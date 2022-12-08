@@ -7,6 +7,7 @@ mod derive_builder {
 
 mod veryl_grammar;
 // The output is version controlled
+mod generated;
 mod veryl_grammar_trait;
 mod veryl_parser;
 
@@ -47,5 +48,3 @@ fn main() -> Result<()> {
         Err(miette!("Please provide a file name as first parameter!"))
     }
 }
-
-
