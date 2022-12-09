@@ -1,23 +1,11 @@
-extern crate parol_runtime;
-
-// auto generation needs derive_builder
-mod derive_builder {
-    pub use parol_runtime::derive_builder::*;
-}
-
-mod veryl_grammar;
-// The output is version controlled
-mod generated;
-mod veryl_grammar_trait;
-mod veryl_parser;
-
-use crate::veryl_grammar::VerylGrammar;
-use crate::veryl_parser::parse;
 use parol_runtime::log::debug;
 use parol_runtime::miette::{miette, IntoDiagnostic, Result, WrapErr};
 use std::env;
 use std::fs;
 use std::time::Instant;
+use veryl_parser::formatter::Formatter;
+use veryl_parser::veryl_grammar::VerylGrammar;
+use veryl_parser::veryl_parser::parse;
 
 // To generate:
 // parol -f ./veryl.par -e ./veryl-exp.par -p ./src/veryl_parser.rs -a ./src/veryl_grammar_trait.rs -t VerylGrammar -m veryl_grammar -g
@@ -41,7 +29,12 @@ fn main() -> Result<()> {
         if args.len() > 2 && args[2] == "-q" {
             Ok(())
         } else {
-            println!("Success!\n{}", veryl_grammar);
+            let mut formatter = Formatter::new();
+            if let Some(ref veryl) = veryl_grammar.veryl {
+                formatter.format(&veryl);
+                println!("{}", formatter.string);
+            }
+            //println!("Success!\n{}", veryl_grammar);
             Ok(())
         }
     } else {

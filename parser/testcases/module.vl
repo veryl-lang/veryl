@@ -1,0 +1,34 @@
+module a #(
+    parameter  a: u32 = 1,
+    localparam a: u32 = 1,
+)(
+    a: input  logic [10],
+    a: output logic [10],
+    a: inout  logic [10],
+) {
+    parameter  a: u32 = 1;
+    localparam a: u64 = 1;
+
+    a: logic;
+    a: logic [10];
+    a: bit   [10][10];
+    a: type_t[10];
+
+    always_ff (posedge i_clk, negedge i_rst_n) {
+        if a {
+            a = b;
+        } else if a {
+            a = b[0];
+        } else {
+            a = c[5:0];
+        }
+    }
+
+    always_comb {
+        a = 10;
+        a = 10'b0;
+        a = 10'b01z;
+        a = 10 + 10;
+        a = 10 + 10'hffff * ( 3 / 4 );
+    }
+}

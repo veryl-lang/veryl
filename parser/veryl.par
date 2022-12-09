@@ -48,6 +48,7 @@ Else      : 'else';
 Parameter : 'parameter';
 Localparam: 'localparam';
 Module    : 'module';
+Interface : 'interface';
 Input     : 'input';
 Output    : 'output';
 Inout     : 'inout';
@@ -66,6 +67,7 @@ Veryl: { Description };
 // ----------------------------------------------------------------------------
 
 Description: ModuleDeclaration
+           | InterfaceDeclaration
            ;
 
 // ----------------------------------------------------------------------------
@@ -142,7 +144,7 @@ ModuleDeclaration: Module Identifier [ ModuleParameter ] [ ModulePort ] LBrace {
 
 ModuleParameter: Sharp LParen [ ModuleParameterList ] RParen;
 
-ModuleParameterList: ModuleParameterItem { Comma ModuleParameterItem } [ Comma ];
+ModuleParameterList: ModuleParameterItem { Comma^ ModuleParameterItem } [ Comma^ ];
 
 ModuleParameterItem: ( Parameter | Localparam ) Identifier Colon Type Assignment Expression;
 
@@ -163,6 +165,22 @@ ModuleItem: VariableDeclaration
           | AlwaysFFDeclaration
           | AlwaysCombDeclaration
           ;
+
+// ----------------------------------------------------------------------------
+// Interface
+// ----------------------------------------------------------------------------
+
+InterfaceDeclaration: Interface Identifier [ InterfaceParameter ] LBrace { InterfaceItem } RBrace;
+
+InterfaceParameter: Sharp LParen [ InterfaceParameterList ] RParen;
+
+InterfaceParameterList: InterfaceParameterItem { Comma InterfaceParameterItem } [ Comma ];
+
+InterfaceParameterItem: ( Parameter | Localparam ) Identifier Colon Type Assignment Expression;
+
+InterfaceItem: ParameterDeclaration
+             | LocalparamDeclaration
+             ;
 
 // ----------------------------------------------------------------------------
 // Declaration
