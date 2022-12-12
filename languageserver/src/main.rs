@@ -1,13 +1,34 @@
 use dashmap::DashMap;
+use ropey::Rope;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
+use veryl_parser::formatter::Formatter;
 use veryl_parser::veryl_grammar::VerylGrammar;
 use veryl_parser::veryl_parser::parse;
 
 #[derive(Debug)]
 struct Backend {
     client: Client,
+    document_map: DashMap<String, Rope>,
+}
+
+struct TextDocumentItem {
+    uri: Url,
+    text: String,
+    version: i32,
+}
+
+impl Backend {
+    async fn on_change(&self, params: TextDocumentItem) {
+        let path = params.uri.to_string();
+        let rope = Rope::from_str(&params.text);
+
+        let mut grammar = VerylGrammar::new();
+        if let Ok(_) = parse(&rope.to_string(), &path, &mut grammar) {}
+
+        self.document_map.insert(path, rope);
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -25,6 +46,7 @@ impl LanguageServer for Backend {
                     }),
                     file_operations: None,
                 }),
+                document_formatting_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -43,23 +65,47 @@ impl LanguageServer for Backend {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         self.client.log_message(MessageType::INFO, "did_open").await;
 
-        let text = params.text_document.text;
-        let path = params.text_document.uri.path().to_string();
-
-        let mut grammar = VerylGrammar::new();
-        if let Ok(_) = parse(&text, &path, &mut grammar) {}
+        self.on_change(TextDocumentItem {
+            uri: params.text_document.uri,
+            text: params.text_document.text,
+            version: params.text_document.version,
+        })
+        .await
     }
 
-    async fn did_change(&self, params: DidChangeTextDocumentParams) {
+    async fn did_change(&self, mut params: DidChangeTextDocumentParams) {
         self.client
             .log_message(MessageType::INFO, "did_change")
             .await;
 
-        let text = &params.content_changes[0].text;
-        let path = params.text_document.uri.path().to_string();
+        self.on_change(TextDocumentItem {
+            uri: params.text_document.uri,
+            text: std::mem::take(&mut params.content_changes[0].text),
+            version: params.text_document.version,
+        })
+        .await
+    }
 
-        let mut grammar = VerylGrammar::new();
-        if let Ok(_) = parse(&text, &path, &mut grammar) {}
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        let path = params.text_document.uri.to_string();
+        if let Some(rope) = self.document_map.get(&path) {
+            let line = rope.len_lines() as u32;
+            let mut grammar = VerylGrammar::new();
+            if let Ok(_) = parse(&rope.to_string(), &path, &mut grammar) {
+                let mut formatter = Formatter::new();
+                if let Some(veryl) = grammar.veryl {
+                    formatter.format(&veryl);
+
+                    let text_edit = TextEdit {
+                        range: Range::new(Position::new(0, 0), Position::new(line, u32::MAX)),
+                        new_text: formatter.string,
+                    };
+
+                    return Ok(Some(vec![text_edit]));
+                }
+            }
+        }
+        Ok(None)
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -72,7 +118,11 @@ async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::new(|client| Backend { client });
+    let document_map = DashMap::new();
+    let (service, socket) = LspService::new(|client| Backend {
+        client,
+        document_map,
+    });
 
     Server::new(stdin, stdout, socket).serve(service).await;
 }

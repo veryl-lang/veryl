@@ -8,12 +8,12 @@ interface a #(
 
     a: logic;
     a: logic [10];
-    a: bit   [10][10];
-    a: type_t[10];
+    a: bit [10][10];
+    a: type_t [10];
 
     modport a {
-        a: input,
+        a: input ,
         a: output,
-        a: inout,
+        a: inout ,
     }
 }

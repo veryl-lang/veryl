@@ -63,6 +63,8 @@ impl Formatter {
 
     fn token(&mut self, x: &Token) {
         if x.location.line - self.line > 1 {
+            self.string
+                .truncate(self.string.len() - self.indent * self.indent_width);
             self.newline();
         }
         self.string.push_str(x.text());
@@ -83,11 +85,12 @@ impl Formatter {
         self.space(1);
         if let Some(ref x) = input.module_declaration_opt {
             self.with_parameter(&x.with_parameter);
+            self.space(1);
         }
         if let Some(ref x) = input.module_declaration_opt0 {
             self.module_port(&x.module_port);
+            self.space(1);
         }
-        self.space(1);
         self.token(&input.l_brace.l_brace);
         self.newline_push();
         for (i, x) in input.module_declaration_list.iter().enumerate() {
@@ -293,6 +296,12 @@ impl Formatter {
             TypeGroup::TypeGroup0(x) => match &*x.builtin_type {
                 BuiltinType::BuiltinType0(x) => self.token(&x.logic.logic),
                 BuiltinType::BuiltinType1(x) => self.token(&x.bit.bit),
+                BuiltinType::BuiltinType2(x) => self.token(&x.u32.u32),
+                BuiltinType::BuiltinType3(x) => self.token(&x.u64.u64),
+                BuiltinType::BuiltinType4(x) => self.token(&x.i32.i32),
+                BuiltinType::BuiltinType5(x) => self.token(&x.i64.i64),
+                BuiltinType::BuiltinType6(x) => self.token(&x.f32.f32),
+                BuiltinType::BuiltinType7(x) => self.token(&x.f64.f64),
             },
             TypeGroup::TypeGroup1(x) => self.token(&x.identifier.identifier),
         }
@@ -452,8 +461,8 @@ impl Formatter {
         self.space(1);
         if let Some(ref x) = input.interface_declaration_opt {
             self.with_parameter(&x.with_parameter);
+            self.space(1);
         }
-        self.space(1);
         self.token(&input.l_brace.l_brace);
         self.newline_push();
         for (i, x) in input.interface_declaration_list.iter().enumerate() {
