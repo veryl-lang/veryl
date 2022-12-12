@@ -3,40 +3,54 @@ use parol_runtime::lexer::Token;
 
 pub struct Formatter {
     pub string: String,
-    pub indent: usize,
-    pub line: usize,
+    pub indent_width: usize,
+    indent: usize,
+    line: usize,
 }
 
-impl Formatter {
-    pub fn new() -> Self {
+impl Default for Formatter {
+    fn default() -> Self {
         Self {
             string: String::new(),
+            indent_width: 4,
             indent: 0,
             line: 0,
         }
     }
+}
+
+impl Formatter {
+    pub fn new() -> Self {
+        Default::default()
+    }
 
     pub fn format(&mut self, input: &Veryl) {
-        for x in &input.veryl_list {
+        for (i, x) in input.veryl_list.iter().enumerate() {
+            if i != 0 {
+                self.newline();
+            }
             self.description(&x.description);
         }
     }
 
-    fn enter_push(&mut self) {
+    fn newline_push(&mut self) {
         self.string.push_str("\n");
         self.indent += 1;
-        self.string.push_str(&" ".repeat(self.indent));
+        self.string
+            .push_str(&" ".repeat(self.indent * self.indent_width));
     }
 
-    fn enter_pop(&mut self) {
+    fn newline_pop(&mut self) {
         self.string.push_str("\n");
         self.indent -= 1;
-        self.string.push_str(&" ".repeat(self.indent));
+        self.string
+            .push_str(&" ".repeat(self.indent * self.indent_width));
     }
 
-    fn enter(&mut self) {
+    fn newline(&mut self) {
         self.string.push_str("\n");
-        self.string.push_str(&" ".repeat(self.indent));
+        self.string
+            .push_str(&" ".repeat(self.indent * self.indent_width));
     }
 
     fn space(&mut self, repeat: usize) {
@@ -49,7 +63,7 @@ impl Formatter {
 
     fn token(&mut self, x: &Token) {
         if x.location.line - self.line > 1 {
-            self.enter();
+            self.newline();
         }
         self.string.push_str(x.text());
         self.line = x.location.line;
@@ -68,28 +82,31 @@ impl Formatter {
         self.token(&input.identifier.identifier);
         self.space(1);
         if let Some(ref x) = input.module_declaration_opt {
-            self.module_parameter(&x.module_parameter);
+            self.with_parameter(&x.with_parameter);
         }
         if let Some(ref x) = input.module_declaration_opt0 {
             self.module_port(&x.module_port);
         }
         self.space(1);
         self.token(&input.l_brace.l_brace);
-        self.enter_push();
-        for x in &input.module_declaration_list {
+        self.newline_push();
+        for (i, x) in input.module_declaration_list.iter().enumerate() {
+            if i != 0 {
+                self.newline();
+            }
             self.module_item(&x.module_item);
         }
-        self.enter_pop();
+        self.newline_pop();
         self.token(&input.r_brace.r_brace);
     }
 
-    fn module_parameter(&mut self, input: &ModuleParameter) {
-        if let Some(ref x) = input.module_parameter_opt {
+    fn with_parameter(&mut self, input: &WithParameter) {
+        if let Some(ref x) = input.with_parameter_opt {
             self.token(&input.sharp.sharp);
             self.token(&input.l_paren.l_paren);
-            self.enter_push();
-            self.module_parameter_list(&x.module_parameter_list);
-            self.enter_pop();
+            self.newline_push();
+            self.with_parameter_list(&x.with_parameter_list);
+            self.newline_pop();
             self.token(&input.r_paren.r_paren);
         } else {
             self.token(&input.sharp.sharp);
@@ -98,21 +115,21 @@ impl Formatter {
         }
     }
 
-    fn module_parameter_list(&mut self, input: &ModuleParameterList) {
-        self.module_parameter_item(&input.module_parameter_item);
-        for x in &input.module_parameter_list_list {
-            self.enter();
-            self.module_parameter_item(&x.module_parameter_item);
+    fn with_parameter_list(&mut self, input: &WithParameterList) {
+        self.with_parameter_item(&input.with_parameter_item);
+        for x in &input.with_parameter_list_list {
+            self.newline();
+            self.with_parameter_item(&x.with_parameter_item);
         }
     }
 
-    fn module_parameter_item(&mut self, input: &ModuleParameterItem) {
-        match &*input.module_parameter_item_group {
-            ModuleParameterItemGroup::ModuleParameterItemGroup0(x) => {
+    fn with_parameter_item(&mut self, input: &WithParameterItem) {
+        match &*input.with_parameter_item_group {
+            WithParameterItemGroup::WithParameterItemGroup0(x) => {
                 self.token(&x.parameter.parameter);
                 self.space(2);
             }
-            ModuleParameterItemGroup::ModuleParameterItemGroup1(x) => {
+            WithParameterItemGroup::WithParameterItemGroup1(x) => {
                 self.token(&x.localparam.localparam);
                 self.space(1);
             }
@@ -131,9 +148,9 @@ impl Formatter {
     fn module_port(&mut self, input: &ModulePort) {
         if let Some(ref x) = input.module_port_opt {
             self.token(&input.l_paren.l_paren);
-            self.enter_push();
+            self.newline_push();
             self.module_port_list(&x.module_port_list);
-            self.enter_pop();
+            self.newline_pop();
             self.token(&input.r_paren.r_paren);
         } else {
             self.token(&input.l_paren.l_paren);
@@ -144,7 +161,7 @@ impl Formatter {
     fn module_port_list(&mut self, input: &ModulePortList) {
         self.module_port_item(&input.module_port_item);
         for x in &input.module_port_list_list {
-            self.enter();
+            self.newline();
             self.module_port_item(&x.module_port_item);
         }
     }
@@ -175,7 +192,6 @@ impl Formatter {
         self.space(1);
         self.r#type(&input.r#type);
         self.token(&input.semi_colon.semi_colon);
-        self.enter();
     }
 
     fn parameter_declaration(&mut self, input: &ParameterDeclaration) {
@@ -190,7 +206,6 @@ impl Formatter {
         self.space(1);
         self.expression(&input.expression);
         self.token(&input.semi_colon.semi_colon);
-        self.enter();
     }
 
     fn localparam_declaration(&mut self, input: &LocalparamDeclaration) {
@@ -205,7 +220,6 @@ impl Formatter {
         self.space(1);
         self.expression(&input.expression);
         self.token(&input.semi_colon.semi_colon);
-        self.enter();
     }
 
     fn always_f_f_declaration(&mut self, input: &AlwaysFFDeclaration) {
@@ -216,28 +230,48 @@ impl Formatter {
         self.token(&input.r_paren.r_paren);
         self.space(1);
         self.token(&input.l_brace.l_brace);
-        self.enter_push();
-        for x in &input.always_f_f_declaration_list {
+        self.newline_push();
+        for (i, x) in input.always_f_f_declaration_list.iter().enumerate() {
+            if i != 0 {
+                self.newline();
+            }
             self.statement(&x.statement);
         }
-        self.enter_pop();
+        self.newline_pop();
         self.token(&input.r_brace.r_brace);
-        self.enter();
     }
 
-    fn always_f_f_conditions(&mut self, input: &AlwaysFFConditions) {}
+    fn always_f_f_conditions(&mut self, input: &AlwaysFFConditions) {
+        self.always_f_f_condition(&input.always_f_f_condition);
+        for x in &input.always_f_f_conditions_list {
+            self.space(1);
+            self.always_f_f_condition(&x.always_f_f_condition);
+        }
+    }
+
+    fn always_f_f_condition(&mut self, input: &AlwaysFFCondition) {
+        match &*input.always_f_f_condition_group {
+            AlwaysFFConditionGroup::AlwaysFFConditionGroup0(x) => self.token(&x.posedge.posedge),
+            AlwaysFFConditionGroup::AlwaysFFConditionGroup1(x) => self.token(&x.negedge.negedge),
+        }
+        self.space(1);
+        self.token(&input.identifier.identifier);
+        self.str(",");
+    }
 
     fn always_comb_declaration(&mut self, input: &AlwaysCombDeclaration) {
         self.token(&input.always_comb.always_comb);
         self.space(1);
         self.token(&input.l_brace.l_brace);
-        self.enter_push();
-        for x in &input.always_comb_declaration_list {
+        self.newline_push();
+        for (i, x) in input.always_comb_declaration_list.iter().enumerate() {
+            if i != 0 {
+                self.newline();
+            }
             self.statement(&x.statement);
         }
-        self.enter_pop();
+        self.newline_pop();
         self.token(&input.r_brace.r_brace);
-        self.enter();
     }
 
     fn direction(&mut self, input: &Direction) {
@@ -270,7 +304,59 @@ impl Formatter {
         }
     }
 
-    fn statement(&mut self, input: &Statement) {}
+    fn statement(&mut self, input: &Statement) {
+        match input {
+            Statement::Statement0(x) => self.assignment_statement(&x.assignment_statement),
+            Statement::Statement1(x) => self.if_statement(&x.if_statement),
+        }
+    }
+
+    fn assignment_statement(&mut self, input: &AssignmentStatement) {
+        self.token(&input.identifier.identifier);
+        self.space(1);
+        self.token(&input.assignment.assignment);
+        self.space(1);
+        self.expression(&input.expression);
+        self.token(&input.semi_colon.semi_colon);
+    }
+
+    fn if_statement(&mut self, input: &IfStatement) {
+        self.token(&input.r#if.r#if);
+        self.space(1);
+        self.expression(&input.expression);
+        self.space(1);
+        self.token(&input.l_brace.l_brace);
+        self.newline_push();
+        self.statement(&input.statement);
+        self.newline_pop();
+        self.token(&input.r_brace.r_brace);
+        if !input.if_statement_list.is_empty() {
+            self.space(1);
+        }
+        for x in &input.if_statement_list {
+            self.token(&x.r#else.r#else);
+            self.space(1);
+            self.token(&x.r#if.r#if);
+            self.space(1);
+            self.expression(&x.expression);
+            self.space(1);
+            self.token(&x.l_brace.l_brace);
+            self.newline_push();
+            self.statement(&x.statement);
+            self.newline_pop();
+            self.token(&x.r_brace.r_brace);
+        }
+        if let Some(ref x) = input.if_statement_opt {
+            self.space(1);
+            self.token(&x.r#else.r#else);
+            self.space(1);
+            self.token(&x.l_brace.l_brace);
+            self.newline_push();
+            self.statement(&x.statement);
+            self.newline_pop();
+            self.token(&x.r_brace.r_brace);
+        }
+    }
 
     fn expression(&mut self, input: &Expression) {
         self.expression0(&input.expression0);
@@ -359,5 +445,65 @@ impl Formatter {
         self.token(&input.r_bracket.r_bracket);
     }
 
-    fn interface_declaration(&mut self, input: &InterfaceDeclaration) {}
+    fn interface_declaration(&mut self, input: &InterfaceDeclaration) {
+        self.token(&input.interface.interface);
+        self.space(1);
+        self.token(&input.identifier.identifier);
+        self.space(1);
+        if let Some(ref x) = input.interface_declaration_opt {
+            self.with_parameter(&x.with_parameter);
+        }
+        self.space(1);
+        self.token(&input.l_brace.l_brace);
+        self.newline_push();
+        for (i, x) in input.interface_declaration_list.iter().enumerate() {
+            if i != 0 {
+                self.newline();
+            }
+            self.interface_item(&x.interface_item);
+        }
+        self.newline_pop();
+        self.token(&input.r_brace.r_brace);
+    }
+
+    fn interface_item(&mut self, input: &InterfaceItem) {
+        match input {
+            InterfaceItem::InterfaceItem0(x) => self.variable_declaration(&x.variable_declaration),
+            InterfaceItem::InterfaceItem1(x) => {
+                self.parameter_declaration(&x.parameter_declaration)
+            }
+            InterfaceItem::InterfaceItem2(x) => {
+                self.localparam_declaration(&x.localparam_declaration)
+            }
+            InterfaceItem::InterfaceItem3(x) => self.modport_declaration(&x.modport_declaration),
+        }
+    }
+
+    fn modport_declaration(&mut self, input: &ModportDeclaration) {
+        self.token(&input.modport.modport);
+        self.space(1);
+        self.token(&input.identifier.identifier);
+        self.space(1);
+        self.token(&input.l_brace.l_brace);
+        self.newline_push();
+        self.modport_list(&input.modport_list);
+        self.newline_pop();
+        self.token(&input.r_brace.r_brace);
+    }
+
+    fn modport_list(&mut self, input: &ModportList) {
+        self.modport_item(&input.modport_item);
+        for x in &input.modport_list_list {
+            self.newline();
+            self.modport_item(&x.modport_item);
+        }
+    }
+
+    fn modport_item(&mut self, input: &ModportItem) {
+        self.token(&input.identifier.identifier);
+        self.token(&input.colon.colon);
+        self.space(1);
+        self.direction(&input.direction);
+        self.str(",");
+    }
 }

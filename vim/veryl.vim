@@ -10,7 +10,8 @@ if exists("b:current_syntax")
     finish
 endif
 
-syn keyword verylStatement module
+syn keyword verylStatement module interface function modport
+syn keyword verylStatement enum struct
 syn keyword verylStatement posedge negedge
 syn keyword verylStatement always_ff always_comb
 syn keyword verylStatement input output inout

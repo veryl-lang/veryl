@@ -52,6 +52,7 @@ Interface : 'interface';
 Input     : 'input';
 Output    : 'output';
 Inout     : 'inout';
+Modport   : 'modport';
 
 // Identifier
 Identifier: /[a-zA-Z_][0-9a-zA-Z_]*/;
@@ -137,16 +138,21 @@ BuiltinType: Logic | Bit;
 Type: ( BuiltinType | Identifier ) { Width };
 
 // ----------------------------------------------------------------------------
+// WithParameter
+// ----------------------------------------------------------------------------
+
+WithParameter: Sharp LParen [ WithParameterList ] RParen;
+
+WithParameterList: WithParameterItem { Comma WithParameterItem } [ Comma ];
+
+WithParameterItem: ( Parameter | Localparam ) Identifier Colon Type Assignment Expression;
+
+
+// ----------------------------------------------------------------------------
 // Module
 // ----------------------------------------------------------------------------
 
-ModuleDeclaration: Module Identifier [ ModuleParameter ] [ ModulePort ] LBrace { ModuleItem } RBrace;
-
-ModuleParameter: Sharp LParen [ ModuleParameterList ] RParen;
-
-ModuleParameterList: ModuleParameterItem { Comma^ ModuleParameterItem } [ Comma^ ];
-
-ModuleParameterItem: ( Parameter | Localparam ) Identifier Colon Type Assignment Expression;
+ModuleDeclaration: Module Identifier [ WithParameter ] [ ModulePort ] LBrace { ModuleItem } RBrace;
 
 ModulePort: LParen [ ModulePortList ] RParen;
 
@@ -170,16 +176,12 @@ ModuleItem: VariableDeclaration
 // Interface
 // ----------------------------------------------------------------------------
 
-InterfaceDeclaration: Interface Identifier [ InterfaceParameter ] LBrace { InterfaceItem } RBrace;
+InterfaceDeclaration: Interface Identifier [ WithParameter ] LBrace { InterfaceItem } RBrace;
 
-InterfaceParameter: Sharp LParen [ InterfaceParameterList ] RParen;
-
-InterfaceParameterList: InterfaceParameterItem { Comma InterfaceParameterItem } [ Comma ];
-
-InterfaceParameterItem: ( Parameter | Localparam ) Identifier Colon Type Assignment Expression;
-
-InterfaceItem: ParameterDeclaration
+InterfaceItem: VariableDeclaration
+             | ParameterDeclaration
              | LocalparamDeclaration
+             | ModportDeclaration
              ;
 
 // ----------------------------------------------------------------------------
@@ -199,3 +201,9 @@ AlwaysFFConditions: AlwaysFFCondition { Comma AlwaysFFCondition } [ Comma ];
 AlwaysFFCondition: ( Posedge | Negedge ) Identifier;
 
 AlwaysCombDeclaration: AlwaysComb LBrace { Statement } RBrace;
+
+ModportDeclaration: Modport Identifier LBrace ModportList RBrace;
+
+ModportList: ModportItem { Comma ModportItem } [ Comma ];
+
+ModportItem: Identifier Colon Direction;
