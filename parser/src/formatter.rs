@@ -93,6 +93,7 @@ impl VerylWalker for Formatter {
             }
             self.description(&x.description);
         }
+        self.newline();
     }
 
     // ----------------------------------------------------------------------------
