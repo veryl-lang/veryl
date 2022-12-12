@@ -1,19 +1,19 @@
 interface a #(
-    parameter  a: u32 = 1,
-    parameter  a: u32 = 1,
-    localparam a: u32 = 1,
+    parameter  a  : u32 = 1,
+    parameter  aa : u32 = 1,
+    localparam aaa: u32 = 1,
 ) {
-    parameter  a: u32 = 1;
-    localparam a: u64 = 1;
+    parameter  a : u32 = 1;
+    localparam aa: u64 = 1;
 
-    a: logic;
-    a: logic [10];
-    a: bit [10][10];
-    a: type_t [10];
+    a   : logic ;
+    aa  : logic  [10];
+    aaa : bit    [10][10];
+    aaaa: type_t [10];
 
-    modport a {
-        a: input ,
-        a: output,
-        a: inout ,
+    modport a   {
+        a  : input ,
+        aa : output,
+        aaa: inout ,
     }
 }

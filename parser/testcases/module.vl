@@ -1,20 +1,20 @@
 module a #(
-    parameter  a: u32 = 1,
-    localparam a: u32 = 1,
-)(
-    a: input  logic [10],
-    a: output logic [10],
-    a: inout  logic [10],
+    parameter  a : u32 = 1,
+    localparam aa: u32 = 1,
+) (
+    a  : input  logic [10],
+    aa : output logic [10],
+    aaa: inout  logic [10],
 ) {
-    parameter  a: u32 = 1;
-    localparam a: u64 = 1;
+    parameter  a : u32 = 1;
+    localparam aa: u64 = 1;
 
-    a: logic;
-    a: logic [10];
-    a: bit   [10][10];
-    a: type_t[10];
+    a   : logic ;
+    aa  : logic  [10];
+    aaa : bit    [10][10];
+    aaaa: type_t [10];
 
-    always_ff (posedge i_clk, negedge i_rst_n) {
+    always_ff (posedge i_clk, negedge i_rst_n,) {
         if a {
             a = b;
         } else if a {
@@ -25,10 +25,11 @@ module a #(
     }
 
     always_comb {
-        a = 10;
-        a = 10'b0;
-        a = 10'b01z;
-        a = 10 + 10;
-        a = 10 + 10'hffff * ( 3 / 4 );
+        aa   = 10;
+        aaa  = 10'b0;
+        aaaa = 10'b01z;
+
+        aa  = 10 + 10;
+        aaa = 10 + 10'hffff * (3 / 4);
     }
 }

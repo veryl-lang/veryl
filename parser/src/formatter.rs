@@ -145,10 +145,12 @@ impl VerylWalker for Formatter {
     fn expression0(&mut self, input: &Expression0) {
         self.expression1(&input.expression1);
         for x in &input.expression0_list {
+            self.space(1);
             match &*x.operator_precedence1 {
                 OperatorPrecedence1::OperatorPrecedence10(x) => self.token(&x.plus.plus),
                 OperatorPrecedence1::OperatorPrecedence11(x) => self.token(&x.minus.minus),
             }
+            self.space(1);
             self.expression1(&x.expression1);
         }
     }
@@ -156,10 +158,12 @@ impl VerylWalker for Formatter {
     fn expression1(&mut self, input: &Expression1) {
         self.expression2(&input.expression2);
         for x in &input.expression1_list {
+            self.space(1);
             match &*x.operator_precedence2 {
                 OperatorPrecedence2::OperatorPrecedence20(x) => self.token(&x.mul.mul),
                 OperatorPrecedence2::OperatorPrecedence21(x) => self.token(&x.div.div),
             }
+            self.space(1);
             self.expression2(&x.expression2);
         }
     }

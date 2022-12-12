@@ -1,8 +1,8 @@
 module a {
-    a: u32;
-    a: u64;
-    a: i32;
-    a: i64;
-    a: f32;
-    a: f64;
+    a  : u32;
+    aa : u64;
+    aaa: i32;
+    a  : i64;
+    aa : f32;
+    aaa: f64;
 }
