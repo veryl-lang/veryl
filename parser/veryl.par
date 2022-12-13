@@ -163,7 +163,7 @@ Expression1: Expression2 { OperatorPrecedence2 Expression2 };
 Expression2: Factor;
 
 Factor: Number
-      | Identifier [ Range ]
+      | Identifier { Range }
       | LParen Expression RParen
       ;
 

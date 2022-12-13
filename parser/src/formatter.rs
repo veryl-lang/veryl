@@ -74,14 +74,13 @@ impl Formatter {
         self.string.push_str(x);
     }
 
-    fn parol_token(&mut self, x: &Token) {
-        if x.location.line - self.line > 1 {
+    fn parol_token(&mut self, x: &Token, adjust_line: bool) {
+        if adjust_line && x.location.line - self.line > 1 {
             self.newline();
         }
         let text = x.text();
         if text.ends_with("\n") {
             self.string.push_str(text.trim_end());
-            self.newline();
         } else {
             self.string.push_str(text);
         }
@@ -89,21 +88,18 @@ impl Formatter {
     }
 
     fn token_with_loc(&mut self, x: &VerylToken) -> Location {
-        self.parol_token(&x.token.token);
+        self.parol_token(&x.token.token, true);
         for x in &x.comments {
-            self.parol_token(&x.token);
+            for _ in 0..x.token.location.line - self.line {
+                self.newline();
+            }
+            self.parol_token(&x.token, false);
         }
         (&x.token.token.location).into()
     }
 
     fn token(&mut self, x: &VerylToken) {
-        self.parol_token(&x.token.token);
-        for x in &x.comments {
-            if x.token.location.line - self.line > 1 {
-                self.newline();
-            }
-            self.parol_token(&x.token);
-        }
+        let _ = self.token_with_loc(x);
     }
 }
 
@@ -125,6 +121,9 @@ impl VerylWalker for Formatter {
 
     fn veryl(&mut self, input: &Veryl) {
         self.token(&input.start.start_token);
+        if !input.start.start_token.comments.is_empty() {
+            self.newline();
+        }
         for (i, x) in input.veryl_list.iter().enumerate() {
             if i != 0 {
                 self.newline();
@@ -212,7 +211,7 @@ impl VerylWalker for Formatter {
             Factor::Factor0(x) => self.number(&x.number),
             Factor::Factor1(x) => {
                 self.identifier(&x.identifier);
-                if let Some(ref x) = x.factor_opt {
+                for x in &x.factor_list {
                     self.range(&x.range);
                 }
             }

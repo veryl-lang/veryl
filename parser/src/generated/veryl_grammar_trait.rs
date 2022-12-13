@@ -859,17 +859,17 @@ pub struct Factor0 {
 ///
 /// Type derived for production 124
 ///
-/// Factor: Identifier FactorOpt /* Option */;
+/// Factor: Identifier FactorList /* Vec */;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 pub struct Factor1 {
     pub identifier: Box<Identifier>,
-    pub factor_opt: Option<Box<FactorOpt>>,
+    pub factor_list: Vec<FactorList>,
 }
 
 ///
-/// Type derived for production 125
+/// Type derived for production 127
 ///
 /// Factor: LParen Expression RParen;
 ///
@@ -1744,11 +1744,11 @@ pub enum Factor {
 }
 
 ///
-/// Type derived for non-terminal FactorOpt
+/// Type derived for non-terminal FactorList
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct FactorOpt {
+pub struct FactorList {
     pub range: Box<Range>,
 }
 
@@ -2900,7 +2900,7 @@ pub enum ASTType {
     F64(F64),
     F64Token(F64Token),
     Factor(Factor),
-    FactorOpt(Option<Box<FactorOpt>>),
+    FactorList(Vec<FactorList>),
     Hash(Hash),
     HashToken(HashToken),
     I32(I32),
@@ -6101,22 +6101,22 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 124:
     ///
-    /// Factor: Identifier FactorOpt /* Option */;
+    /// Factor: Identifier FactorList /* Vec */;
     ///
     #[parol_runtime::function_name::named]
     fn factor_1(
         &mut self,
         _identifier: &ParseTreeStackEntry<'t>,
-        _factor_opt: &ParseTreeStackEntry<'t>,
+        _factor_list: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let factor_opt = pop_item!(self, factor_opt, FactorOpt, context);
+        let factor_list = pop_and_reverse_item!(self, factor_list, FactorList, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
         let factor_1_built = Factor1Builder::default()
             .identifier(Box::new(identifier))
-            .factor_opt(factor_opt)
+            .factor_list(factor_list)
             .build()
             .into_diagnostic()?;
         let factor_1_built = Factor::Factor1(factor_1_built);
@@ -6127,6 +6127,44 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     }
 
     /// Semantic action for production 125:
+    ///
+    /// FactorList /* Vec<T>::Push */: Range FactorList;
+    ///
+    #[parol_runtime::function_name::named]
+    fn factor_list_0(
+        &mut self,
+        _range: &ParseTreeStackEntry<'t>,
+        _factor_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let mut factor_list = pop_item!(self, factor_list, FactorList, context);
+        let range = pop_item!(self, range, Range, context);
+        let factor_list_0_built = FactorListBuilder::default()
+            .range(Box::new(range))
+            .build()
+            .into_diagnostic()?;
+        // Add an element to the vector
+        factor_list.push(factor_list_0_built);
+        self.push(ASTType::FactorList(factor_list), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 126:
+    ///
+    /// FactorList /* Vec<T>::New */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn factor_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let factor_list_1_built = Vec::new();
+        self.push(ASTType::FactorList(factor_list_1_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 127:
     ///
     /// Factor: LParen Expression RParen;
     ///
@@ -6153,42 +6191,6 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         // Calling user action here
         self.user_grammar.factor(&factor_2_built)?;
         self.push(ASTType::Factor(factor_2_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 126:
-    ///
-    /// FactorOpt /* Option<T>::Some */: Range;
-    ///
-    #[parol_runtime::function_name::named]
-    fn factor_opt_0(
-        &mut self,
-        _range: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let range = pop_item!(self, range, Range, context);
-        let factor_opt_0_built = FactorOptBuilder::default()
-            .range(Box::new(range))
-            .build()
-            .into_diagnostic()?;
-        self.push(
-            ASTType::FactorOpt(Some(Box::new(factor_opt_0_built))),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 127:
-    ///
-    /// FactorOpt /* Option<T>::None */: ;
-    ///
-    #[parol_runtime::function_name::named]
-    fn factor_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::FactorOpt(None), context);
         Ok(())
     }
 
@@ -8791,9 +8793,9 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             122 => self.expression2(&children[0], parse_tree),
             123 => self.factor_0(&children[0], parse_tree),
             124 => self.factor_1(&children[0], &children[1], parse_tree),
-            125 => self.factor_2(&children[0], &children[1], &children[2], parse_tree),
-            126 => self.factor_opt_0(&children[0], parse_tree),
-            127 => self.factor_opt_1(parse_tree),
+            125 => self.factor_list_0(&children[0], &children[1], parse_tree),
+            126 => self.factor_list_1(parse_tree),
+            127 => self.factor_2(&children[0], &children[1], &children[2], parse_tree),
             128 => self.statement_0(&children[0], parse_tree),
             129 => self.statement_1(&children[0], parse_tree),
             130 => self.assignment_statement(

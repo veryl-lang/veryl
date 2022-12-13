@@ -130,10 +130,10 @@
 /* 121 */ Expression1List /* Vec<T>::New */: ;
 /* 122 */ Expression2: Factor;
 /* 123 */ Factor: Number;
-/* 124 */ Factor: Identifier FactorOpt /* Option */;
-/* 125 */ Factor: LParen Expression RParen;
-/* 126 */ FactorOpt /* Option<T>::Some */: Range;
-/* 127 */ FactorOpt /* Option<T>::None */: ;
+/* 124 */ Factor: Identifier FactorList /* Vec */;
+/* 125 */ FactorList /* Vec<T>::Push */: Range FactorList;
+/* 126 */ FactorList /* Vec<T>::New */: ;
+/* 127 */ Factor: LParen Expression RParen;
 /* 128 */ Statement: AssignmentStatement;
 /* 129 */ Statement: IfStatement;
 /* 130 */ AssignmentStatement: Identifier Equ Expression Semicolon;

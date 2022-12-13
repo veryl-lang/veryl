@@ -245,7 +245,7 @@ pub const NON_TERMINALS: &[&str; 163] = &[
     /*  52 */ "F64",
     /*  53 */ "F64Token",
     /*  54 */ "Factor",
-    /*  55 */ "FactorOpt",
+    /*  55 */ "FactorList",
     /*  56 */ "Hash",
     /*  57 */ "HashToken",
     /*  58 */ "I32",
@@ -843,7 +843,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 163] = &[
     },
     /* 54 - "Factor" */
     LookaheadDFA {
-        states: &[None, Some(123), Some(124), Some(125)],
+        states: &[None, Some(123), Some(124), Some(127)],
         transitions: &[
             DFATransition(0, 7, 1),
             DFATransition(0, 8, 1),
@@ -855,9 +855,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 163] = &[
         ],
         k: 1,
     },
-    /* 55 - "FactorOpt" */
+    /* 55 - "FactorList" */
     LookaheadDFA {
-        states: &[None, Some(126), Some(127)],
+        states: &[None, Some(125), Some(126)],
         transitions: &[
             DFATransition(0, 12, 2),
             DFATransition(0, 13, 2),
@@ -2617,25 +2617,25 @@ pub const PRODUCTIONS: &[Production; 221] = &[
         lhs: 54,
         production: &[ParseType::N(116)],
     },
-    // 124 - Factor: Identifier FactorOpt /* Option */;
+    // 124 - Factor: Identifier FactorList /* Vec */;
     Production {
         lhs: 54,
         production: &[ParseType::N(55), ParseType::N(62)],
     },
-    // 125 - Factor: LParen Expression RParen;
-    Production {
-        lhs: 54,
-        production: &[ParseType::N(132), ParseType::N(44), ParseType::N(84)],
-    },
-    // 126 - FactorOpt: Range;
+    // 125 - FactorList: Range FactorList;
     Production {
         lhs: 55,
-        production: &[ParseType::N(134)],
+        production: &[ParseType::N(55), ParseType::N(134)],
     },
-    // 127 - FactorOpt: ;
+    // 126 - FactorList: ;
     Production {
         lhs: 55,
         production: &[],
+    },
+    // 127 - Factor: LParen Expression RParen;
+    Production {
+        lhs: 54,
+        production: &[ParseType::N(132), ParseType::N(44), ParseType::N(84)],
     },
     // 128 - Statement: AssignmentStatement;
     Production {

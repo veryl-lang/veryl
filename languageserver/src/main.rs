@@ -30,7 +30,11 @@ impl Backend {
         if let Ok(_) = parse(&rope.to_string(), &path, &mut grammar) {
             if let Some(veryl) = grammar.veryl {
                 self.ast_map.insert(path.clone(), veryl);
+            } else {
+                self.ast_map.remove(&path);
             }
+        } else {
+            self.ast_map.remove(&path);
         }
 
         self.document_map.insert(path, rope);

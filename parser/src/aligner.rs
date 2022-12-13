@@ -130,42 +130,15 @@ impl VerylWalker for Aligner {
     // Expression
     // ----------------------------------------------------------------------------
 
-    fn expression(&mut self, input: &Expression) {
-        self.expression0(&input.expression0);
-    }
+    fn expression(&mut self, _input: &Expression) {}
 
-    fn expression0(&mut self, input: &Expression0) {
-        self.expression1(&input.expression1);
-        for x in &input.expression0_list {
-            self.expression1(&x.expression1);
-        }
-    }
+    fn expression0(&mut self, _input: &Expression0) {}
 
-    fn expression1(&mut self, input: &Expression1) {
-        self.expression2(&input.expression2);
-        for x in &input.expression1_list {
-            self.expression2(&x.expression2);
-        }
-    }
+    fn expression1(&mut self, _input: &Expression1) {}
 
-    fn expression2(&mut self, input: &Expression2) {
-        self.factor(&input.factor);
-    }
+    fn expression2(&mut self, _input: &Expression2) {}
 
-    fn factor(&mut self, input: &Factor) {
-        match input {
-            Factor::Factor0(x) => self.number(&x.number),
-            Factor::Factor1(x) => {
-                self.identifier(&x.identifier);
-                if let Some(ref x) = x.factor_opt {
-                    self.range(&x.range);
-                }
-            }
-            Factor::Factor2(x) => {
-                self.expression(&x.expression);
-            }
-        }
-    }
+    fn factor(&mut self, _input: &Factor) {}
 
     // ----------------------------------------------------------------------------
     // Statement
@@ -180,35 +153,17 @@ impl VerylWalker for Aligner {
 
     fn assignment_statement(&mut self, input: &AssignmentStatement) {
         self.identifier(&input.identifier);
-        self.expression(&input.expression);
     }
 
-    fn if_statement(&mut self, input: &IfStatement) {
-        self.expression(&input.expression);
-        self.statement(&input.statement);
-        for x in &input.if_statement_list {
-            self.expression(&x.expression);
-            self.statement(&x.statement);
-        }
-        if let Some(ref x) = input.if_statement_opt {
-            self.statement(&x.statement);
-        }
-    }
+    fn if_statement(&mut self, _input: &IfStatement) {}
 
     // ----------------------------------------------------------------------------
     // Range / Width
     // ----------------------------------------------------------------------------
 
-    fn range(&mut self, input: &Range) {
-        self.expression(&input.expression);
-        if let Some(ref x) = input.range_opt {
-            self.expression(&x.expression);
-        }
-    }
+    fn range(&mut self, _input: &Range) {}
 
-    fn width(&mut self, input: &Width) {
-        self.expression(&input.expression);
-    }
+    fn width(&mut self, _input: &Width) {}
 
     // ----------------------------------------------------------------------------
     // Type
@@ -251,7 +206,6 @@ impl VerylWalker for Aligner {
     fn with_parameter_item(&mut self, input: &WithParameterItem) {
         self.identifier(&input.identifier);
         self.r#type(&input.r#type);
-        self.expression(&input.expression);
     }
 
     // ----------------------------------------------------------------------------
@@ -285,7 +239,6 @@ impl VerylWalker for Aligner {
 
     fn module_port_item(&mut self, input: &ModulePortItem) {
         self.identifier(&input.identifier);
-        self.direction(&input.direction);
         self.r#type(&input.r#type);
     }
 
@@ -339,28 +292,16 @@ impl VerylWalker for Aligner {
     fn parameter_declaration(&mut self, input: &ParameterDeclaration) {
         self.identifier(&input.identifier);
         self.r#type(&input.r#type);
-        self.expression(&input.expression);
     }
 
     fn localparam_declaration(&mut self, input: &LocalparamDeclaration) {
         self.identifier(&input.identifier);
         self.r#type(&input.r#type);
-        self.expression(&input.expression);
     }
 
-    fn always_ff_declaration(&mut self, input: &AlwaysFfDeclaration) {
-        self.always_ff_conditions(&input.always_ff_conditions);
-        for x in &input.always_ff_declaration_list {
-            self.statement(&x.statement);
-        }
-    }
+    fn always_ff_declaration(&mut self, _input: &AlwaysFfDeclaration) {}
 
-    fn always_ff_conditions(&mut self, input: &AlwaysFfConditions) {
-        self.always_ff_condition(&input.always_ff_condition);
-        for x in &input.always_ff_conditions_list {
-            self.always_ff_condition(&x.always_ff_condition);
-        }
-    }
+    fn always_ff_conditions(&mut self, _input: &AlwaysFfConditions) {}
 
     fn always_ff_condition(&mut self, _input: &AlwaysFfCondition) {}
 
@@ -384,6 +325,5 @@ impl VerylWalker for Aligner {
 
     fn modport_item(&mut self, input: &ModportItem) {
         self.identifier(&input.identifier);
-        self.direction(&input.direction);
     }
 }
