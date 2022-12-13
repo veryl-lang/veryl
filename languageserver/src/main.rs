@@ -5,12 +5,14 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use veryl_parser::formatter::Formatter;
 use veryl_parser::veryl_grammar::VerylGrammar;
+use veryl_parser::veryl_grammar_trait::Veryl;
 use veryl_parser::veryl_parser::parse;
 
 #[derive(Debug)]
 struct Backend {
     client: Client,
     document_map: DashMap<String, Rope>,
+    ast_map: DashMap<String, Veryl>,
 }
 
 struct TextDocumentItem {
@@ -25,7 +27,11 @@ impl Backend {
         let rope = Rope::from_str(&params.text);
 
         let mut grammar = VerylGrammar::new();
-        if let Ok(_) = parse(&rope.to_string(), &path, &mut grammar) {}
+        if let Ok(_) = parse(&rope.to_string(), &path, &mut grammar) {
+            if let Some(veryl) = grammar.veryl {
+                self.ast_map.insert(path.clone(), veryl);
+            }
+        }
 
         self.document_map.insert(path, rope);
     }
@@ -90,19 +96,16 @@ impl LanguageServer for Backend {
         let path = params.text_document.uri.to_string();
         if let Some(rope) = self.document_map.get(&path) {
             let line = rope.len_lines() as u32;
-            let mut grammar = VerylGrammar::new();
-            if let Ok(_) = parse(&rope.to_string(), &path, &mut grammar) {
+            if let Some(veryl) = self.ast_map.get(&path) {
                 let mut formatter = Formatter::new();
-                if let Some(veryl) = grammar.veryl {
-                    formatter.format(&veryl);
+                formatter.format(&veryl);
 
-                    let text_edit = TextEdit {
-                        range: Range::new(Position::new(0, 0), Position::new(line, u32::MAX)),
-                        new_text: formatter.string,
-                    };
+                let text_edit = TextEdit {
+                    range: Range::new(Position::new(0, 0), Position::new(line, u32::MAX)),
+                    new_text: formatter.string,
+                };
 
-                    return Ok(Some(vec![text_edit]));
-                }
+                return Ok(Some(vec![text_edit]));
             }
         }
         Ok(None)
@@ -119,9 +122,11 @@ async fn main() {
     let stdout = tokio::io::stdout();
 
     let document_map = DashMap::new();
+    let ast_map = DashMap::new();
     let (service, socket) = LspService::new(|client| Backend {
         client,
         document_map,
+        ast_map,
     });
 
     Server::new(stdin, stdout, socket).serve(service).await;

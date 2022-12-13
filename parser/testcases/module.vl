@@ -14,7 +14,7 @@ module a #(
     aaa : bit    [10][10];
     aaaa: type_t [10];
 
-    always_ff (posedge i_clk, negedge i_rst_n,) {
+    always_ff (posedge i_clk, negedge i_rst_n) {
         if a {
             a = b;
         } else if a {

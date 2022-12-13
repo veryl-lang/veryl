@@ -2,7 +2,7 @@ use crate::veryl_grammar_trait::*;
 use crate::veryl_walker::VerylWalker;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Hash)]
 pub struct Location {
     pub line: usize,
     pub column: usize,
@@ -90,6 +90,15 @@ impl Aligner {
 }
 
 impl VerylWalker for Aligner {
+    // ----------------------------------------------------------------------------
+    // Terminals
+    // ----------------------------------------------------------------------------
+
+    fn identifier(&mut self, input: &Identifier) {
+        self.identifier
+            .update((&input.identifier_token.token.token.location).into());
+    }
+
     // ----------------------------------------------------------------------------
     // SourceCode
     // ----------------------------------------------------------------------------
@@ -208,22 +217,18 @@ impl VerylWalker for Aligner {
     fn r#type(&mut self, input: &Type) {
         let location = match &*input.type_group {
             TypeGroup::TypeGroup0(x) => match &*x.builtin_type {
-                BuiltinType::BuiltinType0(x) => &x.logic.logic.location,
-                BuiltinType::BuiltinType1(x) => &x.bit.bit.location,
-                BuiltinType::BuiltinType2(x) => &x.u32.u32.location,
-                BuiltinType::BuiltinType3(x) => &x.u64.u64.location,
-                BuiltinType::BuiltinType4(x) => &x.i32.i32.location,
-                BuiltinType::BuiltinType5(x) => &x.i64.i64.location,
-                BuiltinType::BuiltinType6(x) => &x.f32.f32.location,
-                BuiltinType::BuiltinType7(x) => &x.f64.f64.location,
+                BuiltinType::BuiltinType0(x) => &x.logic.logic_token.token.token.location,
+                BuiltinType::BuiltinType1(x) => &x.bit.bit_token.token.token.location,
+                BuiltinType::BuiltinType2(x) => &x.u32.u32_token.token.token.location,
+                BuiltinType::BuiltinType3(x) => &x.u64.u64_token.token.token.location,
+                BuiltinType::BuiltinType4(x) => &x.i32.i32_token.token.token.location,
+                BuiltinType::BuiltinType5(x) => &x.i64.i64_token.token.token.location,
+                BuiltinType::BuiltinType6(x) => &x.f32.f32_token.token.token.location,
+                BuiltinType::BuiltinType7(x) => &x.f64.f64_token.token.token.location,
             },
-            TypeGroup::TypeGroup1(x) => &x.identifier.identifier.location,
+            TypeGroup::TypeGroup1(x) => &x.identifier.identifier_token.token.token.location,
         };
         self.r#type.update(location.into());
-    }
-
-    fn identifier(&mut self, x: &Identifier) {
-        self.identifier.update((&x.identifier.location).into());
     }
 
     // ----------------------------------------------------------------------------
@@ -289,7 +294,7 @@ impl VerylWalker for Aligner {
             ModuleItem::ModuleItem0(x) => self.variable_declaration(&x.variable_declaration),
             ModuleItem::ModuleItem1(x) => self.parameter_declaration(&x.parameter_declaration),
             ModuleItem::ModuleItem2(x) => self.localparam_declaration(&x.localparam_declaration),
-            ModuleItem::ModuleItem3(x) => self.always_f_f_declaration(&x.always_f_f_declaration),
+            ModuleItem::ModuleItem3(x) => self.always_ff_declaration(&x.always_ff_declaration),
             ModuleItem::ModuleItem4(x) => self.always_comb_declaration(&x.always_comb_declaration),
         }
     }
@@ -343,21 +348,21 @@ impl VerylWalker for Aligner {
         self.expression(&input.expression);
     }
 
-    fn always_f_f_declaration(&mut self, input: &AlwaysFFDeclaration) {
-        self.always_f_f_conditions(&input.always_f_f_conditions);
-        for x in &input.always_f_f_declaration_list {
+    fn always_ff_declaration(&mut self, input: &AlwaysFfDeclaration) {
+        self.always_ff_conditions(&input.always_ff_conditions);
+        for x in &input.always_ff_declaration_list {
             self.statement(&x.statement);
         }
     }
 
-    fn always_f_f_conditions(&mut self, input: &AlwaysFFConditions) {
-        self.always_f_f_condition(&input.always_f_f_condition);
-        for x in &input.always_f_f_conditions_list {
-            self.always_f_f_condition(&x.always_f_f_condition);
+    fn always_ff_conditions(&mut self, input: &AlwaysFfConditions) {
+        self.always_ff_condition(&input.always_ff_condition);
+        for x in &input.always_ff_conditions_list {
+            self.always_ff_condition(&x.always_ff_condition);
         }
     }
 
-    fn always_f_f_condition(&mut self, _input: &AlwaysFFCondition) {}
+    fn always_ff_condition(&mut self, _input: &AlwaysFfCondition) {}
 
     fn always_comb_declaration(&mut self, input: &AlwaysCombDeclaration) {
         for x in &input.always_comb_declaration_list {

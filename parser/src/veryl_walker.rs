@@ -2,6 +2,12 @@ use crate::veryl_grammar_trait::*;
 
 pub trait VerylWalker {
     // ----------------------------------------------------------------------------
+    // Terminals
+    // ----------------------------------------------------------------------------
+
+    fn identifier(&mut self, input: &Identifier);
+
+    // ----------------------------------------------------------------------------
     // SourceCode
     // ----------------------------------------------------------------------------
 
@@ -57,8 +63,6 @@ pub trait VerylWalker {
 
     fn r#type(&mut self, input: &Type);
 
-    fn identifier(&mut self, x: &Identifier);
-
     // ----------------------------------------------------------------------------
     // WithParameter
     // ----------------------------------------------------------------------------
@@ -103,11 +107,11 @@ pub trait VerylWalker {
 
     fn localparam_declaration(&mut self, input: &LocalparamDeclaration);
 
-    fn always_f_f_declaration(&mut self, input: &AlwaysFFDeclaration);
+    fn always_ff_declaration(&mut self, input: &AlwaysFfDeclaration);
 
-    fn always_f_f_conditions(&mut self, input: &AlwaysFFConditions);
+    fn always_ff_conditions(&mut self, input: &AlwaysFfConditions);
 
-    fn always_f_f_condition(&mut self, input: &AlwaysFFCondition);
+    fn always_ff_condition(&mut self, input: &AlwaysFfCondition);
 
     fn always_comb_declaration(&mut self, input: &AlwaysCombDeclaration);
 

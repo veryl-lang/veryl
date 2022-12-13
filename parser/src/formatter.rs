@@ -1,5 +1,6 @@
 use crate::aligner::{Aligner, Location};
 use crate::veryl_grammar_trait::*;
+use crate::veryl_token::VerylToken;
 use crate::veryl_walker::VerylWalker;
 use parol_runtime::lexer::Token;
 
@@ -9,8 +10,6 @@ pub struct Formatter {
     indent: usize,
     line: usize,
     aligner: Aligner,
-    index_identifier: usize,
-    index_type: usize,
 }
 
 impl Default for Formatter {
@@ -19,10 +18,8 @@ impl Default for Formatter {
             string: String::new(),
             indent_width: 4,
             indent: 0,
-            line: 0,
+            line: 1,
             aligner: Aligner::new(),
-            index_identifier: 0,
-            index_type: 0,
         }
     }
 }
@@ -38,6 +35,10 @@ impl Formatter {
     }
 
     fn newline_push(&mut self) {
+        if self.string.ends_with(" ") {
+            self.string
+                .truncate(self.string.len() - self.indent * self.indent_width);
+        }
         self.string.push_str("\n");
         self.indent += 1;
         self.string
@@ -45,6 +46,10 @@ impl Formatter {
     }
 
     fn newline_pop(&mut self) {
+        if self.string.ends_with(" ") {
+            self.string
+                .truncate(self.string.len() - self.indent * self.indent_width);
+        }
         self.string.push_str("\n");
         self.indent -= 1;
         self.string
@@ -52,6 +57,10 @@ impl Formatter {
     }
 
     fn newline(&mut self) {
+        if self.string.ends_with(" ") {
+            self.string
+                .truncate(self.string.len() - self.indent * self.indent_width);
+        }
         self.string.push_str("\n");
         self.string
             .push_str(&" ".repeat(self.indent * self.indent_width));
@@ -65,28 +74,57 @@ impl Formatter {
         self.string.push_str(x);
     }
 
-    fn token(&mut self, x: &Token) {
+    fn parol_token(&mut self, x: &Token) {
         if x.location.line - self.line > 1 {
-            self.string
-                .truncate(self.string.len() - self.indent * self.indent_width);
             self.newline();
         }
-        self.string.push_str(x.text());
+        let text = x.text();
+        if text.ends_with("\n") {
+            self.string.push_str(text.trim_end());
+            self.newline();
+        } else {
+            self.string.push_str(text);
+        }
         self.line = x.location.line;
     }
 
-    fn token_with_loc(&mut self, x: &Token) -> Location {
-        self.token(x);
-        (&x.location).into()
+    fn token_with_loc(&mut self, x: &VerylToken) -> Location {
+        self.parol_token(&x.token.token);
+        for x in &x.comments {
+            self.parol_token(&x.token);
+        }
+        (&x.token.token.location).into()
+    }
+
+    fn token(&mut self, x: &VerylToken) {
+        self.parol_token(&x.token.token);
+        for x in &x.comments {
+            if x.token.location.line - self.line > 1 {
+                self.newline();
+            }
+            self.parol_token(&x.token);
+        }
     }
 }
 
 impl VerylWalker for Formatter {
     // ----------------------------------------------------------------------------
+    // Terminals
+    // ----------------------------------------------------------------------------
+
+    fn identifier(&mut self, input: &Identifier) {
+        let loc = self.token_with_loc(&input.identifier_token);
+        if let Some(width) = self.aligner.identifier.widths.get(&loc) {
+            self.space(width - loc.length);
+        }
+    }
+
+    // ----------------------------------------------------------------------------
     // SourceCode
     // ----------------------------------------------------------------------------
 
     fn veryl(&mut self, input: &Veryl) {
+        self.token(&input.start.start_token);
         for (i, x) in input.veryl_list.iter().enumerate() {
             if i != 0 {
                 self.newline();
@@ -114,23 +152,19 @@ impl VerylWalker for Formatter {
     fn number(&mut self, input: &Number) {
         match &*input.integral_number {
             IntegralNumber::IntegralNumber0(x) => {
-                self.token(&x.binary_number.base_less.base_less);
-                self.token(&x.binary_number.based_binary.based_binary);
+                self.token(&x.based_binary.based_binary_token);
             }
             IntegralNumber::IntegralNumber1(x) => {
-                self.token(&x.octal_number.base_less.base_less);
-                self.token(&x.octal_number.based_octal.based_octal);
+                self.token(&x.based_octal.based_octal_token);
             }
             IntegralNumber::IntegralNumber2(x) => {
-                self.token(&x.decimal_number.base_less.base_less);
-                self.token(&x.decimal_number.based_decimal.based_decimal);
+                self.token(&x.based_decimal.based_decimal_token);
             }
             IntegralNumber::IntegralNumber3(x) => {
-                self.token(&x.hex_number.base_less.base_less);
-                self.token(&x.hex_number.based_hex.based_hex);
+                self.token(&x.based_hex.based_hex_token);
             }
             IntegralNumber::IntegralNumber4(x) => {
-                self.token(&x.base_less_number.base_less.base_less);
+                self.token(&x.base_less.base_less_token);
             }
         }
     }
@@ -148,8 +182,8 @@ impl VerylWalker for Formatter {
         for x in &input.expression0_list {
             self.space(1);
             match &*x.operator_precedence1 {
-                OperatorPrecedence1::OperatorPrecedence10(x) => self.token(&x.plus.plus),
-                OperatorPrecedence1::OperatorPrecedence11(x) => self.token(&x.minus.minus),
+                OperatorPrecedence1::OperatorPrecedence10(x) => self.token(&x.plus.plus_token),
+                OperatorPrecedence1::OperatorPrecedence11(x) => self.token(&x.minus.minus_token),
             }
             self.space(1);
             self.expression1(&x.expression1);
@@ -161,8 +195,8 @@ impl VerylWalker for Formatter {
         for x in &input.expression1_list {
             self.space(1);
             match &*x.operator_precedence2 {
-                OperatorPrecedence2::OperatorPrecedence20(x) => self.token(&x.mul.mul),
-                OperatorPrecedence2::OperatorPrecedence21(x) => self.token(&x.div.div),
+                OperatorPrecedence2::OperatorPrecedence20(x) => self.token(&x.star.star_token),
+                OperatorPrecedence2::OperatorPrecedence21(x) => self.token(&x.slash.slash_token),
             }
             self.space(1);
             self.expression2(&x.expression2);
@@ -183,9 +217,9 @@ impl VerylWalker for Formatter {
                 }
             }
             Factor::Factor2(x) => {
-                self.token(&x.l_paren.l_paren);
+                self.token(&x.l_paren.l_paren_token);
                 self.expression(&x.expression);
-                self.token(&x.r_paren.r_paren);
+                self.token(&x.r_paren.r_paren_token);
             }
         }
     }
@@ -204,47 +238,47 @@ impl VerylWalker for Formatter {
     fn assignment_statement(&mut self, input: &AssignmentStatement) {
         self.identifier(&input.identifier);
         self.space(1);
-        self.token(&input.assignment.assignment);
+        self.token(&input.equ.equ_token);
         self.space(1);
         self.expression(&input.expression);
-        self.token(&input.semi_colon.semi_colon);
+        self.token(&input.semicolon.semicolon_token);
     }
 
     fn if_statement(&mut self, input: &IfStatement) {
-        self.token(&input.r#if.r#if);
+        self.token(&input.r#if.if_token);
         self.space(1);
         self.expression(&input.expression);
         self.space(1);
-        self.token(&input.l_brace.l_brace);
+        self.token(&input.l_brace.l_brace_token);
         self.newline_push();
         self.statement(&input.statement);
         self.newline_pop();
-        self.token(&input.r_brace.r_brace);
+        self.token(&input.r_brace.r_brace_token);
         if !input.if_statement_list.is_empty() {
             self.space(1);
         }
         for x in &input.if_statement_list {
-            self.token(&x.r#else.r#else);
+            self.token(&x.r#else.else_token);
             self.space(1);
-            self.token(&x.r#if.r#if);
+            self.token(&x.r#if.if_token);
             self.space(1);
             self.expression(&x.expression);
             self.space(1);
-            self.token(&x.l_brace.l_brace);
+            self.token(&x.l_brace.l_brace_token);
             self.newline_push();
             self.statement(&x.statement);
             self.newline_pop();
-            self.token(&x.r_brace.r_brace);
+            self.token(&x.r_brace.r_brace_token);
         }
         if let Some(ref x) = input.if_statement_opt {
             self.space(1);
-            self.token(&x.r#else.r#else);
+            self.token(&x.r#else.else_token);
             self.space(1);
-            self.token(&x.l_brace.l_brace);
+            self.token(&x.l_brace.l_brace_token);
             self.newline_push();
             self.statement(&x.statement);
             self.newline_pop();
-            self.token(&x.r_brace.r_brace);
+            self.token(&x.r_brace.r_brace_token);
         }
     }
 
@@ -253,19 +287,19 @@ impl VerylWalker for Formatter {
     // ----------------------------------------------------------------------------
 
     fn range(&mut self, input: &Range) {
-        self.token(&input.l_bracket.l_bracket);
+        self.token(&input.l_bracket.l_bracket_token);
         self.expression(&input.expression);
         if let Some(ref x) = input.range_opt {
-            self.token(&x.colon.colon);
+            self.token(&x.colon.colon_token);
             self.expression(&x.expression);
         }
-        self.token(&input.r_bracket.r_bracket);
+        self.token(&input.r_bracket.r_bracket_token);
     }
 
     fn width(&mut self, input: &Width) {
-        self.token(&input.l_bracket.l_bracket);
+        self.token(&input.l_bracket.l_bracket_token);
         self.expression(&input.expression);
-        self.token(&input.r_bracket.r_bracket);
+        self.token(&input.r_bracket.r_bracket_token);
     }
 
     // ----------------------------------------------------------------------------
@@ -275,17 +309,17 @@ impl VerylWalker for Formatter {
     fn r#type(&mut self, input: &Type) {
         let loc = match &*input.type_group {
             TypeGroup::TypeGroup0(x) => match &*x.builtin_type {
-                BuiltinType::BuiltinType0(x) => self.token_with_loc(&x.logic.logic),
-                BuiltinType::BuiltinType1(x) => self.token_with_loc(&x.bit.bit),
-                BuiltinType::BuiltinType2(x) => self.token_with_loc(&x.u32.u32),
-                BuiltinType::BuiltinType3(x) => self.token_with_loc(&x.u64.u64),
-                BuiltinType::BuiltinType4(x) => self.token_with_loc(&x.i32.i32),
-                BuiltinType::BuiltinType5(x) => self.token_with_loc(&x.i64.i64),
-                BuiltinType::BuiltinType6(x) => self.token_with_loc(&x.f32.f32),
-                BuiltinType::BuiltinType7(x) => self.token_with_loc(&x.f64.f64),
+                BuiltinType::BuiltinType0(x) => self.token_with_loc(&x.logic.logic_token),
+                BuiltinType::BuiltinType1(x) => self.token_with_loc(&x.bit.bit_token),
+                BuiltinType::BuiltinType2(x) => self.token_with_loc(&x.u32.u32_token),
+                BuiltinType::BuiltinType3(x) => self.token_with_loc(&x.u64.u64_token),
+                BuiltinType::BuiltinType4(x) => self.token_with_loc(&x.i32.i32_token),
+                BuiltinType::BuiltinType5(x) => self.token_with_loc(&x.i64.i64_token),
+                BuiltinType::BuiltinType6(x) => self.token_with_loc(&x.f32.f32_token),
+                BuiltinType::BuiltinType7(x) => self.token_with_loc(&x.f64.f64_token),
             },
             // This identifier should be treat as type not identifier
-            TypeGroup::TypeGroup1(x) => self.token_with_loc(&x.identifier.identifier),
+            TypeGroup::TypeGroup1(x) => self.token_with_loc(&x.identifier.identifier_token),
         };
         if let Some(width) = self.aligner.r#type.widths.get(&loc) {
             self.space(width - loc.length);
@@ -298,61 +332,58 @@ impl VerylWalker for Formatter {
         }
     }
 
-    fn identifier(&mut self, input: &Identifier) {
-        let loc = self.token_with_loc(&input.identifier);
-        if let Some(width) = self.aligner.identifier.widths.get(&loc) {
-            self.space(width - loc.length);
-        }
-        self.index_identifier += 1;
-    }
-
     // ----------------------------------------------------------------------------
     // WithParameter
     // ----------------------------------------------------------------------------
 
     fn with_parameter(&mut self, input: &WithParameter) {
         if let Some(ref x) = input.with_parameter_opt {
-            self.token(&input.sharp.sharp);
-            self.token(&input.l_paren.l_paren);
+            self.token(&input.hash.hash_token);
+            self.token(&input.l_paren.l_paren_token);
             self.newline_push();
             self.with_parameter_list(&x.with_parameter_list);
             self.newline_pop();
-            self.token(&input.r_paren.r_paren);
+            self.token(&input.r_paren.r_paren_token);
         } else {
-            self.token(&input.sharp.sharp);
-            self.token(&input.l_paren.l_paren);
-            self.token(&input.r_paren.r_paren);
+            self.token(&input.hash.hash_token);
+            self.token(&input.l_paren.l_paren_token);
+            self.token(&input.r_paren.r_paren_token);
         }
     }
 
     fn with_parameter_list(&mut self, input: &WithParameterList) {
         self.with_parameter_item(&input.with_parameter_item);
         for x in &input.with_parameter_list_list {
+            self.token(&x.comma.comma_token);
             self.newline();
             self.with_parameter_item(&x.with_parameter_item);
+        }
+        if let Some(ref x) = input.with_parameter_list_opt {
+            self.token(&x.comma.comma_token);
+        } else {
+            self.str(",");
         }
     }
 
     fn with_parameter_item(&mut self, input: &WithParameterItem) {
         match &*input.with_parameter_item_group {
             WithParameterItemGroup::WithParameterItemGroup0(x) => {
-                self.token(&x.parameter.parameter);
+                self.token(&x.parameter.parameter_token);
                 self.space(2);
             }
             WithParameterItemGroup::WithParameterItemGroup1(x) => {
-                self.token(&x.localparam.localparam);
+                self.token(&x.localparam.localparam_token);
                 self.space(1);
             }
         }
         self.identifier(&input.identifier);
-        self.token(&input.colon.colon);
+        self.token(&input.colon.colon_token);
         self.space(1);
         self.r#type(&input.r#type);
         self.space(1);
-        self.token(&input.assignment.assignment);
+        self.token(&input.equ.equ_token);
         self.space(1);
         self.expression(&input.expression);
-        self.str(",");
     }
 
     // ----------------------------------------------------------------------------
@@ -360,7 +391,7 @@ impl VerylWalker for Formatter {
     // ----------------------------------------------------------------------------
 
     fn module_declaration(&mut self, input: &ModuleDeclaration) {
-        self.token(&input.module.module);
+        self.token(&input.module.module_token);
         self.space(1);
         self.identifier(&input.identifier);
         self.space(1);
@@ -372,7 +403,7 @@ impl VerylWalker for Formatter {
             self.module_port(&x.module_port);
             self.space(1);
         }
-        self.token(&input.l_brace.l_brace);
+        self.token(&input.l_brace.l_brace_token);
         self.newline_push();
         for (i, x) in input.module_declaration_list.iter().enumerate() {
             if i != 0 {
@@ -381,38 +412,43 @@ impl VerylWalker for Formatter {
             self.module_item(&x.module_item);
         }
         self.newline_pop();
-        self.token(&input.r_brace.r_brace);
+        self.token(&input.r_brace.r_brace_token);
     }
 
     fn module_port(&mut self, input: &ModulePort) {
         if let Some(ref x) = input.module_port_opt {
-            self.token(&input.l_paren.l_paren);
+            self.token(&input.l_paren.l_paren_token);
             self.newline_push();
             self.module_port_list(&x.module_port_list);
             self.newline_pop();
-            self.token(&input.r_paren.r_paren);
+            self.token(&input.r_paren.r_paren_token);
         } else {
-            self.token(&input.l_paren.l_paren);
-            self.token(&input.r_paren.r_paren);
+            self.token(&input.l_paren.l_paren_token);
+            self.token(&input.r_paren.r_paren_token);
         }
     }
 
     fn module_port_list(&mut self, input: &ModulePortList) {
         self.module_port_item(&input.module_port_item);
         for x in &input.module_port_list_list {
+            self.token(&x.comma.comma_token);
             self.newline();
             self.module_port_item(&x.module_port_item);
+        }
+        if let Some(ref x) = input.module_port_list_opt {
+            self.token(&x.comma.comma_token);
+        } else {
+            self.str(",");
         }
     }
 
     fn module_port_item(&mut self, input: &ModulePortItem) {
         self.identifier(&input.identifier);
-        self.token(&input.colon.colon);
+        self.token(&input.colon.colon_token);
         self.space(1);
         self.direction(&input.direction);
         self.space(1);
         self.r#type(&input.r#type);
-        self.str(",");
     }
 
     fn module_item(&mut self, input: &ModuleItem) {
@@ -420,7 +456,7 @@ impl VerylWalker for Formatter {
             ModuleItem::ModuleItem0(x) => self.variable_declaration(&x.variable_declaration),
             ModuleItem::ModuleItem1(x) => self.parameter_declaration(&x.parameter_declaration),
             ModuleItem::ModuleItem2(x) => self.localparam_declaration(&x.localparam_declaration),
-            ModuleItem::ModuleItem3(x) => self.always_f_f_declaration(&x.always_f_f_declaration),
+            ModuleItem::ModuleItem3(x) => self.always_ff_declaration(&x.always_ff_declaration),
             ModuleItem::ModuleItem4(x) => self.always_comb_declaration(&x.always_comb_declaration),
         }
     }
@@ -428,12 +464,12 @@ impl VerylWalker for Formatter {
     fn direction(&mut self, input: &Direction) {
         match input {
             Direction::Direction0(x) => {
-                self.token(&x.input.input);
+                self.token(&x.input.input_token);
                 self.space(1);
             }
-            Direction::Direction1(x) => self.token(&x.output.output),
+            Direction::Direction1(x) => self.token(&x.output.output_token),
             Direction::Direction2(x) => {
-                self.token(&x.inout.inout);
+                self.token(&x.inout.inout_token);
                 self.space(1);
             }
         }
@@ -444,7 +480,7 @@ impl VerylWalker for Formatter {
     // ----------------------------------------------------------------------------
 
     fn interface_declaration(&mut self, input: &InterfaceDeclaration) {
-        self.token(&input.interface.interface);
+        self.token(&input.interface.interface_token);
         self.space(1);
         self.identifier(&input.identifier);
         self.space(1);
@@ -452,7 +488,7 @@ impl VerylWalker for Formatter {
             self.with_parameter(&x.with_parameter);
             self.space(1);
         }
-        self.token(&input.l_brace.l_brace);
+        self.token(&input.l_brace.l_brace_token);
         self.newline_push();
         for (i, x) in input.interface_declaration_list.iter().enumerate() {
             if i != 0 {
@@ -461,7 +497,7 @@ impl VerylWalker for Formatter {
             self.interface_item(&x.interface_item);
         }
         self.newline_pop();
-        self.token(&input.r_brace.r_brace);
+        self.token(&input.r_brace.r_brace_token);
     }
 
     fn interface_item(&mut self, input: &InterfaceItem) {
@@ -483,81 +519,85 @@ impl VerylWalker for Formatter {
 
     fn variable_declaration(&mut self, input: &VariableDeclaration) {
         self.identifier(&input.identifier);
-        self.token(&input.colon.colon);
+        self.token(&input.colon.colon_token);
         self.space(1);
         self.r#type(&input.r#type);
-        self.token(&input.semi_colon.semi_colon);
+        self.token(&input.semicolon.semicolon_token);
     }
 
     fn parameter_declaration(&mut self, input: &ParameterDeclaration) {
-        self.token(&input.parameter.parameter);
+        self.token(&input.parameter.parameter_token);
         self.space(2);
         self.identifier(&input.identifier);
-        self.token(&input.colon.colon);
+        self.token(&input.colon.colon_token);
         self.space(1);
         self.r#type(&input.r#type);
         self.space(1);
-        self.token(&input.assignment.assignment);
+        self.token(&input.equ.equ_token);
         self.space(1);
         self.expression(&input.expression);
-        self.token(&input.semi_colon.semi_colon);
+        self.token(&input.semicolon.semicolon_token);
     }
 
     fn localparam_declaration(&mut self, input: &LocalparamDeclaration) {
-        self.token(&input.localparam.localparam);
+        self.token(&input.localparam.localparam_token);
         self.space(1);
         self.identifier(&input.identifier);
-        self.token(&input.colon.colon);
+        self.token(&input.colon.colon_token);
         self.space(1);
         self.r#type(&input.r#type);
         self.space(1);
-        self.token(&input.assignment.assignment);
+        self.token(&input.equ.equ_token);
         self.space(1);
         self.expression(&input.expression);
-        self.token(&input.semi_colon.semi_colon);
+        self.token(&input.semicolon.semicolon_token);
     }
 
-    fn always_f_f_declaration(&mut self, input: &AlwaysFFDeclaration) {
-        self.token(&input.always_f_f.always_f_f);
+    fn always_ff_declaration(&mut self, input: &AlwaysFfDeclaration) {
+        self.token(&input.always_ff.always_ff_token);
         self.space(1);
-        self.token(&input.l_paren.l_paren);
-        self.always_f_f_conditions(&input.always_f_f_conditions);
-        self.token(&input.r_paren.r_paren);
+        self.token(&input.l_paren.l_paren_token);
+        self.always_ff_conditions(&input.always_ff_conditions);
+        self.token(&input.r_paren.r_paren_token);
         self.space(1);
-        self.token(&input.l_brace.l_brace);
+        self.token(&input.l_brace.l_brace_token);
         self.newline_push();
-        for (i, x) in input.always_f_f_declaration_list.iter().enumerate() {
+        for (i, x) in input.always_ff_declaration_list.iter().enumerate() {
             if i != 0 {
                 self.newline();
             }
             self.statement(&x.statement);
         }
         self.newline_pop();
-        self.token(&input.r_brace.r_brace);
+        self.token(&input.r_brace.r_brace_token);
     }
 
-    fn always_f_f_conditions(&mut self, input: &AlwaysFFConditions) {
-        self.always_f_f_condition(&input.always_f_f_condition);
-        for x in &input.always_f_f_conditions_list {
+    fn always_ff_conditions(&mut self, input: &AlwaysFfConditions) {
+        self.always_ff_condition(&input.always_ff_condition);
+        for x in &input.always_ff_conditions_list {
+            self.token(&x.comma.comma_token);
             self.space(1);
-            self.always_f_f_condition(&x.always_f_f_condition);
+            self.always_ff_condition(&x.always_ff_condition);
         }
     }
 
-    fn always_f_f_condition(&mut self, input: &AlwaysFFCondition) {
-        match &*input.always_f_f_condition_group {
-            AlwaysFFConditionGroup::AlwaysFFConditionGroup0(x) => self.token(&x.posedge.posedge),
-            AlwaysFFConditionGroup::AlwaysFFConditionGroup1(x) => self.token(&x.negedge.negedge),
+    fn always_ff_condition(&mut self, input: &AlwaysFfCondition) {
+        match &*input.always_ff_condition_group {
+            AlwaysFfConditionGroup::AlwaysFfConditionGroup0(x) => {
+                self.token(&x.posedge.posedge_token)
+            }
+            AlwaysFfConditionGroup::AlwaysFfConditionGroup1(x) => {
+                self.token(&x.negedge.negedge_token)
+            }
         }
         self.space(1);
         self.identifier(&input.identifier);
-        self.str(",");
     }
 
     fn always_comb_declaration(&mut self, input: &AlwaysCombDeclaration) {
-        self.token(&input.always_comb.always_comb);
+        self.token(&input.always_comb.always_comb_token);
         self.space(1);
-        self.token(&input.l_brace.l_brace);
+        self.token(&input.l_brace.l_brace_token);
         self.newline_push();
         for (i, x) in input.always_comb_declaration_list.iter().enumerate() {
             if i != 0 {
@@ -566,19 +606,19 @@ impl VerylWalker for Formatter {
             self.statement(&x.statement);
         }
         self.newline_pop();
-        self.token(&input.r_brace.r_brace);
+        self.token(&input.r_brace.r_brace_token);
     }
 
     fn modport_declaration(&mut self, input: &ModportDeclaration) {
-        self.token(&input.modport.modport);
+        self.token(&input.modport.modport_token);
         self.space(1);
         self.identifier(&input.identifier);
         self.space(1);
-        self.token(&input.l_brace.l_brace);
+        self.token(&input.l_brace.l_brace_token);
         self.newline_push();
         self.modport_list(&input.modport_list);
         self.newline_pop();
-        self.token(&input.r_brace.r_brace);
+        self.token(&input.r_brace.r_brace_token);
     }
 
     fn modport_list(&mut self, input: &ModportList) {
@@ -591,7 +631,7 @@ impl VerylWalker for Formatter {
 
     fn modport_item(&mut self, input: &ModportItem) {
         self.identifier(&input.identifier);
-        self.token(&input.colon.colon);
+        self.token(&input.colon.colon_token);
         self.space(1);
         self.direction(&input.direction);
         self.str(",");
