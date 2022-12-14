@@ -93,9 +93,11 @@ impl Formatter {
 
         let loc: Location = (&x.token.token.location).into();
         if let Some(width) = self.aligner.widths.get(&loc) {
-            self.space(width - loc.length);
+            //self.space(width - loc.length);
+            self.space(*width);
         }
 
+        // temporary indent to adjust indent of comments with the next push
         if will_push {
             self.indent += 1;
         }
@@ -635,8 +637,14 @@ impl VerylWalker for Formatter {
     fn modport_list(&mut self, input: &ModportList) {
         self.modport_item(&input.modport_item);
         for x in &input.modport_list_list {
+            self.token(&x.comma.comma_token);
             self.newline();
             self.modport_item(&x.modport_item);
+        }
+        if let Some(ref x) = input.modport_list_opt {
+            self.token(&x.comma.comma_token);
+        } else {
+            self.str(",");
         }
     }
 
@@ -645,6 +653,5 @@ impl VerylWalker for Formatter {
         self.token(&input.colon.colon_token);
         self.space(1);
         self.direction(&input.direction);
-        self.str(",");
     }
 }
