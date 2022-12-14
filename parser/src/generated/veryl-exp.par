@@ -6,7 +6,7 @@
 
 %%
 
-/*   0 */ MultiComment: "(((//.*(?:\r\n|\r|\n|$))|((?ms)/\u{2a}.*?\u{2a}/))\s*)+" : OwnedToken;
+/*   0 */ MultiComment: "(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+" : OwnedToken;
 /*   1 */ Comments: CommentsOpt /* Option */;
 /*   2 */ CommentsOpt /* Option<T>::Some */: MultiComment;
 /*   3 */ CommentsOpt /* Option<T>::None */: ;

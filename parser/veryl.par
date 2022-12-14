@@ -12,7 +12,7 @@
 // ----------------------------------------------------------------------------
 
 
-MultiComment: "(((//.*(?:\r\n|\r|\n|$))|((?ms)/\u{2a}.*?\u{2a}/))\s*)+": OwnedToken;
+MultiComment: "(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+": OwnedToken;
 Comments    : [ MultiComment ];
 
 // Start

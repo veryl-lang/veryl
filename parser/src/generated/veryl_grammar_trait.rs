@@ -2246,7 +2246,7 @@ pub struct ModuleToken {
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 pub struct MultiComment {
-    pub multi_comment: crate::veryl_token::OwnedToken, /* (((//.*(?:\r\n|\r|\n|$))|((?ms)/\u{2a}.*?\u{2a}/))\s*)+ */
+    pub multi_comment: crate::veryl_token::OwnedToken, /* (?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+ */
 }
 
 ///
@@ -2972,7 +2972,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 0:
     ///
-    /// MultiComment: "(((//.*(?:\r\n|\r|\n|$))|((?ms)/\u{2a}.*?\u{2a}/))\s*)+" : OwnedToken;
+    /// MultiComment: "(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+" : OwnedToken;
     ///
     #[parol_runtime::function_name::named]
     fn multi_comment(

@@ -27,7 +27,7 @@ pub const TERMINALS: &[&str; 50] = &[
     /*  2 */ UNMATCHABLE_TOKEN,
     /*  3 */ UNMATCHABLE_TOKEN,
     /*  4 */ UNMATCHABLE_TOKEN,
-    /*  5 */ r###"(((//.*(?:\r\n|\r|\n|$))|((?ms)/\u{2a}.*?\u{2a}/))\s*)+"###,
+    /*  5 */ r###"(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+"###,
     /*  6 */ r###"[0-9]+(?:_[0-9]+)*'b[0-1xzXZ]+(?:_[0-1xzXZ]+)*"###,
     /*  7 */ r###"[0-9]+(?:_[0-9]+)*'o[0-7xzXZ]+(?:_[0-7xzXZ]+)*"###,
     /*  8 */ r###"[0-9]+(?:_[0-9]+)*'d[0-9]+(?:_[0-9]+)*"###,
@@ -1820,7 +1820,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 158] = &[
 ];
 
 pub const PRODUCTIONS: &[Production; 213] = &[
-    // 0 - MultiComment: "(((//.*(?:\r\n|\r|\n|$))|((?ms)/\u{2a}.*?\u{2a}/))\s*)+";
+    // 0 - MultiComment: "(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+";
     Production {
         lhs: 108,
         production: &[ParseType::T(5)],

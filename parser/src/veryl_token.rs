@@ -26,7 +26,7 @@ macro_rules! token_with_comments {
             fn from(x: &$x) -> Self {
                 let mut comments = Vec::new();
                 if let Some(ref x) = x.comments.comments_opt {
-                    let mut tokens = split_token(x.multi_comment.multi_comment.clone());
+                    let mut tokens = split_comment_token(x.multi_comment.multi_comment.clone());
                     comments.append(&mut tokens)
                 }
                 VerylToken {
@@ -38,7 +38,7 @@ macro_rules! token_with_comments {
     };
 }
 
-fn split_token(token: OwnedToken) -> Vec<OwnedToken> {
+fn split_comment_token(token: OwnedToken) -> Vec<OwnedToken> {
     let mut line = token.token.location.line;
     let text = token.token.text();
     let re = Regex::new(r"((?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))").unwrap();
@@ -74,7 +74,7 @@ impl From<&StartToken> for VerylToken {
     fn from(x: &StartToken) -> Self {
         let mut comments = Vec::new();
         if let Some(ref x) = x.comments.comments_opt {
-            let mut tokens = split_token(x.multi_comment.multi_comment.clone());
+            let mut tokens = split_comment_token(x.multi_comment.multi_comment.clone());
             comments.append(&mut tokens)
         }
         let location =
