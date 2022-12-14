@@ -87,19 +87,32 @@ impl Formatter {
         self.line = x.location.line;
     }
 
-    fn token_with_loc(&mut self, x: &VerylToken) -> Location {
+    fn process_token(&mut self, x: &VerylToken, will_push: bool) -> Location {
         self.parol_token(&x.token.token, true);
+        if will_push {
+            self.indent += 1;
+        }
         for x in &x.comments {
+            if x.token.location.line == self.line {
+                self.space(1);
+            }
             for _ in 0..x.token.location.line - self.line {
                 self.newline();
             }
             self.parol_token(&x.token, false);
         }
+        if will_push {
+            self.indent -= 1;
+        }
         (&x.token.token.location).into()
     }
 
-    fn token(&mut self, x: &VerylToken) {
-        let _ = self.token_with_loc(x);
+    fn token(&mut self, x: &VerylToken) -> Location {
+        self.process_token(x, false)
+    }
+
+    fn token_will_push(&mut self, x: &VerylToken) -> Location {
+        self.process_token(x, true)
     }
 }
 
@@ -109,7 +122,7 @@ impl VerylWalker for Formatter {
     // ----------------------------------------------------------------------------
 
     fn identifier(&mut self, input: &Identifier) {
-        let loc = self.token_with_loc(&input.identifier_token);
+        let loc = self.token(&input.identifier_token);
         if let Some(width) = self.aligner.identifier.widths.get(&loc) {
             self.space(width - loc.length);
         }
@@ -183,7 +196,7 @@ impl VerylWalker for Formatter {
             match &*x.operator_precedence1 {
                 OperatorPrecedence1::OperatorPrecedence10(x) => self.token(&x.plus.plus_token),
                 OperatorPrecedence1::OperatorPrecedence11(x) => self.token(&x.minus.minus_token),
-            }
+            };
             self.space(1);
             self.expression1(&x.expression1);
         }
@@ -196,7 +209,7 @@ impl VerylWalker for Formatter {
             match &*x.operator_precedence2 {
                 OperatorPrecedence2::OperatorPrecedence20(x) => self.token(&x.star.star_token),
                 OperatorPrecedence2::OperatorPrecedence21(x) => self.token(&x.slash.slash_token),
-            }
+            };
             self.space(1);
             self.expression2(&x.expression2);
         }
@@ -248,7 +261,7 @@ impl VerylWalker for Formatter {
         self.space(1);
         self.expression(&input.expression);
         self.space(1);
-        self.token(&input.l_brace.l_brace_token);
+        self.token_will_push(&input.l_brace.l_brace_token);
         self.newline_push();
         self.statement(&input.statement);
         self.newline_pop();
@@ -263,7 +276,7 @@ impl VerylWalker for Formatter {
             self.space(1);
             self.expression(&x.expression);
             self.space(1);
-            self.token(&x.l_brace.l_brace_token);
+            self.token_will_push(&x.l_brace.l_brace_token);
             self.newline_push();
             self.statement(&x.statement);
             self.newline_pop();
@@ -273,7 +286,7 @@ impl VerylWalker for Formatter {
             self.space(1);
             self.token(&x.r#else.else_token);
             self.space(1);
-            self.token(&x.l_brace.l_brace_token);
+            self.token_will_push(&x.l_brace.l_brace_token);
             self.newline_push();
             self.statement(&x.statement);
             self.newline_pop();
@@ -308,17 +321,17 @@ impl VerylWalker for Formatter {
     fn r#type(&mut self, input: &Type) {
         let loc = match &*input.type_group {
             TypeGroup::TypeGroup0(x) => match &*x.builtin_type {
-                BuiltinType::BuiltinType0(x) => self.token_with_loc(&x.logic.logic_token),
-                BuiltinType::BuiltinType1(x) => self.token_with_loc(&x.bit.bit_token),
-                BuiltinType::BuiltinType2(x) => self.token_with_loc(&x.u32.u32_token),
-                BuiltinType::BuiltinType3(x) => self.token_with_loc(&x.u64.u64_token),
-                BuiltinType::BuiltinType4(x) => self.token_with_loc(&x.i32.i32_token),
-                BuiltinType::BuiltinType5(x) => self.token_with_loc(&x.i64.i64_token),
-                BuiltinType::BuiltinType6(x) => self.token_with_loc(&x.f32.f32_token),
-                BuiltinType::BuiltinType7(x) => self.token_with_loc(&x.f64.f64_token),
+                BuiltinType::BuiltinType0(x) => self.token(&x.logic.logic_token),
+                BuiltinType::BuiltinType1(x) => self.token(&x.bit.bit_token),
+                BuiltinType::BuiltinType2(x) => self.token(&x.u32.u32_token),
+                BuiltinType::BuiltinType3(x) => self.token(&x.u64.u64_token),
+                BuiltinType::BuiltinType4(x) => self.token(&x.i32.i32_token),
+                BuiltinType::BuiltinType5(x) => self.token(&x.i64.i64_token),
+                BuiltinType::BuiltinType6(x) => self.token(&x.f32.f32_token),
+                BuiltinType::BuiltinType7(x) => self.token(&x.f64.f64_token),
             },
             // This identifier should be treat as type not identifier
-            TypeGroup::TypeGroup1(x) => self.token_with_loc(&x.identifier.identifier_token),
+            TypeGroup::TypeGroup1(x) => self.token(&x.identifier.identifier_token),
         };
         if let Some(width) = self.aligner.r#type.widths.get(&loc) {
             self.space(width - loc.length);
@@ -338,7 +351,7 @@ impl VerylWalker for Formatter {
     fn with_parameter(&mut self, input: &WithParameter) {
         if let Some(ref x) = input.with_parameter_opt {
             self.token(&input.hash.hash_token);
-            self.token(&input.l_paren.l_paren_token);
+            self.token_will_push(&input.l_paren.l_paren_token);
             self.newline_push();
             self.with_parameter_list(&x.with_parameter_list);
             self.newline_pop();
@@ -402,7 +415,7 @@ impl VerylWalker for Formatter {
             self.module_port(&x.module_port);
             self.space(1);
         }
-        self.token(&input.l_brace.l_brace_token);
+        self.token_will_push(&input.l_brace.l_brace_token);
         self.newline_push();
         for (i, x) in input.module_declaration_list.iter().enumerate() {
             if i != 0 {
@@ -416,7 +429,7 @@ impl VerylWalker for Formatter {
 
     fn module_port(&mut self, input: &ModulePort) {
         if let Some(ref x) = input.module_port_opt {
-            self.token(&input.l_paren.l_paren_token);
+            self.token_will_push(&input.l_paren.l_paren_token);
             self.newline_push();
             self.module_port_list(&x.module_port_list);
             self.newline_pop();
@@ -466,7 +479,9 @@ impl VerylWalker for Formatter {
                 self.token(&x.input.input_token);
                 self.space(1);
             }
-            Direction::Direction1(x) => self.token(&x.output.output_token),
+            Direction::Direction1(x) => {
+                self.token(&x.output.output_token);
+            }
             Direction::Direction2(x) => {
                 self.token(&x.inout.inout_token);
                 self.space(1);
@@ -487,7 +502,7 @@ impl VerylWalker for Formatter {
             self.with_parameter(&x.with_parameter);
             self.space(1);
         }
-        self.token(&input.l_brace.l_brace_token);
+        self.token_will_push(&input.l_brace.l_brace_token);
         self.newline_push();
         for (i, x) in input.interface_declaration_list.iter().enumerate() {
             if i != 0 {
@@ -559,7 +574,7 @@ impl VerylWalker for Formatter {
         self.always_ff_conditions(&input.always_ff_conditions);
         self.token(&input.r_paren.r_paren_token);
         self.space(1);
-        self.token(&input.l_brace.l_brace_token);
+        self.token_will_push(&input.l_brace.l_brace_token);
         self.newline_push();
         for (i, x) in input.always_ff_declaration_list.iter().enumerate() {
             if i != 0 {
@@ -588,7 +603,7 @@ impl VerylWalker for Formatter {
             AlwaysFfConditionGroup::AlwaysFfConditionGroup1(x) => {
                 self.token(&x.negedge.negedge_token)
             }
-        }
+        };
         self.space(1);
         self.identifier(&input.identifier);
     }
@@ -596,7 +611,7 @@ impl VerylWalker for Formatter {
     fn always_comb_declaration(&mut self, input: &AlwaysCombDeclaration) {
         self.token(&input.always_comb.always_comb_token);
         self.space(1);
-        self.token(&input.l_brace.l_brace_token);
+        self.token_will_push(&input.l_brace.l_brace_token);
         self.newline_push();
         for (i, x) in input.always_comb_declaration_list.iter().enumerate() {
             if i != 0 {
@@ -613,7 +628,7 @@ impl VerylWalker for Formatter {
         self.space(1);
         self.identifier(&input.identifier);
         self.space(1);
-        self.token(&input.l_brace.l_brace_token);
+        self.token_will_push(&input.l_brace.l_brace_token);
         self.newline_push();
         self.modport_list(&input.modport_list);
         self.newline_pop();
