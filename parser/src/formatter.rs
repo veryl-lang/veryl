@@ -92,8 +92,7 @@ impl Formatter {
         self.parol_token(&x.token.token, true);
 
         let loc: Location = (&x.token.token.location).into();
-        if let Some(width) = self.aligner.widths.get(&loc) {
-            //self.space(width - loc.length);
+        if let Some(width) = self.aligner.additions.get(&loc) {
             self.space(*width);
         }
 
@@ -167,23 +166,14 @@ impl VerylWalker for Formatter {
     // ----------------------------------------------------------------------------
 
     fn number(&mut self, input: &Number) {
-        match &*input.integral_number {
-            IntegralNumber::IntegralNumber0(x) => {
-                self.token(&x.based_binary.based_binary_token);
-            }
-            IntegralNumber::IntegralNumber1(x) => {
-                self.token(&x.based_octal.based_octal_token);
-            }
-            IntegralNumber::IntegralNumber2(x) => {
-                self.token(&x.based_decimal.based_decimal_token);
-            }
-            IntegralNumber::IntegralNumber3(x) => {
-                self.token(&x.based_hex.based_hex_token);
-            }
-            IntegralNumber::IntegralNumber4(x) => {
-                self.token(&x.base_less.base_less_token);
-            }
-        }
+        let token = match &*input.integral_number {
+            IntegralNumber::IntegralNumber0(x) => &x.based_binary.based_binary_token,
+            IntegralNumber::IntegralNumber1(x) => &x.based_octal.based_octal_token,
+            IntegralNumber::IntegralNumber2(x) => &x.based_decimal.based_decimal_token,
+            IntegralNumber::IntegralNumber3(x) => &x.based_hex.based_hex_token,
+            IntegralNumber::IntegralNumber4(x) => &x.base_less.base_less_token,
+        };
+        self.token(token);
     }
 
     // ----------------------------------------------------------------------------
@@ -338,9 +328,7 @@ impl VerylWalker for Formatter {
             // This identifier should be treat as type not identifier
             TypeGroup::TypeGroup1(x) => self.token(&x.identifier.identifier_token),
         };
-        if !input.type_list.is_empty() {
-            self.space(1);
-        }
+        self.space(1);
         for x in &input.type_list {
             self.width(&x.width);
         }
