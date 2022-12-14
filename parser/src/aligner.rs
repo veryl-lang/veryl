@@ -88,6 +88,11 @@ impl Align {
         self.last_token = Some(x.clone());
     }
 
+    fn dummy_token(&mut self, x: &VerylToken) {
+        self.width += 0; // 0 length token
+        self.last_token = Some(x.clone());
+    }
+
     fn space(&mut self, x: usize) {
         self.width += x;
     }
@@ -124,7 +129,10 @@ impl Aligner {
         self.finish_group();
         for align in &self.aligns {
             for (x, y) in &align.additions {
-                self.additions.insert(*x, *y);
+                self.additions
+                    .entry(*x)
+                    .and_modify(|val| *val += *y)
+                    .or_insert(*y);
             }
         }
     }
@@ -137,7 +145,10 @@ impl Aligner {
 
     fn insert(&mut self, token: &VerylToken, width: usize) {
         let loc: Location = (&token.token.token.location).into();
-        self.additions.insert(loc, width);
+        self.additions
+            .entry(loc)
+            .and_modify(|val| *val += width)
+            .or_insert(width);
     }
 }
 
@@ -147,6 +158,7 @@ impl VerylWalker for Aligner {
     // ----------------------------------------------------------------------------
 
     fn identifier(&mut self, input: &Identifier) {
+        self.aligns[align_kind::IDENTIFIER].start_item();
         self.aligns[align_kind::IDENTIFIER].token(&input.identifier_token);
         self.aligns[align_kind::IDENTIFIER].finish_item();
     }
@@ -322,14 +334,19 @@ impl VerylWalker for Aligner {
             },
             TypeGroup::TypeGroup1(x) => &x.identifier.identifier_token,
         };
+        self.aligns[align_kind::TYPE].start_item();
         self.aligns[align_kind::TYPE].token(&token);
         self.aligns[align_kind::TYPE].finish_item();
 
-        self.aligns[align_kind::WIDTH].start_item();
-        for x in &input.type_list {
-            self.width(&x.width);
-        }
-        if !input.type_list.is_empty() {
+        if input.type_list.is_empty() {
+            self.aligns[align_kind::WIDTH].start_item();
+            self.aligns[align_kind::WIDTH].dummy_token(&token);
+            self.aligns[align_kind::WIDTH].finish_item();
+        } else {
+            self.aligns[align_kind::WIDTH].start_item();
+            for x in &input.type_list {
+                self.width(&x.width);
+            }
             self.aligns[align_kind::WIDTH].finish_item();
         }
     }
