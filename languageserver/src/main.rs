@@ -6,7 +6,7 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 use veryl_parser::formatter::Formatter;
 use veryl_parser::veryl_grammar::VerylGrammar;
 use veryl_parser::veryl_grammar_trait::Veryl;
-use veryl_parser::veryl_parser::parse;
+use veryl_parser::veryl_parser::{miette, parse, ParserError};
 
 #[derive(Debug)]
 struct Backend {
@@ -27,17 +27,81 @@ impl Backend {
         let rope = Rope::from_str(&params.text);
 
         let mut grammar = VerylGrammar::new();
-        if let Ok(_) = parse(&rope.to_string(), &path, &mut grammar) {
-            if let Some(veryl) = grammar.veryl {
-                self.ast_map.insert(path.clone(), veryl);
-            } else {
-                self.ast_map.remove(&path);
+
+        let diag = match parse(&rope.to_string(), &path, &mut grammar) {
+            Ok(_) => {
+                if let Some(veryl) = grammar.veryl {
+                    self.ast_map.insert(path.clone(), veryl);
+                } else {
+                    self.ast_map.remove(&path);
+                }
+                Vec::new()
             }
-        } else {
-            self.ast_map.remove(&path);
-        }
+            Err(x) => {
+                self.ast_map.remove(&path);
+                Backend::to_diag(x, &rope)
+            }
+        };
+        self.client
+            .publish_diagnostics(params.uri, diag, Some(params.version))
+            .await;
 
         self.document_map.insert(path, rope);
+    }
+
+    fn to_diag(err: miette::ErrReport, rope: &Rope) -> Vec<Diagnostic> {
+        let miette_diag: &dyn miette::Diagnostic = err.as_ref();
+        let parse_error = err.downcast_ref::<ParserError>().unwrap();
+
+        let range = if let Some(mut labels) = miette_diag.labels() {
+            labels.next().map_or(Range::default(), |label| {
+                let line = rope.byte_to_line(label.offset());
+                let pos = label.offset() - rope.line_to_byte(line);
+                let line = line as u32;
+                let pos = pos as u32;
+                let len = label.len() as u32;
+                Range::new(Position::new(line, pos), Position::new(line, pos + len))
+            })
+        } else {
+            Range::default()
+        };
+
+        let code = miette_diag
+            .code()
+            .map(|d| NumberOrString::String(format!("{d}")));
+
+        let message = match parse_error {
+            ParserError::PredictionErrorWithExpectations {
+                unexpected_tokens, ..
+            } => {
+                format!(
+                    "Syntax Error: {}",
+                    Backend::demangle_unexpected_token(&unexpected_tokens[0].to_string())
+                )
+            }
+            _ => format!("Syntax Error: {}", parse_error),
+        };
+
+        let diag = Diagnostic::new(
+            range,
+            Some(DiagnosticSeverity::ERROR),
+            code,
+            Some(String::from("veryl-ls")),
+            message,
+            None,
+            None,
+        );
+        vec![diag]
+    }
+
+    fn demangle_unexpected_token(text: &str) -> String {
+        if text.contains("LBracketAMinusZ") {
+            String::from("Unexpected token: Identifier")
+        } else if text.contains("LBracket0Minus") {
+            String::from("Unexpected token: Number")
+        } else {
+            text.replace("LA(1) (", "").replace(")", "").to_string()
+        }
     }
 }
 
