@@ -10,6 +10,8 @@ pub struct Formatter {
     indent: usize,
     line: usize,
     aligner: Aligner,
+    last_newline: usize,
+    start_token: bool,
 }
 
 impl Default for Formatter {
@@ -20,6 +22,8 @@ impl Default for Formatter {
             indent: 0,
             line: 1,
             aligner: Aligner::new(),
+            last_newline: 0,
+            start_token: false,
         }
     }
 }
@@ -80,11 +84,13 @@ impl Formatter {
             self.newline();
         }
         let text = x.text();
-        if text.ends_with("\n") {
-            self.str(text.trim_end());
+        let text = if text.ends_with("\n") {
+            text.trim_end()
         } else {
-            self.str(text);
-        }
+            text
+        };
+        self.last_newline = text.matches("\n").count();
+        self.str(text);
         self.line = x.location.line;
     }
 
@@ -101,10 +107,10 @@ impl Formatter {
             self.indent += 1;
         }
         for x in &x.comments {
-            if x.token.location.line == self.line {
+            if x.token.location.line == self.line && !self.start_token {
                 self.space(1);
             }
-            for _ in 0..x.token.location.line - self.line {
+            for _ in 0..x.token.location.line - (self.line + self.last_newline) {
                 self.newline();
             }
             self.parol_token(&x.token, false);
@@ -137,7 +143,9 @@ impl VerylWalker for Formatter {
     // ----------------------------------------------------------------------------
 
     fn veryl(&mut self, input: &Veryl) {
+        self.start_token = true;
         self.token(&input.start.start_token);
+        self.start_token = false;
         if !input.start.start_token.comments.is_empty() {
             self.newline();
         }

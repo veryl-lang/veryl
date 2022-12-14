@@ -11,12 +11,9 @@
 // Terminals
 // ----------------------------------------------------------------------------
 
-LineComment : "//.*(:?\r\n|\r|\n|$)"  : OwnedToken;
-BlockComment: "(?ms)/\u{2a}.*?\u{2a}/": OwnedToken;
 
-Comments: { LineComment | BlockComment };
-
-Comment: [ LineComment | BlockComment ];
+MultiComment: "(((//.*(?:\r\n|\r|\n|$))|((?ms)/\u{2a}.*?\u{2a}/))\s*)+": OwnedToken;
+Comments    : [ MultiComment ];
 
 // Start
 StartToken: Comments;
@@ -42,7 +39,7 @@ StarToken     : '*': OwnedToken Comments;
 SlashToken    : '/': OwnedToken Comments;
 ColonToken    : ':': OwnedToken Comments;
 SemicolonToken: ';': OwnedToken Comments;
-CommaToken    : ',': OwnedToken Comment;  // Trailing comma can't have multiple comments
+CommaToken    : ',': OwnedToken Comments;
 LParenToken   : '(': OwnedToken Comments;
 RParenToken   : ')': OwnedToken Comments;
 LBracketToken : '[': OwnedToken Comments;
@@ -76,7 +73,7 @@ AlwaysCombToken: 'always_comb': OwnedToken Comments;
 PosedgeToken   : 'posedge'    : OwnedToken Comments;
 NegedgeToken   : 'negedge'    : OwnedToken Comments;
 IfToken        : 'if'         : OwnedToken Comments;
-ElseToken      : 'else'       : OwnedToken Comment;  // Trailing else can't have multiple comments
+ElseToken      : 'else'       : OwnedToken Comments;
 ParameterToken : 'parameter'  : OwnedToken Comments;
 LocalparamToken: 'localparam' : OwnedToken Comments;
 ModuleToken    : 'module'     : OwnedToken Comments;

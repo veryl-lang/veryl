@@ -21,116 +21,114 @@ use parol_runtime::lexer::tokenizer::{
     ERROR_TOKEN, NEW_LINE_TOKEN, UNMATCHABLE_TOKEN, WHITESPACE_TOKEN,
 };
 
-pub const TERMINALS: &[&str; 51] = &[
+pub const TERMINALS: &[&str; 50] = &[
     /*  0 */ UNMATCHABLE_TOKEN,
     /*  1 */ UNMATCHABLE_TOKEN,
     /*  2 */ UNMATCHABLE_TOKEN,
     /*  3 */ UNMATCHABLE_TOKEN,
     /*  4 */ UNMATCHABLE_TOKEN,
-    /*  5 */ r###"//.*(:?\r\n|\r|\n|$)"###,
-    /*  6 */ r###"(?ms)/\u{2a}.*?\u{2a}/"###,
-    /*  7 */ r###"[0-9]+(?:_[0-9]+)*'b[0-1xzXZ]+(?:_[0-1xzXZ]+)*"###,
-    /*  8 */ r###"[0-9]+(?:_[0-9]+)*'o[0-7xzXZ]+(?:_[0-7xzXZ]+)*"###,
-    /*  9 */ r###"[0-9]+(?:_[0-9]+)*'d[0-9]+(?:_[0-9]+)*"###,
-    /* 10 */ r###"[0-9]+(?:_[0-9]+)*'h[0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*"###,
-    /* 11 */ r###"[0-9]+(?:_[0-9]+)*"###,
-    /* 12 */ r###"\+"###,
-    /* 13 */ r###"\-"###,
-    /* 14 */ r###"\*"###,
-    /* 15 */ r###"/"###,
-    /* 16 */ r###":"###,
-    /* 17 */ r###";"###,
-    /* 18 */ r###","###,
-    /* 19 */ r###"\("###,
-    /* 20 */ r###"\)"###,
-    /* 21 */ r###"\["###,
-    /* 22 */ r###"\]"###,
-    /* 23 */ r###"\{"###,
-    /* 24 */ r###"\}"###,
-    /* 25 */ r###"="###,
-    /* 26 */ r###"\#"###,
-    /* 27 */ r###"logic"###,
-    /* 28 */ r###"bit"###,
-    /* 29 */ r###"always_ff"###,
-    /* 30 */ r###"always_comb"###,
-    /* 31 */ r###"posedge"###,
-    /* 32 */ r###"negedge"###,
-    /* 33 */ r###"if"###,
-    /* 34 */ r###"else"###,
-    /* 35 */ r###"parameter"###,
-    /* 36 */ r###"localparam"###,
-    /* 37 */ r###"module"###,
-    /* 38 */ r###"interface"###,
-    /* 39 */ r###"input"###,
-    /* 40 */ r###"output"###,
-    /* 41 */ r###"inout"###,
-    /* 42 */ r###"modport"###,
-    /* 43 */ r###"u32"###,
-    /* 44 */ r###"u64"###,
-    /* 45 */ r###"i32"###,
-    /* 46 */ r###"i64"###,
-    /* 47 */ r###"f32"###,
-    /* 48 */ r###"f64"###,
-    /* 49 */ r###"[a-zA-Z_][0-9a-zA-Z_]*"###,
-    /* 50 */ ERROR_TOKEN,
+    /*  5 */ r###"(((//.*(?:\r\n|\r|\n|$))|((?ms)/\u{2a}.*?\u{2a}/))\s*)+"###,
+    /*  6 */ r###"[0-9]+(?:_[0-9]+)*'b[0-1xzXZ]+(?:_[0-1xzXZ]+)*"###,
+    /*  7 */ r###"[0-9]+(?:_[0-9]+)*'o[0-7xzXZ]+(?:_[0-7xzXZ]+)*"###,
+    /*  8 */ r###"[0-9]+(?:_[0-9]+)*'d[0-9]+(?:_[0-9]+)*"###,
+    /*  9 */ r###"[0-9]+(?:_[0-9]+)*'h[0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*"###,
+    /* 10 */ r###"[0-9]+(?:_[0-9]+)*"###,
+    /* 11 */ r###"\+"###,
+    /* 12 */ r###"\-"###,
+    /* 13 */ r###"\*"###,
+    /* 14 */ r###"/"###,
+    /* 15 */ r###":"###,
+    /* 16 */ r###";"###,
+    /* 17 */ r###","###,
+    /* 18 */ r###"\("###,
+    /* 19 */ r###"\)"###,
+    /* 20 */ r###"\["###,
+    /* 21 */ r###"\]"###,
+    /* 22 */ r###"\{"###,
+    /* 23 */ r###"\}"###,
+    /* 24 */ r###"="###,
+    /* 25 */ r###"\#"###,
+    /* 26 */ r###"logic"###,
+    /* 27 */ r###"bit"###,
+    /* 28 */ r###"always_ff"###,
+    /* 29 */ r###"always_comb"###,
+    /* 30 */ r###"posedge"###,
+    /* 31 */ r###"negedge"###,
+    /* 32 */ r###"if"###,
+    /* 33 */ r###"else"###,
+    /* 34 */ r###"parameter"###,
+    /* 35 */ r###"localparam"###,
+    /* 36 */ r###"module"###,
+    /* 37 */ r###"interface"###,
+    /* 38 */ r###"input"###,
+    /* 39 */ r###"output"###,
+    /* 40 */ r###"inout"###,
+    /* 41 */ r###"modport"###,
+    /* 42 */ r###"u32"###,
+    /* 43 */ r###"u64"###,
+    /* 44 */ r###"i32"###,
+    /* 45 */ r###"i64"###,
+    /* 46 */ r###"f32"###,
+    /* 47 */ r###"f64"###,
+    /* 48 */ r###"[a-zA-Z_][0-9a-zA-Z_]*"###,
+    /* 49 */ ERROR_TOKEN,
 ];
 
-pub const TERMINAL_NAMES: &[&str; 51] = &[
+pub const TERMINAL_NAMES: &[&str; 50] = &[
     /*  0 */ "EndOfInput",
     /*  1 */ "Newline",
     /*  2 */ "Whitespace",
     /*  3 */ "LineComment",
     /*  4 */ "BlockComment",
-    /*  5 */ "LineComment0",
-    /*  6 */ "BlockComment0",
-    /*  7 */ "LBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStarTickBLBracket0Minus1xzXZRBracketPlusLParenQuestColonUnderscoreLBracket0Minus1xzXZRBracketPlusRParenStar",
-    /*  8 */ "LBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStarTickOLBracket0Minus7xzXZRBracketPlusLParenQuestColonUnderscoreLBracket0Minus7xzXZRBracketPlusRParenStar",
-    /*  9 */ "LBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStarTickDLBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStar",
-    /* 10 */ "LBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStarTickHLBracket0Minus9aMinusFAMinusFxzXZRBracketPlusLParenQuestColonUnderscoreLBracket0Minus9aMinusFAMinusFxzXZRBracketPlusRParenStar",
-    /* 11 */ "LBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStar",
-    /* 12 */ "Plus",
-    /* 13 */ "Minus",
-    /* 14 */ "Star",
-    /* 15 */ "Slash",
-    /* 16 */ "Colon",
-    /* 17 */ "Semicolon",
-    /* 18 */ "Comma",
-    /* 19 */ "LParen",
-    /* 20 */ "RParen",
-    /* 21 */ "LBracket",
-    /* 22 */ "RBracket",
-    /* 23 */ "LBrace",
-    /* 24 */ "RBrace",
-    /* 25 */ "Equ",
-    /* 26 */ "Hash",
-    /* 27 */ "Logic",
-    /* 28 */ "Bit",
-    /* 29 */ "AlwaysUnderscoreFf",
-    /* 30 */ "AlwaysUnderscoreComb",
-    /* 31 */ "Posedge",
-    /* 32 */ "Negedge",
-    /* 33 */ "If",
-    /* 34 */ "Else",
-    /* 35 */ "Parameter",
-    /* 36 */ "Localparam",
-    /* 37 */ "Module",
-    /* 38 */ "Interface",
-    /* 39 */ "Input",
-    /* 40 */ "Output",
-    /* 41 */ "Inout",
-    /* 42 */ "Modport",
-    /* 43 */ "U32",
-    /* 44 */ "U64",
-    /* 45 */ "I32",
-    /* 46 */ "I64",
-    /* 47 */ "F32",
-    /* 48 */ "F64",
-    /* 49 */ "LBracketAMinusZAMinusZUnderscoreRBracketLBracket0Minus9aMinusZAMinusZUnderscoreRBracketStar",
-    /* 50 */ "Error",
+    /*  5 */ "MultiComment",
+    /*  6 */ "LBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStarTickBLBracket0Minus1xzXZRBracketPlusLParenQuestColonUnderscoreLBracket0Minus1xzXZRBracketPlusRParenStar",
+    /*  7 */ "LBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStarTickOLBracket0Minus7xzXZRBracketPlusLParenQuestColonUnderscoreLBracket0Minus7xzXZRBracketPlusRParenStar",
+    /*  8 */ "LBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStarTickDLBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStar",
+    /*  9 */ "LBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStarTickHLBracket0Minus9aMinusFAMinusFxzXZRBracketPlusLParenQuestColonUnderscoreLBracket0Minus9aMinusFAMinusFxzXZRBracketPlusRParenStar",
+    /* 10 */ "LBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStar",
+    /* 11 */ "Plus",
+    /* 12 */ "Minus",
+    /* 13 */ "Star",
+    /* 14 */ "Slash",
+    /* 15 */ "Colon",
+    /* 16 */ "Semicolon",
+    /* 17 */ "Comma",
+    /* 18 */ "LParen",
+    /* 19 */ "RParen",
+    /* 20 */ "LBracket",
+    /* 21 */ "RBracket",
+    /* 22 */ "LBrace",
+    /* 23 */ "RBrace",
+    /* 24 */ "Equ",
+    /* 25 */ "Hash",
+    /* 26 */ "Logic",
+    /* 27 */ "Bit",
+    /* 28 */ "AlwaysUnderscoreFf",
+    /* 29 */ "AlwaysUnderscoreComb",
+    /* 30 */ "Posedge",
+    /* 31 */ "Negedge",
+    /* 32 */ "If",
+    /* 33 */ "Else",
+    /* 34 */ "Parameter",
+    /* 35 */ "Localparam",
+    /* 36 */ "Module",
+    /* 37 */ "Interface",
+    /* 38 */ "Input",
+    /* 39 */ "Output",
+    /* 40 */ "Inout",
+    /* 41 */ "Modport",
+    /* 42 */ "U32",
+    /* 43 */ "U64",
+    /* 44 */ "I32",
+    /* 45 */ "I64",
+    /* 46 */ "F32",
+    /* 47 */ "F64",
+    /* 48 */ "LBracketAMinusZAMinusZUnderscoreRBracketLBracket0Minus9aMinusZAMinusZUnderscoreRBracketStar",
+    /* 49 */ "Error",
 ];
 
 /* SCANNER_0: "INITIAL" */
-const SCANNER_0: (&[&str; 5], &[usize; 45]) = (
+const SCANNER_0: (&[&str; 5], &[usize; 44]) = (
     &[
         /*  0 */ UNMATCHABLE_TOKEN,
         /*  1 */ NEW_LINE_TOKEN,
@@ -139,57 +137,56 @@ const SCANNER_0: (&[&str; 5], &[usize; 45]) = (
         /*  4 */ UNMATCHABLE_TOKEN,
     ],
     &[
-        5,  /* LineComment0 */
-        6,  /* BlockComment0 */
-        7, /* LBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStarTickBLBracket0Minus1xzXZRBracketPlusLParenQuestColonUnderscoreLBracket0Minus1xzXZRBracketPlusRParenStar */
-        8, /* LBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStarTickOLBracket0Minus7xzXZRBracketPlusLParenQuestColonUnderscoreLBracket0Minus7xzXZRBracketPlusRParenStar */
-        9, /* LBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStarTickDLBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStar */
-        10, /* LBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStarTickHLBracket0Minus9aMinusFAMinusFxzXZRBracketPlusLParenQuestColonUnderscoreLBracket0Minus9aMinusFAMinusFxzXZRBracketPlusRParenStar */
-        11, /* LBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStar */
-        12, /* Plus */
-        13, /* Minus */
-        14, /* Star */
-        15, /* Slash */
-        16, /* Colon */
-        17, /* Semicolon */
-        18, /* Comma */
-        19, /* LParen */
-        20, /* RParen */
-        21, /* LBracket */
-        22, /* RBracket */
-        23, /* LBrace */
-        24, /* RBrace */
-        25, /* Equ */
-        26, /* Hash */
-        27, /* Logic */
-        28, /* Bit */
-        29, /* AlwaysUnderscoreFf */
-        30, /* AlwaysUnderscoreComb */
-        31, /* Posedge */
-        32, /* Negedge */
-        33, /* If */
-        34, /* Else */
-        35, /* Parameter */
-        36, /* Localparam */
-        37, /* Module */
-        38, /* Interface */
-        39, /* Input */
-        40, /* Output */
-        41, /* Inout */
-        42, /* Modport */
-        43, /* U32 */
-        44, /* U64 */
-        45, /* I32 */
-        46, /* I64 */
-        47, /* F32 */
-        48, /* F64 */
-        49, /* LBracketAMinusZAMinusZUnderscoreRBracketLBracket0Minus9aMinusZAMinusZUnderscoreRBracketStar */
+        5,  /* MultiComment */
+        6, /* LBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStarTickBLBracket0Minus1xzXZRBracketPlusLParenQuestColonUnderscoreLBracket0Minus1xzXZRBracketPlusRParenStar */
+        7, /* LBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStarTickOLBracket0Minus7xzXZRBracketPlusLParenQuestColonUnderscoreLBracket0Minus7xzXZRBracketPlusRParenStar */
+        8, /* LBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStarTickDLBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStar */
+        9, /* LBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStarTickHLBracket0Minus9aMinusFAMinusFxzXZRBracketPlusLParenQuestColonUnderscoreLBracket0Minus9aMinusFAMinusFxzXZRBracketPlusRParenStar */
+        10, /* LBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStar */
+        11, /* Plus */
+        12, /* Minus */
+        13, /* Star */
+        14, /* Slash */
+        15, /* Colon */
+        16, /* Semicolon */
+        17, /* Comma */
+        18, /* LParen */
+        19, /* RParen */
+        20, /* LBracket */
+        21, /* RBracket */
+        22, /* LBrace */
+        23, /* RBrace */
+        24, /* Equ */
+        25, /* Hash */
+        26, /* Logic */
+        27, /* Bit */
+        28, /* AlwaysUnderscoreFf */
+        29, /* AlwaysUnderscoreComb */
+        30, /* Posedge */
+        31, /* Negedge */
+        32, /* If */
+        33, /* Else */
+        34, /* Parameter */
+        35, /* Localparam */
+        36, /* Module */
+        37, /* Interface */
+        38, /* Input */
+        39, /* Output */
+        40, /* Inout */
+        41, /* Modport */
+        42, /* U32 */
+        43, /* U64 */
+        44, /* I32 */
+        45, /* I64 */
+        46, /* F32 */
+        47, /* F64 */
+        48, /* LBracketAMinusZAMinusZUnderscoreRBracketLBracket0Minus9aMinusZAMinusZUnderscoreRBracketStar */
     ],
 );
 
 const MAX_K: usize = 3;
 
-pub const NON_TERMINALS: &[&str; 163] = &[
+pub const NON_TERMINALS: &[&str; 158] = &[
     /*   0 */ "AlwaysComb",
     /*   1 */ "AlwaysCombDeclaration",
     /*   2 */ "AlwaysCombDeclarationList",
@@ -216,195 +213,190 @@ pub const NON_TERMINALS: &[&str; 163] = &[
     /*  23 */ "BasedOctalToken",
     /*  24 */ "Bit",
     /*  25 */ "BitToken",
-    /*  26 */ "BlockComment",
-    /*  27 */ "BuiltinType",
-    /*  28 */ "Colon",
-    /*  29 */ "ColonToken",
-    /*  30 */ "Comma",
-    /*  31 */ "CommaToken",
-    /*  32 */ "Comment",
-    /*  33 */ "CommentOpt",
-    /*  34 */ "CommentOptGroup",
-    /*  35 */ "Comments",
-    /*  36 */ "CommentsList",
-    /*  37 */ "CommentsListGroup",
-    /*  38 */ "Description",
-    /*  39 */ "Direction",
-    /*  40 */ "Else",
-    /*  41 */ "ElseToken",
-    /*  42 */ "Equ",
-    /*  43 */ "EquToken",
-    /*  44 */ "Expression",
-    /*  45 */ "Expression0",
-    /*  46 */ "Expression0List",
-    /*  47 */ "Expression1",
-    /*  48 */ "Expression1List",
-    /*  49 */ "Expression2",
-    /*  50 */ "F32",
-    /*  51 */ "F32Token",
-    /*  52 */ "F64",
-    /*  53 */ "F64Token",
-    /*  54 */ "Factor",
-    /*  55 */ "FactorList",
-    /*  56 */ "Hash",
-    /*  57 */ "HashToken",
-    /*  58 */ "I32",
-    /*  59 */ "I32Token",
-    /*  60 */ "I64",
-    /*  61 */ "I64Token",
-    /*  62 */ "Identifier",
-    /*  63 */ "IdentifierToken",
-    /*  64 */ "If",
-    /*  65 */ "IfStatement",
-    /*  66 */ "IfStatementList",
-    /*  67 */ "IfStatementOpt",
-    /*  68 */ "IfToken",
-    /*  69 */ "Inout",
-    /*  70 */ "InoutToken",
-    /*  71 */ "Input",
-    /*  72 */ "InputToken",
-    /*  73 */ "IntegralNumber",
-    /*  74 */ "Interface",
-    /*  75 */ "InterfaceDeclaration",
-    /*  76 */ "InterfaceDeclarationList",
-    /*  77 */ "InterfaceDeclarationOpt",
-    /*  78 */ "InterfaceItem",
-    /*  79 */ "InterfaceToken",
-    /*  80 */ "LBrace",
-    /*  81 */ "LBraceToken",
-    /*  82 */ "LBracket",
-    /*  83 */ "LBracketToken",
-    /*  84 */ "LParen",
-    /*  85 */ "LParenToken",
-    /*  86 */ "LineComment",
-    /*  87 */ "Localparam",
-    /*  88 */ "LocalparamDeclaration",
-    /*  89 */ "LocalparamToken",
-    /*  90 */ "Logic",
-    /*  91 */ "LogicToken",
-    /*  92 */ "Minus",
-    /*  93 */ "MinusToken",
-    /*  94 */ "Modport",
-    /*  95 */ "ModportDeclaration",
-    /*  96 */ "ModportItem",
-    /*  97 */ "ModportList",
-    /*  98 */ "ModportListList",
-    /*  99 */ "ModportListOpt",
-    /* 100 */ "ModportToken",
-    /* 101 */ "Module",
-    /* 102 */ "ModuleDeclaration",
-    /* 103 */ "ModuleDeclarationList",
-    /* 104 */ "ModuleDeclarationOpt",
-    /* 105 */ "ModuleDeclarationOpt0",
-    /* 106 */ "ModuleItem",
-    /* 107 */ "ModulePort",
-    /* 108 */ "ModulePortItem",
-    /* 109 */ "ModulePortList",
-    /* 110 */ "ModulePortListList",
-    /* 111 */ "ModulePortListOpt",
-    /* 112 */ "ModulePortOpt",
-    /* 113 */ "ModuleToken",
-    /* 114 */ "Negedge",
-    /* 115 */ "NegedgeToken",
-    /* 116 */ "Number",
-    /* 117 */ "OperatorPrecedence1",
-    /* 118 */ "OperatorPrecedence2",
-    /* 119 */ "Output",
-    /* 120 */ "OutputToken",
-    /* 121 */ "Parameter",
-    /* 122 */ "ParameterDeclaration",
-    /* 123 */ "ParameterToken",
-    /* 124 */ "Plus",
-    /* 125 */ "PlusToken",
-    /* 126 */ "Posedge",
-    /* 127 */ "PosedgeToken",
-    /* 128 */ "RBrace",
-    /* 129 */ "RBraceToken",
-    /* 130 */ "RBracket",
-    /* 131 */ "RBracketToken",
-    /* 132 */ "RParen",
-    /* 133 */ "RParenToken",
-    /* 134 */ "Range",
-    /* 135 */ "RangeOpt",
-    /* 136 */ "Semicolon",
-    /* 137 */ "SemicolonToken",
-    /* 138 */ "Slash",
-    /* 139 */ "SlashToken",
-    /* 140 */ "Star",
-    /* 141 */ "StarToken",
-    /* 142 */ "Start",
-    /* 143 */ "StartToken",
-    /* 144 */ "Statement",
-    /* 145 */ "Type",
-    /* 146 */ "TypeGroup",
-    /* 147 */ "TypeList",
-    /* 148 */ "U32",
-    /* 149 */ "U32Token",
-    /* 150 */ "U64",
-    /* 151 */ "U64Token",
-    /* 152 */ "VariableDeclaration",
-    /* 153 */ "Veryl",
-    /* 154 */ "VerylList",
-    /* 155 */ "Width",
-    /* 156 */ "WithParameter",
-    /* 157 */ "WithParameterItem",
-    /* 158 */ "WithParameterItemGroup",
-    /* 159 */ "WithParameterList",
-    /* 160 */ "WithParameterListList",
-    /* 161 */ "WithParameterListOpt",
-    /* 162 */ "WithParameterOpt",
+    /*  26 */ "BuiltinType",
+    /*  27 */ "Colon",
+    /*  28 */ "ColonToken",
+    /*  29 */ "Comma",
+    /*  30 */ "CommaToken",
+    /*  31 */ "Comments",
+    /*  32 */ "CommentsOpt",
+    /*  33 */ "Description",
+    /*  34 */ "Direction",
+    /*  35 */ "Else",
+    /*  36 */ "ElseToken",
+    /*  37 */ "Equ",
+    /*  38 */ "EquToken",
+    /*  39 */ "Expression",
+    /*  40 */ "Expression0",
+    /*  41 */ "Expression0List",
+    /*  42 */ "Expression1",
+    /*  43 */ "Expression1List",
+    /*  44 */ "Expression2",
+    /*  45 */ "F32",
+    /*  46 */ "F32Token",
+    /*  47 */ "F64",
+    /*  48 */ "F64Token",
+    /*  49 */ "Factor",
+    /*  50 */ "FactorList",
+    /*  51 */ "Hash",
+    /*  52 */ "HashToken",
+    /*  53 */ "I32",
+    /*  54 */ "I32Token",
+    /*  55 */ "I64",
+    /*  56 */ "I64Token",
+    /*  57 */ "Identifier",
+    /*  58 */ "IdentifierToken",
+    /*  59 */ "If",
+    /*  60 */ "IfStatement",
+    /*  61 */ "IfStatementList",
+    /*  62 */ "IfStatementOpt",
+    /*  63 */ "IfToken",
+    /*  64 */ "Inout",
+    /*  65 */ "InoutToken",
+    /*  66 */ "Input",
+    /*  67 */ "InputToken",
+    /*  68 */ "IntegralNumber",
+    /*  69 */ "Interface",
+    /*  70 */ "InterfaceDeclaration",
+    /*  71 */ "InterfaceDeclarationList",
+    /*  72 */ "InterfaceDeclarationOpt",
+    /*  73 */ "InterfaceItem",
+    /*  74 */ "InterfaceToken",
+    /*  75 */ "LBrace",
+    /*  76 */ "LBraceToken",
+    /*  77 */ "LBracket",
+    /*  78 */ "LBracketToken",
+    /*  79 */ "LParen",
+    /*  80 */ "LParenToken",
+    /*  81 */ "Localparam",
+    /*  82 */ "LocalparamDeclaration",
+    /*  83 */ "LocalparamToken",
+    /*  84 */ "Logic",
+    /*  85 */ "LogicToken",
+    /*  86 */ "Minus",
+    /*  87 */ "MinusToken",
+    /*  88 */ "Modport",
+    /*  89 */ "ModportDeclaration",
+    /*  90 */ "ModportItem",
+    /*  91 */ "ModportList",
+    /*  92 */ "ModportListList",
+    /*  93 */ "ModportListOpt",
+    /*  94 */ "ModportToken",
+    /*  95 */ "Module",
+    /*  96 */ "ModuleDeclaration",
+    /*  97 */ "ModuleDeclarationList",
+    /*  98 */ "ModuleDeclarationOpt",
+    /*  99 */ "ModuleDeclarationOpt0",
+    /* 100 */ "ModuleItem",
+    /* 101 */ "ModulePort",
+    /* 102 */ "ModulePortItem",
+    /* 103 */ "ModulePortList",
+    /* 104 */ "ModulePortListList",
+    /* 105 */ "ModulePortListOpt",
+    /* 106 */ "ModulePortOpt",
+    /* 107 */ "ModuleToken",
+    /* 108 */ "MultiComment",
+    /* 109 */ "Negedge",
+    /* 110 */ "NegedgeToken",
+    /* 111 */ "Number",
+    /* 112 */ "OperatorPrecedence1",
+    /* 113 */ "OperatorPrecedence2",
+    /* 114 */ "Output",
+    /* 115 */ "OutputToken",
+    /* 116 */ "Parameter",
+    /* 117 */ "ParameterDeclaration",
+    /* 118 */ "ParameterToken",
+    /* 119 */ "Plus",
+    /* 120 */ "PlusToken",
+    /* 121 */ "Posedge",
+    /* 122 */ "PosedgeToken",
+    /* 123 */ "RBrace",
+    /* 124 */ "RBraceToken",
+    /* 125 */ "RBracket",
+    /* 126 */ "RBracketToken",
+    /* 127 */ "RParen",
+    /* 128 */ "RParenToken",
+    /* 129 */ "Range",
+    /* 130 */ "RangeOpt",
+    /* 131 */ "Semicolon",
+    /* 132 */ "SemicolonToken",
+    /* 133 */ "Slash",
+    /* 134 */ "SlashToken",
+    /* 135 */ "Star",
+    /* 136 */ "StarToken",
+    /* 137 */ "Start",
+    /* 138 */ "StartToken",
+    /* 139 */ "Statement",
+    /* 140 */ "Type",
+    /* 141 */ "TypeGroup",
+    /* 142 */ "TypeList",
+    /* 143 */ "U32",
+    /* 144 */ "U32Token",
+    /* 145 */ "U64",
+    /* 146 */ "U64Token",
+    /* 147 */ "VariableDeclaration",
+    /* 148 */ "Veryl",
+    /* 149 */ "VerylList",
+    /* 150 */ "Width",
+    /* 151 */ "WithParameter",
+    /* 152 */ "WithParameterItem",
+    /* 153 */ "WithParameterItemGroup",
+    /* 154 */ "WithParameterList",
+    /* 155 */ "WithParameterListList",
+    /* 156 */ "WithParameterListOpt",
+    /* 157 */ "WithParameterOpt",
 ];
 
-pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 163] = &[
+pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 158] = &[
     /* 0 - "AlwaysComb" */
     LookaheadDFA {
-        states: &[Some(79)],
+        states: &[Some(71)],
         transitions: &[],
         k: 0,
     },
     /* 1 - "AlwaysCombDeclaration" */
     LookaheadDFA {
-        states: &[Some(211)],
+        states: &[Some(203)],
         transitions: &[],
         k: 0,
     },
     /* 2 - "AlwaysCombDeclarationList" */
     LookaheadDFA {
-        states: &[None, Some(212), Some(213)],
+        states: &[None, Some(204), Some(205)],
         transitions: &[
-            DFATransition(0, 24, 2),
-            DFATransition(0, 33, 1),
-            DFATransition(0, 49, 1),
+            DFATransition(0, 23, 2),
+            DFATransition(0, 32, 1),
+            DFATransition(0, 48, 1),
         ],
         k: 1,
     },
     /* 3 - "AlwaysCombToken" */
     LookaheadDFA {
-        states: &[Some(57)],
+        states: &[Some(49)],
         transitions: &[],
         k: 0,
     },
     /* 4 - "AlwaysFf" */
     LookaheadDFA {
-        states: &[Some(78)],
+        states: &[Some(70)],
         transitions: &[],
         k: 0,
     },
     /* 5 - "AlwaysFfCondition" */
     LookaheadDFA {
-        states: &[Some(208)],
+        states: &[Some(200)],
         transitions: &[],
         k: 0,
     },
     /* 6 - "AlwaysFfConditionGroup" */
     LookaheadDFA {
-        states: &[None, Some(209), Some(210)],
-        transitions: &[DFATransition(0, 31, 1), DFATransition(0, 32, 2)],
+        states: &[None, Some(201), Some(202)],
+        transitions: &[DFATransition(0, 30, 1), DFATransition(0, 31, 2)],
         k: 1,
     },
     /* 7 - "AlwaysFfConditions" */
     LookaheadDFA {
-        states: &[Some(203)],
+        states: &[Some(195)],
         transitions: &[],
         k: 0,
     },
@@ -414,261 +406,209 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 163] = &[
             None,
             None,
             None,
-            Some(204),
+            Some(196),
             None,
             None,
             None,
             None,
-            None,
-            Some(205),
-            None,
+            Some(197),
             None,
             None,
         ],
         transitions: &[
-            DFATransition(0, 18, 1),
-            DFATransition(0, 20, 7),
+            DFATransition(0, 17, 1),
+            DFATransition(0, 19, 6),
             DFATransition(1, 5, 2),
-            DFATransition(1, 6, 4),
-            DFATransition(1, 20, 8),
+            DFATransition(1, 19, 7),
+            DFATransition(1, 30, 4),
             DFATransition(1, 31, 5),
-            DFATransition(1, 32, 6),
-            DFATransition(2, 20, 9),
+            DFATransition(2, 19, 8),
+            DFATransition(2, 30, 3),
             DFATransition(2, 31, 3),
-            DFATransition(2, 32, 3),
-            DFATransition(4, 20, 9),
-            DFATransition(4, 31, 3),
-            DFATransition(4, 32, 3),
+            DFATransition(4, 5, 3),
+            DFATransition(4, 48, 3),
             DFATransition(5, 5, 3),
-            DFATransition(5, 6, 3),
-            DFATransition(5, 49, 3),
-            DFATransition(6, 5, 3),
-            DFATransition(6, 6, 3),
-            DFATransition(6, 49, 3),
-            DFATransition(7, 5, 10),
-            DFATransition(7, 6, 11),
-            DFATransition(7, 23, 12),
-            DFATransition(8, 5, 9),
-            DFATransition(8, 6, 9),
-            DFATransition(8, 23, 9),
-            DFATransition(10, 5, 9),
-            DFATransition(10, 6, 9),
-            DFATransition(10, 23, 9),
-            DFATransition(11, 5, 9),
-            DFATransition(11, 6, 9),
-            DFATransition(11, 23, 9),
-            DFATransition(12, 5, 9),
-            DFATransition(12, 6, 9),
-            DFATransition(12, 24, 9),
-            DFATransition(12, 33, 9),
-            DFATransition(12, 49, 9),
+            DFATransition(5, 48, 3),
+            DFATransition(6, 5, 9),
+            DFATransition(6, 22, 10),
+            DFATransition(7, 5, 8),
+            DFATransition(7, 22, 8),
+            DFATransition(9, 22, 8),
+            DFATransition(10, 5, 8),
+            DFATransition(10, 23, 8),
+            DFATransition(10, 32, 8),
+            DFATransition(10, 48, 8),
         ],
         k: 3,
     },
     /* 9 - "AlwaysFfConditionsOpt" */
     LookaheadDFA {
-        states: &[None, Some(206), Some(207)],
-        transitions: &[DFATransition(0, 18, 1), DFATransition(0, 20, 2)],
+        states: &[None, Some(198), Some(199)],
+        transitions: &[DFATransition(0, 17, 1), DFATransition(0, 19, 2)],
         k: 1,
     },
     /* 10 - "AlwaysFfDeclaration" */
     LookaheadDFA {
-        states: &[Some(200)],
+        states: &[Some(192)],
         transitions: &[],
         k: 0,
     },
     /* 11 - "AlwaysFfDeclarationList" */
     LookaheadDFA {
-        states: &[None, Some(201), Some(202)],
+        states: &[None, Some(193), Some(194)],
         transitions: &[
-            DFATransition(0, 24, 2),
-            DFATransition(0, 33, 1),
-            DFATransition(0, 49, 1),
+            DFATransition(0, 23, 2),
+            DFATransition(0, 32, 1),
+            DFATransition(0, 48, 1),
         ],
         k: 1,
     },
     /* 12 - "AlwaysFfToken" */
     LookaheadDFA {
-        states: &[Some(56)],
+        states: &[Some(48)],
         transitions: &[],
         k: 0,
     },
     /* 13 - "AssignmentStatement" */
     LookaheadDFA {
-        states: &[Some(130)],
+        states: &[Some(122)],
         transitions: &[],
         k: 0,
     },
     /* 14 - "BaseLess" */
     LookaheadDFA {
-        states: &[Some(23)],
+        states: &[Some(15)],
         transitions: &[],
         k: 0,
     },
     /* 15 - "BaseLessToken" */
     LookaheadDFA {
-        states: &[Some(18)],
+        states: &[Some(10)],
         transitions: &[],
         k: 0,
     },
     /* 16 - "BasedBinary" */
     LookaheadDFA {
-        states: &[Some(19)],
+        states: &[Some(11)],
         transitions: &[],
         k: 0,
     },
     /* 17 - "BasedBinaryToken" */
     LookaheadDFA {
-        states: &[Some(14)],
+        states: &[Some(6)],
         transitions: &[],
         k: 0,
     },
     /* 18 - "BasedDecimal" */
     LookaheadDFA {
-        states: &[Some(21)],
+        states: &[Some(13)],
         transitions: &[],
         k: 0,
     },
     /* 19 - "BasedDecimalToken" */
     LookaheadDFA {
-        states: &[Some(16)],
+        states: &[Some(8)],
         transitions: &[],
         k: 0,
     },
     /* 20 - "BasedHex" */
     LookaheadDFA {
-        states: &[Some(22)],
+        states: &[Some(14)],
         transitions: &[],
         k: 0,
     },
     /* 21 - "BasedHexToken" */
     LookaheadDFA {
-        states: &[Some(17)],
+        states: &[Some(9)],
         transitions: &[],
         k: 0,
     },
     /* 22 - "BasedOctal" */
     LookaheadDFA {
-        states: &[Some(20)],
+        states: &[Some(12)],
         transitions: &[],
         k: 0,
     },
     /* 23 - "BasedOctalToken" */
     LookaheadDFA {
-        states: &[Some(15)],
+        states: &[Some(7)],
         transitions: &[],
         k: 0,
     },
     /* 24 - "Bit" */
     LookaheadDFA {
-        states: &[Some(77)],
+        states: &[Some(69)],
         transitions: &[],
         k: 0,
     },
     /* 25 - "BitToken" */
     LookaheadDFA {
-        states: &[Some(55)],
+        states: &[Some(47)],
         transitions: &[],
         k: 0,
     },
-    /* 26 - "BlockComment" */
+    /* 26 - "BuiltinType" */
+    LookaheadDFA {
+        states: &[
+            None,
+            Some(132),
+            Some(133),
+            Some(134),
+            Some(135),
+            Some(136),
+            Some(137),
+            Some(138),
+            Some(139),
+        ],
+        transitions: &[
+            DFATransition(0, 26, 1),
+            DFATransition(0, 27, 2),
+            DFATransition(0, 42, 3),
+            DFATransition(0, 43, 4),
+            DFATransition(0, 44, 5),
+            DFATransition(0, 45, 6),
+            DFATransition(0, 46, 7),
+            DFATransition(0, 47, 8),
+        ],
+        k: 1,
+    },
+    /* 27 - "Colon" */
+    LookaheadDFA {
+        states: &[Some(35)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 28 - "ColonToken" */
+    LookaheadDFA {
+        states: &[Some(20)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 29 - "Comma" */
+    LookaheadDFA {
+        states: &[Some(37)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 30 - "CommaToken" */
+    LookaheadDFA {
+        states: &[Some(22)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 31 - "Comments" */
     LookaheadDFA {
         states: &[Some(1)],
         transitions: &[],
         k: 0,
     },
-    /* 27 - "BuiltinType" */
+    /* 32 - "CommentsOpt" */
     LookaheadDFA {
-        states: &[
-            None,
-            Some(140),
-            Some(141),
-            Some(142),
-            Some(143),
-            Some(144),
-            Some(145),
-            Some(146),
-            Some(147),
-        ],
-        transitions: &[
-            DFATransition(0, 27, 1),
-            DFATransition(0, 28, 2),
-            DFATransition(0, 43, 3),
-            DFATransition(0, 44, 4),
-            DFATransition(0, 45, 5),
-            DFATransition(0, 46, 6),
-            DFATransition(0, 47, 7),
-            DFATransition(0, 48, 8),
-        ],
-        k: 1,
-    },
-    /* 28 - "Colon" */
-    LookaheadDFA {
-        states: &[Some(43)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 29 - "ColonToken" */
-    LookaheadDFA {
-        states: &[Some(28)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 30 - "Comma" */
-    LookaheadDFA {
-        states: &[Some(45)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 31 - "CommaToken" */
-    LookaheadDFA {
-        states: &[Some(30)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 32 - "Comment" */
-    LookaheadDFA {
-        states: &[Some(7)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 33 - "CommentOpt" */
-    LookaheadDFA {
-        states: &[None, Some(8), Some(11)],
-        transitions: &[
-            DFATransition(0, 5, 1),
-            DFATransition(0, 6, 1),
-            DFATransition(0, 20, 2),
-            DFATransition(0, 23, 2),
-            DFATransition(0, 24, 2),
-            DFATransition(0, 31, 2),
-            DFATransition(0, 32, 2),
-            DFATransition(0, 33, 2),
-            DFATransition(0, 35, 2),
-            DFATransition(0, 36, 2),
-            DFATransition(0, 49, 2),
-        ],
-        k: 1,
-    },
-    /* 34 - "CommentOptGroup" */
-    LookaheadDFA {
-        states: &[None, Some(9), Some(10)],
-        transitions: &[DFATransition(0, 5, 1), DFATransition(0, 6, 2)],
-        k: 1,
-    },
-    /* 35 - "Comments" */
-    LookaheadDFA {
-        states: &[Some(2)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 36 - "CommentsList" */
-    LookaheadDFA {
-        states: &[None, Some(3), Some(6)],
+        states: &[None, Some(2), Some(3)],
         transitions: &[
             DFATransition(0, 0, 2),
             DFATransition(0, 5, 1),
-            DFATransition(0, 6, 1),
+            DFATransition(0, 6, 2),
             DFATransition(0, 7, 2),
             DFATransition(0, 8, 2),
             DFATransition(0, 9, 2),
@@ -711,2499 +651,2342 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 163] = &[
             DFATransition(0, 46, 2),
             DFATransition(0, 47, 2),
             DFATransition(0, 48, 2),
-            DFATransition(0, 49, 2),
         ],
         k: 1,
     },
-    /* 37 - "CommentsListGroup" */
+    /* 33 - "Description" */
     LookaheadDFA {
-        states: &[None, Some(4), Some(5)],
-        transitions: &[DFATransition(0, 5, 1), DFATransition(0, 6, 2)],
+        states: &[None, Some(95), Some(96)],
+        transitions: &[DFATransition(0, 36, 1), DFATransition(0, 37, 2)],
         k: 1,
     },
-    /* 38 - "Description" */
+    /* 34 - "Direction" */
     LookaheadDFA {
-        states: &[None, Some(103), Some(104)],
-        transitions: &[DFATransition(0, 37, 1), DFATransition(0, 38, 2)],
-        k: 1,
-    },
-    /* 39 - "Direction" */
-    LookaheadDFA {
-        states: &[None, Some(180), Some(181), Some(182)],
+        states: &[None, Some(172), Some(173), Some(174)],
         transitions: &[
-            DFATransition(0, 39, 1),
-            DFATransition(0, 40, 2),
-            DFATransition(0, 41, 3),
+            DFATransition(0, 38, 1),
+            DFATransition(0, 39, 2),
+            DFATransition(0, 40, 3),
         ],
         k: 1,
     },
-    /* 40 - "Else" */
-    LookaheadDFA {
-        states: &[Some(83)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 41 - "ElseToken" */
-    LookaheadDFA {
-        states: &[Some(61)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 42 - "Equ" */
-    LookaheadDFA {
-        states: &[Some(52)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 43 - "EquToken" */
-    LookaheadDFA {
-        states: &[Some(37)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 44 - "Expression" */
-    LookaheadDFA {
-        states: &[Some(115)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 45 - "Expression0" */
-    LookaheadDFA {
-        states: &[Some(116)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 46 - "Expression0List" */
-    LookaheadDFA {
-        states: &[None, Some(117), Some(118)],
-        transitions: &[
-            DFATransition(0, 12, 1),
-            DFATransition(0, 13, 1),
-            DFATransition(0, 16, 2),
-            DFATransition(0, 17, 2),
-            DFATransition(0, 18, 2),
-            DFATransition(0, 20, 2),
-            DFATransition(0, 22, 2),
-            DFATransition(0, 23, 2),
-        ],
-        k: 1,
-    },
-    /* 47 - "Expression1" */
-    LookaheadDFA {
-        states: &[Some(119)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 48 - "Expression1List" */
-    LookaheadDFA {
-        states: &[None, Some(120), Some(121)],
-        transitions: &[
-            DFATransition(0, 12, 2),
-            DFATransition(0, 13, 2),
-            DFATransition(0, 14, 1),
-            DFATransition(0, 15, 1),
-            DFATransition(0, 16, 2),
-            DFATransition(0, 17, 2),
-            DFATransition(0, 18, 2),
-            DFATransition(0, 20, 2),
-            DFATransition(0, 22, 2),
-            DFATransition(0, 23, 2),
-        ],
-        k: 1,
-    },
-    /* 49 - "Expression2" */
-    LookaheadDFA {
-        states: &[Some(122)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 50 - "F32" */
-    LookaheadDFA {
-        states: &[Some(96)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 51 - "F32Token" */
-    LookaheadDFA {
-        states: &[Some(74)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 52 - "F64" */
-    LookaheadDFA {
-        states: &[Some(97)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 53 - "F64Token" */
+    /* 35 - "Else" */
     LookaheadDFA {
         states: &[Some(75)],
         transitions: &[],
         k: 0,
     },
-    /* 54 - "Factor" */
+    /* 36 - "ElseToken" */
     LookaheadDFA {
-        states: &[None, Some(123), Some(124), Some(127)],
+        states: &[Some(53)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 37 - "Equ" */
+    LookaheadDFA {
+        states: &[Some(44)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 38 - "EquToken" */
+    LookaheadDFA {
+        states: &[Some(29)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 39 - "Expression" */
+    LookaheadDFA {
+        states: &[Some(107)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 40 - "Expression0" */
+    LookaheadDFA {
+        states: &[Some(108)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 41 - "Expression0List" */
+    LookaheadDFA {
+        states: &[None, Some(109), Some(110)],
         transitions: &[
+            DFATransition(0, 11, 1),
+            DFATransition(0, 12, 1),
+            DFATransition(0, 15, 2),
+            DFATransition(0, 16, 2),
+            DFATransition(0, 17, 2),
+            DFATransition(0, 19, 2),
+            DFATransition(0, 21, 2),
+            DFATransition(0, 22, 2),
+        ],
+        k: 1,
+    },
+    /* 42 - "Expression1" */
+    LookaheadDFA {
+        states: &[Some(111)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 43 - "Expression1List" */
+    LookaheadDFA {
+        states: &[None, Some(112), Some(113)],
+        transitions: &[
+            DFATransition(0, 11, 2),
+            DFATransition(0, 12, 2),
+            DFATransition(0, 13, 1),
+            DFATransition(0, 14, 1),
+            DFATransition(0, 15, 2),
+            DFATransition(0, 16, 2),
+            DFATransition(0, 17, 2),
+            DFATransition(0, 19, 2),
+            DFATransition(0, 21, 2),
+            DFATransition(0, 22, 2),
+        ],
+        k: 1,
+    },
+    /* 44 - "Expression2" */
+    LookaheadDFA {
+        states: &[Some(114)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 45 - "F32" */
+    LookaheadDFA {
+        states: &[Some(88)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 46 - "F32Token" */
+    LookaheadDFA {
+        states: &[Some(66)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 47 - "F64" */
+    LookaheadDFA {
+        states: &[Some(89)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 48 - "F64Token" */
+    LookaheadDFA {
+        states: &[Some(67)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 49 - "Factor" */
+    LookaheadDFA {
+        states: &[None, Some(115), Some(116), Some(119)],
+        transitions: &[
+            DFATransition(0, 6, 1),
             DFATransition(0, 7, 1),
             DFATransition(0, 8, 1),
             DFATransition(0, 9, 1),
             DFATransition(0, 10, 1),
-            DFATransition(0, 11, 1),
-            DFATransition(0, 19, 3),
-            DFATransition(0, 49, 2),
+            DFATransition(0, 18, 3),
+            DFATransition(0, 48, 2),
         ],
         k: 1,
     },
-    /* 55 - "FactorList" */
+    /* 50 - "FactorList" */
     LookaheadDFA {
-        states: &[None, Some(125), Some(126)],
+        states: &[None, Some(117), Some(118)],
         transitions: &[
+            DFATransition(0, 11, 2),
             DFATransition(0, 12, 2),
             DFATransition(0, 13, 2),
             DFATransition(0, 14, 2),
             DFATransition(0, 15, 2),
             DFATransition(0, 16, 2),
             DFATransition(0, 17, 2),
-            DFATransition(0, 18, 2),
-            DFATransition(0, 20, 2),
-            DFATransition(0, 21, 1),
+            DFATransition(0, 19, 2),
+            DFATransition(0, 20, 1),
+            DFATransition(0, 21, 2),
             DFATransition(0, 22, 2),
-            DFATransition(0, 23, 2),
         ],
         k: 1,
     },
-    /* 56 - "Hash" */
+    /* 51 - "Hash" */
     LookaheadDFA {
-        states: &[Some(53)],
+        states: &[Some(45)],
         transitions: &[],
         k: 0,
     },
-    /* 57 - "HashToken" */
+    /* 52 - "HashToken" */
     LookaheadDFA {
-        states: &[Some(38)],
+        states: &[Some(30)],
         transitions: &[],
         k: 0,
     },
-    /* 58 - "I32" */
-    LookaheadDFA {
-        states: &[Some(94)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 59 - "I32Token" */
-    LookaheadDFA {
-        states: &[Some(72)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 60 - "I64" */
-    LookaheadDFA {
-        states: &[Some(95)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 61 - "I64Token" */
-    LookaheadDFA {
-        states: &[Some(73)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 62 - "Identifier" */
-    LookaheadDFA {
-        states: &[Some(99)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 63 - "IdentifierToken" */
-    LookaheadDFA {
-        states: &[Some(98)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 64 - "If" */
-    LookaheadDFA {
-        states: &[Some(82)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 65 - "IfStatement" */
-    LookaheadDFA {
-        states: &[Some(131)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 66 - "IfStatementList" */
-    LookaheadDFA {
-        states: &[
-            None,
-            None,
-            None,
-            Some(132),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            Some(133),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        ],
-        transitions: &[
-            DFATransition(0, 24, 6),
-            DFATransition(0, 33, 7),
-            DFATransition(0, 34, 1),
-            DFATransition(0, 49, 8),
-            DFATransition(1, 5, 2),
-            DFATransition(1, 6, 4),
-            DFATransition(1, 23, 29),
-            DFATransition(1, 33, 5),
-            DFATransition(2, 23, 19),
-            DFATransition(2, 33, 3),
-            DFATransition(4, 23, 19),
-            DFATransition(4, 33, 3),
-            DFATransition(5, 5, 3),
-            DFATransition(5, 6, 3),
-            DFATransition(5, 7, 3),
-            DFATransition(5, 8, 3),
-            DFATransition(5, 9, 3),
-            DFATransition(5, 10, 3),
-            DFATransition(5, 11, 3),
-            DFATransition(5, 19, 3),
-            DFATransition(5, 49, 3),
-            DFATransition(6, 5, 9),
-            DFATransition(6, 6, 10),
-            DFATransition(6, 24, 11),
-            DFATransition(6, 29, 12),
-            DFATransition(6, 30, 13),
-            DFATransition(6, 33, 14),
-            DFATransition(6, 34, 15),
-            DFATransition(6, 35, 16),
-            DFATransition(6, 36, 17),
-            DFATransition(6, 49, 18),
-            DFATransition(7, 5, 20),
-            DFATransition(7, 6, 21),
-            DFATransition(7, 7, 22),
-            DFATransition(7, 8, 23),
-            DFATransition(7, 9, 24),
-            DFATransition(7, 10, 25),
-            DFATransition(7, 11, 26),
-            DFATransition(7, 19, 27),
-            DFATransition(7, 49, 28),
-            DFATransition(8, 5, 30),
-            DFATransition(8, 6, 31),
-            DFATransition(8, 25, 32),
-            DFATransition(9, 5, 19),
-            DFATransition(9, 6, 19),
-            DFATransition(9, 24, 19),
-            DFATransition(9, 29, 19),
-            DFATransition(9, 30, 19),
-            DFATransition(9, 33, 19),
-            DFATransition(9, 34, 19),
-            DFATransition(9, 35, 19),
-            DFATransition(9, 36, 19),
-            DFATransition(9, 49, 19),
-            DFATransition(10, 5, 19),
-            DFATransition(10, 6, 19),
-            DFATransition(10, 24, 19),
-            DFATransition(10, 29, 19),
-            DFATransition(10, 30, 19),
-            DFATransition(10, 33, 19),
-            DFATransition(10, 34, 19),
-            DFATransition(10, 35, 19),
-            DFATransition(10, 36, 19),
-            DFATransition(10, 49, 19),
-            DFATransition(11, 0, 19),
-            DFATransition(11, 5, 19),
-            DFATransition(11, 6, 19),
-            DFATransition(11, 24, 19),
-            DFATransition(11, 29, 19),
-            DFATransition(11, 30, 19),
-            DFATransition(11, 33, 19),
-            DFATransition(11, 34, 19),
-            DFATransition(11, 35, 19),
-            DFATransition(11, 36, 19),
-            DFATransition(11, 37, 19),
-            DFATransition(11, 38, 19),
-            DFATransition(11, 49, 19),
-            DFATransition(12, 5, 19),
-            DFATransition(12, 6, 19),
-            DFATransition(12, 19, 19),
-            DFATransition(13, 5, 19),
-            DFATransition(13, 6, 19),
-            DFATransition(13, 23, 19),
-            DFATransition(14, 5, 19),
-            DFATransition(14, 6, 19),
-            DFATransition(14, 7, 19),
-            DFATransition(14, 8, 19),
-            DFATransition(14, 9, 19),
-            DFATransition(14, 10, 19),
-            DFATransition(14, 11, 19),
-            DFATransition(14, 19, 19),
-            DFATransition(14, 49, 19),
-            DFATransition(15, 5, 19),
-            DFATransition(15, 6, 19),
-            DFATransition(15, 23, 19),
-            DFATransition(15, 33, 19),
-            DFATransition(16, 5, 19),
-            DFATransition(16, 6, 19),
-            DFATransition(16, 49, 19),
-            DFATransition(17, 5, 19),
-            DFATransition(17, 6, 19),
-            DFATransition(17, 49, 19),
-            DFATransition(18, 5, 19),
-            DFATransition(18, 6, 19),
-            DFATransition(18, 16, 19),
-            DFATransition(18, 25, 19),
-            DFATransition(20, 5, 19),
-            DFATransition(20, 6, 19),
-            DFATransition(20, 7, 19),
-            DFATransition(20, 8, 19),
-            DFATransition(20, 9, 19),
-            DFATransition(20, 10, 19),
-            DFATransition(20, 11, 19),
-            DFATransition(20, 19, 19),
-            DFATransition(20, 49, 19),
-            DFATransition(21, 5, 19),
-            DFATransition(21, 6, 19),
-            DFATransition(21, 7, 19),
-            DFATransition(21, 8, 19),
-            DFATransition(21, 9, 19),
-            DFATransition(21, 10, 19),
-            DFATransition(21, 11, 19),
-            DFATransition(21, 19, 19),
-            DFATransition(21, 49, 19),
-            DFATransition(22, 5, 19),
-            DFATransition(22, 6, 19),
-            DFATransition(22, 12, 19),
-            DFATransition(22, 13, 19),
-            DFATransition(22, 14, 19),
-            DFATransition(22, 15, 19),
-            DFATransition(22, 23, 19),
-            DFATransition(23, 5, 19),
-            DFATransition(23, 6, 19),
-            DFATransition(23, 12, 19),
-            DFATransition(23, 13, 19),
-            DFATransition(23, 14, 19),
-            DFATransition(23, 15, 19),
-            DFATransition(23, 23, 19),
-            DFATransition(24, 5, 19),
-            DFATransition(24, 6, 19),
-            DFATransition(24, 12, 19),
-            DFATransition(24, 13, 19),
-            DFATransition(24, 14, 19),
-            DFATransition(24, 15, 19),
-            DFATransition(24, 23, 19),
-            DFATransition(25, 5, 19),
-            DFATransition(25, 6, 19),
-            DFATransition(25, 12, 19),
-            DFATransition(25, 13, 19),
-            DFATransition(25, 14, 19),
-            DFATransition(25, 15, 19),
-            DFATransition(25, 23, 19),
-            DFATransition(26, 5, 19),
-            DFATransition(26, 6, 19),
-            DFATransition(26, 12, 19),
-            DFATransition(26, 13, 19),
-            DFATransition(26, 14, 19),
-            DFATransition(26, 15, 19),
-            DFATransition(26, 23, 19),
-            DFATransition(27, 5, 19),
-            DFATransition(27, 6, 19),
-            DFATransition(27, 7, 19),
-            DFATransition(27, 8, 19),
-            DFATransition(27, 9, 19),
-            DFATransition(27, 10, 19),
-            DFATransition(27, 11, 19),
-            DFATransition(27, 19, 19),
-            DFATransition(27, 49, 19),
-            DFATransition(28, 5, 19),
-            DFATransition(28, 6, 19),
-            DFATransition(28, 12, 19),
-            DFATransition(28, 13, 19),
-            DFATransition(28, 14, 19),
-            DFATransition(28, 15, 19),
-            DFATransition(28, 21, 19),
-            DFATransition(28, 23, 19),
-            DFATransition(29, 5, 19),
-            DFATransition(29, 6, 19),
-            DFATransition(29, 33, 19),
-            DFATransition(29, 49, 19),
-            DFATransition(30, 5, 19),
-            DFATransition(30, 6, 19),
-            DFATransition(30, 25, 19),
-            DFATransition(31, 5, 19),
-            DFATransition(31, 6, 19),
-            DFATransition(31, 25, 19),
-            DFATransition(32, 5, 19),
-            DFATransition(32, 6, 19),
-            DFATransition(32, 7, 19),
-            DFATransition(32, 8, 19),
-            DFATransition(32, 9, 19),
-            DFATransition(32, 10, 19),
-            DFATransition(32, 11, 19),
-            DFATransition(32, 19, 19),
-            DFATransition(32, 49, 19),
-        ],
-        k: 3,
-    },
-    /* 67 - "IfStatementOpt" */
-    LookaheadDFA {
-        states: &[None, Some(134), Some(135)],
-        transitions: &[
-            DFATransition(0, 24, 2),
-            DFATransition(0, 33, 2),
-            DFATransition(0, 34, 1),
-            DFATransition(0, 49, 2),
-        ],
-        k: 1,
-    },
-    /* 68 - "IfToken" */
-    LookaheadDFA {
-        states: &[Some(60)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 69 - "Inout" */
-    LookaheadDFA {
-        states: &[Some(90)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 70 - "InoutToken" */
-    LookaheadDFA {
-        states: &[Some(68)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 71 - "Input" */
-    LookaheadDFA {
-        states: &[Some(88)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 72 - "InputToken" */
-    LookaheadDFA {
-        states: &[Some(66)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 73 - "IntegralNumber" */
-    LookaheadDFA {
-        states: &[None, Some(106), Some(107), Some(108), Some(109), Some(110)],
-        transitions: &[
-            DFATransition(0, 7, 1),
-            DFATransition(0, 8, 2),
-            DFATransition(0, 9, 3),
-            DFATransition(0, 10, 4),
-            DFATransition(0, 11, 5),
-        ],
-        k: 1,
-    },
-    /* 74 - "Interface" */
-    LookaheadDFA {
-        states: &[Some(87)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 75 - "InterfaceDeclaration" */
-    LookaheadDFA {
-        states: &[Some(188)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 76 - "InterfaceDeclarationList" */
-    LookaheadDFA {
-        states: &[None, Some(189), Some(190)],
-        transitions: &[
-            DFATransition(0, 24, 2),
-            DFATransition(0, 35, 1),
-            DFATransition(0, 36, 1),
-            DFATransition(0, 42, 1),
-            DFATransition(0, 49, 1),
-        ],
-        k: 1,
-    },
-    /* 77 - "InterfaceDeclarationOpt" */
-    LookaheadDFA {
-        states: &[None, Some(191), Some(192)],
-        transitions: &[DFATransition(0, 23, 2), DFATransition(0, 26, 1)],
-        k: 1,
-    },
-    /* 78 - "InterfaceItem" */
-    LookaheadDFA {
-        states: &[None, Some(193), Some(194), Some(195), Some(196)],
-        transitions: &[
-            DFATransition(0, 35, 2),
-            DFATransition(0, 36, 3),
-            DFATransition(0, 42, 4),
-            DFATransition(0, 49, 1),
-        ],
-        k: 1,
-    },
-    /* 79 - "InterfaceToken" */
-    LookaheadDFA {
-        states: &[Some(65)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 80 - "LBrace" */
-    LookaheadDFA {
-        states: &[Some(50)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 81 - "LBraceToken" */
-    LookaheadDFA {
-        states: &[Some(35)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 82 - "LBracket" */
-    LookaheadDFA {
-        states: &[Some(48)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 83 - "LBracketToken" */
-    LookaheadDFA {
-        states: &[Some(33)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 84 - "LParen" */
-    LookaheadDFA {
-        states: &[Some(46)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 85 - "LParenToken" */
-    LookaheadDFA {
-        states: &[Some(31)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 86 - "LineComment" */
-    LookaheadDFA {
-        states: &[Some(0)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 87 - "Localparam" */
-    LookaheadDFA {
-        states: &[Some(85)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 88 - "LocalparamDeclaration" */
-    LookaheadDFA {
-        states: &[Some(199)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 89 - "LocalparamToken" */
-    LookaheadDFA {
-        states: &[Some(63)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 90 - "Logic" */
-    LookaheadDFA {
-        states: &[Some(76)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 91 - "LogicToken" */
-    LookaheadDFA {
-        states: &[Some(54)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 92 - "Minus" */
-    LookaheadDFA {
-        states: &[Some(40)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 93 - "MinusToken" */
-    LookaheadDFA {
-        states: &[Some(25)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 94 - "Modport" */
-    LookaheadDFA {
-        states: &[Some(91)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 95 - "ModportDeclaration" */
-    LookaheadDFA {
-        states: &[Some(214)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 96 - "ModportItem" */
-    LookaheadDFA {
-        states: &[Some(220)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 97 - "ModportList" */
-    LookaheadDFA {
-        states: &[Some(215)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 98 - "ModportListList" */
-    LookaheadDFA {
-        states: &[
-            None,
-            None,
-            None,
-            Some(216),
-            None,
-            None,
-            None,
-            None,
-            Some(217),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        ],
-        transitions: &[
-            DFATransition(0, 18, 1),
-            DFATransition(0, 24, 6),
-            DFATransition(1, 5, 2),
-            DFATransition(1, 6, 4),
-            DFATransition(1, 24, 7),
-            DFATransition(1, 49, 5),
-            DFATransition(2, 24, 8),
-            DFATransition(2, 49, 3),
-            DFATransition(4, 24, 8),
-            DFATransition(4, 49, 3),
-            DFATransition(5, 5, 3),
-            DFATransition(5, 6, 3),
-            DFATransition(5, 16, 3),
-            DFATransition(6, 5, 9),
-            DFATransition(6, 6, 10),
-            DFATransition(6, 24, 11),
-            DFATransition(6, 35, 12),
-            DFATransition(6, 36, 13),
-            DFATransition(6, 42, 14),
-            DFATransition(6, 49, 15),
-            DFATransition(7, 5, 8),
-            DFATransition(7, 6, 8),
-            DFATransition(7, 24, 8),
-            DFATransition(7, 35, 8),
-            DFATransition(7, 36, 8),
-            DFATransition(7, 42, 8),
-            DFATransition(7, 49, 8),
-            DFATransition(9, 5, 8),
-            DFATransition(9, 6, 8),
-            DFATransition(9, 24, 8),
-            DFATransition(9, 35, 8),
-            DFATransition(9, 36, 8),
-            DFATransition(9, 42, 8),
-            DFATransition(9, 49, 8),
-            DFATransition(10, 5, 8),
-            DFATransition(10, 6, 8),
-            DFATransition(10, 24, 8),
-            DFATransition(10, 35, 8),
-            DFATransition(10, 36, 8),
-            DFATransition(10, 42, 8),
-            DFATransition(10, 49, 8),
-            DFATransition(11, 0, 8),
-            DFATransition(11, 5, 8),
-            DFATransition(11, 6, 8),
-            DFATransition(11, 37, 8),
-            DFATransition(11, 38, 8),
-            DFATransition(12, 5, 8),
-            DFATransition(12, 6, 8),
-            DFATransition(12, 49, 8),
-            DFATransition(13, 5, 8),
-            DFATransition(13, 6, 8),
-            DFATransition(13, 49, 8),
-            DFATransition(14, 5, 8),
-            DFATransition(14, 6, 8),
-            DFATransition(14, 49, 8),
-            DFATransition(15, 5, 8),
-            DFATransition(15, 6, 8),
-            DFATransition(15, 16, 8),
-        ],
-        k: 3,
-    },
-    /* 99 - "ModportListOpt" */
-    LookaheadDFA {
-        states: &[None, Some(218), Some(219)],
-        transitions: &[DFATransition(0, 18, 1), DFATransition(0, 24, 2)],
-        k: 1,
-    },
-    /* 100 - "ModportToken" */
-    LookaheadDFA {
-        states: &[Some(69)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 101 - "Module" */
+    /* 53 - "I32" */
     LookaheadDFA {
         states: &[Some(86)],
         transitions: &[],
         k: 0,
     },
-    /* 102 - "ModuleDeclaration" */
-    LookaheadDFA {
-        states: &[Some(164)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 103 - "ModuleDeclarationList" */
-    LookaheadDFA {
-        states: &[None, Some(165), Some(166)],
-        transitions: &[
-            DFATransition(0, 24, 2),
-            DFATransition(0, 29, 1),
-            DFATransition(0, 30, 1),
-            DFATransition(0, 35, 1),
-            DFATransition(0, 36, 1),
-            DFATransition(0, 49, 1),
-        ],
-        k: 1,
-    },
-    /* 104 - "ModuleDeclarationOpt" */
-    LookaheadDFA {
-        states: &[None, Some(169), Some(170)],
-        transitions: &[
-            DFATransition(0, 19, 2),
-            DFATransition(0, 23, 2),
-            DFATransition(0, 26, 1),
-        ],
-        k: 1,
-    },
-    /* 105 - "ModuleDeclarationOpt0" */
-    LookaheadDFA {
-        states: &[None, Some(167), Some(168)],
-        transitions: &[DFATransition(0, 19, 1), DFATransition(0, 23, 2)],
-        k: 1,
-    },
-    /* 106 - "ModuleItem" */
-    LookaheadDFA {
-        states: &[None, Some(183), Some(184), Some(185), Some(186), Some(187)],
-        transitions: &[
-            DFATransition(0, 29, 4),
-            DFATransition(0, 30, 5),
-            DFATransition(0, 35, 2),
-            DFATransition(0, 36, 3),
-            DFATransition(0, 49, 1),
-        ],
-        k: 1,
-    },
-    /* 107 - "ModulePort" */
-    LookaheadDFA {
-        states: &[Some(171)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 108 - "ModulePortItem" */
-    LookaheadDFA {
-        states: &[Some(179)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 109 - "ModulePortList" */
-    LookaheadDFA {
-        states: &[Some(174)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 110 - "ModulePortListList" */
-    LookaheadDFA {
-        states: &[
-            None,
-            None,
-            None,
-            Some(175),
-            None,
-            None,
-            None,
-            None,
-            Some(176),
-            None,
-            None,
-            None,
-        ],
-        transitions: &[
-            DFATransition(0, 18, 1),
-            DFATransition(0, 20, 6),
-            DFATransition(1, 5, 2),
-            DFATransition(1, 6, 4),
-            DFATransition(1, 20, 7),
-            DFATransition(1, 49, 5),
-            DFATransition(2, 20, 8),
-            DFATransition(2, 49, 3),
-            DFATransition(4, 20, 8),
-            DFATransition(4, 49, 3),
-            DFATransition(5, 5, 3),
-            DFATransition(5, 6, 3),
-            DFATransition(5, 16, 3),
-            DFATransition(6, 5, 9),
-            DFATransition(6, 6, 10),
-            DFATransition(6, 23, 11),
-            DFATransition(7, 5, 8),
-            DFATransition(7, 6, 8),
-            DFATransition(7, 23, 8),
-            DFATransition(9, 5, 8),
-            DFATransition(9, 6, 8),
-            DFATransition(9, 23, 8),
-            DFATransition(10, 5, 8),
-            DFATransition(10, 6, 8),
-            DFATransition(10, 23, 8),
-            DFATransition(11, 5, 8),
-            DFATransition(11, 6, 8),
-            DFATransition(11, 24, 8),
-            DFATransition(11, 29, 8),
-            DFATransition(11, 30, 8),
-            DFATransition(11, 35, 8),
-            DFATransition(11, 36, 8),
-            DFATransition(11, 49, 8),
-        ],
-        k: 3,
-    },
-    /* 111 - "ModulePortListOpt" */
-    LookaheadDFA {
-        states: &[None, Some(177), Some(178)],
-        transitions: &[DFATransition(0, 18, 1), DFATransition(0, 20, 2)],
-        k: 1,
-    },
-    /* 112 - "ModulePortOpt" */
-    LookaheadDFA {
-        states: &[None, Some(172), Some(173)],
-        transitions: &[DFATransition(0, 20, 2), DFATransition(0, 49, 1)],
-        k: 1,
-    },
-    /* 113 - "ModuleToken" */
+    /* 54 - "I32Token" */
     LookaheadDFA {
         states: &[Some(64)],
         transitions: &[],
         k: 0,
     },
-    /* 114 - "Negedge" */
+    /* 55 - "I64" */
     LookaheadDFA {
-        states: &[Some(81)],
+        states: &[Some(87)],
         transitions: &[],
         k: 0,
     },
-    /* 115 - "NegedgeToken" */
+    /* 56 - "I64Token" */
     LookaheadDFA {
-        states: &[Some(59)],
+        states: &[Some(65)],
         transitions: &[],
         k: 0,
     },
-    /* 116 - "Number" */
+    /* 57 - "Identifier" */
     LookaheadDFA {
-        states: &[Some(105)],
+        states: &[Some(91)],
         transitions: &[],
         k: 0,
     },
-    /* 117 - "OperatorPrecedence1" */
+    /* 58 - "IdentifierToken" */
     LookaheadDFA {
-        states: &[None, Some(111), Some(112)],
-        transitions: &[DFATransition(0, 12, 1), DFATransition(0, 13, 2)],
-        k: 1,
-    },
-    /* 118 - "OperatorPrecedence2" */
-    LookaheadDFA {
-        states: &[None, Some(113), Some(114)],
-        transitions: &[DFATransition(0, 14, 1), DFATransition(0, 15, 2)],
-        k: 1,
-    },
-    /* 119 - "Output" */
-    LookaheadDFA {
-        states: &[Some(89)],
+        states: &[Some(90)],
         transitions: &[],
         k: 0,
     },
-    /* 120 - "OutputToken" */
+    /* 59 - "If" */
     LookaheadDFA {
-        states: &[Some(67)],
+        states: &[Some(74)],
         transitions: &[],
         k: 0,
     },
-    /* 121 - "Parameter" */
+    /* 60 - "IfStatement" */
     LookaheadDFA {
-        states: &[Some(84)],
+        states: &[Some(123)],
         transitions: &[],
         k: 0,
     },
-    /* 122 - "ParameterDeclaration" */
-    LookaheadDFA {
-        states: &[Some(198)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 123 - "ParameterToken" */
-    LookaheadDFA {
-        states: &[Some(62)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 124 - "Plus" */
-    LookaheadDFA {
-        states: &[Some(39)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 125 - "PlusToken" */
-    LookaheadDFA {
-        states: &[Some(24)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 126 - "Posedge" */
-    LookaheadDFA {
-        states: &[Some(80)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 127 - "PosedgeToken" */
-    LookaheadDFA {
-        states: &[Some(58)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 128 - "RBrace" */
-    LookaheadDFA {
-        states: &[Some(51)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 129 - "RBraceToken" */
-    LookaheadDFA {
-        states: &[Some(36)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 130 - "RBracket" */
-    LookaheadDFA {
-        states: &[Some(49)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 131 - "RBracketToken" */
-    LookaheadDFA {
-        states: &[Some(34)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 132 - "RParen" */
-    LookaheadDFA {
-        states: &[Some(47)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 133 - "RParenToken" */
-    LookaheadDFA {
-        states: &[Some(32)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 134 - "Range" */
-    LookaheadDFA {
-        states: &[Some(136)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 135 - "RangeOpt" */
-    LookaheadDFA {
-        states: &[None, Some(137), Some(138)],
-        transitions: &[DFATransition(0, 16, 1), DFATransition(0, 22, 2)],
-        k: 1,
-    },
-    /* 136 - "Semicolon" */
-    LookaheadDFA {
-        states: &[Some(44)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 137 - "SemicolonToken" */
-    LookaheadDFA {
-        states: &[Some(29)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 138 - "Slash" */
-    LookaheadDFA {
-        states: &[Some(42)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 139 - "SlashToken" */
-    LookaheadDFA {
-        states: &[Some(27)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 140 - "Star" */
-    LookaheadDFA {
-        states: &[Some(41)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 141 - "StarToken" */
-    LookaheadDFA {
-        states: &[Some(26)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 142 - "Start" */
-    LookaheadDFA {
-        states: &[Some(13)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 143 - "StartToken" */
-    LookaheadDFA {
-        states: &[Some(12)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 144 - "Statement" */
-    LookaheadDFA {
-        states: &[None, Some(128), Some(129)],
-        transitions: &[DFATransition(0, 33, 2), DFATransition(0, 49, 1)],
-        k: 1,
-    },
-    /* 145 - "Type" */
-    LookaheadDFA {
-        states: &[Some(148)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 146 - "TypeGroup" */
-    LookaheadDFA {
-        states: &[None, Some(149), Some(150)],
-        transitions: &[
-            DFATransition(0, 27, 1),
-            DFATransition(0, 28, 1),
-            DFATransition(0, 43, 1),
-            DFATransition(0, 44, 1),
-            DFATransition(0, 45, 1),
-            DFATransition(0, 46, 1),
-            DFATransition(0, 47, 1),
-            DFATransition(0, 48, 1),
-            DFATransition(0, 49, 2),
-        ],
-        k: 1,
-    },
-    /* 147 - "TypeList" */
-    LookaheadDFA {
-        states: &[None, Some(151), Some(152)],
-        transitions: &[
-            DFATransition(0, 17, 2),
-            DFATransition(0, 18, 2),
-            DFATransition(0, 20, 2),
-            DFATransition(0, 21, 1),
-            DFATransition(0, 25, 2),
-        ],
-        k: 1,
-    },
-    /* 148 - "U32" */
-    LookaheadDFA {
-        states: &[Some(92)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 149 - "U32Token" */
-    LookaheadDFA {
-        states: &[Some(70)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 150 - "U64" */
-    LookaheadDFA {
-        states: &[Some(93)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 151 - "U64Token" */
-    LookaheadDFA {
-        states: &[Some(71)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 152 - "VariableDeclaration" */
-    LookaheadDFA {
-        states: &[Some(197)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 153 - "Veryl" */
-    LookaheadDFA {
-        states: &[Some(100)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 154 - "VerylList" */
-    LookaheadDFA {
-        states: &[None, Some(101), Some(102)],
-        transitions: &[
-            DFATransition(0, 0, 2),
-            DFATransition(0, 37, 1),
-            DFATransition(0, 38, 1),
-        ],
-        k: 1,
-    },
-    /* 155 - "Width" */
-    LookaheadDFA {
-        states: &[Some(139)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 156 - "WithParameter" */
-    LookaheadDFA {
-        states: &[Some(153)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 157 - "WithParameterItem" */
-    LookaheadDFA {
-        states: &[Some(161)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 158 - "WithParameterItemGroup" */
-    LookaheadDFA {
-        states: &[None, Some(162), Some(163)],
-        transitions: &[DFATransition(0, 35, 1), DFATransition(0, 36, 2)],
-        k: 1,
-    },
-    /* 159 - "WithParameterList" */
-    LookaheadDFA {
-        states: &[Some(156)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 160 - "WithParameterListList" */
+    /* 61 - "IfStatementList" */
     LookaheadDFA {
         states: &[
             None,
             None,
             None,
-            Some(157),
+            Some(124),
             None,
             None,
             None,
             None,
             None,
-            Some(158),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(125),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
             None,
             None,
             None,
             None,
         ],
         transitions: &[
-            DFATransition(0, 18, 1),
-            DFATransition(0, 20, 7),
+            DFATransition(0, 23, 5),
+            DFATransition(0, 32, 6),
+            DFATransition(0, 33, 1),
+            DFATransition(0, 48, 7),
             DFATransition(1, 5, 2),
-            DFATransition(1, 6, 4),
-            DFATransition(1, 20, 8),
-            DFATransition(1, 35, 5),
-            DFATransition(1, 36, 6),
-            DFATransition(2, 20, 9),
-            DFATransition(2, 35, 3),
-            DFATransition(2, 36, 3),
-            DFATransition(4, 20, 9),
-            DFATransition(4, 35, 3),
-            DFATransition(4, 36, 3),
-            DFATransition(5, 5, 3),
-            DFATransition(5, 6, 3),
-            DFATransition(5, 49, 3),
-            DFATransition(6, 5, 3),
-            DFATransition(6, 6, 3),
-            DFATransition(6, 49, 3),
-            DFATransition(7, 5, 10),
-            DFATransition(7, 6, 11),
-            DFATransition(7, 19, 12),
-            DFATransition(7, 23, 13),
-            DFATransition(8, 5, 9),
-            DFATransition(8, 6, 9),
-            DFATransition(8, 19, 9),
-            DFATransition(8, 23, 9),
-            DFATransition(10, 5, 9),
-            DFATransition(10, 6, 9),
-            DFATransition(10, 19, 9),
-            DFATransition(10, 23, 9),
-            DFATransition(11, 5, 9),
-            DFATransition(11, 6, 9),
-            DFATransition(11, 19, 9),
-            DFATransition(11, 23, 9),
-            DFATransition(12, 5, 9),
-            DFATransition(12, 6, 9),
-            DFATransition(12, 20, 9),
-            DFATransition(12, 49, 9),
-            DFATransition(13, 5, 9),
-            DFATransition(13, 6, 9),
-            DFATransition(13, 24, 9),
-            DFATransition(13, 29, 9),
-            DFATransition(13, 30, 9),
-            DFATransition(13, 35, 9),
-            DFATransition(13, 36, 9),
-            DFATransition(13, 42, 9),
-            DFATransition(13, 49, 9),
+            DFATransition(1, 22, 26),
+            DFATransition(1, 32, 4),
+            DFATransition(2, 22, 17),
+            DFATransition(2, 32, 3),
+            DFATransition(4, 5, 3),
+            DFATransition(4, 6, 3),
+            DFATransition(4, 7, 3),
+            DFATransition(4, 8, 3),
+            DFATransition(4, 9, 3),
+            DFATransition(4, 10, 3),
+            DFATransition(4, 18, 3),
+            DFATransition(4, 48, 3),
+            DFATransition(5, 5, 8),
+            DFATransition(5, 23, 9),
+            DFATransition(5, 28, 10),
+            DFATransition(5, 29, 11),
+            DFATransition(5, 32, 12),
+            DFATransition(5, 33, 13),
+            DFATransition(5, 34, 14),
+            DFATransition(5, 35, 15),
+            DFATransition(5, 48, 16),
+            DFATransition(6, 5, 18),
+            DFATransition(6, 6, 19),
+            DFATransition(6, 7, 20),
+            DFATransition(6, 8, 21),
+            DFATransition(6, 9, 22),
+            DFATransition(6, 10, 23),
+            DFATransition(6, 18, 24),
+            DFATransition(6, 48, 25),
+            DFATransition(7, 5, 27),
+            DFATransition(7, 24, 28),
+            DFATransition(8, 23, 17),
+            DFATransition(8, 28, 17),
+            DFATransition(8, 29, 17),
+            DFATransition(8, 32, 17),
+            DFATransition(8, 33, 17),
+            DFATransition(8, 34, 17),
+            DFATransition(8, 35, 17),
+            DFATransition(8, 48, 17),
+            DFATransition(9, 0, 17),
+            DFATransition(9, 5, 17),
+            DFATransition(9, 23, 17),
+            DFATransition(9, 28, 17),
+            DFATransition(9, 29, 17),
+            DFATransition(9, 32, 17),
+            DFATransition(9, 33, 17),
+            DFATransition(9, 34, 17),
+            DFATransition(9, 35, 17),
+            DFATransition(9, 36, 17),
+            DFATransition(9, 37, 17),
+            DFATransition(9, 48, 17),
+            DFATransition(10, 5, 17),
+            DFATransition(10, 18, 17),
+            DFATransition(11, 5, 17),
+            DFATransition(11, 22, 17),
+            DFATransition(12, 5, 17),
+            DFATransition(12, 6, 17),
+            DFATransition(12, 7, 17),
+            DFATransition(12, 8, 17),
+            DFATransition(12, 9, 17),
+            DFATransition(12, 10, 17),
+            DFATransition(12, 18, 17),
+            DFATransition(12, 48, 17),
+            DFATransition(13, 5, 17),
+            DFATransition(13, 22, 17),
+            DFATransition(13, 32, 17),
+            DFATransition(14, 5, 17),
+            DFATransition(14, 48, 17),
+            DFATransition(15, 5, 17),
+            DFATransition(15, 48, 17),
+            DFATransition(16, 5, 17),
+            DFATransition(16, 15, 17),
+            DFATransition(16, 24, 17),
+            DFATransition(18, 6, 17),
+            DFATransition(18, 7, 17),
+            DFATransition(18, 8, 17),
+            DFATransition(18, 9, 17),
+            DFATransition(18, 10, 17),
+            DFATransition(18, 18, 17),
+            DFATransition(18, 48, 17),
+            DFATransition(19, 5, 17),
+            DFATransition(19, 11, 17),
+            DFATransition(19, 12, 17),
+            DFATransition(19, 13, 17),
+            DFATransition(19, 14, 17),
+            DFATransition(19, 22, 17),
+            DFATransition(20, 5, 17),
+            DFATransition(20, 11, 17),
+            DFATransition(20, 12, 17),
+            DFATransition(20, 13, 17),
+            DFATransition(20, 14, 17),
+            DFATransition(20, 22, 17),
+            DFATransition(21, 5, 17),
+            DFATransition(21, 11, 17),
+            DFATransition(21, 12, 17),
+            DFATransition(21, 13, 17),
+            DFATransition(21, 14, 17),
+            DFATransition(21, 22, 17),
+            DFATransition(22, 5, 17),
+            DFATransition(22, 11, 17),
+            DFATransition(22, 12, 17),
+            DFATransition(22, 13, 17),
+            DFATransition(22, 14, 17),
+            DFATransition(22, 22, 17),
+            DFATransition(23, 5, 17),
+            DFATransition(23, 11, 17),
+            DFATransition(23, 12, 17),
+            DFATransition(23, 13, 17),
+            DFATransition(23, 14, 17),
+            DFATransition(23, 22, 17),
+            DFATransition(24, 5, 17),
+            DFATransition(24, 6, 17),
+            DFATransition(24, 7, 17),
+            DFATransition(24, 8, 17),
+            DFATransition(24, 9, 17),
+            DFATransition(24, 10, 17),
+            DFATransition(24, 18, 17),
+            DFATransition(24, 48, 17),
+            DFATransition(25, 5, 17),
+            DFATransition(25, 11, 17),
+            DFATransition(25, 12, 17),
+            DFATransition(25, 13, 17),
+            DFATransition(25, 14, 17),
+            DFATransition(25, 20, 17),
+            DFATransition(25, 22, 17),
+            DFATransition(26, 5, 17),
+            DFATransition(26, 32, 17),
+            DFATransition(26, 48, 17),
+            DFATransition(27, 24, 17),
+            DFATransition(28, 5, 17),
+            DFATransition(28, 6, 17),
+            DFATransition(28, 7, 17),
+            DFATransition(28, 8, 17),
+            DFATransition(28, 9, 17),
+            DFATransition(28, 10, 17),
+            DFATransition(28, 18, 17),
+            DFATransition(28, 48, 17),
         ],
         k: 3,
     },
-    /* 161 - "WithParameterListOpt" */
+    /* 62 - "IfStatementOpt" */
     LookaheadDFA {
-        states: &[None, Some(159), Some(160)],
-        transitions: &[DFATransition(0, 18, 1), DFATransition(0, 20, 2)],
+        states: &[None, Some(126), Some(127)],
+        transitions: &[
+            DFATransition(0, 23, 2),
+            DFATransition(0, 32, 2),
+            DFATransition(0, 33, 1),
+            DFATransition(0, 48, 2),
+        ],
         k: 1,
     },
-    /* 162 - "WithParameterOpt" */
+    /* 63 - "IfToken" */
+    LookaheadDFA {
+        states: &[Some(52)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 64 - "Inout" */
+    LookaheadDFA {
+        states: &[Some(82)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 65 - "InoutToken" */
+    LookaheadDFA {
+        states: &[Some(60)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 66 - "Input" */
+    LookaheadDFA {
+        states: &[Some(80)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 67 - "InputToken" */
+    LookaheadDFA {
+        states: &[Some(58)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 68 - "IntegralNumber" */
+    LookaheadDFA {
+        states: &[None, Some(98), Some(99), Some(100), Some(101), Some(102)],
+        transitions: &[
+            DFATransition(0, 6, 1),
+            DFATransition(0, 7, 2),
+            DFATransition(0, 8, 3),
+            DFATransition(0, 9, 4),
+            DFATransition(0, 10, 5),
+        ],
+        k: 1,
+    },
+    /* 69 - "Interface" */
+    LookaheadDFA {
+        states: &[Some(79)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 70 - "InterfaceDeclaration" */
+    LookaheadDFA {
+        states: &[Some(180)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 71 - "InterfaceDeclarationList" */
+    LookaheadDFA {
+        states: &[None, Some(181), Some(182)],
+        transitions: &[
+            DFATransition(0, 23, 2),
+            DFATransition(0, 34, 1),
+            DFATransition(0, 35, 1),
+            DFATransition(0, 41, 1),
+            DFATransition(0, 48, 1),
+        ],
+        k: 1,
+    },
+    /* 72 - "InterfaceDeclarationOpt" */
+    LookaheadDFA {
+        states: &[None, Some(183), Some(184)],
+        transitions: &[DFATransition(0, 22, 2), DFATransition(0, 25, 1)],
+        k: 1,
+    },
+    /* 73 - "InterfaceItem" */
+    LookaheadDFA {
+        states: &[None, Some(185), Some(186), Some(187), Some(188)],
+        transitions: &[
+            DFATransition(0, 34, 2),
+            DFATransition(0, 35, 3),
+            DFATransition(0, 41, 4),
+            DFATransition(0, 48, 1),
+        ],
+        k: 1,
+    },
+    /* 74 - "InterfaceToken" */
+    LookaheadDFA {
+        states: &[Some(57)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 75 - "LBrace" */
+    LookaheadDFA {
+        states: &[Some(42)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 76 - "LBraceToken" */
+    LookaheadDFA {
+        states: &[Some(27)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 77 - "LBracket" */
+    LookaheadDFA {
+        states: &[Some(40)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 78 - "LBracketToken" */
+    LookaheadDFA {
+        states: &[Some(25)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 79 - "LParen" */
+    LookaheadDFA {
+        states: &[Some(38)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 80 - "LParenToken" */
+    LookaheadDFA {
+        states: &[Some(23)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 81 - "Localparam" */
+    LookaheadDFA {
+        states: &[Some(77)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 82 - "LocalparamDeclaration" */
+    LookaheadDFA {
+        states: &[Some(191)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 83 - "LocalparamToken" */
+    LookaheadDFA {
+        states: &[Some(55)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 84 - "Logic" */
+    LookaheadDFA {
+        states: &[Some(68)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 85 - "LogicToken" */
+    LookaheadDFA {
+        states: &[Some(46)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 86 - "Minus" */
+    LookaheadDFA {
+        states: &[Some(32)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 87 - "MinusToken" */
+    LookaheadDFA {
+        states: &[Some(17)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 88 - "Modport" */
+    LookaheadDFA {
+        states: &[Some(83)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 89 - "ModportDeclaration" */
+    LookaheadDFA {
+        states: &[Some(206)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 90 - "ModportItem" */
+    LookaheadDFA {
+        states: &[Some(212)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 91 - "ModportList" */
+    LookaheadDFA {
+        states: &[Some(207)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 92 - "ModportListList" */
+    LookaheadDFA {
+        states: &[
+            None,
+            None,
+            None,
+            Some(208),
+            None,
+            None,
+            None,
+            Some(209),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ],
+        transitions: &[
+            DFATransition(0, 17, 1),
+            DFATransition(0, 23, 5),
+            DFATransition(1, 5, 2),
+            DFATransition(1, 23, 6),
+            DFATransition(1, 48, 4),
+            DFATransition(2, 23, 7),
+            DFATransition(2, 48, 3),
+            DFATransition(4, 5, 3),
+            DFATransition(4, 15, 3),
+            DFATransition(5, 5, 8),
+            DFATransition(5, 23, 9),
+            DFATransition(5, 34, 10),
+            DFATransition(5, 35, 11),
+            DFATransition(5, 41, 12),
+            DFATransition(5, 48, 13),
+            DFATransition(6, 5, 7),
+            DFATransition(6, 23, 7),
+            DFATransition(6, 34, 7),
+            DFATransition(6, 35, 7),
+            DFATransition(6, 41, 7),
+            DFATransition(6, 48, 7),
+            DFATransition(8, 23, 7),
+            DFATransition(8, 34, 7),
+            DFATransition(8, 35, 7),
+            DFATransition(8, 41, 7),
+            DFATransition(8, 48, 7),
+            DFATransition(9, 0, 7),
+            DFATransition(9, 5, 7),
+            DFATransition(9, 36, 7),
+            DFATransition(9, 37, 7),
+            DFATransition(10, 5, 7),
+            DFATransition(10, 48, 7),
+            DFATransition(11, 5, 7),
+            DFATransition(11, 48, 7),
+            DFATransition(12, 5, 7),
+            DFATransition(12, 48, 7),
+            DFATransition(13, 5, 7),
+            DFATransition(13, 15, 7),
+        ],
+        k: 3,
+    },
+    /* 93 - "ModportListOpt" */
+    LookaheadDFA {
+        states: &[None, Some(210), Some(211)],
+        transitions: &[DFATransition(0, 17, 1), DFATransition(0, 23, 2)],
+        k: 1,
+    },
+    /* 94 - "ModportToken" */
+    LookaheadDFA {
+        states: &[Some(61)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 95 - "Module" */
+    LookaheadDFA {
+        states: &[Some(78)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 96 - "ModuleDeclaration" */
+    LookaheadDFA {
+        states: &[Some(156)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 97 - "ModuleDeclarationList" */
+    LookaheadDFA {
+        states: &[None, Some(157), Some(158)],
+        transitions: &[
+            DFATransition(0, 23, 2),
+            DFATransition(0, 28, 1),
+            DFATransition(0, 29, 1),
+            DFATransition(0, 34, 1),
+            DFATransition(0, 35, 1),
+            DFATransition(0, 48, 1),
+        ],
+        k: 1,
+    },
+    /* 98 - "ModuleDeclarationOpt" */
+    LookaheadDFA {
+        states: &[None, Some(161), Some(162)],
+        transitions: &[
+            DFATransition(0, 18, 2),
+            DFATransition(0, 22, 2),
+            DFATransition(0, 25, 1),
+        ],
+        k: 1,
+    },
+    /* 99 - "ModuleDeclarationOpt0" */
+    LookaheadDFA {
+        states: &[None, Some(159), Some(160)],
+        transitions: &[DFATransition(0, 18, 1), DFATransition(0, 22, 2)],
+        k: 1,
+    },
+    /* 100 - "ModuleItem" */
+    LookaheadDFA {
+        states: &[None, Some(175), Some(176), Some(177), Some(178), Some(179)],
+        transitions: &[
+            DFATransition(0, 28, 4),
+            DFATransition(0, 29, 5),
+            DFATransition(0, 34, 2),
+            DFATransition(0, 35, 3),
+            DFATransition(0, 48, 1),
+        ],
+        k: 1,
+    },
+    /* 101 - "ModulePort" */
+    LookaheadDFA {
+        states: &[Some(163)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 102 - "ModulePortItem" */
+    LookaheadDFA {
+        states: &[Some(171)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 103 - "ModulePortList" */
+    LookaheadDFA {
+        states: &[Some(166)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 104 - "ModulePortListList" */
+    LookaheadDFA {
+        states: &[
+            None,
+            None,
+            None,
+            Some(167),
+            None,
+            None,
+            None,
+            Some(168),
+            None,
+            None,
+        ],
+        transitions: &[
+            DFATransition(0, 17, 1),
+            DFATransition(0, 19, 5),
+            DFATransition(1, 5, 2),
+            DFATransition(1, 19, 6),
+            DFATransition(1, 48, 4),
+            DFATransition(2, 19, 7),
+            DFATransition(2, 48, 3),
+            DFATransition(4, 5, 3),
+            DFATransition(4, 15, 3),
+            DFATransition(5, 5, 8),
+            DFATransition(5, 22, 9),
+            DFATransition(6, 5, 7),
+            DFATransition(6, 22, 7),
+            DFATransition(8, 22, 7),
+            DFATransition(9, 5, 7),
+            DFATransition(9, 23, 7),
+            DFATransition(9, 28, 7),
+            DFATransition(9, 29, 7),
+            DFATransition(9, 34, 7),
+            DFATransition(9, 35, 7),
+            DFATransition(9, 48, 7),
+        ],
+        k: 3,
+    },
+    /* 105 - "ModulePortListOpt" */
+    LookaheadDFA {
+        states: &[None, Some(169), Some(170)],
+        transitions: &[DFATransition(0, 17, 1), DFATransition(0, 19, 2)],
+        k: 1,
+    },
+    /* 106 - "ModulePortOpt" */
+    LookaheadDFA {
+        states: &[None, Some(164), Some(165)],
+        transitions: &[DFATransition(0, 19, 2), DFATransition(0, 48, 1)],
+        k: 1,
+    },
+    /* 107 - "ModuleToken" */
+    LookaheadDFA {
+        states: &[Some(56)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 108 - "MultiComment" */
+    LookaheadDFA {
+        states: &[Some(0)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 109 - "Negedge" */
+    LookaheadDFA {
+        states: &[Some(73)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 110 - "NegedgeToken" */
+    LookaheadDFA {
+        states: &[Some(51)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 111 - "Number" */
+    LookaheadDFA {
+        states: &[Some(97)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 112 - "OperatorPrecedence1" */
+    LookaheadDFA {
+        states: &[None, Some(103), Some(104)],
+        transitions: &[DFATransition(0, 11, 1), DFATransition(0, 12, 2)],
+        k: 1,
+    },
+    /* 113 - "OperatorPrecedence2" */
+    LookaheadDFA {
+        states: &[None, Some(105), Some(106)],
+        transitions: &[DFATransition(0, 13, 1), DFATransition(0, 14, 2)],
+        k: 1,
+    },
+    /* 114 - "Output" */
+    LookaheadDFA {
+        states: &[Some(81)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 115 - "OutputToken" */
+    LookaheadDFA {
+        states: &[Some(59)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 116 - "Parameter" */
+    LookaheadDFA {
+        states: &[Some(76)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 117 - "ParameterDeclaration" */
+    LookaheadDFA {
+        states: &[Some(190)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 118 - "ParameterToken" */
+    LookaheadDFA {
+        states: &[Some(54)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 119 - "Plus" */
+    LookaheadDFA {
+        states: &[Some(31)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 120 - "PlusToken" */
+    LookaheadDFA {
+        states: &[Some(16)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 121 - "Posedge" */
+    LookaheadDFA {
+        states: &[Some(72)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 122 - "PosedgeToken" */
+    LookaheadDFA {
+        states: &[Some(50)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 123 - "RBrace" */
+    LookaheadDFA {
+        states: &[Some(43)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 124 - "RBraceToken" */
+    LookaheadDFA {
+        states: &[Some(28)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 125 - "RBracket" */
+    LookaheadDFA {
+        states: &[Some(41)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 126 - "RBracketToken" */
+    LookaheadDFA {
+        states: &[Some(26)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 127 - "RParen" */
+    LookaheadDFA {
+        states: &[Some(39)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 128 - "RParenToken" */
+    LookaheadDFA {
+        states: &[Some(24)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 129 - "Range" */
+    LookaheadDFA {
+        states: &[Some(128)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 130 - "RangeOpt" */
+    LookaheadDFA {
+        states: &[None, Some(129), Some(130)],
+        transitions: &[DFATransition(0, 15, 1), DFATransition(0, 21, 2)],
+        k: 1,
+    },
+    /* 131 - "Semicolon" */
+    LookaheadDFA {
+        states: &[Some(36)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 132 - "SemicolonToken" */
+    LookaheadDFA {
+        states: &[Some(21)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 133 - "Slash" */
+    LookaheadDFA {
+        states: &[Some(34)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 134 - "SlashToken" */
+    LookaheadDFA {
+        states: &[Some(19)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 135 - "Star" */
+    LookaheadDFA {
+        states: &[Some(33)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 136 - "StarToken" */
+    LookaheadDFA {
+        states: &[Some(18)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 137 - "Start" */
+    LookaheadDFA {
+        states: &[Some(5)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 138 - "StartToken" */
+    LookaheadDFA {
+        states: &[Some(4)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 139 - "Statement" */
+    LookaheadDFA {
+        states: &[None, Some(120), Some(121)],
+        transitions: &[DFATransition(0, 32, 2), DFATransition(0, 48, 1)],
+        k: 1,
+    },
+    /* 140 - "Type" */
+    LookaheadDFA {
+        states: &[Some(140)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 141 - "TypeGroup" */
+    LookaheadDFA {
+        states: &[None, Some(141), Some(142)],
+        transitions: &[
+            DFATransition(0, 26, 1),
+            DFATransition(0, 27, 1),
+            DFATransition(0, 42, 1),
+            DFATransition(0, 43, 1),
+            DFATransition(0, 44, 1),
+            DFATransition(0, 45, 1),
+            DFATransition(0, 46, 1),
+            DFATransition(0, 47, 1),
+            DFATransition(0, 48, 2),
+        ],
+        k: 1,
+    },
+    /* 142 - "TypeList" */
+    LookaheadDFA {
+        states: &[None, Some(143), Some(144)],
+        transitions: &[
+            DFATransition(0, 16, 2),
+            DFATransition(0, 17, 2),
+            DFATransition(0, 19, 2),
+            DFATransition(0, 20, 1),
+            DFATransition(0, 24, 2),
+        ],
+        k: 1,
+    },
+    /* 143 - "U32" */
+    LookaheadDFA {
+        states: &[Some(84)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 144 - "U32Token" */
+    LookaheadDFA {
+        states: &[Some(62)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 145 - "U64" */
+    LookaheadDFA {
+        states: &[Some(85)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 146 - "U64Token" */
+    LookaheadDFA {
+        states: &[Some(63)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 147 - "VariableDeclaration" */
+    LookaheadDFA {
+        states: &[Some(189)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 148 - "Veryl" */
+    LookaheadDFA {
+        states: &[Some(92)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 149 - "VerylList" */
+    LookaheadDFA {
+        states: &[None, Some(93), Some(94)],
+        transitions: &[
+            DFATransition(0, 0, 2),
+            DFATransition(0, 36, 1),
+            DFATransition(0, 37, 1),
+        ],
+        k: 1,
+    },
+    /* 150 - "Width" */
+    LookaheadDFA {
+        states: &[Some(131)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 151 - "WithParameter" */
+    LookaheadDFA {
+        states: &[Some(145)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 152 - "WithParameterItem" */
+    LookaheadDFA {
+        states: &[Some(153)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 153 - "WithParameterItemGroup" */
     LookaheadDFA {
         states: &[None, Some(154), Some(155)],
+        transitions: &[DFATransition(0, 34, 1), DFATransition(0, 35, 2)],
+        k: 1,
+    },
+    /* 154 - "WithParameterList" */
+    LookaheadDFA {
+        states: &[Some(148)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 155 - "WithParameterListList" */
+    LookaheadDFA {
+        states: &[
+            None,
+            None,
+            None,
+            Some(149),
+            None,
+            None,
+            None,
+            None,
+            Some(150),
+            None,
+            None,
+            None,
+        ],
         transitions: &[
-            DFATransition(0, 20, 2),
+            DFATransition(0, 17, 1),
+            DFATransition(0, 19, 6),
+            DFATransition(1, 5, 2),
+            DFATransition(1, 19, 7),
+            DFATransition(1, 34, 4),
+            DFATransition(1, 35, 5),
+            DFATransition(2, 19, 8),
+            DFATransition(2, 34, 3),
+            DFATransition(2, 35, 3),
+            DFATransition(4, 5, 3),
+            DFATransition(4, 48, 3),
+            DFATransition(5, 5, 3),
+            DFATransition(5, 48, 3),
+            DFATransition(6, 5, 9),
+            DFATransition(6, 18, 10),
+            DFATransition(6, 22, 11),
+            DFATransition(7, 5, 8),
+            DFATransition(7, 18, 8),
+            DFATransition(7, 22, 8),
+            DFATransition(9, 18, 8),
+            DFATransition(9, 22, 8),
+            DFATransition(10, 5, 8),
+            DFATransition(10, 19, 8),
+            DFATransition(10, 48, 8),
+            DFATransition(11, 5, 8),
+            DFATransition(11, 23, 8),
+            DFATransition(11, 28, 8),
+            DFATransition(11, 29, 8),
+            DFATransition(11, 34, 8),
+            DFATransition(11, 35, 8),
+            DFATransition(11, 41, 8),
+            DFATransition(11, 48, 8),
+        ],
+        k: 3,
+    },
+    /* 156 - "WithParameterListOpt" */
+    LookaheadDFA {
+        states: &[None, Some(151), Some(152)],
+        transitions: &[DFATransition(0, 17, 1), DFATransition(0, 19, 2)],
+        k: 1,
+    },
+    /* 157 - "WithParameterOpt" */
+    LookaheadDFA {
+        states: &[None, Some(146), Some(147)],
+        transitions: &[
+            DFATransition(0, 19, 2),
+            DFATransition(0, 34, 1),
             DFATransition(0, 35, 1),
-            DFATransition(0, 36, 1),
         ],
         k: 1,
     },
 ];
 
-pub const PRODUCTIONS: &[Production; 221] = &[
-    // 0 - LineComment: "//.*(:?\r\n|\r|\n|$)";
+pub const PRODUCTIONS: &[Production; 213] = &[
+    // 0 - MultiComment: "(((//.*(?:\r\n|\r|\n|$))|((?ms)/\u{2a}.*?\u{2a}/))\s*)+";
     Production {
-        lhs: 86,
+        lhs: 108,
         production: &[ParseType::T(5)],
     },
-    // 1 - BlockComment: "(?ms)/\u{2a}.*?\u{2a}/";
+    // 1 - Comments: CommentsOpt /* Option */;
     Production {
-        lhs: 26,
-        production: &[ParseType::T(6)],
+        lhs: 31,
+        production: &[ParseType::N(32)],
     },
-    // 2 - Comments: CommentsList /* Vec */;
-    Production {
-        lhs: 35,
-        production: &[ParseType::N(36)],
-    },
-    // 3 - CommentsList: CommentsListGroup CommentsList;
-    Production {
-        lhs: 36,
-        production: &[ParseType::N(36), ParseType::N(37)],
-    },
-    // 4 - CommentsListGroup: LineComment;
-    Production {
-        lhs: 37,
-        production: &[ParseType::N(86)],
-    },
-    // 5 - CommentsListGroup: BlockComment;
-    Production {
-        lhs: 37,
-        production: &[ParseType::N(26)],
-    },
-    // 6 - CommentsList: ;
-    Production {
-        lhs: 36,
-        production: &[],
-    },
-    // 7 - Comment: CommentOpt /* Option */;
+    // 2 - CommentsOpt: MultiComment;
     Production {
         lhs: 32,
-        production: &[ParseType::N(33)],
+        production: &[ParseType::N(108)],
     },
-    // 8 - CommentOpt: CommentOptGroup;
+    // 3 - CommentsOpt: ;
     Production {
-        lhs: 33,
-        production: &[ParseType::N(34)],
-    },
-    // 9 - CommentOptGroup: LineComment;
-    Production {
-        lhs: 34,
-        production: &[ParseType::N(86)],
-    },
-    // 10 - CommentOptGroup: BlockComment;
-    Production {
-        lhs: 34,
-        production: &[ParseType::N(26)],
-    },
-    // 11 - CommentOpt: ;
-    Production {
-        lhs: 33,
+        lhs: 32,
         production: &[],
     },
-    // 12 - StartToken: Comments;
+    // 4 - StartToken: Comments;
     Production {
-        lhs: 143,
-        production: &[ParseType::N(35)],
+        lhs: 138,
+        production: &[ParseType::N(31)],
     },
-    // 13 - Start: StartToken : crate::veryl_token::VerylToken ;
+    // 5 - Start: StartToken : crate::veryl_token::VerylToken ;
     Production {
-        lhs: 142,
-        production: &[ParseType::N(143)],
+        lhs: 137,
+        production: &[ParseType::N(138)],
     },
-    // 14 - BasedBinaryToken: /[0-9]+(?:_[0-9]+)*'b[0-1xzXZ]+(?:_[0-1xzXZ]+)*/ Comments;
+    // 6 - BasedBinaryToken: /[0-9]+(?:_[0-9]+)*'b[0-1xzXZ]+(?:_[0-1xzXZ]+)*/ Comments;
     Production {
         lhs: 17,
-        production: &[ParseType::N(35), ParseType::T(7)],
+        production: &[ParseType::N(31), ParseType::T(6)],
     },
-    // 15 - BasedOctalToken: /[0-9]+(?:_[0-9]+)*'o[0-7xzXZ]+(?:_[0-7xzXZ]+)*/ Comments;
+    // 7 - BasedOctalToken: /[0-9]+(?:_[0-9]+)*'o[0-7xzXZ]+(?:_[0-7xzXZ]+)*/ Comments;
     Production {
         lhs: 23,
-        production: &[ParseType::N(35), ParseType::T(8)],
+        production: &[ParseType::N(31), ParseType::T(7)],
     },
-    // 16 - BasedDecimalToken: /[0-9]+(?:_[0-9]+)*'d[0-9]+(?:_[0-9]+)*/ Comments;
+    // 8 - BasedDecimalToken: /[0-9]+(?:_[0-9]+)*'d[0-9]+(?:_[0-9]+)*/ Comments;
     Production {
         lhs: 19,
-        production: &[ParseType::N(35), ParseType::T(9)],
+        production: &[ParseType::N(31), ParseType::T(8)],
     },
-    // 17 - BasedHexToken: /[0-9]+(?:_[0-9]+)*'h[0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/ Comments;
+    // 9 - BasedHexToken: /[0-9]+(?:_[0-9]+)*'h[0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/ Comments;
     Production {
         lhs: 21,
-        production: &[ParseType::N(35), ParseType::T(10)],
+        production: &[ParseType::N(31), ParseType::T(9)],
     },
-    // 18 - BaseLessToken: /[0-9]+(?:_[0-9]+)*/ Comments;
+    // 10 - BaseLessToken: /[0-9]+(?:_[0-9]+)*/ Comments;
     Production {
         lhs: 15,
-        production: &[ParseType::N(35), ParseType::T(11)],
+        production: &[ParseType::N(31), ParseType::T(10)],
     },
-    // 19 - BasedBinary: BasedBinaryToken : crate::veryl_token::VerylToken ;
+    // 11 - BasedBinary: BasedBinaryToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 16,
         production: &[ParseType::N(17)],
     },
-    // 20 - BasedOctal: BasedOctalToken : crate::veryl_token::VerylToken ;
+    // 12 - BasedOctal: BasedOctalToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 22,
         production: &[ParseType::N(23)],
     },
-    // 21 - BasedDecimal: BasedDecimalToken : crate::veryl_token::VerylToken ;
+    // 13 - BasedDecimal: BasedDecimalToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 18,
         production: &[ParseType::N(19)],
     },
-    // 22 - BasedHex: BasedHexToken : crate::veryl_token::VerylToken ;
+    // 14 - BasedHex: BasedHexToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 20,
         production: &[ParseType::N(21)],
     },
-    // 23 - BaseLess: BaseLessToken : crate::veryl_token::VerylToken ;
+    // 15 - BaseLess: BaseLessToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 14,
         production: &[ParseType::N(15)],
     },
-    // 24 - PlusToken: '+' Comments;
-    Production {
-        lhs: 125,
-        production: &[ParseType::N(35), ParseType::T(12)],
-    },
-    // 25 - MinusToken: '-' Comments;
-    Production {
-        lhs: 93,
-        production: &[ParseType::N(35), ParseType::T(13)],
-    },
-    // 26 - StarToken: '*' Comments;
-    Production {
-        lhs: 141,
-        production: &[ParseType::N(35), ParseType::T(14)],
-    },
-    // 27 - SlashToken: '/' Comments;
-    Production {
-        lhs: 139,
-        production: &[ParseType::N(35), ParseType::T(15)],
-    },
-    // 28 - ColonToken: ':' Comments;
-    Production {
-        lhs: 29,
-        production: &[ParseType::N(35), ParseType::T(16)],
-    },
-    // 29 - SemicolonToken: ';' Comments;
-    Production {
-        lhs: 137,
-        production: &[ParseType::N(35), ParseType::T(17)],
-    },
-    // 30 - CommaToken: ',' Comment;
-    Production {
-        lhs: 31,
-        production: &[ParseType::N(32), ParseType::T(18)],
-    },
-    // 31 - LParenToken: '(' Comments;
-    Production {
-        lhs: 85,
-        production: &[ParseType::N(35), ParseType::T(19)],
-    },
-    // 32 - RParenToken: ')' Comments;
-    Production {
-        lhs: 133,
-        production: &[ParseType::N(35), ParseType::T(20)],
-    },
-    // 33 - LBracketToken: '[' Comments;
-    Production {
-        lhs: 83,
-        production: &[ParseType::N(35), ParseType::T(21)],
-    },
-    // 34 - RBracketToken: ']' Comments;
-    Production {
-        lhs: 131,
-        production: &[ParseType::N(35), ParseType::T(22)],
-    },
-    // 35 - LBraceToken: '{' Comments;
-    Production {
-        lhs: 81,
-        production: &[ParseType::N(35), ParseType::T(23)],
-    },
-    // 36 - RBraceToken: '}' Comments;
-    Production {
-        lhs: 129,
-        production: &[ParseType::N(35), ParseType::T(24)],
-    },
-    // 37 - EquToken: '=' Comments;
-    Production {
-        lhs: 43,
-        production: &[ParseType::N(35), ParseType::T(25)],
-    },
-    // 38 - HashToken: '#' Comments;
-    Production {
-        lhs: 57,
-        production: &[ParseType::N(35), ParseType::T(26)],
-    },
-    // 39 - Plus: PlusToken : crate::veryl_token::VerylToken ;
-    Production {
-        lhs: 124,
-        production: &[ParseType::N(125)],
-    },
-    // 40 - Minus: MinusToken : crate::veryl_token::VerylToken ;
-    Production {
-        lhs: 92,
-        production: &[ParseType::N(93)],
-    },
-    // 41 - Star: StarToken : crate::veryl_token::VerylToken ;
-    Production {
-        lhs: 140,
-        production: &[ParseType::N(141)],
-    },
-    // 42 - Slash: SlashToken : crate::veryl_token::VerylToken ;
-    Production {
-        lhs: 138,
-        production: &[ParseType::N(139)],
-    },
-    // 43 - Colon: ColonToken : crate::veryl_token::VerylToken ;
-    Production {
-        lhs: 28,
-        production: &[ParseType::N(29)],
-    },
-    // 44 - Semicolon: SemicolonToken : crate::veryl_token::VerylToken ;
-    Production {
-        lhs: 136,
-        production: &[ParseType::N(137)],
-    },
-    // 45 - Comma: CommaToken : crate::veryl_token::VerylToken ;
-    Production {
-        lhs: 30,
-        production: &[ParseType::N(31)],
-    },
-    // 46 - LParen: LParenToken : crate::veryl_token::VerylToken ;
-    Production {
-        lhs: 84,
-        production: &[ParseType::N(85)],
-    },
-    // 47 - RParen: RParenToken : crate::veryl_token::VerylToken ;
-    Production {
-        lhs: 132,
-        production: &[ParseType::N(133)],
-    },
-    // 48 - LBracket: LBracketToken : crate::veryl_token::VerylToken ;
-    Production {
-        lhs: 82,
-        production: &[ParseType::N(83)],
-    },
-    // 49 - RBracket: RBracketToken : crate::veryl_token::VerylToken ;
-    Production {
-        lhs: 130,
-        production: &[ParseType::N(131)],
-    },
-    // 50 - LBrace: LBraceToken : crate::veryl_token::VerylToken ;
-    Production {
-        lhs: 80,
-        production: &[ParseType::N(81)],
-    },
-    // 51 - RBrace: RBraceToken : crate::veryl_token::VerylToken ;
-    Production {
-        lhs: 128,
-        production: &[ParseType::N(129)],
-    },
-    // 52 - Equ: EquToken : crate::veryl_token::VerylToken ;
-    Production {
-        lhs: 42,
-        production: &[ParseType::N(43)],
-    },
-    // 53 - Hash: HashToken : crate::veryl_token::VerylToken ;
-    Production {
-        lhs: 56,
-        production: &[ParseType::N(57)],
-    },
-    // 54 - LogicToken: 'logic' Comments;
-    Production {
-        lhs: 91,
-        production: &[ParseType::N(35), ParseType::T(27)],
-    },
-    // 55 - BitToken: 'bit' Comments;
-    Production {
-        lhs: 25,
-        production: &[ParseType::N(35), ParseType::T(28)],
-    },
-    // 56 - AlwaysFfToken: 'always_ff' Comments;
-    Production {
-        lhs: 12,
-        production: &[ParseType::N(35), ParseType::T(29)],
-    },
-    // 57 - AlwaysCombToken: 'always_comb' Comments;
-    Production {
-        lhs: 3,
-        production: &[ParseType::N(35), ParseType::T(30)],
-    },
-    // 58 - PosedgeToken: 'posedge' Comments;
-    Production {
-        lhs: 127,
-        production: &[ParseType::N(35), ParseType::T(31)],
-    },
-    // 59 - NegedgeToken: 'negedge' Comments;
-    Production {
-        lhs: 115,
-        production: &[ParseType::N(35), ParseType::T(32)],
-    },
-    // 60 - IfToken: 'if' Comments;
-    Production {
-        lhs: 68,
-        production: &[ParseType::N(35), ParseType::T(33)],
-    },
-    // 61 - ElseToken: 'else' Comment;
-    Production {
-        lhs: 41,
-        production: &[ParseType::N(32), ParseType::T(34)],
-    },
-    // 62 - ParameterToken: 'parameter' Comments;
-    Production {
-        lhs: 123,
-        production: &[ParseType::N(35), ParseType::T(35)],
-    },
-    // 63 - LocalparamToken: 'localparam' Comments;
-    Production {
-        lhs: 89,
-        production: &[ParseType::N(35), ParseType::T(36)],
-    },
-    // 64 - ModuleToken: 'module' Comments;
-    Production {
-        lhs: 113,
-        production: &[ParseType::N(35), ParseType::T(37)],
-    },
-    // 65 - InterfaceToken: 'interface' Comments;
-    Production {
-        lhs: 79,
-        production: &[ParseType::N(35), ParseType::T(38)],
-    },
-    // 66 - InputToken: 'input' Comments;
-    Production {
-        lhs: 72,
-        production: &[ParseType::N(35), ParseType::T(39)],
-    },
-    // 67 - OutputToken: 'output' Comments;
+    // 16 - PlusToken: '+' Comments;
     Production {
         lhs: 120,
-        production: &[ParseType::N(35), ParseType::T(40)],
+        production: &[ParseType::N(31), ParseType::T(11)],
     },
-    // 68 - InoutToken: 'inout' Comments;
-    Production {
-        lhs: 70,
-        production: &[ParseType::N(35), ParseType::T(41)],
-    },
-    // 69 - ModportToken: 'modport' Comments;
-    Production {
-        lhs: 100,
-        production: &[ParseType::N(35), ParseType::T(42)],
-    },
-    // 70 - U32Token: 'u32' Comments;
-    Production {
-        lhs: 149,
-        production: &[ParseType::N(35), ParseType::T(43)],
-    },
-    // 71 - U64Token: 'u64' Comments;
-    Production {
-        lhs: 151,
-        production: &[ParseType::N(35), ParseType::T(44)],
-    },
-    // 72 - I32Token: 'i32' Comments;
-    Production {
-        lhs: 59,
-        production: &[ParseType::N(35), ParseType::T(45)],
-    },
-    // 73 - I64Token: 'i64' Comments;
-    Production {
-        lhs: 61,
-        production: &[ParseType::N(35), ParseType::T(46)],
-    },
-    // 74 - F32Token: 'f32' Comments;
-    Production {
-        lhs: 51,
-        production: &[ParseType::N(35), ParseType::T(47)],
-    },
-    // 75 - F64Token: 'f64' Comments;
-    Production {
-        lhs: 53,
-        production: &[ParseType::N(35), ParseType::T(48)],
-    },
-    // 76 - Logic: LogicToken : crate::veryl_token::VerylToken ;
-    Production {
-        lhs: 90,
-        production: &[ParseType::N(91)],
-    },
-    // 77 - Bit: BitToken : crate::veryl_token::VerylToken ;
-    Production {
-        lhs: 24,
-        production: &[ParseType::N(25)],
-    },
-    // 78 - AlwaysFf: AlwaysFfToken : crate::veryl_token::VerylToken ;
-    Production {
-        lhs: 4,
-        production: &[ParseType::N(12)],
-    },
-    // 79 - AlwaysComb: AlwaysCombToken : crate::veryl_token::VerylToken ;
-    Production {
-        lhs: 0,
-        production: &[ParseType::N(3)],
-    },
-    // 80 - Posedge: PosedgeToken : crate::veryl_token::VerylToken ;
-    Production {
-        lhs: 126,
-        production: &[ParseType::N(127)],
-    },
-    // 81 - Negedge: NegedgeToken : crate::veryl_token::VerylToken ;
-    Production {
-        lhs: 114,
-        production: &[ParseType::N(115)],
-    },
-    // 82 - If: IfToken : crate::veryl_token::VerylToken ;
-    Production {
-        lhs: 64,
-        production: &[ParseType::N(68)],
-    },
-    // 83 - Else: ElseToken : crate::veryl_token::VerylToken ;
-    Production {
-        lhs: 40,
-        production: &[ParseType::N(41)],
-    },
-    // 84 - Parameter: ParameterToken : crate::veryl_token::VerylToken ;
-    Production {
-        lhs: 121,
-        production: &[ParseType::N(123)],
-    },
-    // 85 - Localparam: LocalparamToken : crate::veryl_token::VerylToken ;
+    // 17 - MinusToken: '-' Comments;
     Production {
         lhs: 87,
-        production: &[ParseType::N(89)],
+        production: &[ParseType::N(31), ParseType::T(12)],
     },
-    // 86 - Module: ModuleToken : crate::veryl_token::VerylToken ;
+    // 18 - StarToken: '*' Comments;
     Production {
-        lhs: 101,
-        production: &[ParseType::N(113)],
+        lhs: 136,
+        production: &[ParseType::N(31), ParseType::T(13)],
     },
-    // 87 - Interface: InterfaceToken : crate::veryl_token::VerylToken ;
+    // 19 - SlashToken: '/' Comments;
     Production {
-        lhs: 74,
-        production: &[ParseType::N(79)],
+        lhs: 134,
+        production: &[ParseType::N(31), ParseType::T(14)],
     },
-    // 88 - Input: InputToken : crate::veryl_token::VerylToken ;
+    // 20 - ColonToken: ':' Comments;
     Production {
-        lhs: 71,
-        production: &[ParseType::N(72)],
+        lhs: 28,
+        production: &[ParseType::N(31), ParseType::T(15)],
     },
-    // 89 - Output: OutputToken : crate::veryl_token::VerylToken ;
+    // 21 - SemicolonToken: ';' Comments;
+    Production {
+        lhs: 132,
+        production: &[ParseType::N(31), ParseType::T(16)],
+    },
+    // 22 - CommaToken: ',' Comments;
+    Production {
+        lhs: 30,
+        production: &[ParseType::N(31), ParseType::T(17)],
+    },
+    // 23 - LParenToken: '(' Comments;
+    Production {
+        lhs: 80,
+        production: &[ParseType::N(31), ParseType::T(18)],
+    },
+    // 24 - RParenToken: ')' Comments;
+    Production {
+        lhs: 128,
+        production: &[ParseType::N(31), ParseType::T(19)],
+    },
+    // 25 - LBracketToken: '[' Comments;
+    Production {
+        lhs: 78,
+        production: &[ParseType::N(31), ParseType::T(20)],
+    },
+    // 26 - RBracketToken: ']' Comments;
+    Production {
+        lhs: 126,
+        production: &[ParseType::N(31), ParseType::T(21)],
+    },
+    // 27 - LBraceToken: '{' Comments;
+    Production {
+        lhs: 76,
+        production: &[ParseType::N(31), ParseType::T(22)],
+    },
+    // 28 - RBraceToken: '}' Comments;
+    Production {
+        lhs: 124,
+        production: &[ParseType::N(31), ParseType::T(23)],
+    },
+    // 29 - EquToken: '=' Comments;
+    Production {
+        lhs: 38,
+        production: &[ParseType::N(31), ParseType::T(24)],
+    },
+    // 30 - HashToken: '#' Comments;
+    Production {
+        lhs: 52,
+        production: &[ParseType::N(31), ParseType::T(25)],
+    },
+    // 31 - Plus: PlusToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 119,
         production: &[ParseType::N(120)],
     },
-    // 90 - Inout: InoutToken : crate::veryl_token::VerylToken ;
+    // 32 - Minus: MinusToken : crate::veryl_token::VerylToken ;
     Production {
-        lhs: 69,
-        production: &[ParseType::N(70)],
+        lhs: 86,
+        production: &[ParseType::N(87)],
     },
-    // 91 - Modport: ModportToken : crate::veryl_token::VerylToken ;
+    // 33 - Star: StarToken : crate::veryl_token::VerylToken ;
     Production {
-        lhs: 94,
-        production: &[ParseType::N(100)],
+        lhs: 135,
+        production: &[ParseType::N(136)],
     },
-    // 92 - U32: U32Token : crate::veryl_token::VerylToken ;
+    // 34 - Slash: SlashToken : crate::veryl_token::VerylToken ;
     Production {
-        lhs: 148,
-        production: &[ParseType::N(149)],
+        lhs: 133,
+        production: &[ParseType::N(134)],
     },
-    // 93 - U64: U64Token : crate::veryl_token::VerylToken ;
+    // 35 - Colon: ColonToken : crate::veryl_token::VerylToken ;
     Production {
-        lhs: 150,
-        production: &[ParseType::N(151)],
+        lhs: 27,
+        production: &[ParseType::N(28)],
     },
-    // 94 - I32: I32Token : crate::veryl_token::VerylToken ;
+    // 36 - Semicolon: SemicolonToken : crate::veryl_token::VerylToken ;
     Production {
-        lhs: 58,
-        production: &[ParseType::N(59)],
+        lhs: 131,
+        production: &[ParseType::N(132)],
     },
-    // 95 - I64: I64Token : crate::veryl_token::VerylToken ;
+    // 37 - Comma: CommaToken : crate::veryl_token::VerylToken ;
     Production {
-        lhs: 60,
-        production: &[ParseType::N(61)],
+        lhs: 29,
+        production: &[ParseType::N(30)],
     },
-    // 96 - F32: F32Token : crate::veryl_token::VerylToken ;
+    // 38 - LParen: LParenToken : crate::veryl_token::VerylToken ;
     Production {
-        lhs: 50,
-        production: &[ParseType::N(51)],
+        lhs: 79,
+        production: &[ParseType::N(80)],
     },
-    // 97 - F64: F64Token : crate::veryl_token::VerylToken ;
+    // 39 - RParen: RParenToken : crate::veryl_token::VerylToken ;
     Production {
-        lhs: 52,
-        production: &[ParseType::N(53)],
+        lhs: 127,
+        production: &[ParseType::N(128)],
     },
-    // 98 - IdentifierToken: /[a-zA-Z_][0-9a-zA-Z_]*/ Comments;
+    // 40 - LBracket: LBracketToken : crate::veryl_token::VerylToken ;
     Production {
-        lhs: 63,
-        production: &[ParseType::N(35), ParseType::T(49)],
+        lhs: 77,
+        production: &[ParseType::N(78)],
     },
-    // 99 - Identifier: IdentifierToken : crate::veryl_token::VerylToken ;
+    // 41 - RBracket: RBracketToken : crate::veryl_token::VerylToken ;
     Production {
-        lhs: 62,
-        production: &[ParseType::N(63)],
+        lhs: 125,
+        production: &[ParseType::N(126)],
     },
-    // 100 - Veryl: Start VerylList /* Vec */;
+    // 42 - LBrace: LBraceToken : crate::veryl_token::VerylToken ;
     Production {
-        lhs: 153,
-        production: &[ParseType::N(154), ParseType::N(142)],
+        lhs: 75,
+        production: &[ParseType::N(76)],
     },
-    // 101 - VerylList: Description VerylList;
+    // 43 - RBrace: RBraceToken : crate::veryl_token::VerylToken ;
     Production {
-        lhs: 154,
-        production: &[ParseType::N(154), ParseType::N(38)],
-    },
-    // 102 - VerylList: ;
-    Production {
-        lhs: 154,
-        production: &[],
-    },
-    // 103 - Description: ModuleDeclaration;
-    Production {
-        lhs: 38,
-        production: &[ParseType::N(102)],
-    },
-    // 104 - Description: InterfaceDeclaration;
-    Production {
-        lhs: 38,
-        production: &[ParseType::N(75)],
-    },
-    // 105 - Number: IntegralNumber;
-    Production {
-        lhs: 116,
-        production: &[ParseType::N(73)],
-    },
-    // 106 - IntegralNumber: BasedBinary;
-    Production {
-        lhs: 73,
-        production: &[ParseType::N(16)],
-    },
-    // 107 - IntegralNumber: BasedOctal;
-    Production {
-        lhs: 73,
-        production: &[ParseType::N(22)],
-    },
-    // 108 - IntegralNumber: BasedDecimal;
-    Production {
-        lhs: 73,
-        production: &[ParseType::N(18)],
-    },
-    // 109 - IntegralNumber: BasedHex;
-    Production {
-        lhs: 73,
-        production: &[ParseType::N(20)],
-    },
-    // 110 - IntegralNumber: BaseLess;
-    Production {
-        lhs: 73,
-        production: &[ParseType::N(14)],
-    },
-    // 111 - OperatorPrecedence1: Plus;
-    Production {
-        lhs: 117,
+        lhs: 123,
         production: &[ParseType::N(124)],
     },
-    // 112 - OperatorPrecedence1: Minus;
+    // 44 - Equ: EquToken : crate::veryl_token::VerylToken ;
     Production {
-        lhs: 117,
-        production: &[ParseType::N(92)],
+        lhs: 37,
+        production: &[ParseType::N(38)],
     },
-    // 113 - OperatorPrecedence2: Star;
+    // 45 - Hash: HashToken : crate::veryl_token::VerylToken ;
+    Production {
+        lhs: 51,
+        production: &[ParseType::N(52)],
+    },
+    // 46 - LogicToken: 'logic' Comments;
+    Production {
+        lhs: 85,
+        production: &[ParseType::N(31), ParseType::T(26)],
+    },
+    // 47 - BitToken: 'bit' Comments;
+    Production {
+        lhs: 25,
+        production: &[ParseType::N(31), ParseType::T(27)],
+    },
+    // 48 - AlwaysFfToken: 'always_ff' Comments;
+    Production {
+        lhs: 12,
+        production: &[ParseType::N(31), ParseType::T(28)],
+    },
+    // 49 - AlwaysCombToken: 'always_comb' Comments;
+    Production {
+        lhs: 3,
+        production: &[ParseType::N(31), ParseType::T(29)],
+    },
+    // 50 - PosedgeToken: 'posedge' Comments;
+    Production {
+        lhs: 122,
+        production: &[ParseType::N(31), ParseType::T(30)],
+    },
+    // 51 - NegedgeToken: 'negedge' Comments;
+    Production {
+        lhs: 110,
+        production: &[ParseType::N(31), ParseType::T(31)],
+    },
+    // 52 - IfToken: 'if' Comments;
+    Production {
+        lhs: 63,
+        production: &[ParseType::N(31), ParseType::T(32)],
+    },
+    // 53 - ElseToken: 'else' Comments;
+    Production {
+        lhs: 36,
+        production: &[ParseType::N(31), ParseType::T(33)],
+    },
+    // 54 - ParameterToken: 'parameter' Comments;
     Production {
         lhs: 118,
-        production: &[ParseType::N(140)],
+        production: &[ParseType::N(31), ParseType::T(34)],
     },
-    // 114 - OperatorPrecedence2: Slash;
+    // 55 - LocalparamToken: 'localparam' Comments;
     Production {
-        lhs: 118,
-        production: &[ParseType::N(138)],
+        lhs: 83,
+        production: &[ParseType::N(31), ParseType::T(35)],
     },
-    // 115 - Expression: Expression0;
+    // 56 - ModuleToken: 'module' Comments;
     Production {
-        lhs: 44,
-        production: &[ParseType::N(45)],
+        lhs: 107,
+        production: &[ParseType::N(31), ParseType::T(36)],
     },
-    // 116 - Expression0: Expression1 Expression0List /* Vec */;
+    // 57 - InterfaceToken: 'interface' Comments;
     Production {
-        lhs: 45,
-        production: &[ParseType::N(46), ParseType::N(47)],
+        lhs: 74,
+        production: &[ParseType::N(31), ParseType::T(37)],
     },
-    // 117 - Expression0List: OperatorPrecedence1 Expression1 Expression0List;
+    // 58 - InputToken: 'input' Comments;
     Production {
-        lhs: 46,
-        production: &[ParseType::N(46), ParseType::N(47), ParseType::N(117)],
+        lhs: 67,
+        production: &[ParseType::N(31), ParseType::T(38)],
     },
-    // 118 - Expression0List: ;
+    // 59 - OutputToken: 'output' Comments;
     Production {
-        lhs: 46,
-        production: &[],
+        lhs: 115,
+        production: &[ParseType::N(31), ParseType::T(39)],
     },
-    // 119 - Expression1: Expression2 Expression1List /* Vec */;
+    // 60 - InoutToken: 'inout' Comments;
     Production {
-        lhs: 47,
-        production: &[ParseType::N(48), ParseType::N(49)],
+        lhs: 65,
+        production: &[ParseType::N(31), ParseType::T(40)],
     },
-    // 120 - Expression1List: OperatorPrecedence2 Expression2 Expression1List;
+    // 61 - ModportToken: 'modport' Comments;
     Production {
-        lhs: 48,
-        production: &[ParseType::N(48), ParseType::N(49), ParseType::N(118)],
+        lhs: 94,
+        production: &[ParseType::N(31), ParseType::T(41)],
     },
-    // 121 - Expression1List: ;
-    Production {
-        lhs: 48,
-        production: &[],
-    },
-    // 122 - Expression2: Factor;
-    Production {
-        lhs: 49,
-        production: &[ParseType::N(54)],
-    },
-    // 123 - Factor: Number;
-    Production {
-        lhs: 54,
-        production: &[ParseType::N(116)],
-    },
-    // 124 - Factor: Identifier FactorList /* Vec */;
-    Production {
-        lhs: 54,
-        production: &[ParseType::N(55), ParseType::N(62)],
-    },
-    // 125 - FactorList: Range FactorList;
-    Production {
-        lhs: 55,
-        production: &[ParseType::N(55), ParseType::N(134)],
-    },
-    // 126 - FactorList: ;
-    Production {
-        lhs: 55,
-        production: &[],
-    },
-    // 127 - Factor: LParen Expression RParen;
-    Production {
-        lhs: 54,
-        production: &[ParseType::N(132), ParseType::N(44), ParseType::N(84)],
-    },
-    // 128 - Statement: AssignmentStatement;
+    // 62 - U32Token: 'u32' Comments;
     Production {
         lhs: 144,
-        production: &[ParseType::N(13)],
+        production: &[ParseType::N(31), ParseType::T(42)],
     },
-    // 129 - Statement: IfStatement;
+    // 63 - U64Token: 'u64' Comments;
     Production {
-        lhs: 144,
+        lhs: 146,
+        production: &[ParseType::N(31), ParseType::T(43)],
+    },
+    // 64 - I32Token: 'i32' Comments;
+    Production {
+        lhs: 54,
+        production: &[ParseType::N(31), ParseType::T(44)],
+    },
+    // 65 - I64Token: 'i64' Comments;
+    Production {
+        lhs: 56,
+        production: &[ParseType::N(31), ParseType::T(45)],
+    },
+    // 66 - F32Token: 'f32' Comments;
+    Production {
+        lhs: 46,
+        production: &[ParseType::N(31), ParseType::T(46)],
+    },
+    // 67 - F64Token: 'f64' Comments;
+    Production {
+        lhs: 48,
+        production: &[ParseType::N(31), ParseType::T(47)],
+    },
+    // 68 - Logic: LogicToken : crate::veryl_token::VerylToken ;
+    Production {
+        lhs: 84,
+        production: &[ParseType::N(85)],
+    },
+    // 69 - Bit: BitToken : crate::veryl_token::VerylToken ;
+    Production {
+        lhs: 24,
+        production: &[ParseType::N(25)],
+    },
+    // 70 - AlwaysFf: AlwaysFfToken : crate::veryl_token::VerylToken ;
+    Production {
+        lhs: 4,
+        production: &[ParseType::N(12)],
+    },
+    // 71 - AlwaysComb: AlwaysCombToken : crate::veryl_token::VerylToken ;
+    Production {
+        lhs: 0,
+        production: &[ParseType::N(3)],
+    },
+    // 72 - Posedge: PosedgeToken : crate::veryl_token::VerylToken ;
+    Production {
+        lhs: 121,
+        production: &[ParseType::N(122)],
+    },
+    // 73 - Negedge: NegedgeToken : crate::veryl_token::VerylToken ;
+    Production {
+        lhs: 109,
+        production: &[ParseType::N(110)],
+    },
+    // 74 - If: IfToken : crate::veryl_token::VerylToken ;
+    Production {
+        lhs: 59,
+        production: &[ParseType::N(63)],
+    },
+    // 75 - Else: ElseToken : crate::veryl_token::VerylToken ;
+    Production {
+        lhs: 35,
+        production: &[ParseType::N(36)],
+    },
+    // 76 - Parameter: ParameterToken : crate::veryl_token::VerylToken ;
+    Production {
+        lhs: 116,
+        production: &[ParseType::N(118)],
+    },
+    // 77 - Localparam: LocalparamToken : crate::veryl_token::VerylToken ;
+    Production {
+        lhs: 81,
+        production: &[ParseType::N(83)],
+    },
+    // 78 - Module: ModuleToken : crate::veryl_token::VerylToken ;
+    Production {
+        lhs: 95,
+        production: &[ParseType::N(107)],
+    },
+    // 79 - Interface: InterfaceToken : crate::veryl_token::VerylToken ;
+    Production {
+        lhs: 69,
+        production: &[ParseType::N(74)],
+    },
+    // 80 - Input: InputToken : crate::veryl_token::VerylToken ;
+    Production {
+        lhs: 66,
+        production: &[ParseType::N(67)],
+    },
+    // 81 - Output: OutputToken : crate::veryl_token::VerylToken ;
+    Production {
+        lhs: 114,
+        production: &[ParseType::N(115)],
+    },
+    // 82 - Inout: InoutToken : crate::veryl_token::VerylToken ;
+    Production {
+        lhs: 64,
         production: &[ParseType::N(65)],
     },
-    // 130 - AssignmentStatement: Identifier Equ Expression Semicolon;
+    // 83 - Modport: ModportToken : crate::veryl_token::VerylToken ;
+    Production {
+        lhs: 88,
+        production: &[ParseType::N(94)],
+    },
+    // 84 - U32: U32Token : crate::veryl_token::VerylToken ;
+    Production {
+        lhs: 143,
+        production: &[ParseType::N(144)],
+    },
+    // 85 - U64: U64Token : crate::veryl_token::VerylToken ;
+    Production {
+        lhs: 145,
+        production: &[ParseType::N(146)],
+    },
+    // 86 - I32: I32Token : crate::veryl_token::VerylToken ;
+    Production {
+        lhs: 53,
+        production: &[ParseType::N(54)],
+    },
+    // 87 - I64: I64Token : crate::veryl_token::VerylToken ;
+    Production {
+        lhs: 55,
+        production: &[ParseType::N(56)],
+    },
+    // 88 - F32: F32Token : crate::veryl_token::VerylToken ;
+    Production {
+        lhs: 45,
+        production: &[ParseType::N(46)],
+    },
+    // 89 - F64: F64Token : crate::veryl_token::VerylToken ;
+    Production {
+        lhs: 47,
+        production: &[ParseType::N(48)],
+    },
+    // 90 - IdentifierToken: /[a-zA-Z_][0-9a-zA-Z_]*/ Comments;
+    Production {
+        lhs: 58,
+        production: &[ParseType::N(31), ParseType::T(48)],
+    },
+    // 91 - Identifier: IdentifierToken : crate::veryl_token::VerylToken ;
+    Production {
+        lhs: 57,
+        production: &[ParseType::N(58)],
+    },
+    // 92 - Veryl: Start VerylList /* Vec */;
+    Production {
+        lhs: 148,
+        production: &[ParseType::N(149), ParseType::N(137)],
+    },
+    // 93 - VerylList: Description VerylList;
+    Production {
+        lhs: 149,
+        production: &[ParseType::N(149), ParseType::N(33)],
+    },
+    // 94 - VerylList: ;
+    Production {
+        lhs: 149,
+        production: &[],
+    },
+    // 95 - Description: ModuleDeclaration;
+    Production {
+        lhs: 33,
+        production: &[ParseType::N(96)],
+    },
+    // 96 - Description: InterfaceDeclaration;
+    Production {
+        lhs: 33,
+        production: &[ParseType::N(70)],
+    },
+    // 97 - Number: IntegralNumber;
+    Production {
+        lhs: 111,
+        production: &[ParseType::N(68)],
+    },
+    // 98 - IntegralNumber: BasedBinary;
+    Production {
+        lhs: 68,
+        production: &[ParseType::N(16)],
+    },
+    // 99 - IntegralNumber: BasedOctal;
+    Production {
+        lhs: 68,
+        production: &[ParseType::N(22)],
+    },
+    // 100 - IntegralNumber: BasedDecimal;
+    Production {
+        lhs: 68,
+        production: &[ParseType::N(18)],
+    },
+    // 101 - IntegralNumber: BasedHex;
+    Production {
+        lhs: 68,
+        production: &[ParseType::N(20)],
+    },
+    // 102 - IntegralNumber: BaseLess;
+    Production {
+        lhs: 68,
+        production: &[ParseType::N(14)],
+    },
+    // 103 - OperatorPrecedence1: Plus;
+    Production {
+        lhs: 112,
+        production: &[ParseType::N(119)],
+    },
+    // 104 - OperatorPrecedence1: Minus;
+    Production {
+        lhs: 112,
+        production: &[ParseType::N(86)],
+    },
+    // 105 - OperatorPrecedence2: Star;
+    Production {
+        lhs: 113,
+        production: &[ParseType::N(135)],
+    },
+    // 106 - OperatorPrecedence2: Slash;
+    Production {
+        lhs: 113,
+        production: &[ParseType::N(133)],
+    },
+    // 107 - Expression: Expression0;
+    Production {
+        lhs: 39,
+        production: &[ParseType::N(40)],
+    },
+    // 108 - Expression0: Expression1 Expression0List /* Vec */;
+    Production {
+        lhs: 40,
+        production: &[ParseType::N(41), ParseType::N(42)],
+    },
+    // 109 - Expression0List: OperatorPrecedence1 Expression1 Expression0List;
+    Production {
+        lhs: 41,
+        production: &[ParseType::N(41), ParseType::N(42), ParseType::N(112)],
+    },
+    // 110 - Expression0List: ;
+    Production {
+        lhs: 41,
+        production: &[],
+    },
+    // 111 - Expression1: Expression2 Expression1List /* Vec */;
+    Production {
+        lhs: 42,
+        production: &[ParseType::N(43), ParseType::N(44)],
+    },
+    // 112 - Expression1List: OperatorPrecedence2 Expression2 Expression1List;
+    Production {
+        lhs: 43,
+        production: &[ParseType::N(43), ParseType::N(44), ParseType::N(113)],
+    },
+    // 113 - Expression1List: ;
+    Production {
+        lhs: 43,
+        production: &[],
+    },
+    // 114 - Expression2: Factor;
+    Production {
+        lhs: 44,
+        production: &[ParseType::N(49)],
+    },
+    // 115 - Factor: Number;
+    Production {
+        lhs: 49,
+        production: &[ParseType::N(111)],
+    },
+    // 116 - Factor: Identifier FactorList /* Vec */;
+    Production {
+        lhs: 49,
+        production: &[ParseType::N(50), ParseType::N(57)],
+    },
+    // 117 - FactorList: Range FactorList;
+    Production {
+        lhs: 50,
+        production: &[ParseType::N(50), ParseType::N(129)],
+    },
+    // 118 - FactorList: ;
+    Production {
+        lhs: 50,
+        production: &[],
+    },
+    // 119 - Factor: LParen Expression RParen;
+    Production {
+        lhs: 49,
+        production: &[ParseType::N(127), ParseType::N(39), ParseType::N(79)],
+    },
+    // 120 - Statement: AssignmentStatement;
+    Production {
+        lhs: 139,
+        production: &[ParseType::N(13)],
+    },
+    // 121 - Statement: IfStatement;
+    Production {
+        lhs: 139,
+        production: &[ParseType::N(60)],
+    },
+    // 122 - AssignmentStatement: Identifier Equ Expression Semicolon;
     Production {
         lhs: 13,
         production: &[
-            ParseType::N(136),
-            ParseType::N(44),
-            ParseType::N(42),
+            ParseType::N(131),
+            ParseType::N(39),
+            ParseType::N(37),
+            ParseType::N(57),
+        ],
+    },
+    // 123 - IfStatement: If Expression LBrace Statement RBrace IfStatementList /* Vec */ IfStatementOpt /* Option */;
+    Production {
+        lhs: 60,
+        production: &[
             ParseType::N(62),
+            ParseType::N(61),
+            ParseType::N(123),
+            ParseType::N(139),
+            ParseType::N(75),
+            ParseType::N(39),
+            ParseType::N(59),
         ],
     },
-    // 131 - IfStatement: If Expression LBrace Statement RBrace IfStatementList /* Vec */ IfStatementOpt /* Option */;
+    // 124 - IfStatementList: Else If Expression LBrace Statement RBrace IfStatementList;
     Production {
-        lhs: 65,
+        lhs: 61,
         production: &[
-            ParseType::N(67),
-            ParseType::N(66),
-            ParseType::N(128),
-            ParseType::N(144),
-            ParseType::N(80),
-            ParseType::N(44),
-            ParseType::N(64),
+            ParseType::N(61),
+            ParseType::N(123),
+            ParseType::N(139),
+            ParseType::N(75),
+            ParseType::N(39),
+            ParseType::N(59),
+            ParseType::N(35),
         ],
     },
-    // 132 - IfStatementList: Else If Expression LBrace Statement RBrace IfStatementList;
+    // 125 - IfStatementList: ;
     Production {
-        lhs: 66,
-        production: &[
-            ParseType::N(66),
-            ParseType::N(128),
-            ParseType::N(144),
-            ParseType::N(80),
-            ParseType::N(44),
-            ParseType::N(64),
-            ParseType::N(40),
-        ],
-    },
-    // 133 - IfStatementList: ;
-    Production {
-        lhs: 66,
+        lhs: 61,
         production: &[],
     },
-    // 134 - IfStatementOpt: Else LBrace Statement RBrace;
+    // 126 - IfStatementOpt: Else LBrace Statement RBrace;
     Production {
-        lhs: 67,
+        lhs: 62,
         production: &[
-            ParseType::N(128),
-            ParseType::N(144),
-            ParseType::N(80),
-            ParseType::N(40),
+            ParseType::N(123),
+            ParseType::N(139),
+            ParseType::N(75),
+            ParseType::N(35),
         ],
     },
-    // 135 - IfStatementOpt: ;
+    // 127 - IfStatementOpt: ;
     Production {
-        lhs: 67,
+        lhs: 62,
         production: &[],
     },
-    // 136 - Range: LBracket Expression RangeOpt /* Option */ RBracket;
+    // 128 - Range: LBracket Expression RangeOpt /* Option */ RBracket;
     Production {
-        lhs: 134,
+        lhs: 129,
         production: &[
+            ParseType::N(125),
             ParseType::N(130),
-            ParseType::N(135),
-            ParseType::N(44),
-            ParseType::N(82),
+            ParseType::N(39),
+            ParseType::N(77),
         ],
     },
-    // 137 - RangeOpt: Colon Expression;
+    // 129 - RangeOpt: Colon Expression;
     Production {
-        lhs: 135,
-        production: &[ParseType::N(44), ParseType::N(28)],
+        lhs: 130,
+        production: &[ParseType::N(39), ParseType::N(27)],
     },
-    // 138 - RangeOpt: ;
+    // 130 - RangeOpt: ;
     Production {
-        lhs: 135,
+        lhs: 130,
         production: &[],
     },
-    // 139 - Width: LBracket Expression RBracket;
+    // 131 - Width: LBracket Expression RBracket;
     Production {
-        lhs: 155,
-        production: &[ParseType::N(130), ParseType::N(44), ParseType::N(82)],
+        lhs: 150,
+        production: &[ParseType::N(125), ParseType::N(39), ParseType::N(77)],
     },
-    // 140 - BuiltinType: Logic;
+    // 132 - BuiltinType: Logic;
     Production {
-        lhs: 27,
-        production: &[ParseType::N(90)],
+        lhs: 26,
+        production: &[ParseType::N(84)],
     },
-    // 141 - BuiltinType: Bit;
+    // 133 - BuiltinType: Bit;
     Production {
-        lhs: 27,
+        lhs: 26,
         production: &[ParseType::N(24)],
     },
-    // 142 - BuiltinType: U32;
+    // 134 - BuiltinType: U32;
     Production {
-        lhs: 27,
-        production: &[ParseType::N(148)],
+        lhs: 26,
+        production: &[ParseType::N(143)],
     },
-    // 143 - BuiltinType: U64;
+    // 135 - BuiltinType: U64;
     Production {
-        lhs: 27,
-        production: &[ParseType::N(150)],
+        lhs: 26,
+        production: &[ParseType::N(145)],
     },
-    // 144 - BuiltinType: I32;
+    // 136 - BuiltinType: I32;
     Production {
-        lhs: 27,
-        production: &[ParseType::N(58)],
+        lhs: 26,
+        production: &[ParseType::N(53)],
     },
-    // 145 - BuiltinType: I64;
+    // 137 - BuiltinType: I64;
     Production {
-        lhs: 27,
-        production: &[ParseType::N(60)],
+        lhs: 26,
+        production: &[ParseType::N(55)],
     },
-    // 146 - BuiltinType: F32;
+    // 138 - BuiltinType: F32;
     Production {
-        lhs: 27,
-        production: &[ParseType::N(50)],
+        lhs: 26,
+        production: &[ParseType::N(45)],
     },
-    // 147 - BuiltinType: F64;
+    // 139 - BuiltinType: F64;
     Production {
-        lhs: 27,
-        production: &[ParseType::N(52)],
+        lhs: 26,
+        production: &[ParseType::N(47)],
     },
-    // 148 - Type: TypeGroup TypeList /* Vec */;
+    // 140 - Type: TypeGroup TypeList /* Vec */;
     Production {
-        lhs: 145,
-        production: &[ParseType::N(147), ParseType::N(146)],
+        lhs: 140,
+        production: &[ParseType::N(142), ParseType::N(141)],
     },
-    // 149 - TypeGroup: BuiltinType;
+    // 141 - TypeGroup: BuiltinType;
     Production {
-        lhs: 146,
-        production: &[ParseType::N(27)],
+        lhs: 141,
+        production: &[ParseType::N(26)],
     },
-    // 150 - TypeGroup: Identifier;
+    // 142 - TypeGroup: Identifier;
     Production {
-        lhs: 146,
-        production: &[ParseType::N(62)],
+        lhs: 141,
+        production: &[ParseType::N(57)],
     },
-    // 151 - TypeList: Width TypeList;
+    // 143 - TypeList: Width TypeList;
     Production {
-        lhs: 147,
-        production: &[ParseType::N(147), ParseType::N(155)],
+        lhs: 142,
+        production: &[ParseType::N(142), ParseType::N(150)],
     },
-    // 152 - TypeList: ;
+    // 144 - TypeList: ;
     Production {
-        lhs: 147,
+        lhs: 142,
         production: &[],
     },
-    // 153 - WithParameter: Hash LParen WithParameterOpt /* Option */ RParen;
+    // 145 - WithParameter: Hash LParen WithParameterOpt /* Option */ RParen;
     Production {
-        lhs: 156,
+        lhs: 151,
         production: &[
-            ParseType::N(132),
-            ParseType::N(162),
-            ParseType::N(84),
-            ParseType::N(56),
+            ParseType::N(127),
+            ParseType::N(157),
+            ParseType::N(79),
+            ParseType::N(51),
         ],
     },
-    // 154 - WithParameterOpt: WithParameterList;
-    Production {
-        lhs: 162,
-        production: &[ParseType::N(159)],
-    },
-    // 155 - WithParameterOpt: ;
-    Production {
-        lhs: 162,
-        production: &[],
-    },
-    // 156 - WithParameterList: WithParameterItem WithParameterListList /* Vec */ WithParameterListOpt /* Option */;
-    Production {
-        lhs: 159,
-        production: &[ParseType::N(161), ParseType::N(160), ParseType::N(157)],
-    },
-    // 157 - WithParameterListList: Comma WithParameterItem WithParameterListList;
-    Production {
-        lhs: 160,
-        production: &[ParseType::N(160), ParseType::N(157), ParseType::N(30)],
-    },
-    // 158 - WithParameterListList: ;
-    Production {
-        lhs: 160,
-        production: &[],
-    },
-    // 159 - WithParameterListOpt: Comma;
-    Production {
-        lhs: 161,
-        production: &[ParseType::N(30)],
-    },
-    // 160 - WithParameterListOpt: ;
-    Production {
-        lhs: 161,
-        production: &[],
-    },
-    // 161 - WithParameterItem: WithParameterItemGroup Identifier Colon Type Equ Expression;
+    // 146 - WithParameterOpt: WithParameterList;
     Production {
         lhs: 157,
-        production: &[
-            ParseType::N(44),
-            ParseType::N(42),
-            ParseType::N(145),
-            ParseType::N(28),
-            ParseType::N(62),
-            ParseType::N(158),
-        ],
+        production: &[ParseType::N(154)],
     },
-    // 162 - WithParameterItemGroup: Parameter;
+    // 147 - WithParameterOpt: ;
     Production {
-        lhs: 158,
-        production: &[ParseType::N(121)],
-    },
-    // 163 - WithParameterItemGroup: Localparam;
-    Production {
-        lhs: 158,
-        production: &[ParseType::N(87)],
-    },
-    // 164 - ModuleDeclaration: Module Identifier ModuleDeclarationOpt /* Option */ ModuleDeclarationOpt0 /* Option */ LBrace ModuleDeclarationList /* Vec */ RBrace;
-    Production {
-        lhs: 102,
-        production: &[
-            ParseType::N(128),
-            ParseType::N(103),
-            ParseType::N(80),
-            ParseType::N(105),
-            ParseType::N(104),
-            ParseType::N(62),
-            ParseType::N(101),
-        ],
-    },
-    // 165 - ModuleDeclarationList: ModuleItem ModuleDeclarationList;
-    Production {
-        lhs: 103,
-        production: &[ParseType::N(103), ParseType::N(106)],
-    },
-    // 166 - ModuleDeclarationList: ;
-    Production {
-        lhs: 103,
+        lhs: 157,
         production: &[],
     },
-    // 167 - ModuleDeclarationOpt0: ModulePort;
+    // 148 - WithParameterList: WithParameterItem WithParameterListList /* Vec */ WithParameterListOpt /* Option */;
     Production {
-        lhs: 105,
-        production: &[ParseType::N(107)],
+        lhs: 154,
+        production: &[ParseType::N(156), ParseType::N(155), ParseType::N(152)],
     },
-    // 168 - ModuleDeclarationOpt0: ;
+    // 149 - WithParameterListList: Comma WithParameterItem WithParameterListList;
     Production {
-        lhs: 105,
+        lhs: 155,
+        production: &[ParseType::N(155), ParseType::N(152), ParseType::N(29)],
+    },
+    // 150 - WithParameterListList: ;
+    Production {
+        lhs: 155,
         production: &[],
     },
-    // 169 - ModuleDeclarationOpt: WithParameter;
+    // 151 - WithParameterListOpt: Comma;
     Production {
-        lhs: 104,
-        production: &[ParseType::N(156)],
+        lhs: 156,
+        production: &[ParseType::N(29)],
     },
-    // 170 - ModuleDeclarationOpt: ;
+    // 152 - WithParameterListOpt: ;
     Production {
-        lhs: 104,
+        lhs: 156,
         production: &[],
     },
-    // 171 - ModulePort: LParen ModulePortOpt /* Option */ RParen;
-    Production {
-        lhs: 107,
-        production: &[ParseType::N(132), ParseType::N(112), ParseType::N(84)],
-    },
-    // 172 - ModulePortOpt: ModulePortList;
-    Production {
-        lhs: 112,
-        production: &[ParseType::N(109)],
-    },
-    // 173 - ModulePortOpt: ;
-    Production {
-        lhs: 112,
-        production: &[],
-    },
-    // 174 - ModulePortList: ModulePortItem ModulePortListList /* Vec */ ModulePortListOpt /* Option */;
-    Production {
-        lhs: 109,
-        production: &[ParseType::N(111), ParseType::N(110), ParseType::N(108)],
-    },
-    // 175 - ModulePortListList: Comma ModulePortItem ModulePortListList;
-    Production {
-        lhs: 110,
-        production: &[ParseType::N(110), ParseType::N(108), ParseType::N(30)],
-    },
-    // 176 - ModulePortListList: ;
-    Production {
-        lhs: 110,
-        production: &[],
-    },
-    // 177 - ModulePortListOpt: Comma;
-    Production {
-        lhs: 111,
-        production: &[ParseType::N(30)],
-    },
-    // 178 - ModulePortListOpt: ;
-    Production {
-        lhs: 111,
-        production: &[],
-    },
-    // 179 - ModulePortItem: Identifier Colon Direction Type;
-    Production {
-        lhs: 108,
-        production: &[
-            ParseType::N(145),
-            ParseType::N(39),
-            ParseType::N(28),
-            ParseType::N(62),
-        ],
-    },
-    // 180 - Direction: Input;
-    Production {
-        lhs: 39,
-        production: &[ParseType::N(71)],
-    },
-    // 181 - Direction: Output;
-    Production {
-        lhs: 39,
-        production: &[ParseType::N(119)],
-    },
-    // 182 - Direction: Inout;
-    Production {
-        lhs: 39,
-        production: &[ParseType::N(69)],
-    },
-    // 183 - ModuleItem: VariableDeclaration;
-    Production {
-        lhs: 106,
-        production: &[ParseType::N(152)],
-    },
-    // 184 - ModuleItem: ParameterDeclaration;
-    Production {
-        lhs: 106,
-        production: &[ParseType::N(122)],
-    },
-    // 185 - ModuleItem: LocalparamDeclaration;
-    Production {
-        lhs: 106,
-        production: &[ParseType::N(88)],
-    },
-    // 186 - ModuleItem: AlwaysFfDeclaration;
-    Production {
-        lhs: 106,
-        production: &[ParseType::N(10)],
-    },
-    // 187 - ModuleItem: AlwaysCombDeclaration;
-    Production {
-        lhs: 106,
-        production: &[ParseType::N(1)],
-    },
-    // 188 - InterfaceDeclaration: Interface Identifier InterfaceDeclarationOpt /* Option */ LBrace InterfaceDeclarationList /* Vec */ RBrace;
-    Production {
-        lhs: 75,
-        production: &[
-            ParseType::N(128),
-            ParseType::N(76),
-            ParseType::N(80),
-            ParseType::N(77),
-            ParseType::N(62),
-            ParseType::N(74),
-        ],
-    },
-    // 189 - InterfaceDeclarationList: InterfaceItem InterfaceDeclarationList;
-    Production {
-        lhs: 76,
-        production: &[ParseType::N(76), ParseType::N(78)],
-    },
-    // 190 - InterfaceDeclarationList: ;
-    Production {
-        lhs: 76,
-        production: &[],
-    },
-    // 191 - InterfaceDeclarationOpt: WithParameter;
-    Production {
-        lhs: 77,
-        production: &[ParseType::N(156)],
-    },
-    // 192 - InterfaceDeclarationOpt: ;
-    Production {
-        lhs: 77,
-        production: &[],
-    },
-    // 193 - InterfaceItem: VariableDeclaration;
-    Production {
-        lhs: 78,
-        production: &[ParseType::N(152)],
-    },
-    // 194 - InterfaceItem: ParameterDeclaration;
-    Production {
-        lhs: 78,
-        production: &[ParseType::N(122)],
-    },
-    // 195 - InterfaceItem: LocalparamDeclaration;
-    Production {
-        lhs: 78,
-        production: &[ParseType::N(88)],
-    },
-    // 196 - InterfaceItem: ModportDeclaration;
-    Production {
-        lhs: 78,
-        production: &[ParseType::N(95)],
-    },
-    // 197 - VariableDeclaration: Identifier Colon Type Semicolon;
+    // 153 - WithParameterItem: WithParameterItemGroup Identifier Colon Type Equ Expression;
     Production {
         lhs: 152,
         production: &[
-            ParseType::N(136),
-            ParseType::N(145),
-            ParseType::N(28),
-            ParseType::N(62),
+            ParseType::N(39),
+            ParseType::N(37),
+            ParseType::N(140),
+            ParseType::N(27),
+            ParseType::N(57),
+            ParseType::N(153),
         ],
     },
-    // 198 - ParameterDeclaration: Parameter Identifier Colon Type Equ Expression Semicolon;
+    // 154 - WithParameterItemGroup: Parameter;
     Production {
-        lhs: 122,
-        production: &[
-            ParseType::N(136),
-            ParseType::N(44),
-            ParseType::N(42),
-            ParseType::N(145),
-            ParseType::N(28),
-            ParseType::N(62),
-            ParseType::N(121),
-        ],
+        lhs: 153,
+        production: &[ParseType::N(116)],
     },
-    // 199 - LocalparamDeclaration: Localparam Identifier Colon Type Equ Expression Semicolon;
+    // 155 - WithParameterItemGroup: Localparam;
     Production {
-        lhs: 88,
+        lhs: 153,
+        production: &[ParseType::N(81)],
+    },
+    // 156 - ModuleDeclaration: Module Identifier ModuleDeclarationOpt /* Option */ ModuleDeclarationOpt0 /* Option */ LBrace ModuleDeclarationList /* Vec */ RBrace;
+    Production {
+        lhs: 96,
         production: &[
-            ParseType::N(136),
-            ParseType::N(44),
-            ParseType::N(42),
-            ParseType::N(145),
-            ParseType::N(28),
-            ParseType::N(62),
-            ParseType::N(87),
+            ParseType::N(123),
+            ParseType::N(97),
+            ParseType::N(75),
+            ParseType::N(99),
+            ParseType::N(98),
+            ParseType::N(57),
+            ParseType::N(95),
         ],
     },
-    // 200 - AlwaysFfDeclaration: AlwaysFf LParen AlwaysFfConditions RParen LBrace AlwaysFfDeclarationList /* Vec */ RBrace;
+    // 157 - ModuleDeclarationList: ModuleItem ModuleDeclarationList;
+    Production {
+        lhs: 97,
+        production: &[ParseType::N(97), ParseType::N(100)],
+    },
+    // 158 - ModuleDeclarationList: ;
+    Production {
+        lhs: 97,
+        production: &[],
+    },
+    // 159 - ModuleDeclarationOpt0: ModulePort;
+    Production {
+        lhs: 99,
+        production: &[ParseType::N(101)],
+    },
+    // 160 - ModuleDeclarationOpt0: ;
+    Production {
+        lhs: 99,
+        production: &[],
+    },
+    // 161 - ModuleDeclarationOpt: WithParameter;
+    Production {
+        lhs: 98,
+        production: &[ParseType::N(151)],
+    },
+    // 162 - ModuleDeclarationOpt: ;
+    Production {
+        lhs: 98,
+        production: &[],
+    },
+    // 163 - ModulePort: LParen ModulePortOpt /* Option */ RParen;
+    Production {
+        lhs: 101,
+        production: &[ParseType::N(127), ParseType::N(106), ParseType::N(79)],
+    },
+    // 164 - ModulePortOpt: ModulePortList;
+    Production {
+        lhs: 106,
+        production: &[ParseType::N(103)],
+    },
+    // 165 - ModulePortOpt: ;
+    Production {
+        lhs: 106,
+        production: &[],
+    },
+    // 166 - ModulePortList: ModulePortItem ModulePortListList /* Vec */ ModulePortListOpt /* Option */;
+    Production {
+        lhs: 103,
+        production: &[ParseType::N(105), ParseType::N(104), ParseType::N(102)],
+    },
+    // 167 - ModulePortListList: Comma ModulePortItem ModulePortListList;
+    Production {
+        lhs: 104,
+        production: &[ParseType::N(104), ParseType::N(102), ParseType::N(29)],
+    },
+    // 168 - ModulePortListList: ;
+    Production {
+        lhs: 104,
+        production: &[],
+    },
+    // 169 - ModulePortListOpt: Comma;
+    Production {
+        lhs: 105,
+        production: &[ParseType::N(29)],
+    },
+    // 170 - ModulePortListOpt: ;
+    Production {
+        lhs: 105,
+        production: &[],
+    },
+    // 171 - ModulePortItem: Identifier Colon Direction Type;
+    Production {
+        lhs: 102,
+        production: &[
+            ParseType::N(140),
+            ParseType::N(34),
+            ParseType::N(27),
+            ParseType::N(57),
+        ],
+    },
+    // 172 - Direction: Input;
+    Production {
+        lhs: 34,
+        production: &[ParseType::N(66)],
+    },
+    // 173 - Direction: Output;
+    Production {
+        lhs: 34,
+        production: &[ParseType::N(114)],
+    },
+    // 174 - Direction: Inout;
+    Production {
+        lhs: 34,
+        production: &[ParseType::N(64)],
+    },
+    // 175 - ModuleItem: VariableDeclaration;
+    Production {
+        lhs: 100,
+        production: &[ParseType::N(147)],
+    },
+    // 176 - ModuleItem: ParameterDeclaration;
+    Production {
+        lhs: 100,
+        production: &[ParseType::N(117)],
+    },
+    // 177 - ModuleItem: LocalparamDeclaration;
+    Production {
+        lhs: 100,
+        production: &[ParseType::N(82)],
+    },
+    // 178 - ModuleItem: AlwaysFfDeclaration;
+    Production {
+        lhs: 100,
+        production: &[ParseType::N(10)],
+    },
+    // 179 - ModuleItem: AlwaysCombDeclaration;
+    Production {
+        lhs: 100,
+        production: &[ParseType::N(1)],
+    },
+    // 180 - InterfaceDeclaration: Interface Identifier InterfaceDeclarationOpt /* Option */ LBrace InterfaceDeclarationList /* Vec */ RBrace;
+    Production {
+        lhs: 70,
+        production: &[
+            ParseType::N(123),
+            ParseType::N(71),
+            ParseType::N(75),
+            ParseType::N(72),
+            ParseType::N(57),
+            ParseType::N(69),
+        ],
+    },
+    // 181 - InterfaceDeclarationList: InterfaceItem InterfaceDeclarationList;
+    Production {
+        lhs: 71,
+        production: &[ParseType::N(71), ParseType::N(73)],
+    },
+    // 182 - InterfaceDeclarationList: ;
+    Production {
+        lhs: 71,
+        production: &[],
+    },
+    // 183 - InterfaceDeclarationOpt: WithParameter;
+    Production {
+        lhs: 72,
+        production: &[ParseType::N(151)],
+    },
+    // 184 - InterfaceDeclarationOpt: ;
+    Production {
+        lhs: 72,
+        production: &[],
+    },
+    // 185 - InterfaceItem: VariableDeclaration;
+    Production {
+        lhs: 73,
+        production: &[ParseType::N(147)],
+    },
+    // 186 - InterfaceItem: ParameterDeclaration;
+    Production {
+        lhs: 73,
+        production: &[ParseType::N(117)],
+    },
+    // 187 - InterfaceItem: LocalparamDeclaration;
+    Production {
+        lhs: 73,
+        production: &[ParseType::N(82)],
+    },
+    // 188 - InterfaceItem: ModportDeclaration;
+    Production {
+        lhs: 73,
+        production: &[ParseType::N(89)],
+    },
+    // 189 - VariableDeclaration: Identifier Colon Type Semicolon;
+    Production {
+        lhs: 147,
+        production: &[
+            ParseType::N(131),
+            ParseType::N(140),
+            ParseType::N(27),
+            ParseType::N(57),
+        ],
+    },
+    // 190 - ParameterDeclaration: Parameter Identifier Colon Type Equ Expression Semicolon;
+    Production {
+        lhs: 117,
+        production: &[
+            ParseType::N(131),
+            ParseType::N(39),
+            ParseType::N(37),
+            ParseType::N(140),
+            ParseType::N(27),
+            ParseType::N(57),
+            ParseType::N(116),
+        ],
+    },
+    // 191 - LocalparamDeclaration: Localparam Identifier Colon Type Equ Expression Semicolon;
+    Production {
+        lhs: 82,
+        production: &[
+            ParseType::N(131),
+            ParseType::N(39),
+            ParseType::N(37),
+            ParseType::N(140),
+            ParseType::N(27),
+            ParseType::N(57),
+            ParseType::N(81),
+        ],
+    },
+    // 192 - AlwaysFfDeclaration: AlwaysFf LParen AlwaysFfConditions RParen LBrace AlwaysFfDeclarationList /* Vec */ RBrace;
     Production {
         lhs: 10,
         production: &[
-            ParseType::N(128),
+            ParseType::N(123),
             ParseType::N(11),
-            ParseType::N(80),
-            ParseType::N(132),
+            ParseType::N(75),
+            ParseType::N(127),
             ParseType::N(7),
-            ParseType::N(84),
+            ParseType::N(79),
             ParseType::N(4),
         ],
     },
-    // 201 - AlwaysFfDeclarationList: Statement AlwaysFfDeclarationList;
+    // 193 - AlwaysFfDeclarationList: Statement AlwaysFfDeclarationList;
     Production {
         lhs: 11,
-        production: &[ParseType::N(11), ParseType::N(144)],
+        production: &[ParseType::N(11), ParseType::N(139)],
     },
-    // 202 - AlwaysFfDeclarationList: ;
+    // 194 - AlwaysFfDeclarationList: ;
     Production {
         lhs: 11,
         production: &[],
     },
-    // 203 - AlwaysFfConditions: AlwaysFfCondition AlwaysFfConditionsList /* Vec */ AlwaysFfConditionsOpt /* Option */;
+    // 195 - AlwaysFfConditions: AlwaysFfCondition AlwaysFfConditionsList /* Vec */ AlwaysFfConditionsOpt /* Option */;
     Production {
         lhs: 7,
         production: &[ParseType::N(9), ParseType::N(8), ParseType::N(5)],
     },
-    // 204 - AlwaysFfConditionsList: Comma AlwaysFfCondition AlwaysFfConditionsList;
+    // 196 - AlwaysFfConditionsList: Comma AlwaysFfCondition AlwaysFfConditionsList;
     Production {
         lhs: 8,
-        production: &[ParseType::N(8), ParseType::N(5), ParseType::N(30)],
+        production: &[ParseType::N(8), ParseType::N(5), ParseType::N(29)],
     },
-    // 205 - AlwaysFfConditionsList: ;
+    // 197 - AlwaysFfConditionsList: ;
     Production {
         lhs: 8,
         production: &[],
     },
-    // 206 - AlwaysFfConditionsOpt: Comma;
+    // 198 - AlwaysFfConditionsOpt: Comma;
     Production {
         lhs: 9,
-        production: &[ParseType::N(30)],
+        production: &[ParseType::N(29)],
     },
-    // 207 - AlwaysFfConditionsOpt: ;
+    // 199 - AlwaysFfConditionsOpt: ;
     Production {
         lhs: 9,
         production: &[],
     },
-    // 208 - AlwaysFfCondition: AlwaysFfConditionGroup Identifier;
+    // 200 - AlwaysFfCondition: AlwaysFfConditionGroup Identifier;
     Production {
         lhs: 5,
-        production: &[ParseType::N(62), ParseType::N(6)],
+        production: &[ParseType::N(57), ParseType::N(6)],
     },
-    // 209 - AlwaysFfConditionGroup: Posedge;
+    // 201 - AlwaysFfConditionGroup: Posedge;
     Production {
         lhs: 6,
-        production: &[ParseType::N(126)],
+        production: &[ParseType::N(121)],
     },
-    // 210 - AlwaysFfConditionGroup: Negedge;
+    // 202 - AlwaysFfConditionGroup: Negedge;
     Production {
         lhs: 6,
-        production: &[ParseType::N(114)],
+        production: &[ParseType::N(109)],
     },
-    // 211 - AlwaysCombDeclaration: AlwaysComb LBrace AlwaysCombDeclarationList /* Vec */ RBrace;
+    // 203 - AlwaysCombDeclaration: AlwaysComb LBrace AlwaysCombDeclarationList /* Vec */ RBrace;
     Production {
         lhs: 1,
         production: &[
-            ParseType::N(128),
+            ParseType::N(123),
             ParseType::N(2),
-            ParseType::N(80),
+            ParseType::N(75),
             ParseType::N(0),
         ],
     },
-    // 212 - AlwaysCombDeclarationList: Statement AlwaysCombDeclarationList;
+    // 204 - AlwaysCombDeclarationList: Statement AlwaysCombDeclarationList;
     Production {
         lhs: 2,
-        production: &[ParseType::N(2), ParseType::N(144)],
+        production: &[ParseType::N(2), ParseType::N(139)],
     },
-    // 213 - AlwaysCombDeclarationList: ;
+    // 205 - AlwaysCombDeclarationList: ;
     Production {
         lhs: 2,
         production: &[],
     },
-    // 214 - ModportDeclaration: Modport Identifier LBrace ModportList RBrace;
+    // 206 - ModportDeclaration: Modport Identifier LBrace ModportList RBrace;
     Production {
-        lhs: 95,
+        lhs: 89,
         production: &[
-            ParseType::N(128),
-            ParseType::N(97),
-            ParseType::N(80),
-            ParseType::N(62),
-            ParseType::N(94),
+            ParseType::N(123),
+            ParseType::N(91),
+            ParseType::N(75),
+            ParseType::N(57),
+            ParseType::N(88),
         ],
     },
-    // 215 - ModportList: ModportItem ModportListList /* Vec */ ModportListOpt /* Option */;
+    // 207 - ModportList: ModportItem ModportListList /* Vec */ ModportListOpt /* Option */;
     Production {
-        lhs: 97,
-        production: &[ParseType::N(99), ParseType::N(98), ParseType::N(96)],
+        lhs: 91,
+        production: &[ParseType::N(93), ParseType::N(92), ParseType::N(90)],
     },
-    // 216 - ModportListList: Comma ModportItem ModportListList;
+    // 208 - ModportListList: Comma ModportItem ModportListList;
     Production {
-        lhs: 98,
-        production: &[ParseType::N(98), ParseType::N(96), ParseType::N(30)],
+        lhs: 92,
+        production: &[ParseType::N(92), ParseType::N(90), ParseType::N(29)],
     },
-    // 217 - ModportListList: ;
+    // 209 - ModportListList: ;
     Production {
-        lhs: 98,
+        lhs: 92,
         production: &[],
     },
-    // 218 - ModportListOpt: Comma;
+    // 210 - ModportListOpt: Comma;
     Production {
-        lhs: 99,
-        production: &[ParseType::N(30)],
+        lhs: 93,
+        production: &[ParseType::N(29)],
     },
-    // 219 - ModportListOpt: ;
+    // 211 - ModportListOpt: ;
     Production {
-        lhs: 99,
+        lhs: 93,
         production: &[],
     },
-    // 220 - ModportItem: Identifier Colon Direction;
+    // 212 - ModportItem: Identifier Colon Direction;
     Production {
-        lhs: 96,
-        production: &[ParseType::N(39), ParseType::N(28), ParseType::N(62)],
+        lhs: 90,
+        production: &[ParseType::N(34), ParseType::N(27), ParseType::N(57)],
     },
 ];
 
@@ -3223,7 +3006,7 @@ where
     T: AsRef<Path>,
 {
     let mut llk_parser = LLKParser::new(
-        153,
+        148,
         LOOKAHEAD_AUTOMATA,
         PRODUCTIONS,
         TERMINAL_NAMES,

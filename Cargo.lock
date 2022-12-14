@@ -1445,6 +1445,7 @@ dependencies = [
  "miette",
  "parol",
  "parol_runtime",
+ "regex",
  "thiserror",
  "walkdir",
 ]

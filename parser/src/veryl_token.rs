@@ -1,4 +1,5 @@
 use crate::veryl_grammar_trait::*;
+use regex::Regex;
 
 #[derive(Debug, Clone)]
 pub struct OwnedToken {
@@ -24,15 +25,9 @@ macro_rules! token_with_comments {
         impl From<&$x> for VerylToken {
             fn from(x: &$x) -> Self {
                 let mut comments = Vec::new();
-                for x in &x.comments.comments_list {
-                    match &*x.comments_list_group {
-                        CommentsListGroup::CommentsListGroup0(x) => {
-                            comments.push(x.line_comment.line_comment.clone())
-                        }
-                        CommentsListGroup::CommentsListGroup1(x) => {
-                            comments.push(x.block_comment.block_comment.clone())
-                        }
-                    }
+                if let Some(ref x) = x.comments.comments_opt {
+                    let mut tokens = split_token(x.multi_comment.multi_comment.clone());
+                    comments.append(&mut tokens)
                 }
                 VerylToken {
                     token: x.$y.clone(),
@@ -43,42 +38,44 @@ macro_rules! token_with_comments {
     };
 }
 
-macro_rules! token_with_comment {
-    ($x:ident, $y:ident) => {
-        impl From<&$x> for VerylToken {
-            fn from(x: &$x) -> Self {
-                let mut comments = Vec::new();
-                if let Some(ref x) = x.comment.comment_opt {
-                    match &*x.comment_opt_group {
-                        CommentOptGroup::CommentOptGroup0(x) => {
-                            comments.push(x.line_comment.line_comment.clone())
-                        }
-                        CommentOptGroup::CommentOptGroup1(x) => {
-                            comments.push(x.block_comment.block_comment.clone())
-                        }
-                    }
-                }
-                VerylToken {
-                    token: x.$y.clone(),
-                    comments,
-                }
-            }
-        }
-    };
+fn split_token(token: OwnedToken) -> Vec<OwnedToken> {
+    let mut line = token.token.location.line;
+    let text = token.token.text();
+    let re = Regex::new(r"((?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))").unwrap();
+
+    let mut prev_pos = 0;
+    let mut ret = Vec::new();
+    for cap in re.captures_iter(text) {
+        let cap = cap.get(0).unwrap();
+        let pos = cap.start();
+        let length = cap.end() - pos;
+
+        line += text[prev_pos..pos].matches("\n").count();
+        prev_pos = pos;
+
+        let location = parol_runtime::lexer::location::Location::with(
+            line,
+            0, // column is not used
+            length,
+            0, // start_pos is not used
+            0, // pos is not used
+            token.token.location.file_name.clone(),
+        );
+
+        let text = String::from(&text[pos..pos + length]);
+        let token = parol_runtime::lexer::Token::with(text, 0, location);
+        let token = OwnedToken { token };
+        ret.push(token);
+    }
+    ret
 }
 
 impl From<&StartToken> for VerylToken {
     fn from(x: &StartToken) -> Self {
         let mut comments = Vec::new();
-        for x in &x.comments.comments_list {
-            match &*x.comments_list_group {
-                CommentsListGroup::CommentsListGroup0(x) => {
-                    comments.push(x.line_comment.line_comment.clone())
-                }
-                CommentsListGroup::CommentsListGroup1(x) => {
-                    comments.push(x.block_comment.block_comment.clone())
-                }
-            }
+        if let Some(ref x) = x.comments.comments_opt {
+            let mut tokens = split_token(x.multi_comment.multi_comment.clone());
+            comments.append(&mut tokens)
         }
         let location =
             parol_runtime::lexer::location::Location::with(1, 1, 0, 0, 0, std::path::Path::new(""));
@@ -101,7 +98,7 @@ token_with_comments!(StarToken, star);
 token_with_comments!(SlashToken, slash);
 token_with_comments!(ColonToken, colon);
 token_with_comments!(SemicolonToken, semicolon);
-token_with_comment!(CommaToken, comma);
+token_with_comments!(CommaToken, comma);
 token_with_comments!(LParenToken, l_paren);
 token_with_comments!(RParenToken, r_paren);
 token_with_comments!(LBracketToken, l_bracket);
@@ -118,7 +115,7 @@ token_with_comments!(AlwaysCombToken, always_underscore_comb);
 token_with_comments!(PosedgeToken, posedge);
 token_with_comments!(NegedgeToken, negedge);
 token_with_comments!(IfToken, r#if);
-token_with_comment!(ElseToken, r#else);
+token_with_comments!(ElseToken, r#else);
 token_with_comments!(ParameterToken, parameter);
 token_with_comments!(LocalparamToken, localparam);
 token_with_comments!(ModuleToken, module);
