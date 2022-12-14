@@ -106,7 +106,7 @@ impl LanguageServer for Backend {
 
                 let text_edit = TextEdit {
                     range: Range::new(Position::new(0, 0), Position::new(line, u32::MAX)),
-                    new_text: formatter.string,
+                    new_text: formatter.as_str().to_string(),
                 };
 
                 return Ok(Some(vec![text_edit]));

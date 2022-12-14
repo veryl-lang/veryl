@@ -32,7 +32,7 @@ fn main() -> Result<()> {
             let mut formatter = Formatter::new();
             if let Some(ref veryl) = veryl_grammar.veryl {
                 formatter.format(&veryl);
-                println!("{}", formatter.string);
+                println!("{}", formatter.as_str());
             }
             //println!("Success!\n{}", veryl_grammar);
             Ok(())

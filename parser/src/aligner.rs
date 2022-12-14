@@ -1,4 +1,5 @@
 use crate::veryl_grammar_trait::*;
+use crate::veryl_token::VerylToken;
 use crate::veryl_walker::VerylWalker;
 use std::collections::HashMap;
 
@@ -24,7 +25,7 @@ pub struct Align {
     max_width: usize,
     line: usize,
     rest: Vec<Location>,
-    pub widths: HashMap<Location, usize>,
+    widths: HashMap<Location, usize>,
 }
 
 impl Default for Align {
@@ -62,6 +63,7 @@ impl Align {
 pub struct Aligner {
     pub identifier: Align,
     pub r#type: Align,
+    pub widths: HashMap<Location, usize>,
 }
 
 impl Default for Aligner {
@@ -69,6 +71,7 @@ impl Default for Aligner {
         Self {
             identifier: Default::default(),
             r#type: Default::default(),
+            widths: HashMap::new(),
         }
     }
 }
@@ -81,11 +84,22 @@ impl Aligner {
     pub fn align(&mut self, input: &Veryl) {
         self.veryl(input);
         self.reset();
+        for (x, y) in &self.identifier.widths {
+            self.widths.insert(*x, *y);
+        }
+        for (x, y) in &self.r#type.widths {
+            self.widths.insert(*x, *y);
+        }
     }
 
     fn reset(&mut self) {
         self.identifier.reset();
         self.r#type.reset();
+    }
+
+    fn insert(&mut self, token: &VerylToken, width: usize) {
+        let loc: Location = (&token.token.token.location).into();
+        self.widths.insert(loc, width);
     }
 }
 
@@ -204,6 +218,14 @@ impl VerylWalker for Aligner {
     }
 
     fn with_parameter_item(&mut self, input: &WithParameterItem) {
+        match &*input.with_parameter_item_group {
+            WithParameterItemGroup::WithParameterItemGroup0(x) => {
+                self.insert(&x.parameter.parameter_token, 10);
+            }
+            WithParameterItemGroup::WithParameterItemGroup1(x) => {
+                self.insert(&x.localparam.localparam_token, 10);
+            }
+        }
         self.identifier(&input.identifier);
         self.r#type(&input.r#type);
     }
@@ -239,6 +261,7 @@ impl VerylWalker for Aligner {
 
     fn module_port_item(&mut self, input: &ModulePortItem) {
         self.identifier(&input.identifier);
+        self.direction(&input.direction);
         self.r#type(&input.r#type);
     }
 
@@ -252,7 +275,19 @@ impl VerylWalker for Aligner {
         }
     }
 
-    fn direction(&mut self, _input: &Direction) {}
+    fn direction(&mut self, input: &Direction) {
+        match input {
+            Direction::Direction0(x) => {
+                self.insert(&x.input.input_token, 6);
+            }
+            Direction::Direction1(x) => {
+                self.insert(&x.output.output_token, 6);
+            }
+            Direction::Direction2(x) => {
+                self.insert(&x.inout.inout_token, 6);
+            }
+        }
+    }
 
     // ----------------------------------------------------------------------------
     // Interface
@@ -290,11 +325,13 @@ impl VerylWalker for Aligner {
     }
 
     fn parameter_declaration(&mut self, input: &ParameterDeclaration) {
+        self.insert(&input.parameter.parameter_token, 10);
         self.identifier(&input.identifier);
         self.r#type(&input.r#type);
     }
 
     fn localparam_declaration(&mut self, input: &LocalparamDeclaration) {
+        self.insert(&input.localparam.localparam_token, 10);
         self.identifier(&input.identifier);
         self.r#type(&input.r#type);
     }

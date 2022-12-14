@@ -5,8 +5,8 @@ use crate::veryl_walker::VerylWalker;
 use parol_runtime::lexer::Token;
 
 pub struct Formatter {
-    pub string: String,
     pub indent_width: usize,
+    string: String,
     indent: usize,
     line: usize,
     aligner: Aligner,
@@ -34,15 +34,22 @@ impl Formatter {
         self.veryl(input);
     }
 
+    pub fn as_str(&self) -> &str {
+        &self.string
+    }
+
+    fn str(&mut self, x: &str) {
+        self.string.push_str(x);
+    }
+
     fn newline_push(&mut self) {
         if self.string.ends_with(" ") {
             self.string
                 .truncate(self.string.len() - self.indent * self.indent_width);
         }
-        self.string.push_str("\n");
+        self.str("\n");
         self.indent += 1;
-        self.string
-            .push_str(&" ".repeat(self.indent * self.indent_width));
+        self.str(&" ".repeat(self.indent * self.indent_width));
     }
 
     fn newline_pop(&mut self) {
@@ -50,10 +57,9 @@ impl Formatter {
             self.string
                 .truncate(self.string.len() - self.indent * self.indent_width);
         }
-        self.string.push_str("\n");
+        self.str("\n");
         self.indent -= 1;
-        self.string
-            .push_str(&" ".repeat(self.indent * self.indent_width));
+        self.str(&" ".repeat(self.indent * self.indent_width));
     }
 
     fn newline(&mut self) {
@@ -61,17 +67,12 @@ impl Formatter {
             self.string
                 .truncate(self.string.len() - self.indent * self.indent_width);
         }
-        self.string.push_str("\n");
-        self.string
-            .push_str(&" ".repeat(self.indent * self.indent_width));
+        self.str("\n");
+        self.str(&" ".repeat(self.indent * self.indent_width));
     }
 
     fn space(&mut self, repeat: usize) {
-        self.string.push_str(&" ".repeat(repeat));
-    }
-
-    fn str(&mut self, x: &str) {
-        self.string.push_str(x);
+        self.str(&" ".repeat(repeat));
     }
 
     fn parol_token(&mut self, x: &Token, adjust_line: bool) {
@@ -80,15 +81,21 @@ impl Formatter {
         }
         let text = x.text();
         if text.ends_with("\n") {
-            self.string.push_str(text.trim_end());
+            self.str(text.trim_end());
         } else {
-            self.string.push_str(text);
+            self.str(text);
         }
         self.line = x.location.line;
     }
 
-    fn process_token(&mut self, x: &VerylToken, will_push: bool) -> Location {
+    fn process_token(&mut self, x: &VerylToken, will_push: bool) {
         self.parol_token(&x.token.token, true);
+
+        let loc: Location = (&x.token.token.location).into();
+        if let Some(width) = self.aligner.widths.get(&loc) {
+            self.space(width - loc.length);
+        }
+
         if will_push {
             self.indent += 1;
         }
@@ -104,14 +111,13 @@ impl Formatter {
         if will_push {
             self.indent -= 1;
         }
-        (&x.token.token.location).into()
     }
 
-    fn token(&mut self, x: &VerylToken) -> Location {
+    fn token(&mut self, x: &VerylToken) {
         self.process_token(x, false)
     }
 
-    fn token_will_push(&mut self, x: &VerylToken) -> Location {
+    fn token_will_push(&mut self, x: &VerylToken) {
         self.process_token(x, true)
     }
 }
@@ -122,10 +128,7 @@ impl VerylWalker for Formatter {
     // ----------------------------------------------------------------------------
 
     fn identifier(&mut self, input: &Identifier) {
-        let loc = self.token(&input.identifier_token);
-        if let Some(width) = self.aligner.identifier.widths.get(&loc) {
-            self.space(width - loc.length);
-        }
+        self.token(&input.identifier_token);
     }
 
     // ----------------------------------------------------------------------------
@@ -319,7 +322,7 @@ impl VerylWalker for Formatter {
     // ----------------------------------------------------------------------------
 
     fn r#type(&mut self, input: &Type) {
-        let loc = match &*input.type_group {
+        match &*input.type_group {
             TypeGroup::TypeGroup0(x) => match &*x.builtin_type {
                 BuiltinType::BuiltinType0(x) => self.token(&x.logic.logic_token),
                 BuiltinType::BuiltinType1(x) => self.token(&x.bit.bit_token),
@@ -333,9 +336,6 @@ impl VerylWalker for Formatter {
             // This identifier should be treat as type not identifier
             TypeGroup::TypeGroup1(x) => self.token(&x.identifier.identifier_token),
         };
-        if let Some(width) = self.aligner.r#type.widths.get(&loc) {
-            self.space(width - loc.length);
-        }
         if !input.type_list.is_empty() {
             self.space(1);
         }
@@ -381,13 +381,12 @@ impl VerylWalker for Formatter {
         match &*input.with_parameter_item_group {
             WithParameterItemGroup::WithParameterItemGroup0(x) => {
                 self.token(&x.parameter.parameter_token);
-                self.space(2);
             }
             WithParameterItemGroup::WithParameterItemGroup1(x) => {
                 self.token(&x.localparam.localparam_token);
-                self.space(1);
             }
         }
+        self.space(1);
         self.identifier(&input.identifier);
         self.token(&input.colon.colon_token);
         self.space(1);
@@ -477,14 +476,12 @@ impl VerylWalker for Formatter {
         match input {
             Direction::Direction0(x) => {
                 self.token(&x.input.input_token);
-                self.space(1);
             }
             Direction::Direction1(x) => {
                 self.token(&x.output.output_token);
             }
             Direction::Direction2(x) => {
                 self.token(&x.inout.inout_token);
-                self.space(1);
             }
         }
     }
@@ -541,7 +538,7 @@ impl VerylWalker for Formatter {
 
     fn parameter_declaration(&mut self, input: &ParameterDeclaration) {
         self.token(&input.parameter.parameter_token);
-        self.space(2);
+        self.space(1);
         self.identifier(&input.identifier);
         self.token(&input.colon.colon_token);
         self.space(1);
