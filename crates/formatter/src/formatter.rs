@@ -1,8 +1,8 @@
 use crate::aligner::{Aligner, Location};
-use crate::veryl_grammar_trait::*;
-use crate::veryl_token::VerylToken;
-use crate::veryl_walker::VerylWalker;
-use parol_runtime::lexer::Token;
+use veryl_parser::veryl_grammar_trait::*;
+use veryl_parser::veryl_token::VerylToken;
+use veryl_parser::veryl_walker::VerylWalker;
+use veryl_parser::ParolToken;
 
 pub struct Formatter {
     pub indent_width: usize,
@@ -79,7 +79,7 @@ impl Formatter {
         self.str(&" ".repeat(repeat));
     }
 
-    fn parol_token(&mut self, x: &Token, adjust_line: bool) {
+    fn parol_token(&mut self, x: &ParolToken, adjust_line: bool) {
         if adjust_line && x.location.line - self.line > 1 {
             self.newline();
         }

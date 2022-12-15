@@ -1,6 +1,8 @@
 [workspace]
 members = [
-    "languageserver",
-    "parser",
+    "crates/formatter",
+    "crates/languageserver",
+    "crates/parser",
+    "crates/veryl",
 ]
 

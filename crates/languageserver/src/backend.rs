@@ -3,7 +3,7 @@ use ropey::Rope;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
-use veryl_parser::formatter::Formatter;
+use veryl_formatter::formatter::Formatter;
 use veryl_parser::veryl_grammar::VerylGrammar;
 use veryl_parser::veryl_grammar_trait::Veryl;
 use veryl_parser::veryl_parser::{miette, parse, ParserError};

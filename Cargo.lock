@@ -1427,6 +1427,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 
 [[package]]
+name = "veryl"
+version = "0.1.0"
+dependencies = [
+ "env_logger",
+ "parol_runtime",
+ "veryl-formatter",
+ "veryl-parser",
+]
+
+[[package]]
+name = "veryl-formatter"
+version = "0.1.0"
+dependencies = [
+ "veryl-parser",
+ "walkdir",
+]
+
+[[package]]
 name = "veryl-ls"
 version = "0.1.0"
 dependencies = [
@@ -1434,6 +1452,7 @@ dependencies = [
  "ropey",
  "tokio",
  "tower-lsp",
+ "veryl-formatter",
  "veryl-parser",
 ]
 
@@ -1441,12 +1460,9 @@ dependencies = [
 name = "veryl-parser"
 version = "0.1.0"
 dependencies = [
- "env_logger",
- "miette",
  "parol",
  "parol_runtime",
  "regex",
- "thiserror",
  "walkdir",
 ]
 

@@ -1,0 +1,12 @@
+[package]
+name = "veryl"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+env_logger      = "0.9.1"
+parol_runtime   = {version = "0.9.0", features = ["auto_generation"]}
+veryl-parser    = {version = "0.1.0", path = "../parser"}
+veryl-formatter = {version = "0.1.0", path = "../formatter"}

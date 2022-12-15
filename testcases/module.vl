@@ -1,18 +1,18 @@
 module a #(
-    parameter  a : u32 = 1,
-    localparam aa: u32 = 1,
+    parameter  a : u32  = 1,
+    localparam aa: u32  = 1,
 ) (
     a  : input  logic [10],
     aa : output logic [10],
     aaa: inout  logic [10],
 ) {
-    parameter  a : u32 = 1;
-    localparam aa: u64 = 1;
+    parameter  a : u32  = 1;
+    localparam aa: u64  = 1;
 
-    a   : logic ;
-    aa  : logic  [10];
+    a   : logic          ;
+    aa  : logic  [10]    ;
     aaa : bit    [10][10];
-    aaaa: type_t [10];
+    aaaa: type_t [10]    ;
 
     always_ff (posedge i_clk, negedge i_rst_n) {
         if a {

@@ -1,7 +1,8 @@
-use crate::veryl_grammar_trait::*;
-use crate::veryl_token::VerylToken;
-use crate::veryl_walker::VerylWalker;
 use std::collections::HashMap;
+use veryl_parser::veryl_grammar_trait::*;
+use veryl_parser::veryl_token::VerylToken;
+use veryl_parser::veryl_walker::VerylWalker;
+use veryl_parser::ParolLocation;
 
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Hash)]
 pub struct Location {
@@ -10,8 +11,8 @@ pub struct Location {
     pub length: usize,
 }
 
-impl From<&parol_runtime::lexer::Location> for Location {
-    fn from(x: &parol_runtime::lexer::Location) -> Self {
+impl From<&ParolLocation> for Location {
+    fn from(x: &ParolLocation) -> Self {
         Self {
             line: x.line,
             column: x.column,
@@ -20,8 +21,8 @@ impl From<&parol_runtime::lexer::Location> for Location {
     }
 }
 
-impl From<parol_runtime::lexer::Location> for Location {
-    fn from(x: parol_runtime::lexer::Location) -> Self {
+impl From<ParolLocation> for Location {
+    fn from(x: ParolLocation) -> Self {
         Self {
             line: x.line,
             column: x.column,
