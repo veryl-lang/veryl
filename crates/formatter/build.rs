@@ -15,10 +15,10 @@ fn main() {
         let entry = entry.unwrap();
         if entry.file_type().is_file() {
             let file = entry.path().file_stem().unwrap().to_string_lossy();
-            let _ = write!(out_test, "#[test]\n");
-            let _ = write!(out_test, "fn test_{}() {{\n", file);
-            let _ = write!(out_test, "    test(\"{}\");\n", file);
-            let _ = write!(out_test, "}}\n");
+            let _ = writeln!(out_test, "#[test]");
+            let _ = writeln!(out_test, "fn test_{}() {{", file);
+            let _ = writeln!(out_test, "    test(\"{}\");", file);
+            let _ = writeln!(out_test, "}}");
         }
     }
 }

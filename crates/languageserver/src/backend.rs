@@ -108,7 +108,7 @@ impl Backend {
         } else if text.contains("LBracket0Minus") {
             String::from("Unexpected token: Number")
         } else {
-            text.replace("LA(1) (", "").replace(")", "").to_string()
+            text.replace("LA(1) (", "").replace(')', "")
         }
     }
 }

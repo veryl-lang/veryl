@@ -50,7 +50,7 @@ fn split_comment_token(token: OwnedToken) -> Vec<OwnedToken> {
         let pos = cap.start();
         let length = cap.end() - pos;
 
-        line += text[prev_pos..pos].matches("\n").count();
+        line += text[prev_pos..pos].matches('\n').count();
         prev_pos = pos;
 
         let location = parol_runtime::lexer::location::Location::with(

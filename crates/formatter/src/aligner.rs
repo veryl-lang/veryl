@@ -31,6 +31,7 @@ impl From<ParolLocation> for Location {
     }
 }
 
+#[derive(Default)]
 pub struct Align {
     index: usize,
     max_width: usize,
@@ -39,20 +40,6 @@ pub struct Align {
     rest: Vec<(Location, usize)>,
     additions: HashMap<Location, usize>,
     last_token: Option<VerylToken>,
-}
-
-impl Default for Align {
-    fn default() -> Self {
-        Self {
-            index: 0,
-            max_width: 0,
-            width: 0,
-            line: 0,
-            rest: Vec::new(),
-            additions: HashMap::new(),
-            last_token: None,
-        }
-    }
 }
 
 impl Align {
@@ -106,18 +93,10 @@ mod align_kind {
     pub const WIDTH: usize = 3;
 }
 
+#[derive(Default)]
 pub struct Aligner {
     pub additions: HashMap<Location, usize>,
     aligns: [Align; 4],
-}
-
-impl Default for Aligner {
-    fn default() -> Self {
-        Self {
-            additions: HashMap::new(),
-            aligns: Default::default(),
-        }
-    }
 }
 
 impl Aligner {
@@ -336,12 +315,12 @@ impl VerylWalker for Aligner {
             TypeGroup::TypeGroup1(x) => &x.identifier.identifier_token,
         };
         self.aligns[align_kind::TYPE].start_item();
-        self.aligns[align_kind::TYPE].token(&token);
+        self.aligns[align_kind::TYPE].token(token);
         self.aligns[align_kind::TYPE].finish_item();
 
         if input.type_list.is_empty() {
             self.aligns[align_kind::WIDTH].start_item();
-            self.aligns[align_kind::WIDTH].dummy_token(&token);
+            self.aligns[align_kind::WIDTH].dummy_token(token);
             self.aligns[align_kind::WIDTH].finish_item();
         } else {
             self.aligns[align_kind::WIDTH].start_item();

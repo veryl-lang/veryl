@@ -47,7 +47,7 @@ impl Formatter {
     }
 
     fn newline_push(&mut self) {
-        if self.string.ends_with(" ") {
+        if self.string.ends_with(' ') {
             self.string
                 .truncate(self.string.len() - self.indent * self.indent_width);
         }
@@ -57,7 +57,7 @@ impl Formatter {
     }
 
     fn newline_pop(&mut self) {
-        if self.string.ends_with(" ") {
+        if self.string.ends_with(' ') {
             self.string
                 .truncate(self.string.len() - self.indent * self.indent_width);
         }
@@ -67,7 +67,7 @@ impl Formatter {
     }
 
     fn newline(&mut self) {
-        if self.string.ends_with(" ") {
+        if self.string.ends_with(' ') {
             self.string
                 .truncate(self.string.len() - self.indent * self.indent_width);
         }
@@ -84,12 +84,12 @@ impl Formatter {
             self.newline();
         }
         let text = x.text();
-        let text = if text.ends_with("\n") {
+        let text = if text.ends_with('\n') {
             text.trim_end()
         } else {
             text
         };
-        self.last_newline = text.matches("\n").count();
+        self.last_newline = text.matches('\n').count();
         self.str(text);
         self.line = x.location.line;
     }

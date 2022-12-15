@@ -36,7 +36,7 @@ pub fn format(opt: &Fmt) -> Result<bool> {
         let mut formatter = Formatter::new();
 
         if let Some(ref veryl) = veryl_grammar.veryl {
-            formatter.format(&veryl);
+            formatter.format(veryl);
 
             let pass = input.as_str() == formatter.as_str();
 
