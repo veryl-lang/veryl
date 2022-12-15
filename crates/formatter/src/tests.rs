@@ -9,10 +9,18 @@ mod formatter {
         let input = fs::read_to_string(&file).unwrap();
         let original = input.clone();
 
-        let input = input.replace(" ", "");
+        // minify without lines which contain line comment
+        let mut minified = String::new();
+        for line in input.lines() {
+            if line.contains("//") {
+                minified.push_str(&format!("{}\n", line));
+            } else {
+                minified.push_str(&format!("{}\n", line.replace(' ', "")));
+            }
+        }
 
         let mut grammar = VerylGrammar::new();
-        let _ = parse(&input, &file, &mut grammar);
+        let _ = parse(&minified, &file, &mut grammar);
         let veryl = grammar.veryl.unwrap();
         let mut formatter = Formatter::new();
 

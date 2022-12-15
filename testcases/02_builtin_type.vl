@@ -1,0 +1,31 @@
+module A {
+    // unsigned integer
+    a: u32 ;
+    a: u64 ;
+
+    // signed integer
+    a: i32 ;
+    a: i64 ;
+
+    // floating point
+    a: f32 ;
+    a: f64 ;
+
+    // 4 state (01xz) type
+    a: logic         ;
+    a: logic [10]    ;
+    a: logic [10][10];
+
+    // 2 state (01) type
+    a: bit         ;
+    a: bit [10]    ;
+    a: bit [10][10];
+
+    // array
+    a: u32 [10];
+    a: u64 [10];
+    a: i32 [10];
+    a: i64 [10];
+    a: f32 [10];
+    a: f64 [10];
+}

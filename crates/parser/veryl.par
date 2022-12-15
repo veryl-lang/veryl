@@ -20,97 +20,107 @@ StartToken: Comments;
 Start     : StartToken: VerylToken;
 
 // Number
+ExponentToken    : /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/: OwnedToken Comments;
+FixedPointToken  : /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/: OwnedToken Comments;
 BasedBinaryToken : /[0-9]+(?:_[0-9]+)*'b[0-1xzXZ]+(?:_[0-1xzXZ]+)*/: OwnedToken Comments;
 BasedOctalToken  : /[0-9]+(?:_[0-9]+)*'o[0-7xzXZ]+(?:_[0-7xzXZ]+)*/: OwnedToken Comments;
 BasedDecimalToken: /[0-9]+(?:_[0-9]+)*'d[0-9]+(?:_[0-9]+)*/: OwnedToken Comments;
 BasedHexToken    : /[0-9]+(?:_[0-9]+)*'h[0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/: OwnedToken Comments;
 BaseLessToken    : /[0-9]+(?:_[0-9]+)*/: OwnedToken Comments;
+AllBitToken      : /'[01]/: OwnedToken Comments;
 
+Exponent    : ExponentToken    : VerylToken;
+FixedPoint  : FixedPointToken  : VerylToken;
 BasedBinary : BasedBinaryToken : VerylToken;
 BasedOctal  : BasedOctalToken  : VerylToken;
 BasedDecimal: BasedDecimalToken: VerylToken;
 BasedHex    : BasedHexToken    : VerylToken;
 BaseLess    : BaseLessToken    : VerylToken;
+AllBit      : AllBitToken      : VerylToken;
 
 // Symbol
-PlusToken     : '+': OwnedToken Comments;
-MinusToken    : '-': OwnedToken Comments;
-StarToken     : '*': OwnedToken Comments;
-SlashToken    : '/': OwnedToken Comments;
 ColonToken    : ':': OwnedToken Comments;
-SemicolonToken: ';': OwnedToken Comments;
 CommaToken    : ',': OwnedToken Comments;
-LParenToken   : '(': OwnedToken Comments;
-RParenToken   : ')': OwnedToken Comments;
-LBracketToken : '[': OwnedToken Comments;
-RBracketToken : ']': OwnedToken Comments;
-LBraceToken   : '{': OwnedToken Comments;
-RBraceToken   : '}': OwnedToken Comments;
 EquToken      : '=': OwnedToken Comments;
 HashToken     : '#': OwnedToken Comments;
+LBraceToken   : '{': OwnedToken Comments;
+LBracketToken : '[': OwnedToken Comments;
+LParenToken   : '(': OwnedToken Comments;
+MinusToken    : '-': OwnedToken Comments;
+PercentToken  : '%': OwnedToken Comments;
+PlusToken     : '+': OwnedToken Comments;
+RBraceToken   : '}': OwnedToken Comments;
+RBracketToken : ']': OwnedToken Comments;
+RParenToken   : ')': OwnedToken Comments;
+SemicolonToken: ';': OwnedToken Comments;
+SlashToken    : '/': OwnedToken Comments;
+StarToken     : '*': OwnedToken Comments;
 
-Plus     : PlusToken     : VerylToken;
-Minus    : MinusToken    : VerylToken;
-Star     : StarToken     : VerylToken;
-Slash    : SlashToken    : VerylToken;
 Colon    : ColonToken    : VerylToken;
-Semicolon: SemicolonToken: VerylToken;
 Comma    : CommaToken    : VerylToken;
-LParen   : LParenToken   : VerylToken;
-RParen   : RParenToken   : VerylToken;
-LBracket : LBracketToken : VerylToken;
-RBracket : RBracketToken : VerylToken;
-LBrace   : LBraceToken   : VerylToken;
-RBrace   : RBraceToken   : VerylToken;
 Equ      : EquToken      : VerylToken;
 Hash     : HashToken     : VerylToken;
+LBrace   : LBraceToken   : VerylToken;
+LBracket : LBracketToken : VerylToken;
+LParen   : LParenToken   : VerylToken;
+Minus    : MinusToken    : VerylToken;
+Percent  : PercentToken  : VerylToken;
+Plus     : PlusToken     : VerylToken;
+RBrace   : RBraceToken   : VerylToken;
+RBracket : RBracketToken : VerylToken;
+RParen   : RParenToken   : VerylToken;
+Semicolon: SemicolonToken: VerylToken;
+Slash    : SlashToken    : VerylToken;
+Star     : StarToken     : VerylToken;
 
 // Keyword
-LogicToken     : 'logic'      : OwnedToken Comments;
-BitToken       : 'bit'        : OwnedToken Comments;
-AlwaysFfToken  : 'always_ff'  : OwnedToken Comments;
 AlwaysCombToken: 'always_comb': OwnedToken Comments;
-PosedgeToken   : 'posedge'    : OwnedToken Comments;
-NegedgeToken   : 'negedge'    : OwnedToken Comments;
-IfToken        : 'if'         : OwnedToken Comments;
+AlwaysFfToken  : 'always_ff'  : OwnedToken Comments;
+AssignToken    : 'assign'     : OwnedToken Comments;
+BitToken       : 'bit'        : OwnedToken Comments;
 ElseToken      : 'else'       : OwnedToken Comments;
-ParameterToken : 'parameter'  : OwnedToken Comments;
-LocalparamToken: 'localparam' : OwnedToken Comments;
-ModuleToken    : 'module'     : OwnedToken Comments;
-InterfaceToken : 'interface'  : OwnedToken Comments;
-InputToken     : 'input'      : OwnedToken Comments;
-OutputToken    : 'output'     : OwnedToken Comments;
-InoutToken     : 'inout'      : OwnedToken Comments;
-ModportToken   : 'modport'    : OwnedToken Comments;
-U32Token       : 'u32'        : OwnedToken Comments;
-U64Token       : 'u64'        : OwnedToken Comments;
-I32Token       : 'i32'        : OwnedToken Comments;
-I64Token       : 'i64'        : OwnedToken Comments;
 F32Token       : 'f32'        : OwnedToken Comments;
 F64Token       : 'f64'        : OwnedToken Comments;
+I32Token       : 'i32'        : OwnedToken Comments;
+I64Token       : 'i64'        : OwnedToken Comments;
+IfToken        : 'if'         : OwnedToken Comments;
+InoutToken     : 'inout'      : OwnedToken Comments;
+InputToken     : 'input'      : OwnedToken Comments;
+InterfaceToken : 'interface'  : OwnedToken Comments;
+LocalparamToken: 'localparam' : OwnedToken Comments;
+LogicToken     : 'logic'      : OwnedToken Comments;
+ModportToken   : 'modport'    : OwnedToken Comments;
+ModuleToken    : 'module'     : OwnedToken Comments;
+NegedgeToken   : 'negedge'    : OwnedToken Comments;
+OutputToken    : 'output'     : OwnedToken Comments;
+ParameterToken : 'parameter'  : OwnedToken Comments;
+PosedgeToken   : 'posedge'    : OwnedToken Comments;
+U32Token       : 'u32'        : OwnedToken Comments;
+U64Token       : 'u64'        : OwnedToken Comments;
 
-Logic     : LogicToken     : VerylToken;
-Bit       : BitToken       : VerylToken;
-AlwaysFf  : AlwaysFfToken  : VerylToken;
 AlwaysComb: AlwaysCombToken: VerylToken;
-Posedge   : PosedgeToken   : VerylToken;
-Negedge   : NegedgeToken   : VerylToken;
-If        : IfToken        : VerylToken;
+AlwaysFf  : AlwaysFfToken  : VerylToken;
+Assign    : AssignToken    : VerylToken;
+Bit       : BitToken       : VerylToken;
 Else      : ElseToken      : VerylToken;
-Parameter : ParameterToken : VerylToken;
-Localparam: LocalparamToken: VerylToken;
-Module    : ModuleToken    : VerylToken;
-Interface : InterfaceToken : VerylToken;
-Input     : InputToken     : VerylToken;
-Output    : OutputToken    : VerylToken;
-Inout     : InoutToken     : VerylToken;
-Modport   : ModportToken   : VerylToken;
-U32       : U32Token       : VerylToken;
-U64       : U64Token       : VerylToken;
-I32       : I32Token       : VerylToken;
-I64       : I64Token       : VerylToken;
 F32       : F32Token       : VerylToken;
 F64       : F64Token       : VerylToken;
+I32       : I32Token       : VerylToken;
+I64       : I64Token       : VerylToken;
+If        : IfToken        : VerylToken;
+Inout     : InoutToken     : VerylToken;
+Input     : InputToken     : VerylToken;
+Interface : InterfaceToken : VerylToken;
+Localparam: LocalparamToken: VerylToken;
+Logic     : LogicToken     : VerylToken;
+Modport   : ModportToken   : VerylToken;
+Module    : ModuleToken    : VerylToken;
+Negedge   : NegedgeToken   : VerylToken;
+Output    : OutputToken    : VerylToken;
+Parameter : ParameterToken : VerylToken;
+Posedge   : PosedgeToken   : VerylToken;
+U32       : U32Token       : VerylToken;
+U64       : U64Token       : VerylToken;
 
 // Identifier
 IdentifierToken: /[a-zA-Z_][0-9a-zA-Z_]*/: OwnedToken Comments;
@@ -135,7 +145,7 @@ Description: ModuleDeclaration
 // ----------------------------------------------------------------------------
 
 Number: IntegralNumber
-//      | RealNumber
+      | RealNumber
       ;
 
 IntegralNumber: BasedBinary
@@ -143,19 +153,26 @@ IntegralNumber: BasedBinary
               | BasedDecimal
               | BasedHex
               | BaseLess
+              | AllBit
               ;
+
+RealNumber: FixedPoint
+          | Exponent
+          ;
 
 // ----------------------------------------------------------------------------
 // Expression
 // ----------------------------------------------------------------------------
 
 OperatorPrecedence1: Plus | Minus;
-OperatorPrecedence2: Star | Slash;
+OperatorPrecedence2: Star | Slash | Percent;
+OperatorPrecedence3: Plus | Minus;
 
 Expression : Expression0;
 Expression0: Expression1 { OperatorPrecedence1 Expression1 };
 Expression1: Expression2 { OperatorPrecedence2 Expression2 };
-Expression2: Factor;
+Expression2: [ OperatorPrecedence3 ] Expression3;
+Expression3: Factor;
 
 Factor: Number
       | Identifier { Range }
@@ -225,6 +242,7 @@ ModuleItem: VariableDeclaration
           | LocalparamDeclaration
           | AlwaysFfDeclaration
           | AlwaysCombDeclaration
+          | AssignDeclaration
           ;
 
 // ----------------------------------------------------------------------------
@@ -256,6 +274,8 @@ AlwaysFfConditions: AlwaysFfCondition { Comma AlwaysFfCondition } [ Comma ];
 AlwaysFfCondition: ( Posedge | Negedge ) Identifier;
 
 AlwaysCombDeclaration: AlwaysComb LBrace { Statement } RBrace;
+
+AssignDeclaration: Assign Identifier [ Colon Type ] Equ Expression Semicolon;
 
 ModportDeclaration: Modport Identifier LBrace ModportList RBrace;
 

@@ -14,7 +14,7 @@ syn keyword verylStatement module interface function modport
 syn keyword verylStatement parameter localparam
 syn keyword verylStatement enum struct
 syn keyword verylStatement posedge negedge
-syn keyword verylStatement always_ff always_comb
+syn keyword verylStatement always_ff always_comb assign
 syn keyword verylStatement input output inout
 syn keyword verylStatement logic bit
 syn keyword verylStatement u32 u64 i32 i64 f32 f64

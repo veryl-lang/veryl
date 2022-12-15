@@ -37,6 +37,8 @@ pub trait VerylWalker {
 
     fn expression2(&mut self, input: &Expression2);
 
+    fn expression3(&mut self, input: &Expression3);
+
     fn factor(&mut self, input: &Factor);
 
     // ----------------------------------------------------------------------------
@@ -114,6 +116,8 @@ pub trait VerylWalker {
     fn always_ff_condition(&mut self, input: &AlwaysFfCondition);
 
     fn always_comb_declaration(&mut self, input: &AlwaysCombDeclaration);
+
+    fn assign_declaration(&mut self, input: &AssignDeclaration);
 
     fn modport_declaration(&mut self, input: &ModportDeclaration);
 

@@ -169,12 +169,19 @@ impl VerylWalker for Aligner {
     // ----------------------------------------------------------------------------
 
     fn number(&mut self, input: &Number) {
-        let token = match &*input.integral_number {
-            IntegralNumber::IntegralNumber0(x) => &x.based_binary.based_binary_token,
-            IntegralNumber::IntegralNumber1(x) => &x.based_octal.based_octal_token,
-            IntegralNumber::IntegralNumber2(x) => &x.based_decimal.based_decimal_token,
-            IntegralNumber::IntegralNumber3(x) => &x.based_hex.based_hex_token,
-            IntegralNumber::IntegralNumber4(x) => &x.base_less.base_less_token,
+        let token = match input {
+            Number::Number0(x) => match &*x.integral_number {
+                IntegralNumber::IntegralNumber0(x) => &x.based_binary.based_binary_token,
+                IntegralNumber::IntegralNumber1(x) => &x.based_octal.based_octal_token,
+                IntegralNumber::IntegralNumber2(x) => &x.based_decimal.based_decimal_token,
+                IntegralNumber::IntegralNumber3(x) => &x.based_hex.based_hex_token,
+                IntegralNumber::IntegralNumber4(x) => &x.base_less.base_less_token,
+                IntegralNumber::IntegralNumber5(x) => &x.all_bit.all_bit_token,
+            },
+            Number::Number1(x) => match &*x.real_number {
+                RealNumber::RealNumber0(x) => &x.fixed_point.fixed_point_token,
+                RealNumber::RealNumber1(x) => &x.exponent.exponent_token,
+            },
         };
         self.aligns[align_kind::EXPRESSION].token(token);
         self.aligns[align_kind::WIDTH].token(token);
@@ -193,16 +200,12 @@ impl VerylWalker for Aligner {
         for x in &input.expression0_list {
             self.aligns[align_kind::EXPRESSION].space(1);
             self.aligns[align_kind::WIDTH].space(1);
-            match &*x.operator_precedence1 {
-                OperatorPrecedence1::OperatorPrecedence10(x) => {
-                    self.aligns[align_kind::EXPRESSION].token(&x.plus.plus_token);
-                    self.aligns[align_kind::WIDTH].token(&x.plus.plus_token)
-                }
-                OperatorPrecedence1::OperatorPrecedence11(x) => {
-                    self.aligns[align_kind::EXPRESSION].token(&x.minus.minus_token);
-                    self.aligns[align_kind::WIDTH].token(&x.minus.minus_token)
-                }
+            let token = match &*x.operator_precedence1 {
+                OperatorPrecedence1::OperatorPrecedence10(x) => &x.plus.plus_token,
+                OperatorPrecedence1::OperatorPrecedence11(x) => &x.minus.minus_token,
             };
+            self.aligns[align_kind::EXPRESSION].token(token);
+            self.aligns[align_kind::WIDTH].token(token);
             self.aligns[align_kind::EXPRESSION].space(1);
             self.aligns[align_kind::WIDTH].space(1);
             self.expression1(&x.expression1);
@@ -214,16 +217,13 @@ impl VerylWalker for Aligner {
         for x in &input.expression1_list {
             self.aligns[align_kind::EXPRESSION].space(1);
             self.aligns[align_kind::WIDTH].space(1);
-            match &*x.operator_precedence2 {
-                OperatorPrecedence2::OperatorPrecedence20(x) => {
-                    self.aligns[align_kind::EXPRESSION].token(&x.star.star_token);
-                    self.aligns[align_kind::WIDTH].token(&x.star.star_token)
-                }
-                OperatorPrecedence2::OperatorPrecedence21(x) => {
-                    self.aligns[align_kind::EXPRESSION].token(&x.slash.slash_token);
-                    self.aligns[align_kind::WIDTH].token(&x.slash.slash_token)
-                }
+            let token = match &*x.operator_precedence2 {
+                OperatorPrecedence2::OperatorPrecedence20(x) => &x.star.star_token,
+                OperatorPrecedence2::OperatorPrecedence21(x) => &x.slash.slash_token,
+                OperatorPrecedence2::OperatorPrecedence22(x) => &x.percent.percent_token,
             };
+            self.aligns[align_kind::EXPRESSION].token(token);
+            self.aligns[align_kind::WIDTH].token(token);
             self.aligns[align_kind::EXPRESSION].space(1);
             self.aligns[align_kind::WIDTH].space(1);
             self.expression2(&x.expression2);
@@ -231,6 +231,18 @@ impl VerylWalker for Aligner {
     }
 
     fn expression2(&mut self, input: &Expression2) {
+        if let Some(ref x) = input.expression2_opt {
+            let token = match &*x.operator_precedence3 {
+                OperatorPrecedence3::OperatorPrecedence30(x) => &x.plus.plus_token,
+                OperatorPrecedence3::OperatorPrecedence31(x) => &x.minus.minus_token,
+            };
+            self.aligns[align_kind::EXPRESSION].token(token);
+            self.aligns[align_kind::WIDTH].token(token);
+        }
+        self.expression3(&input.expression3);
+    }
+
+    fn expression3(&mut self, input: &Expression3) {
         self.factor(&input.factor);
     }
 
@@ -404,6 +416,7 @@ impl VerylWalker for Aligner {
             ModuleItem::ModuleItem2(x) => self.localparam_declaration(&x.localparam_declaration),
             ModuleItem::ModuleItem3(x) => self.always_ff_declaration(&x.always_ff_declaration),
             ModuleItem::ModuleItem4(x) => self.always_comb_declaration(&x.always_comb_declaration),
+            ModuleItem::ModuleItem5(x) => self.assign_declaration(&x.assign_declaration),
         }
     }
 
@@ -475,6 +488,14 @@ impl VerylWalker for Aligner {
         for x in &input.always_comb_declaration_list {
             self.statement(&x.statement);
         }
+    }
+
+    fn assign_declaration(&mut self, input: &AssignDeclaration) {
+        self.identifier(&input.identifier);
+        if let Some(ref x) = input.assign_declaration_opt {
+            self.r#type(&x.r#type);
+        }
+        self.expression(&input.expression);
     }
 
     fn modport_declaration(&mut self, input: &ModportDeclaration) {
