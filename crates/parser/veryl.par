@@ -38,40 +38,61 @@ BasedHex    : BasedHexToken    : VerylToken;
 BaseLess    : BaseLessToken    : VerylToken;
 AllBit      : AllBitToken      : VerylToken;
 
-// Symbol
-ColonToken    : ':': OwnedToken Comments;
-CommaToken    : ',': OwnedToken Comments;
-EquToken      : '=': OwnedToken Comments;
-HashToken     : '#': OwnedToken Comments;
-LBraceToken   : '{': OwnedToken Comments;
-LBracketToken : '[': OwnedToken Comments;
-LParenToken   : '(': OwnedToken Comments;
-MinusToken    : '-': OwnedToken Comments;
-PercentToken  : '%': OwnedToken Comments;
-PlusToken     : '+': OwnedToken Comments;
-RBraceToken   : '}': OwnedToken Comments;
-RBracketToken : ']': OwnedToken Comments;
-RParenToken   : ')': OwnedToken Comments;
-SemicolonToken: ';': OwnedToken Comments;
-SlashToken    : '/': OwnedToken Comments;
-StarToken     : '*': OwnedToken Comments;
+// Double Symbol
+CircumflexTildeToken: '^~': OwnedToken Comments;
+TildeAmpToken       : '~&': OwnedToken Comments;
+TildeCircumflexToken: '~^': OwnedToken Comments;
+TildeOrToken        : '~|': OwnedToken Comments;
 
-Colon    : ColonToken    : VerylToken;
-Comma    : CommaToken    : VerylToken;
-Equ      : EquToken      : VerylToken;
-Hash     : HashToken     : VerylToken;
-LBrace   : LBraceToken   : VerylToken;
-LBracket : LBracketToken : VerylToken;
-LParen   : LParenToken   : VerylToken;
-Minus    : MinusToken    : VerylToken;
-Percent  : PercentToken  : VerylToken;
-Plus     : PlusToken     : VerylToken;
-RBrace   : RBraceToken   : VerylToken;
-RBracket : RBracketToken : VerylToken;
-RParen   : RParenToken   : VerylToken;
-Semicolon: SemicolonToken: VerylToken;
-Slash    : SlashToken    : VerylToken;
-Star     : StarToken     : VerylToken;
+CircumflexTilde: CircumflexTildeToken: VerylToken;
+TildeAmp       : TildeAmpToken       : VerylToken;
+TildeCircumflex: TildeCircumflexToken: VerylToken;
+TildeOr        : TildeOrToken        : VerylToken;
+
+// Single Symbol
+AmpToken       : '&': OwnedToken Comments;
+BangToken      : '!': OwnedToken Comments;
+CircumflexToken: '^': OwnedToken Comments;
+ColonToken     : ':': OwnedToken Comments;
+CommaToken     : ',': OwnedToken Comments;
+EquToken       : '=': OwnedToken Comments;
+HashToken      : '#': OwnedToken Comments;
+LBraceToken    : '{': OwnedToken Comments;
+LBracketToken  : '[': OwnedToken Comments;
+LParenToken    : '(': OwnedToken Comments;
+MinusToken     : '-': OwnedToken Comments;
+OrToken        : '|': OwnedToken Comments;
+PercentToken   : '%': OwnedToken Comments;
+PlusToken      : '+': OwnedToken Comments;
+RBraceToken    : '}': OwnedToken Comments;
+RBracketToken  : ']': OwnedToken Comments;
+RParenToken    : ')': OwnedToken Comments;
+SemicolonToken : ';': OwnedToken Comments;
+SlashToken     : '/': OwnedToken Comments;
+StarToken      : '*': OwnedToken Comments;
+TildeToken     : '~': OwnedToken Comments;
+
+Amp       : AmpToken       : VerylToken;
+Bang      : BangToken      : VerylToken;
+Circumflex: CircumflexToken: VerylToken;
+Colon     : ColonToken     : VerylToken;
+Comma     : CommaToken     : VerylToken;
+Equ       : EquToken       : VerylToken;
+Hash      : HashToken      : VerylToken;
+LBrace    : LBraceToken    : VerylToken;
+LBracket  : LBracketToken  : VerylToken;
+LParen    : LParenToken    : VerylToken;
+Minus     : MinusToken     : VerylToken;
+Or        : OrToken        : VerylToken;
+Percent   : PercentToken   : VerylToken;
+Plus      : PlusToken      : VerylToken;
+RBrace    : RBraceToken    : VerylToken;
+RBracket  : RBracketToken  : VerylToken;
+RParen    : RParenToken    : VerylToken;
+Semicolon : SemicolonToken : VerylToken;
+Slash     : SlashToken     : VerylToken;
+Star      : StarToken      : VerylToken;
+Tilde     : TildeToken     : VerylToken;
 
 // Keyword
 AlwaysCombToken: 'always_comb': OwnedToken Comments;
@@ -166,7 +187,7 @@ RealNumber: FixedPoint
 
 OperatorPrecedence1: Plus | Minus;
 OperatorPrecedence2: Star | Slash | Percent;
-OperatorPrecedence3: Plus | Minus;
+OperatorPrecedence3: Plus | Minus | Bang | Tilde | Amp | Or | Circumflex | TildeAmp | TildeOr | TildeCircumflex | CircumflexTilde;
 
 Expression : Expression0;
 Expression0: Expression1 { OperatorPrecedence1 Expression1 };

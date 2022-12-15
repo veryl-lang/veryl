@@ -95,14 +95,23 @@ token_with_comments!(BasedHexToken, l_bracket0_minus9_r_bracket_plus_l_paren_que
 token_with_comments!(BaseLessToken, l_bracket0_minus9_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9_r_bracket_plus_r_paren_star);
 token_with_comments!(AllBitToken, tick_l_bracket01_r_bracket);
 
+token_with_comments!(CircumflexTildeToken, circumflex_tilde);
+token_with_comments!(TildeAmpToken, tilde_amp);
+token_with_comments!(TildeCircumflexToken, tilde_circumflex);
+token_with_comments!(TildeOrToken, tilde_or);
+
+token_with_comments!(AmpToken, amp);
+token_with_comments!(BangToken, bang);
 token_with_comments!(ColonToken, colon);
 token_with_comments!(CommaToken, comma);
+token_with_comments!(CircumflexToken, circumflex);
 token_with_comments!(EquToken, equ);
 token_with_comments!(HashToken, hash);
 token_with_comments!(LBraceToken, l_brace);
 token_with_comments!(LBracketToken, l_bracket);
 token_with_comments!(LParenToken, l_paren);
 token_with_comments!(MinusToken, minus);
+token_with_comments!(OrToken, or);
 token_with_comments!(PercentToken, percent);
 token_with_comments!(PlusToken, plus);
 token_with_comments!(RBraceToken, r_brace);
@@ -111,6 +120,7 @@ token_with_comments!(RParenToken, r_paren);
 token_with_comments!(SemicolonToken, semicolon);
 token_with_comments!(SlashToken, slash);
 token_with_comments!(StarToken, star);
+token_with_comments!(TildeToken, tilde);
 
 token_with_comments!(AlwaysCombToken, always_underscore_comb);
 token_with_comments!(AlwaysFfToken, always_underscore_ff);

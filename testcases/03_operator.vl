@@ -2,6 +2,15 @@ module A {
     // priority 0: unary
     assign a = +1;
     assign a = -1;
+    assign a = !1;
+    assign a = ~1;
+    assign a = &1;
+    assign a = |1;
+    assign a = ^1;
+    assign a = ~&1;
+    assign a = ~|1;
+    assign a = ~^1;
+    assign a = ^~1;
 
     // priority 1: power
 

@@ -235,6 +235,19 @@ impl VerylWalker for Aligner {
             let token = match &*x.operator_precedence3 {
                 OperatorPrecedence3::OperatorPrecedence30(x) => &x.plus.plus_token,
                 OperatorPrecedence3::OperatorPrecedence31(x) => &x.minus.minus_token,
+                OperatorPrecedence3::OperatorPrecedence32(x) => &x.bang.bang_token,
+                OperatorPrecedence3::OperatorPrecedence33(x) => &x.tilde.tilde_token,
+                OperatorPrecedence3::OperatorPrecedence34(x) => &x.amp.amp_token,
+                OperatorPrecedence3::OperatorPrecedence35(x) => &x.or.or_token,
+                OperatorPrecedence3::OperatorPrecedence36(x) => &x.circumflex.circumflex_token,
+                OperatorPrecedence3::OperatorPrecedence37(x) => &x.tilde_amp.tilde_amp_token,
+                OperatorPrecedence3::OperatorPrecedence38(x) => &x.tilde_or.tilde_or_token,
+                OperatorPrecedence3::OperatorPrecedence39(x) => {
+                    &x.tilde_circumflex.tilde_circumflex_token
+                }
+                OperatorPrecedence3::OperatorPrecedence310(x) => {
+                    &x.circumflex_tilde.circumflex_tilde_token
+                }
             };
             self.aligns[align_kind::EXPRESSION].token(token);
             self.aligns[align_kind::WIDTH].token(token);
