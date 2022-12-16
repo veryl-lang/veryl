@@ -223,35 +223,16 @@ RealNumber: FixedPoint
 // Expression
 // ----------------------------------------------------------------------------
 
-// Operator Precedence
-// Highest 12 --- 01 Lowest
-OperatorPrecedence01: OrOr;
-OperatorPrecedence02: AmpAmp;
-OperatorPrecedence03: Or;
-OperatorPrecedence04: Circumflex | TildeCircumflex | CircumflexTilde;
-OperatorPrecedence05: Amp;
-OperatorPrecedence06: EquEqu | BangEqu | EquEquEqu | BangEquEqu | EquEquQuest | BangEquQuest;
-OperatorPrecedence07: LT | LTEqu | GT | GTEqu;
-OperatorPrecedence08: LTLT | GTGT | LTLTLT | GTGTGT;
-OperatorPrecedence09: Plus | Minus;
-OperatorPrecedence10: Star | Slash | Percent;
-OperatorPrecedence11: StarStar;
-OperatorPrecedence12: Plus | Minus | Bang | Tilde | Amp | Or | Circumflex | TildeAmp | TildeOr | TildeCircumflex | CircumflexTilde;
+BinaryOperator: Plus | Minus | Star | Slash | Percent | Amp | Or | Circumflex
+              | StarStar | AmpAmp | OrOr | TildeCircumflex | CircumflexTilde
+              | LTLT | GTGT | LTLTLT | GTGTGT
+              | LT | GT | LTEqu | GTEqu | EquEqu
+              | BangEqu | EquEquEqu | BangEquEqu | EquEquQuest | BangEquQuest
+              ;
+UnaryOperator : Plus | Minus | Bang | Tilde | Amp | Or | Circumflex | TildeAmp | TildeOr | TildeCircumflex | CircumflexTilde;
 
-Expression  : Expression00;
-Expression00: Expression01 { OperatorPrecedence01 Expression01 };
-Expression01: Expression02 { OperatorPrecedence02 Expression02 };
-Expression02: Expression03 { OperatorPrecedence03 Expression03 };
-Expression03: Expression04 { OperatorPrecedence04 Expression04 };
-Expression04: Expression05 { OperatorPrecedence05 Expression05 };
-Expression05: Expression06 { OperatorPrecedence06 Expression06 };
-Expression06: Expression07 { OperatorPrecedence07 Expression07 };
-Expression07: Expression08 { OperatorPrecedence08 Expression08 };
-Expression08: Expression09 { OperatorPrecedence09 Expression09 };
-Expression09: Expression10 { OperatorPrecedence10 Expression10 };
-Expression10: Expression11 { OperatorPrecedence11 Expression11 };
-Expression11: [ OperatorPrecedence12 ] Expression12;
-Expression12: Factor;
+Expression : Expression1 { BinaryOperator Expression1 };
+Expression1: [ UnaryOperator ] Factor;
 
 Factor: Number
       | Identifier { Range }

@@ -804,63 +804,13 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'OperatorPrecedence01'
-    fn operator_precedence01(&mut self, _arg: &OperatorPrecedence01) -> Result<()> {
+    /// Semantic action for non-terminal 'BinaryOperator'
+    fn binary_operator(&mut self, _arg: &BinaryOperator) -> Result<()> {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'OperatorPrecedence02'
-    fn operator_precedence02(&mut self, _arg: &OperatorPrecedence02) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'OperatorPrecedence03'
-    fn operator_precedence03(&mut self, _arg: &OperatorPrecedence03) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'OperatorPrecedence04'
-    fn operator_precedence04(&mut self, _arg: &OperatorPrecedence04) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'OperatorPrecedence05'
-    fn operator_precedence05(&mut self, _arg: &OperatorPrecedence05) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'OperatorPrecedence06'
-    fn operator_precedence06(&mut self, _arg: &OperatorPrecedence06) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'OperatorPrecedence07'
-    fn operator_precedence07(&mut self, _arg: &OperatorPrecedence07) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'OperatorPrecedence08'
-    fn operator_precedence08(&mut self, _arg: &OperatorPrecedence08) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'OperatorPrecedence09'
-    fn operator_precedence09(&mut self, _arg: &OperatorPrecedence09) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'OperatorPrecedence10'
-    fn operator_precedence10(&mut self, _arg: &OperatorPrecedence10) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'OperatorPrecedence11'
-    fn operator_precedence11(&mut self, _arg: &OperatorPrecedence11) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'OperatorPrecedence12'
-    fn operator_precedence12(&mut self, _arg: &OperatorPrecedence12) -> Result<()> {
+    /// Semantic action for non-terminal 'UnaryOperator'
+    fn unary_operator(&mut self, _arg: &UnaryOperator) -> Result<()> {
         Ok(())
     }
 
@@ -869,68 +819,8 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'Expression00'
-    fn expression00(&mut self, _arg: &Expression00) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'Expression01'
-    fn expression01(&mut self, _arg: &Expression01) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'Expression02'
-    fn expression02(&mut self, _arg: &Expression02) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'Expression03'
-    fn expression03(&mut self, _arg: &Expression03) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'Expression04'
-    fn expression04(&mut self, _arg: &Expression04) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'Expression05'
-    fn expression05(&mut self, _arg: &Expression05) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'Expression06'
-    fn expression06(&mut self, _arg: &Expression06) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'Expression07'
-    fn expression07(&mut self, _arg: &Expression07) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'Expression08'
-    fn expression08(&mut self, _arg: &Expression08) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'Expression09'
-    fn expression09(&mut self, _arg: &Expression09) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'Expression10'
-    fn expression10(&mut self, _arg: &Expression10) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'Expression11'
-    fn expression11(&mut self, _arg: &Expression11) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'Expression12'
-    fn expression12(&mut self, _arg: &Expression12) -> Result<()> {
+    /// Semantic action for non-terminal 'Expression1'
+    fn expression1(&mut self, _arg: &Expression1) -> Result<()> {
         Ok(())
     }
 
@@ -1223,370 +1113,425 @@ pub struct RealNumber1 {
 }
 
 ///
-/// Type derived for production 172
+/// Type derived for production 169
 ///
-/// OperatorPrecedence04: Circumflex;
+/// BinaryOperator: Plus;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence4 {
-    pub circumflex: Box<Circumflex>,
+pub struct BinaryOperator0 {
+    pub plus: Box<Plus>,
+}
+
+///
+/// Type derived for production 170
+///
+/// BinaryOperator: Minus;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct BinaryOperator1 {
+    pub minus: Box<Minus>,
+}
+
+///
+/// Type derived for production 171
+///
+/// BinaryOperator: Star;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct BinaryOperator2 {
+    pub star: Box<Star>,
+}
+
+///
+/// Type derived for production 172
+///
+/// BinaryOperator: Slash;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct BinaryOperator3 {
+    pub slash: Box<Slash>,
 }
 
 ///
 /// Type derived for production 173
 ///
-/// OperatorPrecedence04: TildeCircumflex;
+/// BinaryOperator: Percent;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence5 {
-    pub tilde_circumflex: Box<TildeCircumflex>,
+pub struct BinaryOperator4 {
+    pub percent: Box<Percent>,
 }
 
 ///
 /// Type derived for production 174
 ///
-/// OperatorPrecedence04: CircumflexTilde;
+/// BinaryOperator: Amp;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence6 {
-    pub circumflex_tilde: Box<CircumflexTilde>,
+pub struct BinaryOperator5 {
+    pub amp: Box<Amp>,
+}
+
+///
+/// Type derived for production 175
+///
+/// BinaryOperator: Or;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct BinaryOperator6 {
+    pub or: Box<Or>,
 }
 
 ///
 /// Type derived for production 176
 ///
-/// OperatorPrecedence06: EquEqu;
+/// BinaryOperator: Circumflex;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence8 {
-    pub equ_equ: Box<EquEqu>,
+pub struct BinaryOperator7 {
+    pub circumflex: Box<Circumflex>,
 }
 
 ///
 /// Type derived for production 177
 ///
-/// OperatorPrecedence06: BangEqu;
+/// BinaryOperator: StarStar;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence9 {
-    pub bang_equ: Box<BangEqu>,
+pub struct BinaryOperator8 {
+    pub star_star: Box<StarStar>,
 }
 
 ///
 /// Type derived for production 178
 ///
-/// OperatorPrecedence06: EquEquEqu;
+/// BinaryOperator: AmpAmp;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence13 {
-    pub equ_equ_equ: Box<EquEquEqu>,
+pub struct BinaryOperator9 {
+    pub amp_amp: Box<AmpAmp>,
 }
 
 ///
 /// Type derived for production 179
 ///
-/// OperatorPrecedence06: BangEquEqu;
+/// BinaryOperator: OrOr;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence14 {
-    pub bang_equ_equ: Box<BangEquEqu>,
+pub struct BinaryOperator10 {
+    pub or_or: Box<OrOr>,
 }
 
 ///
 /// Type derived for production 180
 ///
-/// OperatorPrecedence06: EquEquQuest;
+/// BinaryOperator: TildeCircumflex;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence15 {
-    pub equ_equ_quest: Box<EquEquQuest>,
+pub struct BinaryOperator11 {
+    pub tilde_circumflex: Box<TildeCircumflex>,
 }
 
 ///
 /// Type derived for production 181
 ///
-/// OperatorPrecedence06: BangEquQuest;
+/// BinaryOperator: CircumflexTilde;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence16 {
-    pub bang_equ_quest: Box<BangEquQuest>,
+pub struct BinaryOperator12 {
+    pub circumflex_tilde: Box<CircumflexTilde>,
 }
 
 ///
 /// Type derived for production 182
 ///
-/// OperatorPrecedence07: LT;
+/// BinaryOperator: LTLT;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence17 {
-    pub l_t: Box<LT>,
+pub struct BinaryOperator13 {
+    pub l_t_l_t: Box<LTLT>,
 }
 
 ///
 /// Type derived for production 183
 ///
-/// OperatorPrecedence07: LTEqu;
+/// BinaryOperator: GTGT;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence18 {
-    pub l_t_equ: Box<LTEqu>,
+pub struct BinaryOperator14 {
+    pub g_t_g_t: Box<GTGT>,
 }
 
 ///
 /// Type derived for production 184
 ///
-/// OperatorPrecedence07: GT;
+/// BinaryOperator: LTLTLT;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence19 {
-    pub g_t: Box<GT>,
+pub struct BinaryOperator15 {
+    pub l_t_l_t_l_t: Box<LTLTLT>,
 }
 
 ///
 /// Type derived for production 185
 ///
-/// OperatorPrecedence07: GTEqu;
+/// BinaryOperator: GTGTGT;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence20 {
-    pub g_t_equ: Box<GTEqu>,
+pub struct BinaryOperator16 {
+    pub g_t_g_t_g_t: Box<GTGTGT>,
 }
 
 ///
 /// Type derived for production 186
 ///
-/// OperatorPrecedence08: LTLT;
+/// BinaryOperator: LT;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence21 {
-    pub l_t_l_t: Box<LTLT>,
+pub struct BinaryOperator17 {
+    pub l_t: Box<LT>,
 }
 
 ///
 /// Type derived for production 187
 ///
-/// OperatorPrecedence08: GTGT;
+/// BinaryOperator: GT;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence22 {
-    pub g_t_g_t: Box<GTGT>,
+pub struct BinaryOperator18 {
+    pub g_t: Box<GT>,
 }
 
 ///
 /// Type derived for production 188
 ///
-/// OperatorPrecedence08: LTLTLT;
+/// BinaryOperator: LTEqu;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence23 {
-    pub l_t_l_t_l_t: Box<LTLTLT>,
+pub struct BinaryOperator19 {
+    pub l_t_equ: Box<LTEqu>,
 }
 
 ///
 /// Type derived for production 189
 ///
-/// OperatorPrecedence08: GTGTGT;
+/// BinaryOperator: GTEqu;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence24 {
-    pub g_t_g_t_g_t: Box<GTGTGT>,
+pub struct BinaryOperator20 {
+    pub g_t_equ: Box<GTEqu>,
 }
 
 ///
 /// Type derived for production 190
 ///
-/// OperatorPrecedence09: Plus;
+/// BinaryOperator: EquEqu;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence25 {
-    pub plus: Box<Plus>,
+pub struct BinaryOperator21 {
+    pub equ_equ: Box<EquEqu>,
 }
 
 ///
 /// Type derived for production 191
 ///
-/// OperatorPrecedence09: Minus;
+/// BinaryOperator: BangEqu;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence26 {
-    pub minus: Box<Minus>,
+pub struct BinaryOperator22 {
+    pub bang_equ: Box<BangEqu>,
 }
 
 ///
 /// Type derived for production 192
 ///
-/// OperatorPrecedence10: Star;
+/// BinaryOperator: EquEquEqu;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence27 {
-    pub star: Box<Star>,
+pub struct BinaryOperator23 {
+    pub equ_equ_equ: Box<EquEquEqu>,
 }
 
 ///
 /// Type derived for production 193
 ///
-/// OperatorPrecedence10: Slash;
+/// BinaryOperator: BangEquEqu;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence28 {
-    pub slash: Box<Slash>,
+pub struct BinaryOperator24 {
+    pub bang_equ_equ: Box<BangEquEqu>,
 }
 
 ///
 /// Type derived for production 194
 ///
-/// OperatorPrecedence10: Percent;
+/// BinaryOperator: EquEquQuest;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence29 {
-    pub percent: Box<Percent>,
+pub struct BinaryOperator25 {
+    pub equ_equ_quest: Box<EquEquQuest>,
+}
+
+///
+/// Type derived for production 195
+///
+/// BinaryOperator: BangEquQuest;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct BinaryOperator26 {
+    pub bang_equ_quest: Box<BangEquQuest>,
 }
 
 ///
 /// Type derived for production 196
 ///
-/// OperatorPrecedence12: Plus;
+/// UnaryOperator: Plus;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence31 {
+pub struct UnaryOperator0 {
     pub plus: Box<Plus>,
 }
 
 ///
 /// Type derived for production 197
 ///
-/// OperatorPrecedence12: Minus;
+/// UnaryOperator: Minus;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence32 {
+pub struct UnaryOperator1 {
     pub minus: Box<Minus>,
 }
 
 ///
 /// Type derived for production 198
 ///
-/// OperatorPrecedence12: Bang;
+/// UnaryOperator: Bang;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence33 {
+pub struct UnaryOperator2 {
     pub bang: Box<Bang>,
 }
 
 ///
 /// Type derived for production 199
 ///
-/// OperatorPrecedence12: Tilde;
+/// UnaryOperator: Tilde;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence34 {
+pub struct UnaryOperator3 {
     pub tilde: Box<Tilde>,
 }
 
 ///
 /// Type derived for production 200
 ///
-/// OperatorPrecedence12: Amp;
+/// UnaryOperator: Amp;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence35 {
+pub struct UnaryOperator4 {
     pub amp: Box<Amp>,
 }
 
 ///
 /// Type derived for production 201
 ///
-/// OperatorPrecedence12: Or;
+/// UnaryOperator: Or;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence36 {
+pub struct UnaryOperator5 {
     pub or: Box<Or>,
 }
 
 ///
 /// Type derived for production 202
 ///
-/// OperatorPrecedence12: Circumflex;
+/// UnaryOperator: Circumflex;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence37 {
+pub struct UnaryOperator6 {
     pub circumflex: Box<Circumflex>,
 }
 
 ///
 /// Type derived for production 203
 ///
-/// OperatorPrecedence12: TildeAmp;
+/// UnaryOperator: TildeAmp;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence38 {
+pub struct UnaryOperator7 {
     pub tilde_amp: Box<TildeAmp>,
 }
 
 ///
 /// Type derived for production 204
 ///
-/// OperatorPrecedence12: TildeOr;
+/// UnaryOperator: TildeOr;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence39 {
+pub struct UnaryOperator8 {
     pub tilde_or: Box<TildeOr>,
 }
 
 ///
 /// Type derived for production 205
 ///
-/// OperatorPrecedence12: TildeCircumflex;
+/// UnaryOperator: TildeCircumflex;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence40 {
+pub struct UnaryOperator9 {
     pub tilde_circumflex: Box<TildeCircumflex>,
 }
 
 ///
 /// Type derived for production 206
 ///
-/// OperatorPrecedence12: CircumflexTilde;
+/// UnaryOperator: CircumflexTilde;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence41 {
+pub struct UnaryOperator10 {
     pub circumflex_tilde: Box<CircumflexTilde>,
 }
 
 ///
-/// Type derived for production 245
+/// Type derived for production 213
 ///
 /// Factor: Number;
 ///
@@ -1597,7 +1542,7 @@ pub struct Factor0 {
 }
 
 ///
-/// Type derived for production 246
+/// Type derived for production 214
 ///
 /// Factor: Identifier FactorList /* Vec */;
 ///
@@ -1609,7 +1554,7 @@ pub struct Factor1 {
 }
 
 ///
-/// Type derived for production 249
+/// Type derived for production 217
 ///
 /// Factor: LParen Expression RParen;
 ///
@@ -1622,7 +1567,7 @@ pub struct Factor2 {
 }
 
 ///
-/// Type derived for production 250
+/// Type derived for production 218
 ///
 /// Statement: AssignmentStatement;
 ///
@@ -1633,7 +1578,7 @@ pub struct Statement0 {
 }
 
 ///
-/// Type derived for production 251
+/// Type derived for production 219
 ///
 /// Statement: IfStatement;
 ///
@@ -1644,7 +1589,7 @@ pub struct Statement1 {
 }
 
 ///
-/// Type derived for production 262
+/// Type derived for production 230
 ///
 /// BuiltinType: Logic;
 ///
@@ -1655,7 +1600,7 @@ pub struct BuiltinType0 {
 }
 
 ///
-/// Type derived for production 263
+/// Type derived for production 231
 ///
 /// BuiltinType: Bit;
 ///
@@ -1666,7 +1611,7 @@ pub struct BuiltinType1 {
 }
 
 ///
-/// Type derived for production 264
+/// Type derived for production 232
 ///
 /// BuiltinType: U32;
 ///
@@ -1677,7 +1622,7 @@ pub struct BuiltinType2 {
 }
 
 ///
-/// Type derived for production 265
+/// Type derived for production 233
 ///
 /// BuiltinType: U64;
 ///
@@ -1688,7 +1633,7 @@ pub struct BuiltinType3 {
 }
 
 ///
-/// Type derived for production 266
+/// Type derived for production 234
 ///
 /// BuiltinType: I32;
 ///
@@ -1699,7 +1644,7 @@ pub struct BuiltinType4 {
 }
 
 ///
-/// Type derived for production 267
+/// Type derived for production 235
 ///
 /// BuiltinType: I64;
 ///
@@ -1710,7 +1655,7 @@ pub struct BuiltinType5 {
 }
 
 ///
-/// Type derived for production 268
+/// Type derived for production 236
 ///
 /// BuiltinType: F32;
 ///
@@ -1721,7 +1666,7 @@ pub struct BuiltinType6 {
 }
 
 ///
-/// Type derived for production 269
+/// Type derived for production 237
 ///
 /// BuiltinType: F64;
 ///
@@ -1732,7 +1677,7 @@ pub struct BuiltinType7 {
 }
 
 ///
-/// Type derived for production 271
+/// Type derived for production 239
 ///
 /// TypeGroup: BuiltinType;
 ///
@@ -1743,7 +1688,7 @@ pub struct TypeGroup0 {
 }
 
 ///
-/// Type derived for production 272
+/// Type derived for production 240
 ///
 /// TypeGroup: Identifier;
 ///
@@ -1754,7 +1699,7 @@ pub struct TypeGroup1 {
 }
 
 ///
-/// Type derived for production 284
+/// Type derived for production 252
 ///
 /// WithParameterItemGroup: Parameter;
 ///
@@ -1765,7 +1710,7 @@ pub struct WithParameterItemGroup0 {
 }
 
 ///
-/// Type derived for production 285
+/// Type derived for production 253
 ///
 /// WithParameterItemGroup: Localparam;
 ///
@@ -1776,7 +1721,7 @@ pub struct WithParameterItemGroup1 {
 }
 
 ///
-/// Type derived for production 302
+/// Type derived for production 270
 ///
 /// Direction: Input;
 ///
@@ -1787,7 +1732,7 @@ pub struct Direction0 {
 }
 
 ///
-/// Type derived for production 303
+/// Type derived for production 271
 ///
 /// Direction: Output;
 ///
@@ -1798,7 +1743,7 @@ pub struct Direction1 {
 }
 
 ///
-/// Type derived for production 304
+/// Type derived for production 272
 ///
 /// Direction: Inout;
 ///
@@ -1809,7 +1754,7 @@ pub struct Direction2 {
 }
 
 ///
-/// Type derived for production 305
+/// Type derived for production 273
 ///
 /// ModuleItem: VariableDeclaration;
 ///
@@ -1820,7 +1765,7 @@ pub struct ModuleItem0 {
 }
 
 ///
-/// Type derived for production 306
+/// Type derived for production 274
 ///
 /// ModuleItem: ParameterDeclaration;
 ///
@@ -1831,7 +1776,7 @@ pub struct ModuleItem1 {
 }
 
 ///
-/// Type derived for production 307
+/// Type derived for production 275
 ///
 /// ModuleItem: LocalparamDeclaration;
 ///
@@ -1842,7 +1787,7 @@ pub struct ModuleItem2 {
 }
 
 ///
-/// Type derived for production 308
+/// Type derived for production 276
 ///
 /// ModuleItem: AlwaysFfDeclaration;
 ///
@@ -1853,7 +1798,7 @@ pub struct ModuleItem3 {
 }
 
 ///
-/// Type derived for production 309
+/// Type derived for production 277
 ///
 /// ModuleItem: AlwaysCombDeclaration;
 ///
@@ -1864,7 +1809,7 @@ pub struct ModuleItem4 {
 }
 
 ///
-/// Type derived for production 310
+/// Type derived for production 278
 ///
 /// ModuleItem: AssignDeclaration;
 ///
@@ -1875,7 +1820,7 @@ pub struct ModuleItem5 {
 }
 
 ///
-/// Type derived for production 316
+/// Type derived for production 284
 ///
 /// InterfaceItem: VariableDeclaration;
 ///
@@ -1886,7 +1831,7 @@ pub struct InterfaceItem0 {
 }
 
 ///
-/// Type derived for production 317
+/// Type derived for production 285
 ///
 /// InterfaceItem: ParameterDeclaration;
 ///
@@ -1897,7 +1842,7 @@ pub struct InterfaceItem1 {
 }
 
 ///
-/// Type derived for production 318
+/// Type derived for production 286
 ///
 /// InterfaceItem: LocalparamDeclaration;
 ///
@@ -1908,7 +1853,7 @@ pub struct InterfaceItem2 {
 }
 
 ///
-/// Type derived for production 319
+/// Type derived for production 287
 ///
 /// InterfaceItem: ModportDeclaration;
 ///
@@ -1919,7 +1864,7 @@ pub struct InterfaceItem3 {
 }
 
 ///
-/// Type derived for production 332
+/// Type derived for production 300
 ///
 /// AlwaysFfConditionGroup: Posedge;
 ///
@@ -1930,7 +1875,7 @@ pub struct AlwaysFfConditionGroup0 {
 }
 
 ///
-/// Type derived for production 333
+/// Type derived for production 301
 ///
 /// AlwaysFfConditionGroup: Negedge;
 ///
@@ -2367,6 +2312,41 @@ pub struct BasedOctalToken {
 }
 
 ///
+/// Type derived for non-terminal BinaryOperator
+///
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub enum BinaryOperator {
+    BinaryOperator0(BinaryOperator0),
+    BinaryOperator1(BinaryOperator1),
+    BinaryOperator2(BinaryOperator2),
+    BinaryOperator3(BinaryOperator3),
+    BinaryOperator4(BinaryOperator4),
+    BinaryOperator5(BinaryOperator5),
+    BinaryOperator6(BinaryOperator6),
+    BinaryOperator7(BinaryOperator7),
+    BinaryOperator8(BinaryOperator8),
+    BinaryOperator9(BinaryOperator9),
+    BinaryOperator10(BinaryOperator10),
+    BinaryOperator11(BinaryOperator11),
+    BinaryOperator12(BinaryOperator12),
+    BinaryOperator13(BinaryOperator13),
+    BinaryOperator14(BinaryOperator14),
+    BinaryOperator15(BinaryOperator15),
+    BinaryOperator16(BinaryOperator16),
+    BinaryOperator17(BinaryOperator17),
+    BinaryOperator18(BinaryOperator18),
+    BinaryOperator19(BinaryOperator19),
+    BinaryOperator20(BinaryOperator20),
+    BinaryOperator21(BinaryOperator21),
+    BinaryOperator22(BinaryOperator22),
+    BinaryOperator23(BinaryOperator23),
+    BinaryOperator24(BinaryOperator24),
+    BinaryOperator25(BinaryOperator25),
+    BinaryOperator26(BinaryOperator26),
+}
+
+///
 /// Type derived for non-terminal Bit
 ///
 #[allow(dead_code)]
@@ -2637,255 +2617,37 @@ pub struct ExponentToken {
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 pub struct Expression {
-    pub expression00: Box<Expression00>,
+    pub expression1: Box<Expression1>,
+    pub expression_list: Vec<ExpressionList>,
 }
 
 ///
-/// Type derived for non-terminal Expression00
+/// Type derived for non-terminal Expression1
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct Expression00 {
-    pub expression01: Box<Expression01>,
-    pub expression00_list: Vec<Expression00List>,
-}
-
-///
-/// Type derived for non-terminal Expression00List
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Expression00List {
-    pub operator_precedence01: Box<OperatorPrecedence01>,
-    pub expression01: Box<Expression01>,
-}
-
-///
-/// Type derived for non-terminal Expression01
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Expression01 {
-    pub expression02: Box<Expression02>,
-    pub expression01_list: Vec<Expression01List>,
-}
-
-///
-/// Type derived for non-terminal Expression01List
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Expression01List {
-    pub operator_precedence02: Box<OperatorPrecedence02>,
-    pub expression02: Box<Expression02>,
-}
-
-///
-/// Type derived for non-terminal Expression02
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Expression02 {
-    pub expression03: Box<Expression03>,
-    pub expression02_list: Vec<Expression02List>,
-}
-
-///
-/// Type derived for non-terminal Expression02List
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Expression02List {
-    pub operator_precedence03: Box<OperatorPrecedence03>,
-    pub expression03: Box<Expression03>,
-}
-
-///
-/// Type derived for non-terminal Expression03
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Expression03 {
-    pub expression04: Box<Expression04>,
-    pub expression03_list: Vec<Expression03List>,
-}
-
-///
-/// Type derived for non-terminal Expression03List
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Expression03List {
-    pub operator_precedence04: Box<OperatorPrecedence04>,
-    pub expression04: Box<Expression04>,
-}
-
-///
-/// Type derived for non-terminal Expression04
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Expression04 {
-    pub expression05: Box<Expression05>,
-    pub expression04_list: Vec<Expression04List>,
-}
-
-///
-/// Type derived for non-terminal Expression04List
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Expression04List {
-    pub operator_precedence05: Box<OperatorPrecedence05>,
-    pub expression05: Box<Expression05>,
-}
-
-///
-/// Type derived for non-terminal Expression05
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Expression05 {
-    pub expression06: Box<Expression06>,
-    pub expression05_list: Vec<Expression05List>,
-}
-
-///
-/// Type derived for non-terminal Expression05List
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Expression05List {
-    pub operator_precedence06: Box<OperatorPrecedence06>,
-    pub expression06: Box<Expression06>,
-}
-
-///
-/// Type derived for non-terminal Expression06
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Expression06 {
-    pub expression07: Box<Expression07>,
-    pub expression06_list: Vec<Expression06List>,
-}
-
-///
-/// Type derived for non-terminal Expression06List
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Expression06List {
-    pub operator_precedence07: Box<OperatorPrecedence07>,
-    pub expression07: Box<Expression07>,
-}
-
-///
-/// Type derived for non-terminal Expression07
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Expression07 {
-    pub expression08: Box<Expression08>,
-    pub expression07_list: Vec<Expression07List>,
-}
-
-///
-/// Type derived for non-terminal Expression07List
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Expression07List {
-    pub operator_precedence08: Box<OperatorPrecedence08>,
-    pub expression08: Box<Expression08>,
-}
-
-///
-/// Type derived for non-terminal Expression08
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Expression08 {
-    pub expression09: Box<Expression09>,
-    pub expression08_list: Vec<Expression08List>,
-}
-
-///
-/// Type derived for non-terminal Expression08List
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Expression08List {
-    pub operator_precedence09: Box<OperatorPrecedence09>,
-    pub expression09: Box<Expression09>,
-}
-
-///
-/// Type derived for non-terminal Expression09
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Expression09 {
-    pub expression10: Box<Expression10>,
-    pub expression09_list: Vec<Expression09List>,
-}
-
-///
-/// Type derived for non-terminal Expression09List
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Expression09List {
-    pub operator_precedence10: Box<OperatorPrecedence10>,
-    pub expression10: Box<Expression10>,
-}
-
-///
-/// Type derived for non-terminal Expression10
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Expression10 {
-    pub expression11: Box<Expression11>,
-    pub expression10_list: Vec<Expression10List>,
-}
-
-///
-/// Type derived for non-terminal Expression10List
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Expression10List {
-    pub operator_precedence11: Box<OperatorPrecedence11>,
-    pub expression11: Box<Expression11>,
-}
-
-///
-/// Type derived for non-terminal Expression11
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Expression11 {
-    pub expression11_opt: Option<Box<Expression11Opt>>,
-    pub expression12: Box<Expression12>,
-}
-
-///
-/// Type derived for non-terminal Expression11Opt
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Expression11Opt {
-    pub operator_precedence12: Box<OperatorPrecedence12>,
-}
-
-///
-/// Type derived for non-terminal Expression12
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Expression12 {
+pub struct Expression1 {
+    pub expression1_opt: Option<Box<Expression1Opt>>,
     pub factor: Box<Factor>,
+}
+
+///
+/// Type derived for non-terminal Expression1Opt
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct Expression1Opt {
+    pub unary_operator: Box<UnaryOperator>,
+}
+
+///
+/// Type derived for non-terminal ExpressionList
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct ExpressionList {
+    pub binary_operator: Box<BinaryOperator>,
+    pub expression1: Box<Expression1>,
 }
 
 ///
@@ -3748,140 +3510,6 @@ pub enum Number {
 }
 
 ///
-/// Type derived for non-terminal OperatorPrecedence01
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence01 {
-    pub or_or: Box<OrOr>,
-}
-
-///
-/// Type derived for non-terminal OperatorPrecedence02
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence02 {
-    pub amp_amp: Box<AmpAmp>,
-}
-
-///
-/// Type derived for non-terminal OperatorPrecedence03
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence03 {
-    pub or: Box<Or>,
-}
-
-///
-/// Type derived for non-terminal OperatorPrecedence04
-///
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub enum OperatorPrecedence04 {
-    OperatorPrecedence040(OperatorPrecedence4),
-    OperatorPrecedence041(OperatorPrecedence5),
-    OperatorPrecedence042(OperatorPrecedence6),
-}
-
-///
-/// Type derived for non-terminal OperatorPrecedence05
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence05 {
-    pub amp: Box<Amp>,
-}
-
-///
-/// Type derived for non-terminal OperatorPrecedence06
-///
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub enum OperatorPrecedence06 {
-    OperatorPrecedence060(OperatorPrecedence8),
-    OperatorPrecedence061(OperatorPrecedence9),
-    OperatorPrecedence062(OperatorPrecedence13),
-    OperatorPrecedence063(OperatorPrecedence14),
-    OperatorPrecedence064(OperatorPrecedence15),
-    OperatorPrecedence065(OperatorPrecedence16),
-}
-
-///
-/// Type derived for non-terminal OperatorPrecedence07
-///
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub enum OperatorPrecedence07 {
-    OperatorPrecedence070(OperatorPrecedence17),
-    OperatorPrecedence071(OperatorPrecedence18),
-    OperatorPrecedence072(OperatorPrecedence19),
-    OperatorPrecedence073(OperatorPrecedence20),
-}
-
-///
-/// Type derived for non-terminal OperatorPrecedence08
-///
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub enum OperatorPrecedence08 {
-    OperatorPrecedence080(OperatorPrecedence21),
-    OperatorPrecedence081(OperatorPrecedence22),
-    OperatorPrecedence082(OperatorPrecedence23),
-    OperatorPrecedence083(OperatorPrecedence24),
-}
-
-///
-/// Type derived for non-terminal OperatorPrecedence09
-///
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub enum OperatorPrecedence09 {
-    OperatorPrecedence090(OperatorPrecedence25),
-    OperatorPrecedence091(OperatorPrecedence26),
-}
-
-///
-/// Type derived for non-terminal OperatorPrecedence10
-///
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub enum OperatorPrecedence10 {
-    OperatorPrecedence100(OperatorPrecedence27),
-    OperatorPrecedence101(OperatorPrecedence28),
-    OperatorPrecedence102(OperatorPrecedence29),
-}
-
-///
-/// Type derived for non-terminal OperatorPrecedence11
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct OperatorPrecedence11 {
-    pub star_star: Box<StarStar>,
-}
-
-///
-/// Type derived for non-terminal OperatorPrecedence12
-///
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub enum OperatorPrecedence12 {
-    OperatorPrecedence120(OperatorPrecedence31),
-    OperatorPrecedence121(OperatorPrecedence32),
-    OperatorPrecedence122(OperatorPrecedence33),
-    OperatorPrecedence123(OperatorPrecedence34),
-    OperatorPrecedence124(OperatorPrecedence35),
-    OperatorPrecedence125(OperatorPrecedence36),
-    OperatorPrecedence126(OperatorPrecedence37),
-    OperatorPrecedence127(OperatorPrecedence38),
-    OperatorPrecedence128(OperatorPrecedence39),
-    OperatorPrecedence129(OperatorPrecedence40),
-    OperatorPrecedence1210(OperatorPrecedence41),
-}
-
-///
 /// Type derived for non-terminal Or
 ///
 #[allow(dead_code)]
@@ -4366,6 +3994,25 @@ pub struct U64Token {
 }
 
 ///
+/// Type derived for non-terminal UnaryOperator
+///
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub enum UnaryOperator {
+    UnaryOperator0(UnaryOperator0),
+    UnaryOperator1(UnaryOperator1),
+    UnaryOperator2(UnaryOperator2),
+    UnaryOperator3(UnaryOperator3),
+    UnaryOperator4(UnaryOperator4),
+    UnaryOperator5(UnaryOperator5),
+    UnaryOperator6(UnaryOperator6),
+    UnaryOperator7(UnaryOperator7),
+    UnaryOperator8(UnaryOperator8),
+    UnaryOperator9(UnaryOperator9),
+    UnaryOperator10(UnaryOperator10),
+}
+
+///
 /// Type derived for non-terminal VariableDeclaration
 ///
 #[allow(dead_code)]
@@ -4532,6 +4179,7 @@ pub enum ASTType {
     BasedHexToken(BasedHexToken),
     BasedOctal(BasedOctal),
     BasedOctalToken(BasedOctalToken),
+    BinaryOperator(BinaryOperator),
     Bit(Bit),
     BitToken(BitToken),
     BuiltinType(BuiltinType),
@@ -4560,31 +4208,9 @@ pub enum ASTType {
     Exponent(Exponent),
     ExponentToken(ExponentToken),
     Expression(Expression),
-    Expression00(Expression00),
-    Expression00List(Vec<Expression00List>),
-    Expression01(Expression01),
-    Expression01List(Vec<Expression01List>),
-    Expression02(Expression02),
-    Expression02List(Vec<Expression02List>),
-    Expression03(Expression03),
-    Expression03List(Vec<Expression03List>),
-    Expression04(Expression04),
-    Expression04List(Vec<Expression04List>),
-    Expression05(Expression05),
-    Expression05List(Vec<Expression05List>),
-    Expression06(Expression06),
-    Expression06List(Vec<Expression06List>),
-    Expression07(Expression07),
-    Expression07List(Vec<Expression07List>),
-    Expression08(Expression08),
-    Expression08List(Vec<Expression08List>),
-    Expression09(Expression09),
-    Expression09List(Vec<Expression09List>),
-    Expression10(Expression10),
-    Expression10List(Vec<Expression10List>),
-    Expression11(Expression11),
-    Expression11Opt(Option<Box<Expression11Opt>>),
-    Expression12(Expression12),
+    Expression1(Expression1),
+    Expression1Opt(Option<Box<Expression1Opt>>),
+    ExpressionList(Vec<ExpressionList>),
     F32(F32),
     F32Token(F32Token),
     F64(F64),
@@ -4670,18 +4296,6 @@ pub enum ASTType {
     Negedge(Negedge),
     NegedgeToken(NegedgeToken),
     Number(Number),
-    OperatorPrecedence01(OperatorPrecedence01),
-    OperatorPrecedence02(OperatorPrecedence02),
-    OperatorPrecedence03(OperatorPrecedence03),
-    OperatorPrecedence04(OperatorPrecedence04),
-    OperatorPrecedence05(OperatorPrecedence05),
-    OperatorPrecedence06(OperatorPrecedence06),
-    OperatorPrecedence07(OperatorPrecedence07),
-    OperatorPrecedence08(OperatorPrecedence08),
-    OperatorPrecedence09(OperatorPrecedence09),
-    OperatorPrecedence10(OperatorPrecedence10),
-    OperatorPrecedence11(OperatorPrecedence11),
-    OperatorPrecedence12(OperatorPrecedence12),
     Or(Or),
     OrOr(OrOr),
     OrOrToken(OrOrToken),
@@ -4732,6 +4346,7 @@ pub enum ASTType {
     U32Token(U32Token),
     U64(U64),
     U64Token(U64Token),
+    UnaryOperator(UnaryOperator),
     VariableDeclaration(VariableDeclaration),
     Veryl(Veryl),
     VerylList(Vec<VerylList>),
@@ -8998,611 +8613,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 169:
     ///
-    /// OperatorPrecedence01: OrOr;
+    /// BinaryOperator: Plus;
     ///
     #[parol_runtime::function_name::named]
-    fn operator_precedence01(
-        &mut self,
-        _or_or: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let or_or = pop_item!(self, or_or, OrOr, context);
-        let operator_precedence01_built = OperatorPrecedence01Builder::default()
-            .or_or(Box::new(or_or))
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar
-            .operator_precedence01(&operator_precedence01_built)?;
-        self.push(
-            ASTType::OperatorPrecedence01(operator_precedence01_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 170:
-    ///
-    /// OperatorPrecedence02: AmpAmp;
-    ///
-    #[parol_runtime::function_name::named]
-    fn operator_precedence02(
-        &mut self,
-        _amp_amp: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let amp_amp = pop_item!(self, amp_amp, AmpAmp, context);
-        let operator_precedence02_built = OperatorPrecedence02Builder::default()
-            .amp_amp(Box::new(amp_amp))
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar
-            .operator_precedence02(&operator_precedence02_built)?;
-        self.push(
-            ASTType::OperatorPrecedence02(operator_precedence02_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 171:
-    ///
-    /// OperatorPrecedence03: Or;
-    ///
-    #[parol_runtime::function_name::named]
-    fn operator_precedence03(
-        &mut self,
-        _or: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let or = pop_item!(self, or, Or, context);
-        let operator_precedence03_built = OperatorPrecedence03Builder::default()
-            .or(Box::new(or))
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar
-            .operator_precedence03(&operator_precedence03_built)?;
-        self.push(
-            ASTType::OperatorPrecedence03(operator_precedence03_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 172:
-    ///
-    /// OperatorPrecedence04: Circumflex;
-    ///
-    #[parol_runtime::function_name::named]
-    fn operator_precedence04_0(
-        &mut self,
-        _circumflex: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let circumflex = pop_item!(self, circumflex, Circumflex, context);
-        let operator_precedence04_0_built = OperatorPrecedence4Builder::default()
-            .circumflex(Box::new(circumflex))
-            .build()
-            .into_diagnostic()?;
-        let operator_precedence04_0_built =
-            OperatorPrecedence04::OperatorPrecedence040(operator_precedence04_0_built);
-        // Calling user action here
-        self.user_grammar
-            .operator_precedence04(&operator_precedence04_0_built)?;
-        self.push(
-            ASTType::OperatorPrecedence04(operator_precedence04_0_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 173:
-    ///
-    /// OperatorPrecedence04: TildeCircumflex;
-    ///
-    #[parol_runtime::function_name::named]
-    fn operator_precedence04_1(
-        &mut self,
-        _tilde_circumflex: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let tilde_circumflex = pop_item!(self, tilde_circumflex, TildeCircumflex, context);
-        let operator_precedence04_1_built = OperatorPrecedence5Builder::default()
-            .tilde_circumflex(Box::new(tilde_circumflex))
-            .build()
-            .into_diagnostic()?;
-        let operator_precedence04_1_built =
-            OperatorPrecedence04::OperatorPrecedence041(operator_precedence04_1_built);
-        // Calling user action here
-        self.user_grammar
-            .operator_precedence04(&operator_precedence04_1_built)?;
-        self.push(
-            ASTType::OperatorPrecedence04(operator_precedence04_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 174:
-    ///
-    /// OperatorPrecedence04: CircumflexTilde;
-    ///
-    #[parol_runtime::function_name::named]
-    fn operator_precedence04_2(
-        &mut self,
-        _circumflex_tilde: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let circumflex_tilde = pop_item!(self, circumflex_tilde, CircumflexTilde, context);
-        let operator_precedence04_2_built = OperatorPrecedence6Builder::default()
-            .circumflex_tilde(Box::new(circumflex_tilde))
-            .build()
-            .into_diagnostic()?;
-        let operator_precedence04_2_built =
-            OperatorPrecedence04::OperatorPrecedence042(operator_precedence04_2_built);
-        // Calling user action here
-        self.user_grammar
-            .operator_precedence04(&operator_precedence04_2_built)?;
-        self.push(
-            ASTType::OperatorPrecedence04(operator_precedence04_2_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 175:
-    ///
-    /// OperatorPrecedence05: Amp;
-    ///
-    #[parol_runtime::function_name::named]
-    fn operator_precedence05(
-        &mut self,
-        _amp: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let amp = pop_item!(self, amp, Amp, context);
-        let operator_precedence05_built = OperatorPrecedence05Builder::default()
-            .amp(Box::new(amp))
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar
-            .operator_precedence05(&operator_precedence05_built)?;
-        self.push(
-            ASTType::OperatorPrecedence05(operator_precedence05_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 176:
-    ///
-    /// OperatorPrecedence06: EquEqu;
-    ///
-    #[parol_runtime::function_name::named]
-    fn operator_precedence06_0(
-        &mut self,
-        _equ_equ: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let equ_equ = pop_item!(self, equ_equ, EquEqu, context);
-        let operator_precedence06_0_built = OperatorPrecedence8Builder::default()
-            .equ_equ(Box::new(equ_equ))
-            .build()
-            .into_diagnostic()?;
-        let operator_precedence06_0_built =
-            OperatorPrecedence06::OperatorPrecedence060(operator_precedence06_0_built);
-        // Calling user action here
-        self.user_grammar
-            .operator_precedence06(&operator_precedence06_0_built)?;
-        self.push(
-            ASTType::OperatorPrecedence06(operator_precedence06_0_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 177:
-    ///
-    /// OperatorPrecedence06: BangEqu;
-    ///
-    #[parol_runtime::function_name::named]
-    fn operator_precedence06_1(
-        &mut self,
-        _bang_equ: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let bang_equ = pop_item!(self, bang_equ, BangEqu, context);
-        let operator_precedence06_1_built = OperatorPrecedence9Builder::default()
-            .bang_equ(Box::new(bang_equ))
-            .build()
-            .into_diagnostic()?;
-        let operator_precedence06_1_built =
-            OperatorPrecedence06::OperatorPrecedence061(operator_precedence06_1_built);
-        // Calling user action here
-        self.user_grammar
-            .operator_precedence06(&operator_precedence06_1_built)?;
-        self.push(
-            ASTType::OperatorPrecedence06(operator_precedence06_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 178:
-    ///
-    /// OperatorPrecedence06: EquEquEqu;
-    ///
-    #[parol_runtime::function_name::named]
-    fn operator_precedence06_2(
-        &mut self,
-        _equ_equ_equ: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let equ_equ_equ = pop_item!(self, equ_equ_equ, EquEquEqu, context);
-        let operator_precedence06_2_built = OperatorPrecedence13Builder::default()
-            .equ_equ_equ(Box::new(equ_equ_equ))
-            .build()
-            .into_diagnostic()?;
-        let operator_precedence06_2_built =
-            OperatorPrecedence06::OperatorPrecedence062(operator_precedence06_2_built);
-        // Calling user action here
-        self.user_grammar
-            .operator_precedence06(&operator_precedence06_2_built)?;
-        self.push(
-            ASTType::OperatorPrecedence06(operator_precedence06_2_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 179:
-    ///
-    /// OperatorPrecedence06: BangEquEqu;
-    ///
-    #[parol_runtime::function_name::named]
-    fn operator_precedence06_3(
-        &mut self,
-        _bang_equ_equ: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let bang_equ_equ = pop_item!(self, bang_equ_equ, BangEquEqu, context);
-        let operator_precedence06_3_built = OperatorPrecedence14Builder::default()
-            .bang_equ_equ(Box::new(bang_equ_equ))
-            .build()
-            .into_diagnostic()?;
-        let operator_precedence06_3_built =
-            OperatorPrecedence06::OperatorPrecedence063(operator_precedence06_3_built);
-        // Calling user action here
-        self.user_grammar
-            .operator_precedence06(&operator_precedence06_3_built)?;
-        self.push(
-            ASTType::OperatorPrecedence06(operator_precedence06_3_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 180:
-    ///
-    /// OperatorPrecedence06: EquEquQuest;
-    ///
-    #[parol_runtime::function_name::named]
-    fn operator_precedence06_4(
-        &mut self,
-        _equ_equ_quest: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let equ_equ_quest = pop_item!(self, equ_equ_quest, EquEquQuest, context);
-        let operator_precedence06_4_built = OperatorPrecedence15Builder::default()
-            .equ_equ_quest(Box::new(equ_equ_quest))
-            .build()
-            .into_diagnostic()?;
-        let operator_precedence06_4_built =
-            OperatorPrecedence06::OperatorPrecedence064(operator_precedence06_4_built);
-        // Calling user action here
-        self.user_grammar
-            .operator_precedence06(&operator_precedence06_4_built)?;
-        self.push(
-            ASTType::OperatorPrecedence06(operator_precedence06_4_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 181:
-    ///
-    /// OperatorPrecedence06: BangEquQuest;
-    ///
-    #[parol_runtime::function_name::named]
-    fn operator_precedence06_5(
-        &mut self,
-        _bang_equ_quest: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let bang_equ_quest = pop_item!(self, bang_equ_quest, BangEquQuest, context);
-        let operator_precedence06_5_built = OperatorPrecedence16Builder::default()
-            .bang_equ_quest(Box::new(bang_equ_quest))
-            .build()
-            .into_diagnostic()?;
-        let operator_precedence06_5_built =
-            OperatorPrecedence06::OperatorPrecedence065(operator_precedence06_5_built);
-        // Calling user action here
-        self.user_grammar
-            .operator_precedence06(&operator_precedence06_5_built)?;
-        self.push(
-            ASTType::OperatorPrecedence06(operator_precedence06_5_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 182:
-    ///
-    /// OperatorPrecedence07: LT;
-    ///
-    #[parol_runtime::function_name::named]
-    fn operator_precedence07_0(
-        &mut self,
-        _l_t: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let l_t = pop_item!(self, l_t, LT, context);
-        let operator_precedence07_0_built = OperatorPrecedence17Builder::default()
-            .l_t(Box::new(l_t))
-            .build()
-            .into_diagnostic()?;
-        let operator_precedence07_0_built =
-            OperatorPrecedence07::OperatorPrecedence070(operator_precedence07_0_built);
-        // Calling user action here
-        self.user_grammar
-            .operator_precedence07(&operator_precedence07_0_built)?;
-        self.push(
-            ASTType::OperatorPrecedence07(operator_precedence07_0_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 183:
-    ///
-    /// OperatorPrecedence07: LTEqu;
-    ///
-    #[parol_runtime::function_name::named]
-    fn operator_precedence07_1(
-        &mut self,
-        _l_t_equ: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let l_t_equ = pop_item!(self, l_t_equ, LTEqu, context);
-        let operator_precedence07_1_built = OperatorPrecedence18Builder::default()
-            .l_t_equ(Box::new(l_t_equ))
-            .build()
-            .into_diagnostic()?;
-        let operator_precedence07_1_built =
-            OperatorPrecedence07::OperatorPrecedence071(operator_precedence07_1_built);
-        // Calling user action here
-        self.user_grammar
-            .operator_precedence07(&operator_precedence07_1_built)?;
-        self.push(
-            ASTType::OperatorPrecedence07(operator_precedence07_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 184:
-    ///
-    /// OperatorPrecedence07: GT;
-    ///
-    #[parol_runtime::function_name::named]
-    fn operator_precedence07_2(
-        &mut self,
-        _g_t: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let g_t = pop_item!(self, g_t, GT, context);
-        let operator_precedence07_2_built = OperatorPrecedence19Builder::default()
-            .g_t(Box::new(g_t))
-            .build()
-            .into_diagnostic()?;
-        let operator_precedence07_2_built =
-            OperatorPrecedence07::OperatorPrecedence072(operator_precedence07_2_built);
-        // Calling user action here
-        self.user_grammar
-            .operator_precedence07(&operator_precedence07_2_built)?;
-        self.push(
-            ASTType::OperatorPrecedence07(operator_precedence07_2_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 185:
-    ///
-    /// OperatorPrecedence07: GTEqu;
-    ///
-    #[parol_runtime::function_name::named]
-    fn operator_precedence07_3(
-        &mut self,
-        _g_t_equ: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let g_t_equ = pop_item!(self, g_t_equ, GTEqu, context);
-        let operator_precedence07_3_built = OperatorPrecedence20Builder::default()
-            .g_t_equ(Box::new(g_t_equ))
-            .build()
-            .into_diagnostic()?;
-        let operator_precedence07_3_built =
-            OperatorPrecedence07::OperatorPrecedence073(operator_precedence07_3_built);
-        // Calling user action here
-        self.user_grammar
-            .operator_precedence07(&operator_precedence07_3_built)?;
-        self.push(
-            ASTType::OperatorPrecedence07(operator_precedence07_3_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 186:
-    ///
-    /// OperatorPrecedence08: LTLT;
-    ///
-    #[parol_runtime::function_name::named]
-    fn operator_precedence08_0(
-        &mut self,
-        _l_t_l_t: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let l_t_l_t = pop_item!(self, l_t_l_t, LTLT, context);
-        let operator_precedence08_0_built = OperatorPrecedence21Builder::default()
-            .l_t_l_t(Box::new(l_t_l_t))
-            .build()
-            .into_diagnostic()?;
-        let operator_precedence08_0_built =
-            OperatorPrecedence08::OperatorPrecedence080(operator_precedence08_0_built);
-        // Calling user action here
-        self.user_grammar
-            .operator_precedence08(&operator_precedence08_0_built)?;
-        self.push(
-            ASTType::OperatorPrecedence08(operator_precedence08_0_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 187:
-    ///
-    /// OperatorPrecedence08: GTGT;
-    ///
-    #[parol_runtime::function_name::named]
-    fn operator_precedence08_1(
-        &mut self,
-        _g_t_g_t: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let g_t_g_t = pop_item!(self, g_t_g_t, GTGT, context);
-        let operator_precedence08_1_built = OperatorPrecedence22Builder::default()
-            .g_t_g_t(Box::new(g_t_g_t))
-            .build()
-            .into_diagnostic()?;
-        let operator_precedence08_1_built =
-            OperatorPrecedence08::OperatorPrecedence081(operator_precedence08_1_built);
-        // Calling user action here
-        self.user_grammar
-            .operator_precedence08(&operator_precedence08_1_built)?;
-        self.push(
-            ASTType::OperatorPrecedence08(operator_precedence08_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 188:
-    ///
-    /// OperatorPrecedence08: LTLTLT;
-    ///
-    #[parol_runtime::function_name::named]
-    fn operator_precedence08_2(
-        &mut self,
-        _l_t_l_t_l_t: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let l_t_l_t_l_t = pop_item!(self, l_t_l_t_l_t, LTLTLT, context);
-        let operator_precedence08_2_built = OperatorPrecedence23Builder::default()
-            .l_t_l_t_l_t(Box::new(l_t_l_t_l_t))
-            .build()
-            .into_diagnostic()?;
-        let operator_precedence08_2_built =
-            OperatorPrecedence08::OperatorPrecedence082(operator_precedence08_2_built);
-        // Calling user action here
-        self.user_grammar
-            .operator_precedence08(&operator_precedence08_2_built)?;
-        self.push(
-            ASTType::OperatorPrecedence08(operator_precedence08_2_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 189:
-    ///
-    /// OperatorPrecedence08: GTGTGT;
-    ///
-    #[parol_runtime::function_name::named]
-    fn operator_precedence08_3(
-        &mut self,
-        _g_t_g_t_g_t: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let g_t_g_t_g_t = pop_item!(self, g_t_g_t_g_t, GTGTGT, context);
-        let operator_precedence08_3_built = OperatorPrecedence24Builder::default()
-            .g_t_g_t_g_t(Box::new(g_t_g_t_g_t))
-            .build()
-            .into_diagnostic()?;
-        let operator_precedence08_3_built =
-            OperatorPrecedence08::OperatorPrecedence083(operator_precedence08_3_built);
-        // Calling user action here
-        self.user_grammar
-            .operator_precedence08(&operator_precedence08_3_built)?;
-        self.push(
-            ASTType::OperatorPrecedence08(operator_precedence08_3_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 190:
-    ///
-    /// OperatorPrecedence09: Plus;
-    ///
-    #[parol_runtime::function_name::named]
-    fn operator_precedence09_0(
+    fn binary_operator_0(
         &mut self,
         _plus: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
@@ -9610,28 +8624,24 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let plus = pop_item!(self, plus, Plus, context);
-        let operator_precedence09_0_built = OperatorPrecedence25Builder::default()
+        let binary_operator_0_built = BinaryOperator0Builder::default()
             .plus(Box::new(plus))
             .build()
             .into_diagnostic()?;
-        let operator_precedence09_0_built =
-            OperatorPrecedence09::OperatorPrecedence090(operator_precedence09_0_built);
+        let binary_operator_0_built = BinaryOperator::BinaryOperator0(binary_operator_0_built);
         // Calling user action here
         self.user_grammar
-            .operator_precedence09(&operator_precedence09_0_built)?;
-        self.push(
-            ASTType::OperatorPrecedence09(operator_precedence09_0_built),
-            context,
-        );
+            .binary_operator(&binary_operator_0_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_0_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 191:
+    /// Semantic action for production 170:
     ///
-    /// OperatorPrecedence09: Minus;
+    /// BinaryOperator: Minus;
     ///
     #[parol_runtime::function_name::named]
-    fn operator_precedence09_1(
+    fn binary_operator_1(
         &mut self,
         _minus: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
@@ -9639,28 +8649,24 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let minus = pop_item!(self, minus, Minus, context);
-        let operator_precedence09_1_built = OperatorPrecedence26Builder::default()
+        let binary_operator_1_built = BinaryOperator1Builder::default()
             .minus(Box::new(minus))
             .build()
             .into_diagnostic()?;
-        let operator_precedence09_1_built =
-            OperatorPrecedence09::OperatorPrecedence091(operator_precedence09_1_built);
+        let binary_operator_1_built = BinaryOperator::BinaryOperator1(binary_operator_1_built);
         // Calling user action here
         self.user_grammar
-            .operator_precedence09(&operator_precedence09_1_built)?;
-        self.push(
-            ASTType::OperatorPrecedence09(operator_precedence09_1_built),
-            context,
-        );
+            .binary_operator(&binary_operator_1_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_1_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 192:
+    /// Semantic action for production 171:
     ///
-    /// OperatorPrecedence10: Star;
+    /// BinaryOperator: Star;
     ///
     #[parol_runtime::function_name::named]
-    fn operator_precedence10_0(
+    fn binary_operator_2(
         &mut self,
         _star: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
@@ -9668,28 +8674,24 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let star = pop_item!(self, star, Star, context);
-        let operator_precedence10_0_built = OperatorPrecedence27Builder::default()
+        let binary_operator_2_built = BinaryOperator2Builder::default()
             .star(Box::new(star))
             .build()
             .into_diagnostic()?;
-        let operator_precedence10_0_built =
-            OperatorPrecedence10::OperatorPrecedence100(operator_precedence10_0_built);
+        let binary_operator_2_built = BinaryOperator::BinaryOperator2(binary_operator_2_built);
         // Calling user action here
         self.user_grammar
-            .operator_precedence10(&operator_precedence10_0_built)?;
-        self.push(
-            ASTType::OperatorPrecedence10(operator_precedence10_0_built),
-            context,
-        );
+            .binary_operator(&binary_operator_2_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_2_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 193:
+    /// Semantic action for production 172:
     ///
-    /// OperatorPrecedence10: Slash;
+    /// BinaryOperator: Slash;
     ///
     #[parol_runtime::function_name::named]
-    fn operator_precedence10_1(
+    fn binary_operator_3(
         &mut self,
         _slash: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
@@ -9697,28 +8699,24 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let slash = pop_item!(self, slash, Slash, context);
-        let operator_precedence10_1_built = OperatorPrecedence28Builder::default()
+        let binary_operator_3_built = BinaryOperator3Builder::default()
             .slash(Box::new(slash))
             .build()
             .into_diagnostic()?;
-        let operator_precedence10_1_built =
-            OperatorPrecedence10::OperatorPrecedence101(operator_precedence10_1_built);
+        let binary_operator_3_built = BinaryOperator::BinaryOperator3(binary_operator_3_built);
         // Calling user action here
         self.user_grammar
-            .operator_precedence10(&operator_precedence10_1_built)?;
-        self.push(
-            ASTType::OperatorPrecedence10(operator_precedence10_1_built),
-            context,
-        );
+            .binary_operator(&binary_operator_3_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_3_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 194:
+    /// Semantic action for production 173:
     ///
-    /// OperatorPrecedence10: Percent;
+    /// BinaryOperator: Percent;
     ///
     #[parol_runtime::function_name::named]
-    fn operator_precedence10_2(
+    fn binary_operator_4(
         &mut self,
         _percent: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
@@ -9726,171 +8724,24 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let percent = pop_item!(self, percent, Percent, context);
-        let operator_precedence10_2_built = OperatorPrecedence29Builder::default()
+        let binary_operator_4_built = BinaryOperator4Builder::default()
             .percent(Box::new(percent))
             .build()
             .into_diagnostic()?;
-        let operator_precedence10_2_built =
-            OperatorPrecedence10::OperatorPrecedence102(operator_precedence10_2_built);
+        let binary_operator_4_built = BinaryOperator::BinaryOperator4(binary_operator_4_built);
         // Calling user action here
         self.user_grammar
-            .operator_precedence10(&operator_precedence10_2_built)?;
-        self.push(
-            ASTType::OperatorPrecedence10(operator_precedence10_2_built),
-            context,
-        );
+            .binary_operator(&binary_operator_4_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_4_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 195:
+    /// Semantic action for production 174:
     ///
-    /// OperatorPrecedence11: StarStar;
-    ///
-    #[parol_runtime::function_name::named]
-    fn operator_precedence11(
-        &mut self,
-        _star_star: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let star_star = pop_item!(self, star_star, StarStar, context);
-        let operator_precedence11_built = OperatorPrecedence11Builder::default()
-            .star_star(Box::new(star_star))
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar
-            .operator_precedence11(&operator_precedence11_built)?;
-        self.push(
-            ASTType::OperatorPrecedence11(operator_precedence11_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 196:
-    ///
-    /// OperatorPrecedence12: Plus;
+    /// BinaryOperator: Amp;
     ///
     #[parol_runtime::function_name::named]
-    fn operator_precedence12_0(
-        &mut self,
-        _plus: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let plus = pop_item!(self, plus, Plus, context);
-        let operator_precedence12_0_built = OperatorPrecedence31Builder::default()
-            .plus(Box::new(plus))
-            .build()
-            .into_diagnostic()?;
-        let operator_precedence12_0_built =
-            OperatorPrecedence12::OperatorPrecedence120(operator_precedence12_0_built);
-        // Calling user action here
-        self.user_grammar
-            .operator_precedence12(&operator_precedence12_0_built)?;
-        self.push(
-            ASTType::OperatorPrecedence12(operator_precedence12_0_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 197:
-    ///
-    /// OperatorPrecedence12: Minus;
-    ///
-    #[parol_runtime::function_name::named]
-    fn operator_precedence12_1(
-        &mut self,
-        _minus: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let minus = pop_item!(self, minus, Minus, context);
-        let operator_precedence12_1_built = OperatorPrecedence32Builder::default()
-            .minus(Box::new(minus))
-            .build()
-            .into_diagnostic()?;
-        let operator_precedence12_1_built =
-            OperatorPrecedence12::OperatorPrecedence121(operator_precedence12_1_built);
-        // Calling user action here
-        self.user_grammar
-            .operator_precedence12(&operator_precedence12_1_built)?;
-        self.push(
-            ASTType::OperatorPrecedence12(operator_precedence12_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 198:
-    ///
-    /// OperatorPrecedence12: Bang;
-    ///
-    #[parol_runtime::function_name::named]
-    fn operator_precedence12_2(
-        &mut self,
-        _bang: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let bang = pop_item!(self, bang, Bang, context);
-        let operator_precedence12_2_built = OperatorPrecedence33Builder::default()
-            .bang(Box::new(bang))
-            .build()
-            .into_diagnostic()?;
-        let operator_precedence12_2_built =
-            OperatorPrecedence12::OperatorPrecedence122(operator_precedence12_2_built);
-        // Calling user action here
-        self.user_grammar
-            .operator_precedence12(&operator_precedence12_2_built)?;
-        self.push(
-            ASTType::OperatorPrecedence12(operator_precedence12_2_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 199:
-    ///
-    /// OperatorPrecedence12: Tilde;
-    ///
-    #[parol_runtime::function_name::named]
-    fn operator_precedence12_3(
-        &mut self,
-        _tilde: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let tilde = pop_item!(self, tilde, Tilde, context);
-        let operator_precedence12_3_built = OperatorPrecedence34Builder::default()
-            .tilde(Box::new(tilde))
-            .build()
-            .into_diagnostic()?;
-        let operator_precedence12_3_built =
-            OperatorPrecedence12::OperatorPrecedence123(operator_precedence12_3_built);
-        // Calling user action here
-        self.user_grammar
-            .operator_precedence12(&operator_precedence12_3_built)?;
-        self.push(
-            ASTType::OperatorPrecedence12(operator_precedence12_3_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 200:
-    ///
-    /// OperatorPrecedence12: Amp;
-    ///
-    #[parol_runtime::function_name::named]
-    fn operator_precedence12_4(
+    fn binary_operator_5(
         &mut self,
         _amp: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
@@ -9898,28 +8749,24 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let amp = pop_item!(self, amp, Amp, context);
-        let operator_precedence12_4_built = OperatorPrecedence35Builder::default()
+        let binary_operator_5_built = BinaryOperator5Builder::default()
             .amp(Box::new(amp))
             .build()
             .into_diagnostic()?;
-        let operator_precedence12_4_built =
-            OperatorPrecedence12::OperatorPrecedence124(operator_precedence12_4_built);
+        let binary_operator_5_built = BinaryOperator::BinaryOperator5(binary_operator_5_built);
         // Calling user action here
         self.user_grammar
-            .operator_precedence12(&operator_precedence12_4_built)?;
-        self.push(
-            ASTType::OperatorPrecedence12(operator_precedence12_4_built),
-            context,
-        );
+            .binary_operator(&binary_operator_5_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_5_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 201:
+    /// Semantic action for production 175:
     ///
-    /// OperatorPrecedence12: Or;
+    /// BinaryOperator: Or;
     ///
     #[parol_runtime::function_name::named]
-    fn operator_precedence12_5(
+    fn binary_operator_6(
         &mut self,
         _or: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
@@ -9927,28 +8774,24 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let or = pop_item!(self, or, Or, context);
-        let operator_precedence12_5_built = OperatorPrecedence36Builder::default()
+        let binary_operator_6_built = BinaryOperator6Builder::default()
             .or(Box::new(or))
             .build()
             .into_diagnostic()?;
-        let operator_precedence12_5_built =
-            OperatorPrecedence12::OperatorPrecedence125(operator_precedence12_5_built);
+        let binary_operator_6_built = BinaryOperator::BinaryOperator6(binary_operator_6_built);
         // Calling user action here
         self.user_grammar
-            .operator_precedence12(&operator_precedence12_5_built)?;
-        self.push(
-            ASTType::OperatorPrecedence12(operator_precedence12_5_built),
-            context,
-        );
+            .binary_operator(&binary_operator_6_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_6_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 202:
+    /// Semantic action for production 176:
     ///
-    /// OperatorPrecedence12: Circumflex;
+    /// BinaryOperator: Circumflex;
     ///
     #[parol_runtime::function_name::named]
-    fn operator_precedence12_6(
+    fn binary_operator_7(
         &mut self,
         _circumflex: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
@@ -9956,86 +8799,99 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let circumflex = pop_item!(self, circumflex, Circumflex, context);
-        let operator_precedence12_6_built = OperatorPrecedence37Builder::default()
+        let binary_operator_7_built = BinaryOperator7Builder::default()
             .circumflex(Box::new(circumflex))
             .build()
             .into_diagnostic()?;
-        let operator_precedence12_6_built =
-            OperatorPrecedence12::OperatorPrecedence126(operator_precedence12_6_built);
+        let binary_operator_7_built = BinaryOperator::BinaryOperator7(binary_operator_7_built);
         // Calling user action here
         self.user_grammar
-            .operator_precedence12(&operator_precedence12_6_built)?;
-        self.push(
-            ASTType::OperatorPrecedence12(operator_precedence12_6_built),
-            context,
-        );
+            .binary_operator(&binary_operator_7_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_7_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 203:
+    /// Semantic action for production 177:
     ///
-    /// OperatorPrecedence12: TildeAmp;
+    /// BinaryOperator: StarStar;
     ///
     #[parol_runtime::function_name::named]
-    fn operator_precedence12_7(
+    fn binary_operator_8(
         &mut self,
-        _tilde_amp: &ParseTreeStackEntry<'t>,
+        _star_star: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let tilde_amp = pop_item!(self, tilde_amp, TildeAmp, context);
-        let operator_precedence12_7_built = OperatorPrecedence38Builder::default()
-            .tilde_amp(Box::new(tilde_amp))
+        let star_star = pop_item!(self, star_star, StarStar, context);
+        let binary_operator_8_built = BinaryOperator8Builder::default()
+            .star_star(Box::new(star_star))
             .build()
             .into_diagnostic()?;
-        let operator_precedence12_7_built =
-            OperatorPrecedence12::OperatorPrecedence127(operator_precedence12_7_built);
+        let binary_operator_8_built = BinaryOperator::BinaryOperator8(binary_operator_8_built);
         // Calling user action here
         self.user_grammar
-            .operator_precedence12(&operator_precedence12_7_built)?;
-        self.push(
-            ASTType::OperatorPrecedence12(operator_precedence12_7_built),
-            context,
-        );
+            .binary_operator(&binary_operator_8_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_8_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 204:
+    /// Semantic action for production 178:
     ///
-    /// OperatorPrecedence12: TildeOr;
+    /// BinaryOperator: AmpAmp;
     ///
     #[parol_runtime::function_name::named]
-    fn operator_precedence12_8(
+    fn binary_operator_9(
         &mut self,
-        _tilde_or: &ParseTreeStackEntry<'t>,
+        _amp_amp: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let tilde_or = pop_item!(self, tilde_or, TildeOr, context);
-        let operator_precedence12_8_built = OperatorPrecedence39Builder::default()
-            .tilde_or(Box::new(tilde_or))
+        let amp_amp = pop_item!(self, amp_amp, AmpAmp, context);
+        let binary_operator_9_built = BinaryOperator9Builder::default()
+            .amp_amp(Box::new(amp_amp))
             .build()
             .into_diagnostic()?;
-        let operator_precedence12_8_built =
-            OperatorPrecedence12::OperatorPrecedence128(operator_precedence12_8_built);
+        let binary_operator_9_built = BinaryOperator::BinaryOperator9(binary_operator_9_built);
         // Calling user action here
         self.user_grammar
-            .operator_precedence12(&operator_precedence12_8_built)?;
-        self.push(
-            ASTType::OperatorPrecedence12(operator_precedence12_8_built),
-            context,
-        );
+            .binary_operator(&binary_operator_9_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_9_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 205:
+    /// Semantic action for production 179:
     ///
-    /// OperatorPrecedence12: TildeCircumflex;
+    /// BinaryOperator: OrOr;
     ///
     #[parol_runtime::function_name::named]
-    fn operator_precedence12_9(
+    fn binary_operator_10(
+        &mut self,
+        _or_or: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let or_or = pop_item!(self, or_or, OrOr, context);
+        let binary_operator_10_built = BinaryOperator10Builder::default()
+            .or_or(Box::new(or_or))
+            .build()
+            .into_diagnostic()?;
+        let binary_operator_10_built = BinaryOperator::BinaryOperator10(binary_operator_10_built);
+        // Calling user action here
+        self.user_grammar
+            .binary_operator(&binary_operator_10_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_10_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 180:
+    ///
+    /// BinaryOperator: TildeCircumflex;
+    ///
+    #[parol_runtime::function_name::named]
+    fn binary_operator_11(
         &mut self,
         _tilde_circumflex: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
@@ -10043,28 +8899,24 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let tilde_circumflex = pop_item!(self, tilde_circumflex, TildeCircumflex, context);
-        let operator_precedence12_9_built = OperatorPrecedence40Builder::default()
+        let binary_operator_11_built = BinaryOperator11Builder::default()
             .tilde_circumflex(Box::new(tilde_circumflex))
             .build()
             .into_diagnostic()?;
-        let operator_precedence12_9_built =
-            OperatorPrecedence12::OperatorPrecedence129(operator_precedence12_9_built);
+        let binary_operator_11_built = BinaryOperator::BinaryOperator11(binary_operator_11_built);
         // Calling user action here
         self.user_grammar
-            .operator_precedence12(&operator_precedence12_9_built)?;
-        self.push(
-            ASTType::OperatorPrecedence12(operator_precedence12_9_built),
-            context,
-        );
+            .binary_operator(&binary_operator_11_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_11_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 206:
+    /// Semantic action for production 181:
     ///
-    /// OperatorPrecedence12: CircumflexTilde;
+    /// BinaryOperator: CircumflexTilde;
     ///
     #[parol_runtime::function_name::named]
-    fn operator_precedence12_10(
+    fn binary_operator_12(
         &mut self,
         _circumflex_tilde: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
@@ -10072,37 +8924,650 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let circumflex_tilde = pop_item!(self, circumflex_tilde, CircumflexTilde, context);
-        let operator_precedence12_10_built = OperatorPrecedence41Builder::default()
+        let binary_operator_12_built = BinaryOperator12Builder::default()
             .circumflex_tilde(Box::new(circumflex_tilde))
             .build()
             .into_diagnostic()?;
-        let operator_precedence12_10_built =
-            OperatorPrecedence12::OperatorPrecedence1210(operator_precedence12_10_built);
+        let binary_operator_12_built = BinaryOperator::BinaryOperator12(binary_operator_12_built);
         // Calling user action here
         self.user_grammar
-            .operator_precedence12(&operator_precedence12_10_built)?;
-        self.push(
-            ASTType::OperatorPrecedence12(operator_precedence12_10_built),
-            context,
-        );
+            .binary_operator(&binary_operator_12_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_12_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 182:
+    ///
+    /// BinaryOperator: LTLT;
+    ///
+    #[parol_runtime::function_name::named]
+    fn binary_operator_13(
+        &mut self,
+        _l_t_l_t: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let l_t_l_t = pop_item!(self, l_t_l_t, LTLT, context);
+        let binary_operator_13_built = BinaryOperator13Builder::default()
+            .l_t_l_t(Box::new(l_t_l_t))
+            .build()
+            .into_diagnostic()?;
+        let binary_operator_13_built = BinaryOperator::BinaryOperator13(binary_operator_13_built);
+        // Calling user action here
+        self.user_grammar
+            .binary_operator(&binary_operator_13_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_13_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 183:
+    ///
+    /// BinaryOperator: GTGT;
+    ///
+    #[parol_runtime::function_name::named]
+    fn binary_operator_14(
+        &mut self,
+        _g_t_g_t: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let g_t_g_t = pop_item!(self, g_t_g_t, GTGT, context);
+        let binary_operator_14_built = BinaryOperator14Builder::default()
+            .g_t_g_t(Box::new(g_t_g_t))
+            .build()
+            .into_diagnostic()?;
+        let binary_operator_14_built = BinaryOperator::BinaryOperator14(binary_operator_14_built);
+        // Calling user action here
+        self.user_grammar
+            .binary_operator(&binary_operator_14_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_14_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 184:
+    ///
+    /// BinaryOperator: LTLTLT;
+    ///
+    #[parol_runtime::function_name::named]
+    fn binary_operator_15(
+        &mut self,
+        _l_t_l_t_l_t: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let l_t_l_t_l_t = pop_item!(self, l_t_l_t_l_t, LTLTLT, context);
+        let binary_operator_15_built = BinaryOperator15Builder::default()
+            .l_t_l_t_l_t(Box::new(l_t_l_t_l_t))
+            .build()
+            .into_diagnostic()?;
+        let binary_operator_15_built = BinaryOperator::BinaryOperator15(binary_operator_15_built);
+        // Calling user action here
+        self.user_grammar
+            .binary_operator(&binary_operator_15_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_15_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 185:
+    ///
+    /// BinaryOperator: GTGTGT;
+    ///
+    #[parol_runtime::function_name::named]
+    fn binary_operator_16(
+        &mut self,
+        _g_t_g_t_g_t: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let g_t_g_t_g_t = pop_item!(self, g_t_g_t_g_t, GTGTGT, context);
+        let binary_operator_16_built = BinaryOperator16Builder::default()
+            .g_t_g_t_g_t(Box::new(g_t_g_t_g_t))
+            .build()
+            .into_diagnostic()?;
+        let binary_operator_16_built = BinaryOperator::BinaryOperator16(binary_operator_16_built);
+        // Calling user action here
+        self.user_grammar
+            .binary_operator(&binary_operator_16_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_16_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 186:
+    ///
+    /// BinaryOperator: LT;
+    ///
+    #[parol_runtime::function_name::named]
+    fn binary_operator_17(
+        &mut self,
+        _l_t: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let l_t = pop_item!(self, l_t, LT, context);
+        let binary_operator_17_built = BinaryOperator17Builder::default()
+            .l_t(Box::new(l_t))
+            .build()
+            .into_diagnostic()?;
+        let binary_operator_17_built = BinaryOperator::BinaryOperator17(binary_operator_17_built);
+        // Calling user action here
+        self.user_grammar
+            .binary_operator(&binary_operator_17_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_17_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 187:
+    ///
+    /// BinaryOperator: GT;
+    ///
+    #[parol_runtime::function_name::named]
+    fn binary_operator_18(
+        &mut self,
+        _g_t: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let g_t = pop_item!(self, g_t, GT, context);
+        let binary_operator_18_built = BinaryOperator18Builder::default()
+            .g_t(Box::new(g_t))
+            .build()
+            .into_diagnostic()?;
+        let binary_operator_18_built = BinaryOperator::BinaryOperator18(binary_operator_18_built);
+        // Calling user action here
+        self.user_grammar
+            .binary_operator(&binary_operator_18_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_18_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 188:
+    ///
+    /// BinaryOperator: LTEqu;
+    ///
+    #[parol_runtime::function_name::named]
+    fn binary_operator_19(
+        &mut self,
+        _l_t_equ: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let l_t_equ = pop_item!(self, l_t_equ, LTEqu, context);
+        let binary_operator_19_built = BinaryOperator19Builder::default()
+            .l_t_equ(Box::new(l_t_equ))
+            .build()
+            .into_diagnostic()?;
+        let binary_operator_19_built = BinaryOperator::BinaryOperator19(binary_operator_19_built);
+        // Calling user action here
+        self.user_grammar
+            .binary_operator(&binary_operator_19_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_19_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 189:
+    ///
+    /// BinaryOperator: GTEqu;
+    ///
+    #[parol_runtime::function_name::named]
+    fn binary_operator_20(
+        &mut self,
+        _g_t_equ: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let g_t_equ = pop_item!(self, g_t_equ, GTEqu, context);
+        let binary_operator_20_built = BinaryOperator20Builder::default()
+            .g_t_equ(Box::new(g_t_equ))
+            .build()
+            .into_diagnostic()?;
+        let binary_operator_20_built = BinaryOperator::BinaryOperator20(binary_operator_20_built);
+        // Calling user action here
+        self.user_grammar
+            .binary_operator(&binary_operator_20_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_20_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 190:
+    ///
+    /// BinaryOperator: EquEqu;
+    ///
+    #[parol_runtime::function_name::named]
+    fn binary_operator_21(
+        &mut self,
+        _equ_equ: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let equ_equ = pop_item!(self, equ_equ, EquEqu, context);
+        let binary_operator_21_built = BinaryOperator21Builder::default()
+            .equ_equ(Box::new(equ_equ))
+            .build()
+            .into_diagnostic()?;
+        let binary_operator_21_built = BinaryOperator::BinaryOperator21(binary_operator_21_built);
+        // Calling user action here
+        self.user_grammar
+            .binary_operator(&binary_operator_21_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_21_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 191:
+    ///
+    /// BinaryOperator: BangEqu;
+    ///
+    #[parol_runtime::function_name::named]
+    fn binary_operator_22(
+        &mut self,
+        _bang_equ: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let bang_equ = pop_item!(self, bang_equ, BangEqu, context);
+        let binary_operator_22_built = BinaryOperator22Builder::default()
+            .bang_equ(Box::new(bang_equ))
+            .build()
+            .into_diagnostic()?;
+        let binary_operator_22_built = BinaryOperator::BinaryOperator22(binary_operator_22_built);
+        // Calling user action here
+        self.user_grammar
+            .binary_operator(&binary_operator_22_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_22_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 192:
+    ///
+    /// BinaryOperator: EquEquEqu;
+    ///
+    #[parol_runtime::function_name::named]
+    fn binary_operator_23(
+        &mut self,
+        _equ_equ_equ: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let equ_equ_equ = pop_item!(self, equ_equ_equ, EquEquEqu, context);
+        let binary_operator_23_built = BinaryOperator23Builder::default()
+            .equ_equ_equ(Box::new(equ_equ_equ))
+            .build()
+            .into_diagnostic()?;
+        let binary_operator_23_built = BinaryOperator::BinaryOperator23(binary_operator_23_built);
+        // Calling user action here
+        self.user_grammar
+            .binary_operator(&binary_operator_23_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_23_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 193:
+    ///
+    /// BinaryOperator: BangEquEqu;
+    ///
+    #[parol_runtime::function_name::named]
+    fn binary_operator_24(
+        &mut self,
+        _bang_equ_equ: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let bang_equ_equ = pop_item!(self, bang_equ_equ, BangEquEqu, context);
+        let binary_operator_24_built = BinaryOperator24Builder::default()
+            .bang_equ_equ(Box::new(bang_equ_equ))
+            .build()
+            .into_diagnostic()?;
+        let binary_operator_24_built = BinaryOperator::BinaryOperator24(binary_operator_24_built);
+        // Calling user action here
+        self.user_grammar
+            .binary_operator(&binary_operator_24_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_24_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 194:
+    ///
+    /// BinaryOperator: EquEquQuest;
+    ///
+    #[parol_runtime::function_name::named]
+    fn binary_operator_25(
+        &mut self,
+        _equ_equ_quest: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let equ_equ_quest = pop_item!(self, equ_equ_quest, EquEquQuest, context);
+        let binary_operator_25_built = BinaryOperator25Builder::default()
+            .equ_equ_quest(Box::new(equ_equ_quest))
+            .build()
+            .into_diagnostic()?;
+        let binary_operator_25_built = BinaryOperator::BinaryOperator25(binary_operator_25_built);
+        // Calling user action here
+        self.user_grammar
+            .binary_operator(&binary_operator_25_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_25_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 195:
+    ///
+    /// BinaryOperator: BangEquQuest;
+    ///
+    #[parol_runtime::function_name::named]
+    fn binary_operator_26(
+        &mut self,
+        _bang_equ_quest: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let bang_equ_quest = pop_item!(self, bang_equ_quest, BangEquQuest, context);
+        let binary_operator_26_built = BinaryOperator26Builder::default()
+            .bang_equ_quest(Box::new(bang_equ_quest))
+            .build()
+            .into_diagnostic()?;
+        let binary_operator_26_built = BinaryOperator::BinaryOperator26(binary_operator_26_built);
+        // Calling user action here
+        self.user_grammar
+            .binary_operator(&binary_operator_26_built)?;
+        self.push(ASTType::BinaryOperator(binary_operator_26_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 196:
+    ///
+    /// UnaryOperator: Plus;
+    ///
+    #[parol_runtime::function_name::named]
+    fn unary_operator_0(
+        &mut self,
+        _plus: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let plus = pop_item!(self, plus, Plus, context);
+        let unary_operator_0_built = UnaryOperator0Builder::default()
+            .plus(Box::new(plus))
+            .build()
+            .into_diagnostic()?;
+        let unary_operator_0_built = UnaryOperator::UnaryOperator0(unary_operator_0_built);
+        // Calling user action here
+        self.user_grammar.unary_operator(&unary_operator_0_built)?;
+        self.push(ASTType::UnaryOperator(unary_operator_0_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 197:
+    ///
+    /// UnaryOperator: Minus;
+    ///
+    #[parol_runtime::function_name::named]
+    fn unary_operator_1(
+        &mut self,
+        _minus: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let minus = pop_item!(self, minus, Minus, context);
+        let unary_operator_1_built = UnaryOperator1Builder::default()
+            .minus(Box::new(minus))
+            .build()
+            .into_diagnostic()?;
+        let unary_operator_1_built = UnaryOperator::UnaryOperator1(unary_operator_1_built);
+        // Calling user action here
+        self.user_grammar.unary_operator(&unary_operator_1_built)?;
+        self.push(ASTType::UnaryOperator(unary_operator_1_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 198:
+    ///
+    /// UnaryOperator: Bang;
+    ///
+    #[parol_runtime::function_name::named]
+    fn unary_operator_2(
+        &mut self,
+        _bang: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let bang = pop_item!(self, bang, Bang, context);
+        let unary_operator_2_built = UnaryOperator2Builder::default()
+            .bang(Box::new(bang))
+            .build()
+            .into_diagnostic()?;
+        let unary_operator_2_built = UnaryOperator::UnaryOperator2(unary_operator_2_built);
+        // Calling user action here
+        self.user_grammar.unary_operator(&unary_operator_2_built)?;
+        self.push(ASTType::UnaryOperator(unary_operator_2_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 199:
+    ///
+    /// UnaryOperator: Tilde;
+    ///
+    #[parol_runtime::function_name::named]
+    fn unary_operator_3(
+        &mut self,
+        _tilde: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let tilde = pop_item!(self, tilde, Tilde, context);
+        let unary_operator_3_built = UnaryOperator3Builder::default()
+            .tilde(Box::new(tilde))
+            .build()
+            .into_diagnostic()?;
+        let unary_operator_3_built = UnaryOperator::UnaryOperator3(unary_operator_3_built);
+        // Calling user action here
+        self.user_grammar.unary_operator(&unary_operator_3_built)?;
+        self.push(ASTType::UnaryOperator(unary_operator_3_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 200:
+    ///
+    /// UnaryOperator: Amp;
+    ///
+    #[parol_runtime::function_name::named]
+    fn unary_operator_4(
+        &mut self,
+        _amp: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let amp = pop_item!(self, amp, Amp, context);
+        let unary_operator_4_built = UnaryOperator4Builder::default()
+            .amp(Box::new(amp))
+            .build()
+            .into_diagnostic()?;
+        let unary_operator_4_built = UnaryOperator::UnaryOperator4(unary_operator_4_built);
+        // Calling user action here
+        self.user_grammar.unary_operator(&unary_operator_4_built)?;
+        self.push(ASTType::UnaryOperator(unary_operator_4_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 201:
+    ///
+    /// UnaryOperator: Or;
+    ///
+    #[parol_runtime::function_name::named]
+    fn unary_operator_5(
+        &mut self,
+        _or: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let or = pop_item!(self, or, Or, context);
+        let unary_operator_5_built = UnaryOperator5Builder::default()
+            .or(Box::new(or))
+            .build()
+            .into_diagnostic()?;
+        let unary_operator_5_built = UnaryOperator::UnaryOperator5(unary_operator_5_built);
+        // Calling user action here
+        self.user_grammar.unary_operator(&unary_operator_5_built)?;
+        self.push(ASTType::UnaryOperator(unary_operator_5_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 202:
+    ///
+    /// UnaryOperator: Circumflex;
+    ///
+    #[parol_runtime::function_name::named]
+    fn unary_operator_6(
+        &mut self,
+        _circumflex: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let circumflex = pop_item!(self, circumflex, Circumflex, context);
+        let unary_operator_6_built = UnaryOperator6Builder::default()
+            .circumflex(Box::new(circumflex))
+            .build()
+            .into_diagnostic()?;
+        let unary_operator_6_built = UnaryOperator::UnaryOperator6(unary_operator_6_built);
+        // Calling user action here
+        self.user_grammar.unary_operator(&unary_operator_6_built)?;
+        self.push(ASTType::UnaryOperator(unary_operator_6_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 203:
+    ///
+    /// UnaryOperator: TildeAmp;
+    ///
+    #[parol_runtime::function_name::named]
+    fn unary_operator_7(
+        &mut self,
+        _tilde_amp: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let tilde_amp = pop_item!(self, tilde_amp, TildeAmp, context);
+        let unary_operator_7_built = UnaryOperator7Builder::default()
+            .tilde_amp(Box::new(tilde_amp))
+            .build()
+            .into_diagnostic()?;
+        let unary_operator_7_built = UnaryOperator::UnaryOperator7(unary_operator_7_built);
+        // Calling user action here
+        self.user_grammar.unary_operator(&unary_operator_7_built)?;
+        self.push(ASTType::UnaryOperator(unary_operator_7_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 204:
+    ///
+    /// UnaryOperator: TildeOr;
+    ///
+    #[parol_runtime::function_name::named]
+    fn unary_operator_8(
+        &mut self,
+        _tilde_or: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let tilde_or = pop_item!(self, tilde_or, TildeOr, context);
+        let unary_operator_8_built = UnaryOperator8Builder::default()
+            .tilde_or(Box::new(tilde_or))
+            .build()
+            .into_diagnostic()?;
+        let unary_operator_8_built = UnaryOperator::UnaryOperator8(unary_operator_8_built);
+        // Calling user action here
+        self.user_grammar.unary_operator(&unary_operator_8_built)?;
+        self.push(ASTType::UnaryOperator(unary_operator_8_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 205:
+    ///
+    /// UnaryOperator: TildeCircumflex;
+    ///
+    #[parol_runtime::function_name::named]
+    fn unary_operator_9(
+        &mut self,
+        _tilde_circumflex: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let tilde_circumflex = pop_item!(self, tilde_circumflex, TildeCircumflex, context);
+        let unary_operator_9_built = UnaryOperator9Builder::default()
+            .tilde_circumflex(Box::new(tilde_circumflex))
+            .build()
+            .into_diagnostic()?;
+        let unary_operator_9_built = UnaryOperator::UnaryOperator9(unary_operator_9_built);
+        // Calling user action here
+        self.user_grammar.unary_operator(&unary_operator_9_built)?;
+        self.push(ASTType::UnaryOperator(unary_operator_9_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 206:
+    ///
+    /// UnaryOperator: CircumflexTilde;
+    ///
+    #[parol_runtime::function_name::named]
+    fn unary_operator_10(
+        &mut self,
+        _circumflex_tilde: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let circumflex_tilde = pop_item!(self, circumflex_tilde, CircumflexTilde, context);
+        let unary_operator_10_built = UnaryOperator10Builder::default()
+            .circumflex_tilde(Box::new(circumflex_tilde))
+            .build()
+            .into_diagnostic()?;
+        let unary_operator_10_built = UnaryOperator::UnaryOperator10(unary_operator_10_built);
+        // Calling user action here
+        self.user_grammar.unary_operator(&unary_operator_10_built)?;
+        self.push(ASTType::UnaryOperator(unary_operator_10_built), context);
         Ok(())
     }
 
     /// Semantic action for production 207:
     ///
-    /// Expression: Expression00;
+    /// Expression: Expression1 ExpressionList /* Vec */;
     ///
     #[parol_runtime::function_name::named]
     fn expression(
         &mut self,
-        _expression00: &ParseTreeStackEntry<'t>,
+        _expression1: &ParseTreeStackEntry<'t>,
+        _expression_list: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let expression00 = pop_item!(self, expression00, Expression00, context);
+        let expression_list = pop_and_reverse_item!(self, expression_list, ExpressionList, context);
+        let expression1 = pop_item!(self, expression1, Expression1, context);
         let expression_built = ExpressionBuilder::default()
-            .expression00(Box::new(expression00))
+            .expression1(Box::new(expression1))
+            .expression_list(expression_list)
             .build()
             .into_diagnostic()?;
         // Calling user action here
@@ -10113,883 +9578,108 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 208:
     ///
-    /// Expression00: Expression01 Expression00List /* Vec */;
+    /// ExpressionList /* Vec<T>::Push */: BinaryOperator Expression1 ExpressionList;
     ///
     #[parol_runtime::function_name::named]
-    fn expression00(
+    fn expression_list_0(
         &mut self,
-        _expression01: &ParseTreeStackEntry<'t>,
-        _expression00_list: &ParseTreeStackEntry<'t>,
+        _binary_operator: &ParseTreeStackEntry<'t>,
+        _expression1: &ParseTreeStackEntry<'t>,
+        _expression_list: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let expression00_list =
-            pop_and_reverse_item!(self, expression00_list, Expression00List, context);
-        let expression01 = pop_item!(self, expression01, Expression01, context);
-        let expression00_built = Expression00Builder::default()
-            .expression01(Box::new(expression01))
-            .expression00_list(expression00_list)
+        let mut expression_list = pop_item!(self, expression_list, ExpressionList, context);
+        let expression1 = pop_item!(self, expression1, Expression1, context);
+        let binary_operator = pop_item!(self, binary_operator, BinaryOperator, context);
+        let expression_list_0_built = ExpressionListBuilder::default()
+            .expression1(Box::new(expression1))
+            .binary_operator(Box::new(binary_operator))
             .build()
             .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar.expression00(&expression00_built)?;
-        self.push(ASTType::Expression00(expression00_built), context);
+        // Add an element to the vector
+        expression_list.push(expression_list_0_built);
+        self.push(ASTType::ExpressionList(expression_list), context);
         Ok(())
     }
 
     /// Semantic action for production 209:
     ///
-    /// Expression00List /* Vec<T>::Push */: OperatorPrecedence01 Expression01 Expression00List;
+    /// ExpressionList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn expression00_list_0(
-        &mut self,
-        _operator_precedence01: &ParseTreeStackEntry<'t>,
-        _expression01: &ParseTreeStackEntry<'t>,
-        _expression00_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn expression_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let mut expression00_list = pop_item!(self, expression00_list, Expression00List, context);
-        let expression01 = pop_item!(self, expression01, Expression01, context);
-        let operator_precedence01 =
-            pop_item!(self, operator_precedence01, OperatorPrecedence01, context);
-        let expression00_list_0_built = Expression00ListBuilder::default()
-            .expression01(Box::new(expression01))
-            .operator_precedence01(Box::new(operator_precedence01))
-            .build()
-            .into_diagnostic()?;
-        // Add an element to the vector
-        expression00_list.push(expression00_list_0_built);
-        self.push(ASTType::Expression00List(expression00_list), context);
+        let expression_list_1_built = Vec::new();
+        self.push(ASTType::ExpressionList(expression_list_1_built), context);
         Ok(())
     }
 
     /// Semantic action for production 210:
     ///
-    /// Expression00List /* Vec<T>::New */: ;
+    /// Expression1: Expression1Opt /* Option */ Factor;
     ///
     #[parol_runtime::function_name::named]
-    fn expression00_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let expression00_list_1_built = Vec::new();
-        self.push(
-            ASTType::Expression00List(expression00_list_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 211:
-    ///
-    /// Expression01: Expression02 Expression01List /* Vec */;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression01(
+    fn expression1(
         &mut self,
-        _expression02: &ParseTreeStackEntry<'t>,
-        _expression01_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let expression01_list =
-            pop_and_reverse_item!(self, expression01_list, Expression01List, context);
-        let expression02 = pop_item!(self, expression02, Expression02, context);
-        let expression01_built = Expression01Builder::default()
-            .expression02(Box::new(expression02))
-            .expression01_list(expression01_list)
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar.expression01(&expression01_built)?;
-        self.push(ASTType::Expression01(expression01_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 212:
-    ///
-    /// Expression01List /* Vec<T>::Push */: OperatorPrecedence02 Expression02 Expression01List;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression01_list_0(
-        &mut self,
-        _operator_precedence02: &ParseTreeStackEntry<'t>,
-        _expression02: &ParseTreeStackEntry<'t>,
-        _expression01_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let mut expression01_list = pop_item!(self, expression01_list, Expression01List, context);
-        let expression02 = pop_item!(self, expression02, Expression02, context);
-        let operator_precedence02 =
-            pop_item!(self, operator_precedence02, OperatorPrecedence02, context);
-        let expression01_list_0_built = Expression01ListBuilder::default()
-            .expression02(Box::new(expression02))
-            .operator_precedence02(Box::new(operator_precedence02))
-            .build()
-            .into_diagnostic()?;
-        // Add an element to the vector
-        expression01_list.push(expression01_list_0_built);
-        self.push(ASTType::Expression01List(expression01_list), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 213:
-    ///
-    /// Expression01List /* Vec<T>::New */: ;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression01_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let expression01_list_1_built = Vec::new();
-        self.push(
-            ASTType::Expression01List(expression01_list_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 214:
-    ///
-    /// Expression02: Expression03 Expression02List /* Vec */;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression02(
-        &mut self,
-        _expression03: &ParseTreeStackEntry<'t>,
-        _expression02_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let expression02_list =
-            pop_and_reverse_item!(self, expression02_list, Expression02List, context);
-        let expression03 = pop_item!(self, expression03, Expression03, context);
-        let expression02_built = Expression02Builder::default()
-            .expression03(Box::new(expression03))
-            .expression02_list(expression02_list)
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar.expression02(&expression02_built)?;
-        self.push(ASTType::Expression02(expression02_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 215:
-    ///
-    /// Expression02List /* Vec<T>::Push */: OperatorPrecedence03 Expression03 Expression02List;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression02_list_0(
-        &mut self,
-        _operator_precedence03: &ParseTreeStackEntry<'t>,
-        _expression03: &ParseTreeStackEntry<'t>,
-        _expression02_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let mut expression02_list = pop_item!(self, expression02_list, Expression02List, context);
-        let expression03 = pop_item!(self, expression03, Expression03, context);
-        let operator_precedence03 =
-            pop_item!(self, operator_precedence03, OperatorPrecedence03, context);
-        let expression02_list_0_built = Expression02ListBuilder::default()
-            .expression03(Box::new(expression03))
-            .operator_precedence03(Box::new(operator_precedence03))
-            .build()
-            .into_diagnostic()?;
-        // Add an element to the vector
-        expression02_list.push(expression02_list_0_built);
-        self.push(ASTType::Expression02List(expression02_list), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 216:
-    ///
-    /// Expression02List /* Vec<T>::New */: ;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression02_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let expression02_list_1_built = Vec::new();
-        self.push(
-            ASTType::Expression02List(expression02_list_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 217:
-    ///
-    /// Expression03: Expression04 Expression03List /* Vec */;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression03(
-        &mut self,
-        _expression04: &ParseTreeStackEntry<'t>,
-        _expression03_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let expression03_list =
-            pop_and_reverse_item!(self, expression03_list, Expression03List, context);
-        let expression04 = pop_item!(self, expression04, Expression04, context);
-        let expression03_built = Expression03Builder::default()
-            .expression04(Box::new(expression04))
-            .expression03_list(expression03_list)
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar.expression03(&expression03_built)?;
-        self.push(ASTType::Expression03(expression03_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 218:
-    ///
-    /// Expression03List /* Vec<T>::Push */: OperatorPrecedence04 Expression04 Expression03List;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression03_list_0(
-        &mut self,
-        _operator_precedence04: &ParseTreeStackEntry<'t>,
-        _expression04: &ParseTreeStackEntry<'t>,
-        _expression03_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let mut expression03_list = pop_item!(self, expression03_list, Expression03List, context);
-        let expression04 = pop_item!(self, expression04, Expression04, context);
-        let operator_precedence04 =
-            pop_item!(self, operator_precedence04, OperatorPrecedence04, context);
-        let expression03_list_0_built = Expression03ListBuilder::default()
-            .expression04(Box::new(expression04))
-            .operator_precedence04(Box::new(operator_precedence04))
-            .build()
-            .into_diagnostic()?;
-        // Add an element to the vector
-        expression03_list.push(expression03_list_0_built);
-        self.push(ASTType::Expression03List(expression03_list), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 219:
-    ///
-    /// Expression03List /* Vec<T>::New */: ;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression03_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let expression03_list_1_built = Vec::new();
-        self.push(
-            ASTType::Expression03List(expression03_list_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 220:
-    ///
-    /// Expression04: Expression05 Expression04List /* Vec */;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression04(
-        &mut self,
-        _expression05: &ParseTreeStackEntry<'t>,
-        _expression04_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let expression04_list =
-            pop_and_reverse_item!(self, expression04_list, Expression04List, context);
-        let expression05 = pop_item!(self, expression05, Expression05, context);
-        let expression04_built = Expression04Builder::default()
-            .expression05(Box::new(expression05))
-            .expression04_list(expression04_list)
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar.expression04(&expression04_built)?;
-        self.push(ASTType::Expression04(expression04_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 221:
-    ///
-    /// Expression04List /* Vec<T>::Push */: OperatorPrecedence05 Expression05 Expression04List;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression04_list_0(
-        &mut self,
-        _operator_precedence05: &ParseTreeStackEntry<'t>,
-        _expression05: &ParseTreeStackEntry<'t>,
-        _expression04_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let mut expression04_list = pop_item!(self, expression04_list, Expression04List, context);
-        let expression05 = pop_item!(self, expression05, Expression05, context);
-        let operator_precedence05 =
-            pop_item!(self, operator_precedence05, OperatorPrecedence05, context);
-        let expression04_list_0_built = Expression04ListBuilder::default()
-            .expression05(Box::new(expression05))
-            .operator_precedence05(Box::new(operator_precedence05))
-            .build()
-            .into_diagnostic()?;
-        // Add an element to the vector
-        expression04_list.push(expression04_list_0_built);
-        self.push(ASTType::Expression04List(expression04_list), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 222:
-    ///
-    /// Expression04List /* Vec<T>::New */: ;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression04_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let expression04_list_1_built = Vec::new();
-        self.push(
-            ASTType::Expression04List(expression04_list_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 223:
-    ///
-    /// Expression05: Expression06 Expression05List /* Vec */;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression05(
-        &mut self,
-        _expression06: &ParseTreeStackEntry<'t>,
-        _expression05_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let expression05_list =
-            pop_and_reverse_item!(self, expression05_list, Expression05List, context);
-        let expression06 = pop_item!(self, expression06, Expression06, context);
-        let expression05_built = Expression05Builder::default()
-            .expression06(Box::new(expression06))
-            .expression05_list(expression05_list)
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar.expression05(&expression05_built)?;
-        self.push(ASTType::Expression05(expression05_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 224:
-    ///
-    /// Expression05List /* Vec<T>::Push */: OperatorPrecedence06 Expression06 Expression05List;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression05_list_0(
-        &mut self,
-        _operator_precedence06: &ParseTreeStackEntry<'t>,
-        _expression06: &ParseTreeStackEntry<'t>,
-        _expression05_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let mut expression05_list = pop_item!(self, expression05_list, Expression05List, context);
-        let expression06 = pop_item!(self, expression06, Expression06, context);
-        let operator_precedence06 =
-            pop_item!(self, operator_precedence06, OperatorPrecedence06, context);
-        let expression05_list_0_built = Expression05ListBuilder::default()
-            .expression06(Box::new(expression06))
-            .operator_precedence06(Box::new(operator_precedence06))
-            .build()
-            .into_diagnostic()?;
-        // Add an element to the vector
-        expression05_list.push(expression05_list_0_built);
-        self.push(ASTType::Expression05List(expression05_list), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 225:
-    ///
-    /// Expression05List /* Vec<T>::New */: ;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression05_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let expression05_list_1_built = Vec::new();
-        self.push(
-            ASTType::Expression05List(expression05_list_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 226:
-    ///
-    /// Expression06: Expression07 Expression06List /* Vec */;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression06(
-        &mut self,
-        _expression07: &ParseTreeStackEntry<'t>,
-        _expression06_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let expression06_list =
-            pop_and_reverse_item!(self, expression06_list, Expression06List, context);
-        let expression07 = pop_item!(self, expression07, Expression07, context);
-        let expression06_built = Expression06Builder::default()
-            .expression07(Box::new(expression07))
-            .expression06_list(expression06_list)
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar.expression06(&expression06_built)?;
-        self.push(ASTType::Expression06(expression06_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 227:
-    ///
-    /// Expression06List /* Vec<T>::Push */: OperatorPrecedence07 Expression07 Expression06List;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression06_list_0(
-        &mut self,
-        _operator_precedence07: &ParseTreeStackEntry<'t>,
-        _expression07: &ParseTreeStackEntry<'t>,
-        _expression06_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let mut expression06_list = pop_item!(self, expression06_list, Expression06List, context);
-        let expression07 = pop_item!(self, expression07, Expression07, context);
-        let operator_precedence07 =
-            pop_item!(self, operator_precedence07, OperatorPrecedence07, context);
-        let expression06_list_0_built = Expression06ListBuilder::default()
-            .expression07(Box::new(expression07))
-            .operator_precedence07(Box::new(operator_precedence07))
-            .build()
-            .into_diagnostic()?;
-        // Add an element to the vector
-        expression06_list.push(expression06_list_0_built);
-        self.push(ASTType::Expression06List(expression06_list), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 228:
-    ///
-    /// Expression06List /* Vec<T>::New */: ;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression06_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let expression06_list_1_built = Vec::new();
-        self.push(
-            ASTType::Expression06List(expression06_list_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 229:
-    ///
-    /// Expression07: Expression08 Expression07List /* Vec */;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression07(
-        &mut self,
-        _expression08: &ParseTreeStackEntry<'t>,
-        _expression07_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let expression07_list =
-            pop_and_reverse_item!(self, expression07_list, Expression07List, context);
-        let expression08 = pop_item!(self, expression08, Expression08, context);
-        let expression07_built = Expression07Builder::default()
-            .expression08(Box::new(expression08))
-            .expression07_list(expression07_list)
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar.expression07(&expression07_built)?;
-        self.push(ASTType::Expression07(expression07_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 230:
-    ///
-    /// Expression07List /* Vec<T>::Push */: OperatorPrecedence08 Expression08 Expression07List;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression07_list_0(
-        &mut self,
-        _operator_precedence08: &ParseTreeStackEntry<'t>,
-        _expression08: &ParseTreeStackEntry<'t>,
-        _expression07_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let mut expression07_list = pop_item!(self, expression07_list, Expression07List, context);
-        let expression08 = pop_item!(self, expression08, Expression08, context);
-        let operator_precedence08 =
-            pop_item!(self, operator_precedence08, OperatorPrecedence08, context);
-        let expression07_list_0_built = Expression07ListBuilder::default()
-            .expression08(Box::new(expression08))
-            .operator_precedence08(Box::new(operator_precedence08))
-            .build()
-            .into_diagnostic()?;
-        // Add an element to the vector
-        expression07_list.push(expression07_list_0_built);
-        self.push(ASTType::Expression07List(expression07_list), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 231:
-    ///
-    /// Expression07List /* Vec<T>::New */: ;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression07_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let expression07_list_1_built = Vec::new();
-        self.push(
-            ASTType::Expression07List(expression07_list_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 232:
-    ///
-    /// Expression08: Expression09 Expression08List /* Vec */;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression08(
-        &mut self,
-        _expression09: &ParseTreeStackEntry<'t>,
-        _expression08_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let expression08_list =
-            pop_and_reverse_item!(self, expression08_list, Expression08List, context);
-        let expression09 = pop_item!(self, expression09, Expression09, context);
-        let expression08_built = Expression08Builder::default()
-            .expression09(Box::new(expression09))
-            .expression08_list(expression08_list)
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar.expression08(&expression08_built)?;
-        self.push(ASTType::Expression08(expression08_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 233:
-    ///
-    /// Expression08List /* Vec<T>::Push */: OperatorPrecedence09 Expression09 Expression08List;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression08_list_0(
-        &mut self,
-        _operator_precedence09: &ParseTreeStackEntry<'t>,
-        _expression09: &ParseTreeStackEntry<'t>,
-        _expression08_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let mut expression08_list = pop_item!(self, expression08_list, Expression08List, context);
-        let expression09 = pop_item!(self, expression09, Expression09, context);
-        let operator_precedence09 =
-            pop_item!(self, operator_precedence09, OperatorPrecedence09, context);
-        let expression08_list_0_built = Expression08ListBuilder::default()
-            .expression09(Box::new(expression09))
-            .operator_precedence09(Box::new(operator_precedence09))
-            .build()
-            .into_diagnostic()?;
-        // Add an element to the vector
-        expression08_list.push(expression08_list_0_built);
-        self.push(ASTType::Expression08List(expression08_list), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 234:
-    ///
-    /// Expression08List /* Vec<T>::New */: ;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression08_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let expression08_list_1_built = Vec::new();
-        self.push(
-            ASTType::Expression08List(expression08_list_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 235:
-    ///
-    /// Expression09: Expression10 Expression09List /* Vec */;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression09(
-        &mut self,
-        _expression10: &ParseTreeStackEntry<'t>,
-        _expression09_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let expression09_list =
-            pop_and_reverse_item!(self, expression09_list, Expression09List, context);
-        let expression10 = pop_item!(self, expression10, Expression10, context);
-        let expression09_built = Expression09Builder::default()
-            .expression10(Box::new(expression10))
-            .expression09_list(expression09_list)
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar.expression09(&expression09_built)?;
-        self.push(ASTType::Expression09(expression09_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 236:
-    ///
-    /// Expression09List /* Vec<T>::Push */: OperatorPrecedence10 Expression10 Expression09List;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression09_list_0(
-        &mut self,
-        _operator_precedence10: &ParseTreeStackEntry<'t>,
-        _expression10: &ParseTreeStackEntry<'t>,
-        _expression09_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let mut expression09_list = pop_item!(self, expression09_list, Expression09List, context);
-        let expression10 = pop_item!(self, expression10, Expression10, context);
-        let operator_precedence10 =
-            pop_item!(self, operator_precedence10, OperatorPrecedence10, context);
-        let expression09_list_0_built = Expression09ListBuilder::default()
-            .expression10(Box::new(expression10))
-            .operator_precedence10(Box::new(operator_precedence10))
-            .build()
-            .into_diagnostic()?;
-        // Add an element to the vector
-        expression09_list.push(expression09_list_0_built);
-        self.push(ASTType::Expression09List(expression09_list), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 237:
-    ///
-    /// Expression09List /* Vec<T>::New */: ;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression09_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let expression09_list_1_built = Vec::new();
-        self.push(
-            ASTType::Expression09List(expression09_list_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 238:
-    ///
-    /// Expression10: Expression11 Expression10List /* Vec */;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression10(
-        &mut self,
-        _expression11: &ParseTreeStackEntry<'t>,
-        _expression10_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let expression10_list =
-            pop_and_reverse_item!(self, expression10_list, Expression10List, context);
-        let expression11 = pop_item!(self, expression11, Expression11, context);
-        let expression10_built = Expression10Builder::default()
-            .expression11(Box::new(expression11))
-            .expression10_list(expression10_list)
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar.expression10(&expression10_built)?;
-        self.push(ASTType::Expression10(expression10_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 239:
-    ///
-    /// Expression10List /* Vec<T>::Push */: OperatorPrecedence11 Expression11 Expression10List;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression10_list_0(
-        &mut self,
-        _operator_precedence11: &ParseTreeStackEntry<'t>,
-        _expression11: &ParseTreeStackEntry<'t>,
-        _expression10_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let mut expression10_list = pop_item!(self, expression10_list, Expression10List, context);
-        let expression11 = pop_item!(self, expression11, Expression11, context);
-        let operator_precedence11 =
-            pop_item!(self, operator_precedence11, OperatorPrecedence11, context);
-        let expression10_list_0_built = Expression10ListBuilder::default()
-            .expression11(Box::new(expression11))
-            .operator_precedence11(Box::new(operator_precedence11))
-            .build()
-            .into_diagnostic()?;
-        // Add an element to the vector
-        expression10_list.push(expression10_list_0_built);
-        self.push(ASTType::Expression10List(expression10_list), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 240:
-    ///
-    /// Expression10List /* Vec<T>::New */: ;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression10_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let expression10_list_1_built = Vec::new();
-        self.push(
-            ASTType::Expression10List(expression10_list_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 241:
-    ///
-    /// Expression11: Expression11Opt /* Option */ Expression12;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression11(
-        &mut self,
-        _expression11_opt: &ParseTreeStackEntry<'t>,
-        _expression12: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let expression12 = pop_item!(self, expression12, Expression12, context);
-        let expression11_opt = pop_item!(self, expression11_opt, Expression11Opt, context);
-        let expression11_built = Expression11Builder::default()
-            .expression11_opt(expression11_opt)
-            .expression12(Box::new(expression12))
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar.expression11(&expression11_built)?;
-        self.push(ASTType::Expression11(expression11_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 242:
-    ///
-    /// Expression11Opt /* Option<T>::Some */: OperatorPrecedence12;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression11_opt_0(
-        &mut self,
-        _operator_precedence12: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let operator_precedence12 =
-            pop_item!(self, operator_precedence12, OperatorPrecedence12, context);
-        let expression11_opt_0_built = Expression11OptBuilder::default()
-            .operator_precedence12(Box::new(operator_precedence12))
-            .build()
-            .into_diagnostic()?;
-        self.push(
-            ASTType::Expression11Opt(Some(Box::new(expression11_opt_0_built))),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 243:
-    ///
-    /// Expression11Opt /* Option<T>::None */: ;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression11_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::Expression11Opt(None), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 244:
-    ///
-    /// Expression12: Factor;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression12(
-        &mut self,
+        _expression1_opt: &ParseTreeStackEntry<'t>,
         _factor: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let factor = pop_item!(self, factor, Factor, context);
-        let expression12_built = Expression12Builder::default()
+        let expression1_opt = pop_item!(self, expression1_opt, Expression1Opt, context);
+        let expression1_built = Expression1Builder::default()
+            .expression1_opt(expression1_opt)
             .factor(Box::new(factor))
             .build()
             .into_diagnostic()?;
         // Calling user action here
-        self.user_grammar.expression12(&expression12_built)?;
-        self.push(ASTType::Expression12(expression12_built), context);
+        self.user_grammar.expression1(&expression1_built)?;
+        self.push(ASTType::Expression1(expression1_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 245:
+    /// Semantic action for production 211:
+    ///
+    /// Expression1Opt /* Option<T>::Some */: UnaryOperator;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression1_opt_0(
+        &mut self,
+        _unary_operator: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let unary_operator = pop_item!(self, unary_operator, UnaryOperator, context);
+        let expression1_opt_0_built = Expression1OptBuilder::default()
+            .unary_operator(Box::new(unary_operator))
+            .build()
+            .into_diagnostic()?;
+        self.push(
+            ASTType::Expression1Opt(Some(Box::new(expression1_opt_0_built))),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 212:
+    ///
+    /// Expression1Opt /* Option<T>::None */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression1_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        self.push(ASTType::Expression1Opt(None), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 213:
     ///
     /// Factor: Number;
     ///
@@ -11013,7 +9703,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 246:
+    /// Semantic action for production 214:
     ///
     /// Factor: Identifier FactorList /* Vec */;
     ///
@@ -11040,7 +9730,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 247:
+    /// Semantic action for production 215:
     ///
     /// FactorList /* Vec<T>::Push */: Range FactorList;
     ///
@@ -11065,7 +9755,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 248:
+    /// Semantic action for production 216:
     ///
     /// FactorList /* Vec<T>::New */: ;
     ///
@@ -11078,7 +9768,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 249:
+    /// Semantic action for production 217:
     ///
     /// Factor: LParen Expression RParen;
     ///
@@ -11108,7 +9798,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 250:
+    /// Semantic action for production 218:
     ///
     /// Statement: AssignmentStatement;
     ///
@@ -11133,7 +9823,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 251:
+    /// Semantic action for production 219:
     ///
     /// Statement: IfStatement;
     ///
@@ -11157,7 +9847,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 252:
+    /// Semantic action for production 220:
     ///
     /// AssignmentStatement: Identifier Equ Expression Semicolon;
     ///
@@ -11193,7 +9883,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 253:
+    /// Semantic action for production 221:
     ///
     /// IfStatement: If Expression LBrace Statement RBrace IfStatementList /* Vec */ IfStatementOpt /* Option */;
     ///
@@ -11235,7 +9925,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 254:
+    /// Semantic action for production 222:
     ///
     /// IfStatementList /* Vec<T>::Push */: Else If Expression LBrace Statement RBrace IfStatementList;
     ///
@@ -11275,7 +9965,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 255:
+    /// Semantic action for production 223:
     ///
     /// IfStatementList /* Vec<T>::New */: ;
     ///
@@ -11288,7 +9978,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 256:
+    /// Semantic action for production 224:
     ///
     /// IfStatementOpt /* Option<T>::Some */: Else LBrace Statement RBrace;
     ///
@@ -11321,7 +10011,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 257:
+    /// Semantic action for production 225:
     ///
     /// IfStatementOpt /* Option<T>::None */: ;
     ///
@@ -11333,7 +10023,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 258:
+    /// Semantic action for production 226:
     ///
     /// Range: LBracket Expression RangeOpt /* Option */ RBracket;
     ///
@@ -11365,7 +10055,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 259:
+    /// Semantic action for production 227:
     ///
     /// RangeOpt /* Option<T>::Some */: Colon Expression;
     ///
@@ -11392,7 +10082,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 260:
+    /// Semantic action for production 228:
     ///
     /// RangeOpt /* Option<T>::None */: ;
     ///
@@ -11404,7 +10094,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 261:
+    /// Semantic action for production 229:
     ///
     /// Width: LBracket Expression RBracket;
     ///
@@ -11433,7 +10123,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 262:
+    /// Semantic action for production 230:
     ///
     /// BuiltinType: Logic;
     ///
@@ -11457,7 +10147,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 263:
+    /// Semantic action for production 231:
     ///
     /// BuiltinType: Bit;
     ///
@@ -11481,7 +10171,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 264:
+    /// Semantic action for production 232:
     ///
     /// BuiltinType: U32;
     ///
@@ -11505,7 +10195,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 265:
+    /// Semantic action for production 233:
     ///
     /// BuiltinType: U64;
     ///
@@ -11529,7 +10219,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 266:
+    /// Semantic action for production 234:
     ///
     /// BuiltinType: I32;
     ///
@@ -11553,7 +10243,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 267:
+    /// Semantic action for production 235:
     ///
     /// BuiltinType: I64;
     ///
@@ -11577,7 +10267,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 268:
+    /// Semantic action for production 236:
     ///
     /// BuiltinType: F32;
     ///
@@ -11601,7 +10291,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 269:
+    /// Semantic action for production 237:
     ///
     /// BuiltinType: F64;
     ///
@@ -11625,7 +10315,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 270:
+    /// Semantic action for production 238:
     ///
     /// Type: TypeGroup TypeList /* Vec */;
     ///
@@ -11651,7 +10341,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 271:
+    /// Semantic action for production 239:
     ///
     /// TypeGroup: BuiltinType;
     ///
@@ -11673,7 +10363,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 272:
+    /// Semantic action for production 240:
     ///
     /// TypeGroup: Identifier;
     ///
@@ -11695,7 +10385,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 273:
+    /// Semantic action for production 241:
     ///
     /// TypeList /* Vec<T>::Push */: Width TypeList;
     ///
@@ -11720,7 +10410,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 274:
+    /// Semantic action for production 242:
     ///
     /// TypeList /* Vec<T>::New */: ;
     ///
@@ -11733,7 +10423,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 275:
+    /// Semantic action for production 243:
     ///
     /// WithParameter: Hash LParen WithParameterOpt /* Option */ RParen;
     ///
@@ -11765,7 +10455,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 276:
+    /// Semantic action for production 244:
     ///
     /// WithParameterOpt /* Option<T>::Some */: WithParameterList;
     ///
@@ -11789,7 +10479,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 277:
+    /// Semantic action for production 245:
     ///
     /// WithParameterOpt /* Option<T>::None */: ;
     ///
@@ -11801,7 +10491,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 278:
+    /// Semantic action for production 246:
     ///
     /// WithParameterList: WithParameterItem WithParameterListList /* Vec */ WithParameterListOpt /* Option */;
     ///
@@ -11840,7 +10530,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 279:
+    /// Semantic action for production 247:
     ///
     /// WithParameterListList /* Vec<T>::Push */: Comma WithParameterItem WithParameterListList;
     ///
@@ -11876,7 +10566,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 280:
+    /// Semantic action for production 248:
     ///
     /// WithParameterListList /* Vec<T>::New */: ;
     ///
@@ -11892,7 +10582,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 281:
+    /// Semantic action for production 249:
     ///
     /// WithParameterListOpt /* Option<T>::Some */: Comma;
     ///
@@ -11916,7 +10606,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 282:
+    /// Semantic action for production 250:
     ///
     /// WithParameterListOpt /* Option<T>::None */: ;
     ///
@@ -11928,7 +10618,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 283:
+    /// Semantic action for production 251:
     ///
     /// WithParameterItem: WithParameterItemGroup Identifier Colon Type Equ Expression;
     ///
@@ -11975,7 +10665,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 284:
+    /// Semantic action for production 252:
     ///
     /// WithParameterItemGroup: Parameter;
     ///
@@ -12001,7 +10691,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 285:
+    /// Semantic action for production 253:
     ///
     /// WithParameterItemGroup: Localparam;
     ///
@@ -12027,7 +10717,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 286:
+    /// Semantic action for production 254:
     ///
     /// ModuleDeclaration: Module Identifier ModuleDeclarationOpt /* Option */ ModuleDeclarationOpt0 /* Option */ LBrace ModuleDeclarationList /* Vec */ RBrace;
     ///
@@ -12083,7 +10773,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 287:
+    /// Semantic action for production 255:
     ///
     /// ModuleDeclarationList /* Vec<T>::Push */: ModuleItem ModuleDeclarationList;
     ///
@@ -12116,7 +10806,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 288:
+    /// Semantic action for production 256:
     ///
     /// ModuleDeclarationList /* Vec<T>::New */: ;
     ///
@@ -12132,7 +10822,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 289:
+    /// Semantic action for production 257:
     ///
     /// ModuleDeclarationOpt0 /* Option<T>::Some */: ModulePort;
     ///
@@ -12156,7 +10846,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 290:
+    /// Semantic action for production 258:
     ///
     /// ModuleDeclarationOpt0 /* Option<T>::None */: ;
     ///
@@ -12168,7 +10858,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 291:
+    /// Semantic action for production 259:
     ///
     /// ModuleDeclarationOpt /* Option<T>::Some */: WithParameter;
     ///
@@ -12192,7 +10882,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 292:
+    /// Semantic action for production 260:
     ///
     /// ModuleDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -12204,7 +10894,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 293:
+    /// Semantic action for production 261:
     ///
     /// ModulePort: LParen ModulePortOpt /* Option */ RParen;
     ///
@@ -12233,7 +10923,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 294:
+    /// Semantic action for production 262:
     ///
     /// ModulePortOpt /* Option<T>::Some */: ModulePortList;
     ///
@@ -12257,7 +10947,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 295:
+    /// Semantic action for production 263:
     ///
     /// ModulePortOpt /* Option<T>::None */: ;
     ///
@@ -12269,7 +10959,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 296:
+    /// Semantic action for production 264:
     ///
     /// ModulePortList: ModulePortItem ModulePortListList /* Vec */ ModulePortListOpt /* Option */;
     ///
@@ -12301,7 +10991,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 297:
+    /// Semantic action for production 265:
     ///
     /// ModulePortListList /* Vec<T>::Push */: Comma ModulePortItem ModulePortListList;
     ///
@@ -12330,7 +11020,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 298:
+    /// Semantic action for production 266:
     ///
     /// ModulePortListList /* Vec<T>::New */: ;
     ///
@@ -12346,7 +11036,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 299:
+    /// Semantic action for production 267:
     ///
     /// ModulePortListOpt /* Option<T>::Some */: Comma;
     ///
@@ -12370,7 +11060,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 300:
+    /// Semantic action for production 268:
     ///
     /// ModulePortListOpt /* Option<T>::None */: ;
     ///
@@ -12382,7 +11072,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 301:
+    /// Semantic action for production 269:
     ///
     /// ModulePortItem: Identifier Colon Direction Type;
     ///
@@ -12415,7 +11105,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 302:
+    /// Semantic action for production 270:
     ///
     /// Direction: Input;
     ///
@@ -12439,7 +11129,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 303:
+    /// Semantic action for production 271:
     ///
     /// Direction: Output;
     ///
@@ -12463,7 +11153,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 304:
+    /// Semantic action for production 272:
     ///
     /// Direction: Inout;
     ///
@@ -12487,7 +11177,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 305:
+    /// Semantic action for production 273:
     ///
     /// ModuleItem: VariableDeclaration;
     ///
@@ -12512,7 +11202,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 306:
+    /// Semantic action for production 274:
     ///
     /// ModuleItem: ParameterDeclaration;
     ///
@@ -12537,7 +11227,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 307:
+    /// Semantic action for production 275:
     ///
     /// ModuleItem: LocalparamDeclaration;
     ///
@@ -12562,7 +11252,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 308:
+    /// Semantic action for production 276:
     ///
     /// ModuleItem: AlwaysFfDeclaration;
     ///
@@ -12587,7 +11277,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 309:
+    /// Semantic action for production 277:
     ///
     /// ModuleItem: AlwaysCombDeclaration;
     ///
@@ -12616,7 +11306,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 310:
+    /// Semantic action for production 278:
     ///
     /// ModuleItem: AssignDeclaration;
     ///
@@ -12640,7 +11330,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 311:
+    /// Semantic action for production 279:
     ///
     /// InterfaceDeclaration: Interface Identifier InterfaceDeclarationOpt /* Option */ LBrace InterfaceDeclarationList /* Vec */ RBrace;
     ///
@@ -12692,7 +11382,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 312:
+    /// Semantic action for production 280:
     ///
     /// InterfaceDeclarationList /* Vec<T>::Push */: InterfaceItem InterfaceDeclarationList;
     ///
@@ -12725,7 +11415,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 313:
+    /// Semantic action for production 281:
     ///
     /// InterfaceDeclarationList /* Vec<T>::New */: ;
     ///
@@ -12744,7 +11434,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 314:
+    /// Semantic action for production 282:
     ///
     /// InterfaceDeclarationOpt /* Option<T>::Some */: WithParameter;
     ///
@@ -12768,7 +11458,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 315:
+    /// Semantic action for production 283:
     ///
     /// InterfaceDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -12780,7 +11470,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 316:
+    /// Semantic action for production 284:
     ///
     /// InterfaceItem: VariableDeclaration;
     ///
@@ -12805,7 +11495,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 317:
+    /// Semantic action for production 285:
     ///
     /// InterfaceItem: ParameterDeclaration;
     ///
@@ -12830,7 +11520,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 318:
+    /// Semantic action for production 286:
     ///
     /// InterfaceItem: LocalparamDeclaration;
     ///
@@ -12855,7 +11545,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 319:
+    /// Semantic action for production 287:
     ///
     /// InterfaceItem: ModportDeclaration;
     ///
@@ -12879,7 +11569,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 320:
+    /// Semantic action for production 288:
     ///
     /// VariableDeclaration: Identifier Colon Type Semicolon;
     ///
@@ -12915,7 +11605,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 321:
+    /// Semantic action for production 289:
     ///
     /// ParameterDeclaration: Parameter Identifier Colon Type Equ Expression Semicolon;
     ///
@@ -12960,7 +11650,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 322:
+    /// Semantic action for production 290:
     ///
     /// LocalparamDeclaration: Localparam Identifier Colon Type Equ Expression Semicolon;
     ///
@@ -13005,7 +11695,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 323:
+    /// Semantic action for production 291:
     ///
     /// AlwaysFfDeclaration: AlwaysFf LParen AlwaysFfConditions RParen LBrace AlwaysFfDeclarationList /* Vec */ RBrace;
     ///
@@ -13056,7 +11746,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 324:
+    /// Semantic action for production 292:
     ///
     /// AlwaysFfDeclarationList /* Vec<T>::Push */: Statement AlwaysFfDeclarationList;
     ///
@@ -13089,7 +11779,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 325:
+    /// Semantic action for production 293:
     ///
     /// AlwaysFfDeclarationList /* Vec<T>::New */: ;
     ///
@@ -13108,7 +11798,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 326:
+    /// Semantic action for production 294:
     ///
     /// AlwaysFfConditions: AlwaysFfCondition AlwaysFfConditionsList /* Vec */ AlwaysFfConditionsOpt /* Option */;
     ///
@@ -13151,7 +11841,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 327:
+    /// Semantic action for production 295:
     ///
     /// AlwaysFfConditionsList /* Vec<T>::Push */: Comma AlwaysFfCondition AlwaysFfConditionsList;
     ///
@@ -13187,7 +11877,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 328:
+    /// Semantic action for production 296:
     ///
     /// AlwaysFfConditionsList /* Vec<T>::New */: ;
     ///
@@ -13203,7 +11893,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 329:
+    /// Semantic action for production 297:
     ///
     /// AlwaysFfConditionsOpt /* Option<T>::Some */: Comma;
     ///
@@ -13227,7 +11917,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 330:
+    /// Semantic action for production 298:
     ///
     /// AlwaysFfConditionsOpt /* Option<T>::None */: ;
     ///
@@ -13239,7 +11929,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 331:
+    /// Semantic action for production 299:
     ///
     /// AlwaysFfCondition: AlwaysFfConditionGroup Identifier;
     ///
@@ -13274,7 +11964,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 332:
+    /// Semantic action for production 300:
     ///
     /// AlwaysFfConditionGroup: Posedge;
     ///
@@ -13300,7 +11990,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 333:
+    /// Semantic action for production 301:
     ///
     /// AlwaysFfConditionGroup: Negedge;
     ///
@@ -13326,7 +12016,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 334:
+    /// Semantic action for production 302:
     ///
     /// AlwaysCombDeclaration: AlwaysComb LBrace AlwaysCombDeclarationList /* Vec */ RBrace;
     ///
@@ -13367,7 +12057,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 335:
+    /// Semantic action for production 303:
     ///
     /// AlwaysCombDeclarationList /* Vec<T>::Push */: Statement AlwaysCombDeclarationList;
     ///
@@ -13400,7 +12090,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 336:
+    /// Semantic action for production 304:
     ///
     /// AlwaysCombDeclarationList /* Vec<T>::New */: ;
     ///
@@ -13419,7 +12109,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 337:
+    /// Semantic action for production 305:
     ///
     /// AssignDeclaration: Assign Identifier AssignDeclarationOpt /* Option */ Equ Expression Semicolon;
     ///
@@ -13462,7 +12152,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 338:
+    /// Semantic action for production 306:
     ///
     /// AssignDeclarationOpt /* Option<T>::Some */: Colon Type;
     ///
@@ -13489,7 +12179,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 339:
+    /// Semantic action for production 307:
     ///
     /// AssignDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -13501,7 +12191,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 340:
+    /// Semantic action for production 308:
     ///
     /// ModportDeclaration: Modport Identifier LBrace ModportList RBrace;
     ///
@@ -13540,7 +12230,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 341:
+    /// Semantic action for production 309:
     ///
     /// ModportList: ModportItem ModportListList /* Vec */ ModportListOpt /* Option */;
     ///
@@ -13570,7 +12260,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 342:
+    /// Semantic action for production 310:
     ///
     /// ModportListList /* Vec<T>::Push */: Comma ModportItem ModportListList;
     ///
@@ -13598,7 +12288,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 343:
+    /// Semantic action for production 311:
     ///
     /// ModportListList /* Vec<T>::New */: ;
     ///
@@ -13611,7 +12301,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 344:
+    /// Semantic action for production 312:
     ///
     /// ModportListOpt /* Option<T>::Some */: Comma;
     ///
@@ -13635,7 +12325,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 345:
+    /// Semantic action for production 313:
     ///
     /// ModportListOpt /* Option<T>::None */: ;
     ///
@@ -13647,7 +12337,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 346:
+    /// Semantic action for production 314:
     ///
     /// ModportItem: Identifier Colon Direction;
     ///
@@ -13857,97 +12547,65 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             166 => self.integral_number_5(&children[0], parse_tree),
             167 => self.real_number_0(&children[0], parse_tree),
             168 => self.real_number_1(&children[0], parse_tree),
-            169 => self.operator_precedence01(&children[0], parse_tree),
-            170 => self.operator_precedence02(&children[0], parse_tree),
-            171 => self.operator_precedence03(&children[0], parse_tree),
-            172 => self.operator_precedence04_0(&children[0], parse_tree),
-            173 => self.operator_precedence04_1(&children[0], parse_tree),
-            174 => self.operator_precedence04_2(&children[0], parse_tree),
-            175 => self.operator_precedence05(&children[0], parse_tree),
-            176 => self.operator_precedence06_0(&children[0], parse_tree),
-            177 => self.operator_precedence06_1(&children[0], parse_tree),
-            178 => self.operator_precedence06_2(&children[0], parse_tree),
-            179 => self.operator_precedence06_3(&children[0], parse_tree),
-            180 => self.operator_precedence06_4(&children[0], parse_tree),
-            181 => self.operator_precedence06_5(&children[0], parse_tree),
-            182 => self.operator_precedence07_0(&children[0], parse_tree),
-            183 => self.operator_precedence07_1(&children[0], parse_tree),
-            184 => self.operator_precedence07_2(&children[0], parse_tree),
-            185 => self.operator_precedence07_3(&children[0], parse_tree),
-            186 => self.operator_precedence08_0(&children[0], parse_tree),
-            187 => self.operator_precedence08_1(&children[0], parse_tree),
-            188 => self.operator_precedence08_2(&children[0], parse_tree),
-            189 => self.operator_precedence08_3(&children[0], parse_tree),
-            190 => self.operator_precedence09_0(&children[0], parse_tree),
-            191 => self.operator_precedence09_1(&children[0], parse_tree),
-            192 => self.operator_precedence10_0(&children[0], parse_tree),
-            193 => self.operator_precedence10_1(&children[0], parse_tree),
-            194 => self.operator_precedence10_2(&children[0], parse_tree),
-            195 => self.operator_precedence11(&children[0], parse_tree),
-            196 => self.operator_precedence12_0(&children[0], parse_tree),
-            197 => self.operator_precedence12_1(&children[0], parse_tree),
-            198 => self.operator_precedence12_2(&children[0], parse_tree),
-            199 => self.operator_precedence12_3(&children[0], parse_tree),
-            200 => self.operator_precedence12_4(&children[0], parse_tree),
-            201 => self.operator_precedence12_5(&children[0], parse_tree),
-            202 => self.operator_precedence12_6(&children[0], parse_tree),
-            203 => self.operator_precedence12_7(&children[0], parse_tree),
-            204 => self.operator_precedence12_8(&children[0], parse_tree),
-            205 => self.operator_precedence12_9(&children[0], parse_tree),
-            206 => self.operator_precedence12_10(&children[0], parse_tree),
-            207 => self.expression(&children[0], parse_tree),
-            208 => self.expression00(&children[0], &children[1], parse_tree),
-            209 => self.expression00_list_0(&children[0], &children[1], &children[2], parse_tree),
-            210 => self.expression00_list_1(parse_tree),
-            211 => self.expression01(&children[0], &children[1], parse_tree),
-            212 => self.expression01_list_0(&children[0], &children[1], &children[2], parse_tree),
-            213 => self.expression01_list_1(parse_tree),
-            214 => self.expression02(&children[0], &children[1], parse_tree),
-            215 => self.expression02_list_0(&children[0], &children[1], &children[2], parse_tree),
-            216 => self.expression02_list_1(parse_tree),
-            217 => self.expression03(&children[0], &children[1], parse_tree),
-            218 => self.expression03_list_0(&children[0], &children[1], &children[2], parse_tree),
-            219 => self.expression03_list_1(parse_tree),
-            220 => self.expression04(&children[0], &children[1], parse_tree),
-            221 => self.expression04_list_0(&children[0], &children[1], &children[2], parse_tree),
-            222 => self.expression04_list_1(parse_tree),
-            223 => self.expression05(&children[0], &children[1], parse_tree),
-            224 => self.expression05_list_0(&children[0], &children[1], &children[2], parse_tree),
-            225 => self.expression05_list_1(parse_tree),
-            226 => self.expression06(&children[0], &children[1], parse_tree),
-            227 => self.expression06_list_0(&children[0], &children[1], &children[2], parse_tree),
-            228 => self.expression06_list_1(parse_tree),
-            229 => self.expression07(&children[0], &children[1], parse_tree),
-            230 => self.expression07_list_0(&children[0], &children[1], &children[2], parse_tree),
-            231 => self.expression07_list_1(parse_tree),
-            232 => self.expression08(&children[0], &children[1], parse_tree),
-            233 => self.expression08_list_0(&children[0], &children[1], &children[2], parse_tree),
-            234 => self.expression08_list_1(parse_tree),
-            235 => self.expression09(&children[0], &children[1], parse_tree),
-            236 => self.expression09_list_0(&children[0], &children[1], &children[2], parse_tree),
-            237 => self.expression09_list_1(parse_tree),
-            238 => self.expression10(&children[0], &children[1], parse_tree),
-            239 => self.expression10_list_0(&children[0], &children[1], &children[2], parse_tree),
-            240 => self.expression10_list_1(parse_tree),
-            241 => self.expression11(&children[0], &children[1], parse_tree),
-            242 => self.expression11_opt_0(&children[0], parse_tree),
-            243 => self.expression11_opt_1(parse_tree),
-            244 => self.expression12(&children[0], parse_tree),
-            245 => self.factor_0(&children[0], parse_tree),
-            246 => self.factor_1(&children[0], &children[1], parse_tree),
-            247 => self.factor_list_0(&children[0], &children[1], parse_tree),
-            248 => self.factor_list_1(parse_tree),
-            249 => self.factor_2(&children[0], &children[1], &children[2], parse_tree),
-            250 => self.statement_0(&children[0], parse_tree),
-            251 => self.statement_1(&children[0], parse_tree),
-            252 => self.assignment_statement(
+            169 => self.binary_operator_0(&children[0], parse_tree),
+            170 => self.binary_operator_1(&children[0], parse_tree),
+            171 => self.binary_operator_2(&children[0], parse_tree),
+            172 => self.binary_operator_3(&children[0], parse_tree),
+            173 => self.binary_operator_4(&children[0], parse_tree),
+            174 => self.binary_operator_5(&children[0], parse_tree),
+            175 => self.binary_operator_6(&children[0], parse_tree),
+            176 => self.binary_operator_7(&children[0], parse_tree),
+            177 => self.binary_operator_8(&children[0], parse_tree),
+            178 => self.binary_operator_9(&children[0], parse_tree),
+            179 => self.binary_operator_10(&children[0], parse_tree),
+            180 => self.binary_operator_11(&children[0], parse_tree),
+            181 => self.binary_operator_12(&children[0], parse_tree),
+            182 => self.binary_operator_13(&children[0], parse_tree),
+            183 => self.binary_operator_14(&children[0], parse_tree),
+            184 => self.binary_operator_15(&children[0], parse_tree),
+            185 => self.binary_operator_16(&children[0], parse_tree),
+            186 => self.binary_operator_17(&children[0], parse_tree),
+            187 => self.binary_operator_18(&children[0], parse_tree),
+            188 => self.binary_operator_19(&children[0], parse_tree),
+            189 => self.binary_operator_20(&children[0], parse_tree),
+            190 => self.binary_operator_21(&children[0], parse_tree),
+            191 => self.binary_operator_22(&children[0], parse_tree),
+            192 => self.binary_operator_23(&children[0], parse_tree),
+            193 => self.binary_operator_24(&children[0], parse_tree),
+            194 => self.binary_operator_25(&children[0], parse_tree),
+            195 => self.binary_operator_26(&children[0], parse_tree),
+            196 => self.unary_operator_0(&children[0], parse_tree),
+            197 => self.unary_operator_1(&children[0], parse_tree),
+            198 => self.unary_operator_2(&children[0], parse_tree),
+            199 => self.unary_operator_3(&children[0], parse_tree),
+            200 => self.unary_operator_4(&children[0], parse_tree),
+            201 => self.unary_operator_5(&children[0], parse_tree),
+            202 => self.unary_operator_6(&children[0], parse_tree),
+            203 => self.unary_operator_7(&children[0], parse_tree),
+            204 => self.unary_operator_8(&children[0], parse_tree),
+            205 => self.unary_operator_9(&children[0], parse_tree),
+            206 => self.unary_operator_10(&children[0], parse_tree),
+            207 => self.expression(&children[0], &children[1], parse_tree),
+            208 => self.expression_list_0(&children[0], &children[1], &children[2], parse_tree),
+            209 => self.expression_list_1(parse_tree),
+            210 => self.expression1(&children[0], &children[1], parse_tree),
+            211 => self.expression1_opt_0(&children[0], parse_tree),
+            212 => self.expression1_opt_1(parse_tree),
+            213 => self.factor_0(&children[0], parse_tree),
+            214 => self.factor_1(&children[0], &children[1], parse_tree),
+            215 => self.factor_list_0(&children[0], &children[1], parse_tree),
+            216 => self.factor_list_1(parse_tree),
+            217 => self.factor_2(&children[0], &children[1], &children[2], parse_tree),
+            218 => self.statement_0(&children[0], parse_tree),
+            219 => self.statement_1(&children[0], parse_tree),
+            220 => self.assignment_statement(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 parse_tree,
             ),
-            253 => self.if_statement(
+            221 => self.if_statement(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -13957,7 +12615,7 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[6],
                 parse_tree,
             ),
-            254 => self.if_statement_list_0(
+            222 => self.if_statement_list_0(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -13967,58 +12625,58 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[6],
                 parse_tree,
             ),
-            255 => self.if_statement_list_1(parse_tree),
-            256 => self.if_statement_opt_0(
+            223 => self.if_statement_list_1(parse_tree),
+            224 => self.if_statement_opt_0(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 parse_tree,
             ),
-            257 => self.if_statement_opt_1(parse_tree),
-            258 => self.range(
+            225 => self.if_statement_opt_1(parse_tree),
+            226 => self.range(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 parse_tree,
             ),
-            259 => self.range_opt_0(&children[0], &children[1], parse_tree),
-            260 => self.range_opt_1(parse_tree),
-            261 => self.width(&children[0], &children[1], &children[2], parse_tree),
-            262 => self.builtin_type_0(&children[0], parse_tree),
-            263 => self.builtin_type_1(&children[0], parse_tree),
-            264 => self.builtin_type_2(&children[0], parse_tree),
-            265 => self.builtin_type_3(&children[0], parse_tree),
-            266 => self.builtin_type_4(&children[0], parse_tree),
-            267 => self.builtin_type_5(&children[0], parse_tree),
-            268 => self.builtin_type_6(&children[0], parse_tree),
-            269 => self.builtin_type_7(&children[0], parse_tree),
-            270 => self.r#type(&children[0], &children[1], parse_tree),
-            271 => self.type_group_0(&children[0], parse_tree),
-            272 => self.type_group_1(&children[0], parse_tree),
-            273 => self.type_list_0(&children[0], &children[1], parse_tree),
-            274 => self.type_list_1(parse_tree),
-            275 => self.with_parameter(
+            227 => self.range_opt_0(&children[0], &children[1], parse_tree),
+            228 => self.range_opt_1(parse_tree),
+            229 => self.width(&children[0], &children[1], &children[2], parse_tree),
+            230 => self.builtin_type_0(&children[0], parse_tree),
+            231 => self.builtin_type_1(&children[0], parse_tree),
+            232 => self.builtin_type_2(&children[0], parse_tree),
+            233 => self.builtin_type_3(&children[0], parse_tree),
+            234 => self.builtin_type_4(&children[0], parse_tree),
+            235 => self.builtin_type_5(&children[0], parse_tree),
+            236 => self.builtin_type_6(&children[0], parse_tree),
+            237 => self.builtin_type_7(&children[0], parse_tree),
+            238 => self.r#type(&children[0], &children[1], parse_tree),
+            239 => self.type_group_0(&children[0], parse_tree),
+            240 => self.type_group_1(&children[0], parse_tree),
+            241 => self.type_list_0(&children[0], &children[1], parse_tree),
+            242 => self.type_list_1(parse_tree),
+            243 => self.with_parameter(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 parse_tree,
             ),
-            276 => self.with_parameter_opt_0(&children[0], parse_tree),
-            277 => self.with_parameter_opt_1(parse_tree),
-            278 => self.with_parameter_list(&children[0], &children[1], &children[2], parse_tree),
-            279 => self.with_parameter_list_list_0(
+            244 => self.with_parameter_opt_0(&children[0], parse_tree),
+            245 => self.with_parameter_opt_1(parse_tree),
+            246 => self.with_parameter_list(&children[0], &children[1], &children[2], parse_tree),
+            247 => self.with_parameter_list_list_0(
                 &children[0],
                 &children[1],
                 &children[2],
                 parse_tree,
             ),
-            280 => self.with_parameter_list_list_1(parse_tree),
-            281 => self.with_parameter_list_opt_0(&children[0], parse_tree),
-            282 => self.with_parameter_list_opt_1(parse_tree),
-            283 => self.with_parameter_item(
+            248 => self.with_parameter_list_list_1(parse_tree),
+            249 => self.with_parameter_list_opt_0(&children[0], parse_tree),
+            250 => self.with_parameter_list_opt_1(parse_tree),
+            251 => self.with_parameter_item(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -14027,9 +12685,9 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[5],
                 parse_tree,
             ),
-            284 => self.with_parameter_item_group_0(&children[0], parse_tree),
-            285 => self.with_parameter_item_group_1(&children[0], parse_tree),
-            286 => self.module_declaration(
+            252 => self.with_parameter_item_group_0(&children[0], parse_tree),
+            253 => self.with_parameter_item_group_1(&children[0], parse_tree),
+            254 => self.module_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -14039,73 +12697,63 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[6],
                 parse_tree,
             ),
-            287 => self.module_declaration_list_0(&children[0], &children[1], parse_tree),
-            288 => self.module_declaration_list_1(parse_tree),
-            289 => self.module_declaration_opt0_0(&children[0], parse_tree),
-            290 => self.module_declaration_opt0_1(parse_tree),
-            291 => self.module_declaration_opt_0(&children[0], parse_tree),
-            292 => self.module_declaration_opt_1(parse_tree),
-            293 => self.module_port(&children[0], &children[1], &children[2], parse_tree),
-            294 => self.module_port_opt_0(&children[0], parse_tree),
-            295 => self.module_port_opt_1(parse_tree),
-            296 => self.module_port_list(&children[0], &children[1], &children[2], parse_tree),
-            297 => {
+            255 => self.module_declaration_list_0(&children[0], &children[1], parse_tree),
+            256 => self.module_declaration_list_1(parse_tree),
+            257 => self.module_declaration_opt0_0(&children[0], parse_tree),
+            258 => self.module_declaration_opt0_1(parse_tree),
+            259 => self.module_declaration_opt_0(&children[0], parse_tree),
+            260 => self.module_declaration_opt_1(parse_tree),
+            261 => self.module_port(&children[0], &children[1], &children[2], parse_tree),
+            262 => self.module_port_opt_0(&children[0], parse_tree),
+            263 => self.module_port_opt_1(parse_tree),
+            264 => self.module_port_list(&children[0], &children[1], &children[2], parse_tree),
+            265 => {
                 self.module_port_list_list_0(&children[0], &children[1], &children[2], parse_tree)
             }
-            298 => self.module_port_list_list_1(parse_tree),
-            299 => self.module_port_list_opt_0(&children[0], parse_tree),
-            300 => self.module_port_list_opt_1(parse_tree),
-            301 => self.module_port_item(
+            266 => self.module_port_list_list_1(parse_tree),
+            267 => self.module_port_list_opt_0(&children[0], parse_tree),
+            268 => self.module_port_list_opt_1(parse_tree),
+            269 => self.module_port_item(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 parse_tree,
             ),
-            302 => self.direction_0(&children[0], parse_tree),
-            303 => self.direction_1(&children[0], parse_tree),
-            304 => self.direction_2(&children[0], parse_tree),
-            305 => self.module_item_0(&children[0], parse_tree),
-            306 => self.module_item_1(&children[0], parse_tree),
-            307 => self.module_item_2(&children[0], parse_tree),
-            308 => self.module_item_3(&children[0], parse_tree),
-            309 => self.module_item_4(&children[0], parse_tree),
-            310 => self.module_item_5(&children[0], parse_tree),
-            311 => self.interface_declaration(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-                &children[5],
-                parse_tree,
-            ),
-            312 => self.interface_declaration_list_0(&children[0], &children[1], parse_tree),
-            313 => self.interface_declaration_list_1(parse_tree),
-            314 => self.interface_declaration_opt_0(&children[0], parse_tree),
-            315 => self.interface_declaration_opt_1(parse_tree),
-            316 => self.interface_item_0(&children[0], parse_tree),
-            317 => self.interface_item_1(&children[0], parse_tree),
-            318 => self.interface_item_2(&children[0], parse_tree),
-            319 => self.interface_item_3(&children[0], parse_tree),
-            320 => self.variable_declaration(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                parse_tree,
-            ),
-            321 => self.parameter_declaration(
+            270 => self.direction_0(&children[0], parse_tree),
+            271 => self.direction_1(&children[0], parse_tree),
+            272 => self.direction_2(&children[0], parse_tree),
+            273 => self.module_item_0(&children[0], parse_tree),
+            274 => self.module_item_1(&children[0], parse_tree),
+            275 => self.module_item_2(&children[0], parse_tree),
+            276 => self.module_item_3(&children[0], parse_tree),
+            277 => self.module_item_4(&children[0], parse_tree),
+            278 => self.module_item_5(&children[0], parse_tree),
+            279 => self.interface_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
                 &children[5],
-                &children[6],
                 parse_tree,
             ),
-            322 => self.localparam_declaration(
+            280 => self.interface_declaration_list_0(&children[0], &children[1], parse_tree),
+            281 => self.interface_declaration_list_1(parse_tree),
+            282 => self.interface_declaration_opt_0(&children[0], parse_tree),
+            283 => self.interface_declaration_opt_1(parse_tree),
+            284 => self.interface_item_0(&children[0], parse_tree),
+            285 => self.interface_item_1(&children[0], parse_tree),
+            286 => self.interface_item_2(&children[0], parse_tree),
+            287 => self.interface_item_3(&children[0], parse_tree),
+            288 => self.variable_declaration(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                parse_tree,
+            ),
+            289 => self.parameter_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -14115,7 +12763,7 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[6],
                 parse_tree,
             ),
-            323 => self.always_ff_declaration(
+            290 => self.localparam_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -14125,31 +12773,41 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[6],
                 parse_tree,
             ),
-            324 => self.always_ff_declaration_list_0(&children[0], &children[1], parse_tree),
-            325 => self.always_ff_declaration_list_1(parse_tree),
-            326 => self.always_ff_conditions(&children[0], &children[1], &children[2], parse_tree),
-            327 => self.always_ff_conditions_list_0(
+            291 => self.always_ff_declaration(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                &children[4],
+                &children[5],
+                &children[6],
+                parse_tree,
+            ),
+            292 => self.always_ff_declaration_list_0(&children[0], &children[1], parse_tree),
+            293 => self.always_ff_declaration_list_1(parse_tree),
+            294 => self.always_ff_conditions(&children[0], &children[1], &children[2], parse_tree),
+            295 => self.always_ff_conditions_list_0(
                 &children[0],
                 &children[1],
                 &children[2],
                 parse_tree,
             ),
-            328 => self.always_ff_conditions_list_1(parse_tree),
-            329 => self.always_ff_conditions_opt_0(&children[0], parse_tree),
-            330 => self.always_ff_conditions_opt_1(parse_tree),
-            331 => self.always_ff_condition(&children[0], &children[1], parse_tree),
-            332 => self.always_ff_condition_group_0(&children[0], parse_tree),
-            333 => self.always_ff_condition_group_1(&children[0], parse_tree),
-            334 => self.always_comb_declaration(
+            296 => self.always_ff_conditions_list_1(parse_tree),
+            297 => self.always_ff_conditions_opt_0(&children[0], parse_tree),
+            298 => self.always_ff_conditions_opt_1(parse_tree),
+            299 => self.always_ff_condition(&children[0], &children[1], parse_tree),
+            300 => self.always_ff_condition_group_0(&children[0], parse_tree),
+            301 => self.always_ff_condition_group_1(&children[0], parse_tree),
+            302 => self.always_comb_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 parse_tree,
             ),
-            335 => self.always_comb_declaration_list_0(&children[0], &children[1], parse_tree),
-            336 => self.always_comb_declaration_list_1(parse_tree),
-            337 => self.assign_declaration(
+            303 => self.always_comb_declaration_list_0(&children[0], &children[1], parse_tree),
+            304 => self.always_comb_declaration_list_1(parse_tree),
+            305 => self.assign_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -14158,9 +12816,9 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[5],
                 parse_tree,
             ),
-            338 => self.assign_declaration_opt_0(&children[0], &children[1], parse_tree),
-            339 => self.assign_declaration_opt_1(parse_tree),
-            340 => self.modport_declaration(
+            306 => self.assign_declaration_opt_0(&children[0], &children[1], parse_tree),
+            307 => self.assign_declaration_opt_1(parse_tree),
+            308 => self.modport_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -14168,12 +12826,12 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 parse_tree,
             ),
-            341 => self.modport_list(&children[0], &children[1], &children[2], parse_tree),
-            342 => self.modport_list_list_0(&children[0], &children[1], &children[2], parse_tree),
-            343 => self.modport_list_list_1(parse_tree),
-            344 => self.modport_list_opt_0(&children[0], parse_tree),
-            345 => self.modport_list_opt_1(parse_tree),
-            346 => self.modport_item(&children[0], &children[1], &children[2], parse_tree),
+            309 => self.modport_list(&children[0], &children[1], &children[2], parse_tree),
+            310 => self.modport_list_list_0(&children[0], &children[1], &children[2], parse_tree),
+            311 => self.modport_list_list_1(parse_tree),
+            312 => self.modport_list_opt_0(&children[0], parse_tree),
+            313 => self.modport_list_opt_1(parse_tree),
+            314 => self.modport_item(&children[0], &children[1], &children[2], parse_tree),
             _ => Err(miette!("Unhandled production number: {}", prod_num)),
         }
     }

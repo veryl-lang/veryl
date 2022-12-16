@@ -196,188 +196,61 @@ impl VerylWalker for Formatter {
     // ----------------------------------------------------------------------------
 
     fn expression(&mut self, input: &Expression) {
-        self.expression00(&input.expression00);
-    }
-
-    fn expression00(&mut self, input: &Expression00) {
-        self.expression01(&input.expression01);
-        for x in &input.expression00_list {
+        self.expression1(&input.expression1);
+        for x in &input.expression_list {
             self.space(1);
-            self.token(&x.operator_precedence01.or_or.or_or_token);
-            self.space(1);
-            self.expression01(&x.expression01);
-        }
-    }
-
-    fn expression01(&mut self, input: &Expression01) {
-        self.expression02(&input.expression02);
-        for x in &input.expression01_list {
-            self.space(1);
-            self.token(&x.operator_precedence02.amp_amp.amp_amp_token);
-            self.space(1);
-            self.expression02(&x.expression02);
-        }
-    }
-
-    fn expression02(&mut self, input: &Expression02) {
-        self.expression03(&input.expression03);
-        for x in &input.expression02_list {
-            self.space(1);
-            self.token(&x.operator_precedence03.or.or_token);
-            self.space(1);
-            self.expression03(&x.expression03);
-        }
-    }
-
-    fn expression03(&mut self, input: &Expression03) {
-        self.expression04(&input.expression04);
-        for x in &input.expression03_list {
-            self.space(1);
-            let token = match &*x.operator_precedence04 {
-                OperatorPrecedence04::OperatorPrecedence040(x) => &x.circumflex.circumflex_token,
-                OperatorPrecedence04::OperatorPrecedence041(x) => {
-                    &x.tilde_circumflex.tilde_circumflex_token
-                }
-                OperatorPrecedence04::OperatorPrecedence042(x) => {
-                    &x.circumflex_tilde.circumflex_tilde_token
-                }
+            let token = match &*x.binary_operator {
+                BinaryOperator::BinaryOperator0(x) => &x.plus.plus_token,
+                BinaryOperator::BinaryOperator1(x) => &x.minus.minus_token,
+                BinaryOperator::BinaryOperator2(x) => &x.star.star_token,
+                BinaryOperator::BinaryOperator3(x) => &x.slash.slash_token,
+                BinaryOperator::BinaryOperator4(x) => &x.percent.percent_token,
+                BinaryOperator::BinaryOperator5(x) => &x.amp.amp_token,
+                BinaryOperator::BinaryOperator6(x) => &x.or.or_token,
+                BinaryOperator::BinaryOperator7(x) => &x.circumflex.circumflex_token,
+                BinaryOperator::BinaryOperator8(x) => &x.star_star.star_star_token,
+                BinaryOperator::BinaryOperator9(x) => &x.amp_amp.amp_amp_token,
+                BinaryOperator::BinaryOperator10(x) => &x.or_or.or_or_token,
+                BinaryOperator::BinaryOperator11(x) => &x.tilde_circumflex.tilde_circumflex_token,
+                BinaryOperator::BinaryOperator12(x) => &x.circumflex_tilde.circumflex_tilde_token,
+                BinaryOperator::BinaryOperator13(x) => &x.l_t_l_t.l_t_l_t_token,
+                BinaryOperator::BinaryOperator14(x) => &x.g_t_g_t.g_t_g_t_token,
+                BinaryOperator::BinaryOperator15(x) => &x.l_t_l_t_l_t.l_t_l_t_l_t_token,
+                BinaryOperator::BinaryOperator16(x) => &x.g_t_g_t_g_t.g_t_g_t_g_t_token,
+                BinaryOperator::BinaryOperator17(x) => &x.l_t.l_t_token,
+                BinaryOperator::BinaryOperator18(x) => &x.g_t.g_t_token,
+                BinaryOperator::BinaryOperator19(x) => &x.l_t_equ.l_t_equ_token,
+                BinaryOperator::BinaryOperator20(x) => &x.g_t_equ.g_t_equ_token,
+                BinaryOperator::BinaryOperator21(x) => &x.equ_equ.equ_equ_token,
+                BinaryOperator::BinaryOperator22(x) => &x.bang_equ.bang_equ_token,
+                BinaryOperator::BinaryOperator23(x) => &x.equ_equ_equ.equ_equ_equ_token,
+                BinaryOperator::BinaryOperator24(x) => &x.bang_equ_equ.bang_equ_equ_token,
+                BinaryOperator::BinaryOperator25(x) => &x.equ_equ_quest.equ_equ_quest_token,
+                BinaryOperator::BinaryOperator26(x) => &x.bang_equ_quest.bang_equ_quest_token,
             };
             self.token(token);
             self.space(1);
-            self.expression04(&x.expression04);
+            self.expression1(&x.expression1);
         }
     }
 
-    fn expression04(&mut self, input: &Expression04) {
-        self.expression05(&input.expression05);
-        for x in &input.expression04_list {
-            self.space(1);
-            self.token(&x.operator_precedence05.amp.amp_token);
-            self.space(1);
-            self.expression05(&x.expression05);
-        }
-    }
-
-    fn expression05(&mut self, input: &Expression05) {
-        self.expression06(&input.expression06);
-        for x in &input.expression05_list {
-            self.space(1);
-            let token = match &*x.operator_precedence06 {
-                OperatorPrecedence06::OperatorPrecedence060(x) => &x.equ_equ.equ_equ_token,
-                OperatorPrecedence06::OperatorPrecedence061(x) => &x.bang_equ.bang_equ_token,
-                OperatorPrecedence06::OperatorPrecedence062(x) => &x.equ_equ_equ.equ_equ_equ_token,
-                OperatorPrecedence06::OperatorPrecedence063(x) => {
-                    &x.bang_equ_equ.bang_equ_equ_token
-                }
-                OperatorPrecedence06::OperatorPrecedence064(x) => {
-                    &x.equ_equ_quest.equ_equ_quest_token
-                }
-                OperatorPrecedence06::OperatorPrecedence065(x) => {
-                    &x.bang_equ_quest.bang_equ_quest_token
-                }
-            };
-            self.token(token);
-            self.space(1);
-            self.expression06(&x.expression06);
-        }
-    }
-
-    fn expression06(&mut self, input: &Expression06) {
-        self.expression07(&input.expression07);
-        for x in &input.expression06_list {
-            self.space(1);
-            let token = match &*x.operator_precedence07 {
-                OperatorPrecedence07::OperatorPrecedence070(x) => &x.l_t.l_t_token,
-                OperatorPrecedence07::OperatorPrecedence071(x) => &x.l_t_equ.l_t_equ_token,
-                OperatorPrecedence07::OperatorPrecedence072(x) => &x.g_t.g_t_token,
-                OperatorPrecedence07::OperatorPrecedence073(x) => &x.g_t_equ.g_t_equ_token,
-            };
-            self.token(token);
-            self.space(1);
-            self.expression07(&x.expression07);
-        }
-    }
-
-    fn expression07(&mut self, input: &Expression07) {
-        self.expression08(&input.expression08);
-        for x in &input.expression07_list {
-            self.space(1);
-            let token = match &*x.operator_precedence08 {
-                OperatorPrecedence08::OperatorPrecedence080(x) => &x.l_t_l_t.l_t_l_t_token,
-                OperatorPrecedence08::OperatorPrecedence081(x) => &x.g_t_g_t.g_t_g_t_token,
-                OperatorPrecedence08::OperatorPrecedence082(x) => &x.l_t_l_t_l_t.l_t_l_t_l_t_token,
-                OperatorPrecedence08::OperatorPrecedence083(x) => &x.g_t_g_t_g_t.g_t_g_t_g_t_token,
-            };
-            self.token(token);
-            self.space(1);
-            self.expression08(&x.expression08);
-        }
-    }
-
-    fn expression08(&mut self, input: &Expression08) {
-        self.expression09(&input.expression09);
-        for x in &input.expression08_list {
-            self.space(1);
-            let token = match &*x.operator_precedence09 {
-                OperatorPrecedence09::OperatorPrecedence090(x) => &x.plus.plus_token,
-                OperatorPrecedence09::OperatorPrecedence091(x) => &x.minus.minus_token,
-            };
-            self.token(token);
-            self.space(1);
-            self.expression09(&x.expression09);
-        }
-    }
-
-    fn expression09(&mut self, input: &Expression09) {
-        self.expression10(&input.expression10);
-        for x in &input.expression09_list {
-            self.space(1);
-            let token = match &*x.operator_precedence10 {
-                OperatorPrecedence10::OperatorPrecedence100(x) => &x.star.star_token,
-                OperatorPrecedence10::OperatorPrecedence101(x) => &x.slash.slash_token,
-                OperatorPrecedence10::OperatorPrecedence102(x) => &x.percent.percent_token,
-            };
-            self.token(token);
-            self.space(1);
-            self.expression10(&x.expression10);
-        }
-    }
-
-    fn expression10(&mut self, input: &Expression10) {
-        self.expression11(&input.expression11);
-        for x in &input.expression10_list {
-            self.space(1);
-            self.token(&x.operator_precedence11.star_star.star_star_token);
-            self.space(1);
-            self.expression11(&x.expression11);
-        }
-    }
-
-    fn expression11(&mut self, input: &Expression11) {
-        if let Some(ref x) = input.expression11_opt {
-            let token = match &*x.operator_precedence12 {
-                OperatorPrecedence12::OperatorPrecedence120(x) => &x.plus.plus_token,
-                OperatorPrecedence12::OperatorPrecedence121(x) => &x.minus.minus_token,
-                OperatorPrecedence12::OperatorPrecedence122(x) => &x.bang.bang_token,
-                OperatorPrecedence12::OperatorPrecedence123(x) => &x.tilde.tilde_token,
-                OperatorPrecedence12::OperatorPrecedence124(x) => &x.amp.amp_token,
-                OperatorPrecedence12::OperatorPrecedence125(x) => &x.or.or_token,
-                OperatorPrecedence12::OperatorPrecedence126(x) => &x.circumflex.circumflex_token,
-                OperatorPrecedence12::OperatorPrecedence127(x) => &x.tilde_amp.tilde_amp_token,
-                OperatorPrecedence12::OperatorPrecedence128(x) => &x.tilde_or.tilde_or_token,
-                OperatorPrecedence12::OperatorPrecedence129(x) => {
-                    &x.tilde_circumflex.tilde_circumflex_token
-                }
-                OperatorPrecedence12::OperatorPrecedence1210(x) => {
-                    &x.circumflex_tilde.circumflex_tilde_token
-                }
+    fn expression1(&mut self, input: &Expression1) {
+        if let Some(ref x) = input.expression1_opt {
+            let token = match &*x.unary_operator {
+                UnaryOperator::UnaryOperator0(x) => &x.plus.plus_token,
+                UnaryOperator::UnaryOperator1(x) => &x.minus.minus_token,
+                UnaryOperator::UnaryOperator2(x) => &x.bang.bang_token,
+                UnaryOperator::UnaryOperator3(x) => &x.tilde.tilde_token,
+                UnaryOperator::UnaryOperator4(x) => &x.amp.amp_token,
+                UnaryOperator::UnaryOperator5(x) => &x.or.or_token,
+                UnaryOperator::UnaryOperator6(x) => &x.circumflex.circumflex_token,
+                UnaryOperator::UnaryOperator7(x) => &x.tilde_amp.tilde_amp_token,
+                UnaryOperator::UnaryOperator8(x) => &x.tilde_or.tilde_or_token,
+                UnaryOperator::UnaryOperator9(x) => &x.tilde_circumflex.tilde_circumflex_token,
+                UnaryOperator::UnaryOperator10(x) => &x.circumflex_tilde.circumflex_tilde_token,
             };
             self.token(token);
         }
-        self.expression12(&input.expression12);
-    }
-
-    fn expression12(&mut self, input: &Expression12) {
         self.factor(&input.factor);
     }
 
