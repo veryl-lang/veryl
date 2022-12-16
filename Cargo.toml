@@ -3,6 +3,12 @@ members = [
     "crates/formatter",
     "crates/languageserver",
     "crates/parser",
+    "crates/tests",
     "crates/veryl",
 ]
 
+[profile.dev.build-override]
+opt-level = 3
+
+[profile.release.build-override]
+opt-level = 3

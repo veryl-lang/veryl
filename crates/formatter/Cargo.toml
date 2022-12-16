@@ -7,6 +7,3 @@ edition = "2021"
 
 [dependencies]
 veryl-parser = {version = "0.1.0", path = "../parser"}
-
-[build-dependencies]
-walkdir = "2.3.2"

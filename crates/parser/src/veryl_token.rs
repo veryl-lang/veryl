@@ -95,7 +95,23 @@ token_with_comments!(BasedHexToken, l_bracket0_minus9_r_bracket_plus_l_paren_que
 token_with_comments!(BaseLessToken, l_bracket0_minus9_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9_r_bracket_plus_r_paren_star);
 token_with_comments!(AllBitToken, tick_l_bracket01_r_bracket);
 
+token_with_comments!(BangEquEquToken, bang_equ_equ);
+token_with_comments!(BangEquQuestToken, bang_equ_quest);
+token_with_comments!(EquEquEquToken, equ_equ_equ);
+token_with_comments!(EquEquQuestToken, equ_equ_quest);
+token_with_comments!(GTGTGTToken, g_t_g_t_g_t);
+token_with_comments!(LTLTLTToken, l_t_l_t_l_t);
+
+token_with_comments!(AmpAmpToken, amp_amp);
 token_with_comments!(CircumflexTildeToken, circumflex_tilde);
+token_with_comments!(BangEquToken, bang_equ);
+token_with_comments!(EquEquToken, equ_equ);
+token_with_comments!(GTEquToken, g_t_equ);
+token_with_comments!(GTGTToken, g_t_g_t);
+token_with_comments!(LTEquToken, l_t_equ);
+token_with_comments!(LTLTToken, l_t_l_t);
+token_with_comments!(OrOrToken, or_or);
+token_with_comments!(StarStarToken, star_star);
 token_with_comments!(TildeAmpToken, tilde_amp);
 token_with_comments!(TildeCircumflexToken, tilde_circumflex);
 token_with_comments!(TildeOrToken, tilde_or);
@@ -106,10 +122,12 @@ token_with_comments!(ColonToken, colon);
 token_with_comments!(CommaToken, comma);
 token_with_comments!(CircumflexToken, circumflex);
 token_with_comments!(EquToken, equ);
+token_with_comments!(GTToken, g_t);
 token_with_comments!(HashToken, hash);
 token_with_comments!(LBraceToken, l_brace);
 token_with_comments!(LBracketToken, l_bracket);
 token_with_comments!(LParenToken, l_paren);
+token_with_comments!(LTToken, l_t);
 token_with_comments!(MinusToken, minus);
 token_with_comments!(OrToken, or);
 token_with_comments!(PercentToken, percent);

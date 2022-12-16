@@ -1,6 +1,27 @@
-mod formatter {
-    use crate::formatter::Formatter;
+#[cfg(test)]
+mod parser {
     use std::fs;
+    use veryl_parser::veryl_grammar::VerylGrammar;
+    use veryl_parser::veryl_parser::parse;
+
+    fn test(name: &str) {
+        let file = format!("../../testcases/{}.vl", name);
+        let input = fs::read_to_string(&file).unwrap();
+        let mut grammar = VerylGrammar::new();
+        let ret = parse(&input, &file, &mut grammar);
+        match ret {
+            Ok(_) => assert!(true),
+            Err(err) => println!("{}", err),
+        }
+    }
+
+    include!(concat!(env!("OUT_DIR"), "/test.rs"));
+}
+
+#[cfg(test)]
+mod formatter {
+    use std::fs;
+    use veryl_formatter::formatter::Formatter;
     use veryl_parser::veryl_grammar::VerylGrammar;
     use veryl_parser::veryl_parser::parse;
 

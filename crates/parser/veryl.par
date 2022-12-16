@@ -11,7 +11,6 @@
 // Terminals
 // ----------------------------------------------------------------------------
 
-
 MultiComment: "(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+": OwnedToken;
 Comments    : [ MultiComment ];
 
@@ -38,13 +37,46 @@ BasedHex    : BasedHexToken    : VerylToken;
 BaseLess    : BaseLessToken    : VerylToken;
 AllBit      : AllBitToken      : VerylToken;
 
+// Triple Symbol
+BangEquEquToken  : '!==': OwnedToken Comments;
+BangEquQuestToken: '!=?': OwnedToken Comments;
+EquEquEquToken   : '===': OwnedToken Comments;
+EquEquQuestToken : '==?': OwnedToken Comments;
+GTGTGTToken      : '>>>': OwnedToken Comments;
+LTLTLTToken      : '<<<': OwnedToken Comments;
+
+BangEquEqu  : BangEquEquToken  : VerylToken;
+BangEquQuest: BangEquQuestToken: VerylToken;
+EquEquEqu   : EquEquEquToken   : VerylToken;
+EquEquQuest : EquEquQuestToken : VerylToken;
+GTGTGT      : GTGTGTToken      : VerylToken;
+LTLTLT      : LTLTLTToken      : VerylToken;
+
 // Double Symbol
+AmpAmpToken         : '&&': OwnedToken Comments;
 CircumflexTildeToken: '^~': OwnedToken Comments;
+BangEquToken        : '!=': OwnedToken Comments;
+EquEquToken         : '==': OwnedToken Comments;
+GTEquToken          : '>=': OwnedToken Comments;
+GTGTToken           : '>>': OwnedToken Comments;
+LTEquToken          : '<=': OwnedToken Comments;
+LTLTToken           : '<<': OwnedToken Comments;
+OrOrToken           : '||': OwnedToken Comments;
+StarStarToken       : '**': OwnedToken Comments;
 TildeAmpToken       : '~&': OwnedToken Comments;
 TildeCircumflexToken: '~^': OwnedToken Comments;
 TildeOrToken        : '~|': OwnedToken Comments;
 
+AmpAmp         : AmpAmpToken         : VerylToken;
 CircumflexTilde: CircumflexTildeToken: VerylToken;
+BangEqu        : BangEquToken        : VerylToken;
+EquEqu         : EquEquToken         : VerylToken;
+GTEqu          : GTEquToken          : VerylToken;
+GTGT           : GTGTToken           : VerylToken;
+LTEqu          : LTEquToken          : VerylToken;
+LTLT           : LTLTToken           : VerylToken;
+OrOr           : OrOrToken           : VerylToken;
+StarStar       : StarStarToken       : VerylToken;
 TildeAmp       : TildeAmpToken       : VerylToken;
 TildeCircumflex: TildeCircumflexToken: VerylToken;
 TildeOr        : TildeOrToken        : VerylToken;
@@ -52,18 +84,21 @@ TildeOr        : TildeOrToken        : VerylToken;
 // Single Symbol
 AmpToken       : '&': OwnedToken Comments;
 BangToken      : '!': OwnedToken Comments;
-CircumflexToken: '^': OwnedToken Comments;
 ColonToken     : ':': OwnedToken Comments;
 CommaToken     : ',': OwnedToken Comments;
+CircumflexToken: '^': OwnedToken Comments;
 EquToken       : '=': OwnedToken Comments;
+GTToken        : '>': OwnedToken Comments;
 HashToken      : '#': OwnedToken Comments;
 LBraceToken    : '{': OwnedToken Comments;
 LBracketToken  : '[': OwnedToken Comments;
 LParenToken    : '(': OwnedToken Comments;
+LTToken        : '<': OwnedToken Comments;
 MinusToken     : '-': OwnedToken Comments;
 OrToken        : '|': OwnedToken Comments;
 PercentToken   : '%': OwnedToken Comments;
 PlusToken      : '+': OwnedToken Comments;
+//QuestToken     : '?': OwnedToken Comments;
 RBraceToken    : '}': OwnedToken Comments;
 RBracketToken  : ']': OwnedToken Comments;
 RParenToken    : ')': OwnedToken Comments;
@@ -78,14 +113,17 @@ Circumflex: CircumflexToken: VerylToken;
 Colon     : ColonToken     : VerylToken;
 Comma     : CommaToken     : VerylToken;
 Equ       : EquToken       : VerylToken;
+GT        : GTToken        : VerylToken;
 Hash      : HashToken      : VerylToken;
 LBrace    : LBraceToken    : VerylToken;
 LBracket  : LBracketToken  : VerylToken;
 LParen    : LParenToken    : VerylToken;
+LT        : LTToken        : VerylToken;
 Minus     : MinusToken     : VerylToken;
 Or        : OrToken        : VerylToken;
 Percent   : PercentToken   : VerylToken;
 Plus      : PlusToken      : VerylToken;
+//Quest     : QuestToken     : VerylToken;
 RBrace    : RBraceToken    : VerylToken;
 RBracket  : RBracketToken  : VerylToken;
 RParen    : RParenToken    : VerylToken;
@@ -185,15 +223,35 @@ RealNumber: FixedPoint
 // Expression
 // ----------------------------------------------------------------------------
 
-OperatorPrecedence1: Plus | Minus;
-OperatorPrecedence2: Star | Slash | Percent;
-OperatorPrecedence3: Plus | Minus | Bang | Tilde | Amp | Or | Circumflex | TildeAmp | TildeOr | TildeCircumflex | CircumflexTilde;
+// Operator Precedence
+// Highest 12 --- 01 Lowest
+OperatorPrecedence01: OrOr;
+OperatorPrecedence02: AmpAmp;
+OperatorPrecedence03: Or;
+OperatorPrecedence04: Circumflex | TildeCircumflex | CircumflexTilde;
+OperatorPrecedence05: Amp;
+OperatorPrecedence06: EquEqu | BangEqu | EquEquEqu | BangEquEqu | EquEquQuest | BangEquQuest;
+OperatorPrecedence07: LT | LTEqu | GT | GTEqu;
+OperatorPrecedence08: LTLT | GTGT | LTLTLT | GTGTGT;
+OperatorPrecedence09: Plus | Minus;
+OperatorPrecedence10: Star | Slash | Percent;
+OperatorPrecedence11: StarStar;
+OperatorPrecedence12: Plus | Minus | Bang | Tilde | Amp | Or | Circumflex | TildeAmp | TildeOr | TildeCircumflex | CircumflexTilde;
 
-Expression : Expression0;
-Expression0: Expression1 { OperatorPrecedence1 Expression1 };
-Expression1: Expression2 { OperatorPrecedence2 Expression2 };
-Expression2: [ OperatorPrecedence3 ] Expression3;
-Expression3: Factor;
+Expression  : Expression00;
+Expression00: Expression01 { OperatorPrecedence01 Expression01 };
+Expression01: Expression02 { OperatorPrecedence02 Expression02 };
+Expression02: Expression03 { OperatorPrecedence03 Expression03 };
+Expression03: Expression04 { OperatorPrecedence04 Expression04 };
+Expression04: Expression05 { OperatorPrecedence05 Expression05 };
+Expression05: Expression06 { OperatorPrecedence06 Expression06 };
+Expression06: Expression07 { OperatorPrecedence07 Expression07 };
+Expression07: Expression08 { OperatorPrecedence08 Expression08 };
+Expression08: Expression09 { OperatorPrecedence09 Expression09 };
+Expression09: Expression10 { OperatorPrecedence10 Expression10 };
+Expression10: Expression11 { OperatorPrecedence11 Expression11 };
+Expression11: [ OperatorPrecedence12 ] Expression12;
+Expression12: Factor;
 
 Factor: Number
       | Identifier { Range }

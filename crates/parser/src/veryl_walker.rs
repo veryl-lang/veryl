@@ -31,13 +31,31 @@ pub trait VerylWalker {
 
     fn expression(&mut self, input: &Expression);
 
-    fn expression0(&mut self, input: &Expression0);
+    fn expression00(&mut self, input: &Expression00);
 
-    fn expression1(&mut self, input: &Expression1);
+    fn expression01(&mut self, input: &Expression01);
 
-    fn expression2(&mut self, input: &Expression2);
+    fn expression02(&mut self, input: &Expression02);
 
-    fn expression3(&mut self, input: &Expression3);
+    fn expression03(&mut self, input: &Expression03);
+
+    fn expression04(&mut self, input: &Expression04);
+
+    fn expression05(&mut self, input: &Expression05);
+
+    fn expression06(&mut self, input: &Expression06);
+
+    fn expression07(&mut self, input: &Expression07);
+
+    fn expression08(&mut self, input: &Expression08);
+
+    fn expression09(&mut self, input: &Expression09);
+
+    fn expression10(&mut self, input: &Expression10);
+
+    fn expression11(&mut self, input: &Expression11);
+
+    fn expression12(&mut self, input: &Expression12);
 
     fn factor(&mut self, input: &Factor);
 

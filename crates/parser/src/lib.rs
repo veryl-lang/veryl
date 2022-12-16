@@ -9,5 +9,3 @@ pub use parol_runtime::lexer::Token as ParolToken;
 mod derive_builder {
     pub use parol_runtime::derive_builder::*;
 }
-#[cfg(test)]
-mod tests;
