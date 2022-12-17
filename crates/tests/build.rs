@@ -19,7 +19,14 @@ fn main() {
     for entry in WalkDir::new("../../testcases") {
         let entry = entry.unwrap();
         if entry.file_type().is_file() {
-            testcases.push(entry.path().to_string_lossy().into_owned());
+            testcases.push(
+                entry
+                    .path()
+                    .canonicalize()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned(),
+            );
             let file = entry.path().file_stem().unwrap().to_string_lossy();
             let _ = writeln!(out_test, "#[test]");
             let _ = writeln!(out_test, "fn test_{}() {{", file);
