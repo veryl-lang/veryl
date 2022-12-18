@@ -21,21 +21,15 @@ Start     : StartToken: VerylToken;
 // Number
 ExponentToken    : /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/: OwnedToken Comments;
 FixedPointToken  : /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/: OwnedToken Comments;
-BasedBinaryToken : /[0-9]+(?:_[0-9]+)*'b[0-1xzXZ]+(?:_[0-1xzXZ]+)*/: OwnedToken Comments;
-BasedOctalToken  : /[0-9]+(?:_[0-9]+)*'o[0-7xzXZ]+(?:_[0-7xzXZ]+)*/: OwnedToken Comments;
-BasedDecimalToken: /[0-9]+(?:_[0-9]+)*'d[0-9]+(?:_[0-9]+)*/: OwnedToken Comments;
-BasedHexToken    : /[0-9]+(?:_[0-9]+)*'h[0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/: OwnedToken Comments;
+BasedToken       : /[0-9]+(?:_[0-9]+)*'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/: OwnedToken Comments;
 BaseLessToken    : /[0-9]+(?:_[0-9]+)*/: OwnedToken Comments;
 AllBitToken      : /'[01]/: OwnedToken Comments;
 
-Exponent    : ExponentToken    : VerylToken;
-FixedPoint  : FixedPointToken  : VerylToken;
-BasedBinary : BasedBinaryToken : VerylToken;
-BasedOctal  : BasedOctalToken  : VerylToken;
-BasedDecimal: BasedDecimalToken: VerylToken;
-BasedHex    : BasedHexToken    : VerylToken;
-BaseLess    : BaseLessToken    : VerylToken;
-AllBit      : AllBitToken      : VerylToken;
+Exponent  : ExponentToken  : VerylToken;
+FixedPoint: FixedPointToken: VerylToken;
+Based     : BasedToken     : VerylToken;
+BaseLess  : BaseLessToken  : VerylToken;
+AllBit    : AllBitToken    : VerylToken;
 
 // Operator
 CommonOperatorToken: "\+|-|&|\||\^~|\^|~\^|~&|~\|": OwnedToken Comments;
@@ -146,10 +140,7 @@ Number: IntegralNumber
       | RealNumber
       ;
 
-IntegralNumber: BasedBinary
-              | BasedOctal
-              | BasedDecimal
-              | BasedHex
+IntegralNumber: Based
               | BaseLess
               | AllBit
               ;

@@ -59,7 +59,6 @@ impl Backend {
 
     fn to_diag(err: miette::ErrReport, rope: &Rope) -> Vec<Diagnostic> {
         let miette_diag: &dyn miette::Diagnostic = err.as_ref();
-        let parse_error = err.downcast_ref::<ParserError>().unwrap();
 
         let range = if let Some(mut labels) = miette_diag.labels() {
             labels.next().map_or(Range::default(), |label| {
@@ -78,16 +77,20 @@ impl Backend {
             .code()
             .map(|d| NumberOrString::String(format!("{d}")));
 
-        let message = match parse_error {
-            ParserError::PredictionErrorWithExpectations {
-                unexpected_tokens, ..
-            } => {
-                format!(
-                    "Syntax Error: {}",
-                    Backend::demangle_unexpected_token(&unexpected_tokens[0].to_string())
-                )
+        let message = if let Some(x) = err.downcast_ref::<ParserError>() {
+            match x {
+                ParserError::PredictionErrorWithExpectations {
+                    unexpected_tokens, ..
+                } => {
+                    format!(
+                        "Syntax Error: {}",
+                        Backend::demangle_unexpected_token(&unexpected_tokens[0].to_string())
+                    )
+                }
+                _ => format!("Syntax Error: {}", x),
             }
-            _ => format!("Syntax Error: {}", parse_error),
+        } else {
+            format!("Syntax Error: {}", err)
         };
 
         let diag = Diagnostic::new(

@@ -30,6 +30,6 @@ module a #(
         aaaa = 10'b01z;
 
         aa  = 10 + 10;
-        aaa = 10 + 10'hffff * (3 / 4);
+        aaa = 10 + 16'hffff * (3 / 4);
     }
 }

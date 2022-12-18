@@ -176,12 +176,9 @@ impl VerylWalker for Formatter {
     fn number(&mut self, input: &Number) {
         let token = match input {
             Number::Number0(x) => match &*x.integral_number {
-                IntegralNumber::IntegralNumber0(x) => &x.based_binary.based_binary_token,
-                IntegralNumber::IntegralNumber1(x) => &x.based_octal.based_octal_token,
-                IntegralNumber::IntegralNumber2(x) => &x.based_decimal.based_decimal_token,
-                IntegralNumber::IntegralNumber3(x) => &x.based_hex.based_hex_token,
-                IntegralNumber::IntegralNumber4(x) => &x.base_less.base_less_token,
-                IntegralNumber::IntegralNumber5(x) => &x.all_bit.all_bit_token,
+                IntegralNumber::IntegralNumber0(x) => &x.based.based_token,
+                IntegralNumber::IntegralNumber1(x) => &x.base_less.base_less_token,
+                IntegralNumber::IntegralNumber2(x) => &x.all_bit.all_bit_token,
             },
             Number::Number1(x) => match &*x.real_number {
                 RealNumber::RealNumber0(x) => &x.fixed_point.fixed_point_token,
