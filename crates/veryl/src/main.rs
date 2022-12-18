@@ -74,6 +74,7 @@ struct Emit {
 // ---------------------------------------------------------------------------------------------------------------------
 
 fn main() -> Result<ExitCode> {
+    env_logger::init();
     let opt = Opt::parse();
     let ret = match opt.command {
         Commands::Fmt(x) => format::format(&x)?,

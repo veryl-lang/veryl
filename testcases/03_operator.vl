@@ -13,6 +13,7 @@ module A {
     assign a = ^~1;
 
     // priority 1: power
+    assign a = 1 ** 1;
 
     // priority 2: mul, div
     assign a = 1 * 1;

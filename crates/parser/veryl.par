@@ -37,100 +37,39 @@ BasedHex    : BasedHexToken    : VerylToken;
 BaseLess    : BaseLessToken    : VerylToken;
 AllBit      : AllBitToken      : VerylToken;
 
-// Triple Symbol
-BangEquEquToken  : '!==': OwnedToken Comments;
-BangEquQuestToken: '!=?': OwnedToken Comments;
-EquEquEquToken   : '===': OwnedToken Comments;
-EquEquQuestToken : '==?': OwnedToken Comments;
-GTGTGTToken      : '>>>': OwnedToken Comments;
-LTLTLTToken      : '<<<': OwnedToken Comments;
+// Operator
+CommonOperatorToken: "\+|-|&|\||\^~|\^|~\^|~&|~\|": OwnedToken Comments;
+BinaryOperatorToken: "\*\*|\*|/|%"                : OwnedToken Comments;
+UnaryOperatorToken : "!|~"                        : OwnedToken Comments;
 
-BangEquEqu  : BangEquEquToken  : VerylToken;
-BangEquQuest: BangEquQuestToken: VerylToken;
-EquEquEqu   : EquEquEquToken   : VerylToken;
-EquEquQuest : EquEquQuestToken : VerylToken;
-GTGTGT      : GTGTGTToken      : VerylToken;
-LTLTLT      : LTLTLTToken      : VerylToken;
-
-// Double Symbol
-AmpAmpToken         : '&&': OwnedToken Comments;
-CircumflexTildeToken: '^~': OwnedToken Comments;
-BangEquToken        : '!=': OwnedToken Comments;
-EquEquToken         : '==': OwnedToken Comments;
-GTEquToken          : '>=': OwnedToken Comments;
-GTGTToken           : '>>': OwnedToken Comments;
-LTEquToken          : '<=': OwnedToken Comments;
-LTLTToken           : '<<': OwnedToken Comments;
-OrOrToken           : '||': OwnedToken Comments;
-StarStarToken       : '**': OwnedToken Comments;
-TildeAmpToken       : '~&': OwnedToken Comments;
-TildeCircumflexToken: '~^': OwnedToken Comments;
-TildeOrToken        : '~|': OwnedToken Comments;
-
-AmpAmp         : AmpAmpToken         : VerylToken;
-CircumflexTilde: CircumflexTildeToken: VerylToken;
-BangEqu        : BangEquToken        : VerylToken;
-EquEqu         : EquEquToken         : VerylToken;
-GTEqu          : GTEquToken          : VerylToken;
-GTGT           : GTGTToken           : VerylToken;
-LTEqu          : LTEquToken          : VerylToken;
-LTLT           : LTLTToken           : VerylToken;
-OrOr           : OrOrToken           : VerylToken;
-StarStar       : StarStarToken       : VerylToken;
-TildeAmp       : TildeAmpToken       : VerylToken;
-TildeCircumflex: TildeCircumflexToken: VerylToken;
-TildeOr        : TildeOrToken        : VerylToken;
+CommonOperator: CommonOperatorToken: VerylToken;
+BinaryOperator: BinaryOperatorToken: VerylToken;
+UnaryOperator : UnaryOperatorToken : VerylToken;
 
 // Single Symbol
-AmpToken       : '&': OwnedToken Comments;
-BangToken      : '!': OwnedToken Comments;
 ColonToken     : ':': OwnedToken Comments;
 CommaToken     : ',': OwnedToken Comments;
-CircumflexToken: '^': OwnedToken Comments;
 EquToken       : '=': OwnedToken Comments;
-GTToken        : '>': OwnedToken Comments;
 HashToken      : '#': OwnedToken Comments;
 LBraceToken    : '{': OwnedToken Comments;
 LBracketToken  : '[': OwnedToken Comments;
 LParenToken    : '(': OwnedToken Comments;
-LTToken        : '<': OwnedToken Comments;
-MinusToken     : '-': OwnedToken Comments;
-OrToken        : '|': OwnedToken Comments;
-PercentToken   : '%': OwnedToken Comments;
-PlusToken      : '+': OwnedToken Comments;
-//QuestToken     : '?': OwnedToken Comments;
 RBraceToken    : '}': OwnedToken Comments;
 RBracketToken  : ']': OwnedToken Comments;
 RParenToken    : ')': OwnedToken Comments;
 SemicolonToken : ';': OwnedToken Comments;
-SlashToken     : '/': OwnedToken Comments;
-StarToken      : '*': OwnedToken Comments;
-TildeToken     : '~': OwnedToken Comments;
 
-Amp       : AmpToken       : VerylToken;
-Bang      : BangToken      : VerylToken;
-Circumflex: CircumflexToken: VerylToken;
 Colon     : ColonToken     : VerylToken;
 Comma     : CommaToken     : VerylToken;
 Equ       : EquToken       : VerylToken;
-GT        : GTToken        : VerylToken;
 Hash      : HashToken      : VerylToken;
 LBrace    : LBraceToken    : VerylToken;
 LBracket  : LBracketToken  : VerylToken;
 LParen    : LParenToken    : VerylToken;
-LT        : LTToken        : VerylToken;
-Minus     : MinusToken     : VerylToken;
-Or        : OrToken        : VerylToken;
-Percent   : PercentToken   : VerylToken;
-Plus      : PlusToken      : VerylToken;
-//Quest     : QuestToken     : VerylToken;
 RBrace    : RBraceToken    : VerylToken;
 RBracket  : RBracketToken  : VerylToken;
 RParen    : RParenToken    : VerylToken;
 Semicolon : SemicolonToken : VerylToken;
-Slash     : SlashToken     : VerylToken;
-Star      : StarToken      : VerylToken;
-Tilde     : TildeToken     : VerylToken;
 
 // Keyword
 AlwaysCombToken: 'always_comb': OwnedToken Comments;
@@ -223,16 +162,16 @@ RealNumber: FixedPoint
 // Expression
 // ----------------------------------------------------------------------------
 
-BinaryOperator: Plus | Minus | Star | Slash | Percent | Amp | Or | Circumflex
-              | StarStar | AmpAmp | OrOr | TildeCircumflex | CircumflexTilde
-              | LTLT | GTGT | LTLTLT | GTGTGT
-              | LT | GT | LTEqu | GTEqu | EquEqu
-              | BangEqu | EquEquEqu | BangEquEqu | EquEquQuest | BangEquQuest
-              ;
-UnaryOperator : Plus | Minus | Bang | Tilde | Amp | Or | Circumflex | TildeAmp | TildeOr | TildeCircumflex | CircumflexTilde;
+//BinaryOperator: Plus | Minus | Star | Slash | Percent | Amp | Or | Circumflex
+//              | StarStar | AmpAmp | OrOr | TildeCircumflex | CircumflexTilde
+//              | LTLT | GTGT | LTLTLT | GTGTGT
+//              | LT | GT | LTEqu | GTEqu | EquEqu
+//              | BangEqu | EquEquEqu | BangEquEqu | EquEquQuest | BangEquQuest
+//              ;
+//UnaryOperator : Plus | Minus | Bang | Tilde | Amp | Or | Circumflex | TildeAmp | TildeOr | TildeCircumflex | CircumflexTilde;
 
-Expression : Expression1 { BinaryOperator Expression1 };
-Expression1: [ UnaryOperator ] Factor;
+Expression : Expression1 { ( BinaryOperator | CommonOperator ) Expression1 };
+Expression1: [ ( UnaryOperator | CommonOperator ) ] Factor;
 
 Factor: Number
       | Identifier { Range }

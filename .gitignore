@@ -1,2 +1,4 @@
 /target
 /tmp
+perf.data*
+flamegraph.svg

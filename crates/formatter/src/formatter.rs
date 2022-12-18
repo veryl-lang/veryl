@@ -199,34 +199,13 @@ impl VerylWalker for Formatter {
         self.expression1(&input.expression1);
         for x in &input.expression_list {
             self.space(1);
-            let token = match &*x.binary_operator {
-                BinaryOperator::BinaryOperator0(x) => &x.plus.plus_token,
-                BinaryOperator::BinaryOperator1(x) => &x.minus.minus_token,
-                BinaryOperator::BinaryOperator2(x) => &x.star.star_token,
-                BinaryOperator::BinaryOperator3(x) => &x.slash.slash_token,
-                BinaryOperator::BinaryOperator4(x) => &x.percent.percent_token,
-                BinaryOperator::BinaryOperator5(x) => &x.amp.amp_token,
-                BinaryOperator::BinaryOperator6(x) => &x.or.or_token,
-                BinaryOperator::BinaryOperator7(x) => &x.circumflex.circumflex_token,
-                BinaryOperator::BinaryOperator8(x) => &x.star_star.star_star_token,
-                BinaryOperator::BinaryOperator9(x) => &x.amp_amp.amp_amp_token,
-                BinaryOperator::BinaryOperator10(x) => &x.or_or.or_or_token,
-                BinaryOperator::BinaryOperator11(x) => &x.tilde_circumflex.tilde_circumflex_token,
-                BinaryOperator::BinaryOperator12(x) => &x.circumflex_tilde.circumflex_tilde_token,
-                BinaryOperator::BinaryOperator13(x) => &x.l_t_l_t.l_t_l_t_token,
-                BinaryOperator::BinaryOperator14(x) => &x.g_t_g_t.g_t_g_t_token,
-                BinaryOperator::BinaryOperator15(x) => &x.l_t_l_t_l_t.l_t_l_t_l_t_token,
-                BinaryOperator::BinaryOperator16(x) => &x.g_t_g_t_g_t.g_t_g_t_g_t_token,
-                BinaryOperator::BinaryOperator17(x) => &x.l_t.l_t_token,
-                BinaryOperator::BinaryOperator18(x) => &x.g_t.g_t_token,
-                BinaryOperator::BinaryOperator19(x) => &x.l_t_equ.l_t_equ_token,
-                BinaryOperator::BinaryOperator20(x) => &x.g_t_equ.g_t_equ_token,
-                BinaryOperator::BinaryOperator21(x) => &x.equ_equ.equ_equ_token,
-                BinaryOperator::BinaryOperator22(x) => &x.bang_equ.bang_equ_token,
-                BinaryOperator::BinaryOperator23(x) => &x.equ_equ_equ.equ_equ_equ_token,
-                BinaryOperator::BinaryOperator24(x) => &x.bang_equ_equ.bang_equ_equ_token,
-                BinaryOperator::BinaryOperator25(x) => &x.equ_equ_quest.equ_equ_quest_token,
-                BinaryOperator::BinaryOperator26(x) => &x.bang_equ_quest.bang_equ_quest_token,
+            let token = match &*x.expression_list_group {
+                ExpressionListGroup::ExpressionListGroup0(x) => {
+                    &x.binary_operator.binary_operator_token
+                }
+                ExpressionListGroup::ExpressionListGroup1(x) => {
+                    &x.common_operator.common_operator_token
+                }
             };
             self.token(token);
             self.space(1);
@@ -236,18 +215,13 @@ impl VerylWalker for Formatter {
 
     fn expression1(&mut self, input: &Expression1) {
         if let Some(ref x) = input.expression1_opt {
-            let token = match &*x.unary_operator {
-                UnaryOperator::UnaryOperator0(x) => &x.plus.plus_token,
-                UnaryOperator::UnaryOperator1(x) => &x.minus.minus_token,
-                UnaryOperator::UnaryOperator2(x) => &x.bang.bang_token,
-                UnaryOperator::UnaryOperator3(x) => &x.tilde.tilde_token,
-                UnaryOperator::UnaryOperator4(x) => &x.amp.amp_token,
-                UnaryOperator::UnaryOperator5(x) => &x.or.or_token,
-                UnaryOperator::UnaryOperator6(x) => &x.circumflex.circumflex_token,
-                UnaryOperator::UnaryOperator7(x) => &x.tilde_amp.tilde_amp_token,
-                UnaryOperator::UnaryOperator8(x) => &x.tilde_or.tilde_or_token,
-                UnaryOperator::UnaryOperator9(x) => &x.tilde_circumflex.tilde_circumflex_token,
-                UnaryOperator::UnaryOperator10(x) => &x.circumflex_tilde.circumflex_tilde_token,
+            let token = match &*x.expression1_opt_group {
+                Expression1OptGroup::Expression1OptGroup0(x) => {
+                    &x.unary_operator.unary_operator_token
+                }
+                Expression1OptGroup::Expression1OptGroup1(x) => {
+                    &x.common_operator.common_operator_token
+                }
             };
             self.token(token);
         }
