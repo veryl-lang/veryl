@@ -1,23 +1,39 @@
-use parol_runtime::lexer::Token;
+use crate::veryl_token::VerylToken;
 use parol_runtime::miette;
 use parol_runtime::miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
-#[derive(Error, Diagnostic, Debug)]
+#[derive(Clone, Error, Diagnostic, Debug)]
 pub enum VerylError {
-    #[error("{cause}")]
-    SemanticError {
-        cause: String,
+    #[error("{kind} number can't contain {cause}")]
+    InvalidNumberCharacter {
+        cause: char,
+        kind: String,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[error("number is over the maximum size of {width} bits")]
+    NumberOverflow {
+        width: usize,
         #[label("Error location")]
         error_location: SourceSpan,
     },
 }
 
 impl VerylError {
-    pub fn semantic_error(cause: String, token: &Token) -> Self {
-        VerylError::SemanticError {
+    pub fn invalid_number_character(cause: char, kind: &str, token: &VerylToken) -> Self {
+        VerylError::InvalidNumberCharacter {
             cause,
-            error_location: token.into(),
+            kind: kind.to_string(),
+            error_location: (&token.token.token).into(),
+        }
+    }
+
+    pub fn number_overflow(width: usize, token: &VerylToken) -> Self {
+        VerylError::NumberOverflow {
+            width,
+            error_location: (&token.token.token).into(),
         }
     }
 }

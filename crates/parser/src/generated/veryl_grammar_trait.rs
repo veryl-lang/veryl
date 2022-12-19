@@ -469,16 +469,6 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'Veryl'
-    fn veryl(&mut self, _arg: &Veryl) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'Description'
-    fn description(&mut self, _arg: &Description) -> Result<()> {
-        Ok(())
-    }
-
     /// Semantic action for non-terminal 'Number'
     fn number(&mut self, _arg: &Number) -> Result<()> {
         Ok(())
@@ -509,21 +499,6 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'Statement'
-    fn statement(&mut self, _arg: &Statement) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'AssignmentStatement'
-    fn assignment_statement(&mut self, _arg: &AssignmentStatement) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'IfStatement'
-    fn if_statement(&mut self, _arg: &IfStatement) -> Result<()> {
-        Ok(())
-    }
-
     /// Semantic action for non-terminal 'Range'
     fn range(&mut self, _arg: &Range) -> Result<()> {
         Ok(())
@@ -541,6 +516,76 @@ pub trait VerylGrammarTrait {
 
     /// Semantic action for non-terminal 'Type'
     fn r#type(&mut self, _arg: &Type) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Statement'
+    fn statement(&mut self, _arg: &Statement) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'AssignmentStatement'
+    fn assignment_statement(&mut self, _arg: &AssignmentStatement) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'IfStatement'
+    fn if_statement(&mut self, _arg: &IfStatement) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'VariableDeclaration'
+    fn variable_declaration(&mut self, _arg: &VariableDeclaration) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'ParameterDeclaration'
+    fn parameter_declaration(&mut self, _arg: &ParameterDeclaration) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'LocalparamDeclaration'
+    fn localparam_declaration(&mut self, _arg: &LocalparamDeclaration) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'AlwaysFfDeclaration'
+    fn always_ff_declaration(&mut self, _arg: &AlwaysFfDeclaration) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'AlwaysFfConditions'
+    fn always_ff_conditions(&mut self, _arg: &AlwaysFfConditions) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'AlwaysFfCondition'
+    fn always_ff_condition(&mut self, _arg: &AlwaysFfCondition) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'AlwaysCombDeclaration'
+    fn always_comb_declaration(&mut self, _arg: &AlwaysCombDeclaration) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'AssignDeclaration'
+    fn assign_declaration(&mut self, _arg: &AssignDeclaration) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'ModportDeclaration'
+    fn modport_declaration(&mut self, _arg: &ModportDeclaration) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'ModportList'
+    fn modport_list(&mut self, _arg: &ModportList) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'ModportItem'
+    fn modport_item(&mut self, _arg: &ModportItem) -> Result<()> {
         Ok(())
     }
 
@@ -599,58 +644,13 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'VariableDeclaration'
-    fn variable_declaration(&mut self, _arg: &VariableDeclaration) -> Result<()> {
+    /// Semantic action for non-terminal 'Description'
+    fn description(&mut self, _arg: &Description) -> Result<()> {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'ParameterDeclaration'
-    fn parameter_declaration(&mut self, _arg: &ParameterDeclaration) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'LocalparamDeclaration'
-    fn localparam_declaration(&mut self, _arg: &LocalparamDeclaration) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'AlwaysFfDeclaration'
-    fn always_ff_declaration(&mut self, _arg: &AlwaysFfDeclaration) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'AlwaysFfConditions'
-    fn always_ff_conditions(&mut self, _arg: &AlwaysFfConditions) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'AlwaysFfCondition'
-    fn always_ff_condition(&mut self, _arg: &AlwaysFfCondition) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'AlwaysCombDeclaration'
-    fn always_comb_declaration(&mut self, _arg: &AlwaysCombDeclaration) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'AssignDeclaration'
-    fn assign_declaration(&mut self, _arg: &AssignDeclaration) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'ModportDeclaration'
-    fn modport_declaration(&mut self, _arg: &ModportDeclaration) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'ModportList'
-    fn modport_list(&mut self, _arg: &ModportList) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'ModportItem'
-    fn modport_item(&mut self, _arg: &ModportItem) -> Result<()> {
+    /// Semantic action for non-terminal 'Veryl'
+    fn veryl(&mut self, _arg: &Veryl) -> Result<()> {
         Ok(())
     }
 }
@@ -661,29 +661,7 @@ pub trait VerylGrammarTrait {
 //
 
 ///
-/// Type derived for production 95
-///
-/// Description: ModuleDeclaration;
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Description0 {
-    pub module_declaration: Box<ModuleDeclaration>,
-}
-
-///
-/// Type derived for production 96
-///
-/// Description: InterfaceDeclaration;
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Description1 {
-    pub interface_declaration: Box<InterfaceDeclaration>,
-}
-
-///
-/// Type derived for production 97
+/// Type derived for production 92
 ///
 /// Number: IntegralNumber;
 ///
@@ -694,7 +672,7 @@ pub struct Number0 {
 }
 
 ///
-/// Type derived for production 98
+/// Type derived for production 93
 ///
 /// Number: RealNumber;
 ///
@@ -705,7 +683,7 @@ pub struct Number1 {
 }
 
 ///
-/// Type derived for production 99
+/// Type derived for production 94
 ///
 /// IntegralNumber: Based;
 ///
@@ -716,7 +694,7 @@ pub struct IntegralNumber0 {
 }
 
 ///
-/// Type derived for production 100
+/// Type derived for production 95
 ///
 /// IntegralNumber: BaseLess;
 ///
@@ -727,7 +705,7 @@ pub struct IntegralNumber1 {
 }
 
 ///
-/// Type derived for production 101
+/// Type derived for production 96
 ///
 /// IntegralNumber: AllBit;
 ///
@@ -738,7 +716,7 @@ pub struct IntegralNumber2 {
 }
 
 ///
-/// Type derived for production 102
+/// Type derived for production 97
 ///
 /// RealNumber: FixedPoint;
 ///
@@ -749,7 +727,7 @@ pub struct RealNumber0 {
 }
 
 ///
-/// Type derived for production 103
+/// Type derived for production 98
 ///
 /// RealNumber: Exponent;
 ///
@@ -760,7 +738,7 @@ pub struct RealNumber1 {
 }
 
 ///
-/// Type derived for production 106
+/// Type derived for production 101
 ///
 /// ExpressionListGroup: BinaryOperator;
 ///
@@ -771,7 +749,7 @@ pub struct ExpressionListGroup0 {
 }
 
 ///
-/// Type derived for production 107
+/// Type derived for production 102
 ///
 /// ExpressionListGroup: CommonOperator;
 ///
@@ -782,7 +760,7 @@ pub struct ExpressionListGroup1 {
 }
 
 ///
-/// Type derived for production 111
+/// Type derived for production 106
 ///
 /// Expression1OptGroup: UnaryOperator;
 ///
@@ -793,7 +771,7 @@ pub struct Expression1OptGroup0 {
 }
 
 ///
-/// Type derived for production 112
+/// Type derived for production 107
 ///
 /// Expression1OptGroup: CommonOperator;
 ///
@@ -804,7 +782,7 @@ pub struct Expression1OptGroup1 {
 }
 
 ///
-/// Type derived for production 114
+/// Type derived for production 109
 ///
 /// Factor: Number;
 ///
@@ -815,7 +793,7 @@ pub struct Factor0 {
 }
 
 ///
-/// Type derived for production 115
+/// Type derived for production 110
 ///
 /// Factor: Identifier FactorList /* Vec */;
 ///
@@ -827,7 +805,7 @@ pub struct Factor1 {
 }
 
 ///
-/// Type derived for production 118
+/// Type derived for production 113
 ///
 /// Factor: LParen Expression RParen;
 ///
@@ -840,29 +818,7 @@ pub struct Factor2 {
 }
 
 ///
-/// Type derived for production 119
-///
-/// Statement: AssignmentStatement;
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Statement0 {
-    pub assignment_statement: Box<AssignmentStatement>,
-}
-
-///
-/// Type derived for production 120
-///
-/// Statement: IfStatement;
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Statement1 {
-    pub if_statement: Box<IfStatement>,
-}
-
-///
-/// Type derived for production 131
+/// Type derived for production 118
 ///
 /// BuiltinType: Logic;
 ///
@@ -873,7 +829,7 @@ pub struct BuiltinType0 {
 }
 
 ///
-/// Type derived for production 132
+/// Type derived for production 119
 ///
 /// BuiltinType: Bit;
 ///
@@ -884,7 +840,7 @@ pub struct BuiltinType1 {
 }
 
 ///
-/// Type derived for production 133
+/// Type derived for production 120
 ///
 /// BuiltinType: U32;
 ///
@@ -895,7 +851,7 @@ pub struct BuiltinType2 {
 }
 
 ///
-/// Type derived for production 134
+/// Type derived for production 121
 ///
 /// BuiltinType: U64;
 ///
@@ -906,7 +862,7 @@ pub struct BuiltinType3 {
 }
 
 ///
-/// Type derived for production 135
+/// Type derived for production 122
 ///
 /// BuiltinType: I32;
 ///
@@ -917,7 +873,7 @@ pub struct BuiltinType4 {
 }
 
 ///
-/// Type derived for production 136
+/// Type derived for production 123
 ///
 /// BuiltinType: I64;
 ///
@@ -928,7 +884,7 @@ pub struct BuiltinType5 {
 }
 
 ///
-/// Type derived for production 137
+/// Type derived for production 124
 ///
 /// BuiltinType: F32;
 ///
@@ -939,7 +895,7 @@ pub struct BuiltinType6 {
 }
 
 ///
-/// Type derived for production 138
+/// Type derived for production 125
 ///
 /// BuiltinType: F64;
 ///
@@ -950,7 +906,7 @@ pub struct BuiltinType7 {
 }
 
 ///
-/// Type derived for production 140
+/// Type derived for production 127
 ///
 /// TypeGroup: BuiltinType;
 ///
@@ -961,7 +917,7 @@ pub struct TypeGroup0 {
 }
 
 ///
-/// Type derived for production 141
+/// Type derived for production 128
 ///
 /// TypeGroup: Identifier;
 ///
@@ -972,172 +928,29 @@ pub struct TypeGroup1 {
 }
 
 ///
-/// Type derived for production 153
+/// Type derived for production 131
 ///
-/// WithParameterItemGroup: Parameter;
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct WithParameterItemGroup0 {
-    pub parameter: Box<Parameter>,
-}
-
-///
-/// Type derived for production 154
-///
-/// WithParameterItemGroup: Localparam;
+/// Statement: AssignmentStatement;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct WithParameterItemGroup1 {
-    pub localparam: Box<Localparam>,
+pub struct Statement0 {
+    pub assignment_statement: Box<AssignmentStatement>,
 }
 
 ///
-/// Type derived for production 171
+/// Type derived for production 132
 ///
-/// Direction: Input;
+/// Statement: IfStatement;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct Direction0 {
-    pub input: Box<Input>,
+pub struct Statement1 {
+    pub if_statement: Box<IfStatement>,
 }
 
 ///
-/// Type derived for production 172
-///
-/// Direction: Output;
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Direction1 {
-    pub output: Box<Output>,
-}
-
-///
-/// Type derived for production 173
-///
-/// Direction: Inout;
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct Direction2 {
-    pub inout: Box<Inout>,
-}
-
-///
-/// Type derived for production 174
-///
-/// ModuleItem: VariableDeclaration;
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct ModuleItem0 {
-    pub variable_declaration: Box<VariableDeclaration>,
-}
-
-///
-/// Type derived for production 175
-///
-/// ModuleItem: ParameterDeclaration;
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct ModuleItem1 {
-    pub parameter_declaration: Box<ParameterDeclaration>,
-}
-
-///
-/// Type derived for production 176
-///
-/// ModuleItem: LocalparamDeclaration;
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct ModuleItem2 {
-    pub localparam_declaration: Box<LocalparamDeclaration>,
-}
-
-///
-/// Type derived for production 177
-///
-/// ModuleItem: AlwaysFfDeclaration;
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct ModuleItem3 {
-    pub always_ff_declaration: Box<AlwaysFfDeclaration>,
-}
-
-///
-/// Type derived for production 178
-///
-/// ModuleItem: AlwaysCombDeclaration;
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct ModuleItem4 {
-    pub always_comb_declaration: Box<AlwaysCombDeclaration>,
-}
-
-///
-/// Type derived for production 179
-///
-/// ModuleItem: AssignDeclaration;
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct ModuleItem5 {
-    pub assign_declaration: Box<AssignDeclaration>,
-}
-
-///
-/// Type derived for production 185
-///
-/// InterfaceItem: VariableDeclaration;
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct InterfaceItem0 {
-    pub variable_declaration: Box<VariableDeclaration>,
-}
-
-///
-/// Type derived for production 186
-///
-/// InterfaceItem: ParameterDeclaration;
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct InterfaceItem1 {
-    pub parameter_declaration: Box<ParameterDeclaration>,
-}
-
-///
-/// Type derived for production 187
-///
-/// InterfaceItem: LocalparamDeclaration;
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct InterfaceItem2 {
-    pub localparam_declaration: Box<LocalparamDeclaration>,
-}
-
-///
-/// Type derived for production 188
-///
-/// InterfaceItem: ModportDeclaration;
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct InterfaceItem3 {
-    pub modport_declaration: Box<ModportDeclaration>,
-}
-
-///
-/// Type derived for production 201
+/// Type derived for production 151
 ///
 /// AlwaysFfConditionGroup: Posedge;
 ///
@@ -1148,7 +961,7 @@ pub struct AlwaysFfConditionGroup0 {
 }
 
 ///
-/// Type derived for production 202
+/// Type derived for production 152
 ///
 /// AlwaysFfConditionGroup: Negedge;
 ///
@@ -1156,6 +969,193 @@ pub struct AlwaysFfConditionGroup0 {
 #[derive(Builder, Debug, Clone)]
 pub struct AlwaysFfConditionGroup1 {
     pub negedge: Box<Negedge>,
+}
+
+///
+/// Type derived for production 175
+///
+/// WithParameterItemGroup: Parameter;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct WithParameterItemGroup0 {
+    pub parameter: Box<Parameter>,
+}
+
+///
+/// Type derived for production 176
+///
+/// WithParameterItemGroup: Localparam;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct WithParameterItemGroup1 {
+    pub localparam: Box<Localparam>,
+}
+
+///
+/// Type derived for production 193
+///
+/// Direction: Input;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct Direction0 {
+    pub input: Box<Input>,
+}
+
+///
+/// Type derived for production 194
+///
+/// Direction: Output;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct Direction1 {
+    pub output: Box<Output>,
+}
+
+///
+/// Type derived for production 195
+///
+/// Direction: Inout;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct Direction2 {
+    pub inout: Box<Inout>,
+}
+
+///
+/// Type derived for production 196
+///
+/// ModuleItem: VariableDeclaration;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct ModuleItem0 {
+    pub variable_declaration: Box<VariableDeclaration>,
+}
+
+///
+/// Type derived for production 197
+///
+/// ModuleItem: ParameterDeclaration;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct ModuleItem1 {
+    pub parameter_declaration: Box<ParameterDeclaration>,
+}
+
+///
+/// Type derived for production 198
+///
+/// ModuleItem: LocalparamDeclaration;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct ModuleItem2 {
+    pub localparam_declaration: Box<LocalparamDeclaration>,
+}
+
+///
+/// Type derived for production 199
+///
+/// ModuleItem: AlwaysFfDeclaration;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct ModuleItem3 {
+    pub always_ff_declaration: Box<AlwaysFfDeclaration>,
+}
+
+///
+/// Type derived for production 200
+///
+/// ModuleItem: AlwaysCombDeclaration;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct ModuleItem4 {
+    pub always_comb_declaration: Box<AlwaysCombDeclaration>,
+}
+
+///
+/// Type derived for production 201
+///
+/// ModuleItem: AssignDeclaration;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct ModuleItem5 {
+    pub assign_declaration: Box<AssignDeclaration>,
+}
+
+///
+/// Type derived for production 207
+///
+/// InterfaceItem: VariableDeclaration;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct InterfaceItem0 {
+    pub variable_declaration: Box<VariableDeclaration>,
+}
+
+///
+/// Type derived for production 208
+///
+/// InterfaceItem: ParameterDeclaration;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct InterfaceItem1 {
+    pub parameter_declaration: Box<ParameterDeclaration>,
+}
+
+///
+/// Type derived for production 209
+///
+/// InterfaceItem: LocalparamDeclaration;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct InterfaceItem2 {
+    pub localparam_declaration: Box<LocalparamDeclaration>,
+}
+
+///
+/// Type derived for production 210
+///
+/// InterfaceItem: ModportDeclaration;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct InterfaceItem3 {
+    pub modport_declaration: Box<ModportDeclaration>,
+}
+
+///
+/// Type derived for production 211
+///
+/// Description: ModuleDeclaration;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct Description0 {
+    pub module_declaration: Box<ModuleDeclaration>,
+}
+
+///
+/// Type derived for production 212
+///
+/// Description: InterfaceDeclaration;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct Description1 {
+    pub interface_declaration: Box<InterfaceDeclaration>,
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -5283,119 +5283,6 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 92:
     ///
-    /// Veryl: Start VerylList /* Vec */;
-    ///
-    #[parol_runtime::function_name::named]
-    fn veryl(
-        &mut self,
-        _start: &ParseTreeStackEntry<'t>,
-        _veryl_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let veryl_list = pop_and_reverse_item!(self, veryl_list, VerylList, context);
-        let start = pop_item!(self, start, Start, context);
-        let veryl_built = VerylBuilder::default()
-            .start(Box::new(start))
-            .veryl_list(veryl_list)
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar.veryl(&veryl_built)?;
-        self.push(ASTType::Veryl(veryl_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 93:
-    ///
-    /// VerylList /* Vec<T>::Push */: Description VerylList;
-    ///
-    #[parol_runtime::function_name::named]
-    fn veryl_list_0(
-        &mut self,
-        _description: &ParseTreeStackEntry<'t>,
-        _veryl_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let mut veryl_list = pop_item!(self, veryl_list, VerylList, context);
-        let description = pop_item!(self, description, Description, context);
-        let veryl_list_0_built = VerylListBuilder::default()
-            .description(Box::new(description))
-            .build()
-            .into_diagnostic()?;
-        // Add an element to the vector
-        veryl_list.push(veryl_list_0_built);
-        self.push(ASTType::VerylList(veryl_list), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 94:
-    ///
-    /// VerylList /* Vec<T>::New */: ;
-    ///
-    #[parol_runtime::function_name::named]
-    fn veryl_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let veryl_list_1_built = Vec::new();
-        self.push(ASTType::VerylList(veryl_list_1_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 95:
-    ///
-    /// Description: ModuleDeclaration;
-    ///
-    #[parol_runtime::function_name::named]
-    fn description_0(
-        &mut self,
-        _module_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let module_declaration = pop_item!(self, module_declaration, ModuleDeclaration, context);
-        let description_0_built = Description0Builder::default()
-            .module_declaration(Box::new(module_declaration))
-            .build()
-            .into_diagnostic()?;
-        let description_0_built = Description::Description0(description_0_built);
-        // Calling user action here
-        self.user_grammar.description(&description_0_built)?;
-        self.push(ASTType::Description(description_0_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 96:
-    ///
-    /// Description: InterfaceDeclaration;
-    ///
-    #[parol_runtime::function_name::named]
-    fn description_1(
-        &mut self,
-        _interface_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let interface_declaration =
-            pop_item!(self, interface_declaration, InterfaceDeclaration, context);
-        let description_1_built = Description1Builder::default()
-            .interface_declaration(Box::new(interface_declaration))
-            .build()
-            .into_diagnostic()?;
-        let description_1_built = Description::Description1(description_1_built);
-        // Calling user action here
-        self.user_grammar.description(&description_1_built)?;
-        self.push(ASTType::Description(description_1_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 97:
-    ///
     /// Number: IntegralNumber;
     ///
     #[parol_runtime::function_name::named]
@@ -5418,7 +5305,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 98:
+    /// Semantic action for production 93:
     ///
     /// Number: RealNumber;
     ///
@@ -5442,7 +5329,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 99:
+    /// Semantic action for production 94:
     ///
     /// IntegralNumber: Based;
     ///
@@ -5467,7 +5354,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 100:
+    /// Semantic action for production 95:
     ///
     /// IntegralNumber: BaseLess;
     ///
@@ -5492,7 +5379,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 101:
+    /// Semantic action for production 96:
     ///
     /// IntegralNumber: AllBit;
     ///
@@ -5517,7 +5404,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 102:
+    /// Semantic action for production 97:
     ///
     /// RealNumber: FixedPoint;
     ///
@@ -5541,7 +5428,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 103:
+    /// Semantic action for production 98:
     ///
     /// RealNumber: Exponent;
     ///
@@ -5565,7 +5452,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 104:
+    /// Semantic action for production 99:
     ///
     /// Expression: Expression1 ExpressionList /* Vec */;
     ///
@@ -5591,7 +5478,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 105:
+    /// Semantic action for production 100:
     ///
     /// ExpressionList /* Vec<T>::Push */: ExpressionListGroup Expression1 ExpressionList;
     ///
@@ -5620,7 +5507,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 106:
+    /// Semantic action for production 101:
     ///
     /// ExpressionListGroup: BinaryOperator;
     ///
@@ -5646,7 +5533,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 107:
+    /// Semantic action for production 102:
     ///
     /// ExpressionListGroup: CommonOperator;
     ///
@@ -5672,7 +5559,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 108:
+    /// Semantic action for production 103:
     ///
     /// ExpressionList /* Vec<T>::New */: ;
     ///
@@ -5685,7 +5572,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 109:
+    /// Semantic action for production 104:
     ///
     /// Expression1: Expression1Opt /* Option */ Factor;
     ///
@@ -5711,7 +5598,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 110:
+    /// Semantic action for production 105:
     ///
     /// Expression1Opt /* Option<T>::Some */: Expression1OptGroup;
     ///
@@ -5736,7 +5623,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 111:
+    /// Semantic action for production 106:
     ///
     /// Expression1OptGroup: UnaryOperator;
     ///
@@ -5762,7 +5649,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 112:
+    /// Semantic action for production 107:
     ///
     /// Expression1OptGroup: CommonOperator;
     ///
@@ -5788,7 +5675,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 113:
+    /// Semantic action for production 108:
     ///
     /// Expression1Opt /* Option<T>::None */: ;
     ///
@@ -5800,7 +5687,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 114:
+    /// Semantic action for production 109:
     ///
     /// Factor: Number;
     ///
@@ -5824,7 +5711,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 115:
+    /// Semantic action for production 110:
     ///
     /// Factor: Identifier FactorList /* Vec */;
     ///
@@ -5851,7 +5738,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 116:
+    /// Semantic action for production 111:
     ///
     /// FactorList /* Vec<T>::Push */: Range FactorList;
     ///
@@ -5876,7 +5763,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 117:
+    /// Semantic action for production 112:
     ///
     /// FactorList /* Vec<T>::New */: ;
     ///
@@ -5889,7 +5776,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 118:
+    /// Semantic action for production 113:
     ///
     /// Factor: LParen Expression RParen;
     ///
@@ -5919,7 +5806,407 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
+    /// Semantic action for production 114:
+    ///
+    /// Range: LBracket Expression RangeOpt /* Option */ RBracket;
+    ///
+    #[parol_runtime::function_name::named]
+    fn range(
+        &mut self,
+        _l_bracket: &ParseTreeStackEntry<'t>,
+        _expression: &ParseTreeStackEntry<'t>,
+        _range_opt: &ParseTreeStackEntry<'t>,
+        _r_bracket: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let r_bracket = pop_item!(self, r_bracket, RBracket, context);
+        let range_opt = pop_item!(self, range_opt, RangeOpt, context);
+        let expression = pop_item!(self, expression, Expression, context);
+        let l_bracket = pop_item!(self, l_bracket, LBracket, context);
+        let range_built = RangeBuilder::default()
+            .l_bracket(Box::new(l_bracket))
+            .expression(Box::new(expression))
+            .range_opt(range_opt)
+            .r_bracket(Box::new(r_bracket))
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.range(&range_built)?;
+        self.push(ASTType::Range(range_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 115:
+    ///
+    /// RangeOpt /* Option<T>::Some */: Colon Expression;
+    ///
+    #[parol_runtime::function_name::named]
+    fn range_opt_0(
+        &mut self,
+        _colon: &ParseTreeStackEntry<'t>,
+        _expression: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let expression = pop_item!(self, expression, Expression, context);
+        let colon = pop_item!(self, colon, Colon, context);
+        let range_opt_0_built = RangeOptBuilder::default()
+            .colon(Box::new(colon))
+            .expression(Box::new(expression))
+            .build()
+            .into_diagnostic()?;
+        self.push(
+            ASTType::RangeOpt(Some(Box::new(range_opt_0_built))),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 116:
+    ///
+    /// RangeOpt /* Option<T>::None */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn range_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        self.push(ASTType::RangeOpt(None), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 117:
+    ///
+    /// Width: LBracket Expression RBracket;
+    ///
+    #[parol_runtime::function_name::named]
+    fn width(
+        &mut self,
+        _l_bracket: &ParseTreeStackEntry<'t>,
+        _expression: &ParseTreeStackEntry<'t>,
+        _r_bracket: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let r_bracket = pop_item!(self, r_bracket, RBracket, context);
+        let expression = pop_item!(self, expression, Expression, context);
+        let l_bracket = pop_item!(self, l_bracket, LBracket, context);
+        let width_built = WidthBuilder::default()
+            .l_bracket(Box::new(l_bracket))
+            .expression(Box::new(expression))
+            .r_bracket(Box::new(r_bracket))
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.width(&width_built)?;
+        self.push(ASTType::Width(width_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 118:
+    ///
+    /// BuiltinType: Logic;
+    ///
+    #[parol_runtime::function_name::named]
+    fn builtin_type_0(
+        &mut self,
+        _logic: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let logic = pop_item!(self, logic, Logic, context);
+        let builtin_type_0_built = BuiltinType0Builder::default()
+            .logic(Box::new(logic))
+            .build()
+            .into_diagnostic()?;
+        let builtin_type_0_built = BuiltinType::BuiltinType0(builtin_type_0_built);
+        // Calling user action here
+        self.user_grammar.builtin_type(&builtin_type_0_built)?;
+        self.push(ASTType::BuiltinType(builtin_type_0_built), context);
+        Ok(())
+    }
+
     /// Semantic action for production 119:
+    ///
+    /// BuiltinType: Bit;
+    ///
+    #[parol_runtime::function_name::named]
+    fn builtin_type_1(
+        &mut self,
+        _bit: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let bit = pop_item!(self, bit, Bit, context);
+        let builtin_type_1_built = BuiltinType1Builder::default()
+            .bit(Box::new(bit))
+            .build()
+            .into_diagnostic()?;
+        let builtin_type_1_built = BuiltinType::BuiltinType1(builtin_type_1_built);
+        // Calling user action here
+        self.user_grammar.builtin_type(&builtin_type_1_built)?;
+        self.push(ASTType::BuiltinType(builtin_type_1_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 120:
+    ///
+    /// BuiltinType: U32;
+    ///
+    #[parol_runtime::function_name::named]
+    fn builtin_type_2(
+        &mut self,
+        _u32: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let u32 = pop_item!(self, u32, U32, context);
+        let builtin_type_2_built = BuiltinType2Builder::default()
+            .u32(Box::new(u32))
+            .build()
+            .into_diagnostic()?;
+        let builtin_type_2_built = BuiltinType::BuiltinType2(builtin_type_2_built);
+        // Calling user action here
+        self.user_grammar.builtin_type(&builtin_type_2_built)?;
+        self.push(ASTType::BuiltinType(builtin_type_2_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 121:
+    ///
+    /// BuiltinType: U64;
+    ///
+    #[parol_runtime::function_name::named]
+    fn builtin_type_3(
+        &mut self,
+        _u64: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let u64 = pop_item!(self, u64, U64, context);
+        let builtin_type_3_built = BuiltinType3Builder::default()
+            .u64(Box::new(u64))
+            .build()
+            .into_diagnostic()?;
+        let builtin_type_3_built = BuiltinType::BuiltinType3(builtin_type_3_built);
+        // Calling user action here
+        self.user_grammar.builtin_type(&builtin_type_3_built)?;
+        self.push(ASTType::BuiltinType(builtin_type_3_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 122:
+    ///
+    /// BuiltinType: I32;
+    ///
+    #[parol_runtime::function_name::named]
+    fn builtin_type_4(
+        &mut self,
+        _i32: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let i32 = pop_item!(self, i32, I32, context);
+        let builtin_type_4_built = BuiltinType4Builder::default()
+            .i32(Box::new(i32))
+            .build()
+            .into_diagnostic()?;
+        let builtin_type_4_built = BuiltinType::BuiltinType4(builtin_type_4_built);
+        // Calling user action here
+        self.user_grammar.builtin_type(&builtin_type_4_built)?;
+        self.push(ASTType::BuiltinType(builtin_type_4_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 123:
+    ///
+    /// BuiltinType: I64;
+    ///
+    #[parol_runtime::function_name::named]
+    fn builtin_type_5(
+        &mut self,
+        _i64: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let i64 = pop_item!(self, i64, I64, context);
+        let builtin_type_5_built = BuiltinType5Builder::default()
+            .i64(Box::new(i64))
+            .build()
+            .into_diagnostic()?;
+        let builtin_type_5_built = BuiltinType::BuiltinType5(builtin_type_5_built);
+        // Calling user action here
+        self.user_grammar.builtin_type(&builtin_type_5_built)?;
+        self.push(ASTType::BuiltinType(builtin_type_5_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 124:
+    ///
+    /// BuiltinType: F32;
+    ///
+    #[parol_runtime::function_name::named]
+    fn builtin_type_6(
+        &mut self,
+        _f32: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let f32 = pop_item!(self, f32, F32, context);
+        let builtin_type_6_built = BuiltinType6Builder::default()
+            .f32(Box::new(f32))
+            .build()
+            .into_diagnostic()?;
+        let builtin_type_6_built = BuiltinType::BuiltinType6(builtin_type_6_built);
+        // Calling user action here
+        self.user_grammar.builtin_type(&builtin_type_6_built)?;
+        self.push(ASTType::BuiltinType(builtin_type_6_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 125:
+    ///
+    /// BuiltinType: F64;
+    ///
+    #[parol_runtime::function_name::named]
+    fn builtin_type_7(
+        &mut self,
+        _f64: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let f64 = pop_item!(self, f64, F64, context);
+        let builtin_type_7_built = BuiltinType7Builder::default()
+            .f64(Box::new(f64))
+            .build()
+            .into_diagnostic()?;
+        let builtin_type_7_built = BuiltinType::BuiltinType7(builtin_type_7_built);
+        // Calling user action here
+        self.user_grammar.builtin_type(&builtin_type_7_built)?;
+        self.push(ASTType::BuiltinType(builtin_type_7_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 126:
+    ///
+    /// Type: TypeGroup TypeList /* Vec */;
+    ///
+    #[parol_runtime::function_name::named]
+    fn r#type(
+        &mut self,
+        _type_group: &ParseTreeStackEntry<'t>,
+        _type_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let type_list = pop_and_reverse_item!(self, type_list, TypeList, context);
+        let type_group = pop_item!(self, type_group, TypeGroup, context);
+        let r#type_built = TypeBuilder::default()
+            .type_group(Box::new(type_group))
+            .type_list(type_list)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.r#type(&r#type_built)?;
+        self.push(ASTType::Type(r#type_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 127:
+    ///
+    /// TypeGroup: BuiltinType;
+    ///
+    #[parol_runtime::function_name::named]
+    fn type_group_0(
+        &mut self,
+        _builtin_type: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let builtin_type = pop_item!(self, builtin_type, BuiltinType, context);
+        let type_group_0_built = TypeGroup0Builder::default()
+            .builtin_type(Box::new(builtin_type))
+            .build()
+            .into_diagnostic()?;
+        let type_group_0_built = TypeGroup::TypeGroup0(type_group_0_built);
+        self.push(ASTType::TypeGroup(type_group_0_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 128:
+    ///
+    /// TypeGroup: Identifier;
+    ///
+    #[parol_runtime::function_name::named]
+    fn type_group_1(
+        &mut self,
+        _identifier: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let identifier = pop_item!(self, identifier, Identifier, context);
+        let type_group_1_built = TypeGroup1Builder::default()
+            .identifier(Box::new(identifier))
+            .build()
+            .into_diagnostic()?;
+        let type_group_1_built = TypeGroup::TypeGroup1(type_group_1_built);
+        self.push(ASTType::TypeGroup(type_group_1_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 129:
+    ///
+    /// TypeList /* Vec<T>::Push */: Width TypeList;
+    ///
+    #[parol_runtime::function_name::named]
+    fn type_list_0(
+        &mut self,
+        _width: &ParseTreeStackEntry<'t>,
+        _type_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let mut type_list = pop_item!(self, type_list, TypeList, context);
+        let width = pop_item!(self, width, Width, context);
+        let type_list_0_built = TypeListBuilder::default()
+            .width(Box::new(width))
+            .build()
+            .into_diagnostic()?;
+        // Add an element to the vector
+        type_list.push(type_list_0_built);
+        self.push(ASTType::TypeList(type_list), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 130:
+    ///
+    /// TypeList /* Vec<T>::New */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn type_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let type_list_1_built = Vec::new();
+        self.push(ASTType::TypeList(type_list_1_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 131:
     ///
     /// Statement: AssignmentStatement;
     ///
@@ -5944,7 +6231,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 120:
+    /// Semantic action for production 132:
     ///
     /// Statement: IfStatement;
     ///
@@ -5968,7 +6255,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 121:
+    /// Semantic action for production 133:
     ///
     /// AssignmentStatement: Identifier Equ Expression Semicolon;
     ///
@@ -6004,7 +6291,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 122:
+    /// Semantic action for production 134:
     ///
     /// IfStatement: If Expression LBrace Statement RBrace IfStatementList /* Vec */ IfStatementOpt /* Option */;
     ///
@@ -6046,7 +6333,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 123:
+    /// Semantic action for production 135:
     ///
     /// IfStatementList /* Vec<T>::Push */: Else If Expression LBrace Statement RBrace IfStatementList;
     ///
@@ -6086,7 +6373,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 124:
+    /// Semantic action for production 136:
     ///
     /// IfStatementList /* Vec<T>::New */: ;
     ///
@@ -6099,7 +6386,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 125:
+    /// Semantic action for production 137:
     ///
     /// IfStatementOpt /* Option<T>::Some */: Else LBrace Statement RBrace;
     ///
@@ -6132,7 +6419,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 126:
+    /// Semantic action for production 138:
     ///
     /// IfStatementOpt /* Option<T>::None */: ;
     ///
@@ -6144,407 +6431,804 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 127:
+    /// Semantic action for production 139:
     ///
-    /// Range: LBracket Expression RangeOpt /* Option */ RBracket;
+    /// VariableDeclaration: Identifier Colon Type Semicolon;
     ///
     #[parol_runtime::function_name::named]
-    fn range(
+    fn variable_declaration(
         &mut self,
-        _l_bracket: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _range_opt: &ParseTreeStackEntry<'t>,
-        _r_bracket: &ParseTreeStackEntry<'t>,
+        _identifier: &ParseTreeStackEntry<'t>,
+        _colon: &ParseTreeStackEntry<'t>,
+        _type: &ParseTreeStackEntry<'t>,
+        _semicolon: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let r_bracket = pop_item!(self, r_bracket, RBracket, context);
-        let range_opt = pop_item!(self, range_opt, RangeOpt, context);
-        let expression = pop_item!(self, expression, Expression, context);
-        let l_bracket = pop_item!(self, l_bracket, LBracket, context);
-        let range_built = RangeBuilder::default()
-            .l_bracket(Box::new(l_bracket))
-            .expression(Box::new(expression))
-            .range_opt(range_opt)
-            .r_bracket(Box::new(r_bracket))
+        let semicolon = pop_item!(self, semicolon, Semicolon, context);
+        let r#type = pop_item!(self, r#type, Type, context);
+        let colon = pop_item!(self, colon, Colon, context);
+        let identifier = pop_item!(self, identifier, Identifier, context);
+        let variable_declaration_built = VariableDeclarationBuilder::default()
+            .identifier(Box::new(identifier))
+            .colon(Box::new(colon))
+            .r#type(Box::new(r#type))
+            .semicolon(Box::new(semicolon))
             .build()
             .into_diagnostic()?;
         // Calling user action here
-        self.user_grammar.range(&range_built)?;
-        self.push(ASTType::Range(range_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 128:
-    ///
-    /// RangeOpt /* Option<T>::Some */: Colon Expression;
-    ///
-    #[parol_runtime::function_name::named]
-    fn range_opt_0(
-        &mut self,
-        _colon: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let expression = pop_item!(self, expression, Expression, context);
-        let colon = pop_item!(self, colon, Colon, context);
-        let range_opt_0_built = RangeOptBuilder::default()
-            .colon(Box::new(colon))
-            .expression(Box::new(expression))
-            .build()
-            .into_diagnostic()?;
+        self.user_grammar
+            .variable_declaration(&variable_declaration_built)?;
         self.push(
-            ASTType::RangeOpt(Some(Box::new(range_opt_0_built))),
+            ASTType::VariableDeclaration(variable_declaration_built),
             context,
         );
         Ok(())
     }
 
-    /// Semantic action for production 129:
-    ///
-    /// RangeOpt /* Option<T>::None */: ;
-    ///
-    #[parol_runtime::function_name::named]
-    fn range_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::RangeOpt(None), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 130:
-    ///
-    /// Width: LBracket Expression RBracket;
-    ///
-    #[parol_runtime::function_name::named]
-    fn width(
-        &mut self,
-        _l_bracket: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _r_bracket: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let r_bracket = pop_item!(self, r_bracket, RBracket, context);
-        let expression = pop_item!(self, expression, Expression, context);
-        let l_bracket = pop_item!(self, l_bracket, LBracket, context);
-        let width_built = WidthBuilder::default()
-            .l_bracket(Box::new(l_bracket))
-            .expression(Box::new(expression))
-            .r_bracket(Box::new(r_bracket))
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar.width(&width_built)?;
-        self.push(ASTType::Width(width_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 131:
-    ///
-    /// BuiltinType: Logic;
-    ///
-    #[parol_runtime::function_name::named]
-    fn builtin_type_0(
-        &mut self,
-        _logic: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let logic = pop_item!(self, logic, Logic, context);
-        let builtin_type_0_built = BuiltinType0Builder::default()
-            .logic(Box::new(logic))
-            .build()
-            .into_diagnostic()?;
-        let builtin_type_0_built = BuiltinType::BuiltinType0(builtin_type_0_built);
-        // Calling user action here
-        self.user_grammar.builtin_type(&builtin_type_0_built)?;
-        self.push(ASTType::BuiltinType(builtin_type_0_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 132:
-    ///
-    /// BuiltinType: Bit;
-    ///
-    #[parol_runtime::function_name::named]
-    fn builtin_type_1(
-        &mut self,
-        _bit: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let bit = pop_item!(self, bit, Bit, context);
-        let builtin_type_1_built = BuiltinType1Builder::default()
-            .bit(Box::new(bit))
-            .build()
-            .into_diagnostic()?;
-        let builtin_type_1_built = BuiltinType::BuiltinType1(builtin_type_1_built);
-        // Calling user action here
-        self.user_grammar.builtin_type(&builtin_type_1_built)?;
-        self.push(ASTType::BuiltinType(builtin_type_1_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 133:
-    ///
-    /// BuiltinType: U32;
-    ///
-    #[parol_runtime::function_name::named]
-    fn builtin_type_2(
-        &mut self,
-        _u32: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let u32 = pop_item!(self, u32, U32, context);
-        let builtin_type_2_built = BuiltinType2Builder::default()
-            .u32(Box::new(u32))
-            .build()
-            .into_diagnostic()?;
-        let builtin_type_2_built = BuiltinType::BuiltinType2(builtin_type_2_built);
-        // Calling user action here
-        self.user_grammar.builtin_type(&builtin_type_2_built)?;
-        self.push(ASTType::BuiltinType(builtin_type_2_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 134:
-    ///
-    /// BuiltinType: U64;
-    ///
-    #[parol_runtime::function_name::named]
-    fn builtin_type_3(
-        &mut self,
-        _u64: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let u64 = pop_item!(self, u64, U64, context);
-        let builtin_type_3_built = BuiltinType3Builder::default()
-            .u64(Box::new(u64))
-            .build()
-            .into_diagnostic()?;
-        let builtin_type_3_built = BuiltinType::BuiltinType3(builtin_type_3_built);
-        // Calling user action here
-        self.user_grammar.builtin_type(&builtin_type_3_built)?;
-        self.push(ASTType::BuiltinType(builtin_type_3_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 135:
-    ///
-    /// BuiltinType: I32;
-    ///
-    #[parol_runtime::function_name::named]
-    fn builtin_type_4(
-        &mut self,
-        _i32: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let i32 = pop_item!(self, i32, I32, context);
-        let builtin_type_4_built = BuiltinType4Builder::default()
-            .i32(Box::new(i32))
-            .build()
-            .into_diagnostic()?;
-        let builtin_type_4_built = BuiltinType::BuiltinType4(builtin_type_4_built);
-        // Calling user action here
-        self.user_grammar.builtin_type(&builtin_type_4_built)?;
-        self.push(ASTType::BuiltinType(builtin_type_4_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 136:
-    ///
-    /// BuiltinType: I64;
-    ///
-    #[parol_runtime::function_name::named]
-    fn builtin_type_5(
-        &mut self,
-        _i64: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let i64 = pop_item!(self, i64, I64, context);
-        let builtin_type_5_built = BuiltinType5Builder::default()
-            .i64(Box::new(i64))
-            .build()
-            .into_diagnostic()?;
-        let builtin_type_5_built = BuiltinType::BuiltinType5(builtin_type_5_built);
-        // Calling user action here
-        self.user_grammar.builtin_type(&builtin_type_5_built)?;
-        self.push(ASTType::BuiltinType(builtin_type_5_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 137:
-    ///
-    /// BuiltinType: F32;
-    ///
-    #[parol_runtime::function_name::named]
-    fn builtin_type_6(
-        &mut self,
-        _f32: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let f32 = pop_item!(self, f32, F32, context);
-        let builtin_type_6_built = BuiltinType6Builder::default()
-            .f32(Box::new(f32))
-            .build()
-            .into_diagnostic()?;
-        let builtin_type_6_built = BuiltinType::BuiltinType6(builtin_type_6_built);
-        // Calling user action here
-        self.user_grammar.builtin_type(&builtin_type_6_built)?;
-        self.push(ASTType::BuiltinType(builtin_type_6_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 138:
-    ///
-    /// BuiltinType: F64;
-    ///
-    #[parol_runtime::function_name::named]
-    fn builtin_type_7(
-        &mut self,
-        _f64: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let f64 = pop_item!(self, f64, F64, context);
-        let builtin_type_7_built = BuiltinType7Builder::default()
-            .f64(Box::new(f64))
-            .build()
-            .into_diagnostic()?;
-        let builtin_type_7_built = BuiltinType::BuiltinType7(builtin_type_7_built);
-        // Calling user action here
-        self.user_grammar.builtin_type(&builtin_type_7_built)?;
-        self.push(ASTType::BuiltinType(builtin_type_7_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 139:
-    ///
-    /// Type: TypeGroup TypeList /* Vec */;
-    ///
-    #[parol_runtime::function_name::named]
-    fn r#type(
-        &mut self,
-        _type_group: &ParseTreeStackEntry<'t>,
-        _type_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let type_list = pop_and_reverse_item!(self, type_list, TypeList, context);
-        let type_group = pop_item!(self, type_group, TypeGroup, context);
-        let r#type_built = TypeBuilder::default()
-            .type_group(Box::new(type_group))
-            .type_list(type_list)
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar.r#type(&r#type_built)?;
-        self.push(ASTType::Type(r#type_built), context);
-        Ok(())
-    }
-
     /// Semantic action for production 140:
     ///
-    /// TypeGroup: BuiltinType;
+    /// ParameterDeclaration: Parameter Identifier Colon Type Equ Expression Semicolon;
     ///
     #[parol_runtime::function_name::named]
-    fn type_group_0(
+    fn parameter_declaration(
         &mut self,
-        _builtin_type: &ParseTreeStackEntry<'t>,
+        _parameter: &ParseTreeStackEntry<'t>,
+        _identifier: &ParseTreeStackEntry<'t>,
+        _colon: &ParseTreeStackEntry<'t>,
+        _type: &ParseTreeStackEntry<'t>,
+        _equ: &ParseTreeStackEntry<'t>,
+        _expression: &ParseTreeStackEntry<'t>,
+        _semicolon: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let builtin_type = pop_item!(self, builtin_type, BuiltinType, context);
-        let type_group_0_built = TypeGroup0Builder::default()
-            .builtin_type(Box::new(builtin_type))
+        let semicolon = pop_item!(self, semicolon, Semicolon, context);
+        let expression = pop_item!(self, expression, Expression, context);
+        let equ = pop_item!(self, equ, Equ, context);
+        let r#type = pop_item!(self, r#type, Type, context);
+        let colon = pop_item!(self, colon, Colon, context);
+        let identifier = pop_item!(self, identifier, Identifier, context);
+        let parameter = pop_item!(self, parameter, Parameter, context);
+        let parameter_declaration_built = ParameterDeclarationBuilder::default()
+            .parameter(Box::new(parameter))
+            .identifier(Box::new(identifier))
+            .colon(Box::new(colon))
+            .r#type(Box::new(r#type))
+            .equ(Box::new(equ))
+            .expression(Box::new(expression))
+            .semicolon(Box::new(semicolon))
             .build()
             .into_diagnostic()?;
-        let type_group_0_built = TypeGroup::TypeGroup0(type_group_0_built);
-        self.push(ASTType::TypeGroup(type_group_0_built), context);
+        // Calling user action here
+        self.user_grammar
+            .parameter_declaration(&parameter_declaration_built)?;
+        self.push(
+            ASTType::ParameterDeclaration(parameter_declaration_built),
+            context,
+        );
         Ok(())
     }
 
     /// Semantic action for production 141:
     ///
-    /// TypeGroup: Identifier;
+    /// LocalparamDeclaration: Localparam Identifier Colon Type Equ Expression Semicolon;
     ///
     #[parol_runtime::function_name::named]
-    fn type_group_1(
+    fn localparam_declaration(
         &mut self,
+        _localparam: &ParseTreeStackEntry<'t>,
+        _identifier: &ParseTreeStackEntry<'t>,
+        _colon: &ParseTreeStackEntry<'t>,
+        _type: &ParseTreeStackEntry<'t>,
+        _equ: &ParseTreeStackEntry<'t>,
+        _expression: &ParseTreeStackEntry<'t>,
+        _semicolon: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let semicolon = pop_item!(self, semicolon, Semicolon, context);
+        let expression = pop_item!(self, expression, Expression, context);
+        let equ = pop_item!(self, equ, Equ, context);
+        let r#type = pop_item!(self, r#type, Type, context);
+        let colon = pop_item!(self, colon, Colon, context);
+        let identifier = pop_item!(self, identifier, Identifier, context);
+        let localparam = pop_item!(self, localparam, Localparam, context);
+        let localparam_declaration_built = LocalparamDeclarationBuilder::default()
+            .localparam(Box::new(localparam))
+            .identifier(Box::new(identifier))
+            .colon(Box::new(colon))
+            .r#type(Box::new(r#type))
+            .equ(Box::new(equ))
+            .expression(Box::new(expression))
+            .semicolon(Box::new(semicolon))
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar
+            .localparam_declaration(&localparam_declaration_built)?;
+        self.push(
+            ASTType::LocalparamDeclaration(localparam_declaration_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 142:
+    ///
+    /// AlwaysFfDeclaration: AlwaysFf LParen AlwaysFfConditions RParen LBrace AlwaysFfDeclarationList /* Vec */ RBrace;
+    ///
+    #[parol_runtime::function_name::named]
+    fn always_ff_declaration(
+        &mut self,
+        _always_ff: &ParseTreeStackEntry<'t>,
+        _l_paren: &ParseTreeStackEntry<'t>,
+        _always_ff_conditions: &ParseTreeStackEntry<'t>,
+        _r_paren: &ParseTreeStackEntry<'t>,
+        _l_brace: &ParseTreeStackEntry<'t>,
+        _always_ff_declaration_list: &ParseTreeStackEntry<'t>,
+        _r_brace: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let r_brace = pop_item!(self, r_brace, RBrace, context);
+        let always_ff_declaration_list = pop_and_reverse_item!(
+            self,
+            always_ff_declaration_list,
+            AlwaysFfDeclarationList,
+            context
+        );
+        let l_brace = pop_item!(self, l_brace, LBrace, context);
+        let r_paren = pop_item!(self, r_paren, RParen, context);
+        let always_ff_conditions =
+            pop_item!(self, always_ff_conditions, AlwaysFfConditions, context);
+        let l_paren = pop_item!(self, l_paren, LParen, context);
+        let always_ff = pop_item!(self, always_ff, AlwaysFf, context);
+        let always_ff_declaration_built = AlwaysFfDeclarationBuilder::default()
+            .always_ff(Box::new(always_ff))
+            .l_paren(Box::new(l_paren))
+            .always_ff_conditions(Box::new(always_ff_conditions))
+            .r_paren(Box::new(r_paren))
+            .l_brace(Box::new(l_brace))
+            .always_ff_declaration_list(always_ff_declaration_list)
+            .r_brace(Box::new(r_brace))
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar
+            .always_ff_declaration(&always_ff_declaration_built)?;
+        self.push(
+            ASTType::AlwaysFfDeclaration(always_ff_declaration_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 143:
+    ///
+    /// AlwaysFfDeclarationList /* Vec<T>::Push */: Statement AlwaysFfDeclarationList;
+    ///
+    #[parol_runtime::function_name::named]
+    fn always_ff_declaration_list_0(
+        &mut self,
+        _statement: &ParseTreeStackEntry<'t>,
+        _always_ff_declaration_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let mut always_ff_declaration_list = pop_item!(
+            self,
+            always_ff_declaration_list,
+            AlwaysFfDeclarationList,
+            context
+        );
+        let statement = pop_item!(self, statement, Statement, context);
+        let always_ff_declaration_list_0_built = AlwaysFfDeclarationListBuilder::default()
+            .statement(Box::new(statement))
+            .build()
+            .into_diagnostic()?;
+        // Add an element to the vector
+        always_ff_declaration_list.push(always_ff_declaration_list_0_built);
+        self.push(
+            ASTType::AlwaysFfDeclarationList(always_ff_declaration_list),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 144:
+    ///
+    /// AlwaysFfDeclarationList /* Vec<T>::New */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn always_ff_declaration_list_1(
+        &mut self,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let always_ff_declaration_list_1_built = Vec::new();
+        self.push(
+            ASTType::AlwaysFfDeclarationList(always_ff_declaration_list_1_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 145:
+    ///
+    /// AlwaysFfConditions: AlwaysFfCondition AlwaysFfConditionsList /* Vec */ AlwaysFfConditionsOpt /* Option */;
+    ///
+    #[parol_runtime::function_name::named]
+    fn always_ff_conditions(
+        &mut self,
+        _always_ff_condition: &ParseTreeStackEntry<'t>,
+        _always_ff_conditions_list: &ParseTreeStackEntry<'t>,
+        _always_ff_conditions_opt: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let always_ff_conditions_opt = pop_item!(
+            self,
+            always_ff_conditions_opt,
+            AlwaysFfConditionsOpt,
+            context
+        );
+        let always_ff_conditions_list = pop_and_reverse_item!(
+            self,
+            always_ff_conditions_list,
+            AlwaysFfConditionsList,
+            context
+        );
+        let always_ff_condition = pop_item!(self, always_ff_condition, AlwaysFfCondition, context);
+        let always_ff_conditions_built = AlwaysFfConditionsBuilder::default()
+            .always_ff_condition(Box::new(always_ff_condition))
+            .always_ff_conditions_list(always_ff_conditions_list)
+            .always_ff_conditions_opt(always_ff_conditions_opt)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar
+            .always_ff_conditions(&always_ff_conditions_built)?;
+        self.push(
+            ASTType::AlwaysFfConditions(always_ff_conditions_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 146:
+    ///
+    /// AlwaysFfConditionsList /* Vec<T>::Push */: Comma AlwaysFfCondition AlwaysFfConditionsList;
+    ///
+    #[parol_runtime::function_name::named]
+    fn always_ff_conditions_list_0(
+        &mut self,
+        _comma: &ParseTreeStackEntry<'t>,
+        _always_ff_condition: &ParseTreeStackEntry<'t>,
+        _always_ff_conditions_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let mut always_ff_conditions_list = pop_item!(
+            self,
+            always_ff_conditions_list,
+            AlwaysFfConditionsList,
+            context
+        );
+        let always_ff_condition = pop_item!(self, always_ff_condition, AlwaysFfCondition, context);
+        let comma = pop_item!(self, comma, Comma, context);
+        let always_ff_conditions_list_0_built = AlwaysFfConditionsListBuilder::default()
+            .always_ff_condition(Box::new(always_ff_condition))
+            .comma(Box::new(comma))
+            .build()
+            .into_diagnostic()?;
+        // Add an element to the vector
+        always_ff_conditions_list.push(always_ff_conditions_list_0_built);
+        self.push(
+            ASTType::AlwaysFfConditionsList(always_ff_conditions_list),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 147:
+    ///
+    /// AlwaysFfConditionsList /* Vec<T>::New */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn always_ff_conditions_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let always_ff_conditions_list_1_built = Vec::new();
+        self.push(
+            ASTType::AlwaysFfConditionsList(always_ff_conditions_list_1_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 148:
+    ///
+    /// AlwaysFfConditionsOpt /* Option<T>::Some */: Comma;
+    ///
+    #[parol_runtime::function_name::named]
+    fn always_ff_conditions_opt_0(
+        &mut self,
+        _comma: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let comma = pop_item!(self, comma, Comma, context);
+        let always_ff_conditions_opt_0_built = AlwaysFfConditionsOptBuilder::default()
+            .comma(Box::new(comma))
+            .build()
+            .into_diagnostic()?;
+        self.push(
+            ASTType::AlwaysFfConditionsOpt(Some(Box::new(always_ff_conditions_opt_0_built))),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 149:
+    ///
+    /// AlwaysFfConditionsOpt /* Option<T>::None */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn always_ff_conditions_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        self.push(ASTType::AlwaysFfConditionsOpt(None), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 150:
+    ///
+    /// AlwaysFfCondition: AlwaysFfConditionGroup Identifier;
+    ///
+    #[parol_runtime::function_name::named]
+    fn always_ff_condition(
+        &mut self,
+        _always_ff_condition_group: &ParseTreeStackEntry<'t>,
         _identifier: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let identifier = pop_item!(self, identifier, Identifier, context);
-        let type_group_1_built = TypeGroup1Builder::default()
+        let always_ff_condition_group = pop_item!(
+            self,
+            always_ff_condition_group,
+            AlwaysFfConditionGroup,
+            context
+        );
+        let always_ff_condition_built = AlwaysFfConditionBuilder::default()
+            .always_ff_condition_group(Box::new(always_ff_condition_group))
             .identifier(Box::new(identifier))
             .build()
             .into_diagnostic()?;
-        let type_group_1_built = TypeGroup::TypeGroup1(type_group_1_built);
-        self.push(ASTType::TypeGroup(type_group_1_built), context);
+        // Calling user action here
+        self.user_grammar
+            .always_ff_condition(&always_ff_condition_built)?;
+        self.push(
+            ASTType::AlwaysFfCondition(always_ff_condition_built),
+            context,
+        );
         Ok(())
     }
 
-    /// Semantic action for production 142:
+    /// Semantic action for production 151:
     ///
-    /// TypeList /* Vec<T>::Push */: Width TypeList;
+    /// AlwaysFfConditionGroup: Posedge;
     ///
     #[parol_runtime::function_name::named]
-    fn type_list_0(
+    fn always_ff_condition_group_0(
         &mut self,
-        _width: &ParseTreeStackEntry<'t>,
-        _type_list: &ParseTreeStackEntry<'t>,
+        _posedge: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let mut type_list = pop_item!(self, type_list, TypeList, context);
-        let width = pop_item!(self, width, Width, context);
-        let type_list_0_built = TypeListBuilder::default()
-            .width(Box::new(width))
+        let posedge = pop_item!(self, posedge, Posedge, context);
+        let always_ff_condition_group_0_built = AlwaysFfConditionGroup0Builder::default()
+            .posedge(Box::new(posedge))
+            .build()
+            .into_diagnostic()?;
+        let always_ff_condition_group_0_built =
+            AlwaysFfConditionGroup::AlwaysFfConditionGroup0(always_ff_condition_group_0_built);
+        self.push(
+            ASTType::AlwaysFfConditionGroup(always_ff_condition_group_0_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 152:
+    ///
+    /// AlwaysFfConditionGroup: Negedge;
+    ///
+    #[parol_runtime::function_name::named]
+    fn always_ff_condition_group_1(
+        &mut self,
+        _negedge: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let negedge = pop_item!(self, negedge, Negedge, context);
+        let always_ff_condition_group_1_built = AlwaysFfConditionGroup1Builder::default()
+            .negedge(Box::new(negedge))
+            .build()
+            .into_diagnostic()?;
+        let always_ff_condition_group_1_built =
+            AlwaysFfConditionGroup::AlwaysFfConditionGroup1(always_ff_condition_group_1_built);
+        self.push(
+            ASTType::AlwaysFfConditionGroup(always_ff_condition_group_1_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 153:
+    ///
+    /// AlwaysCombDeclaration: AlwaysComb LBrace AlwaysCombDeclarationList /* Vec */ RBrace;
+    ///
+    #[parol_runtime::function_name::named]
+    fn always_comb_declaration(
+        &mut self,
+        _always_comb: &ParseTreeStackEntry<'t>,
+        _l_brace: &ParseTreeStackEntry<'t>,
+        _always_comb_declaration_list: &ParseTreeStackEntry<'t>,
+        _r_brace: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let r_brace = pop_item!(self, r_brace, RBrace, context);
+        let always_comb_declaration_list = pop_and_reverse_item!(
+            self,
+            always_comb_declaration_list,
+            AlwaysCombDeclarationList,
+            context
+        );
+        let l_brace = pop_item!(self, l_brace, LBrace, context);
+        let always_comb = pop_item!(self, always_comb, AlwaysComb, context);
+        let always_comb_declaration_built = AlwaysCombDeclarationBuilder::default()
+            .always_comb(Box::new(always_comb))
+            .l_brace(Box::new(l_brace))
+            .always_comb_declaration_list(always_comb_declaration_list)
+            .r_brace(Box::new(r_brace))
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar
+            .always_comb_declaration(&always_comb_declaration_built)?;
+        self.push(
+            ASTType::AlwaysCombDeclaration(always_comb_declaration_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 154:
+    ///
+    /// AlwaysCombDeclarationList /* Vec<T>::Push */: Statement AlwaysCombDeclarationList;
+    ///
+    #[parol_runtime::function_name::named]
+    fn always_comb_declaration_list_0(
+        &mut self,
+        _statement: &ParseTreeStackEntry<'t>,
+        _always_comb_declaration_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let mut always_comb_declaration_list = pop_item!(
+            self,
+            always_comb_declaration_list,
+            AlwaysCombDeclarationList,
+            context
+        );
+        let statement = pop_item!(self, statement, Statement, context);
+        let always_comb_declaration_list_0_built = AlwaysCombDeclarationListBuilder::default()
+            .statement(Box::new(statement))
             .build()
             .into_diagnostic()?;
         // Add an element to the vector
-        type_list.push(type_list_0_built);
-        self.push(ASTType::TypeList(type_list), context);
+        always_comb_declaration_list.push(always_comb_declaration_list_0_built);
+        self.push(
+            ASTType::AlwaysCombDeclarationList(always_comb_declaration_list),
+            context,
+        );
         Ok(())
     }
 
-    /// Semantic action for production 143:
+    /// Semantic action for production 155:
     ///
-    /// TypeList /* Vec<T>::New */: ;
+    /// AlwaysCombDeclarationList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn type_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn always_comb_declaration_list_1(
+        &mut self,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let type_list_1_built = Vec::new();
-        self.push(ASTType::TypeList(type_list_1_built), context);
+        let always_comb_declaration_list_1_built = Vec::new();
+        self.push(
+            ASTType::AlwaysCombDeclarationList(always_comb_declaration_list_1_built),
+            context,
+        );
         Ok(())
     }
 
-    /// Semantic action for production 144:
+    /// Semantic action for production 156:
+    ///
+    /// AssignDeclaration: Assign Identifier AssignDeclarationOpt /* Option */ Equ Expression Semicolon;
+    ///
+    #[parol_runtime::function_name::named]
+    fn assign_declaration(
+        &mut self,
+        _assign: &ParseTreeStackEntry<'t>,
+        _identifier: &ParseTreeStackEntry<'t>,
+        _assign_declaration_opt: &ParseTreeStackEntry<'t>,
+        _equ: &ParseTreeStackEntry<'t>,
+        _expression: &ParseTreeStackEntry<'t>,
+        _semicolon: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let semicolon = pop_item!(self, semicolon, Semicolon, context);
+        let expression = pop_item!(self, expression, Expression, context);
+        let equ = pop_item!(self, equ, Equ, context);
+        let assign_declaration_opt =
+            pop_item!(self, assign_declaration_opt, AssignDeclarationOpt, context);
+        let identifier = pop_item!(self, identifier, Identifier, context);
+        let assign = pop_item!(self, assign, Assign, context);
+        let assign_declaration_built = AssignDeclarationBuilder::default()
+            .assign(Box::new(assign))
+            .identifier(Box::new(identifier))
+            .assign_declaration_opt(assign_declaration_opt)
+            .equ(Box::new(equ))
+            .expression(Box::new(expression))
+            .semicolon(Box::new(semicolon))
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar
+            .assign_declaration(&assign_declaration_built)?;
+        self.push(
+            ASTType::AssignDeclaration(assign_declaration_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 157:
+    ///
+    /// AssignDeclarationOpt /* Option<T>::Some */: Colon Type;
+    ///
+    #[parol_runtime::function_name::named]
+    fn assign_declaration_opt_0(
+        &mut self,
+        _colon: &ParseTreeStackEntry<'t>,
+        _type: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let r#type = pop_item!(self, r#type, Type, context);
+        let colon = pop_item!(self, colon, Colon, context);
+        let assign_declaration_opt_0_built = AssignDeclarationOptBuilder::default()
+            .colon(Box::new(colon))
+            .r#type(Box::new(r#type))
+            .build()
+            .into_diagnostic()?;
+        self.push(
+            ASTType::AssignDeclarationOpt(Some(Box::new(assign_declaration_opt_0_built))),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 158:
+    ///
+    /// AssignDeclarationOpt /* Option<T>::None */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn assign_declaration_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        self.push(ASTType::AssignDeclarationOpt(None), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 159:
+    ///
+    /// ModportDeclaration: Modport Identifier LBrace ModportList RBrace;
+    ///
+    #[parol_runtime::function_name::named]
+    fn modport_declaration(
+        &mut self,
+        _modport: &ParseTreeStackEntry<'t>,
+        _identifier: &ParseTreeStackEntry<'t>,
+        _l_brace: &ParseTreeStackEntry<'t>,
+        _modport_list: &ParseTreeStackEntry<'t>,
+        _r_brace: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let r_brace = pop_item!(self, r_brace, RBrace, context);
+        let modport_list = pop_item!(self, modport_list, ModportList, context);
+        let l_brace = pop_item!(self, l_brace, LBrace, context);
+        let identifier = pop_item!(self, identifier, Identifier, context);
+        let modport = pop_item!(self, modport, Modport, context);
+        let modport_declaration_built = ModportDeclarationBuilder::default()
+            .modport(Box::new(modport))
+            .identifier(Box::new(identifier))
+            .l_brace(Box::new(l_brace))
+            .modport_list(Box::new(modport_list))
+            .r_brace(Box::new(r_brace))
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar
+            .modport_declaration(&modport_declaration_built)?;
+        self.push(
+            ASTType::ModportDeclaration(modport_declaration_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 160:
+    ///
+    /// ModportList: ModportItem ModportListList /* Vec */ ModportListOpt /* Option */;
+    ///
+    #[parol_runtime::function_name::named]
+    fn modport_list(
+        &mut self,
+        _modport_item: &ParseTreeStackEntry<'t>,
+        _modport_list_list: &ParseTreeStackEntry<'t>,
+        _modport_list_opt: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let modport_list_opt = pop_item!(self, modport_list_opt, ModportListOpt, context);
+        let modport_list_list =
+            pop_and_reverse_item!(self, modport_list_list, ModportListList, context);
+        let modport_item = pop_item!(self, modport_item, ModportItem, context);
+        let modport_list_built = ModportListBuilder::default()
+            .modport_item(Box::new(modport_item))
+            .modport_list_list(modport_list_list)
+            .modport_list_opt(modport_list_opt)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.modport_list(&modport_list_built)?;
+        self.push(ASTType::ModportList(modport_list_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 161:
+    ///
+    /// ModportListList /* Vec<T>::Push */: Comma ModportItem ModportListList;
+    ///
+    #[parol_runtime::function_name::named]
+    fn modport_list_list_0(
+        &mut self,
+        _comma: &ParseTreeStackEntry<'t>,
+        _modport_item: &ParseTreeStackEntry<'t>,
+        _modport_list_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let mut modport_list_list = pop_item!(self, modport_list_list, ModportListList, context);
+        let modport_item = pop_item!(self, modport_item, ModportItem, context);
+        let comma = pop_item!(self, comma, Comma, context);
+        let modport_list_list_0_built = ModportListListBuilder::default()
+            .modport_item(Box::new(modport_item))
+            .comma(Box::new(comma))
+            .build()
+            .into_diagnostic()?;
+        // Add an element to the vector
+        modport_list_list.push(modport_list_list_0_built);
+        self.push(ASTType::ModportListList(modport_list_list), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 162:
+    ///
+    /// ModportListList /* Vec<T>::New */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn modport_list_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let modport_list_list_1_built = Vec::new();
+        self.push(ASTType::ModportListList(modport_list_list_1_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 163:
+    ///
+    /// ModportListOpt /* Option<T>::Some */: Comma;
+    ///
+    #[parol_runtime::function_name::named]
+    fn modport_list_opt_0(
+        &mut self,
+        _comma: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let comma = pop_item!(self, comma, Comma, context);
+        let modport_list_opt_0_built = ModportListOptBuilder::default()
+            .comma(Box::new(comma))
+            .build()
+            .into_diagnostic()?;
+        self.push(
+            ASTType::ModportListOpt(Some(Box::new(modport_list_opt_0_built))),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 164:
+    ///
+    /// ModportListOpt /* Option<T>::None */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn modport_list_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        self.push(ASTType::ModportListOpt(None), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 165:
+    ///
+    /// ModportItem: Identifier Colon Direction;
+    ///
+    #[parol_runtime::function_name::named]
+    fn modport_item(
+        &mut self,
+        _identifier: &ParseTreeStackEntry<'t>,
+        _colon: &ParseTreeStackEntry<'t>,
+        _direction: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let direction = pop_item!(self, direction, Direction, context);
+        let colon = pop_item!(self, colon, Colon, context);
+        let identifier = pop_item!(self, identifier, Identifier, context);
+        let modport_item_built = ModportItemBuilder::default()
+            .identifier(Box::new(identifier))
+            .colon(Box::new(colon))
+            .direction(Box::new(direction))
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.modport_item(&modport_item_built)?;
+        self.push(ASTType::ModportItem(modport_item_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 166:
     ///
     /// WithParameter: Hash LParen WithParameterOpt /* Option */ RParen;
     ///
@@ -6576,7 +7260,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 145:
+    /// Semantic action for production 167:
     ///
     /// WithParameterOpt /* Option<T>::Some */: WithParameterList;
     ///
@@ -6600,7 +7284,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 146:
+    /// Semantic action for production 168:
     ///
     /// WithParameterOpt /* Option<T>::None */: ;
     ///
@@ -6612,7 +7296,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 147:
+    /// Semantic action for production 169:
     ///
     /// WithParameterList: WithParameterItem WithParameterListList /* Vec */ WithParameterListOpt /* Option */;
     ///
@@ -6651,7 +7335,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 148:
+    /// Semantic action for production 170:
     ///
     /// WithParameterListList /* Vec<T>::Push */: Comma WithParameterItem WithParameterListList;
     ///
@@ -6687,7 +7371,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 149:
+    /// Semantic action for production 171:
     ///
     /// WithParameterListList /* Vec<T>::New */: ;
     ///
@@ -6703,7 +7387,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 150:
+    /// Semantic action for production 172:
     ///
     /// WithParameterListOpt /* Option<T>::Some */: Comma;
     ///
@@ -6727,7 +7411,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 151:
+    /// Semantic action for production 173:
     ///
     /// WithParameterListOpt /* Option<T>::None */: ;
     ///
@@ -6739,7 +7423,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 152:
+    /// Semantic action for production 174:
     ///
     /// WithParameterItem: WithParameterItemGroup Identifier Colon Type Equ Expression;
     ///
@@ -6786,7 +7470,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 153:
+    /// Semantic action for production 175:
     ///
     /// WithParameterItemGroup: Parameter;
     ///
@@ -6812,7 +7496,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 154:
+    /// Semantic action for production 176:
     ///
     /// WithParameterItemGroup: Localparam;
     ///
@@ -6838,7 +7522,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 155:
+    /// Semantic action for production 177:
     ///
     /// ModuleDeclaration: Module Identifier ModuleDeclarationOpt /* Option */ ModuleDeclarationOpt0 /* Option */ LBrace ModuleDeclarationList /* Vec */ RBrace;
     ///
@@ -6894,7 +7578,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 156:
+    /// Semantic action for production 178:
     ///
     /// ModuleDeclarationList /* Vec<T>::Push */: ModuleItem ModuleDeclarationList;
     ///
@@ -6927,7 +7611,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 157:
+    /// Semantic action for production 179:
     ///
     /// ModuleDeclarationList /* Vec<T>::New */: ;
     ///
@@ -6943,7 +7627,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 158:
+    /// Semantic action for production 180:
     ///
     /// ModuleDeclarationOpt0 /* Option<T>::Some */: ModulePort;
     ///
@@ -6967,7 +7651,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 159:
+    /// Semantic action for production 181:
     ///
     /// ModuleDeclarationOpt0 /* Option<T>::None */: ;
     ///
@@ -6979,7 +7663,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 160:
+    /// Semantic action for production 182:
     ///
     /// ModuleDeclarationOpt /* Option<T>::Some */: WithParameter;
     ///
@@ -7003,7 +7687,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 161:
+    /// Semantic action for production 183:
     ///
     /// ModuleDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -7015,7 +7699,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 162:
+    /// Semantic action for production 184:
     ///
     /// ModulePort: LParen ModulePortOpt /* Option */ RParen;
     ///
@@ -7044,7 +7728,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 163:
+    /// Semantic action for production 185:
     ///
     /// ModulePortOpt /* Option<T>::Some */: ModulePortList;
     ///
@@ -7068,7 +7752,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 164:
+    /// Semantic action for production 186:
     ///
     /// ModulePortOpt /* Option<T>::None */: ;
     ///
@@ -7080,7 +7764,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 165:
+    /// Semantic action for production 187:
     ///
     /// ModulePortList: ModulePortItem ModulePortListList /* Vec */ ModulePortListOpt /* Option */;
     ///
@@ -7112,7 +7796,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 166:
+    /// Semantic action for production 188:
     ///
     /// ModulePortListList /* Vec<T>::Push */: Comma ModulePortItem ModulePortListList;
     ///
@@ -7141,7 +7825,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 167:
+    /// Semantic action for production 189:
     ///
     /// ModulePortListList /* Vec<T>::New */: ;
     ///
@@ -7157,7 +7841,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 168:
+    /// Semantic action for production 190:
     ///
     /// ModulePortListOpt /* Option<T>::Some */: Comma;
     ///
@@ -7181,7 +7865,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 169:
+    /// Semantic action for production 191:
     ///
     /// ModulePortListOpt /* Option<T>::None */: ;
     ///
@@ -7193,7 +7877,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 170:
+    /// Semantic action for production 192:
     ///
     /// ModulePortItem: Identifier Colon Direction Type;
     ///
@@ -7226,7 +7910,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 171:
+    /// Semantic action for production 193:
     ///
     /// Direction: Input;
     ///
@@ -7250,7 +7934,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 172:
+    /// Semantic action for production 194:
     ///
     /// Direction: Output;
     ///
@@ -7274,7 +7958,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 173:
+    /// Semantic action for production 195:
     ///
     /// Direction: Inout;
     ///
@@ -7298,7 +7982,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 174:
+    /// Semantic action for production 196:
     ///
     /// ModuleItem: VariableDeclaration;
     ///
@@ -7323,7 +8007,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 175:
+    /// Semantic action for production 197:
     ///
     /// ModuleItem: ParameterDeclaration;
     ///
@@ -7348,7 +8032,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 176:
+    /// Semantic action for production 198:
     ///
     /// ModuleItem: LocalparamDeclaration;
     ///
@@ -7373,7 +8057,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 177:
+    /// Semantic action for production 199:
     ///
     /// ModuleItem: AlwaysFfDeclaration;
     ///
@@ -7398,7 +8082,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 178:
+    /// Semantic action for production 200:
     ///
     /// ModuleItem: AlwaysCombDeclaration;
     ///
@@ -7427,7 +8111,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 179:
+    /// Semantic action for production 201:
     ///
     /// ModuleItem: AssignDeclaration;
     ///
@@ -7451,7 +8135,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 180:
+    /// Semantic action for production 202:
     ///
     /// InterfaceDeclaration: Interface Identifier InterfaceDeclarationOpt /* Option */ LBrace InterfaceDeclarationList /* Vec */ RBrace;
     ///
@@ -7503,7 +8187,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 181:
+    /// Semantic action for production 203:
     ///
     /// InterfaceDeclarationList /* Vec<T>::Push */: InterfaceItem InterfaceDeclarationList;
     ///
@@ -7536,7 +8220,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 182:
+    /// Semantic action for production 204:
     ///
     /// InterfaceDeclarationList /* Vec<T>::New */: ;
     ///
@@ -7555,7 +8239,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 183:
+    /// Semantic action for production 205:
     ///
     /// InterfaceDeclarationOpt /* Option<T>::Some */: WithParameter;
     ///
@@ -7579,7 +8263,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 184:
+    /// Semantic action for production 206:
     ///
     /// InterfaceDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -7591,7 +8275,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 185:
+    /// Semantic action for production 207:
     ///
     /// InterfaceItem: VariableDeclaration;
     ///
@@ -7616,7 +8300,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 186:
+    /// Semantic action for production 208:
     ///
     /// InterfaceItem: ParameterDeclaration;
     ///
@@ -7641,7 +8325,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 187:
+    /// Semantic action for production 209:
     ///
     /// InterfaceItem: LocalparamDeclaration;
     ///
@@ -7666,7 +8350,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 188:
+    /// Semantic action for production 210:
     ///
     /// InterfaceItem: ModportDeclaration;
     ///
@@ -7690,800 +8374,116 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 189:
-    ///
-    /// VariableDeclaration: Identifier Colon Type Semicolon;
-    ///
-    #[parol_runtime::function_name::named]
-    fn variable_declaration(
-        &mut self,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _colon: &ParseTreeStackEntry<'t>,
-        _type: &ParseTreeStackEntry<'t>,
-        _semicolon: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let semicolon = pop_item!(self, semicolon, Semicolon, context);
-        let r#type = pop_item!(self, r#type, Type, context);
-        let colon = pop_item!(self, colon, Colon, context);
-        let identifier = pop_item!(self, identifier, Identifier, context);
-        let variable_declaration_built = VariableDeclarationBuilder::default()
-            .identifier(Box::new(identifier))
-            .colon(Box::new(colon))
-            .r#type(Box::new(r#type))
-            .semicolon(Box::new(semicolon))
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar
-            .variable_declaration(&variable_declaration_built)?;
-        self.push(
-            ASTType::VariableDeclaration(variable_declaration_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 190:
-    ///
-    /// ParameterDeclaration: Parameter Identifier Colon Type Equ Expression Semicolon;
-    ///
-    #[parol_runtime::function_name::named]
-    fn parameter_declaration(
-        &mut self,
-        _parameter: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _colon: &ParseTreeStackEntry<'t>,
-        _type: &ParseTreeStackEntry<'t>,
-        _equ: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _semicolon: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let semicolon = pop_item!(self, semicolon, Semicolon, context);
-        let expression = pop_item!(self, expression, Expression, context);
-        let equ = pop_item!(self, equ, Equ, context);
-        let r#type = pop_item!(self, r#type, Type, context);
-        let colon = pop_item!(self, colon, Colon, context);
-        let identifier = pop_item!(self, identifier, Identifier, context);
-        let parameter = pop_item!(self, parameter, Parameter, context);
-        let parameter_declaration_built = ParameterDeclarationBuilder::default()
-            .parameter(Box::new(parameter))
-            .identifier(Box::new(identifier))
-            .colon(Box::new(colon))
-            .r#type(Box::new(r#type))
-            .equ(Box::new(equ))
-            .expression(Box::new(expression))
-            .semicolon(Box::new(semicolon))
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar
-            .parameter_declaration(&parameter_declaration_built)?;
-        self.push(
-            ASTType::ParameterDeclaration(parameter_declaration_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 191:
-    ///
-    /// LocalparamDeclaration: Localparam Identifier Colon Type Equ Expression Semicolon;
-    ///
-    #[parol_runtime::function_name::named]
-    fn localparam_declaration(
-        &mut self,
-        _localparam: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _colon: &ParseTreeStackEntry<'t>,
-        _type: &ParseTreeStackEntry<'t>,
-        _equ: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _semicolon: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let semicolon = pop_item!(self, semicolon, Semicolon, context);
-        let expression = pop_item!(self, expression, Expression, context);
-        let equ = pop_item!(self, equ, Equ, context);
-        let r#type = pop_item!(self, r#type, Type, context);
-        let colon = pop_item!(self, colon, Colon, context);
-        let identifier = pop_item!(self, identifier, Identifier, context);
-        let localparam = pop_item!(self, localparam, Localparam, context);
-        let localparam_declaration_built = LocalparamDeclarationBuilder::default()
-            .localparam(Box::new(localparam))
-            .identifier(Box::new(identifier))
-            .colon(Box::new(colon))
-            .r#type(Box::new(r#type))
-            .equ(Box::new(equ))
-            .expression(Box::new(expression))
-            .semicolon(Box::new(semicolon))
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar
-            .localparam_declaration(&localparam_declaration_built)?;
-        self.push(
-            ASTType::LocalparamDeclaration(localparam_declaration_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 192:
-    ///
-    /// AlwaysFfDeclaration: AlwaysFf LParen AlwaysFfConditions RParen LBrace AlwaysFfDeclarationList /* Vec */ RBrace;
-    ///
-    #[parol_runtime::function_name::named]
-    fn always_ff_declaration(
-        &mut self,
-        _always_ff: &ParseTreeStackEntry<'t>,
-        _l_paren: &ParseTreeStackEntry<'t>,
-        _always_ff_conditions: &ParseTreeStackEntry<'t>,
-        _r_paren: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _always_ff_declaration_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let r_brace = pop_item!(self, r_brace, RBrace, context);
-        let always_ff_declaration_list = pop_and_reverse_item!(
-            self,
-            always_ff_declaration_list,
-            AlwaysFfDeclarationList,
-            context
-        );
-        let l_brace = pop_item!(self, l_brace, LBrace, context);
-        let r_paren = pop_item!(self, r_paren, RParen, context);
-        let always_ff_conditions =
-            pop_item!(self, always_ff_conditions, AlwaysFfConditions, context);
-        let l_paren = pop_item!(self, l_paren, LParen, context);
-        let always_ff = pop_item!(self, always_ff, AlwaysFf, context);
-        let always_ff_declaration_built = AlwaysFfDeclarationBuilder::default()
-            .always_ff(Box::new(always_ff))
-            .l_paren(Box::new(l_paren))
-            .always_ff_conditions(Box::new(always_ff_conditions))
-            .r_paren(Box::new(r_paren))
-            .l_brace(Box::new(l_brace))
-            .always_ff_declaration_list(always_ff_declaration_list)
-            .r_brace(Box::new(r_brace))
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar
-            .always_ff_declaration(&always_ff_declaration_built)?;
-        self.push(
-            ASTType::AlwaysFfDeclaration(always_ff_declaration_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 193:
-    ///
-    /// AlwaysFfDeclarationList /* Vec<T>::Push */: Statement AlwaysFfDeclarationList;
-    ///
-    #[parol_runtime::function_name::named]
-    fn always_ff_declaration_list_0(
-        &mut self,
-        _statement: &ParseTreeStackEntry<'t>,
-        _always_ff_declaration_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let mut always_ff_declaration_list = pop_item!(
-            self,
-            always_ff_declaration_list,
-            AlwaysFfDeclarationList,
-            context
-        );
-        let statement = pop_item!(self, statement, Statement, context);
-        let always_ff_declaration_list_0_built = AlwaysFfDeclarationListBuilder::default()
-            .statement(Box::new(statement))
-            .build()
-            .into_diagnostic()?;
-        // Add an element to the vector
-        always_ff_declaration_list.push(always_ff_declaration_list_0_built);
-        self.push(
-            ASTType::AlwaysFfDeclarationList(always_ff_declaration_list),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 194:
-    ///
-    /// AlwaysFfDeclarationList /* Vec<T>::New */: ;
-    ///
-    #[parol_runtime::function_name::named]
-    fn always_ff_declaration_list_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let always_ff_declaration_list_1_built = Vec::new();
-        self.push(
-            ASTType::AlwaysFfDeclarationList(always_ff_declaration_list_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 195:
-    ///
-    /// AlwaysFfConditions: AlwaysFfCondition AlwaysFfConditionsList /* Vec */ AlwaysFfConditionsOpt /* Option */;
-    ///
-    #[parol_runtime::function_name::named]
-    fn always_ff_conditions(
-        &mut self,
-        _always_ff_condition: &ParseTreeStackEntry<'t>,
-        _always_ff_conditions_list: &ParseTreeStackEntry<'t>,
-        _always_ff_conditions_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let always_ff_conditions_opt = pop_item!(
-            self,
-            always_ff_conditions_opt,
-            AlwaysFfConditionsOpt,
-            context
-        );
-        let always_ff_conditions_list = pop_and_reverse_item!(
-            self,
-            always_ff_conditions_list,
-            AlwaysFfConditionsList,
-            context
-        );
-        let always_ff_condition = pop_item!(self, always_ff_condition, AlwaysFfCondition, context);
-        let always_ff_conditions_built = AlwaysFfConditionsBuilder::default()
-            .always_ff_condition(Box::new(always_ff_condition))
-            .always_ff_conditions_list(always_ff_conditions_list)
-            .always_ff_conditions_opt(always_ff_conditions_opt)
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar
-            .always_ff_conditions(&always_ff_conditions_built)?;
-        self.push(
-            ASTType::AlwaysFfConditions(always_ff_conditions_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 196:
-    ///
-    /// AlwaysFfConditionsList /* Vec<T>::Push */: Comma AlwaysFfCondition AlwaysFfConditionsList;
-    ///
-    #[parol_runtime::function_name::named]
-    fn always_ff_conditions_list_0(
-        &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _always_ff_condition: &ParseTreeStackEntry<'t>,
-        _always_ff_conditions_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let mut always_ff_conditions_list = pop_item!(
-            self,
-            always_ff_conditions_list,
-            AlwaysFfConditionsList,
-            context
-        );
-        let always_ff_condition = pop_item!(self, always_ff_condition, AlwaysFfCondition, context);
-        let comma = pop_item!(self, comma, Comma, context);
-        let always_ff_conditions_list_0_built = AlwaysFfConditionsListBuilder::default()
-            .always_ff_condition(Box::new(always_ff_condition))
-            .comma(Box::new(comma))
-            .build()
-            .into_diagnostic()?;
-        // Add an element to the vector
-        always_ff_conditions_list.push(always_ff_conditions_list_0_built);
-        self.push(
-            ASTType::AlwaysFfConditionsList(always_ff_conditions_list),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 197:
-    ///
-    /// AlwaysFfConditionsList /* Vec<T>::New */: ;
-    ///
-    #[parol_runtime::function_name::named]
-    fn always_ff_conditions_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let always_ff_conditions_list_1_built = Vec::new();
-        self.push(
-            ASTType::AlwaysFfConditionsList(always_ff_conditions_list_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 198:
-    ///
-    /// AlwaysFfConditionsOpt /* Option<T>::Some */: Comma;
-    ///
-    #[parol_runtime::function_name::named]
-    fn always_ff_conditions_opt_0(
-        &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let comma = pop_item!(self, comma, Comma, context);
-        let always_ff_conditions_opt_0_built = AlwaysFfConditionsOptBuilder::default()
-            .comma(Box::new(comma))
-            .build()
-            .into_diagnostic()?;
-        self.push(
-            ASTType::AlwaysFfConditionsOpt(Some(Box::new(always_ff_conditions_opt_0_built))),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 199:
-    ///
-    /// AlwaysFfConditionsOpt /* Option<T>::None */: ;
-    ///
-    #[parol_runtime::function_name::named]
-    fn always_ff_conditions_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::AlwaysFfConditionsOpt(None), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 200:
-    ///
-    /// AlwaysFfCondition: AlwaysFfConditionGroup Identifier;
-    ///
-    #[parol_runtime::function_name::named]
-    fn always_ff_condition(
-        &mut self,
-        _always_ff_condition_group: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let identifier = pop_item!(self, identifier, Identifier, context);
-        let always_ff_condition_group = pop_item!(
-            self,
-            always_ff_condition_group,
-            AlwaysFfConditionGroup,
-            context
-        );
-        let always_ff_condition_built = AlwaysFfConditionBuilder::default()
-            .always_ff_condition_group(Box::new(always_ff_condition_group))
-            .identifier(Box::new(identifier))
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar
-            .always_ff_condition(&always_ff_condition_built)?;
-        self.push(
-            ASTType::AlwaysFfCondition(always_ff_condition_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 201:
-    ///
-    /// AlwaysFfConditionGroup: Posedge;
-    ///
-    #[parol_runtime::function_name::named]
-    fn always_ff_condition_group_0(
-        &mut self,
-        _posedge: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let posedge = pop_item!(self, posedge, Posedge, context);
-        let always_ff_condition_group_0_built = AlwaysFfConditionGroup0Builder::default()
-            .posedge(Box::new(posedge))
-            .build()
-            .into_diagnostic()?;
-        let always_ff_condition_group_0_built =
-            AlwaysFfConditionGroup::AlwaysFfConditionGroup0(always_ff_condition_group_0_built);
-        self.push(
-            ASTType::AlwaysFfConditionGroup(always_ff_condition_group_0_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 202:
-    ///
-    /// AlwaysFfConditionGroup: Negedge;
-    ///
-    #[parol_runtime::function_name::named]
-    fn always_ff_condition_group_1(
-        &mut self,
-        _negedge: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let negedge = pop_item!(self, negedge, Negedge, context);
-        let always_ff_condition_group_1_built = AlwaysFfConditionGroup1Builder::default()
-            .negedge(Box::new(negedge))
-            .build()
-            .into_diagnostic()?;
-        let always_ff_condition_group_1_built =
-            AlwaysFfConditionGroup::AlwaysFfConditionGroup1(always_ff_condition_group_1_built);
-        self.push(
-            ASTType::AlwaysFfConditionGroup(always_ff_condition_group_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 203:
-    ///
-    /// AlwaysCombDeclaration: AlwaysComb LBrace AlwaysCombDeclarationList /* Vec */ RBrace;
-    ///
-    #[parol_runtime::function_name::named]
-    fn always_comb_declaration(
-        &mut self,
-        _always_comb: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _always_comb_declaration_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let r_brace = pop_item!(self, r_brace, RBrace, context);
-        let always_comb_declaration_list = pop_and_reverse_item!(
-            self,
-            always_comb_declaration_list,
-            AlwaysCombDeclarationList,
-            context
-        );
-        let l_brace = pop_item!(self, l_brace, LBrace, context);
-        let always_comb = pop_item!(self, always_comb, AlwaysComb, context);
-        let always_comb_declaration_built = AlwaysCombDeclarationBuilder::default()
-            .always_comb(Box::new(always_comb))
-            .l_brace(Box::new(l_brace))
-            .always_comb_declaration_list(always_comb_declaration_list)
-            .r_brace(Box::new(r_brace))
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar
-            .always_comb_declaration(&always_comb_declaration_built)?;
-        self.push(
-            ASTType::AlwaysCombDeclaration(always_comb_declaration_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 204:
-    ///
-    /// AlwaysCombDeclarationList /* Vec<T>::Push */: Statement AlwaysCombDeclarationList;
-    ///
-    #[parol_runtime::function_name::named]
-    fn always_comb_declaration_list_0(
-        &mut self,
-        _statement: &ParseTreeStackEntry<'t>,
-        _always_comb_declaration_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let mut always_comb_declaration_list = pop_item!(
-            self,
-            always_comb_declaration_list,
-            AlwaysCombDeclarationList,
-            context
-        );
-        let statement = pop_item!(self, statement, Statement, context);
-        let always_comb_declaration_list_0_built = AlwaysCombDeclarationListBuilder::default()
-            .statement(Box::new(statement))
-            .build()
-            .into_diagnostic()?;
-        // Add an element to the vector
-        always_comb_declaration_list.push(always_comb_declaration_list_0_built);
-        self.push(
-            ASTType::AlwaysCombDeclarationList(always_comb_declaration_list),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 205:
-    ///
-    /// AlwaysCombDeclarationList /* Vec<T>::New */: ;
-    ///
-    #[parol_runtime::function_name::named]
-    fn always_comb_declaration_list_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let always_comb_declaration_list_1_built = Vec::new();
-        self.push(
-            ASTType::AlwaysCombDeclarationList(always_comb_declaration_list_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 206:
-    ///
-    /// AssignDeclaration: Assign Identifier AssignDeclarationOpt /* Option */ Equ Expression Semicolon;
-    ///
-    #[parol_runtime::function_name::named]
-    fn assign_declaration(
-        &mut self,
-        _assign: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _assign_declaration_opt: &ParseTreeStackEntry<'t>,
-        _equ: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _semicolon: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let semicolon = pop_item!(self, semicolon, Semicolon, context);
-        let expression = pop_item!(self, expression, Expression, context);
-        let equ = pop_item!(self, equ, Equ, context);
-        let assign_declaration_opt =
-            pop_item!(self, assign_declaration_opt, AssignDeclarationOpt, context);
-        let identifier = pop_item!(self, identifier, Identifier, context);
-        let assign = pop_item!(self, assign, Assign, context);
-        let assign_declaration_built = AssignDeclarationBuilder::default()
-            .assign(Box::new(assign))
-            .identifier(Box::new(identifier))
-            .assign_declaration_opt(assign_declaration_opt)
-            .equ(Box::new(equ))
-            .expression(Box::new(expression))
-            .semicolon(Box::new(semicolon))
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar
-            .assign_declaration(&assign_declaration_built)?;
-        self.push(
-            ASTType::AssignDeclaration(assign_declaration_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 207:
-    ///
-    /// AssignDeclarationOpt /* Option<T>::Some */: Colon Type;
-    ///
-    #[parol_runtime::function_name::named]
-    fn assign_declaration_opt_0(
-        &mut self,
-        _colon: &ParseTreeStackEntry<'t>,
-        _type: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let r#type = pop_item!(self, r#type, Type, context);
-        let colon = pop_item!(self, colon, Colon, context);
-        let assign_declaration_opt_0_built = AssignDeclarationOptBuilder::default()
-            .colon(Box::new(colon))
-            .r#type(Box::new(r#type))
-            .build()
-            .into_diagnostic()?;
-        self.push(
-            ASTType::AssignDeclarationOpt(Some(Box::new(assign_declaration_opt_0_built))),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 208:
-    ///
-    /// AssignDeclarationOpt /* Option<T>::None */: ;
-    ///
-    #[parol_runtime::function_name::named]
-    fn assign_declaration_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::AssignDeclarationOpt(None), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 209:
-    ///
-    /// ModportDeclaration: Modport Identifier LBrace ModportList RBrace;
-    ///
-    #[parol_runtime::function_name::named]
-    fn modport_declaration(
-        &mut self,
-        _modport: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _modport_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let r_brace = pop_item!(self, r_brace, RBrace, context);
-        let modport_list = pop_item!(self, modport_list, ModportList, context);
-        let l_brace = pop_item!(self, l_brace, LBrace, context);
-        let identifier = pop_item!(self, identifier, Identifier, context);
-        let modport = pop_item!(self, modport, Modport, context);
-        let modport_declaration_built = ModportDeclarationBuilder::default()
-            .modport(Box::new(modport))
-            .identifier(Box::new(identifier))
-            .l_brace(Box::new(l_brace))
-            .modport_list(Box::new(modport_list))
-            .r_brace(Box::new(r_brace))
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar
-            .modport_declaration(&modport_declaration_built)?;
-        self.push(
-            ASTType::ModportDeclaration(modport_declaration_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 210:
-    ///
-    /// ModportList: ModportItem ModportListList /* Vec */ ModportListOpt /* Option */;
-    ///
-    #[parol_runtime::function_name::named]
-    fn modport_list(
-        &mut self,
-        _modport_item: &ParseTreeStackEntry<'t>,
-        _modport_list_list: &ParseTreeStackEntry<'t>,
-        _modport_list_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let modport_list_opt = pop_item!(self, modport_list_opt, ModportListOpt, context);
-        let modport_list_list =
-            pop_and_reverse_item!(self, modport_list_list, ModportListList, context);
-        let modport_item = pop_item!(self, modport_item, ModportItem, context);
-        let modport_list_built = ModportListBuilder::default()
-            .modport_item(Box::new(modport_item))
-            .modport_list_list(modport_list_list)
-            .modport_list_opt(modport_list_opt)
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar.modport_list(&modport_list_built)?;
-        self.push(ASTType::ModportList(modport_list_built), context);
-        Ok(())
-    }
-
     /// Semantic action for production 211:
     ///
-    /// ModportListList /* Vec<T>::Push */: Comma ModportItem ModportListList;
+    /// Description: ModuleDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn modport_list_list_0(
+    fn description_0(
         &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _modport_item: &ParseTreeStackEntry<'t>,
-        _modport_list_list: &ParseTreeStackEntry<'t>,
+        _module_declaration: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let mut modport_list_list = pop_item!(self, modport_list_list, ModportListList, context);
-        let modport_item = pop_item!(self, modport_item, ModportItem, context);
-        let comma = pop_item!(self, comma, Comma, context);
-        let modport_list_list_0_built = ModportListListBuilder::default()
-            .modport_item(Box::new(modport_item))
-            .comma(Box::new(comma))
+        let module_declaration = pop_item!(self, module_declaration, ModuleDeclaration, context);
+        let description_0_built = Description0Builder::default()
+            .module_declaration(Box::new(module_declaration))
             .build()
             .into_diagnostic()?;
-        // Add an element to the vector
-        modport_list_list.push(modport_list_list_0_built);
-        self.push(ASTType::ModportListList(modport_list_list), context);
+        let description_0_built = Description::Description0(description_0_built);
+        // Calling user action here
+        self.user_grammar.description(&description_0_built)?;
+        self.push(ASTType::Description(description_0_built), context);
         Ok(())
     }
 
     /// Semantic action for production 212:
     ///
-    /// ModportListList /* Vec<T>::New */: ;
+    /// Description: InterfaceDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn modport_list_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn description_1(
+        &mut self,
+        _interface_declaration: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let modport_list_list_1_built = Vec::new();
-        self.push(ASTType::ModportListList(modport_list_list_1_built), context);
+        let interface_declaration =
+            pop_item!(self, interface_declaration, InterfaceDeclaration, context);
+        let description_1_built = Description1Builder::default()
+            .interface_declaration(Box::new(interface_declaration))
+            .build()
+            .into_diagnostic()?;
+        let description_1_built = Description::Description1(description_1_built);
+        // Calling user action here
+        self.user_grammar.description(&description_1_built)?;
+        self.push(ASTType::Description(description_1_built), context);
         Ok(())
     }
 
     /// Semantic action for production 213:
     ///
-    /// ModportListOpt /* Option<T>::Some */: Comma;
+    /// Veryl: Start VerylList /* Vec */;
     ///
     #[parol_runtime::function_name::named]
-    fn modport_list_opt_0(
+    fn veryl(
         &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
+        _start: &ParseTreeStackEntry<'t>,
+        _veryl_list: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let comma = pop_item!(self, comma, Comma, context);
-        let modport_list_opt_0_built = ModportListOptBuilder::default()
-            .comma(Box::new(comma))
+        let veryl_list = pop_and_reverse_item!(self, veryl_list, VerylList, context);
+        let start = pop_item!(self, start, Start, context);
+        let veryl_built = VerylBuilder::default()
+            .start(Box::new(start))
+            .veryl_list(veryl_list)
             .build()
             .into_diagnostic()?;
-        self.push(
-            ASTType::ModportListOpt(Some(Box::new(modport_list_opt_0_built))),
-            context,
-        );
+        // Calling user action here
+        self.user_grammar.veryl(&veryl_built)?;
+        self.push(ASTType::Veryl(veryl_built), context);
         Ok(())
     }
 
     /// Semantic action for production 214:
     ///
-    /// ModportListOpt /* Option<T>::None */: ;
+    /// VerylList /* Vec<T>::Push */: Description VerylList;
     ///
     #[parol_runtime::function_name::named]
-    fn modport_list_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn veryl_list_0(
+        &mut self,
+        _description: &ParseTreeStackEntry<'t>,
+        _veryl_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::ModportListOpt(None), context);
+        let mut veryl_list = pop_item!(self, veryl_list, VerylList, context);
+        let description = pop_item!(self, description, Description, context);
+        let veryl_list_0_built = VerylListBuilder::default()
+            .description(Box::new(description))
+            .build()
+            .into_diagnostic()?;
+        // Add an element to the vector
+        veryl_list.push(veryl_list_0_built);
+        self.push(ASTType::VerylList(veryl_list), context);
         Ok(())
     }
 
     /// Semantic action for production 215:
     ///
-    /// ModportItem: Identifier Colon Direction;
+    /// VerylList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn modport_item(
-        &mut self,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _colon: &ParseTreeStackEntry<'t>,
-        _direction: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn veryl_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let direction = pop_item!(self, direction, Direction, context);
-        let colon = pop_item!(self, colon, Colon, context);
-        let identifier = pop_item!(self, identifier, Identifier, context);
-        let modport_item_built = ModportItemBuilder::default()
-            .identifier(Box::new(identifier))
-            .colon(Box::new(colon))
-            .direction(Box::new(direction))
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar.modport_item(&modport_item_built)?;
-        self.push(ASTType::ModportItem(modport_item_built), context);
+        let veryl_list_1_built = Vec::new();
+        self.push(ASTType::VerylList(veryl_list_1_built), context);
         Ok(())
     }
 }
@@ -8591,125 +8591,61 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             89 => self.u64(&children[0], parse_tree),
             90 => self.identifier_token(&children[0], &children[1], parse_tree),
             91 => self.identifier(&children[0], parse_tree),
-            92 => self.veryl(&children[0], &children[1], parse_tree),
-            93 => self.veryl_list_0(&children[0], &children[1], parse_tree),
-            94 => self.veryl_list_1(parse_tree),
-            95 => self.description_0(&children[0], parse_tree),
-            96 => self.description_1(&children[0], parse_tree),
-            97 => self.number_0(&children[0], parse_tree),
-            98 => self.number_1(&children[0], parse_tree),
-            99 => self.integral_number_0(&children[0], parse_tree),
-            100 => self.integral_number_1(&children[0], parse_tree),
-            101 => self.integral_number_2(&children[0], parse_tree),
-            102 => self.real_number_0(&children[0], parse_tree),
-            103 => self.real_number_1(&children[0], parse_tree),
-            104 => self.expression(&children[0], &children[1], parse_tree),
-            105 => self.expression_list_0(&children[0], &children[1], &children[2], parse_tree),
-            106 => self.expression_list_group_0(&children[0], parse_tree),
-            107 => self.expression_list_group_1(&children[0], parse_tree),
-            108 => self.expression_list_1(parse_tree),
-            109 => self.expression1(&children[0], &children[1], parse_tree),
-            110 => self.expression1_opt_0(&children[0], parse_tree),
-            111 => self.expression1_opt_group_0(&children[0], parse_tree),
-            112 => self.expression1_opt_group_1(&children[0], parse_tree),
-            113 => self.expression1_opt_1(parse_tree),
-            114 => self.factor_0(&children[0], parse_tree),
-            115 => self.factor_1(&children[0], &children[1], parse_tree),
-            116 => self.factor_list_0(&children[0], &children[1], parse_tree),
-            117 => self.factor_list_1(parse_tree),
-            118 => self.factor_2(&children[0], &children[1], &children[2], parse_tree),
-            119 => self.statement_0(&children[0], parse_tree),
-            120 => self.statement_1(&children[0], parse_tree),
-            121 => self.assignment_statement(
+            92 => self.number_0(&children[0], parse_tree),
+            93 => self.number_1(&children[0], parse_tree),
+            94 => self.integral_number_0(&children[0], parse_tree),
+            95 => self.integral_number_1(&children[0], parse_tree),
+            96 => self.integral_number_2(&children[0], parse_tree),
+            97 => self.real_number_0(&children[0], parse_tree),
+            98 => self.real_number_1(&children[0], parse_tree),
+            99 => self.expression(&children[0], &children[1], parse_tree),
+            100 => self.expression_list_0(&children[0], &children[1], &children[2], parse_tree),
+            101 => self.expression_list_group_0(&children[0], parse_tree),
+            102 => self.expression_list_group_1(&children[0], parse_tree),
+            103 => self.expression_list_1(parse_tree),
+            104 => self.expression1(&children[0], &children[1], parse_tree),
+            105 => self.expression1_opt_0(&children[0], parse_tree),
+            106 => self.expression1_opt_group_0(&children[0], parse_tree),
+            107 => self.expression1_opt_group_1(&children[0], parse_tree),
+            108 => self.expression1_opt_1(parse_tree),
+            109 => self.factor_0(&children[0], parse_tree),
+            110 => self.factor_1(&children[0], &children[1], parse_tree),
+            111 => self.factor_list_0(&children[0], &children[1], parse_tree),
+            112 => self.factor_list_1(parse_tree),
+            113 => self.factor_2(&children[0], &children[1], &children[2], parse_tree),
+            114 => self.range(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 parse_tree,
             ),
-            122 => self.if_statement(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-                &children[5],
-                &children[6],
-                parse_tree,
-            ),
-            123 => self.if_statement_list_0(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-                &children[5],
-                &children[6],
-                parse_tree,
-            ),
-            124 => self.if_statement_list_1(parse_tree),
-            125 => self.if_statement_opt_0(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                parse_tree,
-            ),
-            126 => self.if_statement_opt_1(parse_tree),
-            127 => self.range(
+            115 => self.range_opt_0(&children[0], &children[1], parse_tree),
+            116 => self.range_opt_1(parse_tree),
+            117 => self.width(&children[0], &children[1], &children[2], parse_tree),
+            118 => self.builtin_type_0(&children[0], parse_tree),
+            119 => self.builtin_type_1(&children[0], parse_tree),
+            120 => self.builtin_type_2(&children[0], parse_tree),
+            121 => self.builtin_type_3(&children[0], parse_tree),
+            122 => self.builtin_type_4(&children[0], parse_tree),
+            123 => self.builtin_type_5(&children[0], parse_tree),
+            124 => self.builtin_type_6(&children[0], parse_tree),
+            125 => self.builtin_type_7(&children[0], parse_tree),
+            126 => self.r#type(&children[0], &children[1], parse_tree),
+            127 => self.type_group_0(&children[0], parse_tree),
+            128 => self.type_group_1(&children[0], parse_tree),
+            129 => self.type_list_0(&children[0], &children[1], parse_tree),
+            130 => self.type_list_1(parse_tree),
+            131 => self.statement_0(&children[0], parse_tree),
+            132 => self.statement_1(&children[0], parse_tree),
+            133 => self.assignment_statement(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 parse_tree,
             ),
-            128 => self.range_opt_0(&children[0], &children[1], parse_tree),
-            129 => self.range_opt_1(parse_tree),
-            130 => self.width(&children[0], &children[1], &children[2], parse_tree),
-            131 => self.builtin_type_0(&children[0], parse_tree),
-            132 => self.builtin_type_1(&children[0], parse_tree),
-            133 => self.builtin_type_2(&children[0], parse_tree),
-            134 => self.builtin_type_3(&children[0], parse_tree),
-            135 => self.builtin_type_4(&children[0], parse_tree),
-            136 => self.builtin_type_5(&children[0], parse_tree),
-            137 => self.builtin_type_6(&children[0], parse_tree),
-            138 => self.builtin_type_7(&children[0], parse_tree),
-            139 => self.r#type(&children[0], &children[1], parse_tree),
-            140 => self.type_group_0(&children[0], parse_tree),
-            141 => self.type_group_1(&children[0], parse_tree),
-            142 => self.type_list_0(&children[0], &children[1], parse_tree),
-            143 => self.type_list_1(parse_tree),
-            144 => self.with_parameter(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                parse_tree,
-            ),
-            145 => self.with_parameter_opt_0(&children[0], parse_tree),
-            146 => self.with_parameter_opt_1(parse_tree),
-            147 => self.with_parameter_list(&children[0], &children[1], &children[2], parse_tree),
-            148 => self.with_parameter_list_list_0(
-                &children[0],
-                &children[1],
-                &children[2],
-                parse_tree,
-            ),
-            149 => self.with_parameter_list_list_1(parse_tree),
-            150 => self.with_parameter_list_opt_0(&children[0], parse_tree),
-            151 => self.with_parameter_list_opt_1(parse_tree),
-            152 => self.with_parameter_item(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-                &children[5],
-                parse_tree,
-            ),
-            153 => self.with_parameter_item_group_0(&children[0], parse_tree),
-            154 => self.with_parameter_item_group_1(&children[0], parse_tree),
-            155 => self.module_declaration(
+            134 => self.if_statement(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -8719,117 +8655,184 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[6],
                 parse_tree,
             ),
-            156 => self.module_declaration_list_0(&children[0], &children[1], parse_tree),
-            157 => self.module_declaration_list_1(parse_tree),
-            158 => self.module_declaration_opt0_0(&children[0], parse_tree),
-            159 => self.module_declaration_opt0_1(parse_tree),
-            160 => self.module_declaration_opt_0(&children[0], parse_tree),
-            161 => self.module_declaration_opt_1(parse_tree),
-            162 => self.module_port(&children[0], &children[1], &children[2], parse_tree),
-            163 => self.module_port_opt_0(&children[0], parse_tree),
-            164 => self.module_port_opt_1(parse_tree),
-            165 => self.module_port_list(&children[0], &children[1], &children[2], parse_tree),
-            166 => {
+            135 => self.if_statement_list_0(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                &children[4],
+                &children[5],
+                &children[6],
+                parse_tree,
+            ),
+            136 => self.if_statement_list_1(parse_tree),
+            137 => self.if_statement_opt_0(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                parse_tree,
+            ),
+            138 => self.if_statement_opt_1(parse_tree),
+            139 => self.variable_declaration(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                parse_tree,
+            ),
+            140 => self.parameter_declaration(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                &children[4],
+                &children[5],
+                &children[6],
+                parse_tree,
+            ),
+            141 => self.localparam_declaration(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                &children[4],
+                &children[5],
+                &children[6],
+                parse_tree,
+            ),
+            142 => self.always_ff_declaration(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                &children[4],
+                &children[5],
+                &children[6],
+                parse_tree,
+            ),
+            143 => self.always_ff_declaration_list_0(&children[0], &children[1], parse_tree),
+            144 => self.always_ff_declaration_list_1(parse_tree),
+            145 => self.always_ff_conditions(&children[0], &children[1], &children[2], parse_tree),
+            146 => self.always_ff_conditions_list_0(
+                &children[0],
+                &children[1],
+                &children[2],
+                parse_tree,
+            ),
+            147 => self.always_ff_conditions_list_1(parse_tree),
+            148 => self.always_ff_conditions_opt_0(&children[0], parse_tree),
+            149 => self.always_ff_conditions_opt_1(parse_tree),
+            150 => self.always_ff_condition(&children[0], &children[1], parse_tree),
+            151 => self.always_ff_condition_group_0(&children[0], parse_tree),
+            152 => self.always_ff_condition_group_1(&children[0], parse_tree),
+            153 => self.always_comb_declaration(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                parse_tree,
+            ),
+            154 => self.always_comb_declaration_list_0(&children[0], &children[1], parse_tree),
+            155 => self.always_comb_declaration_list_1(parse_tree),
+            156 => self.assign_declaration(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                &children[4],
+                &children[5],
+                parse_tree,
+            ),
+            157 => self.assign_declaration_opt_0(&children[0], &children[1], parse_tree),
+            158 => self.assign_declaration_opt_1(parse_tree),
+            159 => self.modport_declaration(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                &children[4],
+                parse_tree,
+            ),
+            160 => self.modport_list(&children[0], &children[1], &children[2], parse_tree),
+            161 => self.modport_list_list_0(&children[0], &children[1], &children[2], parse_tree),
+            162 => self.modport_list_list_1(parse_tree),
+            163 => self.modport_list_opt_0(&children[0], parse_tree),
+            164 => self.modport_list_opt_1(parse_tree),
+            165 => self.modport_item(&children[0], &children[1], &children[2], parse_tree),
+            166 => self.with_parameter(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                parse_tree,
+            ),
+            167 => self.with_parameter_opt_0(&children[0], parse_tree),
+            168 => self.with_parameter_opt_1(parse_tree),
+            169 => self.with_parameter_list(&children[0], &children[1], &children[2], parse_tree),
+            170 => self.with_parameter_list_list_0(
+                &children[0],
+                &children[1],
+                &children[2],
+                parse_tree,
+            ),
+            171 => self.with_parameter_list_list_1(parse_tree),
+            172 => self.with_parameter_list_opt_0(&children[0], parse_tree),
+            173 => self.with_parameter_list_opt_1(parse_tree),
+            174 => self.with_parameter_item(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                &children[4],
+                &children[5],
+                parse_tree,
+            ),
+            175 => self.with_parameter_item_group_0(&children[0], parse_tree),
+            176 => self.with_parameter_item_group_1(&children[0], parse_tree),
+            177 => self.module_declaration(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                &children[4],
+                &children[5],
+                &children[6],
+                parse_tree,
+            ),
+            178 => self.module_declaration_list_0(&children[0], &children[1], parse_tree),
+            179 => self.module_declaration_list_1(parse_tree),
+            180 => self.module_declaration_opt0_0(&children[0], parse_tree),
+            181 => self.module_declaration_opt0_1(parse_tree),
+            182 => self.module_declaration_opt_0(&children[0], parse_tree),
+            183 => self.module_declaration_opt_1(parse_tree),
+            184 => self.module_port(&children[0], &children[1], &children[2], parse_tree),
+            185 => self.module_port_opt_0(&children[0], parse_tree),
+            186 => self.module_port_opt_1(parse_tree),
+            187 => self.module_port_list(&children[0], &children[1], &children[2], parse_tree),
+            188 => {
                 self.module_port_list_list_0(&children[0], &children[1], &children[2], parse_tree)
             }
-            167 => self.module_port_list_list_1(parse_tree),
-            168 => self.module_port_list_opt_0(&children[0], parse_tree),
-            169 => self.module_port_list_opt_1(parse_tree),
-            170 => self.module_port_item(
+            189 => self.module_port_list_list_1(parse_tree),
+            190 => self.module_port_list_opt_0(&children[0], parse_tree),
+            191 => self.module_port_list_opt_1(parse_tree),
+            192 => self.module_port_item(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 parse_tree,
             ),
-            171 => self.direction_0(&children[0], parse_tree),
-            172 => self.direction_1(&children[0], parse_tree),
-            173 => self.direction_2(&children[0], parse_tree),
-            174 => self.module_item_0(&children[0], parse_tree),
-            175 => self.module_item_1(&children[0], parse_tree),
-            176 => self.module_item_2(&children[0], parse_tree),
-            177 => self.module_item_3(&children[0], parse_tree),
-            178 => self.module_item_4(&children[0], parse_tree),
-            179 => self.module_item_5(&children[0], parse_tree),
-            180 => self.interface_declaration(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-                &children[5],
-                parse_tree,
-            ),
-            181 => self.interface_declaration_list_0(&children[0], &children[1], parse_tree),
-            182 => self.interface_declaration_list_1(parse_tree),
-            183 => self.interface_declaration_opt_0(&children[0], parse_tree),
-            184 => self.interface_declaration_opt_1(parse_tree),
-            185 => self.interface_item_0(&children[0], parse_tree),
-            186 => self.interface_item_1(&children[0], parse_tree),
-            187 => self.interface_item_2(&children[0], parse_tree),
-            188 => self.interface_item_3(&children[0], parse_tree),
-            189 => self.variable_declaration(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                parse_tree,
-            ),
-            190 => self.parameter_declaration(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-                &children[5],
-                &children[6],
-                parse_tree,
-            ),
-            191 => self.localparam_declaration(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-                &children[5],
-                &children[6],
-                parse_tree,
-            ),
-            192 => self.always_ff_declaration(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-                &children[5],
-                &children[6],
-                parse_tree,
-            ),
-            193 => self.always_ff_declaration_list_0(&children[0], &children[1], parse_tree),
-            194 => self.always_ff_declaration_list_1(parse_tree),
-            195 => self.always_ff_conditions(&children[0], &children[1], &children[2], parse_tree),
-            196 => self.always_ff_conditions_list_0(
-                &children[0],
-                &children[1],
-                &children[2],
-                parse_tree,
-            ),
-            197 => self.always_ff_conditions_list_1(parse_tree),
-            198 => self.always_ff_conditions_opt_0(&children[0], parse_tree),
-            199 => self.always_ff_conditions_opt_1(parse_tree),
-            200 => self.always_ff_condition(&children[0], &children[1], parse_tree),
-            201 => self.always_ff_condition_group_0(&children[0], parse_tree),
-            202 => self.always_ff_condition_group_1(&children[0], parse_tree),
-            203 => self.always_comb_declaration(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                parse_tree,
-            ),
-            204 => self.always_comb_declaration_list_0(&children[0], &children[1], parse_tree),
-            205 => self.always_comb_declaration_list_1(parse_tree),
-            206 => self.assign_declaration(
+            193 => self.direction_0(&children[0], parse_tree),
+            194 => self.direction_1(&children[0], parse_tree),
+            195 => self.direction_2(&children[0], parse_tree),
+            196 => self.module_item_0(&children[0], parse_tree),
+            197 => self.module_item_1(&children[0], parse_tree),
+            198 => self.module_item_2(&children[0], parse_tree),
+            199 => self.module_item_3(&children[0], parse_tree),
+            200 => self.module_item_4(&children[0], parse_tree),
+            201 => self.module_item_5(&children[0], parse_tree),
+            202 => self.interface_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -8838,22 +8841,19 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[5],
                 parse_tree,
             ),
-            207 => self.assign_declaration_opt_0(&children[0], &children[1], parse_tree),
-            208 => self.assign_declaration_opt_1(parse_tree),
-            209 => self.modport_declaration(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-                parse_tree,
-            ),
-            210 => self.modport_list(&children[0], &children[1], &children[2], parse_tree),
-            211 => self.modport_list_list_0(&children[0], &children[1], &children[2], parse_tree),
-            212 => self.modport_list_list_1(parse_tree),
-            213 => self.modport_list_opt_0(&children[0], parse_tree),
-            214 => self.modport_list_opt_1(parse_tree),
-            215 => self.modport_item(&children[0], &children[1], &children[2], parse_tree),
+            203 => self.interface_declaration_list_0(&children[0], &children[1], parse_tree),
+            204 => self.interface_declaration_list_1(parse_tree),
+            205 => self.interface_declaration_opt_0(&children[0], parse_tree),
+            206 => self.interface_declaration_opt_1(parse_tree),
+            207 => self.interface_item_0(&children[0], parse_tree),
+            208 => self.interface_item_1(&children[0], parse_tree),
+            209 => self.interface_item_2(&children[0], parse_tree),
+            210 => self.interface_item_3(&children[0], parse_tree),
+            211 => self.description_0(&children[0], parse_tree),
+            212 => self.description_1(&children[0], parse_tree),
+            213 => self.veryl(&children[0], &children[1], parse_tree),
+            214 => self.veryl_list_0(&children[0], &children[1], parse_tree),
+            215 => self.veryl_list_1(parse_tree),
             _ => Err(miette!("Unhandled production number: {}", prod_num)),
         }
     }

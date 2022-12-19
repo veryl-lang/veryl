@@ -1,166 +1,143 @@
-use std::collections::HashMap;
-use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::VerylToken;
-use veryl_parser::veryl_walker::VerylWalker;
-use veryl_parser::ParolLocation;
+use crate::veryl_error::VerylError;
+use crate::veryl_grammar::VerylGrammar;
+use crate::veryl_grammar_trait::*;
+use crate::veryl_parser::parse;
+use crate::veryl_token::VerylToken;
+use crate::veryl_walker::VerylWalker;
+use parol_runtime::miette::{Result, WrapErr};
+use std::path::Path;
 
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Hash)]
-pub struct Location {
-    pub line: usize,
-    pub column: usize,
-    pub length: usize,
+#[derive(Debug)]
+pub struct Parser {
+    pub veryl: Veryl,
+    pub errors: Vec<VerylError>,
 }
 
-impl From<&ParolLocation> for Location {
-    fn from(x: &ParolLocation) -> Self {
-        Self {
-            line: x.line,
-            column: x.column,
-            length: x.length,
-        }
+const BINARY_CHARS: [char; 6] = ['0', '1', 'x', 'z', 'X', 'Z'];
+const OCTAL_CHARS: [char; 12] = ['0', '1', '2', '3', '4', '5', '6', '7', 'x', 'z', 'X', 'Z'];
+const DECIMAL_CHARS: [char; 10] = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+
+impl Parser {
+    pub fn parse<T: AsRef<Path>>(input: &str, file: &T) -> Result<Self> {
+        let mut grammar = VerylGrammar::new();
+        parse(&input, file, &mut grammar).wrap_err(format!(
+            "Failed parsing file {}",
+            file.as_ref().to_string_lossy()
+        ))?;
+
+        let veryl = grammar.veryl.unwrap();
+
+        let mut checker = Checker::default();
+        checker.check(&veryl);
+
+        Ok(Parser {
+            veryl,
+            errors: checker.errors,
+        })
     }
-}
-
-impl From<ParolLocation> for Location {
-    fn from(x: ParolLocation) -> Self {
-        Self {
-            line: x.line,
-            column: x.column,
-            length: x.length,
-        }
-    }
-}
-
-#[derive(Default)]
-pub struct Align {
-    index: usize,
-    max_width: usize,
-    width: usize,
-    line: usize,
-    rest: Vec<(Location, usize)>,
-    additions: HashMap<Location, usize>,
-    last_token: Option<VerylToken>,
-}
-
-impl Align {
-    fn finish_group(&mut self) {
-        for (loc, width) in &self.rest {
-            self.additions.insert(*loc, self.max_width - width);
-        }
-        self.rest.clear();
-        self.max_width = 0;
-    }
-
-    fn finish_item(&mut self) {
-        let last_token = self.last_token.take();
-        if let Some(last_token) = last_token {
-            let loc: Location = (&last_token.token.token.location).into();
-            if loc.line - self.line > 1 {
-                self.finish_group();
-            }
-            self.max_width = usize::max(self.max_width, self.width);
-            self.line = loc.line;
-            self.rest.push((loc, self.width));
-
-            self.width = 0;
-            self.index += 1;
-        }
-    }
-
-    fn start_item(&mut self) {
-        self.width = 0;
-    }
-
-    fn token(&mut self, x: &VerylToken) {
-        self.width += x.token.token.location.length;
-        self.last_token = Some(x.clone());
-    }
-
-    fn dummy_token(&mut self, x: &VerylToken) {
-        self.width += 0; // 0 length token
-        self.last_token = Some(x.clone());
-    }
-
-    fn space(&mut self, x: usize) {
-        self.width += x;
-    }
-}
-
-mod align_kind {
-    pub const IDENTIFIER: usize = 0;
-    pub const TYPE: usize = 1;
-    pub const EXPRESSION: usize = 2;
-    pub const WIDTH: usize = 3;
 }
 
 #[derive(Default)]
-pub struct Aligner {
-    pub additions: HashMap<Location, usize>,
-    aligns: [Align; 4],
+struct Checker {
+    pub errors: Vec<VerylError>,
 }
 
-impl Aligner {
-    pub fn new() -> Self {
-        Default::default()
-    }
-
-    pub fn align(&mut self, input: &Veryl) {
+impl Checker {
+    fn check(&mut self, input: &Veryl) {
         self.veryl(input);
-        self.finish_group();
-        for align in &self.aligns {
-            for (x, y) in &align.additions {
-                self.additions
-                    .entry(*x)
-                    .and_modify(|val| *val += *y)
-                    .or_insert(*y);
+    }
+
+    fn based(&mut self, token: &VerylToken) {
+        let text = token.token.token.text();
+        let (width, tail) = text.split_once('\'').unwrap();
+        let base = &tail[0..1];
+        let number = &tail[1..];
+
+        let width: usize = width.replace('_', "").parse().unwrap();
+        let number = number.replace('_', "");
+        let number = number.trim_start_matches('0');
+
+        match base {
+            "b" => {
+                if let Some(x) = number.chars().filter(|x| !BINARY_CHARS.contains(&x)).next() {
+                    self.errors
+                        .push(VerylError::invalid_number_character(x, "binary", token));
+                }
+                let actual_width = number.chars().count();
+                if actual_width > width {
+                    self.errors.push(VerylError::number_overflow(width, token));
+                }
             }
+            "o" => {
+                if let Some(x) = number.chars().filter(|x| !OCTAL_CHARS.contains(&x)).next() {
+                    self.errors
+                        .push(VerylError::invalid_number_character(x, "octal", token));
+                }
+                let mut actual_width = number.chars().count() * 3;
+                match number.chars().next() {
+                    Some('1') => actual_width -= 2,
+                    Some('2') => actual_width -= 1,
+                    Some('3') => actual_width -= 1,
+                    _ => (),
+                }
+                if actual_width > width {
+                    self.errors.push(VerylError::number_overflow(width, token));
+                }
+            }
+            "d" => {
+                if let Some(x) = number
+                    .chars()
+                    .filter(|x| !DECIMAL_CHARS.contains(&x))
+                    .next()
+                {
+                    self.errors
+                        .push(VerylError::invalid_number_character(x, "decimal", token));
+                }
+            }
+            "h" => {
+                let mut actual_width = number.chars().count() * 4;
+                match number.chars().next() {
+                    Some('1') => actual_width -= 3,
+                    Some('2') => actual_width -= 2,
+                    Some('3') => actual_width -= 2,
+                    Some('4') => actual_width -= 1,
+                    Some('5') => actual_width -= 1,
+                    Some('6') => actual_width -= 1,
+                    Some('7') => actual_width -= 1,
+                    _ => (),
+                }
+                if actual_width > width {
+                    self.errors.push(VerylError::number_overflow(width, token));
+                }
+            }
+            _ => unreachable!(),
         }
-    }
-
-    fn finish_group(&mut self) {
-        for i in 0..self.aligns.len() {
-            self.aligns[i].finish_group();
-        }
-    }
-
-    fn insert(&mut self, token: &VerylToken, width: usize) {
-        let loc: Location = (&token.token.token.location).into();
-        self.additions
-            .entry(loc)
-            .and_modify(|val| *val += width)
-            .or_insert(width);
     }
 }
 
-impl VerylWalker for Aligner {
+impl VerylWalker for Checker {
     // ----------------------------------------------------------------------------
     // Terminals
     // ----------------------------------------------------------------------------
 
-    fn identifier(&mut self, input: &Identifier) {
-        self.aligns[align_kind::IDENTIFIER].start_item();
-        self.aligns[align_kind::IDENTIFIER].token(&input.identifier_token);
-        self.aligns[align_kind::IDENTIFIER].finish_item();
-    }
+    fn identifier(&mut self, _input: &Identifier) {}
 
     // ----------------------------------------------------------------------------
     // Number
     // ----------------------------------------------------------------------------
 
     fn number(&mut self, input: &Number) {
-        let token = match input {
+        match input {
             Number::Number0(x) => match &*x.integral_number {
-                IntegralNumber::IntegralNumber0(x) => &x.based.based_token,
-                IntegralNumber::IntegralNumber1(x) => &x.base_less.base_less_token,
-                IntegralNumber::IntegralNumber2(x) => &x.all_bit.all_bit_token,
+                IntegralNumber::IntegralNumber0(x) => self.based(&x.based.based_token),
+                IntegralNumber::IntegralNumber1(_) => (),
+                IntegralNumber::IntegralNumber2(_) => (),
             },
             Number::Number1(x) => match &*x.real_number {
-                RealNumber::RealNumber0(x) => &x.fixed_point.fixed_point_token,
-                RealNumber::RealNumber1(x) => &x.exponent.exponent_token,
+                RealNumber::RealNumber0(_) => (),
+                RealNumber::RealNumber1(_) => (),
             },
         };
-        self.aligns[align_kind::EXPRESSION].token(token);
-        self.aligns[align_kind::WIDTH].token(token);
     }
 
     // ----------------------------------------------------------------------------
@@ -170,37 +147,11 @@ impl VerylWalker for Aligner {
     fn expression(&mut self, input: &Expression) {
         self.expression1(&input.expression1);
         for x in &input.expression_list {
-            self.aligns[align_kind::EXPRESSION].space(1);
-            self.aligns[align_kind::WIDTH].space(1);
-            let token = match &*x.expression_list_group {
-                ExpressionListGroup::ExpressionListGroup0(x) => {
-                    &x.binary_operator.binary_operator_token
-                }
-                ExpressionListGroup::ExpressionListGroup1(x) => {
-                    &x.common_operator.common_operator_token
-                }
-            };
-            self.aligns[align_kind::EXPRESSION].token(token);
-            self.aligns[align_kind::WIDTH].token(token);
-            self.aligns[align_kind::EXPRESSION].space(1);
-            self.aligns[align_kind::WIDTH].space(1);
             self.expression1(&x.expression1);
         }
     }
 
     fn expression1(&mut self, input: &Expression1) {
-        if let Some(ref x) = input.expression1_opt {
-            let token = match &*x.expression1_opt_group {
-                Expression1OptGroup::Expression1OptGroup0(x) => {
-                    &x.unary_operator.unary_operator_token
-                }
-                Expression1OptGroup::Expression1OptGroup1(x) => {
-                    &x.common_operator.common_operator_token
-                }
-            };
-            self.aligns[align_kind::EXPRESSION].token(token);
-            self.aligns[align_kind::WIDTH].token(token);
-        }
         self.factor(&input.factor);
     }
 
@@ -208,18 +159,13 @@ impl VerylWalker for Aligner {
         match input {
             Factor::Factor0(x) => self.number(&x.number),
             Factor::Factor1(x) => {
-                self.aligns[align_kind::EXPRESSION].token(&x.identifier.identifier_token);
-                self.aligns[align_kind::WIDTH].token(&x.identifier.identifier_token);
+                self.identifier(&x.identifier);
                 for x in &x.factor_list {
                     self.range(&x.range);
                 }
             }
             Factor::Factor2(x) => {
-                self.aligns[align_kind::EXPRESSION].token(&x.l_paren.l_paren_token);
-                self.aligns[align_kind::WIDTH].token(&x.l_paren.l_paren_token);
                 self.expression(&x.expression);
-                self.aligns[align_kind::EXPRESSION].token(&x.r_paren.r_paren_token);
-                self.aligns[align_kind::WIDTH].token(&x.r_paren.r_paren_token);
             }
         }
     }
@@ -229,24 +175,14 @@ impl VerylWalker for Aligner {
     // ----------------------------------------------------------------------------
 
     fn range(&mut self, input: &Range) {
-        self.aligns[align_kind::EXPRESSION].token(&input.l_bracket.l_bracket_token);
-        self.aligns[align_kind::WIDTH].token(&input.l_bracket.l_bracket_token);
         self.expression(&input.expression);
         if let Some(ref x) = input.range_opt {
-            self.aligns[align_kind::EXPRESSION].token(&x.colon.colon_token);
-            self.aligns[align_kind::WIDTH].token(&x.colon.colon_token);
             self.expression(&x.expression);
         }
-        self.aligns[align_kind::EXPRESSION].token(&input.r_bracket.r_bracket_token);
-        self.aligns[align_kind::WIDTH].token(&input.r_bracket.r_bracket_token);
     }
 
     fn width(&mut self, input: &Width) {
-        self.aligns[align_kind::EXPRESSION].token(&input.l_bracket.l_bracket_token);
-        self.aligns[align_kind::WIDTH].token(&input.l_bracket.l_bracket_token);
         self.expression(&input.expression);
-        self.aligns[align_kind::EXPRESSION].token(&input.r_bracket.r_bracket_token);
-        self.aligns[align_kind::WIDTH].token(&input.r_bracket.r_bracket_token);
     }
 
     // ----------------------------------------------------------------------------
@@ -254,33 +190,8 @@ impl VerylWalker for Aligner {
     // ----------------------------------------------------------------------------
 
     fn r#type(&mut self, input: &Type) {
-        let token = match &*input.type_group {
-            TypeGroup::TypeGroup0(x) => match &*x.builtin_type {
-                BuiltinType::BuiltinType0(x) => &x.logic.logic_token,
-                BuiltinType::BuiltinType1(x) => &x.bit.bit_token,
-                BuiltinType::BuiltinType2(x) => &x.u32.u32_token,
-                BuiltinType::BuiltinType3(x) => &x.u64.u64_token,
-                BuiltinType::BuiltinType4(x) => &x.i32.i32_token,
-                BuiltinType::BuiltinType5(x) => &x.i64.i64_token,
-                BuiltinType::BuiltinType6(x) => &x.f32.f32_token,
-                BuiltinType::BuiltinType7(x) => &x.f64.f64_token,
-            },
-            TypeGroup::TypeGroup1(x) => &x.identifier.identifier_token,
-        };
-        self.aligns[align_kind::TYPE].start_item();
-        self.aligns[align_kind::TYPE].token(token);
-        self.aligns[align_kind::TYPE].finish_item();
-
-        if input.type_list.is_empty() {
-            self.aligns[align_kind::WIDTH].start_item();
-            self.aligns[align_kind::WIDTH].dummy_token(token);
-            self.aligns[align_kind::WIDTH].finish_item();
-        } else {
-            self.aligns[align_kind::WIDTH].start_item();
-            for x in &input.type_list {
-                self.width(&x.width);
-            }
-            self.aligns[align_kind::WIDTH].finish_item();
+        for x in &input.type_list {
+            self.width(&x.width);
         }
     }
 
@@ -297,9 +208,20 @@ impl VerylWalker for Aligner {
 
     fn assignment_statement(&mut self, input: &AssignmentStatement) {
         self.identifier(&input.identifier);
+        self.expression(&input.expression);
     }
 
-    fn if_statement(&mut self, _input: &IfStatement) {}
+    fn if_statement(&mut self, input: &IfStatement) {
+        self.expression(&input.expression);
+        self.statement(&input.statement);
+        for x in &input.if_statement_list {
+            self.expression(&x.expression);
+            self.statement(&x.statement);
+        }
+        if let Some(ref x) = input.if_statement_opt {
+            self.statement(&x.statement);
+        }
+    }
 
     // ----------------------------------------------------------------------------
     // Declaration
@@ -311,21 +233,34 @@ impl VerylWalker for Aligner {
     }
 
     fn parameter_declaration(&mut self, input: &ParameterDeclaration) {
-        self.insert(&input.parameter.parameter_token, 1);
         self.identifier(&input.identifier);
         self.r#type(&input.r#type);
+        self.expression(&input.expression);
     }
 
     fn localparam_declaration(&mut self, input: &LocalparamDeclaration) {
         self.identifier(&input.identifier);
         self.r#type(&input.r#type);
+        self.expression(&input.expression);
     }
 
-    fn always_ff_declaration(&mut self, _input: &AlwaysFfDeclaration) {}
+    fn always_ff_declaration(&mut self, input: &AlwaysFfDeclaration) {
+        self.always_ff_conditions(&input.always_ff_conditions);
+        for x in &input.always_ff_declaration_list {
+            self.statement(&x.statement);
+        }
+    }
 
-    fn always_ff_conditions(&mut self, _input: &AlwaysFfConditions) {}
+    fn always_ff_conditions(&mut self, input: &AlwaysFfConditions) {
+        self.always_ff_condition(&input.always_ff_condition);
+        for x in &input.always_ff_conditions_list {
+            self.always_ff_condition(&x.always_ff_condition);
+        }
+    }
 
-    fn always_ff_condition(&mut self, _input: &AlwaysFfCondition) {}
+    fn always_ff_condition(&mut self, input: &AlwaysFfCondition) {
+        self.identifier(&input.identifier);
+    }
 
     fn always_comb_declaration(&mut self, input: &AlwaysCombDeclaration) {
         for x in &input.always_comb_declaration_list {
@@ -376,17 +311,9 @@ impl VerylWalker for Aligner {
     }
 
     fn with_parameter_item(&mut self, input: &WithParameterItem) {
-        match &*input.with_parameter_item_group {
-            WithParameterItemGroup::WithParameterItemGroup0(x) => {
-                self.insert(&x.parameter.parameter_token, 1);
-            }
-            WithParameterItemGroup::WithParameterItemGroup1(_) => (),
-        }
         self.identifier(&input.identifier);
         self.r#type(&input.r#type);
-        self.aligns[align_kind::EXPRESSION].start_item();
         self.expression(&input.expression);
-        self.aligns[align_kind::EXPRESSION].finish_item();
     }
 
     // ----------------------------------------------------------------------------
@@ -394,6 +321,7 @@ impl VerylWalker for Aligner {
     // ----------------------------------------------------------------------------
 
     fn module_declaration(&mut self, input: &ModuleDeclaration) {
+        self.identifier(&input.identifier);
         if let Some(ref x) = input.module_declaration_opt {
             self.with_parameter(&x.with_parameter);
         }
@@ -435,23 +363,14 @@ impl VerylWalker for Aligner {
         }
     }
 
-    fn direction(&mut self, input: &Direction) {
-        match input {
-            Direction::Direction0(x) => {
-                self.insert(&x.input.input_token, 1);
-            }
-            Direction::Direction1(_) => (),
-            Direction::Direction2(x) => {
-                self.insert(&x.inout.inout_token, 1);
-            }
-        }
-    }
+    fn direction(&mut self, _input: &Direction) {}
 
     // ----------------------------------------------------------------------------
     // Interface
     // ----------------------------------------------------------------------------
 
     fn interface_declaration(&mut self, input: &InterfaceDeclaration) {
+        self.identifier(&input.identifier);
         if let Some(ref x) = input.interface_declaration_opt {
             self.with_parameter(&x.with_parameter);
         }

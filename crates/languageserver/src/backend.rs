@@ -4,15 +4,14 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 use veryl_formatter::formatter::Formatter;
-use veryl_parser::veryl_grammar::VerylGrammar;
-use veryl_parser::veryl_grammar_trait::Veryl;
-use veryl_parser::veryl_parser::{miette, parse, ParserError};
+use veryl_parser::parser::Parser;
+use veryl_parser::veryl_parser::{miette, ParserError};
 
 #[derive(Debug)]
 pub struct Backend {
     client: Client,
     document_map: DashMap<String, Rope>,
-    ast_map: DashMap<String, Veryl>,
+    parser_map: DashMap<String, Parser>,
 }
 
 struct TextDocumentItem {
@@ -26,7 +25,7 @@ impl Backend {
         Self {
             client,
             document_map: DashMap::new(),
-            ast_map: DashMap::new(),
+            parser_map: DashMap::new(),
         }
     }
 
@@ -34,19 +33,19 @@ impl Backend {
         let path = params.uri.to_string();
         let rope = Rope::from_str(&params.text);
 
-        let mut grammar = VerylGrammar::new();
-
-        let diag = match parse(&rope.to_string(), &path, &mut grammar) {
-            Ok(_) => {
-                if let Some(veryl) = grammar.veryl {
-                    self.ast_map.insert(path.clone(), veryl);
-                } else {
-                    self.ast_map.remove(&path);
+        let diag = match Parser::parse(&rope.to_string(), &path) {
+            Ok(x) => {
+                let mut ret = Vec::new();
+                for error in &x.errors {
+                    let error = (*error).clone();
+                    let error: miette::ErrReport = error.into();
+                    ret.append(&mut Backend::to_diag(error, &rope));
                 }
-                Vec::new()
+                self.parser_map.insert(path.clone(), x);
+                ret
             }
             Err(x) => {
-                self.ast_map.remove(&path);
+                self.parser_map.remove(&path);
                 Backend::to_diag(x, &rope)
             }
         };
@@ -90,7 +89,7 @@ impl Backend {
                 _ => format!("Syntax Error: {}", x),
             }
         } else {
-            format!("Syntax Error: {}", err)
+            format!("Semantic Error: {}", err)
         };
 
         let diag = Diagnostic::new(
@@ -175,9 +174,9 @@ impl LanguageServer for Backend {
         let path = params.text_document.uri.to_string();
         if let Some(rope) = self.document_map.get(&path) {
             let line = rope.len_lines() as u32;
-            if let Some(veryl) = self.ast_map.get(&path) {
+            if let Some(parser) = self.parser_map.get(&path) {
                 let mut formatter = Formatter::new();
-                formatter.format(&veryl);
+                formatter.format(&parser.veryl);
 
                 let text_edit = TextEdit {
                     range: Range::new(Position::new(0, 0), Position::new(line, u32::MAX)),

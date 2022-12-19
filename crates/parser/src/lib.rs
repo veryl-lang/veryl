@@ -1,4 +1,5 @@
 pub mod generated;
+pub mod parser;
 pub mod veryl_error;
 pub mod veryl_grammar;
 pub mod veryl_grammar_trait;

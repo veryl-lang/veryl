@@ -10,8 +10,7 @@ use std::io::Write;
 use std::path::Path;
 use std::time::Instant;
 use veryl_formatter::formatter::Formatter;
-use veryl_parser::veryl_grammar::VerylGrammar;
-use veryl_parser::veryl_parser::parse;
+use veryl_parser::parser::Parser;
 
 pub fn format(opt: &Fmt) -> Result<bool> {
     let files = if opt.files.is_empty() {
@@ -30,34 +29,29 @@ pub fn format(opt: &Fmt) -> Result<bool> {
         );
 
         let input = fs::read_to_string(file).into_diagnostic().wrap_err("")?;
-        let mut veryl_grammar = VerylGrammar::new();
-        parse(&input, file, &mut veryl_grammar)
-            .wrap_err(format!("Failed parsing file {}", file.to_string_lossy()))?;
+        let parser = Parser::parse(&input, file)?;
         let mut formatter = Formatter::new();
+        formatter.format(&parser.veryl);
 
-        if let Some(ref veryl) = veryl_grammar.veryl {
-            formatter.format(veryl);
+        let pass = input.as_str() == formatter.as_str();
 
-            let pass = input.as_str() == formatter.as_str();
-
-            if !pass {
-                if opt.check {
-                    print_diff(file, input.as_str(), formatter.as_str());
-                    all_pass = false;
-                } else {
-                    print(
-                        &format!("[Info] Overwrite file: {}", file.to_string_lossy()),
-                        opt,
-                    );
-                    let mut file = OpenOptions::new()
-                        .write(true)
-                        .truncate(true)
-                        .open(file)
-                        .into_diagnostic()?;
-                    file.write_all(formatter.as_str().as_bytes())
-                        .into_diagnostic()?;
-                    file.flush().into_diagnostic()?;
-                }
+        if !pass {
+            if opt.check {
+                print_diff(file, input.as_str(), formatter.as_str());
+                all_pass = false;
+            } else {
+                print(
+                    &format!("[Info] Overwrite file: {}", file.to_string_lossy()),
+                    opt,
+                );
+                let mut file = OpenOptions::new()
+                    .write(true)
+                    .truncate(true)
+                    .open(file)
+                    .into_diagnostic()?;
+                file.write_all(formatter.as_str().as_bytes())
+                    .into_diagnostic()?;
+                file.flush().into_diagnostic()?;
             }
         }
     }

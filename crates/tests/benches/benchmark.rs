@@ -10,7 +10,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         let input = fs::read_to_string(testcase).unwrap();
         text.push_str(&input);
     }
-    let text = text.repeat(10);
+    //let text = text.repeat(10);
     let mut grammar = VerylGrammar::new();
     let mut formatter = Formatter::new();
 

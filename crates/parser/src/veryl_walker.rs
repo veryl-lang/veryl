@@ -8,18 +8,6 @@ pub trait VerylWalker {
     fn identifier(&mut self, input: &Identifier);
 
     // ----------------------------------------------------------------------------
-    // SourceCode
-    // ----------------------------------------------------------------------------
-
-    fn veryl(&mut self, input: &Veryl);
-
-    // ----------------------------------------------------------------------------
-    // Description
-    // ----------------------------------------------------------------------------
-
-    fn description(&mut self, input: &Description);
-
-    // ----------------------------------------------------------------------------
     // Number
     // ----------------------------------------------------------------------------
 
@@ -36,16 +24,6 @@ pub trait VerylWalker {
     fn factor(&mut self, input: &Factor);
 
     // ----------------------------------------------------------------------------
-    // Statement
-    // ----------------------------------------------------------------------------
-
-    fn statement(&mut self, input: &Statement);
-
-    fn assignment_statement(&mut self, input: &AssignmentStatement);
-
-    fn if_statement(&mut self, input: &IfStatement);
-
-    // ----------------------------------------------------------------------------
     // Range / Width
     // ----------------------------------------------------------------------------
 
@@ -58,6 +36,42 @@ pub trait VerylWalker {
     // ----------------------------------------------------------------------------
 
     fn r#type(&mut self, input: &Type);
+
+    // ----------------------------------------------------------------------------
+    // Statement
+    // ----------------------------------------------------------------------------
+
+    fn statement(&mut self, input: &Statement);
+
+    fn assignment_statement(&mut self, input: &AssignmentStatement);
+
+    fn if_statement(&mut self, input: &IfStatement);
+
+    // ----------------------------------------------------------------------------
+    // Declaration
+    // ----------------------------------------------------------------------------
+
+    fn variable_declaration(&mut self, input: &VariableDeclaration);
+
+    fn parameter_declaration(&mut self, input: &ParameterDeclaration);
+
+    fn localparam_declaration(&mut self, input: &LocalparamDeclaration);
+
+    fn always_ff_declaration(&mut self, input: &AlwaysFfDeclaration);
+
+    fn always_ff_conditions(&mut self, input: &AlwaysFfConditions);
+
+    fn always_ff_condition(&mut self, input: &AlwaysFfCondition);
+
+    fn always_comb_declaration(&mut self, input: &AlwaysCombDeclaration);
+
+    fn assign_declaration(&mut self, input: &AssignDeclaration);
+
+    fn modport_declaration(&mut self, input: &ModportDeclaration);
+
+    fn modport_list(&mut self, input: &ModportList);
+
+    fn modport_item(&mut self, input: &ModportItem);
 
     // ----------------------------------------------------------------------------
     // WithParameter
@@ -94,28 +108,14 @@ pub trait VerylWalker {
     fn interface_item(&mut self, input: &InterfaceItem);
 
     // ----------------------------------------------------------------------------
-    // Declaration
+    // Description
     // ----------------------------------------------------------------------------
 
-    fn variable_declaration(&mut self, input: &VariableDeclaration);
+    fn description(&mut self, input: &Description);
 
-    fn parameter_declaration(&mut self, input: &ParameterDeclaration);
+    // ----------------------------------------------------------------------------
+    // SourceCode
+    // ----------------------------------------------------------------------------
 
-    fn localparam_declaration(&mut self, input: &LocalparamDeclaration);
-
-    fn always_ff_declaration(&mut self, input: &AlwaysFfDeclaration);
-
-    fn always_ff_conditions(&mut self, input: &AlwaysFfConditions);
-
-    fn always_ff_condition(&mut self, input: &AlwaysFfCondition);
-
-    fn always_comb_declaration(&mut self, input: &AlwaysCombDeclaration);
-
-    fn assign_declaration(&mut self, input: &AssignDeclaration);
-
-    fn modport_declaration(&mut self, input: &ModportDeclaration);
-
-    fn modport_list(&mut self, input: &ModportList);
-
-    fn modport_item(&mut self, input: &ModportItem);
+    fn veryl(&mut self, input: &Veryl);
 }

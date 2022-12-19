@@ -11,9 +11,6 @@ fn main() {
     let out_test = Path::new(&out_dir).join("test.rs");
     let mut out_test = File::create(&out_test).unwrap();
 
-    let mut test_list = String::new();
-    test_list.push_str("const TESTCASES: ");
-
     let mut testcases = Vec::new();
 
     for entry in WalkDir::new("../../testcases") {
@@ -35,6 +32,7 @@ fn main() {
         }
     }
 
+    let _ = writeln!(out_test, "#[allow(dead_code)]");
     let _ = writeln!(out_test, "const TESTCASES: [&str; {}] = [", testcases.len());
     for testcase in testcases {
         let _ = writeln!(out_test, "    \"{}\",", testcase);

@@ -119,20 +119,6 @@ IdentifierToken: /[a-zA-Z_][0-9a-zA-Z_]*/: OwnedToken Comments;
 Identifier     : IdentifierToken: VerylToken;
 
 // ----------------------------------------------------------------------------
-// SourceCode
-// ----------------------------------------------------------------------------
-
-Veryl: Start { Description };
-
-// ----------------------------------------------------------------------------
-// Description
-// ----------------------------------------------------------------------------
-
-Description: ModuleDeclaration
-           | InterfaceDeclaration
-           ;
-
-// ----------------------------------------------------------------------------
 // Number
 // ----------------------------------------------------------------------------
 
@@ -153,14 +139,6 @@ RealNumber: FixedPoint
 // Expression
 // ----------------------------------------------------------------------------
 
-//BinaryOperator: Plus | Minus | Star | Slash | Percent | Amp | Or | Circumflex
-//              | StarStar | AmpAmp | OrOr | TildeCircumflex | CircumflexTilde
-//              | LTLT | GTGT | LTLTLT | GTGTGT
-//              | LT | GT | LTEqu | GTEqu | EquEqu
-//              | BangEqu | EquEquEqu | BangEquEqu | EquEquQuest | BangEquQuest
-//              ;
-//UnaryOperator : Plus | Minus | Bang | Tilde | Amp | Or | Circumflex | TildeAmp | TildeOr | TildeCircumflex | CircumflexTilde;
-
 Expression : Expression1 { ( BinaryOperator | CommonOperator ) Expression1 };
 Expression1: [ ( UnaryOperator | CommonOperator ) ] Factor;
 
@@ -168,18 +146,6 @@ Factor: Number
       | Identifier { Range }
       | LParen Expression RParen
       ;
-
-// ----------------------------------------------------------------------------
-// Statement
-// ----------------------------------------------------------------------------
-
-Statement: AssignmentStatement
-         | IfStatement
-         ;
-
-AssignmentStatement: Identifier Equ Expression Semicolon;
-
-IfStatement: If Expression LBrace Statement RBrace { Else If Expression LBrace Statement RBrace } [ Else LBrace Statement RBrace ];
 
 // ----------------------------------------------------------------------------
 // Range / Width
@@ -199,6 +165,44 @@ BuiltinType: Logic
            ;
 
 Type: ( BuiltinType | Identifier ) { Width };
+
+// ----------------------------------------------------------------------------
+// Statement
+// ----------------------------------------------------------------------------
+
+Statement: AssignmentStatement
+         | IfStatement
+         ;
+
+AssignmentStatement: Identifier Equ Expression Semicolon;
+
+IfStatement: If Expression LBrace Statement RBrace { Else If Expression LBrace Statement RBrace } [ Else LBrace Statement RBrace ];
+
+// ----------------------------------------------------------------------------
+// Declaration
+// ----------------------------------------------------------------------------
+
+VariableDeclaration: Identifier Colon Type Semicolon;
+
+ParameterDeclaration: Parameter Identifier Colon Type Equ Expression Semicolon;
+
+LocalparamDeclaration: Localparam Identifier Colon Type Equ Expression Semicolon;
+
+AlwaysFfDeclaration: AlwaysFf LParen AlwaysFfConditions RParen LBrace { Statement } RBrace;
+
+AlwaysFfConditions: AlwaysFfCondition { Comma AlwaysFfCondition } [ Comma ];
+
+AlwaysFfCondition: ( Posedge | Negedge ) Identifier;
+
+AlwaysCombDeclaration: AlwaysComb LBrace { Statement } RBrace;
+
+AssignDeclaration: Assign Identifier [ Colon Type ] Equ Expression Semicolon;
+
+ModportDeclaration: Modport Identifier LBrace ModportList RBrace;
+
+ModportList: ModportItem { Comma ModportItem } [ Comma ];
+
+ModportItem: Identifier Colon Direction;
 
 // ----------------------------------------------------------------------------
 // WithParameter
@@ -248,27 +252,15 @@ InterfaceItem: VariableDeclaration
              ;
 
 // ----------------------------------------------------------------------------
-// Declaration
+// Description
 // ----------------------------------------------------------------------------
 
-VariableDeclaration: Identifier Colon Type Semicolon;
+Description: ModuleDeclaration
+           | InterfaceDeclaration
+           ;
 
-ParameterDeclaration: Parameter Identifier Colon Type Equ Expression Semicolon;
+// ----------------------------------------------------------------------------
+// SourceCode
+// ----------------------------------------------------------------------------
 
-LocalparamDeclaration: Localparam Identifier Colon Type Equ Expression Semicolon;
-
-AlwaysFfDeclaration: AlwaysFf LParen AlwaysFfConditions RParen LBrace { Statement } RBrace;
-
-AlwaysFfConditions: AlwaysFfCondition { Comma AlwaysFfCondition } [ Comma ];
-
-AlwaysFfCondition: ( Posedge | Negedge ) Identifier;
-
-AlwaysCombDeclaration: AlwaysComb LBrace { Statement } RBrace;
-
-AssignDeclaration: Assign Identifier [ Colon Type ] Equ Expression Semicolon;
-
-ModportDeclaration: Modport Identifier LBrace ModportList RBrace;
-
-ModportList: ModportItem { Comma ModportItem } [ Comma ];
-
-ModportItem: Identifier Colon Direction;
+Veryl: Start { Description };
