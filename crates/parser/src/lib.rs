@@ -1,3 +1,4 @@
+pub mod analyzer;
 pub mod generated;
 pub mod parser;
 pub mod veryl_error;

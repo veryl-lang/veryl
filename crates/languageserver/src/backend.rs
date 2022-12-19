@@ -34,19 +34,21 @@ impl Backend {
         let rope = Rope::from_str(&params.text);
 
         let diag = match Parser::parse(&rope.to_string(), &path) {
-            Ok(x) => {
-                let mut ret = Vec::new();
-                for error in &x.errors {
-                    let error = (*error).clone();
-                    let error: miette::ErrReport = error.into();
-                    ret.append(&mut Backend::to_diag(error, &rope));
-                }
+            Ok(mut x) => {
+                let ret: Vec<_> = x
+                    .errors
+                    .drain(0..)
+                    .map(|x| {
+                        let x: miette::ErrReport = x.into();
+                        Backend::to_diag(x, &rope)
+                    })
+                    .collect();
                 self.parser_map.insert(path.clone(), x);
                 ret
             }
             Err(x) => {
                 self.parser_map.remove(&path);
-                Backend::to_diag(x, &rope)
+                vec![Backend::to_diag(x, &rope)]
             }
         };
         self.client
@@ -56,7 +58,7 @@ impl Backend {
         self.document_map.insert(path, rope);
     }
 
-    fn to_diag(err: miette::ErrReport, rope: &Rope) -> Vec<Diagnostic> {
+    fn to_diag(err: miette::ErrReport, rope: &Rope) -> Diagnostic {
         let miette_diag: &dyn miette::Diagnostic = err.as_ref();
 
         let range = if let Some(mut labels) = miette_diag.labels() {
@@ -92,7 +94,7 @@ impl Backend {
             format!("Semantic Error: {}", err)
         };
 
-        let diag = Diagnostic::new(
+        Diagnostic::new(
             range,
             Some(DiagnosticSeverity::ERROR),
             code,
@@ -100,8 +102,7 @@ impl Backend {
             message,
             None,
             None,
-        );
-        vec![diag]
+        )
     }
 
     fn demangle_unexpected_token(text: &str) -> String {
