@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 parol_runtime = {version = "0.9.0", features = ["auto_generation"]}
 regex         = "1.7.0"
-thiserror     = "1.0.0"
+thiserror     = "1.0"
 
 [build-dependencies]
 parol   = "0.14.0"

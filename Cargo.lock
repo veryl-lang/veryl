@@ -1722,6 +1722,7 @@ dependencies = [
  "miette",
  "parol_runtime",
  "similar",
+ "thiserror",
  "veryl-formatter",
  "veryl-parser",
  "walkdir",

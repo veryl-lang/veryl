@@ -3,7 +3,8 @@ use miette::Result;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-mod format;
+mod cmd_check;
+mod cmd_fmt;
 mod utils;
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -25,6 +26,7 @@ enum Commands {
     Emit(Emit),
 }
 
+/// Format the current package
 #[derive(Args)]
 pub struct Fmt {
     /// Target files
@@ -43,8 +45,12 @@ pub struct Fmt {
     pub verbose: bool,
 }
 
+/// Analyze the current package
 #[derive(Args)]
 pub struct Check {
+    /// Target files
+    pub files: Vec<PathBuf>,
+
     /// No output printed to stdout
     #[arg(long)]
     pub quiet: bool,
@@ -54,6 +60,7 @@ pub struct Check {
     pub verbose: bool,
 }
 
+/// Emit the target codes corresponding to the current package
 #[derive(Args)]
 struct Emit {
     /// Directory for all generated artifacts
@@ -77,8 +84,8 @@ fn main() -> Result<ExitCode> {
     env_logger::init();
     let opt = Opt::parse();
     let ret = match opt.command {
-        Commands::Fmt(x) => format::format(&x)?,
-        Commands::Check(_) => todo!(),
+        Commands::Fmt(x) => cmd_fmt::CmdFmt::new(x).exec()?,
+        Commands::Check(x) => cmd_check::CmdCheck::new(x).exec()?,
         Commands::Emit(_) => todo!(),
     };
     if ret {

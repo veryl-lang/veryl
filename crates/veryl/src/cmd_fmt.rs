@@ -12,65 +12,72 @@ use std::time::Instant;
 use veryl_formatter::formatter::Formatter;
 use veryl_parser::parser::Parser;
 
-pub fn format(opt: &Fmt) -> Result<bool> {
-    let files = if opt.files.is_empty() {
-        utils::gather_files("./")?
-    } else {
-        opt.files.clone()
-    };
-
-    let mut all_pass = true;
-    let now = Instant::now();
-
-    for file in &files {
-        print(
-            &format!("[Info] Processing file: {}", file.to_string_lossy()),
-            opt,
-        );
-
-        let input = fs::read_to_string(file).into_diagnostic().wrap_err("")?;
-        let parser = Parser::parse(&input, file)?;
-        let mut formatter = Formatter::new();
-        formatter.format(&parser.veryl);
-
-        let pass = input.as_str() == formatter.as_str();
-
-        if !pass {
-            if opt.check {
-                print_diff(file, input.as_str(), formatter.as_str());
-                all_pass = false;
-            } else {
-                print(
-                    &format!("[Info] Overwrite file: {}", file.to_string_lossy()),
-                    opt,
-                );
-                let mut file = OpenOptions::new()
-                    .write(true)
-                    .truncate(true)
-                    .open(file)
-                    .into_diagnostic()?;
-                file.write_all(formatter.as_str().as_bytes())
-                    .into_diagnostic()?;
-                file.flush().into_diagnostic()?;
-            }
-        }
-    }
-
-    let elapsed_time = now.elapsed();
-    print(
-        &format!(
-            "[Info] Elapsed time: {} milliseconds.",
-            elapsed_time.as_millis()
-        ),
-        opt,
-    );
-
-    Ok(all_pass)
+pub struct CmdFmt {
+    opt: Fmt,
 }
 
-fn print(msg: &str, opt: &Fmt) {
-    if opt.verbose {
-        println!("{}", msg);
+impl CmdFmt {
+    pub fn new(opt: Fmt) -> Self {
+        Self { opt }
+    }
+
+    pub fn exec(&self) -> Result<bool> {
+        let files = if self.opt.files.is_empty() {
+            utils::gather_files("./")?
+        } else {
+            self.opt.files.clone()
+        };
+
+        let mut all_pass = true;
+        let now = Instant::now();
+
+        for file in &files {
+            self.print(&format!(
+                "[Info] Processing file: {}",
+                file.to_string_lossy()
+            ));
+
+            let input = fs::read_to_string(file).into_diagnostic().wrap_err("")?;
+            let parser = Parser::parse(&input, file)?;
+            let mut formatter = Formatter::new();
+            formatter.format(&parser.veryl);
+
+            let pass = input.as_str() == formatter.as_str();
+
+            if !pass {
+                if self.opt.check {
+                    print_diff(file, input.as_str(), formatter.as_str());
+                    all_pass = false;
+                } else {
+                    self.print(&format!(
+                        "[Info] Overwrite file: {}",
+                        file.to_string_lossy()
+                    ));
+                    let mut file = OpenOptions::new()
+                        .write(true)
+                        .truncate(true)
+                        .open(file)
+                        .into_diagnostic()?;
+                    file.write_all(formatter.as_str().as_bytes())
+                        .into_diagnostic()?;
+                    file.flush().into_diagnostic()?;
+                }
+            }
+        }
+
+        let elapsed_time = now.elapsed();
+        self.print(&format!(
+            "[Info] Elapsed time: {} milliseconds.",
+            elapsed_time.as_millis()
+        ));
+
+        Ok(all_pass)
+    }
+
+    fn print(&self, msg: &str) {
+        if self.opt.verbose {
+            println!("{}", msg);
+        }
     }
 }
 
