@@ -1723,9 +1723,17 @@ dependencies = [
  "parol_runtime",
  "similar",
  "thiserror",
+ "veryl-emitter",
  "veryl-formatter",
  "veryl-parser",
  "walkdir",
+]
+
+[[package]]
+name = "veryl-emitter"
+version = "0.1.0"
+dependencies = [
+ "veryl-parser",
 ]
 
 [[package]]
@@ -1763,6 +1771,7 @@ name = "veryl-tests"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "veryl-emitter",
  "veryl-formatter",
  "veryl-parser",
  "walkdir",

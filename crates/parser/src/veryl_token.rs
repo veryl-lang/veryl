@@ -20,6 +20,21 @@ pub struct VerylToken {
     pub comments: Vec<OwnedToken>,
 }
 
+impl VerylToken {
+    pub fn replace(&self, text: &str) -> Self {
+        let mut location = self.token.token.location.clone();
+        location.length = text.len();
+        let token = parol_runtime::lexer::Token::with(
+            text.to_owned(),
+            self.token.token.token_type,
+            location,
+        );
+        let mut ret = self.clone();
+        ret.token.token = token;
+        ret
+    }
+}
+
 macro_rules! token_with_comments {
     ($x:ident, $y:ident) => {
         impl From<&$x> for VerylToken {

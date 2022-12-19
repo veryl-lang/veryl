@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 mod cmd_check;
+mod cmd_emit;
 mod cmd_fmt;
 mod utils;
 
@@ -62,7 +63,10 @@ pub struct Check {
 
 /// Emit the target codes corresponding to the current package
 #[derive(Args)]
-struct Emit {
+pub struct Emit {
+    /// Target files
+    pub files: Vec<PathBuf>,
+
     /// Directory for all generated artifacts
     #[arg(long)]
     pub target_directory: Option<PathBuf>,
@@ -86,7 +90,7 @@ fn main() -> Result<ExitCode> {
     let ret = match opt.command {
         Commands::Fmt(x) => cmd_fmt::CmdFmt::new(x).exec()?,
         Commands::Check(x) => cmd_check::CmdCheck::new(x).exec()?,
-        Commands::Emit(_) => todo!(),
+        Commands::Emit(x) => cmd_emit::CmdEmit::new(x).exec()?,
     };
     if ret {
         Ok(ExitCode::SUCCESS)

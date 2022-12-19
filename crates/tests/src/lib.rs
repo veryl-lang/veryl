@@ -46,3 +46,26 @@ mod formatter {
 
     include!(concat!(env!("OUT_DIR"), "/test.rs"));
 }
+
+#[cfg(test)]
+mod emitter {
+    use std::fs;
+    use veryl_emitter::emitter::Emitter;
+    use veryl_parser::parser::Parser;
+
+    fn test(name: &str) {
+        let file = format!("../../testcases/vl/{}.vl", name);
+        let input = fs::read_to_string(&file).unwrap();
+
+        let ret = Parser::parse(&input, &file).unwrap();
+        let mut emitter = Emitter::new();
+        emitter.emit(&ret.veryl);
+
+        let file = format!("../../testcases/sv/{}.sv", name);
+        let reference = fs::read_to_string(&file).unwrap();
+
+        assert_eq!(reference, emitter.as_str());
+    }
+
+    include!(concat!(env!("OUT_DIR"), "/test.rs"));
+}
