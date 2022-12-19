@@ -33,8 +33,8 @@ pub const TERMINALS: &[&str; 50] = &[
     /*  8 */ r###"[0-9]+(?:_[0-9]+)*'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*"###,
     /*  9 */ r###"[0-9]+(?:_[0-9]+)*"###,
     /* 10 */ r###"'[01]"###,
-    /* 11 */ r###"\+|-|&|\||\^~|\^|~\^|~&|~\|"###,
-    /* 12 */ r###"\*\*|\*|/|%"###,
+    /* 11 */ r###"\*\*|\*|/|%|<<<|>>>|<<|>>|<=|>=|<|>|===|==\?|!==|!=\?|==|!=|&&|\|\|"###,
+    /* 12 */ r###"\+|-|&|\||\^~|\^|~\^|~&|~\|"###,
     /* 13 */ r###"!|~"###,
     /* 14 */ r###":"###,
     /* 15 */ r###","###,
@@ -86,8 +86,8 @@ pub const TERMINAL_NAMES: &[&str; 50] = &[
     /*  8 */ "LBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStarTickLBracketBodhRBracketLBracket0Minus9aMinusFAMinusFxzXZRBracketPlusLParenQuestColonUnderscoreLBracket0Minus9aMinusFAMinusFxzXZRBracketPlusRParenStar",
     /*  9 */ "LBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStar",
     /* 10 */ "TickLBracket01RBracket",
-    /* 11 */ "PlusOrMinusOrAmpOrOrOrCircumflexTildeOrCircumflexOrTildeCircumflexOrTildeAmpOrTildeOr",
-    /* 12 */ "StarStarOrStarOrSlashOrPercent",
+    /* 11 */ "StarStarOrStarOrSlashOrPercentOrLTLTLTOrGTGTGTOrLTLTOrGTGTOrLTEquOrGTEquOrLTOrGTOrEquEquEquOrEquEquQuestOrBangEquEquOrBangEquQuestOrEquEquOrBangEquOrAmpAmpOrOrOr",
+    /* 12 */ "PlusOrMinusOrAmpOrOrOrCircumflexTildeOrCircumflexOrTildeCircumflexOrTildeAmpOrTildeOr",
     /* 13 */ "BangOrTilde",
     /* 14 */ "Colon",
     /* 15 */ "Comma",
@@ -143,8 +143,8 @@ const SCANNER_0: (&[&str; 5], &[usize; 44]) = (
         8, /* LBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStarTickLBracketBodhRBracketLBracket0Minus9aMinusFAMinusFxzXZRBracketPlusLParenQuestColonUnderscoreLBracket0Minus9aMinusFAMinusFxzXZRBracketPlusRParenStar */
         9, /* LBracket0Minus9RBracketPlusLParenQuestColonUnderscoreLBracket0Minus9RBracketPlusRParenStar */
         10, /* TickLBracket01RBracket */
-        11, /* PlusOrMinusOrAmpOrOrOrCircumflexTildeOrCircumflexOrTildeCircumflexOrTildeAmpOrTildeOr */
-        12, /* StarStarOrStarOrSlashOrPercent */
+        11, /* StarStarOrStarOrSlashOrPercentOrLTLTLTOrGTGTGTOrLTLTOrGTGTOrLTEquOrGTEquOrLTOrGTOrEquEquEquOrEquEquQuestOrBangEquEquOrBangEquQuestOrEquEquOrBangEquOrAmpAmpOrOrOr */
+        12, /* PlusOrMinusOrAmpOrOrOrCircumflexTildeOrCircumflexOrTildeCircumflexOrTildeAmpOrTildeOr */
         13, /* BangOrTilde */
         14, /* Colon */
         15, /* Comma */
@@ -544,7 +544,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 159] = &[
     },
     /* 25 - "BinaryOperatorToken" */
     LookaheadDFA {
-        states: &[Some(17)],
+        states: &[Some(16)],
         transitions: &[],
         k: 0,
     },
@@ -675,7 +675,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 159] = &[
     },
     /* 36 - "CommonOperatorToken" */
     LookaheadDFA {
-        states: &[Some(16)],
+        states: &[Some(17)],
         transitions: &[],
         k: 0,
     },
@@ -752,7 +752,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 159] = &[
             DFATransition(0, 8, 2),
             DFATransition(0, 9, 2),
             DFATransition(0, 10, 2),
-            DFATransition(0, 11, 1),
+            DFATransition(0, 12, 1),
             DFATransition(0, 13, 1),
             DFATransition(0, 20, 2),
             DFATransition(0, 48, 2),
@@ -762,7 +762,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 159] = &[
     /* 48 - "Expression1OptGroup" */
     LookaheadDFA {
         states: &[None, Some(106), Some(107)],
-        transitions: &[DFATransition(0, 11, 2), DFATransition(0, 13, 1)],
+        transitions: &[DFATransition(0, 12, 2), DFATransition(0, 13, 1)],
         k: 1,
     },
     /* 49 - "ExpressionList" */
@@ -783,7 +783,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 159] = &[
     /* 50 - "ExpressionListGroup" */
     LookaheadDFA {
         states: &[None, Some(101), Some(102)],
-        transitions: &[DFATransition(0, 11, 2), DFATransition(0, 12, 1)],
+        transitions: &[DFATransition(0, 11, 1), DFATransition(0, 12, 2)],
         k: 1,
     },
     /* 51 - "F32" */
@@ -964,7 +964,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 159] = &[
             DFATransition(4, 8, 3),
             DFATransition(4, 9, 3),
             DFATransition(4, 10, 3),
-            DFATransition(4, 11, 3),
+            DFATransition(4, 12, 3),
             DFATransition(4, 13, 3),
             DFATransition(4, 20, 3),
             DFATransition(4, 48, 3),
@@ -984,7 +984,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 159] = &[
             DFATransition(6, 8, 23),
             DFATransition(6, 9, 24),
             DFATransition(6, 10, 25),
-            DFATransition(6, 11, 26),
+            DFATransition(6, 12, 26),
             DFATransition(6, 13, 27),
             DFATransition(6, 20, 28),
             DFATransition(6, 48, 29),
@@ -1027,7 +1027,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 159] = &[
             DFATransition(14, 8, 18),
             DFATransition(14, 9, 18),
             DFATransition(14, 10, 18),
-            DFATransition(14, 11, 18),
+            DFATransition(14, 12, 18),
             DFATransition(14, 13, 18),
             DFATransition(14, 20, 18),
             DFATransition(14, 48, 18),
@@ -1046,7 +1046,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 159] = &[
             DFATransition(20, 8, 18),
             DFATransition(20, 9, 18),
             DFATransition(20, 10, 18),
-            DFATransition(20, 11, 18),
+            DFATransition(20, 12, 18),
             DFATransition(20, 13, 18),
             DFATransition(20, 20, 18),
             DFATransition(20, 48, 18),
@@ -1092,7 +1092,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 159] = &[
             DFATransition(28, 8, 18),
             DFATransition(28, 9, 18),
             DFATransition(28, 10, 18),
-            DFATransition(28, 11, 18),
+            DFATransition(28, 12, 18),
             DFATransition(28, 13, 18),
             DFATransition(28, 20, 18),
             DFATransition(28, 48, 18),
@@ -1108,7 +1108,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 159] = &[
             DFATransition(31, 8, 18),
             DFATransition(31, 9, 18),
             DFATransition(31, 10, 18),
-            DFATransition(31, 11, 18),
+            DFATransition(31, 12, 18),
             DFATransition(31, 13, 18),
             DFATransition(31, 20, 18),
             DFATransition(31, 48, 18),
@@ -1944,14 +1944,14 @@ pub const PRODUCTIONS: &[Production; 216] = &[
         lhs: 0,
         production: &[ParseType::N(1)],
     },
-    // 16 - CommonOperatorToken: "\+|-|&|\||\^~|\^|~\^|~&|~\|" Comments;
-    Production {
-        lhs: 36,
-        production: &[ParseType::N(33), ParseType::T(11)],
-    },
-    // 17 - BinaryOperatorToken: "\*\*|\*|/|%" Comments;
+    // 16 - BinaryOperatorToken: "\*\*|\*|/|%|<<<|>>>|<<|>>|<=|>=|<|>|===|==\?|!==|!=\?|==|!=|&&|\|\|" Comments;
     Production {
         lhs: 25,
+        production: &[ParseType::N(33), ParseType::T(11)],
+    },
+    // 17 - CommonOperatorToken: "\+|-|&|\||\^~|\^|~\^|~&|~\|" Comments;
+    Production {
+        lhs: 36,
         production: &[ParseType::N(33), ParseType::T(12)],
     },
     // 18 - UnaryOperatorToken: "!|~" Comments;

@@ -89,13 +89,13 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'CommonOperatorToken'
-    fn common_operator_token(&mut self, _arg: &CommonOperatorToken) -> Result<()> {
+    /// Semantic action for non-terminal 'BinaryOperatorToken'
+    fn binary_operator_token(&mut self, _arg: &BinaryOperatorToken) -> Result<()> {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'BinaryOperatorToken'
-    fn binary_operator_token(&mut self, _arg: &BinaryOperatorToken) -> Result<()> {
+    /// Semantic action for non-terminal 'CommonOperatorToken'
+    fn common_operator_token(&mut self, _arg: &CommonOperatorToken) -> Result<()> {
         Ok(())
     }
 
@@ -1425,7 +1425,8 @@ pub struct BinaryOperator {
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 pub struct BinaryOperatorToken {
-    pub star_star_or_star_or_slash_or_percent: crate::veryl_token::OwnedToken, /* \*\*|\*|/|% */
+    pub star_star_or_star_or_slash_or_percent_or_l_t_l_t_l_t_or_g_t_g_t_g_t_or_l_t_l_t_or_g_t_g_t_or_l_t_equ_or_g_t_equ_or_l_t_or_g_t_or_equ_equ_equ_or_equ_equ_quest_or_bang_equ_equ_or_bang_equ_quest_or_equ_equ_or_bang_equ_or_amp_amp_or_or_or:
+        crate::veryl_token::OwnedToken, /* \*\*|\*|/|%|<<<|>>>|<<|>>|<=|>=|<|>|===|==\?|!==|!=\?|==|!=|&&|\|\| */
     pub comments: Box<Comments>,
 }
 
@@ -3391,6 +3392,36 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 16:
     ///
+    /// BinaryOperatorToken: "\*\*|\*|/|%|<<<|>>>|<<|>>|<=|>=|<|>|===|==\?|!==|!=\?|==|!=|&&|\|\|" : OwnedToken Comments;
+    ///
+    #[parol_runtime::function_name::named]
+    fn binary_operator_token(
+        &mut self,
+        star_star_or_star_or_slash_or_percent_or_l_t_l_t_l_t_or_g_t_g_t_g_t_or_l_t_l_t_or_g_t_g_t_or_l_t_equ_or_g_t_equ_or_l_t_or_g_t_or_equ_equ_equ_or_equ_equ_quest_or_bang_equ_equ_or_bang_equ_quest_or_equ_equ_or_bang_equ_or_amp_amp_or_or_or: &ParseTreeStackEntry<'t>,
+        _comments: &ParseTreeStackEntry<'t>,
+        parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let star_star_or_star_or_slash_or_percent_or_l_t_l_t_l_t_or_g_t_g_t_g_t_or_l_t_l_t_or_g_t_g_t_or_l_t_equ_or_g_t_equ_or_l_t_or_g_t_or_equ_equ_equ_or_equ_equ_quest_or_bang_equ_equ_or_bang_equ_quest_or_equ_equ_or_bang_equ_or_amp_amp_or_or_or = star_star_or_star_or_slash_or_percent_or_l_t_l_t_l_t_or_g_t_g_t_g_t_or_l_t_l_t_or_g_t_g_t_or_l_t_equ_or_g_t_equ_or_l_t_or_g_t_or_equ_equ_equ_or_equ_equ_quest_or_bang_equ_equ_or_bang_equ_quest_or_equ_equ_or_bang_equ_or_amp_amp_or_or_or.token(parse_tree)?.try_into().into_diagnostic()?;
+        let comments = pop_item!(self, comments, Comments, context);
+        let binary_operator_token_built = BinaryOperatorTokenBuilder::default()
+            .star_star_or_star_or_slash_or_percent_or_l_t_l_t_l_t_or_g_t_g_t_g_t_or_l_t_l_t_or_g_t_g_t_or_l_t_equ_or_g_t_equ_or_l_t_or_g_t_or_equ_equ_equ_or_equ_equ_quest_or_bang_equ_equ_or_bang_equ_quest_or_equ_equ_or_bang_equ_or_amp_amp_or_or_or(star_star_or_star_or_slash_or_percent_or_l_t_l_t_l_t_or_g_t_g_t_g_t_or_l_t_l_t_or_g_t_g_t_or_l_t_equ_or_g_t_equ_or_l_t_or_g_t_or_equ_equ_equ_or_equ_equ_quest_or_bang_equ_equ_or_bang_equ_quest_or_equ_equ_or_bang_equ_or_amp_amp_or_or_or)
+            .comments(Box::new(comments))
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar
+            .binary_operator_token(&binary_operator_token_built)?;
+        self.push(
+            ASTType::BinaryOperatorToken(binary_operator_token_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 17:
+    ///
     /// CommonOperatorToken: "\+|-|&|\||\^~|\^|~\^|~&|~\|" : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
@@ -3414,39 +3445,6 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             .common_operator_token(&common_operator_token_built)?;
         self.push(
             ASTType::CommonOperatorToken(common_operator_token_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 17:
-    ///
-    /// BinaryOperatorToken: "\*\*|\*|/|%" : OwnedToken Comments;
-    ///
-    #[parol_runtime::function_name::named]
-    fn binary_operator_token(
-        &mut self,
-        star_star_or_star_or_slash_or_percent: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let star_star_or_star_or_slash_or_percent = star_star_or_star_or_slash_or_percent
-            .token(parse_tree)?
-            .try_into()
-            .into_diagnostic()?;
-        let comments = pop_item!(self, comments, Comments, context);
-        let binary_operator_token_built = BinaryOperatorTokenBuilder::default()
-            .star_star_or_star_or_slash_or_percent(star_star_or_star_or_slash_or_percent)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar
-            .binary_operator_token(&binary_operator_token_built)?;
-        self.push(
-            ASTType::BinaryOperatorToken(binary_operator_token_built),
             context,
         );
         Ok(())
@@ -8515,8 +8513,8 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             13 => self.based(&children[0], parse_tree),
             14 => self.base_less(&children[0], parse_tree),
             15 => self.all_bit(&children[0], parse_tree),
-            16 => self.common_operator_token(&children[0], &children[1], parse_tree),
-            17 => self.binary_operator_token(&children[0], &children[1], parse_tree),
+            16 => self.binary_operator_token(&children[0], &children[1], parse_tree),
+            17 => self.common_operator_token(&children[0], &children[1], parse_tree),
             18 => self.unary_operator_token(&children[0], &children[1], parse_tree),
             19 => self.common_operator(&children[0], parse_tree),
             20 => self.binary_operator(&children[0], parse_tree),

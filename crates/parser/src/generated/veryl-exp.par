@@ -22,8 +22,8 @@
 /*  13 */ Based: BasedToken : VerylToken;
 /*  14 */ BaseLess: BaseLessToken : VerylToken;
 /*  15 */ AllBit: AllBitToken : VerylToken;
-/*  16 */ CommonOperatorToken: "\+|-|&|\||\^~|\^|~\^|~&|~\|" : OwnedToken Comments;
-/*  17 */ BinaryOperatorToken: "\*\*|\*|/|%" : OwnedToken Comments;
+/*  16 */ BinaryOperatorToken: "\*\*|\*|/|%|<<<|>>>|<<|>>|<=|>=|<|>|===|==\?|!==|!=\?|==|!=|&&|\|\|" : OwnedToken Comments;
+/*  17 */ CommonOperatorToken: "\+|-|&|\||\^~|\^|~\^|~&|~\|" : OwnedToken Comments;
 /*  18 */ UnaryOperatorToken: "!|~" : OwnedToken Comments;
 /*  19 */ CommonOperator: CommonOperatorToken : VerylToken;
 /*  20 */ BinaryOperator: BinaryOperatorToken : VerylToken;

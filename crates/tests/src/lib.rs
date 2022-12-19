@@ -4,7 +4,7 @@ mod parser {
     use veryl_parser::parser::Parser;
 
     fn test(name: &str) {
-        let file = format!("../../testcases/{}.vl", name);
+        let file = format!("../../testcases/vl/{}.vl", name);
         let input = fs::read_to_string(&file).unwrap();
         let ret = Parser::parse(&input, &file);
         match ret {
@@ -23,7 +23,7 @@ mod formatter {
     use veryl_parser::parser::Parser;
 
     fn test(name: &str) {
-        let file = format!("../../testcases/{}.vl", name);
+        let file = format!("../../testcases/vl/{}.vl", name);
         let input = fs::read_to_string(&file).unwrap();
         let original = input.clone();
 

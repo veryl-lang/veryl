@@ -32,9 +32,9 @@ BaseLess  : BaseLessToken  : VerylToken;
 AllBit    : AllBitToken    : VerylToken;
 
 // Operator
-CommonOperatorToken: "\+|-|&|\||\^~|\^|~\^|~&|~\|": OwnedToken Comments;
-BinaryOperatorToken: "\*\*|\*|/|%"                : OwnedToken Comments;
-UnaryOperatorToken : "!|~"                        : OwnedToken Comments;
+BinaryOperatorToken: "\*\*|\*|/|%|<<<|>>>|<<|>>|<=|>=|<|>|===|==\?|!==|!=\?|==|!=|&&|\|\|": OwnedToken Comments;
+CommonOperatorToken: "\+|-|&|\||\^~|\^|~\^|~&|~\|"                                        : OwnedToken Comments;
+UnaryOperatorToken : "!|~"                                                                : OwnedToken Comments;
 
 CommonOperator: CommonOperatorToken: VerylToken;
 BinaryOperator: BinaryOperatorToken: VerylToken;
