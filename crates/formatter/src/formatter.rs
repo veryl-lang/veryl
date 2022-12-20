@@ -17,8 +17,8 @@ pub struct Formatter {
 impl Default for Formatter {
     fn default() -> Self {
         Self {
-            string: String::new(),
             indent_width: 4,
+            string: String::new(),
             indent: 0,
             line: 1,
             aligner: Aligner::new(),
@@ -212,6 +212,43 @@ impl VerylWalker for Formatter {
         }
     }
 
+    /// Semantic action for non-terminal 'IfResetStatement'
+    fn if_reset_statement(&mut self, arg: &IfResetStatement) {
+        self.if_reset(&arg.if_reset);
+        self.space(1);
+        self.token_will_push(&arg.l_brace.l_brace_token);
+        self.newline_push();
+        self.statement(&arg.statement);
+        self.newline_pop();
+        self.r_brace(&arg.r_brace);
+        if !arg.if_reset_statement_list.is_empty() {
+            self.space(1);
+        }
+        for x in &arg.if_reset_statement_list {
+            self.r#else(&x.r#else);
+            self.space(1);
+            self.r#if(&x.r#if);
+            self.space(1);
+            self.expression(&x.expression);
+            self.space(1);
+            self.token_will_push(&x.l_brace.l_brace_token);
+            self.newline_push();
+            self.statement(&x.statement);
+            self.newline_pop();
+            self.r_brace(&x.r_brace);
+        }
+        if let Some(ref x) = arg.if_reset_statement_opt {
+            self.space(1);
+            self.r#else(&x.r#else);
+            self.space(1);
+            self.token_will_push(&x.l_brace.l_brace_token);
+            self.newline_push();
+            self.statement(&x.statement);
+            self.newline_pop();
+            self.r_brace(&x.r_brace);
+        }
+    }
+
     /// Semantic action for non-terminal 'VariableDeclaration'
     fn variable_declaration(&mut self, arg: &VariableDeclaration) {
         self.identifier(&arg.identifier);
@@ -256,7 +293,12 @@ impl VerylWalker for Formatter {
         self.always_ff(&arg.always_ff);
         self.space(1);
         self.l_paren(&arg.l_paren);
-        self.always_ff_conditions(&arg.always_ff_conditions);
+        self.always_ff_clock(&arg.always_ff_clock);
+        if let Some(ref x) = arg.always_ff_declaration_opt {
+            self.comma(&x.comma);
+            self.space(1);
+            self.always_ff_reset(&x.always_ff_reset);
+        }
         self.r_paren(&arg.r_paren);
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
@@ -271,26 +313,29 @@ impl VerylWalker for Formatter {
         self.r_brace(&arg.r_brace);
     }
 
-    /// Semantic action for non-terminal 'AlwaysFfConditions'
-    fn always_ff_conditions(&mut self, arg: &AlwaysFfConditions) {
-        self.always_ff_condition(&arg.always_ff_condition);
-        for x in &arg.always_ff_conditions_list {
-            self.comma(&x.comma);
+    /// Semantic action for non-terminal 'AlwaysFfClock'
+    fn always_ff_clock(&mut self, arg: &AlwaysFfClock) {
+        if let Some(ref x) = arg.always_ff_clock_opt {
+            match &*x.always_ff_clock_opt_group {
+                AlwaysFfClockOptGroup::AlwaysFfClockOptGroup0(x) => self.posedge(&x.posedge),
+                AlwaysFfClockOptGroup::AlwaysFfClockOptGroup1(x) => self.negedge(&x.negedge),
+            }
             self.space(1);
-            self.always_ff_condition(&x.always_ff_condition);
         }
-        if let Some(ref x) = arg.always_ff_conditions_opt {
-            self.comma(&x.comma);
-        }
+        self.identifier(&arg.identifier);
     }
 
-    /// Semantic action for non-terminal 'AlwaysFfCondition'
-    fn always_ff_condition(&mut self, arg: &AlwaysFfCondition) {
-        match &*arg.always_ff_condition_group {
-            AlwaysFfConditionGroup::AlwaysFfConditionGroup0(x) => self.posedge(&x.posedge),
-            AlwaysFfConditionGroup::AlwaysFfConditionGroup1(x) => self.negedge(&x.negedge),
-        };
-        self.space(1);
+    /// Semantic action for non-terminal 'AlwaysFfReset'
+    fn always_ff_reset(&mut self, arg: &AlwaysFfReset) {
+        if let Some(ref x) = arg.always_ff_reset_opt {
+            match &*x.always_ff_reset_opt_group {
+                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup0(x) => self.async_low(&x.async_low),
+                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup1(x) => self.async_high(&x.async_high),
+                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup2(x) => self.sync_low(&x.sync_low),
+                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup3(x) => self.sync_high(&x.sync_high),
+            }
+            self.space(1);
+        }
         self.identifier(&arg.identifier);
     }
 

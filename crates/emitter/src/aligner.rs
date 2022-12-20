@@ -282,6 +282,9 @@ impl VerylWalker for Aligner {
     /// Semantic action for non-terminal 'IfStatement'
     fn if_statement(&mut self, _arg: &IfStatement) {}
 
+    /// Semantic action for non-terminal 'IfResetStatement'
+    fn if_reset_statement(&mut self, _arg: &IfResetStatement) {}
+
     /// Semantic action for non-terminal 'ParameterDeclaration'
     fn parameter_declaration(&mut self, arg: &ParameterDeclaration) {
         self.insert(&arg.parameter.parameter_token, 1);

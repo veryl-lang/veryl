@@ -69,12 +69,15 @@ Semicolon : SemicolonToken : VerylToken;
 AlwaysCombToken: 'always_comb': OwnedToken Comments;
 AlwaysFfToken  : 'always_ff'  : OwnedToken Comments;
 AssignToken    : 'assign'     : OwnedToken Comments;
+AsyncHighToken : 'async_high' : OwnedToken Comments;
+AsyncLowToken  : 'async_low'  : OwnedToken Comments;
 BitToken       : 'bit'        : OwnedToken Comments;
 ElseToken      : 'else'       : OwnedToken Comments;
 F32Token       : 'f32'        : OwnedToken Comments;
 F64Token       : 'f64'        : OwnedToken Comments;
 I32Token       : 'i32'        : OwnedToken Comments;
 I64Token       : 'i64'        : OwnedToken Comments;
+IfResetToken   : 'if_reset'   : OwnedToken Comments;
 IfToken        : 'if'         : OwnedToken Comments;
 InoutToken     : 'inout'      : OwnedToken Comments;
 InputToken     : 'input'      : OwnedToken Comments;
@@ -87,18 +90,23 @@ NegedgeToken   : 'negedge'    : OwnedToken Comments;
 OutputToken    : 'output'     : OwnedToken Comments;
 ParameterToken : 'parameter'  : OwnedToken Comments;
 PosedgeToken   : 'posedge'    : OwnedToken Comments;
+SyncHighToken  : 'sync_high'  : OwnedToken Comments;
+SyncLowToken   : 'sync_low'   : OwnedToken Comments;
 U32Token       : 'u32'        : OwnedToken Comments;
 U64Token       : 'u64'        : OwnedToken Comments;
 
 AlwaysComb: AlwaysCombToken: VerylToken;
 AlwaysFf  : AlwaysFfToken  : VerylToken;
 Assign    : AssignToken    : VerylToken;
+AsyncHigh : AsyncHighToken : VerylToken;
+AsyncLow  : AsyncLowToken  : VerylToken;
 Bit       : BitToken       : VerylToken;
 Else      : ElseToken      : VerylToken;
 F32       : F32Token       : VerylToken;
 F64       : F64Token       : VerylToken;
 I32       : I32Token       : VerylToken;
 I64       : I64Token       : VerylToken;
+IfReset   : IfResetToken   : VerylToken;
 If        : IfToken        : VerylToken;
 Inout     : InoutToken     : VerylToken;
 Input     : InputToken     : VerylToken;
@@ -111,6 +119,8 @@ Negedge   : NegedgeToken   : VerylToken;
 Output    : OutputToken    : VerylToken;
 Parameter : ParameterToken : VerylToken;
 Posedge   : PosedgeToken   : VerylToken;
+SyncHigh  : SyncHighToken  : VerylToken;
+SyncLow   : SyncLowToken   : VerylToken;
 U32       : U32Token       : VerylToken;
 U64       : U64Token       : VerylToken;
 
@@ -172,11 +182,14 @@ Type: ( BuiltinType | Identifier ) { Width };
 
 Statement: AssignmentStatement
          | IfStatement
+         | IfResetStatement
          ;
 
 AssignmentStatement: Identifier Equ Expression Semicolon;
 
 IfStatement: If Expression LBrace Statement RBrace { Else If Expression LBrace Statement RBrace } [ Else LBrace Statement RBrace ];
+
+IfResetStatement: IfReset LBrace Statement RBrace { Else If Expression LBrace Statement RBrace } [ Else LBrace Statement RBrace ];
 
 // ----------------------------------------------------------------------------
 // Declaration
@@ -188,11 +201,11 @@ ParameterDeclaration: Parameter Identifier Colon Type Equ Expression Semicolon;
 
 LocalparamDeclaration: Localparam Identifier Colon Type Equ Expression Semicolon;
 
-AlwaysFfDeclaration: AlwaysFf LParen AlwaysFfConditions RParen LBrace { Statement } RBrace;
+AlwaysFfDeclaration: AlwaysFf LParen AlwaysFfClock [ Comma AlwaysFfReset ] RParen LBrace { Statement } RBrace;
 
-AlwaysFfConditions: AlwaysFfCondition { Comma AlwaysFfCondition } [ Comma ];
+AlwaysFfClock: [ Posedge | Negedge ] Identifier;
 
-AlwaysFfCondition: ( Posedge | Negedge ) Identifier;
+AlwaysFfReset: [ AsyncLow | AsyncHigh | SyncLow | SyncHigh ] Identifier;
 
 AlwaysCombDeclaration: AlwaysComb LBrace { Statement } RBrace;
 

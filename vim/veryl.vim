@@ -14,13 +14,14 @@ syn keyword verylStatement module interface function modport
 syn keyword verylStatement parameter localparam
 syn keyword verylStatement enum struct
 syn keyword verylStatement posedge negedge
+syn keyword verylStatement async_high async_low sync_high sync_low
 syn keyword verylStatement always_ff always_comb assign
 syn keyword verylStatement input output inout
 syn keyword verylStatement logic bit
 syn keyword verylStatement u32 u64 i32 i64 f32 f64
 hi link verylStatement Statement
 
-syn keyword verylConditional if else
+syn keyword verylConditional if if_reset else
 hi link verylConditional Conditional
 
 syn match   verylSpecial "[&|~><!)(#@=?:;}{,.\^\-\[\]]"

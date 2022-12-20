@@ -4,8 +4,22 @@ use veryl_parser::veryl_token::VerylToken;
 use veryl_parser::veryl_walker::VerylWalker;
 use veryl_parser::ParolToken;
 
+pub enum ClockType {
+    PosEdge,
+    NegEdge,
+}
+
+pub enum ResetType {
+    AsyncLow,
+    AsyncHigh,
+    SyncLow,
+    SyncHigh,
+}
+
 pub struct Emitter {
     pub indent_width: usize,
+    pub clock_type: ClockType,
+    pub reset_type: ResetType,
     string: String,
     indent: usize,
     line: usize,
@@ -13,19 +27,23 @@ pub struct Emitter {
     last_newline: usize,
     start_token: bool,
     always_ff: bool,
+    reset_signal: Option<String>,
 }
 
 impl Default for Emitter {
     fn default() -> Self {
         Self {
-            string: String::new(),
             indent_width: 4,
+            clock_type: ClockType::PosEdge,
+            reset_type: ResetType::AsyncLow,
+            string: String::new(),
             indent: 0,
             line: 1,
             aligner: Aligner::new(),
             last_newline: 0,
             start_token: false,
             always_ff: false,
+            reset_signal: None,
         }
     }
 }
@@ -174,6 +192,24 @@ impl Emitter {
             }
         }
     }
+
+    fn always_ff_reset_exist_in_sensitivity_list(&mut self, arg: &AlwaysFfReset) -> bool {
+        if let Some(ref x) = arg.always_ff_reset_opt {
+            match &*x.always_ff_reset_opt_group {
+                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup0(_) => true,
+                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup1(_) => true,
+                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup2(_) => false,
+                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup3(_) => false,
+            }
+        } else {
+            match self.reset_type {
+                ResetType::AsyncLow => true,
+                ResetType::AsyncHigh => true,
+                ResetType::SyncLow => false,
+                ResetType::SyncHigh => false,
+            }
+        }
+    }
 }
 
 impl VerylWalker for Emitter {
@@ -267,6 +303,50 @@ impl VerylWalker for Emitter {
         }
     }
 
+    /// Semantic action for non-terminal 'IfResetStatement'
+    fn if_reset_statement(&mut self, arg: &IfResetStatement) {
+        self.token(&arg.if_reset.if_reset_token.replace("if"));
+        self.space(1);
+        self.str("(");
+        let reset_signal = self.reset_signal.clone().unwrap();
+        self.str(&reset_signal);
+        self.str(")");
+        self.space(1);
+        self.token_will_push(&arg.l_brace.l_brace_token.replace("begin"));
+        self.newline_push();
+        self.statement(&arg.statement);
+        self.newline_pop();
+        self.token(&arg.r_brace.r_brace_token.replace("end"));
+        if !arg.if_reset_statement_list.is_empty() {
+            self.space(1);
+        }
+        for x in &arg.if_reset_statement_list {
+            self.r#else(&x.r#else);
+            self.space(1);
+            self.r#if(&x.r#if);
+            self.space(1);
+            self.str("(");
+            self.expression(&x.expression);
+            self.str(")");
+            self.space(1);
+            self.token_will_push(&x.l_brace.l_brace_token.replace("begin"));
+            self.newline_push();
+            self.statement(&x.statement);
+            self.newline_pop();
+            self.token(&x.r_brace.r_brace_token.replace("end"));
+        }
+        if let Some(ref x) = arg.if_reset_statement_opt {
+            self.space(1);
+            self.r#else(&x.r#else);
+            self.space(1);
+            self.token_will_push(&x.l_brace.l_brace_token.replace("begin"));
+            self.newline_push();
+            self.statement(&x.statement);
+            self.newline_pop();
+            self.token(&x.r_brace.r_brace_token.replace("end"));
+        }
+    }
+
     /// Semantic action for non-terminal 'VariableDeclaration'
     fn variable_declaration(&mut self, arg: &VariableDeclaration) {
         self.type_left(&arg.r#type);
@@ -314,7 +394,14 @@ impl VerylWalker for Emitter {
         self.str("@");
         self.space(1);
         self.l_paren(&arg.l_paren);
-        self.always_ff_conditions(&arg.always_ff_conditions);
+        self.always_ff_clock(&arg.always_ff_clock);
+        if let Some(ref x) = arg.always_ff_declaration_opt {
+            if self.always_ff_reset_exist_in_sensitivity_list(&x.always_ff_reset) {
+                self.comma(&x.comma);
+                self.space(1);
+            }
+            self.always_ff_reset(&x.always_ff_reset);
+        }
         self.r_paren(&arg.r_paren);
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token.replace("begin"));
@@ -330,27 +417,67 @@ impl VerylWalker for Emitter {
         self.always_ff = false;
     }
 
-    /// Semantic action for non-terminal 'AlwaysFfConditions'
-    fn always_ff_conditions(&mut self, arg: &AlwaysFfConditions) {
-        self.always_ff_condition(&arg.always_ff_condition);
-        for x in &arg.always_ff_conditions_list {
-            self.comma(&x.comma);
-            self.space(1);
-            self.always_ff_condition(&x.always_ff_condition);
+    /// Semantic action for non-terminal 'AlwaysFfClock'
+    fn always_ff_clock(&mut self, arg: &AlwaysFfClock) {
+        if let Some(ref x) = arg.always_ff_clock_opt {
+            match &*x.always_ff_clock_opt_group {
+                AlwaysFfClockOptGroup::AlwaysFfClockOptGroup0(x) => self.posedge(&x.posedge),
+                AlwaysFfClockOptGroup::AlwaysFfClockOptGroup1(x) => self.negedge(&x.negedge),
+            }
+        } else {
+            match self.clock_type {
+                ClockType::PosEdge => self.str("posedge"),
+                ClockType::NegEdge => self.str("posedge"),
+            }
         }
-        if let Some(ref x) = arg.always_ff_conditions_opt {
-            self.token(&x.comma.comma_token.replace(""));
-        }
-    }
-
-    /// Semantic action for non-terminal 'AlwaysFfCondition'
-    fn always_ff_condition(&mut self, arg: &AlwaysFfCondition) {
-        match &*arg.always_ff_condition_group {
-            AlwaysFfConditionGroup::AlwaysFfConditionGroup0(x) => self.posedge(&x.posedge),
-            AlwaysFfConditionGroup::AlwaysFfConditionGroup1(x) => self.negedge(&x.negedge),
-        };
         self.space(1);
         self.identifier(&arg.identifier);
+    }
+
+    /// Semantic action for non-terminal 'AlwaysFfReset'
+    fn always_ff_reset(&mut self, arg: &AlwaysFfReset) {
+        let prefix = if let Some(ref x) = arg.always_ff_reset_opt {
+            match &*x.always_ff_reset_opt_group {
+                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup0(x) => {
+                    self.token(&x.async_low.async_low_token.replace("negedge"));
+                    "!"
+                }
+                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup1(x) => {
+                    self.token(&x.async_high.async_high_token.replace("posedge"));
+                    ""
+                }
+                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup2(x) => {
+                    self.token(&x.sync_low.sync_low_token.replace(""));
+                    "!"
+                }
+                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup3(x) => {
+                    self.token(&x.sync_high.sync_high_token.replace(""));
+                    ""
+                }
+            }
+        } else {
+            match self.reset_type {
+                ResetType::AsyncLow => {
+                    self.str("negedge");
+                    "!"
+                }
+                ResetType::AsyncHigh => {
+                    self.str("posedge");
+                    ""
+                }
+                ResetType::SyncLow => "!",
+                ResetType::SyncHigh => "",
+            }
+        };
+        if self.always_ff_reset_exist_in_sensitivity_list(&arg) {
+            self.space(1);
+            self.identifier(&arg.identifier);
+        }
+        self.reset_signal = Some(format!(
+            "{}{}",
+            prefix,
+            arg.identifier.identifier_token.token.token.text()
+        ));
     }
 
     /// Semantic action for non-terminal 'AlwaysCombDeclaration'

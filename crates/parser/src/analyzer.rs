@@ -99,4 +99,43 @@ impl<'a> VerylWalker for Analyzer<'a> {
             _ => unreachable!(),
         }
     }
+
+    /// Semantic action for non-terminal 'AlwaysFfDeclaration'
+    fn always_ff_declaration(&mut self, arg: &AlwaysFfDeclaration) {
+        let if_reset_required = if arg.always_ff_declaration_opt.is_some() {
+            if let Some(ref x) = arg.always_ff_declaration_list.first() {
+                match &*x.statement {
+                    Statement::Statement0(_) => true,
+                    Statement::Statement1(_) => true,
+                    Statement::Statement2(_) => false,
+                }
+            } else {
+                true
+            }
+        } else {
+            false
+        };
+
+        if if_reset_required {
+            self.errors.push(VerylError::if_reset_required(
+                &self.text,
+                &arg.always_ff.always_ff_token,
+            ));
+        }
+
+        let mut if_reset_exist = false;
+        for x in &arg.always_ff_declaration_list {
+            match &*x.statement {
+                Statement::Statement2(_) => if_reset_exist = true,
+                _ => (),
+            }
+        }
+
+        if if_reset_exist && arg.always_ff_declaration_opt.is_none() {
+            self.errors.push(VerylError::reset_signal_missing(
+                &self.text,
+                &arg.always_ff.always_ff_token,
+            ));
+        }
+    }
 }

@@ -25,9 +25,34 @@ pub enum VerylError {
         #[label("Error location")]
         error_location: SourceSpan,
     },
+
+    #[diagnostic(code(VerylError::NumberOverflow), help("add if_reset statement"))]
+    #[error("if_reset statement is required for always_ff with reset signal")]
+    IfResetRequired {
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(code(VerylError::NumberOverflow), help("add reset port"))]
+    #[error("reset signal is required for always_ff with if_reset statement")]
+    ResetSignalMissing {
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
 }
 
 impl VerylError {
+    fn named_source(source: &str, token: &VerylToken) -> NamedSource {
+        NamedSource::new(
+            token.token.token.location.file_name.to_string_lossy(),
+            source.to_string(),
+        )
+    }
+
     pub fn invalid_number_character(
         cause: char,
         kind: &str,
@@ -37,10 +62,7 @@ impl VerylError {
         VerylError::InvalidNumberCharacter {
             cause,
             kind: kind.to_string(),
-            input: NamedSource::new(
-                token.token.token.location.file_name.to_string_lossy(),
-                source.to_string(),
-            ),
+            input: VerylError::named_source(source, token),
             error_location: (&token.token.token).into(),
         }
     }
@@ -48,10 +70,21 @@ impl VerylError {
     pub fn number_overflow(width: usize, source: &str, token: &VerylToken) -> Self {
         VerylError::NumberOverflow {
             width,
-            input: NamedSource::new(
-                token.token.token.location.file_name.to_string_lossy(),
-                source.to_string(),
-            ),
+            input: VerylError::named_source(source, token),
+            error_location: (&token.token.token).into(),
+        }
+    }
+
+    pub fn if_reset_required(source: &str, token: &VerylToken) -> Self {
+        VerylError::IfResetRequired {
+            input: VerylError::named_source(source, token),
+            error_location: (&token.token.token).into(),
+        }
+    }
+
+    pub fn reset_signal_missing(source: &str, token: &VerylToken) -> Self {
+        VerylError::ResetSignalMissing {
+            input: VerylError::named_source(source, token),
             error_location: (&token.token.token).into(),
         }
     }

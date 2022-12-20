@@ -120,6 +120,16 @@ pub trait VerylWalker {
         self.veryl_token(&arg.assign_token);
     }
 
+    /// Semantic action for non-terminal 'AsyncHigh'
+    fn async_high(&mut self, arg: &AsyncHigh) {
+        self.veryl_token(&arg.async_high_token);
+    }
+
+    /// Semantic action for non-terminal 'AsyncLow'
+    fn async_low(&mut self, arg: &AsyncLow) {
+        self.veryl_token(&arg.async_low_token);
+    }
+
     /// Semantic action for non-terminal 'Bit'
     fn bit(&mut self, arg: &Bit) {
         self.veryl_token(&arg.bit_token);
@@ -153,6 +163,11 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'If'
     fn r#if(&mut self, arg: &If) {
         self.veryl_token(&arg.if_token);
+    }
+
+    /// Semantic action for non-terminal 'IfReset'
+    fn if_reset(&mut self, arg: &IfReset) {
+        self.veryl_token(&arg.if_reset_token);
     }
 
     /// Semantic action for non-terminal 'Inout'
@@ -208,6 +223,16 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'Posedge'
     fn posedge(&mut self, arg: &Posedge) {
         self.veryl_token(&arg.posedge_token);
+    }
+
+    /// Semantic action for non-terminal 'SyncHigh'
+    fn sync_high(&mut self, arg: &SyncHigh) {
+        self.veryl_token(&arg.sync_high_token);
+    }
+
+    /// Semantic action for non-terminal 'SyncLow'
+    fn sync_low(&mut self, arg: &SyncLow) {
+        self.veryl_token(&arg.sync_low_token);
     }
 
     /// Semantic action for non-terminal 'U32'
@@ -347,6 +372,7 @@ pub trait VerylWalker {
         match arg {
             Statement::Statement0(x) => self.assignment_statement(&x.assignment_statement),
             Statement::Statement1(x) => self.if_statement(&x.if_statement),
+            Statement::Statement2(x) => self.if_reset_statement(&x.if_reset_statement),
         };
     }
 
@@ -374,6 +400,28 @@ pub trait VerylWalker {
             self.r_brace(&x.r_brace);
         }
         if let Some(ref x) = arg.if_statement_opt {
+            self.r#else(&x.r#else);
+            self.l_brace(&x.l_brace);
+            self.statement(&x.statement);
+            self.r_brace(&x.r_brace);
+        }
+    }
+
+    /// Semantic action for non-terminal 'IfResetStatement'
+    fn if_reset_statement(&mut self, arg: &IfResetStatement) {
+        self.if_reset(&arg.if_reset);
+        self.l_brace(&arg.l_brace);
+        self.statement(&arg.statement);
+        self.r_brace(&arg.r_brace);
+        for x in &arg.if_reset_statement_list {
+            self.r#else(&x.r#else);
+            self.r#if(&x.r#if);
+            self.expression(&x.expression);
+            self.l_brace(&x.l_brace);
+            self.statement(&x.statement);
+            self.r_brace(&x.r_brace);
+        }
+        if let Some(ref x) = arg.if_reset_statement_opt {
             self.r#else(&x.r#else);
             self.l_brace(&x.l_brace);
             self.statement(&x.statement);
@@ -415,7 +463,11 @@ pub trait VerylWalker {
     fn always_ff_declaration(&mut self, arg: &AlwaysFfDeclaration) {
         self.always_ff(&arg.always_ff);
         self.l_paren(&arg.l_paren);
-        self.always_ff_conditions(&arg.always_ff_conditions);
+        self.always_ff_clock(&arg.always_ff_clock);
+        if let Some(ref x) = arg.always_ff_declaration_opt {
+            self.comma(&x.comma);
+            self.always_ff_reset(&x.always_ff_reset);
+        }
         self.r_paren(&arg.r_paren);
         self.l_brace(&arg.l_brace);
         for x in &arg.always_ff_declaration_list {
@@ -424,24 +476,27 @@ pub trait VerylWalker {
         self.r_brace(&arg.r_brace);
     }
 
-    /// Semantic action for non-terminal 'AlwaysFfConditions'
-    fn always_ff_conditions(&mut self, arg: &AlwaysFfConditions) {
-        self.always_ff_condition(&arg.always_ff_condition);
-        for x in &arg.always_ff_conditions_list {
-            self.comma(&x.comma);
-            self.always_ff_condition(&x.always_ff_condition);
+    /// Semantic action for non-terminal 'AlwaysFfClock'
+    fn always_ff_clock(&mut self, arg: &AlwaysFfClock) {
+        if let Some(ref x) = arg.always_ff_clock_opt {
+            match &*x.always_ff_clock_opt_group {
+                AlwaysFfClockOptGroup::AlwaysFfClockOptGroup0(x) => self.posedge(&x.posedge),
+                AlwaysFfClockOptGroup::AlwaysFfClockOptGroup1(x) => self.negedge(&x.negedge),
+            }
         }
-        if let Some(ref x) = arg.always_ff_conditions_opt {
-            self.comma(&x.comma);
-        }
+        self.identifier(&arg.identifier);
     }
 
-    /// Semantic action for non-terminal 'AlwaysFfCondition'
-    fn always_ff_condition(&mut self, arg: &AlwaysFfCondition) {
-        match &*arg.always_ff_condition_group {
-            AlwaysFfConditionGroup::AlwaysFfConditionGroup0(x) => self.posedge(&x.posedge),
-            AlwaysFfConditionGroup::AlwaysFfConditionGroup1(x) => self.negedge(&x.negedge),
-        };
+    /// Semantic action for non-terminal 'AlwaysFfReset'
+    fn always_ff_reset(&mut self, arg: &AlwaysFfReset) {
+        if let Some(ref x) = arg.always_ff_reset_opt {
+            match &*x.always_ff_reset_opt_group {
+                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup0(x) => self.async_low(&x.async_low),
+                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup1(x) => self.async_high(&x.async_high),
+                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup2(x) => self.sync_low(&x.sync_low),
+                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup3(x) => self.sync_high(&x.sync_high),
+            }
+        }
         self.identifier(&arg.identifier);
     }
 

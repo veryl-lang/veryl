@@ -23,12 +23,51 @@ module ModuleA #(
     assign aa  = 1;
     assign aaa = 1;
 
-    // always_ff declaration
-    always_ff @ (posedge i_clk, negedge i_rst_n) begin
-        if (a) begin
+    // always_ff declaration with default polarity
+    always_ff @ (posedge i_clk, negedge i_rst) begin
+        if (!i_rst) begin
             a <= b;
         end else if (a) begin
             a <= b[0];
+        end else begin
+            a <= c[5:0];
+        end
+    end
+
+    // always_ff declaration without reset
+    always_ff @ (posedge i_clk) begin
+        if (a) begin
+            a <= b;
+        end else begin
+            a <= c[5:0];
+        end
+    end
+
+    // always_ff declaration with specified polarity
+    always_ff @ (posedge i_clk, posedge i_rst) begin
+        if (i_rst) begin
+            a <= b;
+        end else begin
+            a <= c[5:0];
+        end
+    end
+    always_ff @ (negedge i_clk, negedge i_rst) begin
+        if (!i_rst) begin
+            a <= b;
+        end else begin
+            a <= c[5:0];
+        end
+    end
+    always_ff @ (posedge i_clk) begin
+        if (i_rst) begin
+            a <= b;
+        end else begin
+            a <= c[5:0];
+        end
+    end
+    always_ff @ (negedge i_clk) begin
+        if (!i_rst) begin
+            a <= b;
         end else begin
             a <= c[5:0];
         end
