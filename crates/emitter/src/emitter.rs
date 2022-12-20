@@ -484,7 +484,7 @@ impl VerylWalker for Emitter {
                 ResetType::SyncHigh => "",
             }
         };
-        if self.always_ff_reset_exist_in_sensitivity_list(&arg) {
+        if self.always_ff_reset_exist_in_sensitivity_list(arg) {
             self.space(1);
             self.identifier(&arg.identifier);
         }
@@ -575,7 +575,7 @@ impl VerylWalker for Emitter {
             self.instance_parameter(&x.instance_parameter);
             self.space(1);
         }
-        self.str(&arg.identifier.identifier_token.token.token.text());
+        self.str(arg.identifier.identifier_token.token.token.text());
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token.replace("("));
         self.newline_push();

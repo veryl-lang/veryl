@@ -1,4 +1,3 @@
-
 use miette::{IntoDiagnostic, Result};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;

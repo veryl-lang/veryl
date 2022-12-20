@@ -15,7 +15,7 @@ pub struct Parser {
 impl Parser {
     pub fn parse<T: AsRef<Path>>(input: &str, file: &T) -> Result<Self> {
         let mut grammar = VerylGrammar::new();
-        parse(&input, file, &mut grammar).wrap_err(format!(
+        parse(input, file, &mut grammar).wrap_err(format!(
             "Failed parsing file {}",
             file.as_ref().to_string_lossy()
         ))?;

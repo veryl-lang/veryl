@@ -45,21 +45,21 @@ impl<'a> VerylWalker for Analyzer<'a> {
 
         match base {
             "b" => {
-                if let Some(x) = number.chars().filter(|x| !BINARY_CHARS.contains(&x)).next() {
+                if let Some(x) = number.chars().find(|x| !BINARY_CHARS.contains(x)) {
                     self.errors.push(VerylError::invalid_number_character(
-                        x, "binary", &self.text, token,
+                        x, "binary", self.text, token,
                     ));
                 }
                 let actual_width = number.chars().count();
                 if actual_width > width {
                     self.errors
-                        .push(VerylError::number_overflow(width, &self.text, token));
+                        .push(VerylError::number_overflow(width, self.text, token));
                 }
             }
             "o" => {
-                if let Some(x) = number.chars().filter(|x| !OCTAL_CHARS.contains(&x)).next() {
+                if let Some(x) = number.chars().find(|x| !OCTAL_CHARS.contains(x)) {
                     self.errors.push(VerylError::invalid_number_character(
-                        x, "octal", &self.text, token,
+                        x, "octal", self.text, token,
                     ));
                 }
                 let mut actual_width = number.chars().count() * 3;
@@ -71,17 +71,13 @@ impl<'a> VerylWalker for Analyzer<'a> {
                 }
                 if actual_width > width {
                     self.errors
-                        .push(VerylError::number_overflow(width, &self.text, token));
+                        .push(VerylError::number_overflow(width, self.text, token));
                 }
             }
             "d" => {
-                if let Some(x) = number
-                    .chars()
-                    .filter(|x| !DECIMAL_CHARS.contains(&x))
-                    .next()
-                {
+                if let Some(x) = number.chars().find(|x| !DECIMAL_CHARS.contains(x)) {
                     self.errors.push(VerylError::invalid_number_character(
-                        x, "decimal", &self.text, token,
+                        x, "decimal", self.text, token,
                     ));
                 }
             }
@@ -99,7 +95,7 @@ impl<'a> VerylWalker for Analyzer<'a> {
                 }
                 if actual_width > width {
                     self.errors
-                        .push(VerylError::number_overflow(width, &self.text, token));
+                        .push(VerylError::number_overflow(width, self.text, token));
                 }
             }
             _ => unreachable!(),
@@ -111,7 +107,7 @@ impl<'a> VerylWalker for Analyzer<'a> {
         if self.in_always_comb || self.in_function {
             self.errors.push(VerylError::invalid_statement(
                 "if_reset",
-                &self.text,
+                self.text,
                 &arg.if_reset.if_reset_token,
             ));
         }
@@ -130,7 +126,7 @@ impl<'a> VerylWalker for Analyzer<'a> {
         if self.in_always_ff || self.in_always_comb {
             self.errors.push(VerylError::invalid_statement(
                 "return",
-                &self.text,
+                self.text,
                 &arg.r#return.return_token,
             ));
         }
@@ -142,11 +138,8 @@ impl<'a> VerylWalker for Analyzer<'a> {
         // TODO check if_reset without first
         // Chcek first if_reset when reset signel exists
         let if_reset_required = if arg.always_ff_declaration_opt.is_some() {
-            if let Some(ref x) = arg.always_ff_declaration_list.first() {
-                match &*x.statement {
-                    Statement::Statement2(_) => false,
-                    _ => true,
-                }
+            if let Some(x) = arg.always_ff_declaration_list.first() {
+                !matches!(&*x.statement, Statement::Statement2(_))
             } else {
                 true
             }
@@ -155,7 +148,7 @@ impl<'a> VerylWalker for Analyzer<'a> {
         };
         if if_reset_required {
             self.errors.push(VerylError::if_reset_required(
-                &self.text,
+                self.text,
                 &arg.always_ff.always_ff_token,
             ));
         }
@@ -163,14 +156,13 @@ impl<'a> VerylWalker for Analyzer<'a> {
         // Chcek reset signal when if_reset exists
         let mut if_reset_exist = false;
         for x in &arg.always_ff_declaration_list {
-            match &*x.statement {
-                Statement::Statement2(_) => if_reset_exist = true,
-                _ => (),
+            if let Statement::Statement2(_) = &*x.statement {
+                if_reset_exist = true;
             }
         }
         if if_reset_exist && arg.always_ff_declaration_opt.is_none() {
             self.errors.push(VerylError::reset_signal_missing(
-                &self.text,
+                self.text,
                 &arg.always_ff.always_ff_token,
             ));
         }
@@ -197,18 +189,15 @@ impl<'a> VerylWalker for Analyzer<'a> {
 
     /// Semantic action for non-terminal 'Direction'
     fn direction(&mut self, arg: &Direction) {
-        match arg {
-            Direction::Direction3(x) => {
-                if !self.in_function {
-                    self.errors.push(VerylError::invalid_direction(
-                        "ref",
-                        &self.text,
-                        &x.r#ref.ref_token,
-                    ));
-                }
+        if let Direction::Direction3(x) = arg {
+            if !self.in_function {
+                self.errors.push(VerylError::invalid_direction(
+                    "ref",
+                    self.text,
+                    &x.r#ref.ref_token,
+                ));
             }
-            _ => (),
-        };
+        }
     }
 
     /// Semantic action for non-terminal 'FunctionDeclaration'

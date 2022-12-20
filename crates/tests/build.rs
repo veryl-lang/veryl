@@ -9,7 +9,7 @@ fn main() {
 
     let out_dir = env::var("OUT_DIR").unwrap();
     let out_test = Path::new(&out_dir).join("test.rs");
-    let mut out_test = File::create(&out_test).unwrap();
+    let mut out_test = File::create(out_test).unwrap();
 
     let mut testcases = Vec::new();
 
