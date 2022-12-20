@@ -25,8 +25,8 @@ pub struct Emitter {
     line: usize,
     aligner: Aligner,
     last_newline: usize,
-    start_token: bool,
-    always_ff: bool,
+    in_start_token: bool,
+    in_always_ff: bool,
     reset_signal: Option<String>,
 }
 
@@ -41,8 +41,8 @@ impl Default for Emitter {
             line: 1,
             aligner: Aligner::new(),
             last_newline: 0,
-            start_token: false,
-            always_ff: false,
+            in_start_token: false,
+            in_always_ff: false,
             reset_signal: None,
         }
     }
@@ -127,7 +127,7 @@ impl Emitter {
                 self.indent += 1;
             }
             for x in &x.comments {
-                if x.token.location.line == self.line && !self.start_token {
+                if x.token.location.line == self.line && !self.in_start_token {
                     self.space(1);
                 }
                 for _ in 0..x.token.location.line - (self.line + self.last_newline) {
@@ -258,7 +258,7 @@ impl VerylWalker for Emitter {
     fn assignment_statement(&mut self, arg: &AssignmentStatement) {
         self.identifier(&arg.identifier);
         self.space(1);
-        if self.always_ff {
+        if self.in_always_ff {
             self.str("<");
         }
         self.equ(&arg.equ);
@@ -403,7 +403,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'AlwaysFfDeclaration'
     fn always_ff_declaration(&mut self, arg: &AlwaysFfDeclaration) {
-        self.always_ff = true;
+        self.in_always_ff = true;
         self.always_ff(&arg.always_ff);
         self.space(1);
         self.str("@");
@@ -429,7 +429,7 @@ impl VerylWalker for Emitter {
         }
         self.newline_pop();
         self.token(&arg.r_brace.r_brace_token.replace("end"));
-        self.always_ff = false;
+        self.in_always_ff = false;
     }
 
     /// Semantic action for non-terminal 'AlwaysFfClock'
@@ -828,9 +828,9 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Veryl'
     fn veryl(&mut self, arg: &Veryl) {
-        self.start_token = true;
+        self.in_start_token = true;
         self.start(&arg.start);
-        self.start_token = false;
+        self.in_start_token = false;
         if !arg.start.start_token.comments.is_empty() {
             self.newline();
         }

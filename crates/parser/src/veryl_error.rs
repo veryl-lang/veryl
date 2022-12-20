@@ -43,6 +43,26 @@ pub enum VerylError {
         #[label("Error location")]
         error_location: SourceSpan,
     },
+
+    #[diagnostic(code(VerylError::NumberOverflow), help("remove {kind} statement"))]
+    #[error("{kind} statement can't be placed at here")]
+    InvalidStatement {
+        kind: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(code(VerylError::NumberOverflow), help("remove {kind} direction"))]
+    #[error("{kind} direction can't be placed at here")]
+    InvalidDirection {
+        kind: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
 }
 
 impl VerylError {
@@ -84,6 +104,22 @@ impl VerylError {
 
     pub fn reset_signal_missing(source: &str, token: &VerylToken) -> Self {
         VerylError::ResetSignalMissing {
+            input: VerylError::named_source(source, token),
+            error_location: (&token.token.token).into(),
+        }
+    }
+
+    pub fn invalid_statement(kind: &str, source: &str, token: &VerylToken) -> Self {
+        VerylError::InvalidStatement {
+            kind: kind.to_string(),
+            input: VerylError::named_source(source, token),
+            error_location: (&token.token.token).into(),
+        }
+    }
+
+    pub fn invalid_direction(kind: &str, source: &str, token: &VerylToken) -> Self {
+        VerylError::InvalidDirection {
+            kind: kind.to_string(),
             input: VerylError::named_source(source, token),
             error_location: (&token.token.token).into(),
         }

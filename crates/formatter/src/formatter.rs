@@ -11,7 +11,7 @@ pub struct Formatter {
     line: usize,
     aligner: Aligner,
     last_newline: usize,
-    start_token: bool,
+    in_start_token: bool,
 }
 
 impl Default for Formatter {
@@ -23,7 +23,7 @@ impl Default for Formatter {
             line: 1,
             aligner: Aligner::new(),
             last_newline: 0,
-            start_token: false,
+            in_start_token: false,
         }
     }
 }
@@ -105,7 +105,7 @@ impl Formatter {
             self.indent += 1;
         }
         for x in &x.comments {
-            if x.token.location.line == self.line && !self.start_token {
+            if x.token.location.line == self.line && !self.in_start_token {
                 self.space(1);
             }
             for _ in 0..x.token.location.line - (self.line + self.last_newline) {
@@ -666,9 +666,9 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'Veryl'
     fn veryl(&mut self, arg: &Veryl) {
-        self.start_token = true;
+        self.in_start_token = true;
         self.start(&arg.start);
-        self.start_token = false;
+        self.in_start_token = false;
         if !arg.start.start_token.comments.is_empty() {
             self.newline();
         }

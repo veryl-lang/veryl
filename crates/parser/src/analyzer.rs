@@ -3,8 +3,11 @@ use crate::veryl_grammar_trait::*;
 use crate::veryl_walker::VerylWalker;
 
 pub struct Analyzer<'a> {
-    text: &'a str,
     pub errors: Vec<VerylError>,
+    text: &'a str,
+    in_always_ff: bool,
+    in_always_comb: bool,
+    in_function: bool,
 }
 
 const BINARY_CHARS: [char; 6] = ['0', '1', 'x', 'z', 'X', 'Z'];
@@ -14,8 +17,11 @@ const DECIMAL_CHARS: [char; 10] = ['0', '1', '2', '3', '4', '5', '6', '7', '8', 
 impl<'a> Analyzer<'a> {
     pub fn new(text: &'a str) -> Self {
         Analyzer {
-            text,
             errors: Vec::new(),
+            text,
+            in_always_ff: false,
+            in_always_comb: false,
+            in_function: false,
         }
     }
 
@@ -100,15 +106,46 @@ impl<'a> VerylWalker for Analyzer<'a> {
         }
     }
 
+    /// Semantic action for non-terminal 'IfResetStatement'
+    fn if_reset_statement(&mut self, arg: &IfResetStatement) {
+        if self.in_always_comb || self.in_function {
+            self.errors.push(VerylError::invalid_statement(
+                "if_reset",
+                &self.text,
+                &arg.if_reset.if_reset_token,
+            ));
+        }
+        self.statement(&arg.statement);
+        for x in &arg.if_reset_statement_list {
+            self.expression(&x.expression);
+            self.statement(&x.statement);
+        }
+        if let Some(ref x) = arg.if_reset_statement_opt {
+            self.statement(&x.statement);
+        }
+    }
+
+    /// Semantic action for non-terminal 'ReturnStatement'
+    fn return_statement(&mut self, arg: &ReturnStatement) {
+        if self.in_always_ff || self.in_always_comb {
+            self.errors.push(VerylError::invalid_statement(
+                "return",
+                &self.text,
+                &arg.r#return.return_token,
+            ));
+        }
+        self.expression(&arg.expression);
+    }
+
     /// Semantic action for non-terminal 'AlwaysFfDeclaration'
     fn always_ff_declaration(&mut self, arg: &AlwaysFfDeclaration) {
+        // TODO check if_reset without first
+        // Chcek first if_reset when reset signel exists
         let if_reset_required = if arg.always_ff_declaration_opt.is_some() {
             if let Some(ref x) = arg.always_ff_declaration_list.first() {
                 match &*x.statement {
-                    Statement::Statement0(_) => true,
-                    Statement::Statement1(_) => true,
                     Statement::Statement2(_) => false,
-                    Statement::Statement3(_) => true,
+                    _ => true,
                 }
             } else {
                 true
@@ -116,7 +153,6 @@ impl<'a> VerylWalker for Analyzer<'a> {
         } else {
             false
         };
-
         if if_reset_required {
             self.errors.push(VerylError::if_reset_required(
                 &self.text,
@@ -124,6 +160,7 @@ impl<'a> VerylWalker for Analyzer<'a> {
             ));
         }
 
+        // Chcek reset signal when if_reset exists
         let mut if_reset_exist = false;
         for x in &arg.always_ff_declaration_list {
             match &*x.statement {
@@ -131,12 +168,61 @@ impl<'a> VerylWalker for Analyzer<'a> {
                 _ => (),
             }
         }
-
         if if_reset_exist && arg.always_ff_declaration_opt.is_none() {
             self.errors.push(VerylError::reset_signal_missing(
                 &self.text,
                 &arg.always_ff.always_ff_token,
             ));
         }
+
+        self.in_always_ff = true;
+        self.always_ff_clock(&arg.always_ff_clock);
+        if let Some(ref x) = arg.always_ff_declaration_opt {
+            self.always_ff_reset(&x.always_ff_reset);
+        }
+        for x in &arg.always_ff_declaration_list {
+            self.statement(&x.statement);
+        }
+        self.in_always_ff = false;
+    }
+
+    /// Semantic action for non-terminal 'AlwaysCombDeclaration'
+    fn always_comb_declaration(&mut self, arg: &AlwaysCombDeclaration) {
+        self.in_always_comb = true;
+        for x in &arg.always_comb_declaration_list {
+            self.statement(&x.statement);
+        }
+        self.in_always_comb = false;
+    }
+
+    /// Semantic action for non-terminal 'Direction'
+    fn direction(&mut self, arg: &Direction) {
+        match arg {
+            Direction::Direction3(x) => {
+                if !self.in_function {
+                    self.errors.push(VerylError::invalid_direction(
+                        "ref",
+                        &self.text,
+                        &x.r#ref.ref_token,
+                    ));
+                }
+            }
+            _ => (),
+        };
+    }
+
+    /// Semantic action for non-terminal 'FunctionDeclaration'
+    fn function_declaration(&mut self, arg: &FunctionDeclaration) {
+        self.in_function = true;
+        if let Some(ref x) = arg.function_declaration_opt {
+            self.with_parameter(&x.with_parameter);
+        }
+        if let Some(ref x) = arg.function_declaration_opt0 {
+            self.port_declaration(&x.port_declaration);
+        }
+        for x in &arg.function_declaration_list {
+            self.function_item(&x.function_item);
+        }
+        self.in_function = false;
     }
 }
