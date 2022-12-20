@@ -1007,7 +1007,7 @@ dependencies = [
  "miette",
  "owo-colors",
  "parol-macros",
- "parol_runtime",
+ "parol_runtime 0.9.0",
  "rand",
  "rand_regex",
  "regex",
@@ -1035,6 +1035,24 @@ dependencies = [
  "lazy_static",
  "log",
  "miette",
+ "parol-macros",
+ "regex",
+ "thiserror",
+]
+
+[[package]]
+name = "parol_runtime"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58f98d3a4f2851f791fe9221808f0f0bc3a62d286042055e577dac22619a3d8a"
+dependencies = [
+ "derive_builder",
+ "function_name",
+ "id_tree",
+ "id_tree_layout",
+ "log",
+ "miette",
+ "once_cell",
  "parol-macros",
  "regex",
  "thiserror",
@@ -1782,7 +1800,7 @@ name = "veryl-parser"
 version = "0.1.0"
 dependencies = [
  "parol",
- "parol_runtime",
+ "parol_runtime 0.10.0",
  "regex",
  "thiserror",
  "walkdir",
