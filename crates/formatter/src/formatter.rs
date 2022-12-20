@@ -249,6 +249,14 @@ impl VerylWalker for Formatter {
         }
     }
 
+    /// Semantic action for non-terminal 'ReturnStatement'
+    fn return_statement(&mut self, arg: &ReturnStatement) {
+        self.r#return(&arg.r#return);
+        self.space(1);
+        self.expression(&arg.expression);
+        self.semicolon(&arg.semicolon);
+    }
+
     /// Semantic action for non-terminal 'VariableDeclaration'
     fn variable_declaration(&mut self, arg: &VariableDeclaration) {
         self.identifier(&arg.identifier);
@@ -576,6 +584,36 @@ impl VerylWalker for Formatter {
         self.direction(&arg.direction);
         self.space(1);
         self.r#type(&arg.r#type);
+    }
+
+    /// Semantic action for non-terminal 'FunctionDeclaration'
+    fn function_declaration(&mut self, arg: &FunctionDeclaration) {
+        self.function(&arg.function);
+        self.space(1);
+        self.identifier(&arg.identifier);
+        self.space(1);
+        if let Some(ref x) = arg.function_declaration_opt {
+            self.with_parameter(&x.with_parameter);
+            self.space(1);
+        }
+        if let Some(ref x) = arg.function_declaration_opt0 {
+            self.port_declaration(&x.port_declaration);
+            self.space(1);
+        }
+        self.minus_g_t(&arg.minus_g_t);
+        self.space(1);
+        self.r#type(&arg.r#type);
+        self.space(1);
+        self.token_will_push(&arg.l_brace.l_brace_token);
+        self.newline_push();
+        for (i, x) in arg.function_declaration_list.iter().enumerate() {
+            if i != 0 {
+                self.newline();
+            }
+            self.function_item(&x.function_item);
+        }
+        self.newline_pop();
+        self.r_brace(&arg.r_brace);
     }
 
     /// Semantic action for non-terminal 'ModuleDeclaration'

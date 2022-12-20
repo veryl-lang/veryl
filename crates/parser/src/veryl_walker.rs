@@ -35,22 +35,7 @@ pub trait VerylWalker {
         self.veryl_token(&arg.all_bit_token);
     }
 
-    /// Semantic action for non-terminal 'CommonOperator'
-    fn common_operator(&mut self, arg: &CommonOperator) {
-        self.veryl_token(&arg.common_operator_token);
-    }
-
-    /// Semantic action for non-terminal 'BinaryOperator'
-    fn binary_operator(&mut self, arg: &BinaryOperator) {
-        self.veryl_token(&arg.binary_operator_token);
-    }
-
-    /// Semantic action for non-terminal 'UnaryOperator'
-    fn unary_operator(&mut self, arg: &UnaryOperator) {
-        self.veryl_token(&arg.unary_operator_token);
-    }
-
-    /// Semantic action for non-terminal 'ColonColonToken'
+    /// Semantic action for non-terminal 'ColonColon'
     fn colon_colon(&mut self, arg: &ColonColon) {
         self.veryl_token(&arg.colon_colon_token);
     }
@@ -90,6 +75,11 @@ pub trait VerylWalker {
         self.veryl_token(&arg.l_paren_token);
     }
 
+    /// Semantic action for non-terminal 'MinusGT'
+    fn minus_g_t(&mut self, arg: &MinusGT) {
+        self.veryl_token(&arg.minus_g_t_token);
+    }
+
     /// Semantic action for non-terminal 'RBrace'
     fn r_brace(&mut self, arg: &RBrace) {
         self.veryl_token(&arg.r_brace_token);
@@ -108,6 +98,21 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'Semicolon'
     fn semicolon(&mut self, arg: &Semicolon) {
         self.veryl_token(&arg.semicolon_token);
+    }
+
+    /// Semantic action for non-terminal 'CommonOperator'
+    fn common_operator(&mut self, arg: &CommonOperator) {
+        self.veryl_token(&arg.common_operator_token);
+    }
+
+    /// Semantic action for non-terminal 'BinaryOperator'
+    fn binary_operator(&mut self, arg: &BinaryOperator) {
+        self.veryl_token(&arg.binary_operator_token);
+    }
+
+    /// Semantic action for non-terminal 'UnaryOperator'
+    fn unary_operator(&mut self, arg: &UnaryOperator) {
+        self.veryl_token(&arg.unary_operator_token);
     }
 
     /// Semantic action for non-terminal 'AlwaysComb'
@@ -153,6 +158,11 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'F64'
     fn f64(&mut self, arg: &F64) {
         self.veryl_token(&arg.f64_token);
+    }
+
+    /// Semantic action for non-terminal 'Function'
+    fn function(&mut self, arg: &Function) {
+        self.veryl_token(&arg.function_token);
     }
 
     /// Semantic action for non-terminal 'I32'
@@ -228,6 +238,16 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'Posedge'
     fn posedge(&mut self, arg: &Posedge) {
         self.veryl_token(&arg.posedge_token);
+    }
+
+    /// Semantic action for non-terminal 'Ref'
+    fn r#ref(&mut self, arg: &Ref) {
+        self.veryl_token(&arg.ref_token);
+    }
+
+    /// Semantic action for non-terminal 'Return'
+    fn r#return(&mut self, arg: &Return) {
+        self.veryl_token(&arg.return_token);
     }
 
     /// Semantic action for non-terminal 'SyncHigh'
@@ -378,6 +398,7 @@ pub trait VerylWalker {
             Statement::Statement0(x) => self.assignment_statement(&x.assignment_statement),
             Statement::Statement1(x) => self.if_statement(&x.if_statement),
             Statement::Statement2(x) => self.if_reset_statement(&x.if_reset_statement),
+            Statement::Statement3(x) => self.return_statement(&x.return_statement),
         };
     }
 
@@ -432,6 +453,13 @@ pub trait VerylWalker {
             self.statement(&x.statement);
             self.r_brace(&x.r_brace);
         }
+    }
+
+    /// Semantic action for non-terminal 'ReturnStatement'
+    fn return_statement(&mut self, arg: &ReturnStatement) {
+        self.r#return(&arg.r#return);
+        self.expression(&arg.expression);
+        self.semicolon(&arg.semicolon);
     }
 
     /// Semantic action for non-terminal 'VariableDeclaration'
@@ -693,6 +721,34 @@ pub trait VerylWalker {
             Direction::Direction0(x) => self.input(&x.input),
             Direction::Direction1(x) => self.output(&x.output),
             Direction::Direction2(x) => self.inout(&x.inout),
+            Direction::Direction3(x) => self.r#ref(&x.r#ref),
+        };
+    }
+
+    /// Semantic action for non-terminal 'FunctionDeclaration'
+    fn function_declaration(&mut self, arg: &FunctionDeclaration) {
+        self.function(&arg.function);
+        self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.function_declaration_opt {
+            self.with_parameter(&x.with_parameter);
+        }
+        if let Some(ref x) = arg.function_declaration_opt0 {
+            self.port_declaration(&x.port_declaration);
+        }
+        self.minus_g_t(&arg.minus_g_t);
+        self.r#type(&arg.r#type);
+        self.l_brace(&arg.l_brace);
+        for x in &arg.function_declaration_list {
+            self.function_item(&x.function_item);
+        }
+        self.r_brace(&arg.r_brace);
+    }
+
+    /// Semantic action for non-terminal 'FunctionItem'
+    fn function_item(&mut self, arg: &FunctionItem) {
+        match arg {
+            FunctionItem::FunctionItem0(x) => self.variable_declaration(&x.variable_declaration),
+            FunctionItem::FunctionItem1(x) => self.statement(&x.statement),
         };
     }
 
@@ -723,6 +779,7 @@ pub trait VerylWalker {
             ModuleItem::ModuleItem4(x) => self.always_comb_declaration(&x.always_comb_declaration),
             ModuleItem::ModuleItem5(x) => self.assign_declaration(&x.assign_declaration),
             ModuleItem::ModuleItem6(x) => self.instantiation(&x.instantiation),
+            ModuleItem::ModuleItem7(x) => self.function_declaration(&x.function_declaration),
         };
     }
 

@@ -82,7 +82,6 @@ module ModuleA #(
         a   = 10;
         aa  = 10'b0;
         aaa = 10'b01z;
-
         a  = 10 + 10;
         aa = 10 + 16'hffff * (3 / 4);
     end

@@ -67,7 +67,10 @@ impl Emitter {
     }
 
     fn unindent(&mut self) {
-        if self.string.ends_with(' ') {
+        if self
+            .string
+            .ends_with(&" ".repeat(self.indent * self.indent_width))
+        {
             self.string
                 .truncate(self.string.len() - self.indent * self.indent_width);
         }
@@ -97,10 +100,7 @@ impl Emitter {
         self.str(&" ".repeat(repeat));
     }
 
-    fn parol_token(&mut self, x: &ParolToken, adjust_line: bool) {
-        if adjust_line && x.location.line - self.line > 1 {
-            self.newline();
-        }
+    fn parol_token(&mut self, x: &ParolToken) {
         let text = x.text();
         let text = if text.ends_with('\n') {
             text.trim_end()
@@ -113,7 +113,7 @@ impl Emitter {
     }
 
     fn process_token(&mut self, x: &VerylToken, will_push: bool, duplicated: Option<usize>) {
-        self.parol_token(&x.token.token, true);
+        self.parol_token(&x.token.token);
 
         let mut loc: Location = (&x.token.token.location).into();
         loc.duplicated = duplicated;
@@ -133,7 +133,7 @@ impl Emitter {
                 for _ in 0..x.token.location.line - (self.line + self.last_newline) {
                     self.newline();
                 }
-                self.parol_token(&x.token, false);
+                self.parol_token(&x.token);
             }
             if will_push {
                 self.indent -= 1;
@@ -352,6 +352,14 @@ impl VerylWalker for Emitter {
             self.newline_pop();
             self.token(&x.r_brace.r_brace_token.replace("end"));
         }
+    }
+
+    /// Semantic action for non-terminal 'ReturnStatement'
+    fn return_statement(&mut self, arg: &ReturnStatement) {
+        self.r#return(&arg.r#return);
+        self.space(1);
+        self.expression(&arg.expression);
+        self.semicolon(&arg.semicolon);
     }
 
     /// Semantic action for non-terminal 'VariableDeclaration'
@@ -727,6 +735,47 @@ impl VerylWalker for Emitter {
         self.space(1);
         self.identifier(&arg.identifier);
         self.r#type_right(&arg.r#type);
+    }
+
+    /// Semantic action for non-terminal 'FunctionDeclaration'
+    fn function_declaration(&mut self, arg: &FunctionDeclaration) {
+        if let Some(ref x) = arg.function_declaration_opt {
+            self.str("module");
+            self.space(1);
+            self.identifier(&arg.identifier);
+            self.space(1);
+            self.with_parameter(&x.with_parameter);
+            self.str(";");
+            self.newline_push();
+        }
+        self.function(&arg.function);
+        self.space(1);
+        self.str("automatic");
+        self.space(1);
+        self.type_left(&arg.r#type);
+        self.type_right(&arg.r#type);
+        self.space(1);
+        self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.function_declaration_opt0 {
+            self.port_declaration(&x.port_declaration);
+            self.space(1);
+        }
+        self.token(&arg.minus_g_t.minus_g_t_token.replace(""));
+        self.str(";");
+        self.token_will_push(&arg.l_brace.l_brace_token.replace(""));
+        self.newline_push();
+        for (i, x) in arg.function_declaration_list.iter().enumerate() {
+            if i != 0 {
+                self.newline();
+            }
+            self.function_item(&x.function_item);
+        }
+        self.newline_pop();
+        self.token(&arg.r_brace.r_brace_token.replace("endfunction"));
+        if arg.function_declaration_opt.is_some() {
+            self.newline_pop();
+            self.str("endmodule");
+        }
     }
 
     /// Semantic action for non-terminal 'ModuleDeclaration'

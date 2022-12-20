@@ -107,10 +107,6 @@ token_with_comments!(BasedToken, l_bracket0_minus9_r_bracket_plus_l_paren_quest_
 token_with_comments!(BaseLessToken, l_bracket0_minus9_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9_r_bracket_plus_r_paren_star);
 token_with_comments!(AllBitToken, tick_l_bracket01_r_bracket);
 
-token_with_comments!(CommonOperatorToken, plus_or_minus_or_amp_or_or_or_circumflex_tilde_or_circumflex_or_tilde_circumflex_or_tilde_amp_or_tilde_or);
-token_with_comments!(BinaryOperatorToken, star_star_or_star_or_slash_or_percent_or_l_t_l_t_l_t_or_g_t_g_t_g_t_or_l_t_l_t_or_g_t_g_t_or_l_t_equ_or_g_t_equ_or_l_t_or_g_t_or_equ_equ_equ_or_equ_equ_quest_or_bang_equ_equ_or_bang_equ_quest_or_equ_equ_or_bang_equ_or_amp_amp_or_or_or);
-token_with_comments!(UnaryOperatorToken, bang_or_tilde);
-
 token_with_comments!(ColonColonToken, colon_colon);
 token_with_comments!(ColonToken, colon);
 token_with_comments!(CommaToken, comma);
@@ -119,10 +115,15 @@ token_with_comments!(HashToken, hash);
 token_with_comments!(LBraceToken, l_brace);
 token_with_comments!(LBracketToken, l_bracket);
 token_with_comments!(LParenToken, l_paren);
+token_with_comments!(MinusGTToken, minus_g_t);
 token_with_comments!(RBraceToken, r_brace);
 token_with_comments!(RBracketToken, r_bracket);
 token_with_comments!(RParenToken, r_paren);
 token_with_comments!(SemicolonToken, semicolon);
+
+token_with_comments!(CommonOperatorToken, plus_or_minus_or_amp_or_or_or_circumflex_tilde_or_circumflex_or_tilde_circumflex_or_tilde_amp_or_tilde_or);
+token_with_comments!(BinaryOperatorToken, star_star_or_star_or_slash_or_percent_or_l_t_l_t_l_t_or_g_t_g_t_g_t_or_l_t_l_t_or_g_t_g_t_or_l_t_equ_or_g_t_equ_or_l_t_or_g_t_or_equ_equ_equ_or_equ_equ_quest_or_bang_equ_equ_or_bang_equ_quest_or_equ_equ_or_bang_equ_or_amp_amp_or_or_or);
+token_with_comments!(UnaryOperatorToken, bang_or_tilde);
 
 token_with_comments!(AlwaysCombToken, always_underscore_comb);
 token_with_comments!(AlwaysFfToken, always_underscore_ff);
@@ -133,6 +134,7 @@ token_with_comments!(BitToken, bit);
 token_with_comments!(ElseToken, r#else);
 token_with_comments!(F32Token, f32);
 token_with_comments!(F64Token, f64);
+token_with_comments!(FunctionToken, function);
 token_with_comments!(I32Token, i32);
 token_with_comments!(I64Token, i64);
 token_with_comments!(IfToken, r#if);
@@ -148,6 +150,8 @@ token_with_comments!(NegedgeToken, negedge);
 token_with_comments!(OutputToken, output);
 token_with_comments!(ParameterToken, parameter);
 token_with_comments!(PosedgeToken, posedge);
+token_with_comments!(RefToken, r#ref);
+token_with_comments!(ReturnToken, r#return);
 token_with_comments!(SyncHighToken, sync_underscore_high);
 token_with_comments!(SyncLowToken, sync_underscore_low);
 token_with_comments!(U32Token, u32);

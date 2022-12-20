@@ -31,6 +31,9 @@ Based     : BasedToken     : VerylToken;
 BaseLess  : BaseLessToken  : VerylToken;
 AllBit    : AllBitToken    : VerylToken;
 
+// Before '-' Operator
+MinusGTToken: '->': OwnedToken Comments;
+
 // Operator
 BinaryOperatorToken: "\*\*|\*|/|%|<<<|>>>|<<|>>|<=|>=|<|>|===|==\?|!==|!=\?|==|!=|&&|\|\|": OwnedToken Comments;
 CommonOperatorToken: "\+|-|&|\||\^~|\^|~\^|~&|~\|"                                        : OwnedToken Comments;
@@ -62,6 +65,7 @@ Hash      : HashToken      : VerylToken;
 LBrace    : LBraceToken    : VerylToken;
 LBracket  : LBracketToken  : VerylToken;
 LParen    : LParenToken    : VerylToken;
+MinusGT   : MinusGTToken   : VerylToken;
 RBrace    : RBraceToken    : VerylToken;
 RBracket  : RBracketToken  : VerylToken;
 RParen    : RParenToken    : VerylToken;
@@ -77,6 +81,7 @@ BitToken       : 'bit'        : OwnedToken Comments;
 ElseToken      : 'else'       : OwnedToken Comments;
 F32Token       : 'f32'        : OwnedToken Comments;
 F64Token       : 'f64'        : OwnedToken Comments;
+FunctionToken  : 'function'   : OwnedToken Comments;
 I32Token       : 'i32'        : OwnedToken Comments;
 I64Token       : 'i64'        : OwnedToken Comments;
 IfResetToken   : 'if_reset'   : OwnedToken Comments;
@@ -92,6 +97,8 @@ NegedgeToken   : 'negedge'    : OwnedToken Comments;
 OutputToken    : 'output'     : OwnedToken Comments;
 ParameterToken : 'parameter'  : OwnedToken Comments;
 PosedgeToken   : 'posedge'    : OwnedToken Comments;
+RefToken       : 'ref'        : OwnedToken Comments;
+ReturnToken    : 'return'     : OwnedToken Comments;
 SyncHighToken  : 'sync_high'  : OwnedToken Comments;
 SyncLowToken   : 'sync_low'   : OwnedToken Comments;
 U32Token       : 'u32'        : OwnedToken Comments;
@@ -106,6 +113,7 @@ Bit       : BitToken       : VerylToken;
 Else      : ElseToken      : VerylToken;
 F32       : F32Token       : VerylToken;
 F64       : F64Token       : VerylToken;
+Function  : FunctionToken  : VerylToken;
 I32       : I32Token       : VerylToken;
 I64       : I64Token       : VerylToken;
 IfReset   : IfResetToken   : VerylToken;
@@ -121,6 +129,8 @@ Negedge   : NegedgeToken   : VerylToken;
 Output    : OutputToken    : VerylToken;
 Parameter : ParameterToken : VerylToken;
 Posedge   : PosedgeToken   : VerylToken;
+Ref       : RefToken       : VerylToken;
+Return    : ReturnToken    : VerylToken;
 SyncHigh  : SyncHighToken  : VerylToken;
 SyncLow   : SyncLowToken   : VerylToken;
 U32       : U32Token       : VerylToken;
@@ -185,6 +195,7 @@ Type: ( BuiltinType | Identifier ) { Width };
 Statement: AssignmentStatement
          | IfStatement
          | IfResetStatement
+         | ReturnStatement
          ;
 
 AssignmentStatement: Identifier Equ Expression Semicolon;
@@ -192,6 +203,8 @@ AssignmentStatement: Identifier Equ Expression Semicolon;
 IfStatement: If Expression LBrace Statement RBrace { Else If Expression LBrace Statement RBrace } [ Else LBrace Statement RBrace ];
 
 IfResetStatement: IfReset LBrace Statement RBrace { Else If Expression LBrace Statement RBrace } [ Else LBrace Statement RBrace ];
+
+ReturnStatement: Return Expression Semicolon;
 
 // ----------------------------------------------------------------------------
 // Declaration
@@ -258,7 +271,18 @@ PortDeclarationItem: Identifier Colon Direction Type;
 Direction: Input
          | Output
          | Inout
+         | Ref
          ;
+
+// ----------------------------------------------------------------------------
+// Function
+// ----------------------------------------------------------------------------
+
+FunctionDeclaration: Function Identifier [ WithParameter ] [ PortDeclaration ] MinusGT Type LBrace { FunctionItem } RBrace;
+
+FunctionItem: VariableDeclaration
+            | Statement
+            ;
 
 // ----------------------------------------------------------------------------
 // Module
@@ -273,6 +297,7 @@ ModuleItem: VariableDeclaration
           | AlwaysCombDeclaration
           | AssignDeclaration
           | Instantiation
+          | FunctionDeclaration
           ;
 
 // ----------------------------------------------------------------------------

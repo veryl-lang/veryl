@@ -108,6 +108,7 @@ impl<'a> VerylWalker for Analyzer<'a> {
                     Statement::Statement0(_) => true,
                     Statement::Statement1(_) => true,
                     Statement::Statement2(_) => false,
+                    Statement::Statement3(_) => true,
                 }
             } else {
                 true

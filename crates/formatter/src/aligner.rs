@@ -329,6 +329,19 @@ impl VerylWalker for Aligner {
         self.aligns[align_kind::EXPRESSION].finish_item();
     }
 
+    /// Semantic action for non-terminal 'FunctionDeclaration'
+    fn function_declaration(&mut self, arg: &FunctionDeclaration) {
+        if let Some(ref x) = arg.function_declaration_opt {
+            self.with_parameter(&x.with_parameter);
+        }
+        if let Some(ref x) = arg.function_declaration_opt0 {
+            self.port_declaration(&x.port_declaration);
+        }
+        for x in &arg.function_declaration_list {
+            self.function_item(&x.function_item);
+        }
+    }
+
     /// Semantic action for non-terminal 'ModuleDeclaration'
     fn module_declaration(&mut self, arg: &ModuleDeclaration) {
         if let Some(ref x) = arg.module_declaration_opt {
@@ -351,6 +364,9 @@ impl VerylWalker for Aligner {
             Direction::Direction1(_) => (),
             Direction::Direction2(x) => {
                 self.insert(&x.inout.inout_token, 1);
+            }
+            Direction::Direction3(x) => {
+                self.insert(&x.r#ref.ref_token, 3);
             }
         }
     }
