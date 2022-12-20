@@ -121,21 +121,23 @@ impl Emitter {
             self.space(*width);
         }
 
-        // temporary indent to adjust indent of comments with the next push
-        if will_push {
-            self.indent += 1;
-        }
-        for x in &x.comments {
-            if x.token.location.line == self.line && !self.start_token {
-                self.space(1);
+        if duplicated.is_none() {
+            // temporary indent to adjust indent of comments with the next push
+            if will_push {
+                self.indent += 1;
             }
-            for _ in 0..x.token.location.line - (self.line + self.last_newline) {
-                self.newline();
+            for x in &x.comments {
+                if x.token.location.line == self.line && !self.start_token {
+                    self.space(1);
+                }
+                for _ in 0..x.token.location.line - (self.line + self.last_newline) {
+                    self.newline();
+                }
+                self.parol_token(&x.token, false);
             }
-            self.parol_token(&x.token, false);
-        }
-        if will_push {
-            self.indent -= 1;
+            if will_push {
+                self.indent -= 1;
+            }
         }
     }
 
@@ -554,9 +556,10 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Instantiation'
     fn instantiation(&mut self, arg: &Instantiation) {
+        self.token(&arg.identifier.identifier_token.replace(""));
+        self.token(&arg.colon_colon.colon_colon_token.replace(""));
         self.identifier(&arg.identifier0);
         self.space(1);
-        self.token(&arg.colon_colon.colon_colon_token.replace(""));
         if let Some(ref x) = arg.instantiation_opt {
             self.instance_parameter(&x.instance_parameter);
             self.space(1);
