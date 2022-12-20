@@ -128,169 +128,69 @@ impl Formatter {
 }
 
 impl VerylWalker for Formatter {
-    // ----------------------------------------------------------------------------
-    // Terminals
-    // ----------------------------------------------------------------------------
-
-    fn identifier(&mut self, input: &Identifier) {
-        self.token(&input.identifier_token);
+    /// Semantic action for non-terminal 'VerylToken'
+    fn veryl_token(&mut self, arg: &VerylToken) {
+        self.token(arg);
     }
 
-    // ----------------------------------------------------------------------------
-    // Number
-    // ----------------------------------------------------------------------------
-
-    fn number(&mut self, input: &Number) {
-        let token = match input {
-            Number::Number0(x) => match &*x.integral_number {
-                IntegralNumber::IntegralNumber0(x) => &x.based.based_token,
-                IntegralNumber::IntegralNumber1(x) => &x.base_less.base_less_token,
-                IntegralNumber::IntegralNumber2(x) => &x.all_bit.all_bit_token,
-            },
-            Number::Number1(x) => match &*x.real_number {
-                RealNumber::RealNumber0(x) => &x.fixed_point.fixed_point_token,
-                RealNumber::RealNumber1(x) => &x.exponent.exponent_token,
-            },
-        };
-        self.token(token);
-    }
-
-    // ----------------------------------------------------------------------------
-    // Expression
-    // ----------------------------------------------------------------------------
-
-    fn expression(&mut self, input: &Expression) {
-        self.expression1(&input.expression1);
-        for x in &input.expression_list {
+    /// Semantic action for non-terminal 'Expression'
+    fn expression(&mut self, arg: &Expression) {
+        self.expression1(&arg.expression1);
+        for x in &arg.expression_list {
             self.space(1);
-            let token = match &*x.expression_list_group {
+            match &*x.expression_list_group {
                 ExpressionListGroup::ExpressionListGroup0(x) => {
-                    &x.binary_operator.binary_operator_token
+                    self.binary_operator(&x.binary_operator)
                 }
                 ExpressionListGroup::ExpressionListGroup1(x) => {
-                    &x.common_operator.common_operator_token
+                    self.common_operator(&x.common_operator)
                 }
             };
-            self.token(token);
             self.space(1);
             self.expression1(&x.expression1);
         }
     }
 
-    fn expression1(&mut self, input: &Expression1) {
-        if let Some(ref x) = input.expression1_opt {
-            let token = match &*x.expression1_opt_group {
-                Expression1OptGroup::Expression1OptGroup0(x) => {
-                    &x.unary_operator.unary_operator_token
-                }
-                Expression1OptGroup::Expression1OptGroup1(x) => {
-                    &x.common_operator.common_operator_token
-                }
-            };
-            self.token(token);
-        }
-        self.factor(&input.factor);
-    }
-
-    fn factor(&mut self, input: &Factor) {
-        match input {
-            Factor::Factor0(x) => self.number(&x.number),
-            Factor::Factor1(x) => {
-                self.identifier(&x.identifier);
-                for x in &x.factor_list {
-                    self.range(&x.range);
-                }
-            }
-            Factor::Factor2(x) => {
-                self.token(&x.l_paren.l_paren_token);
-                self.expression(&x.expression);
-                self.token(&x.r_paren.r_paren_token);
-            }
-        }
-    }
-
-    // ----------------------------------------------------------------------------
-    // Range / Width
-    // ----------------------------------------------------------------------------
-
-    fn range(&mut self, input: &Range) {
-        self.token(&input.l_bracket.l_bracket_token);
-        self.expression(&input.expression);
-        if let Some(ref x) = input.range_opt {
-            self.token(&x.colon.colon_token);
-            self.expression(&x.expression);
-        }
-        self.token(&input.r_bracket.r_bracket_token);
-    }
-
-    fn width(&mut self, input: &Width) {
-        self.token(&input.l_bracket.l_bracket_token);
-        self.expression(&input.expression);
-        self.token(&input.r_bracket.r_bracket_token);
-    }
-
-    // ----------------------------------------------------------------------------
-    // Type
-    // ----------------------------------------------------------------------------
-
-    fn r#type(&mut self, input: &Type) {
-        match &*input.type_group {
-            TypeGroup::TypeGroup0(x) => match &*x.builtin_type {
-                BuiltinType::BuiltinType0(x) => self.token(&x.logic.logic_token),
-                BuiltinType::BuiltinType1(x) => self.token(&x.bit.bit_token),
-                BuiltinType::BuiltinType2(x) => self.token(&x.u32.u32_token),
-                BuiltinType::BuiltinType3(x) => self.token(&x.u64.u64_token),
-                BuiltinType::BuiltinType4(x) => self.token(&x.i32.i32_token),
-                BuiltinType::BuiltinType5(x) => self.token(&x.i64.i64_token),
-                BuiltinType::BuiltinType6(x) => self.token(&x.f32.f32_token),
-                BuiltinType::BuiltinType7(x) => self.token(&x.f64.f64_token),
-            },
-            // This identifier should be treat as type not identifier
-            TypeGroup::TypeGroup1(x) => self.token(&x.identifier.identifier_token),
+    /// Semantic action for non-terminal 'Type'
+    fn r#type(&mut self, arg: &Type) {
+        match &*arg.type_group {
+            TypeGroup::TypeGroup0(x) => self.builtin_type(&x.builtin_type),
+            TypeGroup::TypeGroup1(x) => self.identifier(&x.identifier),
         };
         self.space(1);
-        for x in &input.type_list {
+        for x in &arg.type_list {
             self.width(&x.width);
         }
     }
 
-    // ----------------------------------------------------------------------------
-    // Statement
-    // ----------------------------------------------------------------------------
-
-    fn statement(&mut self, input: &Statement) {
-        match input {
-            Statement::Statement0(x) => self.assignment_statement(&x.assignment_statement),
-            Statement::Statement1(x) => self.if_statement(&x.if_statement),
-        }
+    /// Semantic action for non-terminal 'AssignmentStatement'
+    fn assignment_statement(&mut self, arg: &AssignmentStatement) {
+        self.identifier(&arg.identifier);
+        self.space(1);
+        self.equ(&arg.equ);
+        self.space(1);
+        self.expression(&arg.expression);
+        self.semicolon(&arg.semicolon);
     }
 
-    fn assignment_statement(&mut self, input: &AssignmentStatement) {
-        self.identifier(&input.identifier);
+    /// Semantic action for non-terminal 'IfStatement'
+    fn if_statement(&mut self, arg: &IfStatement) {
+        self.r#if(&arg.r#if);
         self.space(1);
-        self.token(&input.equ.equ_token);
+        self.expression(&arg.expression);
         self.space(1);
-        self.expression(&input.expression);
-        self.token(&input.semicolon.semicolon_token);
-    }
-
-    fn if_statement(&mut self, input: &IfStatement) {
-        self.token(&input.r#if.if_token);
-        self.space(1);
-        self.expression(&input.expression);
-        self.space(1);
-        self.token_will_push(&input.l_brace.l_brace_token);
+        self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
-        self.statement(&input.statement);
+        self.statement(&arg.statement);
         self.newline_pop();
-        self.token(&input.r_brace.r_brace_token);
-        if !input.if_statement_list.is_empty() {
+        self.r_brace(&arg.r_brace);
+        if !arg.if_statement_list.is_empty() {
             self.space(1);
         }
-        for x in &input.if_statement_list {
-            self.token(&x.r#else.else_token);
+        for x in &arg.if_statement_list {
+            self.r#else(&x.r#else);
             self.space(1);
-            self.token(&x.r#if.if_token);
+            self.r#if(&x.r#if);
             self.space(1);
             self.expression(&x.expression);
             self.space(1);
@@ -298,369 +198,315 @@ impl VerylWalker for Formatter {
             self.newline_push();
             self.statement(&x.statement);
             self.newline_pop();
-            self.token(&x.r_brace.r_brace_token);
+            self.r_brace(&x.r_brace);
         }
-        if let Some(ref x) = input.if_statement_opt {
+        if let Some(ref x) = arg.if_statement_opt {
             self.space(1);
-            self.token(&x.r#else.else_token);
+            self.r#else(&x.r#else);
             self.space(1);
             self.token_will_push(&x.l_brace.l_brace_token);
             self.newline_push();
             self.statement(&x.statement);
             self.newline_pop();
-            self.token(&x.r_brace.r_brace_token);
+            self.r_brace(&x.r_brace);
         }
     }
 
-    // ----------------------------------------------------------------------------
-    // Declaration
-    // ----------------------------------------------------------------------------
-
-    fn variable_declaration(&mut self, input: &VariableDeclaration) {
-        self.identifier(&input.identifier);
-        self.token(&input.colon.colon_token);
+    /// Semantic action for non-terminal 'VariableDeclaration'
+    fn variable_declaration(&mut self, arg: &VariableDeclaration) {
+        self.identifier(&arg.identifier);
+        self.colon(&arg.colon);
         self.space(1);
-        self.r#type(&input.r#type);
-        self.token(&input.semicolon.semicolon_token);
+        self.r#type(&arg.r#type);
+        self.semicolon(&arg.semicolon);
     }
 
-    fn parameter_declaration(&mut self, input: &ParameterDeclaration) {
-        self.token(&input.parameter.parameter_token);
+    /// Semantic action for non-terminal 'ParameterDeclaration'
+    fn parameter_declaration(&mut self, arg: &ParameterDeclaration) {
+        self.parameter(&arg.parameter);
         self.space(1);
-        self.identifier(&input.identifier);
-        self.token(&input.colon.colon_token);
+        self.identifier(&arg.identifier);
+        self.colon(&arg.colon);
         self.space(1);
-        self.r#type(&input.r#type);
+        self.r#type(&arg.r#type);
         self.space(1);
-        self.token(&input.equ.equ_token);
+        self.equ(&arg.equ);
         self.space(1);
-        self.expression(&input.expression);
-        self.token(&input.semicolon.semicolon_token);
+        self.expression(&arg.expression);
+        self.semicolon(&arg.semicolon);
     }
 
-    fn localparam_declaration(&mut self, input: &LocalparamDeclaration) {
-        self.token(&input.localparam.localparam_token);
+    /// Semantic action for non-terminal 'LocalparamDeclaration'
+    fn localparam_declaration(&mut self, arg: &LocalparamDeclaration) {
+        self.localparam(&arg.localparam);
         self.space(1);
-        self.identifier(&input.identifier);
-        self.token(&input.colon.colon_token);
+        self.identifier(&arg.identifier);
+        self.colon(&arg.colon);
         self.space(1);
-        self.r#type(&input.r#type);
+        self.r#type(&arg.r#type);
         self.space(1);
-        self.token(&input.equ.equ_token);
+        self.equ(&arg.equ);
         self.space(1);
-        self.expression(&input.expression);
-        self.token(&input.semicolon.semicolon_token);
+        self.expression(&arg.expression);
+        self.semicolon(&arg.semicolon);
     }
 
-    fn always_ff_declaration(&mut self, input: &AlwaysFfDeclaration) {
-        self.token(&input.always_ff.always_ff_token);
+    /// Semantic action for non-terminal 'AlwaysFfDeclaration'
+    fn always_ff_declaration(&mut self, arg: &AlwaysFfDeclaration) {
+        self.always_ff(&arg.always_ff);
         self.space(1);
-        self.token(&input.l_paren.l_paren_token);
-        self.always_ff_conditions(&input.always_ff_conditions);
-        self.token(&input.r_paren.r_paren_token);
+        self.l_paren(&arg.l_paren);
+        self.always_ff_conditions(&arg.always_ff_conditions);
+        self.r_paren(&arg.r_paren);
         self.space(1);
-        self.token_will_push(&input.l_brace.l_brace_token);
+        self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
-        for (i, x) in input.always_ff_declaration_list.iter().enumerate() {
+        for (i, x) in arg.always_ff_declaration_list.iter().enumerate() {
             if i != 0 {
                 self.newline();
             }
             self.statement(&x.statement);
         }
         self.newline_pop();
-        self.token(&input.r_brace.r_brace_token);
+        self.r_brace(&arg.r_brace);
     }
 
-    fn always_ff_conditions(&mut self, input: &AlwaysFfConditions) {
-        self.always_ff_condition(&input.always_ff_condition);
-        for x in &input.always_ff_conditions_list {
-            self.token(&x.comma.comma_token);
+    /// Semantic action for non-terminal 'AlwaysFfConditions'
+    fn always_ff_conditions(&mut self, arg: &AlwaysFfConditions) {
+        self.always_ff_condition(&arg.always_ff_condition);
+        for x in &arg.always_ff_conditions_list {
+            self.comma(&x.comma);
             self.space(1);
             self.always_ff_condition(&x.always_ff_condition);
         }
+        if let Some(ref x) = arg.always_ff_conditions_opt {
+            self.comma(&x.comma);
+        }
     }
 
-    fn always_ff_condition(&mut self, input: &AlwaysFfCondition) {
-        match &*input.always_ff_condition_group {
-            AlwaysFfConditionGroup::AlwaysFfConditionGroup0(x) => {
-                self.token(&x.posedge.posedge_token)
-            }
-            AlwaysFfConditionGroup::AlwaysFfConditionGroup1(x) => {
-                self.token(&x.negedge.negedge_token)
-            }
+    /// Semantic action for non-terminal 'AlwaysFfCondition'
+    fn always_ff_condition(&mut self, arg: &AlwaysFfCondition) {
+        match &*arg.always_ff_condition_group {
+            AlwaysFfConditionGroup::AlwaysFfConditionGroup0(x) => self.posedge(&x.posedge),
+            AlwaysFfConditionGroup::AlwaysFfConditionGroup1(x) => self.negedge(&x.negedge),
         };
         self.space(1);
-        self.identifier(&input.identifier);
+        self.identifier(&arg.identifier);
     }
 
-    fn always_comb_declaration(&mut self, input: &AlwaysCombDeclaration) {
-        self.token(&input.always_comb.always_comb_token);
+    /// Semantic action for non-terminal 'AlwaysCombDeclaration'
+    fn always_comb_declaration(&mut self, arg: &AlwaysCombDeclaration) {
+        self.always_comb(&arg.always_comb);
         self.space(1);
-        self.token_will_push(&input.l_brace.l_brace_token);
+        self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
-        for (i, x) in input.always_comb_declaration_list.iter().enumerate() {
+        for (i, x) in arg.always_comb_declaration_list.iter().enumerate() {
             if i != 0 {
                 self.newline();
             }
             self.statement(&x.statement);
         }
         self.newline_pop();
-        self.token(&input.r_brace.r_brace_token);
+        self.r_brace(&arg.r_brace);
     }
 
-    fn assign_declaration(&mut self, input: &AssignDeclaration) {
-        self.token(&input.assign.assign_token);
+    /// Semantic action for non-terminal 'AssignDeclaration'
+    fn assign_declaration(&mut self, arg: &AssignDeclaration) {
+        self.assign(&arg.assign);
         self.space(1);
-        self.identifier(&input.identifier);
-        if let Some(ref x) = input.assign_declaration_opt {
-            self.token(&x.colon.colon_token);
+        self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.assign_declaration_opt {
+            self.colon(&x.colon);
             self.space(1);
             self.r#type(&x.r#type);
         }
         self.space(1);
-        self.token(&input.equ.equ_token);
+        self.equ(&arg.equ);
         self.space(1);
-        self.expression(&input.expression);
-        self.token(&input.semicolon.semicolon_token);
+        self.expression(&arg.expression);
+        self.semicolon(&arg.semicolon);
     }
 
-    fn modport_declaration(&mut self, input: &ModportDeclaration) {
-        self.token(&input.modport.modport_token);
+    /// Semantic action for non-terminal 'ModportDeclaration'
+    fn modport_declaration(&mut self, arg: &ModportDeclaration) {
+        self.modport(&arg.modport);
         self.space(1);
-        self.identifier(&input.identifier);
+        self.identifier(&arg.identifier);
         self.space(1);
-        self.token_will_push(&input.l_brace.l_brace_token);
+        self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
-        self.modport_list(&input.modport_list);
+        self.modport_list(&arg.modport_list);
         self.newline_pop();
-        self.token(&input.r_brace.r_brace_token);
+        self.r_brace(&arg.r_brace);
     }
 
-    fn modport_list(&mut self, input: &ModportList) {
-        self.modport_item(&input.modport_item);
-        for x in &input.modport_list_list {
-            self.token(&x.comma.comma_token);
+    /// Semantic action for non-terminal 'ModportList'
+    fn modport_list(&mut self, arg: &ModportList) {
+        self.modport_item(&arg.modport_item);
+        for x in &arg.modport_list_list {
+            self.comma(&x.comma);
             self.newline();
             self.modport_item(&x.modport_item);
         }
-        if let Some(ref x) = input.modport_list_opt {
-            self.token(&x.comma.comma_token);
+        if let Some(ref x) = arg.modport_list_opt {
+            self.comma(&x.comma);
         } else {
             self.str(",");
         }
     }
 
-    fn modport_item(&mut self, input: &ModportItem) {
-        self.identifier(&input.identifier);
-        self.token(&input.colon.colon_token);
+    /// Semantic action for non-terminal 'ModportItem'
+    fn modport_item(&mut self, arg: &ModportItem) {
+        self.identifier(&arg.identifier);
+        self.colon(&arg.colon);
         self.space(1);
-        self.direction(&input.direction);
+        self.direction(&arg.direction);
     }
 
-    // ----------------------------------------------------------------------------
-    // WithParameter
-    // ----------------------------------------------------------------------------
-
-    fn with_parameter(&mut self, input: &WithParameter) {
-        if let Some(ref x) = input.with_parameter_opt {
-            self.token(&input.hash.hash_token);
-            self.token_will_push(&input.l_paren.l_paren_token);
+    /// Semantic action for non-terminal 'WithParameter'
+    fn with_parameter(&mut self, arg: &WithParameter) {
+        if let Some(ref x) = arg.with_parameter_opt {
+            self.hash(&arg.hash);
+            self.token_will_push(&arg.l_paren.l_paren_token);
             self.newline_push();
             self.with_parameter_list(&x.with_parameter_list);
             self.newline_pop();
-            self.token(&input.r_paren.r_paren_token);
+            self.r_paren(&arg.r_paren);
         } else {
-            self.token(&input.hash.hash_token);
-            self.token(&input.l_paren.l_paren_token);
-            self.token(&input.r_paren.r_paren_token);
+            self.hash(&arg.hash);
+            self.l_paren(&arg.l_paren);
+            self.r_paren(&arg.r_paren);
         }
     }
 
-    fn with_parameter_list(&mut self, input: &WithParameterList) {
-        self.with_parameter_item(&input.with_parameter_item);
-        for x in &input.with_parameter_list_list {
-            self.token(&x.comma.comma_token);
+    /// Semantic action for non-terminal 'WithParameterList'
+    fn with_parameter_list(&mut self, arg: &WithParameterList) {
+        self.with_parameter_item(&arg.with_parameter_item);
+        for x in &arg.with_parameter_list_list {
+            self.comma(&x.comma);
             self.newline();
             self.with_parameter_item(&x.with_parameter_item);
         }
-        if let Some(ref x) = input.with_parameter_list_opt {
-            self.token(&x.comma.comma_token);
+        if let Some(ref x) = arg.with_parameter_list_opt {
+            self.comma(&x.comma);
         } else {
             self.str(",");
         }
     }
 
-    fn with_parameter_item(&mut self, input: &WithParameterItem) {
-        match &*input.with_parameter_item_group {
-            WithParameterItemGroup::WithParameterItemGroup0(x) => {
-                self.token(&x.parameter.parameter_token);
-            }
-            WithParameterItemGroup::WithParameterItemGroup1(x) => {
-                self.token(&x.localparam.localparam_token);
-            }
-        }
+    /// Semantic action for non-terminal 'WithParameterItem'
+    fn with_parameter_item(&mut self, arg: &WithParameterItem) {
+        match &*arg.with_parameter_item_group {
+            WithParameterItemGroup::WithParameterItemGroup0(x) => self.parameter(&x.parameter),
+            WithParameterItemGroup::WithParameterItemGroup1(x) => self.localparam(&x.localparam),
+        };
         self.space(1);
-        self.identifier(&input.identifier);
-        self.token(&input.colon.colon_token);
+        self.identifier(&arg.identifier);
+        self.colon(&arg.colon);
         self.space(1);
-        self.r#type(&input.r#type);
+        self.r#type(&arg.r#type);
         self.space(1);
-        self.token(&input.equ.equ_token);
+        self.equ(&arg.equ);
         self.space(1);
-        self.expression(&input.expression);
+        self.expression(&arg.expression);
     }
 
-    // ----------------------------------------------------------------------------
-    // Module
-    // ----------------------------------------------------------------------------
-
-    fn module_declaration(&mut self, input: &ModuleDeclaration) {
-        self.token(&input.module.module_token);
+    /// Semantic action for non-terminal 'ModuleDeclaration'
+    fn module_declaration(&mut self, arg: &ModuleDeclaration) {
+        self.module(&arg.module);
         self.space(1);
-        self.identifier(&input.identifier);
+        self.identifier(&arg.identifier);
         self.space(1);
-        if let Some(ref x) = input.module_declaration_opt {
+        if let Some(ref x) = arg.module_declaration_opt {
             self.with_parameter(&x.with_parameter);
             self.space(1);
         }
-        if let Some(ref x) = input.module_declaration_opt0 {
+        if let Some(ref x) = arg.module_declaration_opt0 {
             self.module_port(&x.module_port);
             self.space(1);
         }
-        self.token_will_push(&input.l_brace.l_brace_token);
+        self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
-        for (i, x) in input.module_declaration_list.iter().enumerate() {
+        for (i, x) in arg.module_declaration_list.iter().enumerate() {
             if i != 0 {
                 self.newline();
             }
             self.module_item(&x.module_item);
         }
         self.newline_pop();
-        self.token(&input.r_brace.r_brace_token);
+        self.r_brace(&arg.r_brace);
     }
 
-    fn module_port(&mut self, input: &ModulePort) {
-        if let Some(ref x) = input.module_port_opt {
-            self.token_will_push(&input.l_paren.l_paren_token);
+    /// Semantic action for non-terminal 'ModulePort'
+    fn module_port(&mut self, arg: &ModulePort) {
+        if let Some(ref x) = arg.module_port_opt {
+            self.token_will_push(&arg.l_paren.l_paren_token);
             self.newline_push();
             self.module_port_list(&x.module_port_list);
             self.newline_pop();
-            self.token(&input.r_paren.r_paren_token);
+            self.r_paren(&arg.r_paren);
         } else {
-            self.token(&input.l_paren.l_paren_token);
-            self.token(&input.r_paren.r_paren_token);
+            self.l_paren(&arg.l_paren);
+            self.r_paren(&arg.r_paren);
         }
     }
 
-    fn module_port_list(&mut self, input: &ModulePortList) {
-        self.module_port_item(&input.module_port_item);
-        for x in &input.module_port_list_list {
-            self.token(&x.comma.comma_token);
+    /// Semantic action for non-terminal 'ModulePortList'
+    fn module_port_list(&mut self, arg: &ModulePortList) {
+        self.module_port_item(&arg.module_port_item);
+        for x in &arg.module_port_list_list {
+            self.comma(&x.comma);
             self.newline();
             self.module_port_item(&x.module_port_item);
         }
-        if let Some(ref x) = input.module_port_list_opt {
-            self.token(&x.comma.comma_token);
+        if let Some(ref x) = arg.module_port_list_opt {
+            self.comma(&x.comma);
         } else {
             self.str(",");
         }
     }
 
-    fn module_port_item(&mut self, input: &ModulePortItem) {
-        self.identifier(&input.identifier);
-        self.token(&input.colon.colon_token);
+    /// Semantic action for non-terminal 'ModulePortItem'
+    fn module_port_item(&mut self, arg: &ModulePortItem) {
+        self.identifier(&arg.identifier);
+        self.colon(&arg.colon);
         self.space(1);
-        self.direction(&input.direction);
+        self.direction(&arg.direction);
         self.space(1);
-        self.r#type(&input.r#type);
+        self.r#type(&arg.r#type);
     }
 
-    fn module_item(&mut self, input: &ModuleItem) {
-        match input {
-            ModuleItem::ModuleItem0(x) => self.variable_declaration(&x.variable_declaration),
-            ModuleItem::ModuleItem1(x) => self.parameter_declaration(&x.parameter_declaration),
-            ModuleItem::ModuleItem2(x) => self.localparam_declaration(&x.localparam_declaration),
-            ModuleItem::ModuleItem3(x) => self.always_ff_declaration(&x.always_ff_declaration),
-            ModuleItem::ModuleItem4(x) => self.always_comb_declaration(&x.always_comb_declaration),
-            ModuleItem::ModuleItem5(x) => self.assign_declaration(&x.assign_declaration),
-        }
-    }
-
-    fn direction(&mut self, input: &Direction) {
-        match input {
-            Direction::Direction0(x) => {
-                self.token(&x.input.input_token);
-            }
-            Direction::Direction1(x) => {
-                self.token(&x.output.output_token);
-            }
-            Direction::Direction2(x) => {
-                self.token(&x.inout.inout_token);
-            }
-        }
-    }
-
-    // ----------------------------------------------------------------------------
-    // Interface
-    // ----------------------------------------------------------------------------
-
-    fn interface_declaration(&mut self, input: &InterfaceDeclaration) {
-        self.token(&input.interface.interface_token);
+    /// Semantic action for non-terminal 'InterfaceDeclaration'
+    fn interface_declaration(&mut self, arg: &InterfaceDeclaration) {
+        self.interface(&arg.interface);
         self.space(1);
-        self.identifier(&input.identifier);
+        self.identifier(&arg.identifier);
         self.space(1);
-        if let Some(ref x) = input.interface_declaration_opt {
+        if let Some(ref x) = arg.interface_declaration_opt {
             self.with_parameter(&x.with_parameter);
             self.space(1);
         }
-        self.token_will_push(&input.l_brace.l_brace_token);
+        self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
-        for (i, x) in input.interface_declaration_list.iter().enumerate() {
+        for (i, x) in arg.interface_declaration_list.iter().enumerate() {
             if i != 0 {
                 self.newline();
             }
             self.interface_item(&x.interface_item);
         }
         self.newline_pop();
-        self.token(&input.r_brace.r_brace_token);
+        self.r_brace(&arg.r_brace);
     }
 
-    fn interface_item(&mut self, input: &InterfaceItem) {
-        match input {
-            InterfaceItem::InterfaceItem0(x) => self.variable_declaration(&x.variable_declaration),
-            InterfaceItem::InterfaceItem1(x) => {
-                self.parameter_declaration(&x.parameter_declaration)
-            }
-            InterfaceItem::InterfaceItem2(x) => {
-                self.localparam_declaration(&x.localparam_declaration)
-            }
-            InterfaceItem::InterfaceItem3(x) => self.modport_declaration(&x.modport_declaration),
-        }
-    }
-
-    // ----------------------------------------------------------------------------
-    // Description
-    // ----------------------------------------------------------------------------
-
-    fn description(&mut self, input: &Description) {
-        match input {
-            Description::Description0(x) => self.module_declaration(&x.module_declaration),
-            Description::Description1(x) => self.interface_declaration(&x.interface_declaration),
-        }
-    }
-
-    // ----------------------------------------------------------------------------
-    // SourceCode
-    // ----------------------------------------------------------------------------
-
-    fn veryl(&mut self, input: &Veryl) {
+    /// Semantic action for non-terminal 'Veryl'
+    fn veryl(&mut self, arg: &Veryl) {
         self.start_token = true;
-        self.token(&input.start.start_token);
+        self.start(&arg.start);
         self.start_token = false;
-        if !input.start.start_token.comments.is_empty() {
+        if !arg.start.start_token.comments.is_empty() {
             self.newline();
         }
-        for (i, x) in input.veryl_list.iter().enumerate() {
+        for (i, x) in arg.veryl_list.iter().enumerate() {
             if i != 0 {
                 self.newline();
             }
