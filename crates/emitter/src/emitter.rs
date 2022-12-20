@@ -505,14 +505,17 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'AssignDeclaration'
     fn assign_declaration(&mut self, arg: &AssignDeclaration) {
+        if let Some(ref x) = arg.assign_declaration_opt {
+            self.type_left(&x.r#type);
+            self.space(1);
+            self.identifier(&arg.identifier);
+            self.type_right(&x.r#type);
+            self.str(";");
+            self.newline();
+        }
         self.assign(&arg.assign);
         self.space(1);
         self.identifier(&arg.identifier);
-        if let Some(ref x) = arg.assign_declaration_opt {
-            self.colon(&x.colon);
-            self.space(1);
-            self.r#type(&x.r#type);
-        }
         self.space(1);
         self.equ(&arg.equ);
         self.space(1);
