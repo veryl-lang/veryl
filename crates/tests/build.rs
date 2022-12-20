@@ -35,7 +35,7 @@ fn main() {
     let _ = writeln!(out_test, "#[allow(dead_code)]");
     let _ = writeln!(out_test, "const TESTCASES: [&str; {}] = [", testcases.len());
     for testcase in testcases {
-        let _ = writeln!(out_test, "    \"{}\",", testcase);
+        let _ = writeln!(out_test, "    r\"{}\",", testcase);
     }
     let _ = writeln!(out_test, "];");
 }
