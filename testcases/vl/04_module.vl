@@ -1,19 +1,29 @@
-module a #(
+// module declaration
+module ModuleA #(
+    // module parameter
     parameter  a : u32  = 1,
     localparam aa: u32  = 1,
 ) (
+    // module port
     a  : input  logic [10],
     aa : output logic [10],
     aaa: inout  logic [10],
 ) {
+    // parameter declaration
     parameter  a : u32  = 1;
     localparam aa: u64  = 1;
 
-    a   : logic          ;
-    aa  : logic  [10]    ;
-    aaa : bit    [10][10];
-    aaaa: type_t [10]    ;
+    // variable declaration
+    a  : logic         ;
+    aa : logic [10]    ;
+    aaa: bit   [10][10];
 
+    // assign declaration
+    assign a   = 1;
+    assign aa  = 1;
+    assign aaa = 1;
+
+    // always_ff declaration
     always_ff (posedge i_clk, negedge i_rst_n) {
         if a {
             a = b;
@@ -24,6 +34,7 @@ module a #(
         }
     }
 
+    // always_comb declaration
     always_comb {
         a   = 10;
         aa  = 10'b0;

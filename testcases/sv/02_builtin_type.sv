@@ -1,31 +1,31 @@
-module A ;
+module ModuleA ;
     // unsigned integer
-    int unsigned     a ;
-    longint unsigned a ;
+    int unsigned     a  ;
+    longint unsigned aa ;
 
     // signed integer
-    int signed     a ;
-    longint signed a ;
+    int signed     a  ;
+    longint signed aa ;
 
     // floating point
-    real     a ;
-    longreal a ;
+    shortreal a  ;
+    real      aa ;
 
     // 4 state (01xz) type
-    logic                  a;
-    logic [10-1:0]         a;
-    logic [10-1:0][10-1:0] a;
+    logic                  a  ;
+    logic [10-1:0]         aa ;
+    logic [10-1:0][10-1:0] aaa;
 
     // 2 state (01) type
-    bit                  a;
-    bit [10-1:0]         a;
-    bit [10-1:0][10-1:0] a;
+    bit                  a  ;
+    bit [10-1:0]         aa ;
+    bit [10-1:0][10-1:0] aaa;
 
     // array
-    int unsigned     a [10-1:0];
-    longint unsigned a [10-1:0];
-    int signed       a [10-1:0];
-    longint signed   a [10-1:0];
-    real             a [10-1:0];
-    longreal         a [10-1:0];
+    int unsigned     a      [10-1:0];
+    longint unsigned aa     [10-1:0];
+    int signed       aaa    [10-1:0];
+    longint signed   aaaa   [10-1:0];
+    shortreal        aaaaa  [10-1:0];
+    real             aaaaaa [10-1:0];
 endmodule

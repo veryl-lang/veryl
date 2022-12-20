@@ -252,8 +252,8 @@ impl VerylWalker for Aligner {
                 BuiltinType::BuiltinType3(x) => x.u64.u64_token.replace("unsigned longint"),
                 BuiltinType::BuiltinType4(x) => x.i32.i32_token.replace("signed int"),
                 BuiltinType::BuiltinType5(x) => x.i64.i64_token.replace("signed longint"),
-                BuiltinType::BuiltinType6(x) => x.f32.f32_token.replace("real"),
-                BuiltinType::BuiltinType7(x) => x.f64.f64_token.replace("longreal"),
+                BuiltinType::BuiltinType6(x) => x.f32.f32_token.replace("shortreal"),
+                BuiltinType::BuiltinType7(x) => x.f64.f64_token.replace("real"),
             },
             TypeGroup::TypeGroup1(x) => x.identifier.identifier_token.clone(),
         };

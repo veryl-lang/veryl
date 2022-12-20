@@ -296,6 +296,11 @@ impl VerylWalker for Aligner {
     /// Semantic action for non-terminal 'AlwaysFfDeclaration'
     fn always_ff_declaration(&mut self, _arg: &AlwaysFfDeclaration) {}
 
+    /// Semantic action for non-terminal 'ModportDeclaration'
+    fn modport_declaration(&mut self, arg: &ModportDeclaration) {
+        self.modport_list(&arg.modport_list);
+    }
+
     /// Semantic action for non-terminal 'WithParameterItem'
     fn with_parameter_item(&mut self, arg: &WithParameterItem) {
         match &*arg.with_parameter_item_group {
