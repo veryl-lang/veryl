@@ -41,6 +41,9 @@ mod formatter {
         let mut formatter = Formatter::new();
         formatter.format(&ret.veryl);
 
+        // remove CR on Windows environment
+        let original = original.replace('\r', "");
+
         assert_eq!(original, formatter.as_str());
     }
 
@@ -63,6 +66,9 @@ mod emitter {
 
         let file = format!("../../testcases/sv/{}.sv", name);
         let reference = fs::read_to_string(&file).unwrap();
+
+        // remove CR on Windows environment
+        let reference = reference.replace('\r', "");
 
         assert_eq!(reference, emitter.as_str());
     }

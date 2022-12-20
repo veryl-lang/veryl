@@ -1,5 +1,17 @@
 # Veryl
 
+Veryl is a next generation hardware description language (HDL).
+
+[![Actions Status](https://github.com/dalance/veryl/workflows/Regression/badge.svg)](https://github.com/dalance/veryl/actions)
+
+## Feature
+
+* Symplified syntax based on SystemVerilog / Rust
+* Transpiler to SystemVerilog
+* Semantic checker
+* Source code formatter
+* Language server
+
 ## Usage
 
 ## Example

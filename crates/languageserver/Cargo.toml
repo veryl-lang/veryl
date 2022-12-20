@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 tower-lsp       = "0.17.0"
 tokio           = {version = "1.23.0", features = ["full"]}
+veryl-analyzer  = {version = "0.1.0", path = "../analyzer"}
 veryl-formatter = {version = "0.1.0", path = "../formatter"}
 veryl-parser    = {version = "0.1.0", path = "../parser"}
 dashmap         = "5.4.0"

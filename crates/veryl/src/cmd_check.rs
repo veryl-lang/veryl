@@ -4,8 +4,9 @@ use miette::{Diagnostic, IntoDiagnostic, Result, WrapErr};
 use std::fs;
 use std::time::Instant;
 use thiserror::Error;
+use veryl_analyzer::analyze_error::AnalyzeError;
+use veryl_analyzer::analyzer::Analyzer;
 use veryl_parser::parser::Parser;
-use veryl_parser::veryl_error::VerylError;
 
 pub struct CmdCheck {
     opt: Check,
@@ -15,7 +16,7 @@ pub struct CmdCheck {
 #[error("Check error")]
 pub struct CheckError {
     #[related]
-    related: Vec<VerylError>,
+    related: Vec<AnalyzeError>,
 }
 
 impl CmdCheck {
@@ -43,10 +44,13 @@ impl CmdCheck {
 
             let input = fs::read_to_string(file).into_diagnostic().wrap_err("")?;
             let parser = Parser::parse(&input, file)?;
-            if !parser.errors.is_empty() {
+
+            let mut analyzer = Analyzer::new(&input);
+            analyzer.analyze(&parser.veryl);
+            if !analyzer.errors.is_empty() {
                 all_pass = false;
 
-                for error in parser.errors {
+                for error in analyzer.errors {
                     check_error.related.push(error);
                 }
             }

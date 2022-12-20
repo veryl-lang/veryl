@@ -3,6 +3,7 @@ use ropey::Rope;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
+use veryl_analyzer::analyzer::Analyzer;
 use veryl_formatter::formatter::Formatter;
 use veryl_parser::parser::Parser;
 use veryl_parser::veryl_parser::{miette, ParserError};
@@ -32,10 +33,13 @@ impl Backend {
     async fn on_change(&self, params: TextDocumentItem) {
         let path = params.uri.to_string();
         let rope = Rope::from_str(&params.text);
+        let text = rope.to_string();
 
-        let diag = match Parser::parse(&rope.to_string(), &path) {
-            Ok(mut x) => {
-                let ret: Vec<_> = x
+        let diag = match Parser::parse(&text, &path) {
+            Ok(x) => {
+                let mut analyzer = Analyzer::new(&text);
+                analyzer.analyze(&x.veryl);
+                let ret: Vec<_> = analyzer
                     .errors
                     .drain(0..)
                     .map(|x| {

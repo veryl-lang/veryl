@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/analyzer",
     "crates/emitter",
     "crates/formatter",
     "crates/languageserver",

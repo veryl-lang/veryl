@@ -1735,10 +1735,19 @@ dependencies = [
  "miette",
  "similar",
  "thiserror",
+ "veryl-analyzer",
  "veryl-emitter",
  "veryl-formatter",
  "veryl-parser",
  "walkdir",
+]
+
+[[package]]
+name = "veryl-analyzer"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+ "veryl-parser",
 ]
 
 [[package]]
@@ -1763,6 +1772,7 @@ dependencies = [
  "ropey",
  "tokio",
  "tower-lsp",
+ "veryl-analyzer",
  "veryl-formatter",
  "veryl-parser",
 ]

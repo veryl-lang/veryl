@@ -12,6 +12,7 @@ env_logger      = "0.10.0"
 miette          = {version = "5.5.0", features = ["fancy"]}
 similar         = {version = "2.2.1", features = ["text", "inline"]}
 thiserror       = "1.0"
+veryl-analyzer  = {version = "0.1.0", path = "../analyzer"}
 veryl-emitter   = {version = "0.1.0", path = "../emitter"}
 veryl-parser    = {version = "0.1.0", path = "../parser"}
 veryl-formatter = {version = "0.1.0", path = "../formatter"}
