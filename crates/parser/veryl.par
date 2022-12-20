@@ -40,19 +40,21 @@ CommonOperator: CommonOperatorToken: VerylToken;
 BinaryOperator: BinaryOperatorToken: VerylToken;
 UnaryOperator : UnaryOperatorToken : VerylToken;
 
-// Single Symbol
-ColonToken     : ':': OwnedToken Comments;
-CommaToken     : ',': OwnedToken Comments;
-EquToken       : '=': OwnedToken Comments;
-HashToken      : '#': OwnedToken Comments;
-LBraceToken    : '{': OwnedToken Comments;
-LBracketToken  : '[': OwnedToken Comments;
-LParenToken    : '(': OwnedToken Comments;
-RBraceToken    : '}': OwnedToken Comments;
-RBracketToken  : ']': OwnedToken Comments;
-RParenToken    : ')': OwnedToken Comments;
-SemicolonToken : ';': OwnedToken Comments;
+// Symbol
+ColonColonToken: '::': OwnedToken Comments;
+ColonToken     : ':' : OwnedToken Comments;
+CommaToken     : ',' : OwnedToken Comments;
+EquToken       : '=' : OwnedToken Comments;
+HashToken      : '#' : OwnedToken Comments;
+LBraceToken    : '{' : OwnedToken Comments;
+LBracketToken  : '[' : OwnedToken Comments;
+LParenToken    : '(' : OwnedToken Comments;
+RBraceToken    : '}' : OwnedToken Comments;
+RBracketToken  : ']' : OwnedToken Comments;
+RParenToken    : ')' : OwnedToken Comments;
+SemicolonToken : ';' : OwnedToken Comments;
 
+ColonColon: ColonColonToken: VerylToken;
 Colon     : ColonToken     : VerylToken;
 Comma     : CommaToken     : VerylToken;
 Equ       : EquToken       : VerylToken;
@@ -218,6 +220,22 @@ ModportList: ModportItem { Comma ModportItem } [ Comma ];
 ModportItem: Identifier Colon Direction;
 
 // ----------------------------------------------------------------------------
+// Instantiation
+// ----------------------------------------------------------------------------
+
+Instantiation: Identifier ColonColon Identifier [ InstanceParameter ] LBrace [ InstancePortList ] RBrace;
+
+InstanceParameter: Hash LParen [ InstanceParameterList ] RParen;
+
+InstanceParameterList: InstanceParameterItem { Comma InstanceParameterItem } [ Comma ];
+
+InstanceParameterItem: Identifier [ Colon Expression ];
+
+InstancePortList: InstancePortItem { Comma InstancePortItem } [ Comma ];
+
+InstancePortItem: Identifier [ Colon Expression ];
+
+// ----------------------------------------------------------------------------
 // WithParameter
 // ----------------------------------------------------------------------------
 
@@ -250,6 +268,7 @@ ModuleItem: VariableDeclaration
           | AlwaysFfDeclaration
           | AlwaysCombDeclaration
           | AssignDeclaration
+          | Instantiation
           ;
 
 // ----------------------------------------------------------------------------

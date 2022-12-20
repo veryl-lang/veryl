@@ -50,6 +50,11 @@ pub trait VerylWalker {
         self.veryl_token(&arg.unary_operator_token);
     }
 
+    /// Semantic action for non-terminal 'ColonColonToken'
+    fn colon_colon(&mut self, arg: &ColonColon) {
+        self.veryl_token(&arg.colon_colon_token);
+    }
+
     /// Semantic action for non-terminal 'Colon'
     fn colon(&mut self, arg: &Colon) {
         self.veryl_token(&arg.colon_token);
@@ -551,6 +556,73 @@ pub trait VerylWalker {
         self.direction(&arg.direction);
     }
 
+    /// Semantic action for non-terminal 'Instantiation'
+    fn instantiation(&mut self, arg: &Instantiation) {
+        self.identifier(&arg.identifier);
+        self.colon_colon(&arg.colon_colon);
+        self.identifier(&arg.identifier0);
+        if let Some(ref x) = arg.instantiation_opt {
+            self.instance_parameter(&x.instance_parameter);
+        }
+        self.l_brace(&arg.l_brace);
+        if let Some(ref x) = arg.instantiation_opt0 {
+            self.instance_port_list(&x.instance_port_list);
+        }
+        self.r_brace(&arg.r_brace);
+    }
+
+    /// Semantic action for non-terminal 'InstanceParameter'
+    fn instance_parameter(&mut self, arg: &InstanceParameter) {
+        self.hash(&arg.hash);
+        self.l_paren(&arg.l_paren);
+        if let Some(ref x) = arg.instance_parameter_opt {
+            self.instance_parameter_list(&x.instance_parameter_list);
+        }
+        self.r_paren(&arg.r_paren);
+    }
+
+    /// Semantic action for non-terminal 'InstanceParameterList'
+    fn instance_parameter_list(&mut self, arg: &InstanceParameterList) {
+        self.instance_parameter_item(&arg.instance_parameter_item);
+        for x in &arg.instance_parameter_list_list {
+            self.comma(&x.comma);
+            self.instance_parameter_item(&x.instance_parameter_item);
+        }
+        if let Some(ref x) = arg.instance_parameter_list_opt {
+            self.comma(&x.comma);
+        }
+    }
+
+    /// Semantic action for non-terminal 'InstanceParameterItem'
+    fn instance_parameter_item(&mut self, arg: &InstanceParameterItem) {
+        self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.instance_parameter_item_opt {
+            self.colon(&x.colon);
+            self.expression(&x.expression);
+        }
+    }
+
+    /// Semantic action for non-terminal 'InstancePortList'
+    fn instance_port_list(&mut self, arg: &InstancePortList) {
+        self.instance_port_item(&arg.instance_port_item);
+        for x in &arg.instance_port_list_list {
+            self.comma(&x.comma);
+            self.instance_port_item(&x.instance_port_item);
+        }
+        if let Some(ref x) = arg.instance_port_list_opt {
+            self.comma(&x.comma);
+        }
+    }
+
+    /// Semantic action for non-terminal 'InstancePortItem'
+    fn instance_port_item(&mut self, arg: &InstancePortItem) {
+        self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.instance_port_item_opt {
+            self.colon(&x.colon);
+            self.expression(&x.expression);
+        }
+    }
+
     /// Semantic action for non-terminal 'WithParameter'
     fn with_parameter(&mut self, arg: &WithParameter) {
         self.hash(&arg.hash);
@@ -650,6 +722,7 @@ pub trait VerylWalker {
             ModuleItem::ModuleItem3(x) => self.always_ff_declaration(&x.always_ff_declaration),
             ModuleItem::ModuleItem4(x) => self.always_comb_declaration(&x.always_comb_declaration),
             ModuleItem::ModuleItem5(x) => self.assign_declaration(&x.assign_declaration),
+            ModuleItem::ModuleItem6(x) => self.instantiation(&x.instantiation),
         };
     }
 

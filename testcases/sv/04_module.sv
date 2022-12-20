@@ -82,4 +82,14 @@ module ModuleA #(
         a  = 10 + 10;
         aa = 10 + 16'hffff * (3 / 4);
     end
+
+    // module instantiation
+    ModuleB #(
+        .a  (a ),
+        .aa (10)
+    ) b (
+        .a    (a  ),
+        .bb   (aa ),
+        .bbbb (bbb)
+    );
 endmodule

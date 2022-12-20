@@ -304,6 +304,16 @@ impl VerylWalker for Aligner {
         self.modport_list(&arg.modport_list);
     }
 
+    /// Semantic action for non-terminal 'Instantiation'
+    fn instantiation(&mut self, arg: &Instantiation) {
+        if let Some(ref x) = arg.instantiation_opt {
+            self.instance_parameter(&x.instance_parameter);
+        }
+        if let Some(ref x) = arg.instantiation_opt0 {
+            self.instance_port_list(&x.instance_port_list);
+        }
+    }
+
     /// Semantic action for non-terminal 'WithParameterItem'
     fn with_parameter_item(&mut self, arg: &WithParameterItem) {
         match &*arg.with_parameter_item_group {

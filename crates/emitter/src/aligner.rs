@@ -9,6 +9,7 @@ pub struct Location {
     pub line: usize,
     pub column: usize,
     pub length: usize,
+    pub duplicated: Option<usize>,
 }
 
 impl From<&ParolLocation> for Location {
@@ -17,6 +18,7 @@ impl From<&ParolLocation> for Location {
             line: x.line,
             column: x.column,
             length: x.length,
+            duplicated: None,
         }
     }
 }
@@ -27,6 +29,7 @@ impl From<ParolLocation> for Location {
             line: x.line,
             column: x.column,
             length: x.length,
+            duplicated: None,
         }
     }
 }
@@ -39,7 +42,7 @@ pub struct Align {
     line: usize,
     rest: Vec<(Location, usize)>,
     additions: HashMap<Location, usize>,
-    last_token: Option<VerylToken>,
+    last_location: Option<Location>,
 }
 
 impl Align {
@@ -52,9 +55,8 @@ impl Align {
     }
 
     fn finish_item(&mut self) {
-        let last_token = self.last_token.take();
-        if let Some(last_token) = last_token {
-            let loc: Location = (&last_token.token.token.location).into();
+        let last_location = self.last_location.take();
+        if let Some(loc) = last_location {
             if loc.line - self.line > 1 {
                 self.finish_group();
             }
@@ -73,12 +75,21 @@ impl Align {
 
     fn token(&mut self, x: &VerylToken) {
         self.width += x.token.token.location.length;
-        self.last_token = Some(x.clone());
+        let loc: Location = (&x.token.token.location).into();
+        self.last_location = Some(loc);
     }
 
     fn dummy_token(&mut self, x: &VerylToken) {
         self.width += 0; // 0 length token
-        self.last_token = Some(x.clone());
+        let loc: Location = (&x.token.token.location).into();
+        self.last_location = Some(loc);
+    }
+
+    fn duplicated_token(&mut self, x: &VerylToken, i: usize) {
+        self.width += x.token.token.location.length;
+        let mut loc: Location = (&x.token.token.location).into();
+        loc.duplicated = Some(i);
+        self.last_location = Some(loc);
     }
 
     fn space(&mut self, x: usize) {
@@ -300,6 +311,51 @@ impl VerylWalker for Aligner {
 
     /// Semantic action for non-terminal 'AlwaysFfDeclaration'
     fn always_ff_declaration(&mut self, _arg: &AlwaysFfDeclaration) {}
+
+    /// Semantic action for non-terminal 'ModportDeclaration'
+    fn modport_declaration(&mut self, arg: &ModportDeclaration) {
+        self.modport_list(&arg.modport_list);
+    }
+
+    /// Semantic action for non-terminal 'Instantiation'
+    fn instantiation(&mut self, arg: &Instantiation) {
+        if let Some(ref x) = arg.instantiation_opt {
+            self.instance_parameter(&x.instance_parameter);
+        }
+        if let Some(ref x) = arg.instantiation_opt0 {
+            self.instance_port_list(&x.instance_port_list);
+        }
+    }
+
+    /// Semantic action for non-terminal 'InstanceParameterItem'
+    fn instance_parameter_item(&mut self, arg: &InstanceParameterItem) {
+        self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.instance_parameter_item_opt {
+            self.aligns[align_kind::EXPRESSION].start_item();
+            self.expression(&x.expression);
+            self.aligns[align_kind::EXPRESSION].finish_item();
+        } else {
+            self.aligns[align_kind::EXPRESSION].start_item();
+            self.aligns[align_kind::EXPRESSION]
+                .duplicated_token(&arg.identifier.identifier_token, 0);
+            self.aligns[align_kind::EXPRESSION].finish_item();
+        }
+    }
+
+    /// Semantic action for non-terminal 'InstancePortItem'
+    fn instance_port_item(&mut self, arg: &InstancePortItem) {
+        self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.instance_port_item_opt {
+            self.aligns[align_kind::EXPRESSION].start_item();
+            self.expression(&x.expression);
+            self.aligns[align_kind::EXPRESSION].finish_item();
+        } else {
+            self.aligns[align_kind::EXPRESSION].start_item();
+            self.aligns[align_kind::EXPRESSION]
+                .duplicated_token(&arg.identifier.identifier_token, 0);
+            self.aligns[align_kind::EXPRESSION].finish_item();
+        }
+    }
 
     /// Semantic action for non-terminal 'WithParameterItem'
     fn with_parameter_item(&mut self, arg: &WithParameterItem) {

@@ -408,6 +408,89 @@ impl VerylWalker for Formatter {
         self.direction(&arg.direction);
     }
 
+    /// Semantic action for non-terminal 'Instantiation'
+    fn instantiation(&mut self, arg: &Instantiation) {
+        self.identifier(&arg.identifier);
+        self.space(1);
+        self.colon_colon(&arg.colon_colon);
+        self.space(1);
+        self.identifier(&arg.identifier0);
+        self.space(1);
+        if let Some(ref x) = arg.instantiation_opt {
+            self.instance_parameter(&x.instance_parameter);
+            self.space(1);
+        }
+        self.token_will_push(&arg.l_brace.l_brace_token);
+        self.newline_push();
+        if let Some(ref x) = arg.instantiation_opt0 {
+            self.instance_port_list(&x.instance_port_list);
+        }
+        self.newline_pop();
+        self.r_brace(&arg.r_brace);
+    }
+
+    /// Semantic action for non-terminal 'InstanceParameter'
+    fn instance_parameter(&mut self, arg: &InstanceParameter) {
+        self.hash(&arg.hash);
+        self.token_will_push(&arg.l_paren.l_paren_token);
+        self.newline_push();
+        if let Some(ref x) = arg.instance_parameter_opt {
+            self.instance_parameter_list(&x.instance_parameter_list);
+        }
+        self.newline_pop();
+        self.r_paren(&arg.r_paren);
+    }
+
+    /// Semantic action for non-terminal 'InstanceParameterList'
+    fn instance_parameter_list(&mut self, arg: &InstanceParameterList) {
+        self.instance_parameter_item(&arg.instance_parameter_item);
+        for x in &arg.instance_parameter_list_list {
+            self.comma(&x.comma);
+            self.newline();
+            self.instance_parameter_item(&x.instance_parameter_item);
+        }
+        if let Some(ref x) = arg.instance_parameter_list_opt {
+            self.comma(&x.comma);
+        } else {
+            self.str(",");
+        }
+    }
+
+    /// Semantic action for non-terminal 'InstanceParameterItem'
+    fn instance_parameter_item(&mut self, arg: &InstanceParameterItem) {
+        self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.instance_parameter_item_opt {
+            self.colon(&x.colon);
+            self.space(1);
+            self.expression(&x.expression);
+        }
+    }
+
+    /// Semantic action for non-terminal 'InstancePortList'
+    fn instance_port_list(&mut self, arg: &InstancePortList) {
+        self.instance_port_item(&arg.instance_port_item);
+        for x in &arg.instance_port_list_list {
+            self.comma(&x.comma);
+            self.newline();
+            self.instance_port_item(&x.instance_port_item);
+        }
+        if let Some(ref x) = arg.instance_port_list_opt {
+            self.comma(&x.comma);
+        } else {
+            self.str(",");
+        }
+    }
+
+    /// Semantic action for non-terminal 'InstancePortItem'
+    fn instance_port_item(&mut self, arg: &InstancePortItem) {
+        self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.instance_port_item_opt {
+            self.colon(&x.colon);
+            self.space(1);
+            self.expression(&x.expression);
+        }
+    }
+
     /// Semantic action for non-terminal 'WithParameter'
     fn with_parameter(&mut self, arg: &WithParameter) {
         if let Some(ref x) = arg.with_parameter_opt {

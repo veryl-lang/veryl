@@ -7,3 +7,6 @@ install:
 
 gen_sv:
 	cargo run --bin veryl -- emit --target-directory ./testcases/sv ./testcases/vl/*
+
+flamegraph:
+	cargo flamegraph --bench benchmark -- --bench

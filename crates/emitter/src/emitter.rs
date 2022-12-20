@@ -112,10 +112,11 @@ impl Emitter {
         self.line = x.location.line;
     }
 
-    fn process_token(&mut self, x: &VerylToken, will_push: bool) {
+    fn process_token(&mut self, x: &VerylToken, will_push: bool, duplicated: Option<usize>) {
         self.parol_token(&x.token.token, true);
 
-        let loc: Location = (&x.token.token.location).into();
+        let mut loc: Location = (&x.token.token.location).into();
+        loc.duplicated = duplicated;
         if let Some(width) = self.aligner.additions.get(&loc) {
             self.space(*width);
         }
@@ -139,11 +140,15 @@ impl Emitter {
     }
 
     fn token(&mut self, x: &VerylToken) {
-        self.process_token(x, false)
+        self.process_token(x, false, None)
     }
 
     fn token_will_push(&mut self, x: &VerylToken) {
-        self.process_token(x, true)
+        self.process_token(x, true, None)
+    }
+
+    fn duplicated_token(&mut self, x: &VerylToken, i: usize) {
+        self.process_token(x, false, Some(i))
     }
 
     fn type_left(&mut self, input: &Type) {
@@ -545,6 +550,94 @@ impl VerylWalker for Emitter {
         self.direction(&arg.direction);
         self.space(1);
         self.identifier(&arg.identifier);
+    }
+
+    /// Semantic action for non-terminal 'Instantiation'
+    fn instantiation(&mut self, arg: &Instantiation) {
+        self.identifier(&arg.identifier0);
+        self.space(1);
+        self.token(&arg.colon_colon.colon_colon_token.replace(""));
+        if let Some(ref x) = arg.instantiation_opt {
+            self.instance_parameter(&x.instance_parameter);
+            self.space(1);
+        }
+        self.str(&arg.identifier.identifier_token.token.token.text());
+        self.space(1);
+        self.token_will_push(&arg.l_brace.l_brace_token.replace("("));
+        self.newline_push();
+        if let Some(ref x) = arg.instantiation_opt0 {
+            self.instance_port_list(&x.instance_port_list);
+        }
+        self.newline_pop();
+        self.token(&arg.r_brace.r_brace_token.replace(");"));
+    }
+
+    /// Semantic action for non-terminal 'InstanceParameter'
+    fn instance_parameter(&mut self, arg: &InstanceParameter) {
+        self.hash(&arg.hash);
+        self.token_will_push(&arg.l_paren.l_paren_token);
+        self.newline_push();
+        if let Some(ref x) = arg.instance_parameter_opt {
+            self.instance_parameter_list(&x.instance_parameter_list);
+        }
+        self.newline_pop();
+        self.r_paren(&arg.r_paren);
+    }
+
+    /// Semantic action for non-terminal 'InstanceParameterList'
+    fn instance_parameter_list(&mut self, arg: &InstanceParameterList) {
+        self.instance_parameter_item(&arg.instance_parameter_item);
+        for x in &arg.instance_parameter_list_list {
+            self.comma(&x.comma);
+            self.newline();
+            self.instance_parameter_item(&x.instance_parameter_item);
+        }
+        if let Some(ref x) = arg.instance_parameter_list_opt {
+            self.token(&x.comma.comma_token.replace(""));
+        }
+    }
+
+    /// Semantic action for non-terminal 'InstanceParameterItem'
+    fn instance_parameter_item(&mut self, arg: &InstanceParameterItem) {
+        self.str(".");
+        self.identifier(&arg.identifier);
+        self.space(1);
+        self.str("(");
+        if let Some(ref x) = arg.instance_parameter_item_opt {
+            self.token(&x.colon.colon_token.replace(""));
+            self.expression(&x.expression);
+        } else {
+            self.duplicated_token(&arg.identifier.identifier_token, 0);
+        }
+        self.str(")");
+    }
+
+    /// Semantic action for non-terminal 'InstancePortList'
+    fn instance_port_list(&mut self, arg: &InstancePortList) {
+        self.instance_port_item(&arg.instance_port_item);
+        for x in &arg.instance_port_list_list {
+            self.comma(&x.comma);
+            self.newline();
+            self.instance_port_item(&x.instance_port_item);
+        }
+        if let Some(ref x) = arg.instance_port_list_opt {
+            self.token(&x.comma.comma_token.replace(""));
+        }
+    }
+
+    /// Semantic action for non-terminal 'InstancePortItem'
+    fn instance_port_item(&mut self, arg: &InstancePortItem) {
+        self.str(".");
+        self.identifier(&arg.identifier);
+        self.space(1);
+        self.str("(");
+        if let Some(ref x) = arg.instance_port_item_opt {
+            self.token(&x.colon.colon_token.replace(""));
+            self.expression(&x.expression);
+        } else {
+            self.duplicated_token(&arg.identifier.identifier_token, 0);
+        }
+        self.str(")");
     }
 
     /// Semantic action for non-terminal 'WithParameter'

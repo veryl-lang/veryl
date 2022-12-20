@@ -111,6 +111,7 @@ token_with_comments!(CommonOperatorToken, plus_or_minus_or_amp_or_or_or_circumfl
 token_with_comments!(BinaryOperatorToken, star_star_or_star_or_slash_or_percent_or_l_t_l_t_l_t_or_g_t_g_t_g_t_or_l_t_l_t_or_g_t_g_t_or_l_t_equ_or_g_t_equ_or_l_t_or_g_t_or_equ_equ_equ_or_equ_equ_quest_or_bang_equ_equ_or_bang_equ_quest_or_equ_equ_or_bang_equ_or_amp_amp_or_or_or);
 token_with_comments!(UnaryOperatorToken, bang_or_tilde);
 
+token_with_comments!(ColonColonToken, colon_colon);
 token_with_comments!(ColonToken, colon);
 token_with_comments!(CommaToken, comma);
 token_with_comments!(EquToken, equ);

@@ -15,7 +15,7 @@ interface InterfaceA #(
     bit   [10-1:0][10-1:0] aaa;
 
     // modport declaration
-    modport a   (
+    modport a (
         input  a  ,
         output aa ,
         inout  aaa
