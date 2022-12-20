@@ -246,21 +246,25 @@ WithParameterList: WithParameterItem { Comma WithParameterItem } [ Comma ];
 WithParameterItem: ( Parameter | Localparam ) Identifier Colon Type Equ Expression;
 
 // ----------------------------------------------------------------------------
-// Module
+// PortDeclaration
 // ----------------------------------------------------------------------------
 
-ModuleDeclaration: Module Identifier [ WithParameter ] [ ModulePort ] LBrace { ModuleItem } RBrace;
+PortDeclaration: LParen [ PortDeclarationList ] RParen;
 
-ModulePort: LParen [ ModulePortList ] RParen;
+PortDeclarationList: PortDeclarationItem { Comma PortDeclarationItem } [ Comma ];
 
-ModulePortList: ModulePortItem { Comma ModulePortItem } [ Comma ];
-
-ModulePortItem: Identifier Colon Direction Type;
+PortDeclarationItem: Identifier Colon Direction Type;
 
 Direction: Input
          | Output
          | Inout
          ;
+
+// ----------------------------------------------------------------------------
+// Module
+// ----------------------------------------------------------------------------
+
+ModuleDeclaration: Module Identifier [ WithParameter ] [ PortDeclaration ] LBrace { ModuleItem } RBrace;
 
 ModuleItem: VariableDeclaration
           | ParameterDeclaration

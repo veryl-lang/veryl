@@ -692,6 +692,43 @@ impl VerylWalker for Emitter {
         self.expression(&arg.expression);
     }
 
+    /// Semantic action for non-terminal 'PortDeclaration'
+    fn port_declaration(&mut self, arg: &PortDeclaration) {
+        if let Some(ref x) = arg.port_declaration_opt {
+            self.token_will_push(&arg.l_paren.l_paren_token);
+            self.newline_push();
+            self.port_declaration_list(&x.port_declaration_list);
+            self.newline_pop();
+            self.r_paren(&arg.r_paren);
+        } else {
+            self.l_paren(&arg.l_paren);
+            self.r_paren(&arg.r_paren);
+        }
+    }
+
+    /// Semantic action for non-terminal 'PortDeclarationList'
+    fn port_declaration_list(&mut self, arg: &PortDeclarationList) {
+        self.port_declaration_item(&arg.port_declaration_item);
+        for x in &arg.port_declaration_list_list {
+            self.comma(&x.comma);
+            self.newline();
+            self.port_declaration_item(&x.port_declaration_item);
+        }
+        if let Some(ref x) = arg.port_declaration_list_opt {
+            self.token(&x.comma.comma_token.replace(""));
+        }
+    }
+
+    /// Semantic action for non-terminal 'PortDeclarationItem'
+    fn port_declaration_item(&mut self, arg: &PortDeclarationItem) {
+        self.direction(&arg.direction);
+        self.space(1);
+        self.r#type_left(&arg.r#type);
+        self.space(1);
+        self.identifier(&arg.identifier);
+        self.r#type_right(&arg.r#type);
+    }
+
     /// Semantic action for non-terminal 'ModuleDeclaration'
     fn module_declaration(&mut self, arg: &ModuleDeclaration) {
         self.module(&arg.module);
@@ -703,7 +740,7 @@ impl VerylWalker for Emitter {
             self.space(1);
         }
         if let Some(ref x) = arg.module_declaration_opt0 {
-            self.module_port(&x.module_port);
+            self.port_declaration(&x.port_declaration);
             self.space(1);
         }
         self.token_will_push(&arg.l_brace.l_brace_token.replace(";"));
@@ -716,43 +753,6 @@ impl VerylWalker for Emitter {
         }
         self.newline_pop();
         self.token(&arg.r_brace.r_brace_token.replace("endmodule"));
-    }
-
-    /// Semantic action for non-terminal 'ModulePort'
-    fn module_port(&mut self, arg: &ModulePort) {
-        if let Some(ref x) = arg.module_port_opt {
-            self.token_will_push(&arg.l_paren.l_paren_token);
-            self.newline_push();
-            self.module_port_list(&x.module_port_list);
-            self.newline_pop();
-            self.r_paren(&arg.r_paren);
-        } else {
-            self.l_paren(&arg.l_paren);
-            self.r_paren(&arg.r_paren);
-        }
-    }
-
-    /// Semantic action for non-terminal 'ModulePortList'
-    fn module_port_list(&mut self, arg: &ModulePortList) {
-        self.module_port_item(&arg.module_port_item);
-        for x in &arg.module_port_list_list {
-            self.comma(&x.comma);
-            self.newline();
-            self.module_port_item(&x.module_port_item);
-        }
-        if let Some(ref x) = arg.module_port_list_opt {
-            self.token(&x.comma.comma_token.replace(""));
-        }
-    }
-
-    /// Semantic action for non-terminal 'ModulePortItem'
-    fn module_port_item(&mut self, arg: &ModulePortItem) {
-        self.direction(&arg.direction);
-        self.space(1);
-        self.r#type_left(&arg.r#type);
-        self.space(1);
-        self.identifier(&arg.identifier);
-        self.r#type_right(&arg.r#type);
     }
 
     /// Semantic action for non-terminal 'InterfaceDeclaration'

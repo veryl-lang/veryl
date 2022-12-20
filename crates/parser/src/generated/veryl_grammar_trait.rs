@@ -699,28 +699,28 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'ModuleDeclaration'
-    fn module_declaration(&mut self, _arg: &ModuleDeclaration) -> Result<()> {
+    /// Semantic action for non-terminal 'PortDeclaration'
+    fn port_declaration(&mut self, _arg: &PortDeclaration) -> Result<()> {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'ModulePort'
-    fn module_port(&mut self, _arg: &ModulePort) -> Result<()> {
+    /// Semantic action for non-terminal 'PortDeclarationList'
+    fn port_declaration_list(&mut self, _arg: &PortDeclarationList) -> Result<()> {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'ModulePortList'
-    fn module_port_list(&mut self, _arg: &ModulePortList) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'ModulePortItem'
-    fn module_port_item(&mut self, _arg: &ModulePortItem) -> Result<()> {
+    /// Semantic action for non-terminal 'PortDeclarationItem'
+    fn port_declaration_item(&mut self, _arg: &PortDeclarationItem) -> Result<()> {
         Ok(())
     }
 
     /// Semantic action for non-terminal 'Direction'
     fn direction(&mut self, _arg: &Direction) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'ModuleDeclaration'
+    fn module_declaration(&mut self, _arg: &ModuleDeclaration) -> Result<()> {
         Ok(())
     }
 
@@ -1144,7 +1144,7 @@ pub struct WithParameterItemGroup1 {
 }
 
 ///
-/// Type derived for production 241
+/// Type derived for production 234
 ///
 /// Direction: Input;
 ///
@@ -1155,7 +1155,7 @@ pub struct Direction0 {
 }
 
 ///
-/// Type derived for production 242
+/// Type derived for production 235
 ///
 /// Direction: Output;
 ///
@@ -1166,7 +1166,7 @@ pub struct Direction1 {
 }
 
 ///
-/// Type derived for production 243
+/// Type derived for production 236
 ///
 /// Direction: Inout;
 ///
@@ -2689,7 +2689,7 @@ pub struct ModuleDeclarationOpt {
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 pub struct ModuleDeclarationOpt0 {
-    pub module_port: Box<ModulePort>,
+    pub port_declaration: Box<PortDeclaration>,
 }
 
 ///
@@ -2705,68 +2705,6 @@ pub enum ModuleItem {
     ModuleItem4(ModuleItem4),
     ModuleItem5(ModuleItem5),
     ModuleItem6(ModuleItem6),
-}
-
-///
-/// Type derived for non-terminal ModulePort
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct ModulePort {
-    pub l_paren: Box<LParen>,
-    pub module_port_opt: Option<Box<ModulePortOpt>>,
-    pub r_paren: Box<RParen>,
-}
-
-///
-/// Type derived for non-terminal ModulePortItem
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct ModulePortItem {
-    pub identifier: Box<Identifier>,
-    pub colon: Box<Colon>,
-    pub direction: Box<Direction>,
-    pub r#type: Box<Type>,
-}
-
-///
-/// Type derived for non-terminal ModulePortList
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct ModulePortList {
-    pub module_port_item: Box<ModulePortItem>,
-    pub module_port_list_list: Vec<ModulePortListList>,
-    pub module_port_list_opt: Option<Box<ModulePortListOpt>>,
-}
-
-///
-/// Type derived for non-terminal ModulePortListList
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct ModulePortListList {
-    pub comma: Box<Comma>,
-    pub module_port_item: Box<ModulePortItem>,
-}
-
-///
-/// Type derived for non-terminal ModulePortListOpt
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct ModulePortListOpt {
-    pub comma: Box<Comma>,
-}
-
-///
-/// Type derived for non-terminal ModulePortOpt
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-pub struct ModulePortOpt {
-    pub module_port_list: Box<ModulePortList>,
 }
 
 ///
@@ -2868,6 +2806,68 @@ pub struct ParameterDeclaration {
 pub struct ParameterToken {
     pub parameter: crate::veryl_token::OwnedToken, /* parameter */
     pub comments: Box<Comments>,
+}
+
+///
+/// Type derived for non-terminal PortDeclaration
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct PortDeclaration {
+    pub l_paren: Box<LParen>,
+    pub port_declaration_opt: Option<Box<PortDeclarationOpt>>,
+    pub r_paren: Box<RParen>,
+}
+
+///
+/// Type derived for non-terminal PortDeclarationItem
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct PortDeclarationItem {
+    pub identifier: Box<Identifier>,
+    pub colon: Box<Colon>,
+    pub direction: Box<Direction>,
+    pub r#type: Box<Type>,
+}
+
+///
+/// Type derived for non-terminal PortDeclarationList
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct PortDeclarationList {
+    pub port_declaration_item: Box<PortDeclarationItem>,
+    pub port_declaration_list_list: Vec<PortDeclarationListList>,
+    pub port_declaration_list_opt: Option<Box<PortDeclarationListOpt>>,
+}
+
+///
+/// Type derived for non-terminal PortDeclarationListList
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct PortDeclarationListList {
+    pub comma: Box<Comma>,
+    pub port_declaration_item: Box<PortDeclarationItem>,
+}
+
+///
+/// Type derived for non-terminal PortDeclarationListOpt
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct PortDeclarationListOpt {
+    pub comma: Box<Comma>,
+}
+
+///
+/// Type derived for non-terminal PortDeclarationOpt
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct PortDeclarationOpt {
+    pub port_declaration_list: Box<PortDeclarationList>,
 }
 
 ///
@@ -3410,12 +3410,6 @@ pub enum ASTType {
     ModuleDeclarationOpt(Option<Box<ModuleDeclarationOpt>>),
     ModuleDeclarationOpt0(Option<Box<ModuleDeclarationOpt0>>),
     ModuleItem(ModuleItem),
-    ModulePort(ModulePort),
-    ModulePortItem(ModulePortItem),
-    ModulePortList(ModulePortList),
-    ModulePortListList(Vec<ModulePortListList>),
-    ModulePortListOpt(Option<Box<ModulePortListOpt>>),
-    ModulePortOpt(Option<Box<ModulePortOpt>>),
     ModuleToken(ModuleToken),
     MultiComment(MultiComment),
     Negedge(Negedge),
@@ -3426,6 +3420,12 @@ pub enum ASTType {
     Parameter(Parameter),
     ParameterDeclaration(ParameterDeclaration),
     ParameterToken(ParameterToken),
+    PortDeclaration(PortDeclaration),
+    PortDeclarationItem(PortDeclarationItem),
+    PortDeclarationList(PortDeclarationList),
+    PortDeclarationListList(Vec<PortDeclarationListList>),
+    PortDeclarationListOpt(Option<Box<PortDeclarationListOpt>>),
+    PortDeclarationOpt(Option<Box<PortDeclarationOpt>>),
     Posedge(Posedge),
     PosedgeToken(PosedgeToken),
     RBrace(RBrace),
@@ -9246,6 +9246,318 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 225:
     ///
+    /// PortDeclaration: LParen PortDeclarationOpt /* Option */ RParen;
+    ///
+    #[parol_runtime::function_name::named]
+    fn port_declaration(
+        &mut self,
+        _l_paren: &ParseTreeStackEntry<'t>,
+        _port_declaration_opt: &ParseTreeStackEntry<'t>,
+        _r_paren: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let r_paren = pop_item!(self, r_paren, RParen, context);
+        let port_declaration_opt =
+            pop_item!(self, port_declaration_opt, PortDeclarationOpt, context);
+        let l_paren = pop_item!(self, l_paren, LParen, context);
+        let port_declaration_built = PortDeclarationBuilder::default()
+            .l_paren(Box::new(l_paren))
+            .port_declaration_opt(port_declaration_opt)
+            .r_paren(Box::new(r_paren))
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar
+            .port_declaration(&port_declaration_built)?;
+        self.push(ASTType::PortDeclaration(port_declaration_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 226:
+    ///
+    /// PortDeclarationOpt /* Option<T>::Some */: PortDeclarationList;
+    ///
+    #[parol_runtime::function_name::named]
+    fn port_declaration_opt_0(
+        &mut self,
+        _port_declaration_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let port_declaration_list =
+            pop_item!(self, port_declaration_list, PortDeclarationList, context);
+        let port_declaration_opt_0_built = PortDeclarationOptBuilder::default()
+            .port_declaration_list(Box::new(port_declaration_list))
+            .build()
+            .into_diagnostic()?;
+        self.push(
+            ASTType::PortDeclarationOpt(Some(Box::new(port_declaration_opt_0_built))),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 227:
+    ///
+    /// PortDeclarationOpt /* Option<T>::None */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn port_declaration_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        self.push(ASTType::PortDeclarationOpt(None), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 228:
+    ///
+    /// PortDeclarationList: PortDeclarationItem PortDeclarationListList /* Vec */ PortDeclarationListOpt /* Option */;
+    ///
+    #[parol_runtime::function_name::named]
+    fn port_declaration_list(
+        &mut self,
+        _port_declaration_item: &ParseTreeStackEntry<'t>,
+        _port_declaration_list_list: &ParseTreeStackEntry<'t>,
+        _port_declaration_list_opt: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let port_declaration_list_opt = pop_item!(
+            self,
+            port_declaration_list_opt,
+            PortDeclarationListOpt,
+            context
+        );
+        let port_declaration_list_list = pop_and_reverse_item!(
+            self,
+            port_declaration_list_list,
+            PortDeclarationListList,
+            context
+        );
+        let port_declaration_item =
+            pop_item!(self, port_declaration_item, PortDeclarationItem, context);
+        let port_declaration_list_built = PortDeclarationListBuilder::default()
+            .port_declaration_item(Box::new(port_declaration_item))
+            .port_declaration_list_list(port_declaration_list_list)
+            .port_declaration_list_opt(port_declaration_list_opt)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar
+            .port_declaration_list(&port_declaration_list_built)?;
+        self.push(
+            ASTType::PortDeclarationList(port_declaration_list_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 229:
+    ///
+    /// PortDeclarationListList /* Vec<T>::Push */: Comma PortDeclarationItem PortDeclarationListList;
+    ///
+    #[parol_runtime::function_name::named]
+    fn port_declaration_list_list_0(
+        &mut self,
+        _comma: &ParseTreeStackEntry<'t>,
+        _port_declaration_item: &ParseTreeStackEntry<'t>,
+        _port_declaration_list_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let mut port_declaration_list_list = pop_item!(
+            self,
+            port_declaration_list_list,
+            PortDeclarationListList,
+            context
+        );
+        let port_declaration_item =
+            pop_item!(self, port_declaration_item, PortDeclarationItem, context);
+        let comma = pop_item!(self, comma, Comma, context);
+        let port_declaration_list_list_0_built = PortDeclarationListListBuilder::default()
+            .port_declaration_item(Box::new(port_declaration_item))
+            .comma(Box::new(comma))
+            .build()
+            .into_diagnostic()?;
+        // Add an element to the vector
+        port_declaration_list_list.push(port_declaration_list_list_0_built);
+        self.push(
+            ASTType::PortDeclarationListList(port_declaration_list_list),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 230:
+    ///
+    /// PortDeclarationListList /* Vec<T>::New */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn port_declaration_list_list_1(
+        &mut self,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let port_declaration_list_list_1_built = Vec::new();
+        self.push(
+            ASTType::PortDeclarationListList(port_declaration_list_list_1_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 231:
+    ///
+    /// PortDeclarationListOpt /* Option<T>::Some */: Comma;
+    ///
+    #[parol_runtime::function_name::named]
+    fn port_declaration_list_opt_0(
+        &mut self,
+        _comma: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let comma = pop_item!(self, comma, Comma, context);
+        let port_declaration_list_opt_0_built = PortDeclarationListOptBuilder::default()
+            .comma(Box::new(comma))
+            .build()
+            .into_diagnostic()?;
+        self.push(
+            ASTType::PortDeclarationListOpt(Some(Box::new(port_declaration_list_opt_0_built))),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 232:
+    ///
+    /// PortDeclarationListOpt /* Option<T>::None */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn port_declaration_list_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        self.push(ASTType::PortDeclarationListOpt(None), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 233:
+    ///
+    /// PortDeclarationItem: Identifier Colon Direction Type;
+    ///
+    #[parol_runtime::function_name::named]
+    fn port_declaration_item(
+        &mut self,
+        _identifier: &ParseTreeStackEntry<'t>,
+        _colon: &ParseTreeStackEntry<'t>,
+        _direction: &ParseTreeStackEntry<'t>,
+        _type: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let r#type = pop_item!(self, r#type, Type, context);
+        let direction = pop_item!(self, direction, Direction, context);
+        let colon = pop_item!(self, colon, Colon, context);
+        let identifier = pop_item!(self, identifier, Identifier, context);
+        let port_declaration_item_built = PortDeclarationItemBuilder::default()
+            .identifier(Box::new(identifier))
+            .colon(Box::new(colon))
+            .direction(Box::new(direction))
+            .r#type(Box::new(r#type))
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar
+            .port_declaration_item(&port_declaration_item_built)?;
+        self.push(
+            ASTType::PortDeclarationItem(port_declaration_item_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 234:
+    ///
+    /// Direction: Input;
+    ///
+    #[parol_runtime::function_name::named]
+    fn direction_0(
+        &mut self,
+        _input: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let input = pop_item!(self, input, Input, context);
+        let direction_0_built = Direction0Builder::default()
+            .input(Box::new(input))
+            .build()
+            .into_diagnostic()?;
+        let direction_0_built = Direction::Direction0(direction_0_built);
+        // Calling user action here
+        self.user_grammar.direction(&direction_0_built)?;
+        self.push(ASTType::Direction(direction_0_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 235:
+    ///
+    /// Direction: Output;
+    ///
+    #[parol_runtime::function_name::named]
+    fn direction_1(
+        &mut self,
+        _output: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let output = pop_item!(self, output, Output, context);
+        let direction_1_built = Direction1Builder::default()
+            .output(Box::new(output))
+            .build()
+            .into_diagnostic()?;
+        let direction_1_built = Direction::Direction1(direction_1_built);
+        // Calling user action here
+        self.user_grammar.direction(&direction_1_built)?;
+        self.push(ASTType::Direction(direction_1_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 236:
+    ///
+    /// Direction: Inout;
+    ///
+    #[parol_runtime::function_name::named]
+    fn direction_2(
+        &mut self,
+        _inout: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let inout = pop_item!(self, inout, Inout, context);
+        let direction_2_built = Direction2Builder::default()
+            .inout(Box::new(inout))
+            .build()
+            .into_diagnostic()?;
+        let direction_2_built = Direction::Direction2(direction_2_built);
+        // Calling user action here
+        self.user_grammar.direction(&direction_2_built)?;
+        self.push(ASTType::Direction(direction_2_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 237:
+    ///
     /// ModuleDeclaration: Module Identifier ModuleDeclarationOpt /* Option */ ModuleDeclarationOpt0 /* Option */ LBrace ModuleDeclarationList /* Vec */ RBrace;
     ///
     #[parol_runtime::function_name::named]
@@ -9300,7 +9612,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 226:
+    /// Semantic action for production 238:
     ///
     /// ModuleDeclarationList /* Vec<T>::Push */: ModuleItem ModuleDeclarationList;
     ///
@@ -9333,7 +9645,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 227:
+    /// Semantic action for production 239:
     ///
     /// ModuleDeclarationList /* Vec<T>::New */: ;
     ///
@@ -9349,21 +9661,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 228:
+    /// Semantic action for production 240:
     ///
-    /// ModuleDeclarationOpt0 /* Option<T>::Some */: ModulePort;
+    /// ModuleDeclarationOpt0 /* Option<T>::Some */: PortDeclaration;
     ///
     #[parol_runtime::function_name::named]
     fn module_declaration_opt0_0(
         &mut self,
-        _module_port: &ParseTreeStackEntry<'t>,
+        _port_declaration: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let module_port = pop_item!(self, module_port, ModulePort, context);
+        let port_declaration = pop_item!(self, port_declaration, PortDeclaration, context);
         let module_declaration_opt0_0_built = ModuleDeclarationOpt0Builder::default()
-            .module_port(Box::new(module_port))
+            .port_declaration(Box::new(port_declaration))
             .build()
             .into_diagnostic()?;
         self.push(
@@ -9373,7 +9685,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 229:
+    /// Semantic action for production 241:
     ///
     /// ModuleDeclarationOpt0 /* Option<T>::None */: ;
     ///
@@ -9385,7 +9697,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 230:
+    /// Semantic action for production 242:
     ///
     /// ModuleDeclarationOpt /* Option<T>::Some */: WithParameter;
     ///
@@ -9409,7 +9721,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 231:
+    /// Semantic action for production 243:
     ///
     /// ModuleDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -9418,289 +9730,6 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::ModuleDeclarationOpt(None), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 232:
-    ///
-    /// ModulePort: LParen ModulePortOpt /* Option */ RParen;
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_port(
-        &mut self,
-        _l_paren: &ParseTreeStackEntry<'t>,
-        _module_port_opt: &ParseTreeStackEntry<'t>,
-        _r_paren: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let r_paren = pop_item!(self, r_paren, RParen, context);
-        let module_port_opt = pop_item!(self, module_port_opt, ModulePortOpt, context);
-        let l_paren = pop_item!(self, l_paren, LParen, context);
-        let module_port_built = ModulePortBuilder::default()
-            .l_paren(Box::new(l_paren))
-            .module_port_opt(module_port_opt)
-            .r_paren(Box::new(r_paren))
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar.module_port(&module_port_built)?;
-        self.push(ASTType::ModulePort(module_port_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 233:
-    ///
-    /// ModulePortOpt /* Option<T>::Some */: ModulePortList;
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_port_opt_0(
-        &mut self,
-        _module_port_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let module_port_list = pop_item!(self, module_port_list, ModulePortList, context);
-        let module_port_opt_0_built = ModulePortOptBuilder::default()
-            .module_port_list(Box::new(module_port_list))
-            .build()
-            .into_diagnostic()?;
-        self.push(
-            ASTType::ModulePortOpt(Some(Box::new(module_port_opt_0_built))),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 234:
-    ///
-    /// ModulePortOpt /* Option<T>::None */: ;
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_port_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::ModulePortOpt(None), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 235:
-    ///
-    /// ModulePortList: ModulePortItem ModulePortListList /* Vec */ ModulePortListOpt /* Option */;
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_port_list(
-        &mut self,
-        _module_port_item: &ParseTreeStackEntry<'t>,
-        _module_port_list_list: &ParseTreeStackEntry<'t>,
-        _module_port_list_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let module_port_list_opt =
-            pop_item!(self, module_port_list_opt, ModulePortListOpt, context);
-        let module_port_list_list =
-            pop_and_reverse_item!(self, module_port_list_list, ModulePortListList, context);
-        let module_port_item = pop_item!(self, module_port_item, ModulePortItem, context);
-        let module_port_list_built = ModulePortListBuilder::default()
-            .module_port_item(Box::new(module_port_item))
-            .module_port_list_list(module_port_list_list)
-            .module_port_list_opt(module_port_list_opt)
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar
-            .module_port_list(&module_port_list_built)?;
-        self.push(ASTType::ModulePortList(module_port_list_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 236:
-    ///
-    /// ModulePortListList /* Vec<T>::Push */: Comma ModulePortItem ModulePortListList;
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_port_list_list_0(
-        &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _module_port_item: &ParseTreeStackEntry<'t>,
-        _module_port_list_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let mut module_port_list_list =
-            pop_item!(self, module_port_list_list, ModulePortListList, context);
-        let module_port_item = pop_item!(self, module_port_item, ModulePortItem, context);
-        let comma = pop_item!(self, comma, Comma, context);
-        let module_port_list_list_0_built = ModulePortListListBuilder::default()
-            .module_port_item(Box::new(module_port_item))
-            .comma(Box::new(comma))
-            .build()
-            .into_diagnostic()?;
-        // Add an element to the vector
-        module_port_list_list.push(module_port_list_list_0_built);
-        self.push(ASTType::ModulePortListList(module_port_list_list), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 237:
-    ///
-    /// ModulePortListList /* Vec<T>::New */: ;
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_port_list_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let module_port_list_list_1_built = Vec::new();
-        self.push(
-            ASTType::ModulePortListList(module_port_list_list_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 238:
-    ///
-    /// ModulePortListOpt /* Option<T>::Some */: Comma;
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_port_list_opt_0(
-        &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let comma = pop_item!(self, comma, Comma, context);
-        let module_port_list_opt_0_built = ModulePortListOptBuilder::default()
-            .comma(Box::new(comma))
-            .build()
-            .into_diagnostic()?;
-        self.push(
-            ASTType::ModulePortListOpt(Some(Box::new(module_port_list_opt_0_built))),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 239:
-    ///
-    /// ModulePortListOpt /* Option<T>::None */: ;
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_port_list_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::ModulePortListOpt(None), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 240:
-    ///
-    /// ModulePortItem: Identifier Colon Direction Type;
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_port_item(
-        &mut self,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _colon: &ParseTreeStackEntry<'t>,
-        _direction: &ParseTreeStackEntry<'t>,
-        _type: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let r#type = pop_item!(self, r#type, Type, context);
-        let direction = pop_item!(self, direction, Direction, context);
-        let colon = pop_item!(self, colon, Colon, context);
-        let identifier = pop_item!(self, identifier, Identifier, context);
-        let module_port_item_built = ModulePortItemBuilder::default()
-            .identifier(Box::new(identifier))
-            .colon(Box::new(colon))
-            .direction(Box::new(direction))
-            .r#type(Box::new(r#type))
-            .build()
-            .into_diagnostic()?;
-        // Calling user action here
-        self.user_grammar
-            .module_port_item(&module_port_item_built)?;
-        self.push(ASTType::ModulePortItem(module_port_item_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 241:
-    ///
-    /// Direction: Input;
-    ///
-    #[parol_runtime::function_name::named]
-    fn direction_0(
-        &mut self,
-        _input: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let input = pop_item!(self, input, Input, context);
-        let direction_0_built = Direction0Builder::default()
-            .input(Box::new(input))
-            .build()
-            .into_diagnostic()?;
-        let direction_0_built = Direction::Direction0(direction_0_built);
-        // Calling user action here
-        self.user_grammar.direction(&direction_0_built)?;
-        self.push(ASTType::Direction(direction_0_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 242:
-    ///
-    /// Direction: Output;
-    ///
-    #[parol_runtime::function_name::named]
-    fn direction_1(
-        &mut self,
-        _output: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let output = pop_item!(self, output, Output, context);
-        let direction_1_built = Direction1Builder::default()
-            .output(Box::new(output))
-            .build()
-            .into_diagnostic()?;
-        let direction_1_built = Direction::Direction1(direction_1_built);
-        // Calling user action here
-        self.user_grammar.direction(&direction_1_built)?;
-        self.push(ASTType::Direction(direction_1_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 243:
-    ///
-    /// Direction: Inout;
-    ///
-    #[parol_runtime::function_name::named]
-    fn direction_2(
-        &mut self,
-        _inout: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let inout = pop_item!(self, inout, Inout, context);
-        let direction_2_built = Direction2Builder::default()
-            .inout(Box::new(inout))
-            .build()
-            .into_diagnostic()?;
-        let direction_2_built = Direction::Direction2(direction_2_built);
-        // Calling user action here
-        self.user_grammar.direction(&direction_2_built)?;
-        self.push(ASTType::Direction(direction_2_built), context);
         Ok(())
     }
 
@@ -10627,7 +10656,30 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             ),
             223 => self.with_parameter_item_group_0(&children[0], parse_tree),
             224 => self.with_parameter_item_group_1(&children[0], parse_tree),
-            225 => self.module_declaration(
+            225 => self.port_declaration(&children[0], &children[1], &children[2], parse_tree),
+            226 => self.port_declaration_opt_0(&children[0], parse_tree),
+            227 => self.port_declaration_opt_1(parse_tree),
+            228 => self.port_declaration_list(&children[0], &children[1], &children[2], parse_tree),
+            229 => self.port_declaration_list_list_0(
+                &children[0],
+                &children[1],
+                &children[2],
+                parse_tree,
+            ),
+            230 => self.port_declaration_list_list_1(parse_tree),
+            231 => self.port_declaration_list_opt_0(&children[0], parse_tree),
+            232 => self.port_declaration_list_opt_1(parse_tree),
+            233 => self.port_declaration_item(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                parse_tree,
+            ),
+            234 => self.direction_0(&children[0], parse_tree),
+            235 => self.direction_1(&children[0], parse_tree),
+            236 => self.direction_2(&children[0], parse_tree),
+            237 => self.module_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -10637,32 +10689,12 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[6],
                 parse_tree,
             ),
-            226 => self.module_declaration_list_0(&children[0], &children[1], parse_tree),
-            227 => self.module_declaration_list_1(parse_tree),
-            228 => self.module_declaration_opt0_0(&children[0], parse_tree),
-            229 => self.module_declaration_opt0_1(parse_tree),
-            230 => self.module_declaration_opt_0(&children[0], parse_tree),
-            231 => self.module_declaration_opt_1(parse_tree),
-            232 => self.module_port(&children[0], &children[1], &children[2], parse_tree),
-            233 => self.module_port_opt_0(&children[0], parse_tree),
-            234 => self.module_port_opt_1(parse_tree),
-            235 => self.module_port_list(&children[0], &children[1], &children[2], parse_tree),
-            236 => {
-                self.module_port_list_list_0(&children[0], &children[1], &children[2], parse_tree)
-            }
-            237 => self.module_port_list_list_1(parse_tree),
-            238 => self.module_port_list_opt_0(&children[0], parse_tree),
-            239 => self.module_port_list_opt_1(parse_tree),
-            240 => self.module_port_item(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                parse_tree,
-            ),
-            241 => self.direction_0(&children[0], parse_tree),
-            242 => self.direction_1(&children[0], parse_tree),
-            243 => self.direction_2(&children[0], parse_tree),
+            238 => self.module_declaration_list_0(&children[0], &children[1], parse_tree),
+            239 => self.module_declaration_list_1(parse_tree),
+            240 => self.module_declaration_opt0_0(&children[0], parse_tree),
+            241 => self.module_declaration_opt0_1(parse_tree),
+            242 => self.module_declaration_opt_0(&children[0], parse_tree),
+            243 => self.module_declaration_opt_1(parse_tree),
             244 => self.module_item_0(&children[0], parse_tree),
             245 => self.module_item_1(&children[0], parse_tree),
             246 => self.module_item_2(&children[0], parse_tree),

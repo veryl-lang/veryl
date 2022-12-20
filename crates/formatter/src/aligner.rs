@@ -335,7 +335,7 @@ impl VerylWalker for Aligner {
             self.with_parameter(&x.with_parameter);
         }
         if let Some(ref x) = arg.module_declaration_opt0 {
-            self.module_port(&x.module_port);
+            self.port_declaration(&x.port_declaration);
         }
         for x in &arg.module_declaration_list {
             self.module_item(&x.module_item);

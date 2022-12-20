@@ -658,46 +658,29 @@ pub trait VerylWalker {
         self.expression(&arg.expression);
     }
 
-    /// Semantic action for non-terminal 'ModuleDeclaration'
-    fn module_declaration(&mut self, arg: &ModuleDeclaration) {
-        self.module(&arg.module);
-        self.identifier(&arg.identifier);
-        if let Some(ref x) = arg.module_declaration_opt {
-            self.with_parameter(&x.with_parameter);
-        }
-        if let Some(ref x) = arg.module_declaration_opt0 {
-            self.module_port(&x.module_port);
-        }
-        self.l_brace(&arg.l_brace);
-        for x in &arg.module_declaration_list {
-            self.module_item(&x.module_item);
-        }
-        self.r_brace(&arg.r_brace);
-    }
-
-    /// Semantic action for non-terminal 'ModulePort'
-    fn module_port(&mut self, arg: &ModulePort) {
+    /// Semantic action for non-terminal 'PortDeclaration'
+    fn port_declaration(&mut self, arg: &PortDeclaration) {
         self.l_paren(&arg.l_paren);
-        if let Some(ref x) = arg.module_port_opt {
-            self.module_port_list(&x.module_port_list);
+        if let Some(ref x) = arg.port_declaration_opt {
+            self.port_declaration_list(&x.port_declaration_list);
         }
         self.r_paren(&arg.r_paren);
     }
 
-    /// Semantic action for non-terminal 'ModulePortList'
-    fn module_port_list(&mut self, arg: &ModulePortList) {
-        self.module_port_item(&arg.module_port_item);
-        for x in &arg.module_port_list_list {
+    /// Semantic action for non-terminal 'PortDeclarationList'
+    fn port_declaration_list(&mut self, arg: &PortDeclarationList) {
+        self.port_declaration_item(&arg.port_declaration_item);
+        for x in &arg.port_declaration_list_list {
             self.comma(&x.comma);
-            self.module_port_item(&x.module_port_item);
+            self.port_declaration_item(&x.port_declaration_item);
         }
-        if let Some(ref x) = arg.module_port_list_opt {
+        if let Some(ref x) = arg.port_declaration_list_opt {
             self.comma(&x.comma);
         }
     }
 
-    /// Semantic action for non-terminal 'ModulePortItem'
-    fn module_port_item(&mut self, arg: &ModulePortItem) {
+    /// Semantic action for non-terminal 'PortDeclarationItem'
+    fn port_declaration_item(&mut self, arg: &PortDeclarationItem) {
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
         self.direction(&arg.direction);
@@ -711,6 +694,23 @@ pub trait VerylWalker {
             Direction::Direction1(x) => self.output(&x.output),
             Direction::Direction2(x) => self.inout(&x.inout),
         };
+    }
+
+    /// Semantic action for non-terminal 'ModuleDeclaration'
+    fn module_declaration(&mut self, arg: &ModuleDeclaration) {
+        self.module(&arg.module);
+        self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.module_declaration_opt {
+            self.with_parameter(&x.with_parameter);
+        }
+        if let Some(ref x) = arg.module_declaration_opt0 {
+            self.port_declaration(&x.port_declaration);
+        }
+        self.l_brace(&arg.l_brace);
+        for x in &arg.module_declaration_list {
+            self.module_item(&x.module_item);
+        }
+        self.r_brace(&arg.r_brace);
     }
 
     /// Semantic action for non-terminal 'ModuleItem'
