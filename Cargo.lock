@@ -1792,6 +1792,7 @@ name = "veryl-tests"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "veryl-analyzer",
  "veryl-emitter",
  "veryl-formatter",
  "veryl-parser",

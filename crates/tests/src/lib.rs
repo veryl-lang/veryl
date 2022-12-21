@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod parser {
     use std::fs;
-    use veryl_parser::parser::Parser;
+    use veryl_parser::Parser;
 
     fn test(name: &str) {
         let file = format!("../../testcases/vl/{}.vl", name);
@@ -17,10 +17,30 @@ mod parser {
 }
 
 #[cfg(test)]
+mod analyzer {
+    use std::fs;
+    use veryl_analyzer::Analyzer;
+    use veryl_parser::Parser;
+
+    fn test(name: &str) {
+        let file = format!("../../testcases/vl/{}.vl", name);
+        let input = fs::read_to_string(&file).unwrap();
+
+        let ret = Parser::parse(&input, &file).unwrap();
+        let mut analyzer = Analyzer::new(&input);
+        analyzer.analyze(&ret.veryl);
+
+        assert!(analyzer.errors.is_empty());
+    }
+
+    include!(concat!(env!("OUT_DIR"), "/test.rs"));
+}
+
+#[cfg(test)]
 mod formatter {
     use std::fs;
-    use veryl_formatter::formatter::Formatter;
-    use veryl_parser::parser::Parser;
+    use veryl_formatter::Formatter;
+    use veryl_parser::Parser;
 
     fn test(name: &str) {
         let file = format!("../../testcases/vl/{}.vl", name);
@@ -53,8 +73,8 @@ mod formatter {
 #[cfg(test)]
 mod emitter {
     use std::fs;
-    use veryl_emitter::emitter::Emitter;
-    use veryl_parser::parser::Parser;
+    use veryl_emitter::Emitter;
+    use veryl_parser::Parser;
 
     fn test(name: &str) {
         let file = format!("../../testcases/vl/{}.vl", name);
