@@ -9,6 +9,9 @@ members = [
     "crates/veryl",
 ]
 
+[workspace.dependencies]
+thiserror     = "1.0"
+
 [profile.dev.build-override]
 opt-level = 3
 

@@ -1732,7 +1732,6 @@ dependencies = [
  "clap 4.0.29",
  "console",
  "env_logger 0.10.0",
- "miette",
  "similar",
  "thiserror",
  "veryl-analyzer",

@@ -3,10 +3,9 @@ use ropey::Rope;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
-use veryl_analyzer::analyzer::Analyzer;
-use veryl_formatter::formatter::Formatter;
-use veryl_parser::parser::Parser;
-use veryl_parser::veryl_parser::{miette, ParserError};
+use veryl_analyzer::Analyzer;
+use veryl_formatter::Formatter;
+use veryl_parser::{miette, Parser, ParserError};
 
 #[derive(Debug)]
 pub struct Backend {

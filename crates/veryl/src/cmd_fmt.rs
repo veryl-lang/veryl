@@ -1,7 +1,6 @@
 use crate::utils;
 use crate::Fmt;
 use console::{style, Style};
-use miette::{IntoDiagnostic, Result, WrapErr};
 use similar::{ChangeTag, TextDiff};
 use std::fmt;
 use std::fs;
@@ -9,8 +8,9 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
 use std::time::Instant;
-use veryl_formatter::formatter::Formatter;
-use veryl_parser::parser::Parser;
+use veryl_formatter::Formatter;
+use veryl_parser::miette::{IntoDiagnostic, Result, WrapErr};
+use veryl_parser::Parser;
 
 pub struct CmdFmt {
     opt: Fmt,

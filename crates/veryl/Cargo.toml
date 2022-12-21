@@ -9,9 +9,8 @@ edition = "2021"
 clap            = {version = "4.0.29", features = ["derive"]}
 console         = "0.15.2"
 env_logger      = "0.10.0"
-miette          = {version = "5.5.0", features = ["fancy"]}
 similar         = {version = "2.2.1", features = ["text", "inline"]}
-thiserror       = "1.0"
+thiserror       = {workspace = true}
 veryl-analyzer  = {version = "0.1.0", path = "../analyzer"}
 veryl-emitter   = {version = "0.1.0", path = "../emitter"}
 veryl-parser    = {version = "0.1.0", path = "../parser"}

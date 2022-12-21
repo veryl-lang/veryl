@@ -1,12 +1,11 @@
 use crate::utils;
 use crate::Check;
-use miette::{Diagnostic, IntoDiagnostic, Result, WrapErr};
 use std::fs;
 use std::time::Instant;
 use thiserror::Error;
-use veryl_analyzer::analyze_error::AnalyzeError;
-use veryl_analyzer::analyzer::Analyzer;
-use veryl_parser::parser::Parser;
+use veryl_analyzer::{AnalyzeError, Analyzer};
+use veryl_parser::miette::{self, Diagnostic, IntoDiagnostic, Result, WrapErr};
+use veryl_parser::Parser;
 
 pub struct CmdCheck {
     opt: Check,

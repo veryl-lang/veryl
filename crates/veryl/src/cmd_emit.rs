@@ -1,12 +1,12 @@
 use crate::utils;
 use crate::Emit;
-use miette::{IntoDiagnostic, Result, WrapErr};
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::time::Instant;
-use veryl_emitter::emitter::Emitter;
-use veryl_parser::parser::Parser;
+use veryl_emitter::Emitter;
+use veryl_parser::miette::{IntoDiagnostic, Result, WrapErr};
+use veryl_parser::Parser;
 
 pub struct CmdEmit {
     opt: Emit,

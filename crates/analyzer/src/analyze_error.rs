@@ -1,6 +1,5 @@
 use thiserror::Error;
-use veryl_parser::parol_runtime::miette;
-use veryl_parser::parol_runtime::miette::{Diagnostic, NamedSource, SourceSpan};
+use veryl_parser::miette::{self, Diagnostic, NamedSource, SourceSpan};
 use veryl_parser::veryl_token::VerylToken;
 
 #[derive(Error, Diagnostic, Debug)]

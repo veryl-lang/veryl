@@ -6,10 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tower-lsp       = "0.17.0"
+dashmap         = "5.4.0"
+ropey           = "1.5.0"
 tokio           = {version = "1.23.0", features = ["full"]}
+tower-lsp       = "0.17.0"
 veryl-analyzer  = {version = "0.1.0", path = "../analyzer"}
 veryl-formatter = {version = "0.1.0", path = "../formatter"}
 veryl-parser    = {version = "0.1.0", path = "../parser"}
-dashmap         = "5.4.0"
-ropey           = "1.5.0"

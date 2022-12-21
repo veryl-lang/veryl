@@ -1,5 +1,5 @@
 use crate::analyze_error::AnalyzeError;
-use veryl_parser::parol_runtime::miette::Result;
+use veryl_parser::miette::Result;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 

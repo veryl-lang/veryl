@@ -1,5 +1,5 @@
-use miette::{IntoDiagnostic, Result};
 use std::path::{Path, PathBuf};
+use veryl_parser::veryl_parser::miette::{IntoDiagnostic, Result};
 use walkdir::WalkDir;
 
 pub fn gather_files<T: AsRef<Path>>(base_dir: T) -> Result<Vec<PathBuf>> {

@@ -1,7 +1,7 @@
 use clap::{Args, Parser, Subcommand};
-use miette::Result;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use veryl_parser::miette::Result;
 
 mod cmd_check;
 mod cmd_emit;
