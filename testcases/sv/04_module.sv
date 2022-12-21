@@ -24,8 +24,8 @@ module ModuleA #(
     assign aaa = 1;
 
     // assign declaration with variable declaration
-    logic [10-1:0] a;
-    assign a = 1;
+    logic [10-1:0] c;
+    assign c = 1;
 
     // always_ff declaration with default polarity
     always_ff @ (posedge i_clk, negedge i_rst) begin

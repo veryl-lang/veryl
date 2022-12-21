@@ -80,6 +80,26 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         Ok(())
     }
 
+    fn assign_declaration(&mut self, arg: &AssignDeclaration) -> Result<()> {
+        if let HandlerPoint::Before = self.point {
+            // assign with type
+            if arg.assign_declaration_opt.is_some() {
+                let name = arg.identifier.identifier_token.text();
+                let loc: Location = arg.identifier.identifier_token.location().into();
+
+                let symbol = Symbol::new(&name, SymbolKind::Parameter, &self.name_space, &loc);
+                if !self.table.insert(&name, symbol) {
+                    self.errors.push(AnalyzeError::duplicated_identifier(
+                        name,
+                        self.text,
+                        &arg.identifier.identifier_token,
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn with_parameter_item(&mut self, arg: &WithParameterItem) -> Result<()> {
         if let HandlerPoint::Before = self.point {
             let name = arg.identifier.identifier_token.text();
