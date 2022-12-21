@@ -200,9 +200,9 @@ Statement: AssignmentStatement
 
 AssignmentStatement: Identifier Equ Expression Semicolon;
 
-IfStatement: If Expression LBrace Statement RBrace { Else If Expression LBrace Statement RBrace } [ Else LBrace Statement RBrace ];
+IfStatement: If Expression LBrace { Statement } RBrace { Else If Expression LBrace { Statement } RBrace } [ Else LBrace { Statement } RBrace ];
 
-IfResetStatement: IfReset LBrace Statement RBrace { Else If Expression LBrace Statement RBrace } [ Else LBrace Statement RBrace ];
+IfResetStatement: IfReset LBrace { Statement } RBrace { Else If Expression LBrace { Statement } RBrace } [ Else LBrace { Statement } RBrace ];
 
 ReturnStatement: Return Expression Semicolon;
 

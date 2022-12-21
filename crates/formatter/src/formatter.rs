@@ -181,13 +181,15 @@ impl VerylWalker for Formatter {
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
-        self.statement(&arg.statement);
+        for x in &arg.if_statement_list {
+            self.statement(&x.statement);
+        }
         self.newline_pop();
         self.r_brace(&arg.r_brace);
-        if !arg.if_statement_list.is_empty() {
+        if !arg.if_statement_list0.is_empty() {
             self.space(1);
         }
-        for x in &arg.if_statement_list {
+        for x in &arg.if_statement_list0 {
             self.r#else(&x.r#else);
             self.space(1);
             self.r#if(&x.r#if);
@@ -196,7 +198,9 @@ impl VerylWalker for Formatter {
             self.space(1);
             self.token_will_push(&x.l_brace.l_brace_token);
             self.newline_push();
-            self.statement(&x.statement);
+            for x in &x.if_statement_list0_list {
+                self.statement(&x.statement);
+            }
             self.newline_pop();
             self.r_brace(&x.r_brace);
         }
@@ -206,7 +210,9 @@ impl VerylWalker for Formatter {
             self.space(1);
             self.token_will_push(&x.l_brace.l_brace_token);
             self.newline_push();
-            self.statement(&x.statement);
+            for x in &x.if_statement_opt_list {
+                self.statement(&x.statement);
+            }
             self.newline_pop();
             self.r_brace(&x.r_brace);
         }
@@ -218,13 +224,15 @@ impl VerylWalker for Formatter {
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
-        self.statement(&arg.statement);
+        for x in &arg.if_reset_statement_list {
+            self.statement(&x.statement);
+        }
         self.newline_pop();
         self.r_brace(&arg.r_brace);
-        if !arg.if_reset_statement_list.is_empty() {
+        if !arg.if_reset_statement_list0.is_empty() {
             self.space(1);
         }
-        for x in &arg.if_reset_statement_list {
+        for x in &arg.if_reset_statement_list0 {
             self.r#else(&x.r#else);
             self.space(1);
             self.r#if(&x.r#if);
@@ -233,7 +241,9 @@ impl VerylWalker for Formatter {
             self.space(1);
             self.token_will_push(&x.l_brace.l_brace_token);
             self.newline_push();
-            self.statement(&x.statement);
+            for x in &x.if_reset_statement_list0_list {
+                self.statement(&x.statement);
+            }
             self.newline_pop();
             self.r_brace(&x.r_brace);
         }
@@ -243,7 +253,9 @@ impl VerylWalker for Formatter {
             self.space(1);
             self.token_will_push(&x.l_brace.l_brace_token);
             self.newline_push();
-            self.statement(&x.statement);
+            for x in &x.if_reset_statement_opt_list {
+                self.statement(&x.statement);
+            }
             self.newline_pop();
             self.r_brace(&x.r_brace);
         }

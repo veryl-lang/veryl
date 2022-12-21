@@ -570,20 +570,26 @@ pub trait VerylWalker {
         self.r#if(&arg.r#if);
         self.expression(&arg.expression);
         self.l_brace(&arg.l_brace);
-        self.statement(&arg.statement);
-        self.r_brace(&arg.r_brace);
         for x in &arg.if_statement_list {
+            self.statement(&x.statement);
+        }
+        self.r_brace(&arg.r_brace);
+        for x in &arg.if_statement_list0 {
             self.r#else(&x.r#else);
             self.r#if(&x.r#if);
             self.expression(&x.expression);
             self.l_brace(&x.l_brace);
-            self.statement(&x.statement);
+            for x in &x.if_statement_list0_list {
+                self.statement(&x.statement);
+            }
             self.r_brace(&x.r_brace);
         }
         if let Some(ref x) = arg.if_statement_opt {
             self.r#else(&x.r#else);
             self.l_brace(&x.l_brace);
-            self.statement(&x.statement);
+            for x in &x.if_statement_opt_list {
+                self.statement(&x.statement);
+            }
             self.r_brace(&x.r_brace);
         }
         after!(self, if_statement, arg);
@@ -594,20 +600,26 @@ pub trait VerylWalker {
         before!(self, if_reset_statement, arg);
         self.if_reset(&arg.if_reset);
         self.l_brace(&arg.l_brace);
-        self.statement(&arg.statement);
-        self.r_brace(&arg.r_brace);
         for x in &arg.if_reset_statement_list {
+            self.statement(&x.statement);
+        }
+        self.r_brace(&arg.r_brace);
+        for x in &arg.if_reset_statement_list0 {
             self.r#else(&x.r#else);
             self.r#if(&x.r#if);
             self.expression(&x.expression);
             self.l_brace(&x.l_brace);
-            self.statement(&x.statement);
+            for x in &x.if_reset_statement_list0_list {
+                self.statement(&x.statement);
+            }
             self.r_brace(&x.r_brace);
         }
         if let Some(ref x) = arg.if_reset_statement_opt {
             self.r#else(&x.r#else);
             self.l_brace(&x.l_brace);
-            self.statement(&x.statement);
+            for x in &x.if_reset_statement_opt_list {
+                self.statement(&x.statement);
+            }
             self.r_brace(&x.r_brace);
         }
         after!(self, if_reset_statement, arg);
