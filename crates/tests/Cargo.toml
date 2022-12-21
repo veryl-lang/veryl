@@ -20,3 +20,6 @@ walkdir = "2.3.2"
 [[bench]]
 name = "benchmark"
 harness = false
+
+[workspace.metadata.release]
+release = false

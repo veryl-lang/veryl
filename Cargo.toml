@@ -9,8 +9,17 @@ members = [
     "crates/veryl",
 ]
 
+[workspace.package]
+authors     = ["dalance@gmail.com"]
+repository  = "https://github.com/dalance/veryl"
+keywords    = ["parser", "verilog", "systemverilog"]
+categories  = ["parsing"]
+license     = "MIT OR Apache-2.0"
+readme      = "../../README.md"
+description = "A modern hardware description language"
+
 [workspace.dependencies]
-thiserror     = "1.0"
+thiserror = "1.0"
 
 [profile.dev.build-override]
 opt-level = 3
