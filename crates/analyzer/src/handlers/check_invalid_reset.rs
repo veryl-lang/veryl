@@ -4,13 +4,13 @@ use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 
 #[derive(Default)]
-pub struct InvalidReset<'a> {
+pub struct CheckInvalidReset<'a> {
     pub errors: Vec<AnalyzeError>,
     text: &'a str,
     point: HandlerPoint,
 }
 
-impl<'a> InvalidReset<'a> {
+impl<'a> CheckInvalidReset<'a> {
     pub fn new(text: &'a str) -> Self {
         Self {
             text,
@@ -19,13 +19,13 @@ impl<'a> InvalidReset<'a> {
     }
 }
 
-impl<'a> Handler for InvalidReset<'a> {
+impl<'a> Handler for CheckInvalidReset<'a> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl<'a> VerylGrammarTrait for InvalidReset<'a> {
+impl<'a> VerylGrammarTrait for CheckInvalidReset<'a> {
     fn always_ff_declaration(&mut self, arg: &AlwaysFfDeclaration) -> Result<()> {
         if let HandlerPoint::Before = self.point {
             // Chcek first if_reset when reset signel exists

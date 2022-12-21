@@ -1,53 +1,86 @@
-pub mod invalid_direction;
-pub mod invalid_number_character;
-pub mod invalid_reset;
-pub mod invalid_statement;
-pub mod number_overflow;
-use invalid_direction::*;
-use invalid_number_character::*;
-use invalid_reset::*;
-use invalid_statement::*;
-use number_overflow::*;
+pub mod check_invalid_direction;
+pub mod check_invalid_number_character;
+pub mod check_invalid_reset;
+pub mod check_invalid_statement;
+pub mod check_number_overflow;
+pub mod create_symbol_table;
+use check_invalid_direction::*;
+use check_invalid_number_character::*;
+use check_invalid_reset::*;
+use check_invalid_statement::*;
+use check_number_overflow::*;
+use create_symbol_table::*;
 
 use crate::analyze_error::AnalyzeError;
+use crate::symbol_table::SymbolTable;
+use std::marker::PhantomData;
 use veryl_parser::veryl_walker::Handler;
 
-pub struct Handlers<'a> {
-    invalid_direction: InvalidDirection<'a>,
-    invalid_number_character: InvalidNumberCharacter<'a>,
-    invalid_reset: InvalidReset<'a>,
-    invalid_statement: InvalidStatement<'a>,
-    number_overflow: NumberOverflow<'a>,
+pub struct Pass1Handlers<'a> {
+    check_invalid_direction: CheckInvalidDirection<'a>,
+    check_invalid_number_character: CheckInvalidNumberCharacter<'a>,
+    check_invalid_reset: CheckInvalidReset<'a>,
+    check_invalid_statement: CheckInvalidStatement<'a>,
+    check_number_overflow: CheckNumberOverflow<'a>,
+    create_symbol_table: CreateSymbolTable<'a>,
 }
 
-impl<'a> Handlers<'a> {
+impl<'a> Pass1Handlers<'a> {
     pub fn new(text: &'a str) -> Self {
         Self {
-            invalid_direction: InvalidDirection::new(text),
-            invalid_number_character: InvalidNumberCharacter::new(text),
-            invalid_reset: InvalidReset::new(text),
-            invalid_statement: InvalidStatement::new(text),
-            number_overflow: NumberOverflow::new(text),
+            check_invalid_direction: CheckInvalidDirection::new(text),
+            check_invalid_number_character: CheckInvalidNumberCharacter::new(text),
+            check_invalid_reset: CheckInvalidReset::new(text),
+            check_invalid_statement: CheckInvalidStatement::new(text),
+            check_number_overflow: CheckNumberOverflow::new(text),
+            create_symbol_table: CreateSymbolTable::new(text),
         }
     }
 
     pub fn get_handlers(&mut self) -> Vec<&mut dyn Handler> {
         vec![
-            &mut self.invalid_direction as &mut dyn Handler,
-            &mut self.invalid_number_character as &mut dyn Handler,
-            &mut self.invalid_reset as &mut dyn Handler,
-            &mut self.invalid_statement as &mut dyn Handler,
-            &mut self.number_overflow as &mut dyn Handler,
+            &mut self.check_invalid_direction as &mut dyn Handler,
+            &mut self.check_invalid_number_character as &mut dyn Handler,
+            &mut self.check_invalid_reset as &mut dyn Handler,
+            &mut self.check_invalid_statement as &mut dyn Handler,
+            &mut self.check_number_overflow as &mut dyn Handler,
+            &mut self.create_symbol_table as &mut dyn Handler,
         ]
     }
 
     pub fn get_errors(&mut self) -> Vec<AnalyzeError> {
         let mut ret = Vec::new();
-        ret.append(&mut self.invalid_direction.errors);
-        ret.append(&mut self.invalid_number_character.errors);
-        ret.append(&mut self.invalid_reset.errors);
-        ret.append(&mut self.invalid_statement.errors);
-        ret.append(&mut self.number_overflow.errors);
+        ret.append(&mut self.check_invalid_direction.errors);
+        ret.append(&mut self.check_invalid_number_character.errors);
+        ret.append(&mut self.check_invalid_reset.errors);
+        ret.append(&mut self.check_invalid_statement.errors);
+        ret.append(&mut self.check_number_overflow.errors);
+        ret.append(&mut self.create_symbol_table.errors);
+        ret
+    }
+
+    pub fn get_symbol_table(&mut self) -> &SymbolTable {
+        &self.create_symbol_table.table
+    }
+}
+
+pub struct Pass2Handlers<'a> {
+    x: PhantomData<&'a ()>,
+}
+
+impl<'a> Pass2Handlers<'a> {
+    pub fn new(_text: &'a str) -> Self {
+        Self {
+            x: Default::default(),
+        }
+    }
+
+    pub fn get_handlers(&mut self) -> Vec<&mut dyn Handler> {
+        vec![]
+    }
+
+    pub fn get_errors(&mut self) -> Vec<AnalyzeError> {
+        let ret = Vec::new();
         ret
     }
 }

@@ -1,4 +1,5 @@
 use crate::veryl_grammar_trait::*;
+use parol_runtime::lexer::{Location, Token};
 use regex::Regex;
 
 #[derive(Debug, Clone)]
@@ -32,6 +33,18 @@ impl VerylToken {
         let mut ret = self.clone();
         ret.token.token = token;
         ret
+    }
+
+    pub fn text(&self) -> &str {
+        self.token.token.text()
+    }
+
+    pub fn location(&self) -> &Location {
+        &self.token.token.location
+    }
+
+    pub fn parol_token(&self) -> &Token {
+        &self.token.token
     }
 }
 
@@ -68,7 +81,7 @@ fn split_comment_token(token: OwnedToken) -> Vec<OwnedToken> {
         line += text[prev_pos..pos].matches('\n').count();
         prev_pos = pos;
 
-        let location = parol_runtime::lexer::location::Location::with(
+        let location = Location::with(
             line,
             0, // column is not used
             length,
@@ -92,10 +105,9 @@ impl From<&StartToken> for VerylToken {
             let mut tokens = split_comment_token(x.multi_comment.multi_comment.clone());
             comments.append(&mut tokens)
         }
-        let location =
-            parol_runtime::lexer::location::Location::with(1, 1, 0, 0, 0, std::path::Path::new(""));
+        let location = Location::with(1, 1, 0, 0, 0, std::path::Path::new(""));
         let token = OwnedToken {
-            token: parol_runtime::lexer::Token::with("", 0, location),
+            token: Token::with("", 0, location),
         };
         VerylToken { token, comments }
     }
@@ -107,7 +119,7 @@ token_with_comments!(BasedToken, l_bracket0_minus9_r_bracket_plus_l_paren_quest_
 token_with_comments!(BaseLessToken, l_bracket0_minus9_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9_r_bracket_plus_r_paren_star);
 token_with_comments!(AllBitToken, tick_l_bracket01_r_bracket);
 
-token_with_comments!(ColonColonToken, colon_colon);
+token_with_comments!(ColonColonColonToken, colon_colon_colon);
 token_with_comments!(ColonToken, colon);
 token_with_comments!(CommaToken, comma);
 token_with_comments!(EquToken, equ);

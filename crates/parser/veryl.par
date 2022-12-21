@@ -44,32 +44,32 @@ BinaryOperator: BinaryOperatorToken: VerylToken;
 UnaryOperator : UnaryOperatorToken : VerylToken;
 
 // Symbol
-ColonColonToken: '::': OwnedToken Comments;
-ColonToken     : ':' : OwnedToken Comments;
-CommaToken     : ',' : OwnedToken Comments;
-EquToken       : '=' : OwnedToken Comments;
-HashToken      : '#' : OwnedToken Comments;
-LBraceToken    : '{' : OwnedToken Comments;
-LBracketToken  : '[' : OwnedToken Comments;
-LParenToken    : '(' : OwnedToken Comments;
-RBraceToken    : '}' : OwnedToken Comments;
-RBracketToken  : ']' : OwnedToken Comments;
-RParenToken    : ')' : OwnedToken Comments;
-SemicolonToken : ';' : OwnedToken Comments;
+ColonColonColonToken: ':::': OwnedToken Comments;
+ColonToken          : ':' : OwnedToken Comments;
+CommaToken          : ',' : OwnedToken Comments;
+EquToken            : '=' : OwnedToken Comments;
+HashToken           : '#' : OwnedToken Comments;
+LBraceToken         : '{' : OwnedToken Comments;
+LBracketToken       : '[' : OwnedToken Comments;
+LParenToken         : '(' : OwnedToken Comments;
+RBraceToken         : '}' : OwnedToken Comments;
+RBracketToken       : ']' : OwnedToken Comments;
+RParenToken         : ')' : OwnedToken Comments;
+SemicolonToken      : ';' : OwnedToken Comments;
 
-ColonColon: ColonColonToken: VerylToken;
-Colon     : ColonToken     : VerylToken;
-Comma     : CommaToken     : VerylToken;
-Equ       : EquToken       : VerylToken;
-Hash      : HashToken      : VerylToken;
-LBrace    : LBraceToken    : VerylToken;
-LBracket  : LBracketToken  : VerylToken;
-LParen    : LParenToken    : VerylToken;
-MinusGT   : MinusGTToken   : VerylToken;
-RBrace    : RBraceToken    : VerylToken;
-RBracket  : RBracketToken  : VerylToken;
-RParen    : RParenToken    : VerylToken;
-Semicolon : SemicolonToken : VerylToken;
+ColonColonColon: ColonColonColonToken: VerylToken;
+Colon          : ColonToken          : VerylToken;
+Comma          : CommaToken          : VerylToken;
+Equ            : EquToken            : VerylToken;
+Hash           : HashToken           : VerylToken;
+LBrace         : LBraceToken         : VerylToken;
+LBracket       : LBracketToken       : VerylToken;
+LParen         : LParenToken         : VerylToken;
+MinusGT        : MinusGTToken        : VerylToken;
+RBrace         : RBraceToken         : VerylToken;
+RBracket       : RBracketToken       : VerylToken;
+RParen         : RParenToken         : VerylToken;
+Semicolon      : SemicolonToken      : VerylToken;
 
 // Keyword
 AlwaysCombToken: 'always_comb': OwnedToken Comments;
@@ -236,7 +236,7 @@ ModportItem: Identifier Colon Direction;
 // Instantiation
 // ----------------------------------------------------------------------------
 
-Instantiation: Identifier ColonColon Identifier [ InstanceParameter ] LBrace [ InstancePortList ] RBrace;
+Instantiation: Identifier ColonColonColon Identifier [ InstanceParameter ] LBrace [ InstancePortList ] RBrace;
 
 InstanceParameter: Hash LParen [ InstanceParameterList ] RParen;
 

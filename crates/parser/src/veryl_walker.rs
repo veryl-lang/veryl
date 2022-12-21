@@ -69,11 +69,11 @@ pub trait VerylWalker {
         after!(self, all_bit, arg);
     }
 
-    /// Semantic action for non-terminal 'ColonColon'
-    fn colon_colon(&mut self, arg: &ColonColon) {
-        before!(self, colon_colon, arg);
-        self.veryl_token(&arg.colon_colon_token);
-        after!(self, colon_colon, arg);
+    /// Semantic action for non-terminal 'ColonColonColon'
+    fn colon_colon_colon(&mut self, arg: &ColonColonColon) {
+        before!(self, colon_colon_colon, arg);
+        self.veryl_token(&arg.colon_colon_colon_token);
+        after!(self, colon_colon_colon, arg);
     }
 
     /// Semantic action for non-terminal 'Colon'
@@ -782,7 +782,7 @@ pub trait VerylWalker {
     fn instantiation(&mut self, arg: &Instantiation) {
         before!(self, instantiation, arg);
         self.identifier(&arg.identifier);
-        self.colon_colon(&arg.colon_colon);
+        self.colon_colon_colon(&arg.colon_colon_colon);
         self.identifier(&arg.identifier0);
         if let Some(ref x) = arg.instantiation_opt {
             self.instance_parameter(&x.instance_parameter);

@@ -113,9 +113,9 @@ impl Emitter {
     }
 
     fn process_token(&mut self, x: &VerylToken, will_push: bool, duplicated: Option<usize>) {
-        self.parol_token(&x.token.token);
+        self.parol_token(x.parol_token());
 
-        let mut loc: Location = (&x.token.token.location).into();
+        let mut loc: Location = x.location().into();
         loc.duplicated = duplicated;
         if let Some(width) = self.aligner.additions.get(&loc) {
             self.space(*width);
@@ -503,7 +503,7 @@ impl VerylWalker for Emitter {
         self.reset_signal = Some(format!(
             "{}{}",
             prefix,
-            arg.identifier.identifier_token.token.token.text()
+            arg.identifier.identifier_token.text()
         ));
     }
 
@@ -580,14 +580,14 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'Instantiation'
     fn instantiation(&mut self, arg: &Instantiation) {
         self.token(&arg.identifier.identifier_token.replace(""));
-        self.token(&arg.colon_colon.colon_colon_token.replace(""));
+        self.token(&arg.colon_colon_colon.colon_colon_colon_token.replace(""));
         self.identifier(&arg.identifier0);
         self.space(1);
         if let Some(ref x) = arg.instantiation_opt {
             self.instance_parameter(&x.instance_parameter);
             self.space(1);
         }
-        self.str(arg.identifier.identifier_token.token.token.text());
+        self.str(arg.identifier.identifier_token.text());
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token.replace("("));
         self.newline_push();

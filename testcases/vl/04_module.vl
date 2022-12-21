@@ -10,13 +10,13 @@ module ModuleA #(
     aaa: inout  logic [10],
 ) {
     // parameter declaration
-    parameter  a : u32  = 1;
-    localparam aa: u64  = 1;
+    parameter  b : u32  = 1;
+    localparam bb: u64  = 1;
 
     // variable declaration
-    a  : logic         ;
-    aa : logic [10]    ;
-    aaa: bit   [10][10];
+    b  : logic         ;
+    bb : logic [10]    ;
+    bbb: bit   [10][10];
 
     // assign declaration
     assign a   = 1;
@@ -87,7 +87,7 @@ module ModuleA #(
     }
 
     // module instantiation
-    b :: ModuleB #(
+    b ::: ModuleB #(
         a ,
         aa: 10,
     ) {

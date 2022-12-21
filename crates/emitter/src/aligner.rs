@@ -74,20 +74,20 @@ impl Align {
     }
 
     fn token(&mut self, x: &VerylToken) {
-        self.width += x.token.token.location.length;
-        let loc: Location = (&x.token.token.location).into();
+        self.width += x.location().length;
+        let loc: Location = x.location().into();
         self.last_location = Some(loc);
     }
 
     fn dummy_token(&mut self, x: &VerylToken) {
         self.width += 0; // 0 length token
-        let loc: Location = (&x.token.token.location).into();
+        let loc: Location = x.location().into();
         self.last_location = Some(loc);
     }
 
     fn duplicated_token(&mut self, x: &VerylToken, i: usize) {
-        self.width += x.token.token.location.length;
-        let mut loc: Location = (&x.token.token.location).into();
+        self.width += x.location().length;
+        let mut loc: Location = x.location().into();
         loc.duplicated = Some(i);
         self.last_location = Some(loc);
     }
@@ -135,7 +135,7 @@ impl Aligner {
     }
 
     fn insert(&mut self, token: &VerylToken, width: usize) {
-        let loc: Location = (&token.token.token.location).into();
+        let loc: Location = token.location().into();
         self.additions
             .entry(loc)
             .and_modify(|val| *val += width)

@@ -4,29 +4,29 @@ module ModuleA {
     parameter  aa: u32  = 01234_56789;
 
     // binary
-    parameter  a : u32  = 32'b01xzXZ;
-    parameter  aa: u32  = 32'b01_xz_XZ;
+    parameter  b : u32  = 32'b01xzXZ;
+    parameter  bb: u32  = 32'b01_xz_XZ;
 
     // octal
-    parameter  a : u32  = 32'o01234567xzXZ;
-    parameter  aa: u32  = 32'o01234_567xzXZ;
+    parameter  c : u32  = 32'o01234567xzXZ;
+    parameter  cc: u32  = 32'o01234_567xzXZ;
 
     // decimal
-    parameter  a : u32  = 32'd0123456789;
-    parameter  aa: u32  = 32'd01234_56789;
+    parameter  d : u32  = 32'd0123456789;
+    parameter  dd: u32  = 32'd01234_56789;
 
     // hex
-    parameter  a : u32  = 128'h0123456789abcdefxzABCDEFXZ;
-    parameter  aa: u32  = 128'h01234_5678_9abc_defxz_ABCD_EFXZ;
+    parameter  e : u32  = 128'h0123456789abcdefxzABCDEFXZ;
+    parameter  ee: u32  = 128'h01234_5678_9abc_defxz_ABCD_EFXZ;
 
     // all0, all1
-    parameter  a : u32  = '0;
-    parameter  aa: u32  = '1;
+    parameter  f : u32  = '0;
+    parameter  ff: u32  = '1;
 
     // floating point
-    parameter  a    : u32  = 0123456789.0123456789;
-    parameter  aa   : u32  = 0123456789.0123456789e+0123456789;
-    parameter  aaa  : u32  = 0123456789.0123456789e-0123456789;
-    parameter  aaaa : u32  = 0123456789.0123456789E+0123456789;
-    parameter  aaaaa: u32  = 0123456789.0123456789E-0123456789;
+    parameter  g    : u32  = 0123456789.0123456789;
+    parameter  gg   : u32  = 0123456789.0123456789e+0123456789;
+    parameter  ggg  : u32  = 0123456789.0123456789e-0123456789;
+    parameter  gggg : u32  = 0123456789.0123456789E+0123456789;
+    parameter  ggggg: u32  = 0123456789.0123456789E-0123456789;
 }

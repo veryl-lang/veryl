@@ -4,28 +4,28 @@ module ModuleA ;
     longint unsigned aa ;
 
     // signed integer
-    int signed     a  ;
-    longint signed aa ;
+    int signed     b  ;
+    longint signed bb ;
 
     // floating point
-    shortreal a  ;
-    real      aa ;
+    shortreal c  ;
+    real      cc ;
 
     // 4 state (01xz) type
-    logic                  a  ;
-    logic [10-1:0]         aa ;
-    logic [10-1:0][10-1:0] aaa;
+    logic                  d  ;
+    logic [10-1:0]         dd ;
+    logic [10-1:0][10-1:0] ddd;
 
     // 2 state (01) type
-    bit                  a  ;
-    bit [10-1:0]         aa ;
-    bit [10-1:0][10-1:0] aaa;
+    bit                  e  ;
+    bit [10-1:0]         ee ;
+    bit [10-1:0][10-1:0] eee;
 
     // array
-    int unsigned     a      [10-1:0];
-    longint unsigned aa     [10-1:0];
-    int signed       aaa    [10-1:0];
-    longint signed   aaaa   [10-1:0];
-    shortreal        aaaaa  [10-1:0];
-    real             aaaaaa [10-1:0];
+    int unsigned     f      [10-1:0];
+    longint unsigned ff     [10-1:0];
+    int signed       fff    [10-1:0];
+    longint signed   ffff   [10-1:0];
+    shortreal        fffff  [10-1:0];
+    real             ffffff [10-1:0];
 endmodule

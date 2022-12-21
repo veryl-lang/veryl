@@ -54,7 +54,7 @@ impl Align {
     fn finish_item(&mut self) {
         let last_token = self.last_token.take();
         if let Some(last_token) = last_token {
-            let loc: Location = (&last_token.token.token.location).into();
+            let loc: Location = last_token.location().into();
             if loc.line - self.line > 1 {
                 self.finish_group();
             }
@@ -72,7 +72,7 @@ impl Align {
     }
 
     fn token(&mut self, x: &VerylToken) {
-        self.width += x.token.token.location.length;
+        self.width += x.location().length;
         self.last_token = Some(x.clone());
     }
 
@@ -124,7 +124,7 @@ impl Aligner {
     }
 
     fn insert(&mut self, token: &VerylToken, width: usize) {
-        let loc: Location = (&token.token.token.location).into();
+        let loc: Location = token.location().into();
         self.additions
             .entry(loc)
             .and_modify(|val| *val += width)

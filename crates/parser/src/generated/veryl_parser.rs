@@ -37,7 +37,7 @@ pub const TERMINALS: &[&str; 60] = &[
     /* 12 */ r###"\*\*|\*|/|%|<<<|>>>|<<|>>|<=|>=|<|>|===|==\?|!==|!=\?|==|!=|&&|\|\|"###,
     /* 13 */ r###"\+|-|&|\||\^~|\^|~\^|~&|~\|"###,
     /* 14 */ r###"!|~"###,
-    /* 15 */ r###"::"###,
+    /* 15 */ r###":::"###,
     /* 16 */ r###":"###,
     /* 17 */ r###","###,
     /* 18 */ r###"="###,
@@ -100,7 +100,7 @@ pub const TERMINAL_NAMES: &[&str; 60] = &[
     /* 12 */ "StarStarOrStarOrSlashOrPercentOrLTLTLTOrGTGTGTOrLTLTOrGTGTOrLTEquOrGTEquOrLTOrGTOrEquEquEquOrEquEquQuestOrBangEquEquOrBangEquQuestOrEquEquOrBangEquOrAmpAmpOrOrOr",
     /* 13 */ "PlusOrMinusOrAmpOrOrOrCircumflexTildeOrCircumflexOrTildeCircumflexOrTildeAmpOrTildeOr",
     /* 14 */ "BangOrTilde",
-    /* 15 */ "ColonColon",
+    /* 15 */ "ColonColonColon",
     /* 16 */ "Colon",
     /* 17 */ "Comma",
     /* 18 */ "Equ",
@@ -167,7 +167,7 @@ const SCANNER_0: (&[&str; 5], &[usize; 54]) = (
         12, /* StarStarOrStarOrSlashOrPercentOrLTLTLTOrGTGTGTOrLTLTOrGTGTOrLTEquOrGTEquOrLTOrGTOrEquEquEquOrEquEquQuestOrBangEquEquOrBangEquQuestOrEquEquOrBangEquOrAmpAmpOrOrOr */
         13, /* PlusOrMinusOrAmpOrOrOrCircumflexTildeOrCircumflexOrTildeCircumflexOrTildeAmpOrTildeOr */
         14, /* BangOrTilde */
-        15, /* ColonColon */
+        15, /* ColonColonColon */
         16, /* Colon */
         17, /* Comma */
         18, /* Equ */
@@ -253,8 +253,8 @@ pub const NON_TERMINALS: &[&str; 211] = &[
     /*  33 */ "BitToken",
     /*  34 */ "BuiltinType",
     /*  35 */ "Colon",
-    /*  36 */ "ColonColon",
-    /*  37 */ "ColonColonToken",
+    /*  36 */ "ColonColonColon",
+    /*  37 */ "ColonColonColonToken",
     /*  38 */ "ColonToken",
     /*  39 */ "Comma",
     /*  40 */ "CommaToken",
@@ -693,13 +693,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 211] = &[
         transitions: &[],
         k: 0,
     },
-    /* 36 - "ColonColon" */
+    /* 36 - "ColonColonColon" */
     LookaheadDFA {
         states: &[Some(35)],
         transitions: &[],
         k: 0,
     },
-    /* 37 - "ColonColonToken" */
+    /* 37 - "ColonColonColonToken" */
     LookaheadDFA {
         states: &[Some(23)],
         transitions: &[],
@@ -3342,7 +3342,7 @@ pub const PRODUCTIONS: &[Production; 298] = &[
         lhs: 198,
         production: &[ParseType::N(199)],
     },
-    // 23 - ColonColonToken: '::' Comments;
+    // 23 - ColonColonColonToken: ':::' Comments;
     Production {
         lhs: 37,
         production: &[ParseType::N(41), ParseType::T(15)],
@@ -3402,7 +3402,7 @@ pub const PRODUCTIONS: &[Production; 298] = &[
         lhs: 183,
         production: &[ParseType::N(41), ParseType::T(26)],
     },
-    // 35 - ColonColon: ColonColonToken : crate::veryl_token::VerylToken ;
+    // 35 - ColonColonColon: ColonColonColonToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 36,
         production: &[ParseType::N(37)],
@@ -4386,7 +4386,7 @@ pub const PRODUCTIONS: &[Production; 298] = &[
         lhs: 139,
         production: &[ParseType::N(46), ParseType::N(35), ParseType::N(80)],
     },
-    // 212 - Instantiation: Identifier ColonColon Identifier InstantiationOpt /* Option */ LBrace InstantiationOpt0 /* Option */ RBrace;
+    // 212 - Instantiation: Identifier ColonColonColon Identifier InstantiationOpt /* Option */ LBrace InstantiationOpt0 /* Option */ RBrace;
     Production {
         lhs: 114,
         production: &[

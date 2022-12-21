@@ -4,14 +4,14 @@ use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 
 #[derive(Default)]
-pub struct InvalidDirection<'a> {
+pub struct CheckInvalidDirection<'a> {
     pub errors: Vec<AnalyzeError>,
     text: &'a str,
     point: HandlerPoint,
     in_function: bool,
 }
 
-impl<'a> InvalidDirection<'a> {
+impl<'a> CheckInvalidDirection<'a> {
     pub fn new(text: &'a str) -> Self {
         Self {
             text,
@@ -20,13 +20,13 @@ impl<'a> InvalidDirection<'a> {
     }
 }
 
-impl<'a> Handler for InvalidDirection<'a> {
+impl<'a> Handler for CheckInvalidDirection<'a> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl<'a> VerylGrammarTrait for InvalidDirection<'a> {
+impl<'a> VerylGrammarTrait for CheckInvalidDirection<'a> {
     fn direction(&mut self, arg: &Direction) -> Result<()> {
         if let HandlerPoint::Before = self.point {
             if let Direction::Direction3(x) = arg {

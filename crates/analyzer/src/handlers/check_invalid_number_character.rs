@@ -8,13 +8,13 @@ const OCTAL_CHARS: [char; 12] = ['0', '1', '2', '3', '4', '5', '6', '7', 'x', 'z
 const DECIMAL_CHARS: [char; 10] = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
 
 #[derive(Default)]
-pub struct InvalidNumberCharacter<'a> {
+pub struct CheckInvalidNumberCharacter<'a> {
     pub errors: Vec<AnalyzeError>,
     text: &'a str,
     point: HandlerPoint,
 }
 
-impl<'a> InvalidNumberCharacter<'a> {
+impl<'a> CheckInvalidNumberCharacter<'a> {
     pub fn new(text: &'a str) -> Self {
         Self {
             text,
@@ -23,17 +23,17 @@ impl<'a> InvalidNumberCharacter<'a> {
     }
 }
 
-impl<'a> Handler for InvalidNumberCharacter<'a> {
+impl<'a> Handler for CheckInvalidNumberCharacter<'a> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl<'a> VerylGrammarTrait for InvalidNumberCharacter<'a> {
+impl<'a> VerylGrammarTrait for CheckInvalidNumberCharacter<'a> {
     fn based(&mut self, arg: &Based) -> Result<()> {
         if let HandlerPoint::Before = self.point {
             let token = &arg.based_token;
-            let text = token.token.token.text();
+            let text = token.text();
             let (_, tail) = text.split_once('\'').unwrap();
             let base = &tail[0..1];
             let number = &tail[1..];

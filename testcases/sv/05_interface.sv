@@ -6,8 +6,8 @@ interface InterfaceA #(
     localparam int unsigned aaa  = 1
 ) ;
     // parameter declaration
-    parameter  int unsigned     a   = 1;
-    localparam longint unsigned aa  = 1;
+    parameter  int unsigned     b   = 1;
+    localparam longint unsigned bb  = 1;
 
     // variable declaration
     logic                  a  ;

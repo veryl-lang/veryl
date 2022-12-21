@@ -10,13 +10,13 @@ module ModuleA #(
     inout  logic [10-1:0] aaa
 ) ;
     // parameter declaration
-    parameter  int unsigned     a   = 1;
-    localparam longint unsigned aa  = 1;
+    parameter  int unsigned     b   = 1;
+    localparam longint unsigned bb  = 1;
 
     // variable declaration
-    logic                  a  ;
-    logic [10-1:0]         aa ;
-    bit   [10-1:0][10-1:0] aaa;
+    logic                  b  ;
+    logic [10-1:0]         bb ;
+    bit   [10-1:0][10-1:0] bbb;
 
     // assign declaration
     assign a   = 1;

@@ -93,9 +93,9 @@ impl Formatter {
     }
 
     fn process_token(&mut self, x: &VerylToken, will_push: bool) {
-        self.parol_token(&x.token.token, true);
+        self.parol_token(x.parol_token(), true);
 
-        let loc: Location = (&x.token.token.location).into();
+        let loc: Location = x.location().into();
         if let Some(width) = self.aligner.additions.get(&loc) {
             self.space(*width);
         }
@@ -432,7 +432,7 @@ impl VerylWalker for Formatter {
     fn instantiation(&mut self, arg: &Instantiation) {
         self.identifier(&arg.identifier);
         self.space(1);
-        self.colon_colon(&arg.colon_colon);
+        self.colon_colon_colon(&arg.colon_colon_colon);
         self.space(1);
         self.identifier(&arg.identifier0);
         self.space(1);

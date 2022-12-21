@@ -62,12 +62,22 @@ pub enum AnalyzeError {
         #[label("Error location")]
         error_location: SourceSpan,
     },
+
+    #[diagnostic(code(AnalyzeError::DuplicatedIdentifier), help(""))]
+    #[error("{identifier} is duplicated")]
+    DuplicatedIdentifier {
+        identifier: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
 }
 
 impl AnalyzeError {
     fn named_source(source: &str, token: &VerylToken) -> NamedSource {
         NamedSource::new(
-            token.token.token.location.file_name.to_string_lossy(),
+            token.location().file_name.to_string_lossy(),
             source.to_string(),
         )
     }
@@ -82,7 +92,7 @@ impl AnalyzeError {
             cause,
             kind: kind.to_string(),
             input: AnalyzeError::named_source(source, token),
-            error_location: (&token.token.token).into(),
+            error_location: token.parol_token().into(),
         }
     }
 
@@ -90,21 +100,21 @@ impl AnalyzeError {
         AnalyzeError::NumberOverflow {
             width,
             input: AnalyzeError::named_source(source, token),
-            error_location: (&token.token.token).into(),
+            error_location: token.parol_token().into(),
         }
     }
 
     pub fn if_reset_required(source: &str, token: &VerylToken) -> Self {
         AnalyzeError::IfResetRequired {
             input: AnalyzeError::named_source(source, token),
-            error_location: (&token.token.token).into(),
+            error_location: token.parol_token().into(),
         }
     }
 
     pub fn reset_signal_missing(source: &str, token: &VerylToken) -> Self {
         AnalyzeError::ResetSignalMissing {
             input: AnalyzeError::named_source(source, token),
-            error_location: (&token.token.token).into(),
+            error_location: token.parol_token().into(),
         }
     }
 
@@ -112,7 +122,7 @@ impl AnalyzeError {
         AnalyzeError::InvalidStatement {
             kind: kind.to_string(),
             input: AnalyzeError::named_source(source, token),
-            error_location: (&token.token.token).into(),
+            error_location: token.parol_token().into(),
         }
     }
 
@@ -120,7 +130,15 @@ impl AnalyzeError {
         AnalyzeError::InvalidDirection {
             kind: kind.to_string(),
             input: AnalyzeError::named_source(source, token),
-            error_location: (&token.token.token).into(),
+            error_location: token.parol_token().into(),
+        }
+    }
+
+    pub fn duplicated_identifier(identifier: &str, source: &str, token: &VerylToken) -> Self {
+        AnalyzeError::DuplicatedIdentifier {
+            identifier: identifier.to_string(),
+            input: AnalyzeError::named_source(source, token),
+            error_location: token.parol_token().into(),
         }
     }
 }

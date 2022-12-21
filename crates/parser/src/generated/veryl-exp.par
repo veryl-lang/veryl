@@ -29,7 +29,7 @@
 /*  20 */ CommonOperator: CommonOperatorToken : VerylToken;
 /*  21 */ BinaryOperator: BinaryOperatorToken : VerylToken;
 /*  22 */ UnaryOperator: UnaryOperatorToken : VerylToken;
-/*  23 */ ColonColonToken: '::' : OwnedToken Comments;
+/*  23 */ ColonColonColonToken: ':::' : OwnedToken Comments;
 /*  24 */ ColonToken: ':' : OwnedToken Comments;
 /*  25 */ CommaToken: ',' : OwnedToken Comments;
 /*  26 */ EquToken: '=' : OwnedToken Comments;
@@ -41,7 +41,7 @@
 /*  32 */ RBracketToken: ']' : OwnedToken Comments;
 /*  33 */ RParenToken: ')' : OwnedToken Comments;
 /*  34 */ SemicolonToken: ';' : OwnedToken Comments;
-/*  35 */ ColonColon: ColonColonToken : VerylToken;
+/*  35 */ ColonColonColon: ColonColonColonToken : VerylToken;
 /*  36 */ Colon: ColonToken : VerylToken;
 /*  37 */ Comma: CommaToken : VerylToken;
 /*  38 */ Equ: EquToken : VerylToken;
@@ -218,7 +218,7 @@
 /* 209 */ ModportListOpt /* Option<T>::Some */: Comma;
 /* 210 */ ModportListOpt /* Option<T>::None */: ;
 /* 211 */ ModportItem: Identifier Colon Direction;
-/* 212 */ Instantiation: Identifier ColonColon Identifier InstantiationOpt /* Option */ LBrace InstantiationOpt0 /* Option */ RBrace;
+/* 212 */ Instantiation: Identifier ColonColonColon Identifier InstantiationOpt /* Option */ LBrace InstantiationOpt0 /* Option */ RBrace;
 /* 213 */ InstantiationOpt0 /* Option<T>::Some */: InstancePortList;
 /* 214 */ InstantiationOpt0 /* Option<T>::None */: ;
 /* 215 */ InstantiationOpt /* Option<T>::Some */: InstanceParameter;

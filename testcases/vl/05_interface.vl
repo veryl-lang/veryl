@@ -6,8 +6,8 @@ interface InterfaceA #(
     localparam aaa: u32  = 1,
 ) {
     // parameter declaration
-    parameter  a : u32  = 1;
-    localparam aa: u64  = 1;
+    parameter  b : u32  = 1;
+    localparam bb: u64  = 1;
 
     // variable declaration
     a  : logic         ;

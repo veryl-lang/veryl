@@ -4,13 +4,13 @@ use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 
 #[derive(Default)]
-pub struct NumberOverflow<'a> {
+pub struct CheckNumberOverflow<'a> {
     pub errors: Vec<AnalyzeError>,
     text: &'a str,
     point: HandlerPoint,
 }
 
-impl<'a> NumberOverflow<'a> {
+impl<'a> CheckNumberOverflow<'a> {
     pub fn new(text: &'a str) -> Self {
         Self {
             text,
@@ -19,17 +19,17 @@ impl<'a> NumberOverflow<'a> {
     }
 }
 
-impl<'a> Handler for NumberOverflow<'a> {
+impl<'a> Handler for CheckNumberOverflow<'a> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl<'a> VerylGrammarTrait for NumberOverflow<'a> {
+impl<'a> VerylGrammarTrait for CheckNumberOverflow<'a> {
     fn based(&mut self, arg: &Based) -> Result<()> {
         if let HandlerPoint::Before = self.point {
             let token = &arg.based_token;
-            let text = token.token.token.text();
+            let text = token.text();
             let (width, tail) = text.split_once('\'').unwrap();
             let base = &tail[0..1];
             let number = &tail[1..];

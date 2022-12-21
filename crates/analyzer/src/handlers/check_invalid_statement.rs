@@ -4,7 +4,7 @@ use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 
 #[derive(Default)]
-pub struct InvalidStatement<'a> {
+pub struct CheckInvalidStatement<'a> {
     pub errors: Vec<AnalyzeError>,
     text: &'a str,
     point: HandlerPoint,
@@ -14,7 +14,7 @@ pub struct InvalidStatement<'a> {
     statement_depth_in_always_ff: usize,
 }
 
-impl<'a> InvalidStatement<'a> {
+impl<'a> CheckInvalidStatement<'a> {
     pub fn new(text: &'a str) -> Self {
         Self {
             text,
@@ -23,13 +23,13 @@ impl<'a> InvalidStatement<'a> {
     }
 }
 
-impl<'a> Handler for InvalidStatement<'a> {
+impl<'a> Handler for CheckInvalidStatement<'a> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl<'a> VerylGrammarTrait for InvalidStatement<'a> {
+impl<'a> VerylGrammarTrait for CheckInvalidStatement<'a> {
     fn statement(&mut self, _arg: &Statement) -> Result<()> {
         if let HandlerPoint::Before = self.point {
             self.statement_depth_in_always_ff += 1;

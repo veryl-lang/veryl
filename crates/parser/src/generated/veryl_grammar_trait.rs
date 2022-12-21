@@ -124,8 +124,8 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'ColonColonToken'
-    fn colon_colon_token(&mut self, _arg: &ColonColonToken) -> Result<()> {
+    /// Semantic action for non-terminal 'ColonColonColonToken'
+    fn colon_colon_colon_token(&mut self, _arg: &ColonColonColonToken) -> Result<()> {
         Ok(())
     }
 
@@ -184,8 +184,8 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'ColonColon'
-    fn colon_colon(&mut self, _arg: &ColonColon) -> Result<()> {
+    /// Semantic action for non-terminal 'ColonColonColon'
+    fn colon_colon_colon(&mut self, _arg: &ColonColonColon) -> Result<()> {
         Ok(())
     }
 
@@ -1805,21 +1805,21 @@ pub struct Colon {
 }
 
 ///
-/// Type derived for non-terminal ColonColon
+/// Type derived for non-terminal ColonColonColon
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct ColonColon {
-    pub colon_colon_token: crate::veryl_token::VerylToken,
+pub struct ColonColonColon {
+    pub colon_colon_colon_token: crate::veryl_token::VerylToken,
 }
 
 ///
-/// Type derived for non-terminal ColonColonToken
+/// Type derived for non-terminal ColonColonColonToken
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct ColonColonToken {
-    pub colon_colon: crate::veryl_token::OwnedToken, /* :: */
+pub struct ColonColonColonToken {
+    pub colon_colon_colon: crate::veryl_token::OwnedToken, /* ::: */
     pub comments: Box<Comments>,
 }
 
@@ -2596,7 +2596,7 @@ pub struct InstancePortListOpt {
 #[derive(Builder, Debug, Clone)]
 pub struct Instantiation {
     pub identifier: Box<Identifier>,
-    pub colon_colon: Box<ColonColon>,
+    pub colon_colon_colon: Box<ColonColonColon>,
     pub identifier0: Box<Identifier>,
     pub instantiation_opt: Option<Box<InstantiationOpt>>,
     pub l_brace: Box<LBrace>,
@@ -3619,8 +3619,8 @@ pub enum ASTType {
     BitToken(BitToken),
     BuiltinType(BuiltinType),
     Colon(Colon),
-    ColonColon(ColonColon),
-    ColonColonToken(ColonColonToken),
+    ColonColonColon(ColonColonColon),
+    ColonColonColonToken(ColonColonColonToken),
     ColonToken(ColonToken),
     Comma(Comma),
     CommaToken(CommaToken),
@@ -4435,31 +4435,34 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 23:
     ///
-    /// ColonColonToken: '::' : OwnedToken Comments;
+    /// ColonColonColonToken: ':::' : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
-    fn colon_colon_token(
+    fn colon_colon_colon_token(
         &mut self,
-        colon_colon: &ParseTreeStackEntry<'t>,
+        colon_colon_colon: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let colon_colon = colon_colon
+        let colon_colon_colon = colon_colon_colon
             .token(parse_tree)?
             .try_into()
             .into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
-        let colon_colon_token_built = ColonColonTokenBuilder::default()
-            .colon_colon(colon_colon)
+        let colon_colon_colon_token_built = ColonColonColonTokenBuilder::default()
+            .colon_colon_colon(colon_colon_colon)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
         // Calling user action here
         self.user_grammar
-            .colon_colon_token(&colon_colon_token_built)?;
-        self.push(ASTType::ColonColonToken(colon_colon_token_built), context);
+            .colon_colon_colon_token(&colon_colon_colon_token_built)?;
+        self.push(
+            ASTType::ColonColonColonToken(colon_colon_colon_token_built),
+            context,
+        );
         Ok(())
     }
 
@@ -4751,24 +4754,26 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 35:
     ///
-    /// ColonColon: ColonColonToken : VerylToken;
+    /// ColonColonColon: ColonColonColonToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn colon_colon(
+    fn colon_colon_colon(
         &mut self,
-        _colon_colon_token: &ParseTreeStackEntry<'t>,
+        _colon_colon_colon_token: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let colon_colon_token = pop_item!(self, colon_colon_token, ColonColonToken, context);
-        let colon_colon_built = ColonColonBuilder::default()
-            .colon_colon_token((&colon_colon_token).try_into().into_diagnostic()?)
+        let colon_colon_colon_token =
+            pop_item!(self, colon_colon_colon_token, ColonColonColonToken, context);
+        let colon_colon_colon_built = ColonColonColonBuilder::default()
+            .colon_colon_colon_token((&colon_colon_colon_token).try_into().into_diagnostic()?)
             .build()
             .into_diagnostic()?;
         // Calling user action here
-        self.user_grammar.colon_colon(&colon_colon_built)?;
-        self.push(ASTType::ColonColon(colon_colon_built), context);
+        self.user_grammar
+            .colon_colon_colon(&colon_colon_colon_built)?;
+        self.push(ASTType::ColonColonColon(colon_colon_colon_built), context);
         Ok(())
     }
 
@@ -9231,13 +9236,13 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 212:
     ///
-    /// Instantiation: Identifier ColonColon Identifier InstantiationOpt /* Option */ LBrace InstantiationOpt0 /* Option */ RBrace;
+    /// Instantiation: Identifier ColonColonColon Identifier InstantiationOpt /* Option */ LBrace InstantiationOpt0 /* Option */ RBrace;
     ///
     #[parol_runtime::function_name::named]
     fn instantiation(
         &mut self,
         _identifier: &ParseTreeStackEntry<'t>,
-        _colon_colon: &ParseTreeStackEntry<'t>,
+        _colon_colon_colon: &ParseTreeStackEntry<'t>,
         _identifier0: &ParseTreeStackEntry<'t>,
         _instantiation_opt: &ParseTreeStackEntry<'t>,
         _l_brace: &ParseTreeStackEntry<'t>,
@@ -9252,11 +9257,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let l_brace = pop_item!(self, l_brace, LBrace, context);
         let instantiation_opt = pop_item!(self, instantiation_opt, InstantiationOpt, context);
         let identifier0 = pop_item!(self, identifier0, Identifier, context);
-        let colon_colon = pop_item!(self, colon_colon, ColonColon, context);
+        let colon_colon_colon = pop_item!(self, colon_colon_colon, ColonColonColon, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
         let instantiation_built = InstantiationBuilder::default()
             .identifier(Box::new(identifier))
-            .colon_colon(Box::new(colon_colon))
+            .colon_colon_colon(Box::new(colon_colon_colon))
             .identifier0(Box::new(identifier0))
             .instantiation_opt(instantiation_opt)
             .l_brace(Box::new(l_brace))
@@ -11459,7 +11464,7 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             20 => self.common_operator(&children[0], parse_tree),
             21 => self.binary_operator(&children[0], parse_tree),
             22 => self.unary_operator(&children[0], parse_tree),
-            23 => self.colon_colon_token(&children[0], &children[1], parse_tree),
+            23 => self.colon_colon_colon_token(&children[0], &children[1], parse_tree),
             24 => self.colon_token(&children[0], &children[1], parse_tree),
             25 => self.comma_token(&children[0], &children[1], parse_tree),
             26 => self.equ_token(&children[0], &children[1], parse_tree),
@@ -11471,7 +11476,7 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             32 => self.r_bracket_token(&children[0], &children[1], parse_tree),
             33 => self.r_paren_token(&children[0], &children[1], parse_tree),
             34 => self.semicolon_token(&children[0], &children[1], parse_tree),
-            35 => self.colon_colon(&children[0], parse_tree),
+            35 => self.colon_colon_colon(&children[0], parse_tree),
             36 => self.colon(&children[0], parse_tree),
             37 => self.comma(&children[0], parse_tree),
             38 => self.equ(&children[0], parse_tree),
