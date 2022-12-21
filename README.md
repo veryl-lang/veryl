@@ -1,6 +1,6 @@
 # Veryl
 
-Veryl is a next generation hardware description language (HDL).
+Veryl is a modern hardware description language.
 
 [![Actions Status](https://github.com/dalance/veryl/workflows/Regression/badge.svg)](https://github.com/dalance/veryl/actions)
 
