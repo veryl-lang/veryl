@@ -1,5 +1,5 @@
 use crate::utils;
-use crate::Emit;
+use crate::OptBuild;
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -8,12 +8,12 @@ use veryl_emitter::Emitter;
 use veryl_parser::miette::{IntoDiagnostic, Result, WrapErr};
 use veryl_parser::Parser;
 
-pub struct CmdEmit {
-    opt: Emit,
+pub struct CmdBuild {
+    opt: OptBuild,
 }
 
-impl CmdEmit {
-    pub fn new(opt: Emit) -> Self {
+impl CmdBuild {
+    pub fn new(opt: OptBuild) -> Self {
         Self { opt }
     }
 

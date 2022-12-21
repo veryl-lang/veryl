@@ -1,5 +1,5 @@
 use crate::utils;
-use crate::Check;
+use crate::OptCheck;
 use std::fs;
 use std::time::Instant;
 use thiserror::Error;
@@ -8,7 +8,7 @@ use veryl_parser::miette::{self, Diagnostic, IntoDiagnostic, Result, WrapErr};
 use veryl_parser::Parser;
 
 pub struct CmdCheck {
-    opt: Check,
+    opt: OptCheck,
 }
 
 #[derive(Error, Diagnostic, Debug, Default)]
@@ -19,7 +19,7 @@ pub struct CheckError {
 }
 
 impl CmdCheck {
-    pub fn new(opt: Check) -> Self {
+    pub fn new(opt: OptCheck) -> Self {
         Self { opt }
     }
 

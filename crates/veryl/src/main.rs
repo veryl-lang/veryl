@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use veryl_parser::miette::Result;
 
+mod cmd_build;
 mod cmd_check;
-mod cmd_emit;
 mod cmd_fmt;
 mod utils;
 
@@ -22,14 +22,14 @@ struct Opt {
 
 #[derive(Subcommand)]
 enum Commands {
-    Fmt(Fmt),
-    Check(Check),
-    Emit(Emit),
+    Fmt(OptFmt),
+    Check(OptCheck),
+    Build(OptBuild),
 }
 
 /// Format the current package
 #[derive(Args)]
-pub struct Fmt {
+pub struct OptFmt {
     /// Target files
     pub files: Vec<PathBuf>,
 
@@ -48,7 +48,7 @@ pub struct Fmt {
 
 /// Analyze the current package
 #[derive(Args)]
-pub struct Check {
+pub struct OptCheck {
     /// Target files
     pub files: Vec<PathBuf>,
 
@@ -61,9 +61,9 @@ pub struct Check {
     pub verbose: bool,
 }
 
-/// Emit the target codes corresponding to the current package
+/// Build the target codes corresponding to the current package
 #[derive(Args)]
-pub struct Emit {
+pub struct OptBuild {
     /// Target files
     pub files: Vec<PathBuf>,
 
@@ -90,7 +90,7 @@ fn main() -> Result<ExitCode> {
     let ret = match opt.command {
         Commands::Fmt(x) => cmd_fmt::CmdFmt::new(x).exec()?,
         Commands::Check(x) => cmd_check::CmdCheck::new(x).exec()?,
-        Commands::Emit(x) => cmd_emit::CmdEmit::new(x).exec()?,
+        Commands::Build(x) => cmd_build::CmdBuild::new(x).exec()?,
     };
     if ret {
         Ok(ExitCode::SUCCESS)

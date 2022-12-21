@@ -1,5 +1,5 @@
 use crate::utils;
-use crate::Fmt;
+use crate::OptFmt;
 use console::{style, Style};
 use similar::{ChangeTag, TextDiff};
 use std::fmt;
@@ -13,11 +13,11 @@ use veryl_parser::miette::{IntoDiagnostic, Result, WrapErr};
 use veryl_parser::Parser;
 
 pub struct CmdFmt {
-    opt: Fmt,
+    opt: OptFmt,
 }
 
 impl CmdFmt {
-    pub fn new(opt: Fmt) -> Self {
+    pub fn new(opt: OptFmt) -> Self {
         Self { opt }
     }
 
