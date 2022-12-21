@@ -4,17 +4,30 @@ Veryl is a modern hardware description language.
 
 [![Actions Status](https://github.com/dalance/veryl/workflows/Regression/badge.svg)](https://github.com/dalance/veryl/actions)
 
-## Feature
+## Documentation quick links
 
-* Symplified syntax based on SystemVerilog / Rust
+* [Features](#features)
+* [Installation](#installation)
+* [Usage](#usage)
+* [Reference](#reference)
+* [License](#license)
+* [Contribution](#contribution)
+
+## Features
+
+* Symplified syntax
+    * Based on SystemVerilog / Rust
 * Transpiler to SystemVerilog
-* Semantic checker
-* Source code formatter
-* Language server
+    * Human readable output
+    * Interoperability with SystemVerilog
+* Integrated Tools
+    * Semantic checker
+    * Source code formatter
+    * Language server
+
+## Installation
 
 ## Usage
-
-## Example
 
 ## Reference
 
