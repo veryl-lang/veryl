@@ -15,7 +15,7 @@ repository  = "https://github.com/dalance/veryl"
 keywords    = ["parser", "verilog", "systemverilog"]
 categories  = ["parsing"]
 license     = "MIT OR Apache-2.0"
-readme      = "../../README.md"
+readme      = "README.md"
 description = "A modern hardware description language"
 
 [workspace.dependencies]
