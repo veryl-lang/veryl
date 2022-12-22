@@ -307,6 +307,14 @@ impl VerylWalker for Formatter {
         self.dot_dot(&arg.dot_dot);
         self.expression(&arg.expression0);
         self.space(1);
+        if let Some(ref x) = arg.for_statement_opt {
+            self.step(&x.step);
+            self.space(1);
+            self.assignment_operator(&x.assignment_operator);
+            self.space(1);
+            self.expression(&x.expression);
+            self.space(1);
+        }
         self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
         for (i, x) in arg.for_statement_list.iter().enumerate() {

@@ -73,6 +73,7 @@ ParameterToken : 'parameter'  : OwnedToken Comments;
 PosedgeToken   : 'posedge'    : OwnedToken Comments;
 RefToken       : 'ref'        : OwnedToken Comments;
 ReturnToken    : 'return'     : OwnedToken Comments;
+StepToken      : 'step'       : OwnedToken Comments;
 SyncHighToken  : 'sync_high'  : OwnedToken Comments;
 SyncLowToken   : 'sync_low'   : OwnedToken Comments;
 U32Token       : 'u32'        : OwnedToken Comments;
@@ -146,6 +147,7 @@ Parameter : ParameterToken : VerylToken;
 Posedge   : PosedgeToken   : VerylToken;
 Ref       : RefToken       : VerylToken;
 Return    : ReturnToken    : VerylToken;
+Step      : StepToken      : VerylToken;
 SyncHigh  : SyncHighToken  : VerylToken;
 SyncLow   : SyncLowToken   : VerylToken;
 U32       : U32Token       : VerylToken;
@@ -221,7 +223,7 @@ IfResetStatement: IfReset LBrace { Statement } RBrace { Else If Expression LBrac
 
 ReturnStatement: Return Expression Semicolon;
 
-ForStatement: For Identifier Colon Type In Expression DotDot Expression LBrace { Statement } RBrace;
+ForStatement: For Identifier Colon Type In Expression DotDot Expression [ Step AssignmentOperator Expression ] LBrace { Statement } RBrace;
 
 // ----------------------------------------------------------------------------
 // Declaration

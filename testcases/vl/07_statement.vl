@@ -2,6 +2,7 @@ module ModuleA {
     always_comb {
         // assignment statement
         a =    1;
+        a +=   1;
         a -=   1;
         a *=   1;
         a /=   1;
@@ -28,6 +29,16 @@ module ModuleA {
 
         // for statement
         for a: u32  in 0..10 {
+            a  = 1;
+            aa = 1;
+        }
+
+        // for statement with custom step
+        for a: u32  in 0..10 step += 2 {
+            a  = 1;
+            aa = 1;
+        }
+        for a: u32  in 0..10 step *= 2 {
             a  = 1;
             aa = 1;
         }

@@ -168,6 +168,7 @@ token_with_comments!(ParameterToken, parameter);
 token_with_comments!(PosedgeToken, posedge);
 token_with_comments!(RefToken, r#ref);
 token_with_comments!(ReturnToken, r#return);
+token_with_comments!(StepToken, step);
 token_with_comments!(SyncHighToken, sync_underscore_high);
 token_with_comments!(SyncLowToken, sync_underscore_low);
 token_with_comments!(U32Token, u32);

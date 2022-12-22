@@ -419,8 +419,16 @@ impl VerylWalker for Emitter {
         self.expression(&arg.expression0);
         self.str(";");
         self.space(1);
-        self.identifier(&arg.identifier);
-        self.str("++");
+        if let Some(ref x) = arg.for_statement_opt {
+            self.identifier(&arg.identifier);
+            self.space(1);
+            self.assignment_operator(&x.assignment_operator);
+            self.space(1);
+            self.expression(&x.expression);
+        } else {
+            self.identifier(&arg.identifier);
+            self.str("++");
+        }
         self.str(")");
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token.replace("begin"));

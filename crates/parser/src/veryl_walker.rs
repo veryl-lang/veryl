@@ -398,6 +398,13 @@ pub trait VerylWalker {
         after!(self, r#return, arg);
     }
 
+    /// Semantic action for non-terminal 'Step'
+    fn step(&mut self, arg: &Step) {
+        before!(self, step, arg);
+        self.veryl_token(&arg.step_token);
+        after!(self, step, arg);
+    }
+
     /// Semantic action for non-terminal 'SyncHigh'
     fn sync_high(&mut self, arg: &SyncHigh) {
         before!(self, sync_high, arg);
@@ -679,6 +686,11 @@ pub trait VerylWalker {
         self.expression(&arg.expression);
         self.dot_dot(&arg.dot_dot);
         self.expression(&arg.expression0);
+        if let Some(ref x) = arg.for_statement_opt {
+            self.step(&x.step);
+            self.assignment_operator(&x.assignment_operator);
+            self.expression(&x.expression);
+        }
         self.l_brace(&arg.l_brace);
         for x in &arg.for_statement_list {
             self.statement(&x.statement);
