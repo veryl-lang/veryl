@@ -25,9 +25,10 @@ AllBitToken      : /'[01]/: OwnedToken Comments;
 // '->' should be before '-'
 MinusGTToken: '->': OwnedToken Comments;
 
-BinaryOperatorToken: "\*\*|\*|/|%|<<<|>>>|<<|>>|<=|>=|<|>|===|==\?|!==|!=\?|==|!=|&&|\|\|": OwnedToken Comments;
-CommonOperatorToken: "\+|-|&|\||\^~|\^|~\^|~&|~\|"                                        : OwnedToken Comments;
-UnaryOperatorToken : "!|~"                                                                : OwnedToken Comments;
+AssignmentOperatorToken: "\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<=|>>=|<<<=|>>>="                      : OwnedToken Comments;
+BinaryOperatorToken    : "\*\*|\*|/|%|<<<|>>>|<<|>>|<=|>=|<|>|===|==\?|!==|!=\?|==|!=|&&|\|\|": OwnedToken Comments;
+CommonOperatorToken    : "\+|-|&|\||\^~|\^|~\^|~&|~\|"                                        : OwnedToken Comments;
+UnaryOperatorToken     : "!|~"                                                                : OwnedToken Comments;
 
 ColonColonColonToken: ':::': OwnedToken Comments;
 ColonToken          : ':'  : OwnedToken Comments;
@@ -94,9 +95,10 @@ BaseLess  : BaseLessToken  : VerylToken;
 AllBit    : AllBitToken    : VerylToken;
 
 // Operator
-CommonOperator: CommonOperatorToken: VerylToken;
-BinaryOperator: BinaryOperatorToken: VerylToken;
-UnaryOperator : UnaryOperatorToken : VerylToken;
+AssignmentOperator: AssignmentOperatorToken: VerylToken;
+CommonOperator    : CommonOperatorToken    : VerylToken;
+BinaryOperator    : BinaryOperatorToken    : VerylToken;
+UnaryOperator     : UnaryOperatorToken     : VerylToken;
 
 // Symbol
 Colon          : ColonToken          : VerylToken;
@@ -211,7 +213,7 @@ Statement: AssignmentStatement
          | ForStatement
          ;
 
-AssignmentStatement: Identifier Equ Expression Semicolon;
+AssignmentStatement: Identifier ( Equ | AssignmentOperator ) Expression Semicolon;
 
 IfStatement: If Expression LBrace { Statement } RBrace { Else If Expression LBrace { Statement } RBrace } [ Else LBrace { Statement } RBrace ];
 

@@ -69,6 +69,13 @@ pub trait VerylWalker {
         after!(self, all_bit, arg);
     }
 
+    /// Semantic action for non-terminal 'AssignmentOperator'
+    fn assignment_operator(&mut self, arg: &AssignmentOperator) {
+        before!(self, assignment_operator, arg);
+        self.veryl_token(&arg.assignment_operator_token);
+        after!(self, assignment_operator, arg);
+    }
+
     /// Semantic action for non-terminal 'CommonOperator'
     fn common_operator(&mut self, arg: &CommonOperator) {
         before!(self, common_operator, arg);
@@ -580,7 +587,12 @@ pub trait VerylWalker {
     fn assignment_statement(&mut self, arg: &AssignmentStatement) {
         before!(self, assignment_statement, arg);
         self.identifier(&arg.identifier);
-        self.equ(&arg.equ);
+        match &*arg.assignment_statement_group {
+            AssignmentStatementGroup::AssignmentStatementGroup0(x) => self.equ(&x.equ),
+            AssignmentStatementGroup::AssignmentStatementGroup1(x) => {
+                self.assignment_operator(&x.assignment_operator)
+            }
+        }
         self.expression(&arg.expression);
         self.semicolon(&arg.semicolon);
         after!(self, assignment_statement, arg);

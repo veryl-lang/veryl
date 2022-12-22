@@ -91,12 +91,13 @@ mod align_kind {
     pub const TYPE: usize = 1;
     pub const EXPRESSION: usize = 2;
     pub const WIDTH: usize = 3;
+    pub const ASSIGNMENT: usize = 4;
 }
 
 #[derive(Default)]
 pub struct Aligner {
     pub additions: HashMap<Location, usize>,
-    aligns: [Align; 4],
+    aligns: [Align; 5],
 }
 
 impl Aligner {
@@ -275,6 +276,15 @@ impl VerylWalker for Aligner {
     /// Semantic action for non-terminal 'AssignmentStatement'
     fn assignment_statement(&mut self, arg: &AssignmentStatement) {
         self.identifier(&arg.identifier);
+        let token = match &*arg.assignment_statement_group {
+            AssignmentStatementGroup::AssignmentStatementGroup0(x) => &x.equ.equ_token,
+            AssignmentStatementGroup::AssignmentStatementGroup1(x) => {
+                &x.assignment_operator.assignment_operator_token
+            }
+        };
+        self.aligns[align_kind::ASSIGNMENT].start_item();
+        self.aligns[align_kind::ASSIGNMENT].token(token);
+        self.aligns[align_kind::ASSIGNMENT].finish_item();
     }
 
     /// Semantic action for non-terminal 'IfStatement'

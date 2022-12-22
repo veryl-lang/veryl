@@ -167,7 +167,12 @@ impl VerylWalker for Formatter {
     fn assignment_statement(&mut self, arg: &AssignmentStatement) {
         self.identifier(&arg.identifier);
         self.space(1);
-        self.equ(&arg.equ);
+        match &*arg.assignment_statement_group {
+            AssignmentStatementGroup::AssignmentStatementGroup0(x) => self.equ(&x.equ),
+            AssignmentStatementGroup::AssignmentStatementGroup1(x) => {
+                self.assignment_operator(&x.assignment_operator)
+            }
+        }
         self.space(1);
         self.expression(&arg.expression);
         self.semicolon(&arg.semicolon);

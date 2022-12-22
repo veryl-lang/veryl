@@ -1,5 +1,19 @@
 module ModuleA ;
     always_comb begin
+        // assignment statement
+        a =    1;
+        a -=   1;
+        a *=   1;
+        a /=   1;
+        a %=   1;
+        a &=   1;
+        a |=   1;
+        a ^=   1;
+        a <<=  1;
+        a >>=  1;
+        a <<<= 1;
+        a >>>= 1;
+
         // if statement
         if (a) begin
             a  = 1;
