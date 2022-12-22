@@ -921,7 +921,7 @@ impl VerylWalker for Emitter {
             } else {
                 self.space(1);
                 self.str(":");
-                self.str(&arg.identifier.identifier_token.text());
+                self.str(arg.identifier.identifier_token.text());
             }
             self.token_will_push(&x.l_brace.l_brace_token.replace(""));
             self.newline_push();
@@ -946,7 +946,7 @@ impl VerylWalker for Emitter {
             } else {
                 self.space(1);
                 self.str(":");
-                self.str(&arg.identifier.identifier_token.text());
+                self.str(arg.identifier.identifier_token.text());
             }
             self.token_will_push(&x.l_brace.l_brace_token.replace(""));
             self.newline_push();
