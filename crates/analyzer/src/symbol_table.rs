@@ -101,11 +101,12 @@ impl SymbolTable {
         let mut max_depth = 0;
         if let Some(symbols) = self.table.get(name) {
             for symbol in symbols {
-                if symbol.kind == kind && name_space.included(&symbol.name_space) {
-                    if symbol.name_space.depth() > max_depth {
-                        ret = Some(symbol);
-                        max_depth = symbol.name_space.depth();
-                    }
+                if symbol.kind == kind
+                    && name_space.included(&symbol.name_space)
+                    && symbol.name_space.depth() > max_depth
+                {
+                    ret = Some(symbol);
+                    max_depth = symbol.name_space.depth();
                 }
             }
         }

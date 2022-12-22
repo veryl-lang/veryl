@@ -3,6 +3,7 @@
 Veryl is a modern hardware description language.
 
 [![Actions Status](https://github.com/dalance/veryl/workflows/Regression/badge.svg)](https://github.com/dalance/veryl/actions)
+[![Crates.io](https://img.shields.io/crates/v/veryl.svg)](https://crates.io/crates/veryl)
 
 ## Documentation quick links
 

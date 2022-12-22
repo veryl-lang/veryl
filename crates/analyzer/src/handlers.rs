@@ -80,7 +80,6 @@ impl<'a> Pass2Handlers<'a> {
     }
 
     pub fn get_errors(&mut self) -> Vec<AnalyzeError> {
-        let ret = Vec::new();
-        ret
+        vec![]
     }
 }
