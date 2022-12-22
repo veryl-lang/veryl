@@ -63,6 +63,10 @@ hi link verylConditional Conditional
 syn keyword verylRepeat for in step
 hi link verylRepeat Repeat
 
+" Identifier
+syn match verylIdentifier "[a-zA-Z_][0-9a-zA-Z_]*"
+hi link verylIdentifier Identifier
+
 " Comment
 syn region verylComment start="/\*" end="\*/"
 syn match  verylComment "//.*"

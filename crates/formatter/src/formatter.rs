@@ -194,10 +194,8 @@ impl VerylWalker for Formatter {
         }
         self.newline_pop();
         self.r_brace(&arg.r_brace);
-        if !arg.if_statement_list0.is_empty() {
-            self.space(1);
-        }
         for x in &arg.if_statement_list0 {
+            self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
             self.r#if(&x.r#if);
@@ -246,10 +244,8 @@ impl VerylWalker for Formatter {
         }
         self.newline_pop();
         self.r_brace(&arg.r_brace);
-        if !arg.if_reset_statement_list0.is_empty() {
-            self.space(1);
-        }
         for x in &arg.if_reset_statement_list0 {
+            self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
             self.r#if(&x.r#if);
@@ -718,6 +714,9 @@ impl VerylWalker for Formatter {
         self.space(1);
         self.expression(&arg.expression);
         self.space(1);
+        self.colon(&arg.colon);
+        self.identifier(&arg.identifier);
+        self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
         for (i, x) in arg.module_if_declaration_list.iter().enumerate() {
@@ -728,16 +727,19 @@ impl VerylWalker for Formatter {
         }
         self.newline_pop();
         self.r_brace(&arg.r_brace);
-        if !arg.module_if_declaration_list0.is_empty() {
-            self.space(1);
-        }
         for x in &arg.module_if_declaration_list0 {
+            self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
             self.r#if(&x.r#if);
             self.space(1);
             self.expression(&x.expression);
             self.space(1);
+            if let Some(ref x) = x.module_if_declaration_opt {
+                self.colon(&x.colon);
+                self.identifier(&x.identifier);
+                self.space(1);
+            }
             self.token_will_push(&x.l_brace.l_brace_token);
             self.newline_push();
             for (i, x) in x.module_if_declaration_list0_list.iter().enumerate() {
@@ -749,13 +751,18 @@ impl VerylWalker for Formatter {
             self.newline_pop();
             self.r_brace(&x.r_brace);
         }
-        if let Some(ref x) = arg.module_if_declaration_opt {
+        if let Some(ref x) = arg.module_if_declaration_opt0 {
             self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
+            if let Some(ref x) = x.module_if_declaration_opt1 {
+                self.colon(&x.colon);
+                self.identifier(&x.identifier);
+                self.space(1);
+            }
             self.token_will_push(&x.l_brace.l_brace_token);
             self.newline_push();
-            for (i, x) in x.module_if_declaration_opt_list.iter().enumerate() {
+            for (i, x) in x.module_if_declaration_opt0_list.iter().enumerate() {
                 if i != 0 {
                     self.newline();
                 }
@@ -786,6 +793,9 @@ impl VerylWalker for Formatter {
             self.expression(&x.expression);
             self.space(1);
         }
+        self.colon(&arg.colon);
+        self.identifier(&arg.identifier0);
+        self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
         for (i, x) in arg.module_for_declaration_list.iter().enumerate() {
@@ -826,6 +836,9 @@ impl VerylWalker for Formatter {
         self.space(1);
         self.expression(&arg.expression);
         self.space(1);
+        self.colon(&arg.colon);
+        self.identifier(&arg.identifier);
+        self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
         for (i, x) in arg.interface_if_declaration_list.iter().enumerate() {
@@ -836,16 +849,19 @@ impl VerylWalker for Formatter {
         }
         self.newline_pop();
         self.r_brace(&arg.r_brace);
-        if !arg.interface_if_declaration_list0.is_empty() {
-            self.space(1);
-        }
         for x in &arg.interface_if_declaration_list0 {
+            self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
             self.r#if(&x.r#if);
             self.space(1);
             self.expression(&x.expression);
             self.space(1);
+            if let Some(ref x) = x.interface_if_declaration_opt {
+                self.colon(&x.colon);
+                self.identifier(&x.identifier);
+                self.space(1);
+            }
             self.token_will_push(&x.l_brace.l_brace_token);
             self.newline_push();
             for (i, x) in x.interface_if_declaration_list0_list.iter().enumerate() {
@@ -857,13 +873,18 @@ impl VerylWalker for Formatter {
             self.newline_pop();
             self.r_brace(&x.r_brace);
         }
-        if let Some(ref x) = arg.interface_if_declaration_opt {
+        if let Some(ref x) = arg.interface_if_declaration_opt0 {
             self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
+            if let Some(ref x) = x.interface_if_declaration_opt1 {
+                self.colon(&x.colon);
+                self.identifier(&x.identifier);
+                self.space(1);
+            }
             self.token_will_push(&x.l_brace.l_brace_token);
             self.newline_push();
-            for (i, x) in x.interface_if_declaration_opt_list.iter().enumerate() {
+            for (i, x) in x.interface_if_declaration_opt0_list.iter().enumerate() {
                 if i != 0 {
                     self.newline();
                 }
@@ -894,6 +915,9 @@ impl VerylWalker for Formatter {
             self.expression(&x.expression);
             self.space(1);
         }
+        self.colon(&arg.colon);
+        self.identifier(&arg.identifier0);
+        self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
         for (i, x) in arg.interface_for_declaration_list.iter().enumerate() {

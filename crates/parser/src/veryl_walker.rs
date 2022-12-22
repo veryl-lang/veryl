@@ -1065,6 +1065,8 @@ pub trait VerylWalker {
         before!(self, module_if_declaration, arg);
         self.r#if(&arg.r#if);
         self.expression(&arg.expression);
+        self.colon(&arg.colon);
+        self.identifier(&arg.identifier);
         self.l_brace(&arg.l_brace);
         for x in &arg.module_if_declaration_list {
             self.module_item(&x.module_item);
@@ -1074,16 +1076,24 @@ pub trait VerylWalker {
             self.r#else(&x.r#else);
             self.r#if(&x.r#if);
             self.expression(&x.expression);
+            if let Some(ref x) = x.module_if_declaration_opt {
+                self.colon(&x.colon);
+                self.identifier(&x.identifier);
+            }
             self.l_brace(&x.l_brace);
             for x in &x.module_if_declaration_list0_list {
                 self.module_item(&x.module_item);
             }
             self.r_brace(&x.r_brace);
         }
-        if let Some(ref x) = arg.module_if_declaration_opt {
+        if let Some(ref x) = arg.module_if_declaration_opt0 {
             self.r#else(&x.r#else);
+            if let Some(ref x) = x.module_if_declaration_opt1 {
+                self.colon(&x.colon);
+                self.identifier(&x.identifier);
+            }
             self.l_brace(&x.l_brace);
-            for x in &x.module_if_declaration_opt_list {
+            for x in &x.module_if_declaration_opt0_list {
                 self.module_item(&x.module_item);
             }
             self.r_brace(&x.r_brace);
@@ -1105,6 +1115,8 @@ pub trait VerylWalker {
             self.assignment_operator(&x.assignment_operator);
             self.expression(&x.expression);
         }
+        self.colon(&arg.colon);
+        self.identifier(&arg.identifier0);
         self.l_brace(&arg.l_brace);
         for x in &arg.module_for_declaration_list {
             self.module_item(&x.module_item);
@@ -1152,6 +1164,8 @@ pub trait VerylWalker {
         before!(self, interface_if_declaration, arg);
         self.r#if(&arg.r#if);
         self.expression(&arg.expression);
+        self.colon(&arg.colon);
+        self.identifier(&arg.identifier);
         self.l_brace(&arg.l_brace);
         for x in &arg.interface_if_declaration_list {
             self.interface_item(&x.interface_item);
@@ -1161,16 +1175,24 @@ pub trait VerylWalker {
             self.r#else(&x.r#else);
             self.r#if(&x.r#if);
             self.expression(&x.expression);
+            if let Some(ref x) = x.interface_if_declaration_opt {
+                self.colon(&x.colon);
+                self.identifier(&x.identifier);
+            }
             self.l_brace(&x.l_brace);
             for x in &x.interface_if_declaration_list0_list {
                 self.interface_item(&x.interface_item);
             }
             self.r_brace(&x.r_brace);
         }
-        if let Some(ref x) = arg.interface_if_declaration_opt {
+        if let Some(ref x) = arg.interface_if_declaration_opt0 {
             self.r#else(&x.r#else);
+            if let Some(ref x) = x.interface_if_declaration_opt1 {
+                self.colon(&x.colon);
+                self.identifier(&x.identifier);
+            }
             self.l_brace(&x.l_brace);
-            for x in &x.interface_if_declaration_opt_list {
+            for x in &x.interface_if_declaration_opt0_list {
                 self.interface_item(&x.interface_item);
             }
             self.r_brace(&x.r_brace);
@@ -1192,6 +1214,8 @@ pub trait VerylWalker {
             self.assignment_operator(&x.assignment_operator);
             self.expression(&x.expression);
         }
+        self.colon(&arg.colon);
+        self.identifier(&arg.identifier0);
         self.l_brace(&arg.l_brace);
         for x in &arg.interface_for_declaration_list {
             self.interface_item(&x.interface_item);

@@ -1384,7 +1384,7 @@ pub struct FunctionItem1 {
 }
 
 ///
-/// Type derived for production 310
+/// Type derived for production 314
 ///
 /// ModuleItem: VariableDeclaration;
 ///
@@ -1395,7 +1395,7 @@ pub struct ModuleItem0 {
 }
 
 ///
-/// Type derived for production 311
+/// Type derived for production 315
 ///
 /// ModuleItem: ParameterDeclaration;
 ///
@@ -1406,7 +1406,7 @@ pub struct ModuleItem1 {
 }
 
 ///
-/// Type derived for production 312
+/// Type derived for production 316
 ///
 /// ModuleItem: LocalparamDeclaration;
 ///
@@ -1417,7 +1417,7 @@ pub struct ModuleItem2 {
 }
 
 ///
-/// Type derived for production 313
+/// Type derived for production 317
 ///
 /// ModuleItem: AlwaysFfDeclaration;
 ///
@@ -1428,7 +1428,7 @@ pub struct ModuleItem3 {
 }
 
 ///
-/// Type derived for production 314
+/// Type derived for production 318
 ///
 /// ModuleItem: AlwaysCombDeclaration;
 ///
@@ -1439,7 +1439,7 @@ pub struct ModuleItem4 {
 }
 
 ///
-/// Type derived for production 315
+/// Type derived for production 319
 ///
 /// ModuleItem: AssignDeclaration;
 ///
@@ -1450,7 +1450,7 @@ pub struct ModuleItem5 {
 }
 
 ///
-/// Type derived for production 316
+/// Type derived for production 320
 ///
 /// ModuleItem: Instantiation;
 ///
@@ -1461,7 +1461,7 @@ pub struct ModuleItem6 {
 }
 
 ///
-/// Type derived for production 317
+/// Type derived for production 321
 ///
 /// ModuleItem: FunctionDeclaration;
 ///
@@ -1472,7 +1472,7 @@ pub struct ModuleItem7 {
 }
 
 ///
-/// Type derived for production 318
+/// Type derived for production 322
 ///
 /// ModuleItem: ModuleIfDeclaration;
 ///
@@ -1483,7 +1483,7 @@ pub struct ModuleItem8 {
 }
 
 ///
-/// Type derived for production 319
+/// Type derived for production 323
 ///
 /// ModuleItem: ModuleForDeclaration;
 ///
@@ -1494,7 +1494,7 @@ pub struct ModuleItem9 {
 }
 
 ///
-/// Type derived for production 341
+/// Type derived for production 349
 ///
 /// InterfaceItem: VariableDeclaration;
 ///
@@ -1505,7 +1505,7 @@ pub struct InterfaceItem0 {
 }
 
 ///
-/// Type derived for production 342
+/// Type derived for production 350
 ///
 /// InterfaceItem: ParameterDeclaration;
 ///
@@ -1516,7 +1516,7 @@ pub struct InterfaceItem1 {
 }
 
 ///
-/// Type derived for production 343
+/// Type derived for production 351
 ///
 /// InterfaceItem: LocalparamDeclaration;
 ///
@@ -1527,7 +1527,7 @@ pub struct InterfaceItem2 {
 }
 
 ///
-/// Type derived for production 344
+/// Type derived for production 352
 ///
 /// InterfaceItem: ModportDeclaration;
 ///
@@ -1538,7 +1538,7 @@ pub struct InterfaceItem3 {
 }
 
 ///
-/// Type derived for production 345
+/// Type derived for production 353
 ///
 /// InterfaceItem: InterfaceIfDeclaration;
 ///
@@ -1549,7 +1549,7 @@ pub struct InterfaceItem4 {
 }
 
 ///
-/// Type derived for production 346
+/// Type derived for production 354
 ///
 /// InterfaceItem: InterfaceForDeclaration;
 ///
@@ -1560,7 +1560,7 @@ pub struct InterfaceItem5 {
 }
 
 ///
-/// Type derived for production 347
+/// Type derived for production 355
 ///
 /// Description: ModuleDeclaration;
 ///
@@ -1571,7 +1571,7 @@ pub struct Description0 {
 }
 
 ///
-/// Type derived for production 348
+/// Type derived for production 356
 ///
 /// Description: InterfaceDeclaration;
 ///
@@ -2966,6 +2966,8 @@ pub struct InterfaceForDeclaration {
     pub dot_dot: Box<DotDot>,
     pub expression0: Box<Expression>,
     pub interface_for_declaration_opt: Option<Box<InterfaceForDeclarationOpt>>,
+    pub colon: Box<Colon>,
+    pub identifier0: Box<Identifier>,
     pub l_brace: Box<LBrace>,
     pub interface_for_declaration_list: Vec<InterfaceForDeclarationList>,
     pub r_brace: Box<RBrace>,
@@ -2999,11 +3001,13 @@ pub struct InterfaceForDeclarationOpt {
 pub struct InterfaceIfDeclaration {
     pub r#if: Box<If>,
     pub expression: Box<Expression>,
+    pub colon: Box<Colon>,
+    pub identifier: Box<Identifier>,
     pub l_brace: Box<LBrace>,
     pub interface_if_declaration_list: Vec<InterfaceIfDeclarationList>,
     pub r_brace: Box<RBrace>,
     pub interface_if_declaration_list0: Vec<InterfaceIfDeclarationList0>,
-    pub interface_if_declaration_opt: Option<Box<InterfaceIfDeclarationOpt>>,
+    pub interface_if_declaration_opt0: Option<Box<InterfaceIfDeclarationOpt0>>,
 }
 
 ///
@@ -3024,6 +3028,7 @@ pub struct InterfaceIfDeclarationList0 {
     pub r#else: Box<Else>,
     pub r#if: Box<If>,
     pub expression: Box<Expression>,
+    pub interface_if_declaration_opt: Option<Box<InterfaceIfDeclarationOpt>>,
     pub l_brace: Box<LBrace>,
     pub interface_if_declaration_list0_list: Vec<InterfaceIfDeclarationList0List>,
     pub r_brace: Box<RBrace>,
@@ -3044,19 +3049,40 @@ pub struct InterfaceIfDeclarationList0List {
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 pub struct InterfaceIfDeclarationOpt {
+    pub colon: Box<Colon>,
+    pub identifier: Box<Identifier>,
+}
+
+///
+/// Type derived for non-terminal InterfaceIfDeclarationOpt0
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct InterfaceIfDeclarationOpt0 {
     pub r#else: Box<Else>,
+    pub interface_if_declaration_opt1: Option<Box<InterfaceIfDeclarationOpt1>>,
     pub l_brace: Box<LBrace>,
-    pub interface_if_declaration_opt_list: Vec<InterfaceIfDeclarationOptList>,
+    pub interface_if_declaration_opt0_list: Vec<InterfaceIfDeclarationOpt0List>,
     pub r_brace: Box<RBrace>,
 }
 
 ///
-/// Type derived for non-terminal InterfaceIfDeclarationOptList
+/// Type derived for non-terminal InterfaceIfDeclarationOpt0List
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct InterfaceIfDeclarationOptList {
+pub struct InterfaceIfDeclarationOpt0List {
     pub interface_item: Box<InterfaceItem>,
+}
+
+///
+/// Type derived for non-terminal InterfaceIfDeclarationOpt1
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct InterfaceIfDeclarationOpt1 {
+    pub colon: Box<Colon>,
+    pub identifier: Box<Identifier>,
 }
 
 ///
@@ -3349,6 +3375,8 @@ pub struct ModuleForDeclaration {
     pub dot_dot: Box<DotDot>,
     pub expression0: Box<Expression>,
     pub module_for_declaration_opt: Option<Box<ModuleForDeclarationOpt>>,
+    pub colon: Box<Colon>,
+    pub identifier0: Box<Identifier>,
     pub l_brace: Box<LBrace>,
     pub module_for_declaration_list: Vec<ModuleForDeclarationList>,
     pub r_brace: Box<RBrace>,
@@ -3382,11 +3410,13 @@ pub struct ModuleForDeclarationOpt {
 pub struct ModuleIfDeclaration {
     pub r#if: Box<If>,
     pub expression: Box<Expression>,
+    pub colon: Box<Colon>,
+    pub identifier: Box<Identifier>,
     pub l_brace: Box<LBrace>,
     pub module_if_declaration_list: Vec<ModuleIfDeclarationList>,
     pub r_brace: Box<RBrace>,
     pub module_if_declaration_list0: Vec<ModuleIfDeclarationList0>,
-    pub module_if_declaration_opt: Option<Box<ModuleIfDeclarationOpt>>,
+    pub module_if_declaration_opt0: Option<Box<ModuleIfDeclarationOpt0>>,
 }
 
 ///
@@ -3407,6 +3437,7 @@ pub struct ModuleIfDeclarationList0 {
     pub r#else: Box<Else>,
     pub r#if: Box<If>,
     pub expression: Box<Expression>,
+    pub module_if_declaration_opt: Option<Box<ModuleIfDeclarationOpt>>,
     pub l_brace: Box<LBrace>,
     pub module_if_declaration_list0_list: Vec<ModuleIfDeclarationList0List>,
     pub r_brace: Box<RBrace>,
@@ -3427,19 +3458,40 @@ pub struct ModuleIfDeclarationList0List {
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 pub struct ModuleIfDeclarationOpt {
+    pub colon: Box<Colon>,
+    pub identifier: Box<Identifier>,
+}
+
+///
+/// Type derived for non-terminal ModuleIfDeclarationOpt0
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct ModuleIfDeclarationOpt0 {
     pub r#else: Box<Else>,
+    pub module_if_declaration_opt1: Option<Box<ModuleIfDeclarationOpt1>>,
     pub l_brace: Box<LBrace>,
-    pub module_if_declaration_opt_list: Vec<ModuleIfDeclarationOptList>,
+    pub module_if_declaration_opt0_list: Vec<ModuleIfDeclarationOpt0List>,
     pub r_brace: Box<RBrace>,
 }
 
 ///
-/// Type derived for non-terminal ModuleIfDeclarationOptList
+/// Type derived for non-terminal ModuleIfDeclarationOpt0List
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct ModuleIfDeclarationOptList {
+pub struct ModuleIfDeclarationOpt0List {
     pub module_item: Box<ModuleItem>,
+}
+
+///
+/// Type derived for non-terminal ModuleIfDeclarationOpt1
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+pub struct ModuleIfDeclarationOpt1 {
+    pub colon: Box<Colon>,
+    pub identifier: Box<Identifier>,
 }
 
 ///
@@ -4240,7 +4292,9 @@ pub enum ASTType {
     InterfaceIfDeclarationList0(Vec<InterfaceIfDeclarationList0>),
     InterfaceIfDeclarationList0List(Vec<InterfaceIfDeclarationList0List>),
     InterfaceIfDeclarationOpt(Option<Box<InterfaceIfDeclarationOpt>>),
-    InterfaceIfDeclarationOptList(Vec<InterfaceIfDeclarationOptList>),
+    InterfaceIfDeclarationOpt0(Option<Box<InterfaceIfDeclarationOpt0>>),
+    InterfaceIfDeclarationOpt0List(Vec<InterfaceIfDeclarationOpt0List>),
+    InterfaceIfDeclarationOpt1(Option<Box<InterfaceIfDeclarationOpt1>>),
     InterfaceItem(InterfaceItem),
     InterfaceToken(InterfaceToken),
     LBrace(LBrace),
@@ -4276,7 +4330,9 @@ pub enum ASTType {
     ModuleIfDeclarationList0(Vec<ModuleIfDeclarationList0>),
     ModuleIfDeclarationList0List(Vec<ModuleIfDeclarationList0List>),
     ModuleIfDeclarationOpt(Option<Box<ModuleIfDeclarationOpt>>),
-    ModuleIfDeclarationOptList(Vec<ModuleIfDeclarationOptList>),
+    ModuleIfDeclarationOpt0(Option<Box<ModuleIfDeclarationOpt0>>),
+    ModuleIfDeclarationOpt0List(Vec<ModuleIfDeclarationOpt0List>),
+    ModuleIfDeclarationOpt1(Option<Box<ModuleIfDeclarationOpt1>>),
     ModuleItem(ModuleItem),
     ModuleToken(ModuleToken),
     MultiComment(MultiComment),
@@ -11903,26 +11959,28 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 294:
     ///
-    /// ModuleIfDeclaration: If Expression LBrace ModuleIfDeclarationList /* Vec */ RBrace ModuleIfDeclarationList0 /* Vec */ ModuleIfDeclarationOpt /* Option */;
+    /// ModuleIfDeclaration: If Expression Colon Identifier LBrace ModuleIfDeclarationList /* Vec */ RBrace ModuleIfDeclarationList0 /* Vec */ ModuleIfDeclarationOpt0 /* Option */;
     ///
     #[parol_runtime::function_name::named]
     fn module_if_declaration(
         &mut self,
         _if: &ParseTreeStackEntry<'t>,
         _expression: &ParseTreeStackEntry<'t>,
+        _colon: &ParseTreeStackEntry<'t>,
+        _identifier: &ParseTreeStackEntry<'t>,
         _l_brace: &ParseTreeStackEntry<'t>,
         _module_if_declaration_list: &ParseTreeStackEntry<'t>,
         _r_brace: &ParseTreeStackEntry<'t>,
         _module_if_declaration_list0: &ParseTreeStackEntry<'t>,
-        _module_if_declaration_opt: &ParseTreeStackEntry<'t>,
+        _module_if_declaration_opt0: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let module_if_declaration_opt = pop_item!(
+        let module_if_declaration_opt0 = pop_item!(
             self,
-            module_if_declaration_opt,
-            ModuleIfDeclarationOpt,
+            module_if_declaration_opt0,
+            ModuleIfDeclarationOpt0,
             context
         );
         let module_if_declaration_list0 = pop_and_reverse_item!(
@@ -11939,16 +11997,20 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let l_brace = pop_item!(self, l_brace, LBrace, context);
+        let identifier = pop_item!(self, identifier, Identifier, context);
+        let colon = pop_item!(self, colon, Colon, context);
         let expression = pop_item!(self, expression, Expression, context);
         let r#if = pop_item!(self, r#if, If, context);
         let module_if_declaration_built = ModuleIfDeclarationBuilder::default()
             .r#if(Box::new(r#if))
             .expression(Box::new(expression))
+            .colon(Box::new(colon))
+            .identifier(Box::new(identifier))
             .l_brace(Box::new(l_brace))
             .module_if_declaration_list(module_if_declaration_list)
             .r_brace(Box::new(r_brace))
             .module_if_declaration_list0(module_if_declaration_list0)
-            .module_if_declaration_opt(module_if_declaration_opt)
+            .module_if_declaration_opt0(module_if_declaration_opt0)
             .build()
             .into_diagnostic()?;
         // Calling user action here
@@ -11963,7 +12025,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 295:
     ///
-    /// ModuleIfDeclarationList0 /* Vec<T>::Push */: Else If Expression LBrace ModuleIfDeclarationList0List /* Vec */ RBrace ModuleIfDeclarationList0;
+    /// ModuleIfDeclarationList0 /* Vec<T>::Push */: Else If Expression ModuleIfDeclarationOpt /* Option */ LBrace ModuleIfDeclarationList0List /* Vec */ RBrace ModuleIfDeclarationList0;
     ///
     #[parol_runtime::function_name::named]
     fn module_if_declaration_list0_0(
@@ -11971,6 +12033,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         _else: &ParseTreeStackEntry<'t>,
         _if: &ParseTreeStackEntry<'t>,
         _expression: &ParseTreeStackEntry<'t>,
+        _module_if_declaration_opt: &ParseTreeStackEntry<'t>,
         _l_brace: &ParseTreeStackEntry<'t>,
         _module_if_declaration_list0_list: &ParseTreeStackEntry<'t>,
         _r_brace: &ParseTreeStackEntry<'t>,
@@ -11993,6 +12056,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let l_brace = pop_item!(self, l_brace, LBrace, context);
+        let module_if_declaration_opt = pop_item!(
+            self,
+            module_if_declaration_opt,
+            ModuleIfDeclarationOpt,
+            context
+        );
         let expression = pop_item!(self, expression, Expression, context);
         let r#if = pop_item!(self, r#if, If, context);
         let r#else = pop_item!(self, r#else, Else, context);
@@ -12000,6 +12069,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             .r_brace(Box::new(r_brace))
             .module_if_declaration_list0_list(module_if_declaration_list0_list)
             .l_brace(Box::new(l_brace))
+            .module_if_declaration_opt(module_if_declaration_opt)
             .expression(Box::new(expression))
             .r#if(Box::new(r#if))
             .r#else(Box::new(r#else))
@@ -12140,33 +12210,177 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 301:
     ///
-    /// ModuleIfDeclarationOpt /* Option<T>::Some */: Else LBrace ModuleIfDeclarationOptList /* Vec */ RBrace;
+    /// ModuleIfDeclarationOpt0 /* Option<T>::Some */: Else ModuleIfDeclarationOpt1 /* Option */ LBrace ModuleIfDeclarationOpt0List /* Vec */ RBrace;
     ///
     #[parol_runtime::function_name::named]
-    fn module_if_declaration_opt_0(
+    fn module_if_declaration_opt0_0(
         &mut self,
         _else: &ParseTreeStackEntry<'t>,
+        _module_if_declaration_opt1: &ParseTreeStackEntry<'t>,
         _l_brace: &ParseTreeStackEntry<'t>,
-        _module_if_declaration_opt_list: &ParseTreeStackEntry<'t>,
+        _module_if_declaration_opt0_list: &ParseTreeStackEntry<'t>,
         _r_brace: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let r_brace = pop_item!(self, r_brace, RBrace, context);
-        let module_if_declaration_opt_list = pop_and_reverse_item!(
+        let module_if_declaration_opt0_list = pop_and_reverse_item!(
             self,
-            module_if_declaration_opt_list,
-            ModuleIfDeclarationOptList,
+            module_if_declaration_opt0_list,
+            ModuleIfDeclarationOpt0List,
             context
         );
         let l_brace = pop_item!(self, l_brace, LBrace, context);
+        let module_if_declaration_opt1 = pop_item!(
+            self,
+            module_if_declaration_opt1,
+            ModuleIfDeclarationOpt1,
+            context
+        );
         let r#else = pop_item!(self, r#else, Else, context);
-        let module_if_declaration_opt_0_built = ModuleIfDeclarationOptBuilder::default()
+        let module_if_declaration_opt0_0_built = ModuleIfDeclarationOpt0Builder::default()
             .r#else(Box::new(r#else))
+            .module_if_declaration_opt1(module_if_declaration_opt1)
             .l_brace(Box::new(l_brace))
-            .module_if_declaration_opt_list(module_if_declaration_opt_list)
+            .module_if_declaration_opt0_list(module_if_declaration_opt0_list)
             .r_brace(Box::new(r_brace))
+            .build()
+            .into_diagnostic()?;
+        self.push(
+            ASTType::ModuleIfDeclarationOpt0(Some(Box::new(module_if_declaration_opt0_0_built))),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 302:
+    ///
+    /// ModuleIfDeclarationOpt0List /* Vec<T>::Push */: ModuleItem ModuleIfDeclarationOpt0List;
+    ///
+    #[parol_runtime::function_name::named]
+    fn module_if_declaration_opt0_list_0(
+        &mut self,
+        _module_item: &ParseTreeStackEntry<'t>,
+        _module_if_declaration_opt0_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let mut module_if_declaration_opt0_list = pop_item!(
+            self,
+            module_if_declaration_opt0_list,
+            ModuleIfDeclarationOpt0List,
+            context
+        );
+        let module_item = pop_item!(self, module_item, ModuleItem, context);
+        let module_if_declaration_opt0_list_0_built = ModuleIfDeclarationOpt0ListBuilder::default()
+            .module_item(Box::new(module_item))
+            .build()
+            .into_diagnostic()?;
+        // Add an element to the vector
+        module_if_declaration_opt0_list.push(module_if_declaration_opt0_list_0_built);
+        self.push(
+            ASTType::ModuleIfDeclarationOpt0List(module_if_declaration_opt0_list),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 303:
+    ///
+    /// ModuleIfDeclarationOpt0List /* Vec<T>::New */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn module_if_declaration_opt0_list_1(
+        &mut self,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let module_if_declaration_opt0_list_1_built = Vec::new();
+        self.push(
+            ASTType::ModuleIfDeclarationOpt0List(module_if_declaration_opt0_list_1_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 304:
+    ///
+    /// ModuleIfDeclarationOpt1 /* Option<T>::Some */: Colon Identifier;
+    ///
+    #[parol_runtime::function_name::named]
+    fn module_if_declaration_opt1_0(
+        &mut self,
+        _colon: &ParseTreeStackEntry<'t>,
+        _identifier: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let identifier = pop_item!(self, identifier, Identifier, context);
+        let colon = pop_item!(self, colon, Colon, context);
+        let module_if_declaration_opt1_0_built = ModuleIfDeclarationOpt1Builder::default()
+            .colon(Box::new(colon))
+            .identifier(Box::new(identifier))
+            .build()
+            .into_diagnostic()?;
+        self.push(
+            ASTType::ModuleIfDeclarationOpt1(Some(Box::new(module_if_declaration_opt1_0_built))),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 305:
+    ///
+    /// ModuleIfDeclarationOpt1 /* Option<T>::None */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn module_if_declaration_opt1_1(
+        &mut self,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        self.push(ASTType::ModuleIfDeclarationOpt1(None), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 306:
+    ///
+    /// ModuleIfDeclarationOpt0 /* Option<T>::None */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn module_if_declaration_opt0_1(
+        &mut self,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        self.push(ASTType::ModuleIfDeclarationOpt0(None), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 307:
+    ///
+    /// ModuleIfDeclarationOpt /* Option<T>::Some */: Colon Identifier;
+    ///
+    #[parol_runtime::function_name::named]
+    fn module_if_declaration_opt_0(
+        &mut self,
+        _colon: &ParseTreeStackEntry<'t>,
+        _identifier: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let identifier = pop_item!(self, identifier, Identifier, context);
+        let colon = pop_item!(self, colon, Colon, context);
+        let module_if_declaration_opt_0_built = ModuleIfDeclarationOptBuilder::default()
+            .colon(Box::new(colon))
+            .identifier(Box::new(identifier))
             .build()
             .into_diagnostic()?;
         self.push(
@@ -12176,59 +12390,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 302:
-    ///
-    /// ModuleIfDeclarationOptList /* Vec<T>::Push */: ModuleItem ModuleIfDeclarationOptList;
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_if_declaration_opt_list_0(
-        &mut self,
-        _module_item: &ParseTreeStackEntry<'t>,
-        _module_if_declaration_opt_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let mut module_if_declaration_opt_list = pop_item!(
-            self,
-            module_if_declaration_opt_list,
-            ModuleIfDeclarationOptList,
-            context
-        );
-        let module_item = pop_item!(self, module_item, ModuleItem, context);
-        let module_if_declaration_opt_list_0_built = ModuleIfDeclarationOptListBuilder::default()
-            .module_item(Box::new(module_item))
-            .build()
-            .into_diagnostic()?;
-        // Add an element to the vector
-        module_if_declaration_opt_list.push(module_if_declaration_opt_list_0_built);
-        self.push(
-            ASTType::ModuleIfDeclarationOptList(module_if_declaration_opt_list),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 303:
-    ///
-    /// ModuleIfDeclarationOptList /* Vec<T>::New */: ;
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_if_declaration_opt_list_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let module_if_declaration_opt_list_1_built = Vec::new();
-        self.push(
-            ASTType::ModuleIfDeclarationOptList(module_if_declaration_opt_list_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 304:
+    /// Semantic action for production 308:
     ///
     /// ModuleIfDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -12240,9 +12402,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 305:
+    /// Semantic action for production 309:
     ///
-    /// ModuleForDeclaration: For Identifier In Expression DotDot Expression ModuleForDeclarationOpt /* Option */ LBrace ModuleForDeclarationList /* Vec */ RBrace;
+    /// ModuleForDeclaration: For Identifier In Expression DotDot Expression ModuleForDeclarationOpt /* Option */ Colon Identifier LBrace ModuleForDeclarationList /* Vec */ RBrace;
     ///
     #[parol_runtime::function_name::named]
     fn module_for_declaration(
@@ -12254,6 +12416,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         _dot_dot: &ParseTreeStackEntry<'t>,
         _expression0: &ParseTreeStackEntry<'t>,
         _module_for_declaration_opt: &ParseTreeStackEntry<'t>,
+        _colon: &ParseTreeStackEntry<'t>,
+        _identifier0: &ParseTreeStackEntry<'t>,
         _l_brace: &ParseTreeStackEntry<'t>,
         _module_for_declaration_list: &ParseTreeStackEntry<'t>,
         _r_brace: &ParseTreeStackEntry<'t>,
@@ -12269,6 +12433,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let l_brace = pop_item!(self, l_brace, LBrace, context);
+        let identifier0 = pop_item!(self, identifier0, Identifier, context);
+        let colon = pop_item!(self, colon, Colon, context);
         let module_for_declaration_opt = pop_item!(
             self,
             module_for_declaration_opt,
@@ -12289,6 +12455,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             .dot_dot(Box::new(dot_dot))
             .expression0(Box::new(expression0))
             .module_for_declaration_opt(module_for_declaration_opt)
+            .colon(Box::new(colon))
+            .identifier0(Box::new(identifier0))
             .l_brace(Box::new(l_brace))
             .module_for_declaration_list(module_for_declaration_list)
             .r_brace(Box::new(r_brace))
@@ -12304,7 +12472,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 306:
+    /// Semantic action for production 310:
     ///
     /// ModuleForDeclarationList /* Vec<T>::Push */: ModuleItem ModuleForDeclarationList;
     ///
@@ -12337,7 +12505,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 307:
+    /// Semantic action for production 311:
     ///
     /// ModuleForDeclarationList /* Vec<T>::New */: ;
     ///
@@ -12356,7 +12524,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 308:
+    /// Semantic action for production 312:
     ///
     /// ModuleForDeclarationOpt /* Option<T>::Some */: Step AssignmentOperator Expression;
     ///
@@ -12386,7 +12554,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 309:
+    /// Semantic action for production 313:
     ///
     /// ModuleForDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -12401,7 +12569,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 310:
+    /// Semantic action for production 314:
     ///
     /// ModuleItem: VariableDeclaration;
     ///
@@ -12426,7 +12594,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 311:
+    /// Semantic action for production 315:
     ///
     /// ModuleItem: ParameterDeclaration;
     ///
@@ -12451,7 +12619,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 312:
+    /// Semantic action for production 316:
     ///
     /// ModuleItem: LocalparamDeclaration;
     ///
@@ -12476,7 +12644,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 313:
+    /// Semantic action for production 317:
     ///
     /// ModuleItem: AlwaysFfDeclaration;
     ///
@@ -12501,7 +12669,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 314:
+    /// Semantic action for production 318:
     ///
     /// ModuleItem: AlwaysCombDeclaration;
     ///
@@ -12530,7 +12698,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 315:
+    /// Semantic action for production 319:
     ///
     /// ModuleItem: AssignDeclaration;
     ///
@@ -12554,7 +12722,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 316:
+    /// Semantic action for production 320:
     ///
     /// ModuleItem: Instantiation;
     ///
@@ -12578,7 +12746,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 317:
+    /// Semantic action for production 321:
     ///
     /// ModuleItem: FunctionDeclaration;
     ///
@@ -12603,7 +12771,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 318:
+    /// Semantic action for production 322:
     ///
     /// ModuleItem: ModuleIfDeclaration;
     ///
@@ -12628,7 +12796,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 319:
+    /// Semantic action for production 323:
     ///
     /// ModuleItem: ModuleForDeclaration;
     ///
@@ -12653,7 +12821,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 320:
+    /// Semantic action for production 324:
     ///
     /// InterfaceDeclaration: Interface Identifier InterfaceDeclarationOpt /* Option */ LBrace InterfaceDeclarationList /* Vec */ RBrace;
     ///
@@ -12705,7 +12873,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 321:
+    /// Semantic action for production 325:
     ///
     /// InterfaceDeclarationList /* Vec<T>::Push */: InterfaceItem InterfaceDeclarationList;
     ///
@@ -12738,7 +12906,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 322:
+    /// Semantic action for production 326:
     ///
     /// InterfaceDeclarationList /* Vec<T>::New */: ;
     ///
@@ -12757,7 +12925,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 323:
+    /// Semantic action for production 327:
     ///
     /// InterfaceDeclarationOpt /* Option<T>::Some */: WithParameter;
     ///
@@ -12781,7 +12949,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 324:
+    /// Semantic action for production 328:
     ///
     /// InterfaceDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -12793,28 +12961,30 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 325:
+    /// Semantic action for production 329:
     ///
-    /// InterfaceIfDeclaration: If Expression LBrace InterfaceIfDeclarationList /* Vec */ RBrace InterfaceIfDeclarationList0 /* Vec */ InterfaceIfDeclarationOpt /* Option */;
+    /// InterfaceIfDeclaration: If Expression Colon Identifier LBrace InterfaceIfDeclarationList /* Vec */ RBrace InterfaceIfDeclarationList0 /* Vec */ InterfaceIfDeclarationOpt0 /* Option */;
     ///
     #[parol_runtime::function_name::named]
     fn interface_if_declaration(
         &mut self,
         _if: &ParseTreeStackEntry<'t>,
         _expression: &ParseTreeStackEntry<'t>,
+        _colon: &ParseTreeStackEntry<'t>,
+        _identifier: &ParseTreeStackEntry<'t>,
         _l_brace: &ParseTreeStackEntry<'t>,
         _interface_if_declaration_list: &ParseTreeStackEntry<'t>,
         _r_brace: &ParseTreeStackEntry<'t>,
         _interface_if_declaration_list0: &ParseTreeStackEntry<'t>,
-        _interface_if_declaration_opt: &ParseTreeStackEntry<'t>,
+        _interface_if_declaration_opt0: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let interface_if_declaration_opt = pop_item!(
+        let interface_if_declaration_opt0 = pop_item!(
             self,
-            interface_if_declaration_opt,
-            InterfaceIfDeclarationOpt,
+            interface_if_declaration_opt0,
+            InterfaceIfDeclarationOpt0,
             context
         );
         let interface_if_declaration_list0 = pop_and_reverse_item!(
@@ -12831,16 +13001,20 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let l_brace = pop_item!(self, l_brace, LBrace, context);
+        let identifier = pop_item!(self, identifier, Identifier, context);
+        let colon = pop_item!(self, colon, Colon, context);
         let expression = pop_item!(self, expression, Expression, context);
         let r#if = pop_item!(self, r#if, If, context);
         let interface_if_declaration_built = InterfaceIfDeclarationBuilder::default()
             .r#if(Box::new(r#if))
             .expression(Box::new(expression))
+            .colon(Box::new(colon))
+            .identifier(Box::new(identifier))
             .l_brace(Box::new(l_brace))
             .interface_if_declaration_list(interface_if_declaration_list)
             .r_brace(Box::new(r_brace))
             .interface_if_declaration_list0(interface_if_declaration_list0)
-            .interface_if_declaration_opt(interface_if_declaration_opt)
+            .interface_if_declaration_opt0(interface_if_declaration_opt0)
             .build()
             .into_diagnostic()?;
         // Calling user action here
@@ -12853,9 +13027,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 326:
+    /// Semantic action for production 330:
     ///
-    /// InterfaceIfDeclarationList0 /* Vec<T>::Push */: Else If Expression LBrace InterfaceIfDeclarationList0List /* Vec */ RBrace InterfaceIfDeclarationList0;
+    /// InterfaceIfDeclarationList0 /* Vec<T>::Push */: Else If Expression InterfaceIfDeclarationOpt /* Option */ LBrace InterfaceIfDeclarationList0List /* Vec */ RBrace InterfaceIfDeclarationList0;
     ///
     #[parol_runtime::function_name::named]
     fn interface_if_declaration_list0_0(
@@ -12863,6 +13037,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         _else: &ParseTreeStackEntry<'t>,
         _if: &ParseTreeStackEntry<'t>,
         _expression: &ParseTreeStackEntry<'t>,
+        _interface_if_declaration_opt: &ParseTreeStackEntry<'t>,
         _l_brace: &ParseTreeStackEntry<'t>,
         _interface_if_declaration_list0_list: &ParseTreeStackEntry<'t>,
         _r_brace: &ParseTreeStackEntry<'t>,
@@ -12885,6 +13060,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let l_brace = pop_item!(self, l_brace, LBrace, context);
+        let interface_if_declaration_opt = pop_item!(
+            self,
+            interface_if_declaration_opt,
+            InterfaceIfDeclarationOpt,
+            context
+        );
         let expression = pop_item!(self, expression, Expression, context);
         let r#if = pop_item!(self, r#if, If, context);
         let r#else = pop_item!(self, r#else, Else, context);
@@ -12892,6 +13073,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             .r_brace(Box::new(r_brace))
             .interface_if_declaration_list0_list(interface_if_declaration_list0_list)
             .l_brace(Box::new(l_brace))
+            .interface_if_declaration_opt(interface_if_declaration_opt)
             .expression(Box::new(expression))
             .r#if(Box::new(r#if))
             .r#else(Box::new(r#else))
@@ -12906,7 +13088,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 327:
+    /// Semantic action for production 331:
     ///
     /// InterfaceIfDeclarationList0List /* Vec<T>::Push */: InterfaceItem InterfaceIfDeclarationList0List;
     ///
@@ -12940,7 +13122,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 328:
+    /// Semantic action for production 332:
     ///
     /// InterfaceIfDeclarationList0List /* Vec<T>::New */: ;
     ///
@@ -12959,7 +13141,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 329:
+    /// Semantic action for production 333:
     ///
     /// InterfaceIfDeclarationList0 /* Vec<T>::New */: ;
     ///
@@ -12978,7 +13160,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 330:
+    /// Semantic action for production 334:
     ///
     /// InterfaceIfDeclarationList /* Vec<T>::Push */: InterfaceItem InterfaceIfDeclarationList;
     ///
@@ -13011,7 +13193,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 331:
+    /// Semantic action for production 335:
     ///
     /// InterfaceIfDeclarationList /* Vec<T>::New */: ;
     ///
@@ -13030,35 +13212,184 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 332:
+    /// Semantic action for production 336:
     ///
-    /// InterfaceIfDeclarationOpt /* Option<T>::Some */: Else LBrace InterfaceIfDeclarationOptList /* Vec */ RBrace;
+    /// InterfaceIfDeclarationOpt0 /* Option<T>::Some */: Else InterfaceIfDeclarationOpt1 /* Option */ LBrace InterfaceIfDeclarationOpt0List /* Vec */ RBrace;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_if_declaration_opt_0(
+    fn interface_if_declaration_opt0_0(
         &mut self,
         _else: &ParseTreeStackEntry<'t>,
+        _interface_if_declaration_opt1: &ParseTreeStackEntry<'t>,
         _l_brace: &ParseTreeStackEntry<'t>,
-        _interface_if_declaration_opt_list: &ParseTreeStackEntry<'t>,
+        _interface_if_declaration_opt0_list: &ParseTreeStackEntry<'t>,
         _r_brace: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let r_brace = pop_item!(self, r_brace, RBrace, context);
-        let interface_if_declaration_opt_list = pop_and_reverse_item!(
+        let interface_if_declaration_opt0_list = pop_and_reverse_item!(
             self,
-            interface_if_declaration_opt_list,
-            InterfaceIfDeclarationOptList,
+            interface_if_declaration_opt0_list,
+            InterfaceIfDeclarationOpt0List,
             context
         );
         let l_brace = pop_item!(self, l_brace, LBrace, context);
+        let interface_if_declaration_opt1 = pop_item!(
+            self,
+            interface_if_declaration_opt1,
+            InterfaceIfDeclarationOpt1,
+            context
+        );
         let r#else = pop_item!(self, r#else, Else, context);
-        let interface_if_declaration_opt_0_built = InterfaceIfDeclarationOptBuilder::default()
+        let interface_if_declaration_opt0_0_built = InterfaceIfDeclarationOpt0Builder::default()
             .r#else(Box::new(r#else))
+            .interface_if_declaration_opt1(interface_if_declaration_opt1)
             .l_brace(Box::new(l_brace))
-            .interface_if_declaration_opt_list(interface_if_declaration_opt_list)
+            .interface_if_declaration_opt0_list(interface_if_declaration_opt0_list)
             .r_brace(Box::new(r_brace))
+            .build()
+            .into_diagnostic()?;
+        self.push(
+            ASTType::InterfaceIfDeclarationOpt0(Some(Box::new(
+                interface_if_declaration_opt0_0_built,
+            ))),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 337:
+    ///
+    /// InterfaceIfDeclarationOpt0List /* Vec<T>::Push */: InterfaceItem InterfaceIfDeclarationOpt0List;
+    ///
+    #[parol_runtime::function_name::named]
+    fn interface_if_declaration_opt0_list_0(
+        &mut self,
+        _interface_item: &ParseTreeStackEntry<'t>,
+        _interface_if_declaration_opt0_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let mut interface_if_declaration_opt0_list = pop_item!(
+            self,
+            interface_if_declaration_opt0_list,
+            InterfaceIfDeclarationOpt0List,
+            context
+        );
+        let interface_item = pop_item!(self, interface_item, InterfaceItem, context);
+        let interface_if_declaration_opt0_list_0_built =
+            InterfaceIfDeclarationOpt0ListBuilder::default()
+                .interface_item(Box::new(interface_item))
+                .build()
+                .into_diagnostic()?;
+        // Add an element to the vector
+        interface_if_declaration_opt0_list.push(interface_if_declaration_opt0_list_0_built);
+        self.push(
+            ASTType::InterfaceIfDeclarationOpt0List(interface_if_declaration_opt0_list),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 338:
+    ///
+    /// InterfaceIfDeclarationOpt0List /* Vec<T>::New */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn interface_if_declaration_opt0_list_1(
+        &mut self,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let interface_if_declaration_opt0_list_1_built = Vec::new();
+        self.push(
+            ASTType::InterfaceIfDeclarationOpt0List(interface_if_declaration_opt0_list_1_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 339:
+    ///
+    /// InterfaceIfDeclarationOpt1 /* Option<T>::Some */: Colon Identifier;
+    ///
+    #[parol_runtime::function_name::named]
+    fn interface_if_declaration_opt1_0(
+        &mut self,
+        _colon: &ParseTreeStackEntry<'t>,
+        _identifier: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let identifier = pop_item!(self, identifier, Identifier, context);
+        let colon = pop_item!(self, colon, Colon, context);
+        let interface_if_declaration_opt1_0_built = InterfaceIfDeclarationOpt1Builder::default()
+            .colon(Box::new(colon))
+            .identifier(Box::new(identifier))
+            .build()
+            .into_diagnostic()?;
+        self.push(
+            ASTType::InterfaceIfDeclarationOpt1(Some(Box::new(
+                interface_if_declaration_opt1_0_built,
+            ))),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 340:
+    ///
+    /// InterfaceIfDeclarationOpt1 /* Option<T>::None */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn interface_if_declaration_opt1_1(
+        &mut self,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        self.push(ASTType::InterfaceIfDeclarationOpt1(None), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 341:
+    ///
+    /// InterfaceIfDeclarationOpt0 /* Option<T>::None */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn interface_if_declaration_opt0_1(
+        &mut self,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        self.push(ASTType::InterfaceIfDeclarationOpt0(None), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 342:
+    ///
+    /// InterfaceIfDeclarationOpt /* Option<T>::Some */: Colon Identifier;
+    ///
+    #[parol_runtime::function_name::named]
+    fn interface_if_declaration_opt_0(
+        &mut self,
+        _colon: &ParseTreeStackEntry<'t>,
+        _identifier: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let identifier = pop_item!(self, identifier, Identifier, context);
+        let colon = pop_item!(self, colon, Colon, context);
+        let interface_if_declaration_opt_0_built = InterfaceIfDeclarationOptBuilder::default()
+            .colon(Box::new(colon))
+            .identifier(Box::new(identifier))
             .build()
             .into_diagnostic()?;
         self.push(
@@ -13070,60 +13401,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 333:
-    ///
-    /// InterfaceIfDeclarationOptList /* Vec<T>::Push */: InterfaceItem InterfaceIfDeclarationOptList;
-    ///
-    #[parol_runtime::function_name::named]
-    fn interface_if_declaration_opt_list_0(
-        &mut self,
-        _interface_item: &ParseTreeStackEntry<'t>,
-        _interface_if_declaration_opt_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let mut interface_if_declaration_opt_list = pop_item!(
-            self,
-            interface_if_declaration_opt_list,
-            InterfaceIfDeclarationOptList,
-            context
-        );
-        let interface_item = pop_item!(self, interface_item, InterfaceItem, context);
-        let interface_if_declaration_opt_list_0_built =
-            InterfaceIfDeclarationOptListBuilder::default()
-                .interface_item(Box::new(interface_item))
-                .build()
-                .into_diagnostic()?;
-        // Add an element to the vector
-        interface_if_declaration_opt_list.push(interface_if_declaration_opt_list_0_built);
-        self.push(
-            ASTType::InterfaceIfDeclarationOptList(interface_if_declaration_opt_list),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 334:
-    ///
-    /// InterfaceIfDeclarationOptList /* Vec<T>::New */: ;
-    ///
-    #[parol_runtime::function_name::named]
-    fn interface_if_declaration_opt_list_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let interface_if_declaration_opt_list_1_built = Vec::new();
-        self.push(
-            ASTType::InterfaceIfDeclarationOptList(interface_if_declaration_opt_list_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 335:
+    /// Semantic action for production 343:
     ///
     /// InterfaceIfDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -13138,9 +13416,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 336:
+    /// Semantic action for production 344:
     ///
-    /// InterfaceForDeclaration: For Identifier In Expression DotDot Expression InterfaceForDeclarationOpt /* Option */ LBrace InterfaceForDeclarationList /* Vec */ RBrace;
+    /// InterfaceForDeclaration: For Identifier In Expression DotDot Expression InterfaceForDeclarationOpt /* Option */ Colon Identifier LBrace InterfaceForDeclarationList /* Vec */ RBrace;
     ///
     #[parol_runtime::function_name::named]
     fn interface_for_declaration(
@@ -13152,6 +13430,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         _dot_dot: &ParseTreeStackEntry<'t>,
         _expression0: &ParseTreeStackEntry<'t>,
         _interface_for_declaration_opt: &ParseTreeStackEntry<'t>,
+        _colon: &ParseTreeStackEntry<'t>,
+        _identifier0: &ParseTreeStackEntry<'t>,
         _l_brace: &ParseTreeStackEntry<'t>,
         _interface_for_declaration_list: &ParseTreeStackEntry<'t>,
         _r_brace: &ParseTreeStackEntry<'t>,
@@ -13167,6 +13447,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let l_brace = pop_item!(self, l_brace, LBrace, context);
+        let identifier0 = pop_item!(self, identifier0, Identifier, context);
+        let colon = pop_item!(self, colon, Colon, context);
         let interface_for_declaration_opt = pop_item!(
             self,
             interface_for_declaration_opt,
@@ -13187,6 +13469,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             .dot_dot(Box::new(dot_dot))
             .expression0(Box::new(expression0))
             .interface_for_declaration_opt(interface_for_declaration_opt)
+            .colon(Box::new(colon))
+            .identifier0(Box::new(identifier0))
             .l_brace(Box::new(l_brace))
             .interface_for_declaration_list(interface_for_declaration_list)
             .r_brace(Box::new(r_brace))
@@ -13202,7 +13486,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 337:
+    /// Semantic action for production 345:
     ///
     /// InterfaceForDeclarationList /* Vec<T>::Push */: InterfaceItem InterfaceForDeclarationList;
     ///
@@ -13235,7 +13519,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 338:
+    /// Semantic action for production 346:
     ///
     /// InterfaceForDeclarationList /* Vec<T>::New */: ;
     ///
@@ -13254,7 +13538,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 339:
+    /// Semantic action for production 347:
     ///
     /// InterfaceForDeclarationOpt /* Option<T>::Some */: Step AssignmentOperator Expression;
     ///
@@ -13286,7 +13570,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 340:
+    /// Semantic action for production 348:
     ///
     /// InterfaceForDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -13301,7 +13585,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 341:
+    /// Semantic action for production 349:
     ///
     /// InterfaceItem: VariableDeclaration;
     ///
@@ -13326,7 +13610,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 342:
+    /// Semantic action for production 350:
     ///
     /// InterfaceItem: ParameterDeclaration;
     ///
@@ -13351,7 +13635,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 343:
+    /// Semantic action for production 351:
     ///
     /// InterfaceItem: LocalparamDeclaration;
     ///
@@ -13376,7 +13660,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 344:
+    /// Semantic action for production 352:
     ///
     /// InterfaceItem: ModportDeclaration;
     ///
@@ -13400,7 +13684,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 345:
+    /// Semantic action for production 353:
     ///
     /// InterfaceItem: InterfaceIfDeclaration;
     ///
@@ -13429,7 +13713,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 346:
+    /// Semantic action for production 354:
     ///
     /// InterfaceItem: InterfaceForDeclaration;
     ///
@@ -13458,7 +13742,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 347:
+    /// Semantic action for production 355:
     ///
     /// Description: ModuleDeclaration;
     ///
@@ -13482,7 +13766,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 348:
+    /// Semantic action for production 356:
     ///
     /// Description: InterfaceDeclaration;
     ///
@@ -13507,7 +13791,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 349:
+    /// Semantic action for production 357:
     ///
     /// Veryl: Start VerylList /* Vec */;
     ///
@@ -13533,7 +13817,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 350:
+    /// Semantic action for production 358:
     ///
     /// VerylList /* Vec<T>::Push */: Description VerylList;
     ///
@@ -13558,7 +13842,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 351:
+    /// Semantic action for production 359:
     ///
     /// VerylList /* Vec<T>::New */: ;
     ///
@@ -14087,6 +14371,8 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 &children[5],
                 &children[6],
+                &children[7],
+                &children[8],
                 parse_tree,
             ),
             295 => self.module_if_declaration_list0_0(
@@ -14097,6 +14383,7 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 &children[5],
                 &children[6],
+                &children[7],
                 parse_tree,
             ),
             296 => self.module_if_declaration_list0_list_0(&children[0], &children[1], parse_tree),
@@ -14104,17 +14391,22 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             298 => self.module_if_declaration_list0_1(parse_tree),
             299 => self.module_if_declaration_list_0(&children[0], &children[1], parse_tree),
             300 => self.module_if_declaration_list_1(parse_tree),
-            301 => self.module_if_declaration_opt_0(
+            301 => self.module_if_declaration_opt0_0(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
+                &children[4],
                 parse_tree,
             ),
-            302 => self.module_if_declaration_opt_list_0(&children[0], &children[1], parse_tree),
-            303 => self.module_if_declaration_opt_list_1(parse_tree),
-            304 => self.module_if_declaration_opt_1(parse_tree),
-            305 => self.module_for_declaration(
+            302 => self.module_if_declaration_opt0_list_0(&children[0], &children[1], parse_tree),
+            303 => self.module_if_declaration_opt0_list_1(parse_tree),
+            304 => self.module_if_declaration_opt1_0(&children[0], &children[1], parse_tree),
+            305 => self.module_if_declaration_opt1_1(parse_tree),
+            306 => self.module_if_declaration_opt0_1(parse_tree),
+            307 => self.module_if_declaration_opt_0(&children[0], &children[1], parse_tree),
+            308 => self.module_if_declaration_opt_1(parse_tree),
+            309 => self.module_for_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -14125,51 +14417,43 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[7],
                 &children[8],
                 &children[9],
+                &children[10],
+                &children[11],
                 parse_tree,
             ),
-            306 => self.module_for_declaration_list_0(&children[0], &children[1], parse_tree),
-            307 => self.module_for_declaration_list_1(parse_tree),
-            308 => self.module_for_declaration_opt_0(
+            310 => self.module_for_declaration_list_0(&children[0], &children[1], parse_tree),
+            311 => self.module_for_declaration_list_1(parse_tree),
+            312 => self.module_for_declaration_opt_0(
                 &children[0],
                 &children[1],
                 &children[2],
                 parse_tree,
             ),
-            309 => self.module_for_declaration_opt_1(parse_tree),
-            310 => self.module_item_0(&children[0], parse_tree),
-            311 => self.module_item_1(&children[0], parse_tree),
-            312 => self.module_item_2(&children[0], parse_tree),
-            313 => self.module_item_3(&children[0], parse_tree),
-            314 => self.module_item_4(&children[0], parse_tree),
-            315 => self.module_item_5(&children[0], parse_tree),
-            316 => self.module_item_6(&children[0], parse_tree),
-            317 => self.module_item_7(&children[0], parse_tree),
-            318 => self.module_item_8(&children[0], parse_tree),
-            319 => self.module_item_9(&children[0], parse_tree),
-            320 => self.interface_declaration(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-                &children[5],
-                parse_tree,
-            ),
-            321 => self.interface_declaration_list_0(&children[0], &children[1], parse_tree),
-            322 => self.interface_declaration_list_1(parse_tree),
-            323 => self.interface_declaration_opt_0(&children[0], parse_tree),
-            324 => self.interface_declaration_opt_1(parse_tree),
-            325 => self.interface_if_declaration(
+            313 => self.module_for_declaration_opt_1(parse_tree),
+            314 => self.module_item_0(&children[0], parse_tree),
+            315 => self.module_item_1(&children[0], parse_tree),
+            316 => self.module_item_2(&children[0], parse_tree),
+            317 => self.module_item_3(&children[0], parse_tree),
+            318 => self.module_item_4(&children[0], parse_tree),
+            319 => self.module_item_5(&children[0], parse_tree),
+            320 => self.module_item_6(&children[0], parse_tree),
+            321 => self.module_item_7(&children[0], parse_tree),
+            322 => self.module_item_8(&children[0], parse_tree),
+            323 => self.module_item_9(&children[0], parse_tree),
+            324 => self.interface_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
                 &children[5],
-                &children[6],
                 parse_tree,
             ),
-            326 => self.interface_if_declaration_list0_0(
+            325 => self.interface_declaration_list_0(&children[0], &children[1], parse_tree),
+            326 => self.interface_declaration_list_1(parse_tree),
+            327 => self.interface_declaration_opt_0(&children[0], parse_tree),
+            328 => self.interface_declaration_opt_1(parse_tree),
+            329 => self.interface_if_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -14177,26 +14461,46 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 &children[5],
                 &children[6],
+                &children[7],
+                &children[8],
                 parse_tree,
             ),
-            327 => {
+            330 => self.interface_if_declaration_list0_0(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                &children[4],
+                &children[5],
+                &children[6],
+                &children[7],
+                parse_tree,
+            ),
+            331 => {
                 self.interface_if_declaration_list0_list_0(&children[0], &children[1], parse_tree)
             }
-            328 => self.interface_if_declaration_list0_list_1(parse_tree),
-            329 => self.interface_if_declaration_list0_1(parse_tree),
-            330 => self.interface_if_declaration_list_0(&children[0], &children[1], parse_tree),
-            331 => self.interface_if_declaration_list_1(parse_tree),
-            332 => self.interface_if_declaration_opt_0(
+            332 => self.interface_if_declaration_list0_list_1(parse_tree),
+            333 => self.interface_if_declaration_list0_1(parse_tree),
+            334 => self.interface_if_declaration_list_0(&children[0], &children[1], parse_tree),
+            335 => self.interface_if_declaration_list_1(parse_tree),
+            336 => self.interface_if_declaration_opt0_0(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
+                &children[4],
                 parse_tree,
             ),
-            333 => self.interface_if_declaration_opt_list_0(&children[0], &children[1], parse_tree),
-            334 => self.interface_if_declaration_opt_list_1(parse_tree),
-            335 => self.interface_if_declaration_opt_1(parse_tree),
-            336 => self.interface_for_declaration(
+            337 => {
+                self.interface_if_declaration_opt0_list_0(&children[0], &children[1], parse_tree)
+            }
+            338 => self.interface_if_declaration_opt0_list_1(parse_tree),
+            339 => self.interface_if_declaration_opt1_0(&children[0], &children[1], parse_tree),
+            340 => self.interface_if_declaration_opt1_1(parse_tree),
+            341 => self.interface_if_declaration_opt0_1(parse_tree),
+            342 => self.interface_if_declaration_opt_0(&children[0], &children[1], parse_tree),
+            343 => self.interface_if_declaration_opt_1(parse_tree),
+            344 => self.interface_for_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -14207,28 +14511,30 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[7],
                 &children[8],
                 &children[9],
+                &children[10],
+                &children[11],
                 parse_tree,
             ),
-            337 => self.interface_for_declaration_list_0(&children[0], &children[1], parse_tree),
-            338 => self.interface_for_declaration_list_1(parse_tree),
-            339 => self.interface_for_declaration_opt_0(
+            345 => self.interface_for_declaration_list_0(&children[0], &children[1], parse_tree),
+            346 => self.interface_for_declaration_list_1(parse_tree),
+            347 => self.interface_for_declaration_opt_0(
                 &children[0],
                 &children[1],
                 &children[2],
                 parse_tree,
             ),
-            340 => self.interface_for_declaration_opt_1(parse_tree),
-            341 => self.interface_item_0(&children[0], parse_tree),
-            342 => self.interface_item_1(&children[0], parse_tree),
-            343 => self.interface_item_2(&children[0], parse_tree),
-            344 => self.interface_item_3(&children[0], parse_tree),
-            345 => self.interface_item_4(&children[0], parse_tree),
-            346 => self.interface_item_5(&children[0], parse_tree),
-            347 => self.description_0(&children[0], parse_tree),
-            348 => self.description_1(&children[0], parse_tree),
-            349 => self.veryl(&children[0], &children[1], parse_tree),
-            350 => self.veryl_list_0(&children[0], &children[1], parse_tree),
-            351 => self.veryl_list_1(parse_tree),
+            348 => self.interface_for_declaration_opt_1(parse_tree),
+            349 => self.interface_item_0(&children[0], parse_tree),
+            350 => self.interface_item_1(&children[0], parse_tree),
+            351 => self.interface_item_2(&children[0], parse_tree),
+            352 => self.interface_item_3(&children[0], parse_tree),
+            353 => self.interface_item_4(&children[0], parse_tree),
+            354 => self.interface_item_5(&children[0], parse_tree),
+            355 => self.description_0(&children[0], parse_tree),
+            356 => self.description_1(&children[0], parse_tree),
+            357 => self.veryl(&children[0], &children[1], parse_tree),
+            358 => self.veryl_list_0(&children[0], &children[1], parse_tree),
+            359 => self.veryl_list_1(parse_tree),
             _ => Err(miette!("Unhandled production number: {}", prod_num)),
         }
     }

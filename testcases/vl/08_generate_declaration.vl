@@ -1,10 +1,14 @@
 module ModuleA {
     // if declaration
-    if a {
+    if a == 1 :label {
         always_ff (i_clk) {
             a = 1;
         }
-    } else if b {
+    } else if b == 1 { // label can be omit in else clause
+        always_ff (i_clk) {
+            b = 1;
+        }
+    } else if b == 1 :label1 { // label can be override in the specified clause only
         always_ff (i_clk) {
             b = 1;
         }
@@ -15,14 +19,14 @@ module ModuleA {
     }
 
     // for declaration
-    for a in 0..10 {
+    for a in 0..10 :label {
         always_ff (i_clk) {
             a = 1;
         }
     }
 
     // for declaration with custom step
-    for a in 0..10 step += 2 {
+    for a in 0..10 step += 2 :label {
         always_ff (i_clk) {
             a = 1;
         }

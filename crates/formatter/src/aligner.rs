@@ -410,8 +410,8 @@ impl VerylWalker for Aligner {
                 self.module_item(&x.module_item);
             }
         }
-        if let Some(ref x) = arg.module_if_declaration_opt {
-            for x in &x.module_if_declaration_opt_list {
+        if let Some(ref x) = arg.module_if_declaration_opt0 {
+            for x in &x.module_if_declaration_opt0_list {
                 self.module_item(&x.module_item);
             }
         }
@@ -460,8 +460,8 @@ impl VerylWalker for Aligner {
                 self.interface_item(&x.interface_item);
             }
         }
-        if let Some(ref x) = arg.interface_if_declaration_opt {
-            for x in &x.interface_if_declaration_opt_list {
+        if let Some(ref x) = arg.interface_if_declaration_opt0 {
+            for x in &x.interface_if_declaration_opt0_list {
                 self.interface_item(&x.interface_item);
             }
         }

@@ -290,10 +290,8 @@ impl VerylWalker for Emitter {
         }
         self.newline_pop();
         self.token(&arg.r_brace.r_brace_token.replace("end"));
-        if !arg.if_statement_list0.is_empty() {
-            self.space(1);
-        }
         for x in &arg.if_statement_list0 {
+            self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
             self.r#if(&x.r#if);
@@ -349,10 +347,8 @@ impl VerylWalker for Emitter {
         }
         self.newline_pop();
         self.token(&arg.r_brace.r_brace_token.replace("end"));
-        if !arg.if_reset_statement_list0.is_empty() {
-            self.space(1);
-        }
         for x in &arg.if_reset_statement_list0 {
+            self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
             self.r#if(&x.r#if);
@@ -893,7 +889,11 @@ impl VerylWalker for Emitter {
         self.expression(&arg.expression);
         self.str(")");
         self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token.replace("begin"));
+        self.str("begin");
+        self.space(1);
+        self.colon(&arg.colon);
+        self.identifier(&arg.identifier);
+        self.token_will_push(&arg.l_brace.l_brace_token.replace(""));
         self.newline_push();
         for (i, x) in arg.module_if_declaration_list.iter().enumerate() {
             if i != 0 {
@@ -903,10 +903,8 @@ impl VerylWalker for Emitter {
         }
         self.newline_pop();
         self.token(&arg.r_brace.r_brace_token.replace("end"));
-        if !arg.module_if_declaration_list0.is_empty() {
-            self.space(1);
-        }
         for x in &arg.module_if_declaration_list0 {
+            self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
             self.r#if(&x.r#if);
@@ -915,7 +913,17 @@ impl VerylWalker for Emitter {
             self.expression(&x.expression);
             self.str(")");
             self.space(1);
-            self.token_will_push(&x.l_brace.l_brace_token.replace("begin"));
+            self.str("begin");
+            if let Some(ref x) = x.module_if_declaration_opt {
+                self.space(1);
+                self.colon(&x.colon);
+                self.identifier(&x.identifier);
+            } else {
+                self.space(1);
+                self.str(":");
+                self.str(&arg.identifier.identifier_token.text());
+            }
+            self.token_will_push(&x.l_brace.l_brace_token.replace(""));
             self.newline_push();
             for (i, x) in x.module_if_declaration_list0_list.iter().enumerate() {
                 if i != 0 {
@@ -926,13 +934,23 @@ impl VerylWalker for Emitter {
             self.newline_pop();
             self.token(&x.r_brace.r_brace_token.replace("end"));
         }
-        if let Some(ref x) = arg.module_if_declaration_opt {
+        if let Some(ref x) = arg.module_if_declaration_opt0 {
             self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
-            self.token_will_push(&x.l_brace.l_brace_token.replace("begin"));
+            self.str("begin");
+            if let Some(ref x) = x.module_if_declaration_opt1 {
+                self.space(1);
+                self.colon(&x.colon);
+                self.identifier(&x.identifier);
+            } else {
+                self.space(1);
+                self.str(":");
+                self.str(&arg.identifier.identifier_token.text());
+            }
+            self.token_will_push(&x.l_brace.l_brace_token.replace(""));
             self.newline_push();
-            for (i, x) in x.module_if_declaration_opt_list.iter().enumerate() {
+            for (i, x) in x.module_if_declaration_opt0_list.iter().enumerate() {
                 if i != 0 {
                     self.newline();
                 }
@@ -976,7 +994,11 @@ impl VerylWalker for Emitter {
         }
         self.str(")");
         self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token.replace("begin"));
+        self.str("begin");
+        self.space(1);
+        self.colon(&arg.colon);
+        self.identifier(&arg.identifier0);
+        self.token_will_push(&arg.l_brace.l_brace_token.replace(""));
         self.newline_push();
         for (i, x) in arg.module_for_declaration_list.iter().enumerate() {
             if i != 0 {
@@ -1018,7 +1040,11 @@ impl VerylWalker for Emitter {
         self.expression(&arg.expression);
         self.str(")");
         self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token.replace("begin"));
+        self.str("begin");
+        self.space(1);
+        self.colon(&arg.colon);
+        self.identifier(&arg.identifier);
+        self.token_will_push(&arg.l_brace.l_brace_token.replace(""));
         self.newline_push();
         for (i, x) in arg.interface_if_declaration_list.iter().enumerate() {
             if i != 0 {
@@ -1028,10 +1054,8 @@ impl VerylWalker for Emitter {
         }
         self.newline_pop();
         self.token(&arg.r_brace.r_brace_token.replace("end"));
-        if !arg.interface_if_declaration_list0.is_empty() {
-            self.space(1);
-        }
         for x in &arg.interface_if_declaration_list0 {
+            self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
             self.r#if(&x.r#if);
@@ -1040,7 +1064,17 @@ impl VerylWalker for Emitter {
             self.expression(&x.expression);
             self.str(")");
             self.space(1);
-            self.token_will_push(&x.l_brace.l_brace_token.replace("begin"));
+            self.str("begin");
+            if let Some(ref x) = x.interface_if_declaration_opt {
+                self.space(1);
+                self.colon(&x.colon);
+                self.identifier(&x.identifier);
+            } else {
+                self.space(1);
+                self.str(":");
+                self.str(arg.identifier.identifier_token.text());
+            }
+            self.token_will_push(&x.l_brace.l_brace_token.replace(""));
             self.newline_push();
             for (i, x) in x.interface_if_declaration_list0_list.iter().enumerate() {
                 if i != 0 {
@@ -1051,13 +1085,23 @@ impl VerylWalker for Emitter {
             self.newline_pop();
             self.token(&x.r_brace.r_brace_token.replace("end"));
         }
-        if let Some(ref x) = arg.interface_if_declaration_opt {
+        if let Some(ref x) = arg.interface_if_declaration_opt0 {
             self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
-            self.token_will_push(&x.l_brace.l_brace_token.replace("begin"));
+            self.str("begin");
+            if let Some(ref x) = x.interface_if_declaration_opt1 {
+                self.space(1);
+                self.colon(&x.colon);
+                self.identifier(&x.identifier);
+            } else {
+                self.space(1);
+                self.str(":");
+                self.str(arg.identifier.identifier_token.text());
+            }
+            self.token_will_push(&x.l_brace.l_brace_token.replace(""));
             self.newline_push();
-            for (i, x) in x.interface_if_declaration_opt_list.iter().enumerate() {
+            for (i, x) in x.interface_if_declaration_opt0_list.iter().enumerate() {
                 if i != 0 {
                     self.newline();
                 }
@@ -1101,7 +1145,11 @@ impl VerylWalker for Emitter {
         }
         self.str(")");
         self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token.replace("begin"));
+        self.str("begin");
+        self.space(1);
+        self.colon(&arg.colon);
+        self.identifier(&arg.identifier0);
+        self.token_will_push(&arg.l_brace.l_brace_token.replace(""));
         self.newline_push();
         for (i, x) in arg.interface_for_declaration_list.iter().enumerate() {
             if i != 0 {
