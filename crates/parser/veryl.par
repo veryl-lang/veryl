@@ -311,7 +311,7 @@ ModuleDeclaration: Module Identifier [ WithParameter ] [ PortDeclaration ] LBrac
 
 ModuleIfDeclaration: If Expression LBrace { ModuleItem } RBrace { Else If Expression LBrace { ModuleItem } RBrace } [ Else LBrace { ModuleItem } RBrace ];
 
-ModuleForDeclaration: For Identifier Colon Type In Expression DotDot Expression [ Step AssignmentOperator Expression ] LBrace { ModuleItem } RBrace;
+ModuleForDeclaration: For Identifier In Expression DotDot Expression [ Step AssignmentOperator Expression ] LBrace { ModuleItem } RBrace;
 
 ModuleItem: VariableDeclaration
           | ParameterDeclaration
@@ -333,7 +333,7 @@ InterfaceDeclaration: Interface Identifier [ WithParameter ] LBrace { InterfaceI
 
 InterfaceIfDeclaration: If Expression LBrace { InterfaceItem } RBrace { Else If Expression LBrace { InterfaceItem } RBrace } [ Else LBrace { InterfaceItem } RBrace ];
 
-InterfaceForDeclaration: For Identifier Colon Type In Expression DotDot Expression [ Step AssignmentOperator Expression ] LBrace { InterfaceItem } RBrace;
+InterfaceForDeclaration: For Identifier In Expression DotDot Expression [ Step AssignmentOperator Expression ] LBrace { InterfaceItem } RBrace;
 
 InterfaceItem: VariableDeclaration
              | ParameterDeclaration

@@ -2850,7 +2850,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 243] = &[
             DFATransition(24, 63, 12),
             DFATransition(25, 63, 12),
             DFATransition(26, 5, 12),
-            DFATransition(26, 17, 12),
+            DFATransition(26, 47, 12),
             DFATransition(27, 6, 12),
             DFATransition(27, 7, 12),
             DFATransition(27, 8, 12),
@@ -3527,7 +3527,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 243] = &[
             DFATransition(36, 63, 15),
             DFATransition(37, 63, 15),
             DFATransition(38, 5, 15),
-            DFATransition(38, 17, 15),
+            DFATransition(38, 47, 15),
             DFATransition(39, 63, 15),
             DFATransition(40, 5, 15),
             DFATransition(40, 11, 15),
@@ -3860,7 +3860,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 243] = &[
             DFATransition(43, 63, 45),
             DFATransition(44, 63, 46),
             DFATransition(45, 5, 46),
-            DFATransition(45, 17, 46),
+            DFATransition(45, 47, 46),
         ],
         k: 3,
     },
@@ -6104,7 +6104,7 @@ pub const PRODUCTIONS: &[Production; 352] = &[
         lhs: 177,
         production: &[],
     },
-    // 305 - ModuleForDeclaration: For Identifier Colon Type In Expression DotDot Expression ModuleForDeclarationOpt /* Option */ LBrace ModuleForDeclarationList /* Vec */ RBrace;
+    // 305 - ModuleForDeclaration: For Identifier In Expression DotDot Expression ModuleForDeclarationOpt /* Option */ LBrace ModuleForDeclarationList /* Vec */ RBrace;
     Production {
         lhs: 170,
         production: &[
@@ -6116,8 +6116,6 @@ pub const PRODUCTIONS: &[Production; 352] = &[
             ParseType::N(50),
             ParseType::N(58),
             ParseType::N(108),
-            ParseType::N(223),
-            ParseType::N(38),
             ParseType::N(90),
             ParseType::N(72),
         ],
@@ -6300,7 +6298,7 @@ pub const PRODUCTIONS: &[Production; 352] = &[
         lhs: 141,
         production: &[],
     },
-    // 336 - InterfaceForDeclaration: For Identifier Colon Type In Expression DotDot Expression InterfaceForDeclarationOpt /* Option */ LBrace InterfaceForDeclarationList /* Vec */ RBrace;
+    // 336 - InterfaceForDeclaration: For Identifier In Expression DotDot Expression InterfaceForDeclarationOpt /* Option */ LBrace InterfaceForDeclarationList /* Vec */ RBrace;
     Production {
         lhs: 134,
         production: &[
@@ -6312,8 +6310,6 @@ pub const PRODUCTIONS: &[Production; 352] = &[
             ParseType::N(50),
             ParseType::N(58),
             ParseType::N(108),
-            ParseType::N(223),
-            ParseType::N(38),
             ParseType::N(90),
             ParseType::N(72),
         ],

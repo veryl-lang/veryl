@@ -311,7 +311,7 @@
 /* 302 */ ModuleIfDeclarationOptList /* Vec<T>::Push */: ModuleItem ModuleIfDeclarationOptList;
 /* 303 */ ModuleIfDeclarationOptList /* Vec<T>::New */: ;
 /* 304 */ ModuleIfDeclarationOpt /* Option<T>::None */: ;
-/* 305 */ ModuleForDeclaration: For Identifier Colon Type In Expression DotDot Expression ModuleForDeclarationOpt /* Option */ LBrace ModuleForDeclarationList /* Vec */ RBrace;
+/* 305 */ ModuleForDeclaration: For Identifier In Expression DotDot Expression ModuleForDeclarationOpt /* Option */ LBrace ModuleForDeclarationList /* Vec */ RBrace;
 /* 306 */ ModuleForDeclarationList /* Vec<T>::Push */: ModuleItem ModuleForDeclarationList;
 /* 307 */ ModuleForDeclarationList /* Vec<T>::New */: ;
 /* 308 */ ModuleForDeclarationOpt /* Option<T>::Some */: Step AssignmentOperator Expression;
@@ -342,7 +342,7 @@
 /* 333 */ InterfaceIfDeclarationOptList /* Vec<T>::Push */: InterfaceItem InterfaceIfDeclarationOptList;
 /* 334 */ InterfaceIfDeclarationOptList /* Vec<T>::New */: ;
 /* 335 */ InterfaceIfDeclarationOpt /* Option<T>::None */: ;
-/* 336 */ InterfaceForDeclaration: For Identifier Colon Type In Expression DotDot Expression InterfaceForDeclarationOpt /* Option */ LBrace InterfaceForDeclarationList /* Vec */ RBrace;
+/* 336 */ InterfaceForDeclaration: For Identifier In Expression DotDot Expression InterfaceForDeclarationOpt /* Option */ LBrace InterfaceForDeclarationList /* Vec */ RBrace;
 /* 337 */ InterfaceForDeclarationList /* Vec<T>::Push */: InterfaceItem InterfaceForDeclarationList;
 /* 338 */ InterfaceForDeclarationList /* Vec<T>::New */: ;
 /* 339 */ InterfaceForDeclarationOpt /* Option<T>::Some */: Step AssignmentOperator Expression;

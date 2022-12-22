@@ -2961,8 +2961,6 @@ pub struct InterfaceDeclarationOpt {
 pub struct InterfaceForDeclaration {
     pub r#for: Box<For>,
     pub identifier: Box<Identifier>,
-    pub colon: Box<Colon>,
-    pub r#type: Box<Type>,
     pub r#in: Box<In>,
     pub expression: Box<Expression>,
     pub dot_dot: Box<DotDot>,
@@ -3346,8 +3344,6 @@ pub struct ModuleDeclarationOpt0 {
 pub struct ModuleForDeclaration {
     pub r#for: Box<For>,
     pub identifier: Box<Identifier>,
-    pub colon: Box<Colon>,
-    pub r#type: Box<Type>,
     pub r#in: Box<In>,
     pub expression: Box<Expression>,
     pub dot_dot: Box<DotDot>,
@@ -12246,15 +12242,13 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 305:
     ///
-    /// ModuleForDeclaration: For Identifier Colon Type In Expression DotDot Expression ModuleForDeclarationOpt /* Option */ LBrace ModuleForDeclarationList /* Vec */ RBrace;
+    /// ModuleForDeclaration: For Identifier In Expression DotDot Expression ModuleForDeclarationOpt /* Option */ LBrace ModuleForDeclarationList /* Vec */ RBrace;
     ///
     #[parol_runtime::function_name::named]
     fn module_for_declaration(
         &mut self,
         _for: &ParseTreeStackEntry<'t>,
         _identifier: &ParseTreeStackEntry<'t>,
-        _colon: &ParseTreeStackEntry<'t>,
-        _type: &ParseTreeStackEntry<'t>,
         _in: &ParseTreeStackEntry<'t>,
         _expression: &ParseTreeStackEntry<'t>,
         _dot_dot: &ParseTreeStackEntry<'t>,
@@ -12285,15 +12279,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let dot_dot = pop_item!(self, dot_dot, DotDot, context);
         let expression = pop_item!(self, expression, Expression, context);
         let r#in = pop_item!(self, r#in, In, context);
-        let r#type = pop_item!(self, r#type, Type, context);
-        let colon = pop_item!(self, colon, Colon, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
         let r#for = pop_item!(self, r#for, For, context);
         let module_for_declaration_built = ModuleForDeclarationBuilder::default()
             .r#for(Box::new(r#for))
             .identifier(Box::new(identifier))
-            .colon(Box::new(colon))
-            .r#type(Box::new(r#type))
             .r#in(Box::new(r#in))
             .expression(Box::new(expression))
             .dot_dot(Box::new(dot_dot))
@@ -13150,15 +13140,13 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 336:
     ///
-    /// InterfaceForDeclaration: For Identifier Colon Type In Expression DotDot Expression InterfaceForDeclarationOpt /* Option */ LBrace InterfaceForDeclarationList /* Vec */ RBrace;
+    /// InterfaceForDeclaration: For Identifier In Expression DotDot Expression InterfaceForDeclarationOpt /* Option */ LBrace InterfaceForDeclarationList /* Vec */ RBrace;
     ///
     #[parol_runtime::function_name::named]
     fn interface_for_declaration(
         &mut self,
         _for: &ParseTreeStackEntry<'t>,
         _identifier: &ParseTreeStackEntry<'t>,
-        _colon: &ParseTreeStackEntry<'t>,
-        _type: &ParseTreeStackEntry<'t>,
         _in: &ParseTreeStackEntry<'t>,
         _expression: &ParseTreeStackEntry<'t>,
         _dot_dot: &ParseTreeStackEntry<'t>,
@@ -13189,15 +13177,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let dot_dot = pop_item!(self, dot_dot, DotDot, context);
         let expression = pop_item!(self, expression, Expression, context);
         let r#in = pop_item!(self, r#in, In, context);
-        let r#type = pop_item!(self, r#type, Type, context);
-        let colon = pop_item!(self, colon, Colon, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
         let r#for = pop_item!(self, r#for, For, context);
         let interface_for_declaration_built = InterfaceForDeclarationBuilder::default()
             .r#for(Box::new(r#for))
             .identifier(Box::new(identifier))
-            .colon(Box::new(colon))
-            .r#type(Box::new(r#type))
             .r#in(Box::new(r#in))
             .expression(Box::new(expression))
             .dot_dot(Box::new(dot_dot))
@@ -14141,8 +14125,6 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[7],
                 &children[8],
                 &children[9],
-                &children[10],
-                &children[11],
                 parse_tree,
             ),
             306 => self.module_for_declaration_list_0(&children[0], &children[1], parse_tree),
@@ -14225,8 +14207,6 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[7],
                 &children[8],
                 &children[9],
-                &children[10],
-                &children[11],
                 parse_tree,
             ),
             337 => self.interface_for_declaration_list_0(&children[0], &children[1], parse_tree),

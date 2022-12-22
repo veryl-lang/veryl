@@ -15,14 +15,14 @@ module ModuleA {
     }
 
     // for declaration
-    for a: u32  in 0..10 {
+    for a in 0..10 {
         always_ff (i_clk) {
             a = 1;
         }
     }
 
     // for declaration with custom step
-    for a: u32  in 0..10 step += 2 {
+    for a in 0..10 step += 2 {
         always_ff (i_clk) {
             a = 1;
         }

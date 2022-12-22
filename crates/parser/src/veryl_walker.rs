@@ -1096,8 +1096,6 @@ pub trait VerylWalker {
         before!(self, module_for_declaration, arg);
         self.r#for(&arg.r#for);
         self.identifier(&arg.identifier);
-        self.colon(&arg.colon);
-        self.r#type(&arg.r#type);
         self.r#in(&arg.r#in);
         self.expression(&arg.expression);
         self.dot_dot(&arg.dot_dot);
@@ -1185,8 +1183,6 @@ pub trait VerylWalker {
         before!(self, interface_for_declaration, arg);
         self.r#for(&arg.r#for);
         self.identifier(&arg.identifier);
-        self.colon(&arg.colon);
-        self.r#type(&arg.r#type);
         self.r#in(&arg.r#in);
         self.expression(&arg.expression);
         self.dot_dot(&arg.dot_dot);
