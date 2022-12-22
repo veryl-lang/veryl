@@ -14,64 +14,35 @@
 MultiComment: "(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+": OwnedToken;
 Comments    : [ MultiComment ];
 
-// Start
 StartToken: Comments;
-Start     : StartToken: VerylToken;
 
-// Number
 ExponentToken    : /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/: OwnedToken Comments;
 FixedPointToken  : /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/: OwnedToken Comments;
 BasedToken       : /[0-9]+(?:_[0-9]+)*'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/: OwnedToken Comments;
 BaseLessToken    : /[0-9]+(?:_[0-9]+)*/: OwnedToken Comments;
 AllBitToken      : /'[01]/: OwnedToken Comments;
 
-Exponent  : ExponentToken  : VerylToken;
-FixedPoint: FixedPointToken: VerylToken;
-Based     : BasedToken     : VerylToken;
-BaseLess  : BaseLessToken  : VerylToken;
-AllBit    : AllBitToken    : VerylToken;
-
-// Before '-' Operator
+// '->' should be before '-'
 MinusGTToken: '->': OwnedToken Comments;
 
-// Operator
 BinaryOperatorToken: "\*\*|\*|/|%|<<<|>>>|<<|>>|<=|>=|<|>|===|==\?|!==|!=\?|==|!=|&&|\|\|": OwnedToken Comments;
 CommonOperatorToken: "\+|-|&|\||\^~|\^|~\^|~&|~\|"                                        : OwnedToken Comments;
 UnaryOperatorToken : "!|~"                                                                : OwnedToken Comments;
 
-CommonOperator: CommonOperatorToken: VerylToken;
-BinaryOperator: BinaryOperatorToken: VerylToken;
-UnaryOperator : UnaryOperatorToken : VerylToken;
-
-// Symbol
 ColonColonColonToken: ':::': OwnedToken Comments;
-ColonToken          : ':' : OwnedToken Comments;
-CommaToken          : ',' : OwnedToken Comments;
-EquToken            : '=' : OwnedToken Comments;
-HashToken           : '#' : OwnedToken Comments;
-LBraceToken         : '{' : OwnedToken Comments;
-LBracketToken       : '[' : OwnedToken Comments;
-LParenToken         : '(' : OwnedToken Comments;
-RBraceToken         : '}' : OwnedToken Comments;
-RBracketToken       : ']' : OwnedToken Comments;
-RParenToken         : ')' : OwnedToken Comments;
-SemicolonToken      : ';' : OwnedToken Comments;
+ColonToken          : ':'  : OwnedToken Comments;
+CommaToken          : ','  : OwnedToken Comments;
+DotDotToken         : '..' : OwnedToken Comments;
+EquToken            : '='  : OwnedToken Comments;
+HashToken           : '#'  : OwnedToken Comments;
+LBraceToken         : '{'  : OwnedToken Comments;
+LBracketToken       : '['  : OwnedToken Comments;
+LParenToken         : '('  : OwnedToken Comments;
+RBraceToken         : '}'  : OwnedToken Comments;
+RBracketToken       : ']'  : OwnedToken Comments;
+RParenToken         : ')'  : OwnedToken Comments;
+SemicolonToken      : ';'  : OwnedToken Comments;
 
-ColonColonColon: ColonColonColonToken: VerylToken;
-Colon          : ColonToken          : VerylToken;
-Comma          : CommaToken          : VerylToken;
-Equ            : EquToken            : VerylToken;
-Hash           : HashToken           : VerylToken;
-LBrace         : LBraceToken         : VerylToken;
-LBracket       : LBracketToken       : VerylToken;
-LParen         : LParenToken         : VerylToken;
-MinusGT        : MinusGTToken        : VerylToken;
-RBrace         : RBraceToken         : VerylToken;
-RBracket       : RBracketToken       : VerylToken;
-RParen         : RParenToken         : VerylToken;
-Semicolon      : SemicolonToken      : VerylToken;
-
-// Keyword
 AlwaysCombToken: 'always_comb': OwnedToken Comments;
 AlwaysFfToken  : 'always_ff'  : OwnedToken Comments;
 AssignToken    : 'assign'     : OwnedToken Comments;
@@ -81,6 +52,7 @@ BitToken       : 'bit'        : OwnedToken Comments;
 ElseToken      : 'else'       : OwnedToken Comments;
 F32Token       : 'f32'        : OwnedToken Comments;
 F64Token       : 'f64'        : OwnedToken Comments;
+ForToken       : 'for'        : OwnedToken Comments;
 FunctionToken  : 'function'   : OwnedToken Comments;
 I32Token       : 'i32'        : OwnedToken Comments;
 I64Token       : 'i64'        : OwnedToken Comments;
@@ -89,6 +61,7 @@ IfToken        : 'if'         : OwnedToken Comments;
 InoutToken     : 'inout'      : OwnedToken Comments;
 InputToken     : 'input'      : OwnedToken Comments;
 InterfaceToken : 'interface'  : OwnedToken Comments;
+InToken        : 'in'         : OwnedToken Comments;
 LocalparamToken: 'localparam' : OwnedToken Comments;
 LogicToken     : 'logic'      : OwnedToken Comments;
 ModportToken   : 'modport'    : OwnedToken Comments;
@@ -104,6 +77,44 @@ SyncLowToken   : 'sync_low'   : OwnedToken Comments;
 U32Token       : 'u32'        : OwnedToken Comments;
 U64Token       : 'u64'        : OwnedToken Comments;
 
+IdentifierToken: /[a-zA-Z_][0-9a-zA-Z_]*/: OwnedToken Comments;
+
+// ----------------------------------------------------------------------------
+// VerylToken
+// ----------------------------------------------------------------------------
+
+// Start
+Start: StartToken: VerylToken;
+
+// Number
+Exponent  : ExponentToken  : VerylToken;
+FixedPoint: FixedPointToken: VerylToken;
+Based     : BasedToken     : VerylToken;
+BaseLess  : BaseLessToken  : VerylToken;
+AllBit    : AllBitToken    : VerylToken;
+
+// Operator
+CommonOperator: CommonOperatorToken: VerylToken;
+BinaryOperator: BinaryOperatorToken: VerylToken;
+UnaryOperator : UnaryOperatorToken : VerylToken;
+
+// Symbol
+Colon          : ColonToken          : VerylToken;
+ColonColonColon: ColonColonColonToken: VerylToken;
+Comma          : CommaToken          : VerylToken;
+DotDot         : DotDotToken         : VerylToken;
+Equ            : EquToken            : VerylToken;
+Hash           : HashToken           : VerylToken;
+LBrace         : LBraceToken         : VerylToken;
+LBracket       : LBracketToken       : VerylToken;
+LParen         : LParenToken         : VerylToken;
+MinusGT        : MinusGTToken        : VerylToken;
+RBrace         : RBraceToken         : VerylToken;
+RBracket       : RBracketToken       : VerylToken;
+RParen         : RParenToken         : VerylToken;
+Semicolon      : SemicolonToken      : VerylToken;
+
+// Keyword
 AlwaysComb: AlwaysCombToken: VerylToken;
 AlwaysFf  : AlwaysFfToken  : VerylToken;
 Assign    : AssignToken    : VerylToken;
@@ -113,11 +124,13 @@ Bit       : BitToken       : VerylToken;
 Else      : ElseToken      : VerylToken;
 F32       : F32Token       : VerylToken;
 F64       : F64Token       : VerylToken;
+For       : ForToken       : VerylToken;
 Function  : FunctionToken  : VerylToken;
 I32       : I32Token       : VerylToken;
 I64       : I64Token       : VerylToken;
-IfReset   : IfResetToken   : VerylToken;
 If        : IfToken        : VerylToken;
+IfReset   : IfResetToken   : VerylToken;
+In        : InToken        : VerylToken;
 Inout     : InoutToken     : VerylToken;
 Input     : InputToken     : VerylToken;
 Interface : InterfaceToken : VerylToken;
@@ -137,8 +150,7 @@ U32       : U32Token       : VerylToken;
 U64       : U64Token       : VerylToken;
 
 // Identifier
-IdentifierToken: /[a-zA-Z_][0-9a-zA-Z_]*/: OwnedToken Comments;
-Identifier     : IdentifierToken: VerylToken;
+Identifier: IdentifierToken: VerylToken;
 
 // ----------------------------------------------------------------------------
 // Number
@@ -196,6 +208,7 @@ Statement: AssignmentStatement
          | IfStatement
          | IfResetStatement
          | ReturnStatement
+         | ForStatement
          ;
 
 AssignmentStatement: Identifier Equ Expression Semicolon;
@@ -205,6 +218,8 @@ IfStatement: If Expression LBrace { Statement } RBrace { Else If Expression LBra
 IfResetStatement: IfReset LBrace { Statement } RBrace { Else If Expression LBrace { Statement } RBrace } [ Else LBrace { Statement } RBrace ];
 
 ReturnStatement: Return Expression Semicolon;
+
+ForStatement: For Identifier Colon Type In Expression DotDot Expression LBrace { Statement } RBrace;
 
 // ----------------------------------------------------------------------------
 // Declaration

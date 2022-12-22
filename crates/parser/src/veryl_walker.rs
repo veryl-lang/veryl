@@ -69,11 +69,25 @@ pub trait VerylWalker {
         after!(self, all_bit, arg);
     }
 
-    /// Semantic action for non-terminal 'ColonColonColon'
-    fn colon_colon_colon(&mut self, arg: &ColonColonColon) {
-        before!(self, colon_colon_colon, arg);
-        self.veryl_token(&arg.colon_colon_colon_token);
-        after!(self, colon_colon_colon, arg);
+    /// Semantic action for non-terminal 'CommonOperator'
+    fn common_operator(&mut self, arg: &CommonOperator) {
+        before!(self, common_operator, arg);
+        self.veryl_token(&arg.common_operator_token);
+        after!(self, common_operator, arg);
+    }
+
+    /// Semantic action for non-terminal 'BinaryOperator'
+    fn binary_operator(&mut self, arg: &BinaryOperator) {
+        before!(self, binary_operator, arg);
+        self.veryl_token(&arg.binary_operator_token);
+        after!(self, binary_operator, arg);
+    }
+
+    /// Semantic action for non-terminal 'UnaryOperator'
+    fn unary_operator(&mut self, arg: &UnaryOperator) {
+        before!(self, unary_operator, arg);
+        self.veryl_token(&arg.unary_operator_token);
+        after!(self, unary_operator, arg);
     }
 
     /// Semantic action for non-terminal 'Colon'
@@ -83,11 +97,25 @@ pub trait VerylWalker {
         after!(self, colon, arg);
     }
 
+    /// Semantic action for non-terminal 'ColonColonColon'
+    fn colon_colon_colon(&mut self, arg: &ColonColonColon) {
+        before!(self, colon_colon_colon, arg);
+        self.veryl_token(&arg.colon_colon_colon_token);
+        after!(self, colon_colon_colon, arg);
+    }
+
     /// Semantic action for non-terminal 'Comma'
     fn comma(&mut self, arg: &Comma) {
         before!(self, comma, arg);
         self.veryl_token(&arg.comma_token);
         after!(self, comma, arg);
+    }
+
+    /// Semantic action for non-terminal 'DotDot'
+    fn dot_dot(&mut self, arg: &DotDot) {
+        before!(self, dot_dot, arg);
+        self.veryl_token(&arg.dot_dot_token);
+        after!(self, dot_dot, arg);
     }
 
     /// Semantic action for non-terminal 'Equ'
@@ -160,27 +188,6 @@ pub trait VerylWalker {
         after!(self, semicolon, arg);
     }
 
-    /// Semantic action for non-terminal 'CommonOperator'
-    fn common_operator(&mut self, arg: &CommonOperator) {
-        before!(self, common_operator, arg);
-        self.veryl_token(&arg.common_operator_token);
-        after!(self, common_operator, arg);
-    }
-
-    /// Semantic action for non-terminal 'BinaryOperator'
-    fn binary_operator(&mut self, arg: &BinaryOperator) {
-        before!(self, binary_operator, arg);
-        self.veryl_token(&arg.binary_operator_token);
-        after!(self, binary_operator, arg);
-    }
-
-    /// Semantic action for non-terminal 'UnaryOperator'
-    fn unary_operator(&mut self, arg: &UnaryOperator) {
-        before!(self, unary_operator, arg);
-        self.veryl_token(&arg.unary_operator_token);
-        after!(self, unary_operator, arg);
-    }
-
     /// Semantic action for non-terminal 'AlwaysComb'
     fn always_comb(&mut self, arg: &AlwaysComb) {
         before!(self, always_comb, arg);
@@ -244,6 +251,13 @@ pub trait VerylWalker {
         after!(self, f64, arg);
     }
 
+    /// Semantic action for non-terminal 'For'
+    fn r#for(&mut self, arg: &For) {
+        before!(self, r#for, arg);
+        self.veryl_token(&arg.for_token);
+        after!(self, r#for, arg);
+    }
+
     /// Semantic action for non-terminal 'Function'
     fn function(&mut self, arg: &Function) {
         before!(self, function, arg);
@@ -277,6 +291,13 @@ pub trait VerylWalker {
         before!(self, if_reset, arg);
         self.veryl_token(&arg.if_reset_token);
         after!(self, if_reset, arg);
+    }
+
+    /// Semantic action for non-terminal 'In'
+    fn r#in(&mut self, arg: &In) {
+        before!(self, r#in, arg);
+        self.veryl_token(&arg.in_token);
+        after!(self, r#in, arg);
     }
 
     /// Semantic action for non-terminal 'Inout'
@@ -550,6 +571,7 @@ pub trait VerylWalker {
             Statement::Statement1(x) => self.if_statement(&x.if_statement),
             Statement::Statement2(x) => self.if_reset_statement(&x.if_reset_statement),
             Statement::Statement3(x) => self.return_statement(&x.return_statement),
+            Statement::Statement4(x) => self.for_statement(&x.for_statement),
         };
         after!(self, statement, arg);
     }
@@ -632,6 +654,25 @@ pub trait VerylWalker {
         self.expression(&arg.expression);
         self.semicolon(&arg.semicolon);
         after!(self, return_statement, arg);
+    }
+
+    /// Semantic action for non-terminal 'ForStatement'
+    fn for_statement(&mut self, arg: &ForStatement) {
+        before!(self, for_statement, arg);
+        self.r#for(&arg.r#for);
+        self.identifier(&arg.identifier);
+        self.colon(&arg.colon);
+        self.r#type(&arg.r#type);
+        self.r#in(&arg.r#in);
+        self.expression(&arg.expression);
+        self.dot_dot(&arg.dot_dot);
+        self.expression(&arg.expression0);
+        self.l_brace(&arg.l_brace);
+        for x in &arg.for_statement_list {
+            self.statement(&x.statement);
+        }
+        self.r_brace(&arg.r_brace);
+        after!(self, for_statement, arg);
     }
 
     /// Semantic action for non-terminal 'VariableDeclaration'

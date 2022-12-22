@@ -278,10 +278,45 @@ impl VerylWalker for Aligner {
     }
 
     /// Semantic action for non-terminal 'IfStatement'
-    fn if_statement(&mut self, _arg: &IfStatement) {}
+    fn if_statement(&mut self, arg: &IfStatement) {
+        for x in &arg.if_statement_list {
+            self.statement(&x.statement);
+        }
+        for x in &arg.if_statement_list0 {
+            for x in &x.if_statement_list0_list {
+                self.statement(&x.statement);
+            }
+        }
+        if let Some(ref x) = arg.if_statement_opt {
+            for x in &x.if_statement_opt_list {
+                self.statement(&x.statement);
+            }
+        }
+    }
 
     /// Semantic action for non-terminal 'IfResetStatement'
-    fn if_reset_statement(&mut self, _arg: &IfResetStatement) {}
+    fn if_reset_statement(&mut self, arg: &IfResetStatement) {
+        for x in &arg.if_reset_statement_list {
+            self.statement(&x.statement);
+        }
+        for x in &arg.if_reset_statement_list0 {
+            for x in &x.if_reset_statement_list0_list {
+                self.statement(&x.statement);
+            }
+        }
+        if let Some(ref x) = arg.if_reset_statement_opt {
+            for x in &x.if_reset_statement_opt_list {
+                self.statement(&x.statement);
+            }
+        }
+    }
+
+    /// Semantic action for non-terminal 'ForStatement'
+    fn for_statement(&mut self, arg: &ForStatement) {
+        for x in &arg.for_statement_list {
+            self.statement(&x.statement);
+        }
+    }
 
     /// Semantic action for non-terminal 'ParameterDeclaration'
     fn parameter_declaration(&mut self, arg: &ParameterDeclaration) {

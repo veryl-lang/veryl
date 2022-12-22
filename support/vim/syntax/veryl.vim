@@ -21,7 +21,7 @@ syn keyword verylStatement logic bit
 syn keyword verylStatement u32 u64 i32 i64 f32 f64
 hi link verylStatement Statement
 
-syn keyword verylConditional if if_reset else
+syn keyword verylConditional if if_reset else for in
 hi link verylConditional Conditional
 
 syn match   verylSpecial "[&|~><!)(#@=?:;}{,.\^\-\[\]]"

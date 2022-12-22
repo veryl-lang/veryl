@@ -1,0 +1,21 @@
+module ModuleA {
+    always_comb {
+        // if statement
+        if a {
+            a  = 1;
+            aa = 1;
+        } else if a {
+            a  = 1;
+            aa = 1;
+        } else {
+            a  = 1;
+            aa = 1;
+        }
+
+        // for statement
+        for a: u32  in 0..10 {
+            a  = 1;
+            aa = 1;
+        }
+    }
+}
