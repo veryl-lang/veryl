@@ -1,0 +1,30 @@
+module ModuleA {
+    // if declaration
+    if a {
+        always_ff (i_clk) {
+            a = 1;
+        }
+    } else if b {
+        always_ff (i_clk) {
+            b = 1;
+        }
+    } else {
+        always_ff (i_clk) {
+            c = 1;
+        }
+    }
+
+    // for declaration
+    for a: u32  in 0..10 {
+        always_ff (i_clk) {
+            a = 1;
+        }
+    }
+
+    // for declaration with custom step
+    for a: u32  in 0..10 step += 2 {
+        always_ff (i_clk) {
+            a = 1;
+        }
+    }
+}

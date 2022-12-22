@@ -400,6 +400,30 @@ impl VerylWalker for Aligner {
         }
     }
 
+    /// Semantic action for non-terminal 'ModuleIfDeclaration'
+    fn module_if_declaration(&mut self, arg: &ModuleIfDeclaration) {
+        for x in &arg.module_if_declaration_list {
+            self.module_item(&x.module_item);
+        }
+        for x in &arg.module_if_declaration_list0 {
+            for x in &x.module_if_declaration_list0_list {
+                self.module_item(&x.module_item);
+            }
+        }
+        if let Some(ref x) = arg.module_if_declaration_opt {
+            for x in &x.module_if_declaration_opt_list {
+                self.module_item(&x.module_item);
+            }
+        }
+    }
+
+    /// Semantic action for non-terminal 'ModuleForDeclaration'
+    fn module_for_declaration(&mut self, arg: &ModuleForDeclaration) {
+        for x in &arg.module_for_declaration_list {
+            self.module_item(&x.module_item);
+        }
+    }
+
     /// Semantic action for non-terminal 'Direction'
     fn direction(&mut self, arg: &Direction) {
         match arg {
@@ -422,6 +446,30 @@ impl VerylWalker for Aligner {
             self.with_parameter(&x.with_parameter);
         }
         for x in &arg.interface_declaration_list {
+            self.interface_item(&x.interface_item);
+        }
+    }
+
+    /// Semantic action for non-terminal 'InterfaceIfDeclaration'
+    fn interface_if_declaration(&mut self, arg: &InterfaceIfDeclaration) {
+        for x in &arg.interface_if_declaration_list {
+            self.interface_item(&x.interface_item);
+        }
+        for x in &arg.interface_if_declaration_list0 {
+            for x in &x.interface_if_declaration_list0_list {
+                self.interface_item(&x.interface_item);
+            }
+        }
+        if let Some(ref x) = arg.interface_if_declaration_opt {
+            for x in &x.interface_if_declaration_opt_list {
+                self.interface_item(&x.interface_item);
+            }
+        }
+    }
+
+    /// Semantic action for non-terminal 'InterfaceForDeclaration'
+    fn interface_for_declaration(&mut self, arg: &InterfaceForDeclaration) {
+        for x in &arg.interface_for_declaration_list {
             self.interface_item(&x.interface_item);
         }
     }
