@@ -30,7 +30,7 @@ release_win:
 
 release_mac:
 	cargo build --locked --release --target=x86_64-apple-darwin
-	zip -j ${ZIP_NAME}-v${VERSION}-x86_64-mac.zip $(addprefix target/x86_64-unknown-linux-musl/release/, ${BIN_NAMES})
+	zip -j ${ZIP_NAME}-v${VERSION}-x86_64-mac.zip $(addprefix target/x86_64-apple-darwin/release/, ${BIN_NAMES})
 
 release_rpm:
 	mkdir -p target
