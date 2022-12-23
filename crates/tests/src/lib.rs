@@ -39,13 +39,13 @@ mod analyzer {
 #[cfg(test)]
 mod formatter {
     use std::fs;
-    use veryl_config::Config;
     use veryl_formatter::Formatter;
+    use veryl_metadata::Metadata;
     use veryl_parser::Parser;
 
     fn test(name: &str) {
-        let config_path = Config::search_from_current().unwrap();
-        let config = Config::load(&config_path).unwrap();
+        let metadata_path = Metadata::search_from_current().unwrap();
+        let metadata = Metadata::load(&metadata_path).unwrap();
 
         let file = format!("../../testcases/vl/{}.vl", name);
         let input = fs::read_to_string(&file).unwrap();
@@ -62,7 +62,7 @@ mod formatter {
         }
 
         let ret = Parser::parse(&input, &file).unwrap();
-        let mut formatter = Formatter::new(&config);
+        let mut formatter = Formatter::new(&metadata);
         formatter.format(&ret.veryl);
 
         // remove CR on Windows environment
@@ -77,19 +77,19 @@ mod formatter {
 #[cfg(test)]
 mod emitter {
     use std::fs;
-    use veryl_config::Config;
     use veryl_emitter::Emitter;
+    use veryl_metadata::Metadata;
     use veryl_parser::Parser;
 
     fn test(name: &str) {
-        let config_path = Config::search_from_current().unwrap();
-        let config = Config::load(&config_path).unwrap();
+        let metadata_path = Metadata::search_from_current().unwrap();
+        let metadata = Metadata::load(&metadata_path).unwrap();
 
         let file = format!("../../testcases/vl/{}.vl", name);
         let input = fs::read_to_string(&file).unwrap();
 
         let ret = Parser::parse(&input, &file).unwrap();
-        let mut emitter = Emitter::new(&config);
+        let mut emitter = Emitter::new(&metadata);
         emitter.emit(&ret.veryl);
 
         let file = format!("../../testcases/sv/{}.sv", name);

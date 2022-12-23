@@ -1,10 +1,10 @@
 [workspace]
 members = [
     "crates/analyzer",
-    "crates/config",
     "crates/emitter",
     "crates/formatter",
     "crates/languageserver",
+    "crates/metadata",
     "crates/parser",
     "crates/tests",
     "crates/veryl",

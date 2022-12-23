@@ -19,8 +19,8 @@ env_logger      = "0.10.0"
 similar         = {version = "2.2.1", features = ["text", "inline"]}
 thiserror       = {workspace = true}
 veryl-analyzer  = {version = "0.1.0", path = "../analyzer"}
-veryl-config    = {version = "0.1.0", path = "../config"}
 veryl-emitter   = {version = "0.1.0", path = "../emitter"}
-veryl-parser    = {version = "0.1.0", path = "../parser"}
 veryl-formatter = {version = "0.1.0", path = "../formatter"}
+veryl-metadata  = {version = "0.1.0", path = "../metadata"}
+veryl-parser    = {version = "0.1.0", path = "../parser"}
 walkdir         = "2.3.2"

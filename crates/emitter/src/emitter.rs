@@ -1,5 +1,5 @@
 use crate::aligner::{Aligner, Location};
-use veryl_config::{ClockType, Config, ResetType};
+use veryl_metadata::{ClockType, Metadata, ResetType};
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::VerylToken;
 use veryl_parser::veryl_walker::VerylWalker;
@@ -38,11 +38,11 @@ impl Default for Emitter {
 }
 
 impl Emitter {
-    pub fn new(config: &Config) -> Self {
+    pub fn new(metadata: &Metadata) -> Self {
         Self {
-            indent_width: config.format.indent_width,
-            clock_type: config.build.clock_type,
-            reset_type: config.build.reset_type,
+            indent_width: metadata.format.indent_width,
+            clock_type: metadata.build.clock_type,
+            reset_type: metadata.build.reset_type,
             ..Default::default()
         }
     }

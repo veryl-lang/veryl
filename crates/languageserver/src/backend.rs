@@ -4,8 +4,8 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 use veryl_analyzer::Analyzer;
-use veryl_config::Config;
 use veryl_formatter::Formatter;
+use veryl_metadata::Metadata;
 use veryl_parser::{miette, Parser, ParserError};
 
 #[derive(Debug)]
@@ -177,12 +177,12 @@ impl LanguageServer for Backend {
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         let path = params.text_document.uri.to_string();
-        if let Ok(config_path) = Config::search_from(params.text_document.uri.path()) {
-            if let Ok(config) = Config::load(&config_path) {
+        if let Ok(metadata_path) = Metadata::search_from(params.text_document.uri.path()) {
+            if let Ok(metadata) = Metadata::load(&metadata_path) {
                 if let Some(rope) = self.document_map.get(&path) {
                     let line = rope.len_lines() as u32;
                     if let Some(parser) = self.parser_map.get(&path) {
-                        let mut formatter = Formatter::new(&config);
+                        let mut formatter = Formatter::new(&metadata);
                         formatter.format(&parser.veryl);
 
                         let text_edit = TextEdit {

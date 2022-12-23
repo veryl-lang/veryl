@@ -1655,9 +1655,9 @@ dependencies = [
  "similar",
  "thiserror",
  "veryl-analyzer",
- "veryl-config",
  "veryl-emitter",
  "veryl-formatter",
+ "veryl-metadata",
  "veryl-parser",
  "walkdir",
 ]
@@ -1671,22 +1671,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "veryl-config"
-version = "0.1.0"
-dependencies = [
- "semver",
- "serde",
- "thiserror",
- "toml",
- "veryl-parser",
-]
-
-[[package]]
 name = "veryl-emitter"
 version = "0.1.0"
 dependencies = [
  "serde",
- "veryl-config",
+ "veryl-metadata",
  "veryl-parser",
 ]
 
@@ -1694,7 +1683,7 @@ dependencies = [
 name = "veryl-formatter"
 version = "0.1.0"
 dependencies = [
- "veryl-config",
+ "veryl-metadata",
  "veryl-parser",
 ]
 
@@ -1707,8 +1696,19 @@ dependencies = [
  "tokio",
  "tower-lsp",
  "veryl-analyzer",
- "veryl-config",
  "veryl-formatter",
+ "veryl-metadata",
+ "veryl-parser",
+]
+
+[[package]]
+name = "veryl-metadata"
+version = "0.1.0"
+dependencies = [
+ "semver",
+ "serde",
+ "thiserror",
+ "toml",
  "veryl-parser",
 ]
 
@@ -1729,9 +1729,9 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "veryl-analyzer",
- "veryl-config",
  "veryl-emitter",
  "veryl-formatter",
+ "veryl-metadata",
  "veryl-parser",
  "walkdir",
 ]

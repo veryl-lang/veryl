@@ -4,7 +4,7 @@ use std::fs;
 use std::time::Instant;
 use thiserror::Error;
 use veryl_analyzer::{AnalyzeError, Analyzer};
-use veryl_config::Config;
+use veryl_metadata::Metadata;
 use veryl_parser::miette::{self, Diagnostic, IntoDiagnostic, Result, WrapErr};
 use veryl_parser::Parser;
 
@@ -24,7 +24,7 @@ impl CmdCheck {
         Self { opt }
     }
 
-    pub fn exec(&self, _config: &Config) -> Result<bool> {
+    pub fn exec(&self, _metadata: &Metadata) -> Result<bool> {
         let files = if self.opt.files.is_empty() {
             utils::gather_files("./")?
         } else {

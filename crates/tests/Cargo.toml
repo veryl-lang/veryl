@@ -7,9 +7,9 @@ edition = "2021"
 
 [dependencies]
 veryl-analyzer  = {version = "0.1.0", path = "../analyzer"}
-veryl-config    = {version = "0.1.0", path = "../config"}
 veryl-emitter   = {version = "0.1.0", path = "../emitter"}
 veryl-formatter = {version = "0.1.0", path = "../formatter"}
+veryl-metadata  = {version = "0.1.0", path = "../metadata"}
 veryl-parser    = {version = "0.1.0", path = "../parser"}
 
 [dev-dependencies]

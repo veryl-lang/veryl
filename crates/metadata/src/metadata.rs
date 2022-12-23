@@ -1,11 +1,11 @@
-use crate::ConfigError;
+use crate::MetadataError;
 use semver::Version;
 use serde::Deserialize;
 use std::env;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize)]
-pub struct Config {
+pub struct Metadata {
     pub package: Package,
     #[serde(default)]
     pub build: Build,
@@ -13,12 +13,12 @@ pub struct Config {
     pub format: Format,
 }
 
-impl Config {
-    pub fn search_from_current() -> Result<PathBuf, ConfigError> {
-        Config::search_from(env::current_dir()?)
+impl Metadata {
+    pub fn search_from_current() -> Result<PathBuf, MetadataError> {
+        Metadata::search_from(env::current_dir()?)
     }
 
-    pub fn search_from<T: AsRef<Path>>(from: T) -> Result<PathBuf, ConfigError> {
+    pub fn search_from<T: AsRef<Path>>(from: T) -> Result<PathBuf, MetadataError> {
         for path in from.as_ref().ancestors() {
             let path = path.join("Veryl.toml");
             if path.is_file() {
@@ -26,13 +26,13 @@ impl Config {
             }
         }
 
-        Err(ConfigError::FileNotFound)
+        Err(MetadataError::FileNotFound)
     }
 
-    pub fn load<T: AsRef<Path>>(path: T) -> Result<Self, ConfigError> {
+    pub fn load<T: AsRef<Path>>(path: T) -> Result<Self, MetadataError> {
         let text = std::fs::read_to_string(path)?;
-        let config: Config = toml::from_str(&text)?;
-        Ok(config)
+        let metadata: Metadata = toml::from_str(&text)?;
+        Ok(metadata)
     }
 }
 
@@ -131,10 +131,10 @@ indent_width = 4
 
     #[test]
     fn load_toml() {
-        let config: Config = toml::from_str(TEST_TOML).unwrap();
-        assert_eq!(config.package.name, "test");
+        let metadata: Metadata = toml::from_str(TEST_TOML).unwrap();
+        assert_eq!(metadata.package.name, "test");
         assert_eq!(
-            config.package.version,
+            metadata.package.version,
             Version {
                 major: 0,
                 minor: 1,
@@ -143,14 +143,14 @@ indent_width = 4
                 build: BuildMetadata::EMPTY,
             }
         );
-        assert_eq!(config.build.clock_type, ClockType::PosEdge);
-        assert_eq!(config.build.reset_type, ResetType::AsyncLow);
-        assert_eq!(config.format.indent_width, 4);
+        assert_eq!(metadata.build.clock_type, ClockType::PosEdge);
+        assert_eq!(metadata.build.reset_type, ResetType::AsyncLow);
+        assert_eq!(metadata.format.indent_width, 4);
     }
 
     #[test]
     fn search_config() {
-        let path = Config::search_from_current();
+        let path = Metadata::search_from_current();
         assert!(path.is_ok());
     }
 }
