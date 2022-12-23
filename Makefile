@@ -1,9 +1,10 @@
-VERSION = $(patsubst "%",%, $(word 3, $(shell grep version Cargo.toml)))
+VERSION = $(patsubst "%",%, $(word 3, $(shell grep version ./crates/veryl/Cargo.toml)))
 BUILD_TIME = $(shell date +"%Y/%m/%d %H:%M:%S")
 GIT_REVISION = $(shell git log -1 --format="%h")
 RUST_VERSION = $(word 2, $(shell rustc -V))
 LONG_VERSION = "$(VERSION) ( rev: $(GIT_REVISION), rustc: $(RUST_VERSION), build at: $(BUILD_TIME) )"
-BIN_NAME = veryl
+ZIP_NAME = veryl
+BIN_NAMES = veryl veryl-ls
 
 export LONG_VERSION
 
@@ -20,16 +21,16 @@ clean:
 
 release_lnx:
 	cargo build --locked --release --target=x86_64-unknown-linux-musl
-	zip -j ${BIN_NAME}-v${VERSION}-x86_64-linux.zip target/x86_64-unknown-linux-musl/release/${BIN_NAME}
+	zip -j ${ZIP_NAME}-v${VERSION}-x86_64-linux.zip $(addprefix target/x86_64-unknown-linux-musl/release/, ${BIN_NAMES})
 
 release_win:
 	cargo build --locked --release --target=x86_64-pc-windows-msvc
-	mv -v target/x86_64-pc-windows-msvc/release/${BIN_NAME}.exe ./
-	7z a ${BIN_NAME}-v${VERSION}-x86_64-windows.zip ${BIN_NAME}.exe
+	mv -v $(addsuffix .exe, $(addprefix target/x86_64-pc-windows-msvc/release/, ${BIN_NAMES})) ./
+	7z a ${ZIP_NAME}-v${VERSION}-x86_64-windows.zip $(addsuffix .exe, ${BIN_NAMES})
 
 release_mac:
 	cargo build --locked --release --target=x86_64-apple-darwin
-	zip -j ${BIN_NAME}-v${VERSION}-x86_64-mac.zip target/x86_64-apple-darwin/release/${BIN_NAME}
+	zip -j ${ZIP_NAME}-v${VERSION}-x86_64-mac.zip $(addprefix target/x86_64-unknown-linux-musl/release/, ${BIN_NAMES})
 
 release_rpm:
 	mkdir -p target
