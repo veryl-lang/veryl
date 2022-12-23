@@ -1,10 +1,20 @@
 [package]
-name = "veryl-config"
-version = "0.1.0"
-edition = "2021"
+name                  = "veryl-config"
+version               = "0.1.0"
+authors.workspace     = true
+repository.workspace  = true
+keywords.workspace    = true
+categories.workspace  = true
+license.workspace     = true
+readme.workspace      = true
+description.workspace = true
+edition               = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-toml  = "0.5.10"
+semver       = {version = "1.0", features = ["serde"]}
+serde        = {workspace = true}
+thiserror    = {workspace = true}
+toml         = "0.5.10"
+veryl-parser = {version = "0.1.0", path = "../parser"}

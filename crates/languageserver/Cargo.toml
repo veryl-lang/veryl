@@ -18,5 +18,6 @@ ropey           = "1.5.0"
 tokio           = {version = "1.23.0", features = ["full"]}
 tower-lsp       = "0.17.0"
 veryl-analyzer  = {version = "0.1.0", path = "../analyzer"}
+veryl-config    = {version = "0.1.0", path = "../config"}
 veryl-formatter = {version = "0.1.0", path = "../formatter"}
 veryl-parser    = {version = "0.1.0", path = "../parser"}

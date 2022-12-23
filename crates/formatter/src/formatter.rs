@@ -1,4 +1,5 @@
 use crate::aligner::{Aligner, Location};
+use veryl_config::Config;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::VerylToken;
 use veryl_parser::veryl_walker::VerylWalker;
@@ -29,8 +30,11 @@ impl Default for Formatter {
 }
 
 impl Formatter {
-    pub fn new() -> Self {
-        Default::default()
+    pub fn new(config: &Config) -> Self {
+        Self {
+            indent_width: config.format.indent_width,
+            ..Default::default()
+        }
     }
 
     pub fn format(&mut self, input: &Veryl) {

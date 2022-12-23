@@ -1,20 +1,9 @@
 use crate::aligner::{Aligner, Location};
+use veryl_config::{ClockType, Config, ResetType};
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::VerylToken;
 use veryl_parser::veryl_walker::VerylWalker;
 use veryl_parser::ParolToken;
-
-pub enum ClockType {
-    PosEdge,
-    NegEdge,
-}
-
-pub enum ResetType {
-    AsyncLow,
-    AsyncHigh,
-    SyncLow,
-    SyncHigh,
-}
 
 pub struct Emitter {
     pub indent_width: usize,
@@ -49,8 +38,13 @@ impl Default for Emitter {
 }
 
 impl Emitter {
-    pub fn new() -> Self {
-        Default::default()
+    pub fn new(config: &Config) -> Self {
+        Self {
+            indent_width: config.format.indent_width,
+            clock_type: config.build.clock_type,
+            reset_type: config.build.reset_type,
+            ..Default::default()
+        }
     }
 
     pub fn emit(&mut self, input: &Veryl) {

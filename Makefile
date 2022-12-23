@@ -44,7 +44,7 @@ install:
 	cargo install --path crates/veryl
 
 gen_sv:
-	cargo run --bin veryl -- build --target-directory ./testcases/sv ./testcases/vl/*
+	cargo run --bin veryl -- build
 
 flamegraph:
 	cargo flamegraph --bench benchmark -- --bench

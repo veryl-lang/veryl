@@ -1,0 +1,11 @@
+[package]
+name = "veryl-testcase"
+version = "0.1.0"
+
+[build]
+clock_type = "posedge"
+reset_type = "async_low"
+target     = {type = "directory", path = "testcases/sv"}
+
+[format]
+indent_witdh = 4

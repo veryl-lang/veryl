@@ -4,6 +4,7 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 use veryl_analyzer::Analyzer;
+use veryl_config::Config;
 use veryl_formatter::Formatter;
 use veryl_parser::{miette, Parser, ParserError};
 
@@ -176,18 +177,22 @@ impl LanguageServer for Backend {
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         let path = params.text_document.uri.to_string();
-        if let Some(rope) = self.document_map.get(&path) {
-            let line = rope.len_lines() as u32;
-            if let Some(parser) = self.parser_map.get(&path) {
-                let mut formatter = Formatter::new();
-                formatter.format(&parser.veryl);
+        if let Ok(config_path) = Config::search_from(params.text_document.uri.path()) {
+            if let Ok(config) = Config::load(&config_path) {
+                if let Some(rope) = self.document_map.get(&path) {
+                    let line = rope.len_lines() as u32;
+                    if let Some(parser) = self.parser_map.get(&path) {
+                        let mut formatter = Formatter::new(&config);
+                        formatter.format(&parser.veryl);
 
-                let text_edit = TextEdit {
-                    range: Range::new(Position::new(0, 0), Position::new(line, u32::MAX)),
-                    new_text: formatter.as_str().to_string(),
-                };
+                        let text_edit = TextEdit {
+                            range: Range::new(Position::new(0, 0), Position::new(line, u32::MAX)),
+                            new_text: formatter.as_str().to_string(),
+                        };
 
-                return Ok(Some(vec![text_edit]));
+                        return Ok(Some(vec![text_edit]));
+                    }
+                }
             }
         }
         Ok(None)

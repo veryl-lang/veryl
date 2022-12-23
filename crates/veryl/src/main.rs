@@ -1,6 +1,7 @@
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 use std::process::ExitCode;
+use veryl_config::Config;
 use veryl_parser::miette::Result;
 
 mod cmd_build;
@@ -67,10 +68,6 @@ pub struct OptBuild {
     /// Target files
     pub files: Vec<PathBuf>,
 
-    /// Directory for all generated artifacts
-    #[arg(long)]
-    pub target_directory: Option<PathBuf>,
-
     /// No output printed to stdout
     #[arg(long)]
     pub quiet: bool,
@@ -87,10 +84,14 @@ pub struct OptBuild {
 fn main() -> Result<ExitCode> {
     env_logger::init();
     let opt = Opt::parse();
+
+    let config_path = Config::search_from_current()?;
+    let config = Config::load(&config_path)?;
+
     let ret = match opt.command {
-        Commands::Fmt(x) => cmd_fmt::CmdFmt::new(x).exec()?,
-        Commands::Check(x) => cmd_check::CmdCheck::new(x).exec()?,
-        Commands::Build(x) => cmd_build::CmdBuild::new(x).exec()?,
+        Commands::Fmt(x) => cmd_fmt::CmdFmt::new(x).exec(&config)?,
+        Commands::Check(x) => cmd_check::CmdCheck::new(x).exec(&config)?,
+        Commands::Build(x) => cmd_build::CmdBuild::new(x).exec(&config)?,
     };
     if ret {
         Ok(ExitCode::SUCCESS)

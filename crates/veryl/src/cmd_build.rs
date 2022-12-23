@@ -4,6 +4,7 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::time::Instant;
+use veryl_config::{Config, Target};
 use veryl_emitter::Emitter;
 use veryl_parser::miette::{IntoDiagnostic, Result, WrapErr};
 use veryl_parser::Parser;
@@ -17,7 +18,7 @@ impl CmdBuild {
         Self { opt }
     }
 
-    pub fn exec(&self) -> Result<bool> {
+    pub fn exec(&self, config: &Config) -> Result<bool> {
         let files = if self.opt.files.is_empty() {
             utils::gather_files("./")?
         } else {
@@ -34,13 +35,14 @@ impl CmdBuild {
 
             let input = fs::read_to_string(file).into_diagnostic().wrap_err("")?;
             let parser = Parser::parse(&input, file)?;
-            let mut emitter = Emitter::new();
+            let mut emitter = Emitter::new(config);
             emitter.emit(&parser.veryl);
 
-            let output = if let Some(ref dir) = self.opt.target_directory {
-                dir.join(file.with_extension("sv").file_name().unwrap())
-            } else {
-                file.with_extension("sv")
+            let output = match config.build.target {
+                Target::Source => file.with_extension("sv"),
+                Target::Directory { ref path } => {
+                    path.join(file.with_extension("sv").file_name().unwrap())
+                }
             };
 
             self.print(&format!("[Info] Output file: {}", output.to_string_lossy()));

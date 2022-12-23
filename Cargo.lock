@@ -1212,6 +1212,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d29ab0c6d3fc0ee92fe66e2d99f700eab17a8d57d1c1d3b748380fb20baa78cd"
 
 [[package]]
+name = "semver"
+version = "1.0.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58bc9567378fc7690d6b2addae4e60ac2eeea07becb2c64b9f218b53865cba2a"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "serde"
 version = "1.0.151"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1646,6 +1655,7 @@ dependencies = [
  "similar",
  "thiserror",
  "veryl-analyzer",
+ "veryl-config",
  "veryl-emitter",
  "veryl-formatter",
  "veryl-parser",
@@ -1664,14 +1674,19 @@ dependencies = [
 name = "veryl-config"
 version = "0.1.0"
 dependencies = [
+ "semver",
  "serde",
+ "thiserror",
  "toml",
+ "veryl-parser",
 ]
 
 [[package]]
 name = "veryl-emitter"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "veryl-config",
  "veryl-parser",
 ]
 
@@ -1679,6 +1694,7 @@ dependencies = [
 name = "veryl-formatter"
 version = "0.1.0"
 dependencies = [
+ "veryl-config",
  "veryl-parser",
 ]
 
@@ -1691,6 +1707,7 @@ dependencies = [
  "tokio",
  "tower-lsp",
  "veryl-analyzer",
+ "veryl-config",
  "veryl-formatter",
  "veryl-parser",
 ]
@@ -1712,6 +1729,7 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "veryl-analyzer",
+ "veryl-config",
  "veryl-emitter",
  "veryl-formatter",
  "veryl-parser",

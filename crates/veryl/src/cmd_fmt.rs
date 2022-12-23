@@ -8,6 +8,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
 use std::time::Instant;
+use veryl_config::Config;
 use veryl_formatter::Formatter;
 use veryl_parser::miette::{IntoDiagnostic, Result, WrapErr};
 use veryl_parser::Parser;
@@ -21,7 +22,7 @@ impl CmdFmt {
         Self { opt }
     }
 
-    pub fn exec(&self) -> Result<bool> {
+    pub fn exec(&self, config: &Config) -> Result<bool> {
         let files = if self.opt.files.is_empty() {
             utils::gather_files("./")?
         } else {
@@ -39,7 +40,7 @@ impl CmdFmt {
 
             let input = fs::read_to_string(file).into_diagnostic().wrap_err("")?;
             let parser = Parser::parse(&input, file)?;
-            let mut formatter = Formatter::new();
+            let mut formatter = Formatter::new(config);
             formatter.format(&parser.veryl);
 
             let pass = input.as_str() == formatter.as_str();

@@ -20,6 +20,7 @@ readme      = "README.md"
 description = "A modern hardware description language"
 
 [workspace.dependencies]
+serde     = {version = "1.0", features = ["derive"]}
 thiserror = "1.0"
 
 [profile.dev.build-override]
