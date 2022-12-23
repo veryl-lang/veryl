@@ -178,7 +178,7 @@ impl LanguageServer for Backend {
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         let path = params.text_document.uri.to_string();
         if let Ok(metadata_path) = Metadata::search_from(params.text_document.uri.path()) {
-            if let Ok(metadata) = Metadata::load(&metadata_path) {
+            if let Ok(metadata) = Metadata::load(metadata_path) {
                 if let Some(rope) = self.document_map.get(&path) {
                     let line = rope.len_lines() as u32;
                     if let Some(parser) = self.parser_map.get(&path) {

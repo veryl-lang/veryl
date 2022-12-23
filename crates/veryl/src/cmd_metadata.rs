@@ -3,12 +3,12 @@ use veryl_metadata::Metadata;
 use veryl_parser::miette::Result;
 
 pub struct CmdMetadata {
-    opt: OptMetadata,
+    _opt: OptMetadata,
 }
 
 impl CmdMetadata {
     pub fn new(opt: OptMetadata) -> Self {
-        Self { opt }
+        Self { _opt: opt }
     }
 
     pub fn exec(&self, metadata: &Metadata) -> Result<bool> {
@@ -17,9 +17,9 @@ impl CmdMetadata {
         Ok(true)
     }
 
-    fn print(&self, msg: &str) {
-        if self.opt.verbose {
-            println!("{}", msg);
-        }
-    }
+    //fn print(&self, msg: &str) {
+    //    if self.opt.verbose {
+    //        println!("{}", msg);
+    //    }
+    //}
 }

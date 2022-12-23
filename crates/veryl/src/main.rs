@@ -100,7 +100,7 @@ fn main() -> Result<ExitCode> {
     let opt = Opt::parse();
 
     let metadata_path = Metadata::search_from_current()?;
-    let metadata = Metadata::load(&metadata_path)?;
+    let metadata = Metadata::load(metadata_path)?;
 
     let ret = match opt.command {
         Commands::Fmt(x) => cmd_fmt::CmdFmt::new(x).exec(&metadata)?,
