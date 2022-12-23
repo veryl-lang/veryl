@@ -507,7 +507,7 @@ impl VerylWalker for Emitter {
         } else {
             match self.clock_type {
                 ClockType::PosEdge => self.str("posedge"),
-                ClockType::NegEdge => self.str("posedge"),
+                ClockType::NegEdge => self.str("negedge"),
             }
         }
         self.space(1);

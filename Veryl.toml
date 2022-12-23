@@ -8,4 +8,4 @@ reset_type = "async_low"
 target     = {type = "directory", path = "testcases/sv"}
 
 [format]
-indent_witdh = 4
+indent_width = 4
