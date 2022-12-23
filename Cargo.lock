@@ -196,9 +196,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.0.30"
+version = "4.0.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "656ad1e55e23d287773f7d8192c300dc715c3eeded93b3da651d11c42cfd74d2"
+checksum = "a7db700bc935f9e43e88d00b0850dae18a63773cfbec6d8e070fccf7fef89a39"
 dependencies = [
  "bitflags",
  "clap_derive",
@@ -996,7 +996,7 @@ dependencies = [
  "bart",
  "bart_derive",
  "cfg-if",
- "clap 4.0.30",
+ "clap 4.0.32",
  "derive_builder",
  "env_logger 0.9.3",
  "function_name",
@@ -1738,7 +1738,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 name = "veryl"
 version = "0.1.0"
 dependencies = [
- "clap 4.0.30",
+ "clap 4.0.32",
  "console",
  "env_logger 0.10.0",
  "similar",
