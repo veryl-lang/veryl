@@ -1,4 +1,10 @@
 {
+    "$comment": {
+        "copyright": [
+            "Copyright (c) 2022 Naoya Hatta"
+        ],
+        "license": "MIT License"
+    },
     "comments": {
         // symbol used for single line comment. Remove this entry if your language does not support line comments
         "lineComment": "//",

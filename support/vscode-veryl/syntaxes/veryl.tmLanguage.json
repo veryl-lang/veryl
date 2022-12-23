@@ -1,20 +1,35 @@
 {
 	"$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
 	"name": "Veryl",
+    "fileTypes" : [
+        "vl"
+    ],
 	"patterns": [
 		{
 			"include": "#keywords"
 		},
 		{
 			"include": "#strings"
+		},
+		{
+			"include": "#comments"
+		},
+		{
+			"include": "#identifiers"
 		}
 	],
 	"repository": {
 		"keywords": {
-			"patterns": [{
-				"name": "keyword.control.veryl",
-				"match": "\\b(if|while|for|return)\\b"
-			}]
+			"patterns": [
+				{
+				    "name": "keyword.control.veryl",
+                    "match": "\\b(if|if_reset|else|for|in)\\b"
+			    },
+                {
+				    "name": "keyword.veryl",
+                    "match": "\\b(module|interface|function|modport|enum|struct|parameter|localparam|posedge|negedge|async_high|async_low|sync_high|sync_low|always_ff|always_comb|assign|return)\\b"
+			    }
+            ]
 		},
 		"strings": {
 			"name": "string.quoted.double.veryl",
@@ -26,7 +41,44 @@
 					"match": "\\\\."
 				}
 			]
+		},
+		"comments": {
+			"patterns": [
+				{
+					"begin": "/\\*",
+					"beginCaptures": {
+						"0": {
+							"name": "punctuation.definition.comment.veryl"
+						}
+					},
+					"end": "\\*/",
+					"endCaptures": {
+						"0": {
+							"name": "punctuation.definition.comment.veryl"
+						}
+					},
+					"name": "comment.block.veryl"
+				},
+				{
+					"begin": "//",
+					"beginCaptures": {
+						"0": {
+							"name": "punctuation.definition.comment.veryl"
+						}
+					},
+					"end": "$\\n?",
+					"name": "comment.line.double-slash.veryl"
+				}
+			]
+		},
+		"identifiers": {
+			"patterns": [
+				{
+					"match": "\\b[a-zA-Z_][a-zA-Z0-9_$]*\\b",
+					"name": "variable.other.identifier.veryl"
+				}
+			]
 		}
 	},
-	"scopeName": ""
+	"scopeName": "source.veryl"
 }
