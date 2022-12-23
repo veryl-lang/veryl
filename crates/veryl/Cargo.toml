@@ -16,6 +16,7 @@ edition               = "2021"
 clap            = {version = "4.0.32", features = ["derive"]}
 console         = "0.15.2"
 env_logger      = "0.10.0"
+serde_json      = "1.0"
 similar         = {version = "2.2.1", features = ["text", "inline"]}
 thiserror       = {workspace = true}
 veryl-analyzer  = {version = "0.1.0", path = "../analyzer"}

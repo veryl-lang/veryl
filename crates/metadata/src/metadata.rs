@@ -1,10 +1,10 @@
 use crate::MetadataError;
 use semver::Version;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::env;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Metadata {
     pub package: Package,
     #[serde(default)]
@@ -36,7 +36,7 @@ impl Metadata {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Package {
     pub name: String,
     pub version: Version,
@@ -47,7 +47,7 @@ pub struct Package {
     pub repository: Option<String>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Build {
     #[serde(default)]
     pub clock_type: ClockType,
@@ -57,7 +57,7 @@ pub struct Build {
     pub target: Target,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ClockType {
     #[default]
     #[serde(rename = "posedge")]
@@ -66,7 +66,7 @@ pub enum ClockType {
     NegEdge,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ResetType {
     #[default]
     #[serde(rename = "async_low")]
@@ -79,7 +79,7 @@ pub enum ResetType {
     SyncHigh,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type")]
 pub enum Target {
     #[default]
@@ -89,7 +89,7 @@ pub enum Target {
     Directory { path: PathBuf },
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Format {
     #[serde(default = "default_indent_width")]
     pub indent_width: usize,

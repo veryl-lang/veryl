@@ -1652,6 +1652,7 @@ dependencies = [
  "clap 4.0.32",
  "console",
  "env_logger",
+ "serde_json",
  "similar",
  "thiserror",
  "veryl-analyzer",

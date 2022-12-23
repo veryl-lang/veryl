@@ -1,4 +1,4 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use veryl_metadata::Metadata;
@@ -7,7 +7,9 @@ use veryl_parser::miette::Result;
 mod cmd_build;
 mod cmd_check;
 mod cmd_fmt;
+mod cmd_init;
 mod cmd_metadata;
+mod cmd_new;
 mod utils;
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -24,10 +26,41 @@ struct Opt {
 
 #[derive(Subcommand)]
 enum Commands {
+    New(OptNew),
+    Init(OptInit),
     Fmt(OptFmt),
     Check(OptCheck),
     Build(OptBuild),
     Metadata(OptMetadata),
+}
+
+/// Create a new package
+#[derive(Args)]
+pub struct OptNew {
+    pub path: PathBuf,
+
+    /// No output printed to stdout
+    #[arg(long)]
+    pub quiet: bool,
+
+    /// Use verbose output
+    #[arg(long)]
+    pub verbose: bool,
+}
+
+/// Create a new package in an existing directory
+#[derive(Args)]
+pub struct OptInit {
+    #[arg(default_value = ".")]
+    pub path: PathBuf,
+
+    /// No output printed to stdout
+    #[arg(long)]
+    pub quiet: bool,
+
+    /// Use verbose output
+    #[arg(long)]
+    pub verbose: bool,
 }
 
 /// Format the current package
@@ -82,6 +115,10 @@ pub struct OptBuild {
 /// Dump metadata of the current packege
 #[derive(Args)]
 pub struct OptMetadata {
+    /// output format
+    #[arg(long, value_enum, default_value_t)]
+    pub format: Format,
+
     /// No output printed to stdout
     #[arg(long)]
     pub quiet: bool,
@@ -89,6 +126,13 @@ pub struct OptMetadata {
     /// Use verbose output
     #[arg(long)]
     pub verbose: bool,
+}
+
+#[derive(Clone, Copy, Default, Debug, ValueEnum)]
+pub enum Format {
+    #[default]
+    Pretty,
+    Json,
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -103,6 +147,8 @@ fn main() -> Result<ExitCode> {
     let metadata = Metadata::load(metadata_path)?;
 
     let ret = match opt.command {
+        Commands::New(x) => cmd_new::CmdNew::new(x).exec(&metadata)?,
+        Commands::Init(x) => cmd_init::CmdInit::new(x).exec(&metadata)?,
         Commands::Fmt(x) => cmd_fmt::CmdFmt::new(x).exec(&metadata)?,
         Commands::Check(x) => cmd_check::CmdCheck::new(x).exec(&metadata)?,
         Commands::Build(x) => cmd_build::CmdBuild::new(x).exec(&metadata)?,
