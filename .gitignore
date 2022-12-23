@@ -1,3 +1,7 @@
 /target
 perf.data*
 flamegraph.svg
+support/vscode-veryl/out
+support/vscode-veryl/node_modules
+support/vscode-veryl/.vscode-test/
+support/vscode-veryl/*.vsix
