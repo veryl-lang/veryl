@@ -31,7 +31,70 @@ If you have any idea, please open [Issue](https://github.com/dalance/veryl/issue
 
 ## Installation
 
+### Download binary
+
+Download from [release page](https://github.com/dalance/veryl/releases/latest), and extract to the directory in PATH.
+
+### Cargo
+
+You can install with [cargo](https://crates.io/crates/veryl).
+
+```
+cargo install veryl veryl-ls
+```
+
 ## Usage
+
+* Create a new package
+
+```
+veryl new [package name]
+```
+
+* Create a new package in an existing directory
+
+```
+veryl init [path]
+```
+
+* Format the current package
+
+```
+veryl fmt
+```
+
+* Analyze the current package
+
+```
+veryl check
+```
+
+* Build target codes corresponding to the current package
+
+```
+veryl build
+```
+
+## Package Configuration Example
+
+```toml
+[package]
+name = "name"      # package name
+version = "0.1.0"  # package version (semver is recommended)
+
+[build]
+clock_type = "posedge"    # default clock type [posedge|negedge]
+reset_type = "async_low"  # default reset type [async_low|async_high|sync_low|sync_high]
+
+# output target files in the same location as source
+target     = {type = "source"}
+
+# output target files in the specified directory
+#target     = {type = "directory", path = "testcases/sv"}
+
+[format]
+indent_width = 4  # indent width
+```
 
 ## Reference
 
