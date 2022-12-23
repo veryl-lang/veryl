@@ -10,6 +10,9 @@ readme.workspace      = true
 description.workspace = true
 edition               = "2021"
 
+[package.metadata.release]
+tag = true
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]

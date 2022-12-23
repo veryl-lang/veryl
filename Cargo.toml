@@ -23,6 +23,9 @@ description = "A modern hardware description language"
 serde     = {version = "1.0", features = ["derive"]}
 thiserror = "1.0"
 
+[workspace.metadata.release]
+tag = false
+
 [profile.dev.build-override]
 opt-level = 3
 
