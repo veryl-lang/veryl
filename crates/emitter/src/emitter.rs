@@ -155,19 +155,17 @@ impl Emitter {
 
     fn type_left(&mut self, input: &Type) {
         let (width, token) = match &*input.type_group {
-            TypeGroup::TypeGroup0(x) => match &*x.builtin_type {
-                BuiltinType::BuiltinType0(x) => (true, x.logic.logic_token.clone()),
-                BuiltinType::BuiltinType1(x) => (true, x.bit.bit_token.clone()),
-                BuiltinType::BuiltinType2(x) => (false, x.u32.u32_token.replace("int unsigned")),
-                BuiltinType::BuiltinType3(x) => {
-                    (false, x.u64.u64_token.replace("longint unsigned"))
-                }
-                BuiltinType::BuiltinType4(x) => (false, x.i32.i32_token.replace("int signed")),
-                BuiltinType::BuiltinType5(x) => (false, x.i64.i64_token.replace("longint signed")),
-                BuiltinType::BuiltinType6(x) => (false, x.f32.f32_token.replace("shortreal")),
-                BuiltinType::BuiltinType7(x) => (false, x.f64.f64_token.replace("real")),
+            TypeGroup::BuiltinType(x) => match &*x.builtin_type {
+                BuiltinType::Logic(x) => (true, x.logic.logic_token.clone()),
+                BuiltinType::Bit(x) => (true, x.bit.bit_token.clone()),
+                BuiltinType::U32(x) => (false, x.u32.u32_token.replace("int unsigned")),
+                BuiltinType::U64(x) => (false, x.u64.u64_token.replace("longint unsigned")),
+                BuiltinType::I32(x) => (false, x.i32.i32_token.replace("int signed")),
+                BuiltinType::I64(x) => (false, x.i64.i64_token.replace("longint signed")),
+                BuiltinType::F32(x) => (false, x.f32.f32_token.replace("shortreal")),
+                BuiltinType::F64(x) => (false, x.f64.f64_token.replace("real")),
             },
-            TypeGroup::TypeGroup1(x) => (false, x.identifier.identifier_token.clone()),
+            TypeGroup::Identifier(x) => (false, x.identifier.identifier_token.clone()),
         };
         self.token(&token);
         if width {
@@ -180,17 +178,17 @@ impl Emitter {
 
     fn type_right(&mut self, input: &Type) {
         let width = match &*input.type_group {
-            TypeGroup::TypeGroup0(x) => match &*x.builtin_type {
-                BuiltinType::BuiltinType0(_) => false,
-                BuiltinType::BuiltinType1(_) => false,
-                BuiltinType::BuiltinType2(_) => true,
-                BuiltinType::BuiltinType3(_) => true,
-                BuiltinType::BuiltinType4(_) => true,
-                BuiltinType::BuiltinType5(_) => true,
-                BuiltinType::BuiltinType6(_) => true,
-                BuiltinType::BuiltinType7(_) => true,
+            TypeGroup::BuiltinType(x) => match &*x.builtin_type {
+                BuiltinType::Logic(_) => false,
+                BuiltinType::Bit(_) => false,
+                BuiltinType::U32(_) => true,
+                BuiltinType::U64(_) => true,
+                BuiltinType::I32(_) => true,
+                BuiltinType::I64(_) => true,
+                BuiltinType::F32(_) => true,
+                BuiltinType::F64(_) => true,
             },
-            TypeGroup::TypeGroup1(_) => true,
+            TypeGroup::Identifier(_) => true,
         };
         if width {
             self.space(1);
@@ -203,10 +201,10 @@ impl Emitter {
     fn always_ff_reset_exist_in_sensitivity_list(&mut self, arg: &AlwaysFfReset) -> bool {
         if let Some(ref x) = arg.always_ff_reset_opt {
             match &*x.always_ff_reset_opt_group {
-                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup0(_) => true,
-                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup1(_) => true,
-                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup2(_) => false,
-                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup3(_) => false,
+                AlwaysFfResetOptGroup::AsyncLow(_) => true,
+                AlwaysFfResetOptGroup::AsyncHigh(_) => true,
+                AlwaysFfResetOptGroup::SyncLow(_) => false,
+                AlwaysFfResetOptGroup::SyncHigh(_) => false,
             }
         } else {
             match self.reset_type {
@@ -231,12 +229,8 @@ impl VerylWalker for Emitter {
         for x in &arg.expression_list {
             self.space(1);
             match &*x.expression_list_group {
-                ExpressionListGroup::ExpressionListGroup0(x) => {
-                    self.binary_operator(&x.binary_operator)
-                }
-                ExpressionListGroup::ExpressionListGroup1(x) => {
-                    self.common_operator(&x.common_operator)
-                }
+                ExpressionListGroup::BinaryOperator(x) => self.binary_operator(&x.binary_operator),
+                ExpressionListGroup::CommonOperator(x) => self.common_operator(&x.common_operator),
             };
             self.space(1);
             self.expression1(&x.expression1);
@@ -262,8 +256,8 @@ impl VerylWalker for Emitter {
             self.str("<");
         }
         match &*arg.assignment_statement_group {
-            AssignmentStatementGroup::AssignmentStatementGroup0(x) => self.equ(&x.equ),
-            AssignmentStatementGroup::AssignmentStatementGroup1(x) => {
+            AssignmentStatementGroup::Equ(x) => self.equ(&x.equ),
+            AssignmentStatementGroup::AssignmentOperator(x) => {
                 self.assignment_operator(&x.assignment_operator)
             }
         }
@@ -513,8 +507,8 @@ impl VerylWalker for Emitter {
     fn always_ff_clock(&mut self, arg: &AlwaysFfClock) {
         if let Some(ref x) = arg.always_ff_clock_opt {
             match &*x.always_ff_clock_opt_group {
-                AlwaysFfClockOptGroup::AlwaysFfClockOptGroup0(x) => self.posedge(&x.posedge),
-                AlwaysFfClockOptGroup::AlwaysFfClockOptGroup1(x) => self.negedge(&x.negedge),
+                AlwaysFfClockOptGroup::Posedge(x) => self.posedge(&x.posedge),
+                AlwaysFfClockOptGroup::Negedge(x) => self.negedge(&x.negedge),
             }
         } else {
             match self.clock_type {
@@ -530,19 +524,19 @@ impl VerylWalker for Emitter {
     fn always_ff_reset(&mut self, arg: &AlwaysFfReset) {
         let prefix = if let Some(ref x) = arg.always_ff_reset_opt {
             match &*x.always_ff_reset_opt_group {
-                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup0(x) => {
+                AlwaysFfResetOptGroup::AsyncLow(x) => {
                     self.token(&x.async_low.async_low_token.replace("negedge"));
                     "!"
                 }
-                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup1(x) => {
+                AlwaysFfResetOptGroup::AsyncHigh(x) => {
                     self.token(&x.async_high.async_high_token.replace("posedge"));
                     ""
                 }
-                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup2(x) => {
+                AlwaysFfResetOptGroup::SyncLow(x) => {
                     self.token(&x.sync_low.sync_low_token.replace(""));
                     "!"
                 }
-                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup3(x) => {
+                AlwaysFfResetOptGroup::SyncHigh(x) => {
                     self.token(&x.sync_high.sync_high_token.replace(""));
                     ""
                 }
@@ -763,8 +757,8 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'WithParameterItem'
     fn with_parameter_item(&mut self, arg: &WithParameterItem) {
         match &*arg.with_parameter_item_group {
-            WithParameterItemGroup::WithParameterItemGroup0(x) => self.parameter(&x.parameter),
-            WithParameterItemGroup::WithParameterItemGroup1(x) => self.localparam(&x.localparam),
+            WithParameterItemGroup::Parameter(x) => self.parameter(&x.parameter),
+            WithParameterItemGroup::Localparam(x) => self.localparam(&x.localparam),
         };
         self.space(1);
         self.type_left(&arg.r#type);

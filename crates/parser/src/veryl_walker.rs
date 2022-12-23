@@ -444,8 +444,8 @@ pub trait VerylWalker {
     fn number(&mut self, arg: &Number) {
         before!(self, number, arg);
         match arg {
-            Number::Number0(x) => self.integral_number(&x.integral_number),
-            Number::Number1(x) => self.real_number(&x.real_number),
+            Number::IntegralNumber(x) => self.integral_number(&x.integral_number),
+            Number::RealNumber(x) => self.real_number(&x.real_number),
         };
         after!(self, number, arg);
     }
@@ -454,9 +454,9 @@ pub trait VerylWalker {
     fn integral_number(&mut self, arg: &IntegralNumber) {
         before!(self, integral_number, arg);
         match arg {
-            IntegralNumber::IntegralNumber0(x) => self.based(&x.based),
-            IntegralNumber::IntegralNumber1(x) => self.base_less(&x.base_less),
-            IntegralNumber::IntegralNumber2(x) => self.all_bit(&x.all_bit),
+            IntegralNumber::Based(x) => self.based(&x.based),
+            IntegralNumber::BaseLess(x) => self.base_less(&x.base_less),
+            IntegralNumber::AllBit(x) => self.all_bit(&x.all_bit),
         };
         after!(self, integral_number, arg);
     }
@@ -465,8 +465,8 @@ pub trait VerylWalker {
     fn real_number(&mut self, arg: &RealNumber) {
         before!(self, real_number, arg);
         match arg {
-            RealNumber::RealNumber0(x) => self.fixed_point(&x.fixed_point),
-            RealNumber::RealNumber1(x) => self.exponent(&x.exponent),
+            RealNumber::FixedPoint(x) => self.fixed_point(&x.fixed_point),
+            RealNumber::Exponent(x) => self.exponent(&x.exponent),
         };
         after!(self, real_number, arg);
     }
@@ -477,12 +477,8 @@ pub trait VerylWalker {
         self.expression1(&arg.expression1);
         for x in &arg.expression_list {
             match &*x.expression_list_group {
-                ExpressionListGroup::ExpressionListGroup0(x) => {
-                    self.binary_operator(&x.binary_operator)
-                }
-                ExpressionListGroup::ExpressionListGroup1(x) => {
-                    self.common_operator(&x.common_operator)
-                }
+                ExpressionListGroup::BinaryOperator(x) => self.binary_operator(&x.binary_operator),
+                ExpressionListGroup::CommonOperator(x) => self.common_operator(&x.common_operator),
             };
             self.expression1(&x.expression1);
         }
@@ -494,12 +490,8 @@ pub trait VerylWalker {
         before!(self, expression1, arg);
         if let Some(ref x) = arg.expression1_opt {
             match &*x.expression1_opt_group {
-                Expression1OptGroup::Expression1OptGroup0(x) => {
-                    self.unary_operator(&x.unary_operator)
-                }
-                Expression1OptGroup::Expression1OptGroup1(x) => {
-                    self.common_operator(&x.common_operator)
-                }
+                Expression1OptGroup::UnaryOperator(x) => self.unary_operator(&x.unary_operator),
+                Expression1OptGroup::CommonOperator(x) => self.common_operator(&x.common_operator),
             };
         }
         self.factor(&arg.factor);
@@ -510,14 +502,14 @@ pub trait VerylWalker {
     fn factor(&mut self, arg: &Factor) {
         before!(self, factor, arg);
         match arg {
-            Factor::Factor0(x) => self.number(&x.number),
-            Factor::Factor1(x) => {
+            Factor::Number(x) => self.number(&x.number),
+            Factor::IdentifierFactorList(x) => {
                 self.identifier(&x.identifier);
                 for x in &x.factor_list {
                     self.range(&x.range);
                 }
             }
-            Factor::Factor2(x) => {
+            Factor::LParenExpressionRParen(x) => {
                 self.l_paren(&x.l_paren);
                 self.expression(&x.expression);
                 self.r_paren(&x.r_paren);
@@ -552,14 +544,14 @@ pub trait VerylWalker {
     fn builtin_type(&mut self, arg: &BuiltinType) {
         before!(self, builtin_type, arg);
         match arg {
-            BuiltinType::BuiltinType0(x) => self.logic(&x.logic),
-            BuiltinType::BuiltinType1(x) => self.bit(&x.bit),
-            BuiltinType::BuiltinType2(x) => self.u32(&x.u32),
-            BuiltinType::BuiltinType3(x) => self.u64(&x.u64),
-            BuiltinType::BuiltinType4(x) => self.i32(&x.i32),
-            BuiltinType::BuiltinType5(x) => self.i64(&x.i64),
-            BuiltinType::BuiltinType6(x) => self.f32(&x.f32),
-            BuiltinType::BuiltinType7(x) => self.f64(&x.f64),
+            BuiltinType::Logic(x) => self.logic(&x.logic),
+            BuiltinType::Bit(x) => self.bit(&x.bit),
+            BuiltinType::U32(x) => self.u32(&x.u32),
+            BuiltinType::U64(x) => self.u64(&x.u64),
+            BuiltinType::I32(x) => self.i32(&x.i32),
+            BuiltinType::I64(x) => self.i64(&x.i64),
+            BuiltinType::F32(x) => self.f32(&x.f32),
+            BuiltinType::F64(x) => self.f64(&x.f64),
         };
         after!(self, builtin_type, arg);
     }
@@ -568,8 +560,8 @@ pub trait VerylWalker {
     fn r#type(&mut self, arg: &Type) {
         before!(self, r#type, arg);
         match &*arg.type_group {
-            TypeGroup::TypeGroup0(x) => self.builtin_type(&x.builtin_type),
-            TypeGroup::TypeGroup1(x) => self.identifier(&x.identifier),
+            TypeGroup::BuiltinType(x) => self.builtin_type(&x.builtin_type),
+            TypeGroup::Identifier(x) => self.identifier(&x.identifier),
         };
         for x in &arg.type_list {
             self.width(&x.width);
@@ -581,11 +573,11 @@ pub trait VerylWalker {
     fn statement(&mut self, arg: &Statement) {
         before!(self, statement, arg);
         match arg {
-            Statement::Statement0(x) => self.assignment_statement(&x.assignment_statement),
-            Statement::Statement1(x) => self.if_statement(&x.if_statement),
-            Statement::Statement2(x) => self.if_reset_statement(&x.if_reset_statement),
-            Statement::Statement3(x) => self.return_statement(&x.return_statement),
-            Statement::Statement4(x) => self.for_statement(&x.for_statement),
+            Statement::AssignmentStatement(x) => self.assignment_statement(&x.assignment_statement),
+            Statement::IfStatement(x) => self.if_statement(&x.if_statement),
+            Statement::IfResetStatement(x) => self.if_reset_statement(&x.if_reset_statement),
+            Statement::ReturnStatement(x) => self.return_statement(&x.return_statement),
+            Statement::ForStatement(x) => self.for_statement(&x.for_statement),
         };
         after!(self, statement, arg);
     }
@@ -595,8 +587,8 @@ pub trait VerylWalker {
         before!(self, assignment_statement, arg);
         self.identifier(&arg.identifier);
         match &*arg.assignment_statement_group {
-            AssignmentStatementGroup::AssignmentStatementGroup0(x) => self.equ(&x.equ),
-            AssignmentStatementGroup::AssignmentStatementGroup1(x) => {
+            AssignmentStatementGroup::Equ(x) => self.equ(&x.equ),
+            AssignmentStatementGroup::AssignmentOperator(x) => {
                 self.assignment_operator(&x.assignment_operator)
             }
         }
@@ -759,8 +751,8 @@ pub trait VerylWalker {
         before!(self, always_ff_clock, arg);
         if let Some(ref x) = arg.always_ff_clock_opt {
             match &*x.always_ff_clock_opt_group {
-                AlwaysFfClockOptGroup::AlwaysFfClockOptGroup0(x) => self.posedge(&x.posedge),
-                AlwaysFfClockOptGroup::AlwaysFfClockOptGroup1(x) => self.negedge(&x.negedge),
+                AlwaysFfClockOptGroup::Posedge(x) => self.posedge(&x.posedge),
+                AlwaysFfClockOptGroup::Negedge(x) => self.negedge(&x.negedge),
             }
         }
         self.identifier(&arg.identifier);
@@ -772,10 +764,10 @@ pub trait VerylWalker {
         before!(self, always_ff_reset, arg);
         if let Some(ref x) = arg.always_ff_reset_opt {
             match &*x.always_ff_reset_opt_group {
-                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup0(x) => self.async_low(&x.async_low),
-                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup1(x) => self.async_high(&x.async_high),
-                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup2(x) => self.sync_low(&x.sync_low),
-                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup3(x) => self.sync_high(&x.sync_high),
+                AlwaysFfResetOptGroup::AsyncLow(x) => self.async_low(&x.async_low),
+                AlwaysFfResetOptGroup::AsyncHigh(x) => self.async_high(&x.async_high),
+                AlwaysFfResetOptGroup::SyncLow(x) => self.sync_low(&x.sync_low),
+                AlwaysFfResetOptGroup::SyncHigh(x) => self.sync_high(&x.sync_high),
             }
         }
         self.identifier(&arg.identifier);
@@ -952,8 +944,8 @@ pub trait VerylWalker {
     fn with_parameter_item(&mut self, arg: &WithParameterItem) {
         before!(self, with_parameter_item, arg);
         match &*arg.with_parameter_item_group {
-            WithParameterItemGroup::WithParameterItemGroup0(x) => self.parameter(&x.parameter),
-            WithParameterItemGroup::WithParameterItemGroup1(x) => self.localparam(&x.localparam),
+            WithParameterItemGroup::Parameter(x) => self.parameter(&x.parameter),
+            WithParameterItemGroup::Localparam(x) => self.localparam(&x.localparam),
         };
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
@@ -1002,10 +994,10 @@ pub trait VerylWalker {
     fn direction(&mut self, arg: &Direction) {
         before!(self, direction, arg);
         match arg {
-            Direction::Direction0(x) => self.input(&x.input),
-            Direction::Direction1(x) => self.output(&x.output),
-            Direction::Direction2(x) => self.inout(&x.inout),
-            Direction::Direction3(x) => self.r#ref(&x.r#ref),
+            Direction::Input(x) => self.input(&x.input),
+            Direction::Output(x) => self.output(&x.output),
+            Direction::Inout(x) => self.inout(&x.inout),
+            Direction::Ref(x) => self.r#ref(&x.r#ref),
         };
         after!(self, direction, arg);
     }
@@ -1035,8 +1027,10 @@ pub trait VerylWalker {
     fn function_item(&mut self, arg: &FunctionItem) {
         before!(self, function_item, arg);
         match arg {
-            FunctionItem::FunctionItem0(x) => self.variable_declaration(&x.variable_declaration),
-            FunctionItem::FunctionItem1(x) => self.statement(&x.statement),
+            FunctionItem::VariableDeclaration(x) => {
+                self.variable_declaration(&x.variable_declaration)
+            }
+            FunctionItem::Statement(x) => self.statement(&x.statement),
         };
         after!(self, function_item, arg);
     }
@@ -1129,16 +1123,32 @@ pub trait VerylWalker {
     fn module_item(&mut self, arg: &ModuleItem) {
         before!(self, module_item, arg);
         match arg {
-            ModuleItem::ModuleItem0(x) => self.variable_declaration(&x.variable_declaration),
-            ModuleItem::ModuleItem1(x) => self.parameter_declaration(&x.parameter_declaration),
-            ModuleItem::ModuleItem2(x) => self.localparam_declaration(&x.localparam_declaration),
-            ModuleItem::ModuleItem3(x) => self.always_ff_declaration(&x.always_ff_declaration),
-            ModuleItem::ModuleItem4(x) => self.always_comb_declaration(&x.always_comb_declaration),
-            ModuleItem::ModuleItem5(x) => self.assign_declaration(&x.assign_declaration),
-            ModuleItem::ModuleItem6(x) => self.instantiation(&x.instantiation),
-            ModuleItem::ModuleItem7(x) => self.function_declaration(&x.function_declaration),
-            ModuleItem::ModuleItem8(x) => self.module_if_declaration(&x.module_if_declaration),
-            ModuleItem::ModuleItem9(x) => self.module_for_declaration(&x.module_for_declaration),
+            ModuleItem::VariableDeclaration(x) => {
+                self.variable_declaration(&x.variable_declaration)
+            }
+            ModuleItem::ParameterDeclaration(x) => {
+                self.parameter_declaration(&x.parameter_declaration)
+            }
+            ModuleItem::LocalparamDeclaration(x) => {
+                self.localparam_declaration(&x.localparam_declaration)
+            }
+            ModuleItem::AlwaysFfDeclaration(x) => {
+                self.always_ff_declaration(&x.always_ff_declaration)
+            }
+            ModuleItem::AlwaysCombDeclaration(x) => {
+                self.always_comb_declaration(&x.always_comb_declaration)
+            }
+            ModuleItem::AssignDeclaration(x) => self.assign_declaration(&x.assign_declaration),
+            ModuleItem::Instantiation(x) => self.instantiation(&x.instantiation),
+            ModuleItem::FunctionDeclaration(x) => {
+                self.function_declaration(&x.function_declaration)
+            }
+            ModuleItem::ModuleIfDeclaration(x) => {
+                self.module_if_declaration(&x.module_if_declaration)
+            }
+            ModuleItem::ModuleForDeclaration(x) => {
+                self.module_for_declaration(&x.module_for_declaration)
+            }
         };
         after!(self, module_item, arg);
     }
@@ -1228,18 +1238,22 @@ pub trait VerylWalker {
     fn interface_item(&mut self, arg: &InterfaceItem) {
         before!(self, interface_item, arg);
         match arg {
-            InterfaceItem::InterfaceItem0(x) => self.variable_declaration(&x.variable_declaration),
-            InterfaceItem::InterfaceItem1(x) => {
+            InterfaceItem::VariableDeclaration(x) => {
+                self.variable_declaration(&x.variable_declaration)
+            }
+            InterfaceItem::ParameterDeclaration(x) => {
                 self.parameter_declaration(&x.parameter_declaration)
             }
-            InterfaceItem::InterfaceItem2(x) => {
+            InterfaceItem::LocalparamDeclaration(x) => {
                 self.localparam_declaration(&x.localparam_declaration)
             }
-            InterfaceItem::InterfaceItem3(x) => self.modport_declaration(&x.modport_declaration),
-            InterfaceItem::InterfaceItem4(x) => {
+            InterfaceItem::ModportDeclaration(x) => {
+                self.modport_declaration(&x.modport_declaration)
+            }
+            InterfaceItem::InterfaceIfDeclaration(x) => {
                 self.interface_if_declaration(&x.interface_if_declaration)
             }
-            InterfaceItem::InterfaceItem5(x) => {
+            InterfaceItem::InterfaceForDeclaration(x) => {
                 self.interface_for_declaration(&x.interface_for_declaration)
             }
         };
@@ -1250,8 +1264,10 @@ pub trait VerylWalker {
     fn description(&mut self, arg: &Description) {
         before!(self, description, arg);
         match arg {
-            Description::Description0(x) => self.module_declaration(&x.module_declaration),
-            Description::Description1(x) => self.interface_declaration(&x.interface_declaration),
+            Description::ModuleDeclaration(x) => self.module_declaration(&x.module_declaration),
+            Description::InterfaceDeclaration(x) => {
+                self.interface_declaration(&x.interface_declaration)
+            }
         };
         after!(self, description, arg);
     }

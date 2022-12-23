@@ -139,12 +139,8 @@ impl VerylWalker for Formatter {
         for x in &arg.expression_list {
             self.space(1);
             match &*x.expression_list_group {
-                ExpressionListGroup::ExpressionListGroup0(x) => {
-                    self.binary_operator(&x.binary_operator)
-                }
-                ExpressionListGroup::ExpressionListGroup1(x) => {
-                    self.common_operator(&x.common_operator)
-                }
+                ExpressionListGroup::BinaryOperator(x) => self.binary_operator(&x.binary_operator),
+                ExpressionListGroup::CommonOperator(x) => self.common_operator(&x.common_operator),
             };
             self.space(1);
             self.expression1(&x.expression1);
@@ -154,8 +150,8 @@ impl VerylWalker for Formatter {
     /// Semantic action for non-terminal 'Type'
     fn r#type(&mut self, arg: &Type) {
         match &*arg.type_group {
-            TypeGroup::TypeGroup0(x) => self.builtin_type(&x.builtin_type),
-            TypeGroup::TypeGroup1(x) => self.identifier(&x.identifier),
+            TypeGroup::BuiltinType(x) => self.builtin_type(&x.builtin_type),
+            TypeGroup::Identifier(x) => self.identifier(&x.identifier),
         };
         self.space(1);
         for x in &arg.type_list {
@@ -168,8 +164,8 @@ impl VerylWalker for Formatter {
         self.identifier(&arg.identifier);
         self.space(1);
         match &*arg.assignment_statement_group {
-            AssignmentStatementGroup::AssignmentStatementGroup0(x) => self.equ(&x.equ),
-            AssignmentStatementGroup::AssignmentStatementGroup1(x) => {
+            AssignmentStatementGroup::Equ(x) => self.equ(&x.equ),
+            AssignmentStatementGroup::AssignmentOperator(x) => {
                 self.assignment_operator(&x.assignment_operator)
             }
         }
@@ -391,8 +387,8 @@ impl VerylWalker for Formatter {
     fn always_ff_clock(&mut self, arg: &AlwaysFfClock) {
         if let Some(ref x) = arg.always_ff_clock_opt {
             match &*x.always_ff_clock_opt_group {
-                AlwaysFfClockOptGroup::AlwaysFfClockOptGroup0(x) => self.posedge(&x.posedge),
-                AlwaysFfClockOptGroup::AlwaysFfClockOptGroup1(x) => self.negedge(&x.negedge),
+                AlwaysFfClockOptGroup::Posedge(x) => self.posedge(&x.posedge),
+                AlwaysFfClockOptGroup::Negedge(x) => self.negedge(&x.negedge),
             }
             self.space(1);
         }
@@ -403,10 +399,10 @@ impl VerylWalker for Formatter {
     fn always_ff_reset(&mut self, arg: &AlwaysFfReset) {
         if let Some(ref x) = arg.always_ff_reset_opt {
             match &*x.always_ff_reset_opt_group {
-                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup0(x) => self.async_low(&x.async_low),
-                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup1(x) => self.async_high(&x.async_high),
-                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup2(x) => self.sync_low(&x.sync_low),
-                AlwaysFfResetOptGroup::AlwaysFfResetOptGroup3(x) => self.sync_high(&x.sync_high),
+                AlwaysFfResetOptGroup::AsyncLow(x) => self.async_low(&x.async_low),
+                AlwaysFfResetOptGroup::AsyncHigh(x) => self.async_high(&x.async_high),
+                AlwaysFfResetOptGroup::SyncLow(x) => self.sync_low(&x.sync_low),
+                AlwaysFfResetOptGroup::SyncHigh(x) => self.sync_high(&x.sync_high),
             }
             self.space(1);
         }
@@ -599,8 +595,8 @@ impl VerylWalker for Formatter {
     /// Semantic action for non-terminal 'WithParameterItem'
     fn with_parameter_item(&mut self, arg: &WithParameterItem) {
         match &*arg.with_parameter_item_group {
-            WithParameterItemGroup::WithParameterItemGroup0(x) => self.parameter(&x.parameter),
-            WithParameterItemGroup::WithParameterItemGroup1(x) => self.localparam(&x.localparam),
+            WithParameterItemGroup::Parameter(x) => self.parameter(&x.parameter),
+            WithParameterItemGroup::Localparam(x) => self.localparam(&x.localparam),
         };
         self.space(1);
         self.identifier(&arg.identifier);

@@ -4,16 +4,19 @@
 // lost after next build.
 // ---------------------------------------------------------
 
+// Disable clippy warnings that can result in the way how parol generates code.
+#![allow(clippy::enum_variant_names)]
+#![allow(clippy::large_enum_variant)]
+#![allow(clippy::upper_case_acronyms)]
+
 use parol_runtime::derive_builder::Builder;
 use parol_runtime::id_tree::Tree;
-#[allow(unused_imports)]
-use parol_runtime::parol_macros::{pop_and_reverse_item, pop_item};
-
 use parol_runtime::log::trace;
 #[allow(unused_imports)]
 use parol_runtime::miette::{bail, miette, IntoDiagnostic, Result};
+#[allow(unused_imports)]
+use parol_runtime::parol_macros::{pop_and_reverse_item, pop_item};
 use parol_runtime::parser::{ParseTreeStackEntry, ParseTreeType, UserActionsTrait};
-
 use std::marker::PhantomData;
 
 /// Semantic actions trait generated for the user grammar
@@ -892,7 +895,8 @@ pub trait VerylGrammarTrait {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct Number0 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct NumberIntegralNumber {
     pub integral_number: Box<IntegralNumber>,
 }
 
@@ -903,7 +907,8 @@ pub struct Number0 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct Number1 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct NumberRealNumber {
     pub real_number: Box<RealNumber>,
 }
 
@@ -914,7 +919,8 @@ pub struct Number1 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct IntegralNumber0 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct IntegralNumberBased {
     pub based: Box<Based>,
 }
 
@@ -925,7 +931,8 @@ pub struct IntegralNumber0 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct IntegralNumber1 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct IntegralNumberBaseLess {
     pub base_less: Box<BaseLess>,
 }
 
@@ -936,7 +943,8 @@ pub struct IntegralNumber1 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct IntegralNumber2 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct IntegralNumberAllBit {
     pub all_bit: Box<AllBit>,
 }
 
@@ -947,7 +955,8 @@ pub struct IntegralNumber2 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct RealNumber0 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct RealNumberFixedPoint {
     pub fixed_point: Box<FixedPoint>,
 }
 
@@ -958,7 +967,8 @@ pub struct RealNumber0 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct RealNumber1 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct RealNumberExponent {
     pub exponent: Box<Exponent>,
 }
 
@@ -969,7 +979,8 @@ pub struct RealNumber1 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct ExpressionListGroup0 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct ExpressionListGroupBinaryOperator {
     pub binary_operator: Box<BinaryOperator>,
 }
 
@@ -980,7 +991,8 @@ pub struct ExpressionListGroup0 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct ExpressionListGroup1 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct ExpressionListGroupCommonOperator {
     pub common_operator: Box<CommonOperator>,
 }
 
@@ -991,7 +1003,8 @@ pub struct ExpressionListGroup1 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct Expression1OptGroup0 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Expression1OptGroupUnaryOperator {
     pub unary_operator: Box<UnaryOperator>,
 }
 
@@ -1002,7 +1015,8 @@ pub struct Expression1OptGroup0 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct Expression1OptGroup1 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Expression1OptGroupCommonOperator {
     pub common_operator: Box<CommonOperator>,
 }
 
@@ -1013,7 +1027,8 @@ pub struct Expression1OptGroup1 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct Factor0 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct FactorNumber {
     pub number: Box<Number>,
 }
 
@@ -1024,7 +1039,8 @@ pub struct Factor0 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct Factor1 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct FactorIdentifierFactorList {
     pub identifier: Box<Identifier>,
     pub factor_list: Vec<FactorList>,
 }
@@ -1036,7 +1052,8 @@ pub struct Factor1 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct Factor2 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct FactorLParenExpressionRParen {
     pub l_paren: Box<LParen>,
     pub expression: Box<Expression>,
     pub r_paren: Box<RParen>,
@@ -1049,7 +1066,8 @@ pub struct Factor2 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct BuiltinType0 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct BuiltinTypeLogic {
     pub logic: Box<Logic>,
 }
 
@@ -1060,7 +1078,8 @@ pub struct BuiltinType0 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct BuiltinType1 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct BuiltinTypeBit {
     pub bit: Box<Bit>,
 }
 
@@ -1071,7 +1090,8 @@ pub struct BuiltinType1 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct BuiltinType2 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct BuiltinTypeU32 {
     pub u32: Box<U32>,
 }
 
@@ -1082,7 +1102,8 @@ pub struct BuiltinType2 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct BuiltinType3 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct BuiltinTypeU64 {
     pub u64: Box<U64>,
 }
 
@@ -1093,7 +1114,8 @@ pub struct BuiltinType3 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct BuiltinType4 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct BuiltinTypeI32 {
     pub i32: Box<I32>,
 }
 
@@ -1104,7 +1126,8 @@ pub struct BuiltinType4 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct BuiltinType5 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct BuiltinTypeI64 {
     pub i64: Box<I64>,
 }
 
@@ -1115,7 +1138,8 @@ pub struct BuiltinType5 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct BuiltinType6 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct BuiltinTypeF32 {
     pub f32: Box<F32>,
 }
 
@@ -1126,7 +1150,8 @@ pub struct BuiltinType6 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct BuiltinType7 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct BuiltinTypeF64 {
     pub f64: Box<F64>,
 }
 
@@ -1137,7 +1162,8 @@ pub struct BuiltinType7 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct TypeGroup0 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct TypeGroupBuiltinType {
     pub builtin_type: Box<BuiltinType>,
 }
 
@@ -1148,7 +1174,8 @@ pub struct TypeGroup0 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct TypeGroup1 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct TypeGroupIdentifier {
     pub identifier: Box<Identifier>,
 }
 
@@ -1159,7 +1186,8 @@ pub struct TypeGroup1 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct Statement0 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct StatementAssignmentStatement {
     pub assignment_statement: Box<AssignmentStatement>,
 }
 
@@ -1170,7 +1198,8 @@ pub struct Statement0 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct Statement1 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct StatementIfStatement {
     pub if_statement: Box<IfStatement>,
 }
 
@@ -1181,7 +1210,8 @@ pub struct Statement1 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct Statement2 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct StatementIfResetStatement {
     pub if_reset_statement: Box<IfResetStatement>,
 }
 
@@ -1192,7 +1222,8 @@ pub struct Statement2 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct Statement3 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct StatementReturnStatement {
     pub return_statement: Box<ReturnStatement>,
 }
 
@@ -1203,7 +1234,8 @@ pub struct Statement3 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct Statement4 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct StatementForStatement {
     pub for_statement: Box<ForStatement>,
 }
 
@@ -1214,7 +1246,8 @@ pub struct Statement4 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct AssignmentStatementGroup0 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct AssignmentStatementGroupEqu {
     pub equ: Box<Equ>,
 }
 
@@ -1225,7 +1258,8 @@ pub struct AssignmentStatementGroup0 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct AssignmentStatementGroup1 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct AssignmentStatementGroupAssignmentOperator {
     pub assignment_operator: Box<AssignmentOperator>,
 }
 
@@ -1236,7 +1270,8 @@ pub struct AssignmentStatementGroup1 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct AlwaysFfClockOptGroup0 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct AlwaysFfClockOptGroupPosedge {
     pub posedge: Box<Posedge>,
 }
 
@@ -1247,7 +1282,8 @@ pub struct AlwaysFfClockOptGroup0 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct AlwaysFfClockOptGroup1 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct AlwaysFfClockOptGroupNegedge {
     pub negedge: Box<Negedge>,
 }
 
@@ -1258,7 +1294,8 @@ pub struct AlwaysFfClockOptGroup1 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct AlwaysFfResetOptGroup0 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct AlwaysFfResetOptGroupAsyncLow {
     pub async_low: Box<AsyncLow>,
 }
 
@@ -1269,7 +1306,8 @@ pub struct AlwaysFfResetOptGroup0 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct AlwaysFfResetOptGroup1 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct AlwaysFfResetOptGroupAsyncHigh {
     pub async_high: Box<AsyncHigh>,
 }
 
@@ -1280,7 +1318,8 @@ pub struct AlwaysFfResetOptGroup1 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct AlwaysFfResetOptGroup2 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct AlwaysFfResetOptGroupSyncLow {
     pub sync_low: Box<SyncLow>,
 }
 
@@ -1291,7 +1330,8 @@ pub struct AlwaysFfResetOptGroup2 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct AlwaysFfResetOptGroup3 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct AlwaysFfResetOptGroupSyncHigh {
     pub sync_high: Box<SyncHigh>,
 }
 
@@ -1302,7 +1342,8 @@ pub struct AlwaysFfResetOptGroup3 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct WithParameterItemGroup0 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct WithParameterItemGroupParameter {
     pub parameter: Box<Parameter>,
 }
 
@@ -1313,7 +1354,8 @@ pub struct WithParameterItemGroup0 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct WithParameterItemGroup1 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct WithParameterItemGroupLocalparam {
     pub localparam: Box<Localparam>,
 }
 
@@ -1324,7 +1366,8 @@ pub struct WithParameterItemGroup1 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct Direction0 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct DirectionInput {
     pub input: Box<Input>,
 }
 
@@ -1335,7 +1378,8 @@ pub struct Direction0 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct Direction1 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct DirectionOutput {
     pub output: Box<Output>,
 }
 
@@ -1346,7 +1390,8 @@ pub struct Direction1 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct Direction2 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct DirectionInout {
     pub inout: Box<Inout>,
 }
 
@@ -1357,7 +1402,8 @@ pub struct Direction2 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct Direction3 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct DirectionRef {
     pub r#ref: Box<Ref>,
 }
 
@@ -1368,7 +1414,8 @@ pub struct Direction3 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct FunctionItem0 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct FunctionItemVariableDeclaration {
     pub variable_declaration: Box<VariableDeclaration>,
 }
 
@@ -1379,7 +1426,8 @@ pub struct FunctionItem0 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct FunctionItem1 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct FunctionItemStatement {
     pub statement: Box<Statement>,
 }
 
@@ -1390,7 +1438,8 @@ pub struct FunctionItem1 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct ModuleItem0 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct ModuleItemVariableDeclaration {
     pub variable_declaration: Box<VariableDeclaration>,
 }
 
@@ -1401,7 +1450,8 @@ pub struct ModuleItem0 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct ModuleItem1 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct ModuleItemParameterDeclaration {
     pub parameter_declaration: Box<ParameterDeclaration>,
 }
 
@@ -1412,7 +1462,8 @@ pub struct ModuleItem1 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct ModuleItem2 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct ModuleItemLocalparamDeclaration {
     pub localparam_declaration: Box<LocalparamDeclaration>,
 }
 
@@ -1423,7 +1474,8 @@ pub struct ModuleItem2 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct ModuleItem3 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct ModuleItemAlwaysFfDeclaration {
     pub always_ff_declaration: Box<AlwaysFfDeclaration>,
 }
 
@@ -1434,7 +1486,8 @@ pub struct ModuleItem3 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct ModuleItem4 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct ModuleItemAlwaysCombDeclaration {
     pub always_comb_declaration: Box<AlwaysCombDeclaration>,
 }
 
@@ -1445,7 +1498,8 @@ pub struct ModuleItem4 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct ModuleItem5 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct ModuleItemAssignDeclaration {
     pub assign_declaration: Box<AssignDeclaration>,
 }
 
@@ -1456,7 +1510,8 @@ pub struct ModuleItem5 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct ModuleItem6 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct ModuleItemInstantiation {
     pub instantiation: Box<Instantiation>,
 }
 
@@ -1467,7 +1522,8 @@ pub struct ModuleItem6 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct ModuleItem7 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct ModuleItemFunctionDeclaration {
     pub function_declaration: Box<FunctionDeclaration>,
 }
 
@@ -1478,7 +1534,8 @@ pub struct ModuleItem7 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct ModuleItem8 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct ModuleItemModuleIfDeclaration {
     pub module_if_declaration: Box<ModuleIfDeclaration>,
 }
 
@@ -1489,7 +1546,8 @@ pub struct ModuleItem8 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct ModuleItem9 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct ModuleItemModuleForDeclaration {
     pub module_for_declaration: Box<ModuleForDeclaration>,
 }
 
@@ -1500,7 +1558,8 @@ pub struct ModuleItem9 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct InterfaceItem0 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct InterfaceItemVariableDeclaration {
     pub variable_declaration: Box<VariableDeclaration>,
 }
 
@@ -1511,7 +1570,8 @@ pub struct InterfaceItem0 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct InterfaceItem1 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct InterfaceItemParameterDeclaration {
     pub parameter_declaration: Box<ParameterDeclaration>,
 }
 
@@ -1522,7 +1582,8 @@ pub struct InterfaceItem1 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct InterfaceItem2 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct InterfaceItemLocalparamDeclaration {
     pub localparam_declaration: Box<LocalparamDeclaration>,
 }
 
@@ -1533,7 +1594,8 @@ pub struct InterfaceItem2 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct InterfaceItem3 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct InterfaceItemModportDeclaration {
     pub modport_declaration: Box<ModportDeclaration>,
 }
 
@@ -1544,7 +1606,8 @@ pub struct InterfaceItem3 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct InterfaceItem4 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct InterfaceItemInterfaceIfDeclaration {
     pub interface_if_declaration: Box<InterfaceIfDeclaration>,
 }
 
@@ -1555,7 +1618,8 @@ pub struct InterfaceItem4 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct InterfaceItem5 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct InterfaceItemInterfaceForDeclaration {
     pub interface_for_declaration: Box<InterfaceForDeclaration>,
 }
 
@@ -1566,7 +1630,8 @@ pub struct InterfaceItem5 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct Description0 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct DescriptionModuleDeclaration {
     pub module_declaration: Box<ModuleDeclaration>,
 }
 
@@ -1577,7 +1642,8 @@ pub struct Description0 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
-pub struct Description1 {
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct DescriptionInterfaceDeclaration {
     pub interface_declaration: Box<InterfaceDeclaration>,
 }
 
@@ -1591,6 +1657,7 @@ pub struct Description1 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct AllBit {
     pub all_bit_token: crate::veryl_token::VerylToken,
 }
@@ -1600,6 +1667,7 @@ pub struct AllBit {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct AllBitToken {
     pub tick_l_bracket01_r_bracket: crate::veryl_token::OwnedToken, /* '[01] */
     pub comments: Box<Comments>,
@@ -1610,6 +1678,7 @@ pub struct AllBitToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct AlwaysComb {
     pub always_comb_token: crate::veryl_token::VerylToken,
 }
@@ -1619,6 +1688,7 @@ pub struct AlwaysComb {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct AlwaysCombDeclaration {
     pub always_comb: Box<AlwaysComb>,
     pub l_brace: Box<LBrace>,
@@ -1631,6 +1701,7 @@ pub struct AlwaysCombDeclaration {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct AlwaysCombDeclarationList {
     pub statement: Box<Statement>,
 }
@@ -1640,6 +1711,7 @@ pub struct AlwaysCombDeclarationList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct AlwaysCombToken {
     pub always_underscore_comb: crate::veryl_token::OwnedToken, /* always_comb */
     pub comments: Box<Comments>,
@@ -1650,6 +1722,7 @@ pub struct AlwaysCombToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct AlwaysFf {
     pub always_ff_token: crate::veryl_token::VerylToken,
 }
@@ -1659,6 +1732,7 @@ pub struct AlwaysFf {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct AlwaysFfClock {
     pub always_ff_clock_opt: Option<Box<AlwaysFfClockOpt>>,
     pub identifier: Box<Identifier>,
@@ -1669,6 +1743,7 @@ pub struct AlwaysFfClock {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct AlwaysFfClockOpt {
     pub always_ff_clock_opt_group: Box<AlwaysFfClockOptGroup>,
 }
@@ -1679,8 +1754,8 @@ pub struct AlwaysFfClockOpt {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum AlwaysFfClockOptGroup {
-    AlwaysFfClockOptGroup0(AlwaysFfClockOptGroup0),
-    AlwaysFfClockOptGroup1(AlwaysFfClockOptGroup1),
+    Posedge(AlwaysFfClockOptGroupPosedge),
+    Negedge(AlwaysFfClockOptGroupNegedge),
 }
 
 ///
@@ -1688,6 +1763,7 @@ pub enum AlwaysFfClockOptGroup {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct AlwaysFfDeclaration {
     pub always_ff: Box<AlwaysFf>,
     pub l_paren: Box<LParen>,
@@ -1704,6 +1780,7 @@ pub struct AlwaysFfDeclaration {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct AlwaysFfDeclarationList {
     pub statement: Box<Statement>,
 }
@@ -1713,6 +1790,7 @@ pub struct AlwaysFfDeclarationList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct AlwaysFfDeclarationOpt {
     pub comma: Box<Comma>,
     pub always_ff_reset: Box<AlwaysFfReset>,
@@ -1723,6 +1801,7 @@ pub struct AlwaysFfDeclarationOpt {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct AlwaysFfReset {
     pub always_ff_reset_opt: Option<Box<AlwaysFfResetOpt>>,
     pub identifier: Box<Identifier>,
@@ -1733,6 +1812,7 @@ pub struct AlwaysFfReset {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct AlwaysFfResetOpt {
     pub always_ff_reset_opt_group: Box<AlwaysFfResetOptGroup>,
 }
@@ -1743,10 +1823,10 @@ pub struct AlwaysFfResetOpt {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum AlwaysFfResetOptGroup {
-    AlwaysFfResetOptGroup0(AlwaysFfResetOptGroup0),
-    AlwaysFfResetOptGroup1(AlwaysFfResetOptGroup1),
-    AlwaysFfResetOptGroup2(AlwaysFfResetOptGroup2),
-    AlwaysFfResetOptGroup3(AlwaysFfResetOptGroup3),
+    AsyncLow(AlwaysFfResetOptGroupAsyncLow),
+    AsyncHigh(AlwaysFfResetOptGroupAsyncHigh),
+    SyncLow(AlwaysFfResetOptGroupSyncLow),
+    SyncHigh(AlwaysFfResetOptGroupSyncHigh),
 }
 
 ///
@@ -1754,6 +1834,7 @@ pub enum AlwaysFfResetOptGroup {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct AlwaysFfToken {
     pub always_underscore_ff: crate::veryl_token::OwnedToken, /* always_ff */
     pub comments: Box<Comments>,
@@ -1764,6 +1845,7 @@ pub struct AlwaysFfToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Assign {
     pub assign_token: crate::veryl_token::VerylToken,
 }
@@ -1773,6 +1855,7 @@ pub struct Assign {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct AssignDeclaration {
     pub assign: Box<Assign>,
     pub identifier: Box<Identifier>,
@@ -1787,6 +1870,7 @@ pub struct AssignDeclaration {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct AssignDeclarationOpt {
     pub colon: Box<Colon>,
     pub r#type: Box<Type>,
@@ -1797,6 +1881,7 @@ pub struct AssignDeclarationOpt {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct AssignToken {
     pub assign: crate::veryl_token::OwnedToken, /* assign */
     pub comments: Box<Comments>,
@@ -1807,6 +1892,7 @@ pub struct AssignToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct AssignmentOperator {
     pub assignment_operator_token: crate::veryl_token::VerylToken,
 }
@@ -1816,6 +1902,7 @@ pub struct AssignmentOperator {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct AssignmentOperatorToken {
     pub plus_equ_or_minus_equ_or_star_equ_or_slash_equ_or_percent_equ_or_amp_equ_or_or_equ_or_circumflex_equ_or_l_t_l_t_equ_or_g_t_g_t_equ_or_l_t_l_t_l_t_equ_or_g_t_g_t_g_t_equ:
         crate::veryl_token::OwnedToken, /* \+=|-=|\*=|/=|%=|&=|\|=|\^=|<<=|>>=|<<<=|>>>= */
@@ -1827,6 +1914,7 @@ pub struct AssignmentOperatorToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct AssignmentStatement {
     pub identifier: Box<Identifier>,
     pub assignment_statement_group: Box<AssignmentStatementGroup>,
@@ -1840,8 +1928,8 @@ pub struct AssignmentStatement {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum AssignmentStatementGroup {
-    AssignmentStatementGroup0(AssignmentStatementGroup0),
-    AssignmentStatementGroup1(AssignmentStatementGroup1),
+    Equ(AssignmentStatementGroupEqu),
+    AssignmentOperator(AssignmentStatementGroupAssignmentOperator),
 }
 
 ///
@@ -1849,6 +1937,7 @@ pub enum AssignmentStatementGroup {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct AsyncHigh {
     pub async_high_token: crate::veryl_token::VerylToken,
 }
@@ -1858,6 +1947,7 @@ pub struct AsyncHigh {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct AsyncHighToken {
     pub async_underscore_high: crate::veryl_token::OwnedToken, /* async_high */
     pub comments: Box<Comments>,
@@ -1868,6 +1958,7 @@ pub struct AsyncHighToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct AsyncLow {
     pub async_low_token: crate::veryl_token::VerylToken,
 }
@@ -1877,6 +1968,7 @@ pub struct AsyncLow {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct AsyncLowToken {
     pub async_underscore_low: crate::veryl_token::OwnedToken, /* async_low */
     pub comments: Box<Comments>,
@@ -1887,6 +1979,7 @@ pub struct AsyncLowToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct BaseLess {
     pub base_less_token: crate::veryl_token::VerylToken,
 }
@@ -1896,6 +1989,7 @@ pub struct BaseLess {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct BaseLessToken {
     pub l_bracket0_minus9_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9_r_bracket_plus_r_paren_star:
         crate::veryl_token::OwnedToken, /* [0-9]+(?:_[0-9]+)* */
@@ -1907,6 +2001,7 @@ pub struct BaseLessToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Based {
     pub based_token: crate::veryl_token::VerylToken,
 }
@@ -1916,6 +2011,7 @@ pub struct Based {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct BasedToken {
     pub l_bracket0_minus9_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9_r_bracket_plus_r_paren_star_tick_l_bracket_bodh_r_bracket_l_bracket0_minus9a_minus_f_a_minus_fxz_x_z_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9a_minus_f_a_minus_fxz_x_z_r_bracket_plus_r_paren_star:
         crate::veryl_token::OwnedToken, /* [0-9]+(?:_[0-9]+)*'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)* */
@@ -1927,6 +2023,7 @@ pub struct BasedToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct BinaryOperator {
     pub binary_operator_token: crate::veryl_token::VerylToken,
 }
@@ -1936,6 +2033,7 @@ pub struct BinaryOperator {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct BinaryOperatorToken {
     pub star_star_or_star_or_slash_or_percent_or_l_t_l_t_l_t_or_g_t_g_t_g_t_or_l_t_l_t_or_g_t_g_t_or_l_t_equ_or_g_t_equ_or_l_t_or_g_t_or_equ_equ_equ_or_equ_equ_quest_or_bang_equ_equ_or_bang_equ_quest_or_equ_equ_or_bang_equ_or_amp_amp_or_or_or:
         crate::veryl_token::OwnedToken, /* \*\*|\*|/|%|<<<|>>>|<<|>>|<=|>=|<|>|===|==\?|!==|!=\?|==|!=|&&|\|\| */
@@ -1947,6 +2045,7 @@ pub struct BinaryOperatorToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Bit {
     pub bit_token: crate::veryl_token::VerylToken,
 }
@@ -1956,6 +2055,7 @@ pub struct Bit {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct BitToken {
     pub bit: crate::veryl_token::OwnedToken, /* bit */
     pub comments: Box<Comments>,
@@ -1967,14 +2067,14 @@ pub struct BitToken {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum BuiltinType {
-    BuiltinType0(BuiltinType0),
-    BuiltinType1(BuiltinType1),
-    BuiltinType2(BuiltinType2),
-    BuiltinType3(BuiltinType3),
-    BuiltinType4(BuiltinType4),
-    BuiltinType5(BuiltinType5),
-    BuiltinType6(BuiltinType6),
-    BuiltinType7(BuiltinType7),
+    Logic(BuiltinTypeLogic),
+    Bit(BuiltinTypeBit),
+    U32(BuiltinTypeU32),
+    U64(BuiltinTypeU64),
+    I32(BuiltinTypeI32),
+    I64(BuiltinTypeI64),
+    F32(BuiltinTypeF32),
+    F64(BuiltinTypeF64),
 }
 
 ///
@@ -1982,6 +2082,7 @@ pub enum BuiltinType {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Colon {
     pub colon_token: crate::veryl_token::VerylToken,
 }
@@ -1991,6 +2092,7 @@ pub struct Colon {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ColonColonColon {
     pub colon_colon_colon_token: crate::veryl_token::VerylToken,
 }
@@ -2000,6 +2102,7 @@ pub struct ColonColonColon {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ColonColonColonToken {
     pub colon_colon_colon: crate::veryl_token::OwnedToken, /* ::: */
     pub comments: Box<Comments>,
@@ -2010,6 +2113,7 @@ pub struct ColonColonColonToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ColonToken {
     pub colon: crate::veryl_token::OwnedToken, /* : */
     pub comments: Box<Comments>,
@@ -2020,6 +2124,7 @@ pub struct ColonToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Comma {
     pub comma_token: crate::veryl_token::VerylToken,
 }
@@ -2029,6 +2134,7 @@ pub struct Comma {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct CommaToken {
     pub comma: crate::veryl_token::OwnedToken, /* , */
     pub comments: Box<Comments>,
@@ -2039,6 +2145,7 @@ pub struct CommaToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Comments {
     pub comments_opt: Option<Box<CommentsOpt>>,
 }
@@ -2048,6 +2155,7 @@ pub struct Comments {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct CommentsOpt {
     pub multi_comment: Box<MultiComment>,
 }
@@ -2057,6 +2165,7 @@ pub struct CommentsOpt {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct CommonOperator {
     pub common_operator_token: crate::veryl_token::VerylToken,
 }
@@ -2066,6 +2175,7 @@ pub struct CommonOperator {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct CommonOperatorToken {
     pub plus_or_minus_or_amp_or_or_or_circumflex_tilde_or_circumflex_or_tilde_circumflex_or_tilde_amp_or_tilde_or:
         crate::veryl_token::OwnedToken, /* \+|-|&|\||\^~|\^|~\^|~&|~\| */
@@ -2078,8 +2188,8 @@ pub struct CommonOperatorToken {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum Description {
-    Description0(Description0),
-    Description1(Description1),
+    ModuleDeclaration(DescriptionModuleDeclaration),
+    InterfaceDeclaration(DescriptionInterfaceDeclaration),
 }
 
 ///
@@ -2088,10 +2198,10 @@ pub enum Description {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum Direction {
-    Direction0(Direction0),
-    Direction1(Direction1),
-    Direction2(Direction2),
-    Direction3(Direction3),
+    Input(DirectionInput),
+    Output(DirectionOutput),
+    Inout(DirectionInout),
+    Ref(DirectionRef),
 }
 
 ///
@@ -2099,6 +2209,7 @@ pub enum Direction {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct DotDot {
     pub dot_dot_token: crate::veryl_token::VerylToken,
 }
@@ -2108,6 +2219,7 @@ pub struct DotDot {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct DotDotToken {
     pub dot_dot: crate::veryl_token::OwnedToken, /* .. */
     pub comments: Box<Comments>,
@@ -2118,6 +2230,7 @@ pub struct DotDotToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Else {
     pub else_token: crate::veryl_token::VerylToken,
 }
@@ -2127,6 +2240,7 @@ pub struct Else {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ElseToken {
     pub r#else: crate::veryl_token::OwnedToken, /* else */
     pub comments: Box<Comments>,
@@ -2137,6 +2251,7 @@ pub struct ElseToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Equ {
     pub equ_token: crate::veryl_token::VerylToken,
 }
@@ -2146,6 +2261,7 @@ pub struct Equ {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct EquToken {
     pub equ: crate::veryl_token::OwnedToken, /* = */
     pub comments: Box<Comments>,
@@ -2156,6 +2272,7 @@ pub struct EquToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Exponent {
     pub exponent_token: crate::veryl_token::VerylToken,
 }
@@ -2165,6 +2282,7 @@ pub struct Exponent {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ExponentToken {
     pub l_bracket0_minus9_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9_r_bracket_plus_r_paren_star_dot_l_bracket0_minus9_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9_r_bracket_plus_r_paren_star_l_bracket_e_e_r_bracket_l_bracket_plus_minus_r_bracket_quest_l_bracket0_minus9_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9_r_bracket_plus_r_paren_star:
         crate::veryl_token::OwnedToken, /* [0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)* */
@@ -2176,6 +2294,7 @@ pub struct ExponentToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Expression {
     pub expression1: Box<Expression1>,
     pub expression_list: Vec<ExpressionList>,
@@ -2186,6 +2305,7 @@ pub struct Expression {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Expression1 {
     pub expression1_opt: Option<Box<Expression1Opt>>,
     pub factor: Box<Factor>,
@@ -2196,6 +2316,7 @@ pub struct Expression1 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Expression1Opt {
     pub expression1_opt_group: Box<Expression1OptGroup>,
 }
@@ -2206,8 +2327,8 @@ pub struct Expression1Opt {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum Expression1OptGroup {
-    Expression1OptGroup0(Expression1OptGroup0),
-    Expression1OptGroup1(Expression1OptGroup1),
+    UnaryOperator(Expression1OptGroupUnaryOperator),
+    CommonOperator(Expression1OptGroupCommonOperator),
 }
 
 ///
@@ -2215,6 +2336,7 @@ pub enum Expression1OptGroup {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ExpressionList {
     pub expression_list_group: Box<ExpressionListGroup>,
     pub expression1: Box<Expression1>,
@@ -2226,8 +2348,8 @@ pub struct ExpressionList {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum ExpressionListGroup {
-    ExpressionListGroup0(ExpressionListGroup0),
-    ExpressionListGroup1(ExpressionListGroup1),
+    BinaryOperator(ExpressionListGroupBinaryOperator),
+    CommonOperator(ExpressionListGroupCommonOperator),
 }
 
 ///
@@ -2235,6 +2357,7 @@ pub enum ExpressionListGroup {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct F32 {
     pub f32_token: crate::veryl_token::VerylToken,
 }
@@ -2244,6 +2367,7 @@ pub struct F32 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct F32Token {
     pub f32: crate::veryl_token::OwnedToken, /* f32 */
     pub comments: Box<Comments>,
@@ -2254,6 +2378,7 @@ pub struct F32Token {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct F64 {
     pub f64_token: crate::veryl_token::VerylToken,
 }
@@ -2263,6 +2388,7 @@ pub struct F64 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct F64Token {
     pub f64: crate::veryl_token::OwnedToken, /* f64 */
     pub comments: Box<Comments>,
@@ -2274,9 +2400,9 @@ pub struct F64Token {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum Factor {
-    Factor0(Factor0),
-    Factor1(Factor1),
-    Factor2(Factor2),
+    Number(FactorNumber),
+    IdentifierFactorList(FactorIdentifierFactorList),
+    LParenExpressionRParen(FactorLParenExpressionRParen),
 }
 
 ///
@@ -2284,6 +2410,7 @@ pub enum Factor {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct FactorList {
     pub range: Box<Range>,
 }
@@ -2293,6 +2420,7 @@ pub struct FactorList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct FixedPoint {
     pub fixed_point_token: crate::veryl_token::VerylToken,
 }
@@ -2302,6 +2430,7 @@ pub struct FixedPoint {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct FixedPointToken {
     pub l_bracket0_minus9_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9_r_bracket_plus_r_paren_star_dot_l_bracket0_minus9_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9_r_bracket_plus_r_paren_star:
         crate::veryl_token::OwnedToken, /* [0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)* */
@@ -2313,6 +2442,7 @@ pub struct FixedPointToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct For {
     pub for_token: crate::veryl_token::VerylToken,
 }
@@ -2322,6 +2452,7 @@ pub struct For {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ForStatement {
     pub r#for: Box<For>,
     pub identifier: Box<Identifier>,
@@ -2342,6 +2473,7 @@ pub struct ForStatement {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ForStatementList {
     pub statement: Box<Statement>,
 }
@@ -2351,6 +2483,7 @@ pub struct ForStatementList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ForStatementOpt {
     pub step: Box<Step>,
     pub assignment_operator: Box<AssignmentOperator>,
@@ -2362,6 +2495,7 @@ pub struct ForStatementOpt {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ForToken {
     pub r#for: crate::veryl_token::OwnedToken, /* for */
     pub comments: Box<Comments>,
@@ -2372,6 +2506,7 @@ pub struct ForToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Function {
     pub function_token: crate::veryl_token::VerylToken,
 }
@@ -2381,6 +2516,7 @@ pub struct Function {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct FunctionDeclaration {
     pub function: Box<Function>,
     pub identifier: Box<Identifier>,
@@ -2398,6 +2534,7 @@ pub struct FunctionDeclaration {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct FunctionDeclarationList {
     pub function_item: Box<FunctionItem>,
 }
@@ -2407,6 +2544,7 @@ pub struct FunctionDeclarationList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct FunctionDeclarationOpt {
     pub with_parameter: Box<WithParameter>,
 }
@@ -2416,6 +2554,7 @@ pub struct FunctionDeclarationOpt {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct FunctionDeclarationOpt0 {
     pub port_declaration: Box<PortDeclaration>,
 }
@@ -2426,8 +2565,8 @@ pub struct FunctionDeclarationOpt0 {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum FunctionItem {
-    FunctionItem0(FunctionItem0),
-    FunctionItem1(FunctionItem1),
+    VariableDeclaration(FunctionItemVariableDeclaration),
+    Statement(FunctionItemStatement),
 }
 
 ///
@@ -2435,6 +2574,7 @@ pub enum FunctionItem {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct FunctionToken {
     pub function: crate::veryl_token::OwnedToken, /* function */
     pub comments: Box<Comments>,
@@ -2445,6 +2585,7 @@ pub struct FunctionToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Hash {
     pub hash_token: crate::veryl_token::VerylToken,
 }
@@ -2454,6 +2595,7 @@ pub struct Hash {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct HashToken {
     pub hash: crate::veryl_token::OwnedToken, /* # */
     pub comments: Box<Comments>,
@@ -2464,6 +2606,7 @@ pub struct HashToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct I32 {
     pub i32_token: crate::veryl_token::VerylToken,
 }
@@ -2473,6 +2616,7 @@ pub struct I32 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct I32Token {
     pub i32: crate::veryl_token::OwnedToken, /* i32 */
     pub comments: Box<Comments>,
@@ -2483,6 +2627,7 @@ pub struct I32Token {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct I64 {
     pub i64_token: crate::veryl_token::VerylToken,
 }
@@ -2492,6 +2637,7 @@ pub struct I64 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct I64Token {
     pub i64: crate::veryl_token::OwnedToken, /* i64 */
     pub comments: Box<Comments>,
@@ -2502,6 +2648,7 @@ pub struct I64Token {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Identifier {
     pub identifier_token: crate::veryl_token::VerylToken,
 }
@@ -2511,6 +2658,7 @@ pub struct Identifier {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct IdentifierToken {
     pub l_bracket_a_minus_z_a_minus_z_underscore_r_bracket_l_bracket0_minus9a_minus_z_a_minus_z_underscore_r_bracket_star:
         crate::veryl_token::OwnedToken, /* [a-zA-Z_][0-9a-zA-Z_]* */
@@ -2522,6 +2670,7 @@ pub struct IdentifierToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct If {
     pub if_token: crate::veryl_token::VerylToken,
 }
@@ -2531,6 +2680,7 @@ pub struct If {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct IfReset {
     pub if_reset_token: crate::veryl_token::VerylToken,
 }
@@ -2540,6 +2690,7 @@ pub struct IfReset {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct IfResetStatement {
     pub if_reset: Box<IfReset>,
     pub l_brace: Box<LBrace>,
@@ -2554,6 +2705,7 @@ pub struct IfResetStatement {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct IfResetStatementList {
     pub statement: Box<Statement>,
 }
@@ -2563,6 +2715,7 @@ pub struct IfResetStatementList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct IfResetStatementList0 {
     pub r#else: Box<Else>,
     pub r#if: Box<If>,
@@ -2577,6 +2730,7 @@ pub struct IfResetStatementList0 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct IfResetStatementList0List {
     pub statement: Box<Statement>,
 }
@@ -2586,6 +2740,7 @@ pub struct IfResetStatementList0List {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct IfResetStatementOpt {
     pub r#else: Box<Else>,
     pub l_brace: Box<LBrace>,
@@ -2598,6 +2753,7 @@ pub struct IfResetStatementOpt {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct IfResetStatementOptList {
     pub statement: Box<Statement>,
 }
@@ -2607,6 +2763,7 @@ pub struct IfResetStatementOptList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct IfResetToken {
     pub if_underscore_reset: crate::veryl_token::OwnedToken, /* if_reset */
     pub comments: Box<Comments>,
@@ -2617,6 +2774,7 @@ pub struct IfResetToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct IfStatement {
     pub r#if: Box<If>,
     pub expression: Box<Expression>,
@@ -2632,6 +2790,7 @@ pub struct IfStatement {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct IfStatementList {
     pub statement: Box<Statement>,
 }
@@ -2641,6 +2800,7 @@ pub struct IfStatementList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct IfStatementList0 {
     pub r#else: Box<Else>,
     pub r#if: Box<If>,
@@ -2655,6 +2815,7 @@ pub struct IfStatementList0 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct IfStatementList0List {
     pub statement: Box<Statement>,
 }
@@ -2664,6 +2825,7 @@ pub struct IfStatementList0List {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct IfStatementOpt {
     pub r#else: Box<Else>,
     pub l_brace: Box<LBrace>,
@@ -2676,6 +2838,7 @@ pub struct IfStatementOpt {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct IfStatementOptList {
     pub statement: Box<Statement>,
 }
@@ -2685,6 +2848,7 @@ pub struct IfStatementOptList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct IfToken {
     pub r#if: crate::veryl_token::OwnedToken, /* if */
     pub comments: Box<Comments>,
@@ -2695,6 +2859,7 @@ pub struct IfToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct In {
     pub in_token: crate::veryl_token::VerylToken,
 }
@@ -2704,6 +2869,7 @@ pub struct In {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InToken {
     pub r#in: crate::veryl_token::OwnedToken, /* in */
     pub comments: Box<Comments>,
@@ -2714,6 +2880,7 @@ pub struct InToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Inout {
     pub inout_token: crate::veryl_token::VerylToken,
 }
@@ -2723,6 +2890,7 @@ pub struct Inout {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InoutToken {
     pub inout: crate::veryl_token::OwnedToken, /* inout */
     pub comments: Box<Comments>,
@@ -2733,6 +2901,7 @@ pub struct InoutToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Input {
     pub input_token: crate::veryl_token::VerylToken,
 }
@@ -2742,6 +2911,7 @@ pub struct Input {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InputToken {
     pub input: crate::veryl_token::OwnedToken, /* input */
     pub comments: Box<Comments>,
@@ -2752,6 +2922,7 @@ pub struct InputToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InstanceParameter {
     pub hash: Box<Hash>,
     pub l_paren: Box<LParen>,
@@ -2764,6 +2935,7 @@ pub struct InstanceParameter {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InstanceParameterItem {
     pub identifier: Box<Identifier>,
     pub instance_parameter_item_opt: Option<Box<InstanceParameterItemOpt>>,
@@ -2774,6 +2946,7 @@ pub struct InstanceParameterItem {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InstanceParameterItemOpt {
     pub colon: Box<Colon>,
     pub expression: Box<Expression>,
@@ -2784,6 +2957,7 @@ pub struct InstanceParameterItemOpt {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InstanceParameterList {
     pub instance_parameter_item: Box<InstanceParameterItem>,
     pub instance_parameter_list_list: Vec<InstanceParameterListList>,
@@ -2795,6 +2969,7 @@ pub struct InstanceParameterList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InstanceParameterListList {
     pub comma: Box<Comma>,
     pub instance_parameter_item: Box<InstanceParameterItem>,
@@ -2805,6 +2980,7 @@ pub struct InstanceParameterListList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InstanceParameterListOpt {
     pub comma: Box<Comma>,
 }
@@ -2814,6 +2990,7 @@ pub struct InstanceParameterListOpt {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InstanceParameterOpt {
     pub instance_parameter_list: Box<InstanceParameterList>,
 }
@@ -2823,6 +3000,7 @@ pub struct InstanceParameterOpt {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InstancePortItem {
     pub identifier: Box<Identifier>,
     pub instance_port_item_opt: Option<Box<InstancePortItemOpt>>,
@@ -2833,6 +3011,7 @@ pub struct InstancePortItem {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InstancePortItemOpt {
     pub colon: Box<Colon>,
     pub expression: Box<Expression>,
@@ -2843,6 +3022,7 @@ pub struct InstancePortItemOpt {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InstancePortList {
     pub instance_port_item: Box<InstancePortItem>,
     pub instance_port_list_list: Vec<InstancePortListList>,
@@ -2854,6 +3034,7 @@ pub struct InstancePortList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InstancePortListList {
     pub comma: Box<Comma>,
     pub instance_port_item: Box<InstancePortItem>,
@@ -2864,6 +3045,7 @@ pub struct InstancePortListList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InstancePortListOpt {
     pub comma: Box<Comma>,
 }
@@ -2873,6 +3055,7 @@ pub struct InstancePortListOpt {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Instantiation {
     pub identifier: Box<Identifier>,
     pub colon_colon_colon: Box<ColonColonColon>,
@@ -2888,6 +3071,7 @@ pub struct Instantiation {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InstantiationOpt {
     pub instance_parameter: Box<InstanceParameter>,
 }
@@ -2897,6 +3081,7 @@ pub struct InstantiationOpt {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InstantiationOpt0 {
     pub instance_port_list: Box<InstancePortList>,
 }
@@ -2907,9 +3092,9 @@ pub struct InstantiationOpt0 {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum IntegralNumber {
-    IntegralNumber0(IntegralNumber0),
-    IntegralNumber1(IntegralNumber1),
-    IntegralNumber2(IntegralNumber2),
+    Based(IntegralNumberBased),
+    BaseLess(IntegralNumberBaseLess),
+    AllBit(IntegralNumberAllBit),
 }
 
 ///
@@ -2917,6 +3102,7 @@ pub enum IntegralNumber {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Interface {
     pub interface_token: crate::veryl_token::VerylToken,
 }
@@ -2926,6 +3112,7 @@ pub struct Interface {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InterfaceDeclaration {
     pub interface: Box<Interface>,
     pub identifier: Box<Identifier>,
@@ -2940,6 +3127,7 @@ pub struct InterfaceDeclaration {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InterfaceDeclarationList {
     pub interface_item: Box<InterfaceItem>,
 }
@@ -2949,6 +3137,7 @@ pub struct InterfaceDeclarationList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InterfaceDeclarationOpt {
     pub with_parameter: Box<WithParameter>,
 }
@@ -2958,6 +3147,7 @@ pub struct InterfaceDeclarationOpt {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InterfaceForDeclaration {
     pub r#for: Box<For>,
     pub identifier: Box<Identifier>,
@@ -2978,6 +3168,7 @@ pub struct InterfaceForDeclaration {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InterfaceForDeclarationList {
     pub interface_item: Box<InterfaceItem>,
 }
@@ -2987,6 +3178,7 @@ pub struct InterfaceForDeclarationList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InterfaceForDeclarationOpt {
     pub step: Box<Step>,
     pub assignment_operator: Box<AssignmentOperator>,
@@ -2998,6 +3190,7 @@ pub struct InterfaceForDeclarationOpt {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InterfaceIfDeclaration {
     pub r#if: Box<If>,
     pub expression: Box<Expression>,
@@ -3015,6 +3208,7 @@ pub struct InterfaceIfDeclaration {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InterfaceIfDeclarationList {
     pub interface_item: Box<InterfaceItem>,
 }
@@ -3024,6 +3218,7 @@ pub struct InterfaceIfDeclarationList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InterfaceIfDeclarationList0 {
     pub r#else: Box<Else>,
     pub r#if: Box<If>,
@@ -3039,6 +3234,7 @@ pub struct InterfaceIfDeclarationList0 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InterfaceIfDeclarationList0List {
     pub interface_item: Box<InterfaceItem>,
 }
@@ -3048,6 +3244,7 @@ pub struct InterfaceIfDeclarationList0List {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InterfaceIfDeclarationOpt {
     pub colon: Box<Colon>,
     pub identifier: Box<Identifier>,
@@ -3058,6 +3255,7 @@ pub struct InterfaceIfDeclarationOpt {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InterfaceIfDeclarationOpt0 {
     pub r#else: Box<Else>,
     pub interface_if_declaration_opt1: Option<Box<InterfaceIfDeclarationOpt1>>,
@@ -3071,6 +3269,7 @@ pub struct InterfaceIfDeclarationOpt0 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InterfaceIfDeclarationOpt0List {
     pub interface_item: Box<InterfaceItem>,
 }
@@ -3080,6 +3279,7 @@ pub struct InterfaceIfDeclarationOpt0List {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InterfaceIfDeclarationOpt1 {
     pub colon: Box<Colon>,
     pub identifier: Box<Identifier>,
@@ -3091,12 +3291,12 @@ pub struct InterfaceIfDeclarationOpt1 {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum InterfaceItem {
-    InterfaceItem0(InterfaceItem0),
-    InterfaceItem1(InterfaceItem1),
-    InterfaceItem2(InterfaceItem2),
-    InterfaceItem3(InterfaceItem3),
-    InterfaceItem4(InterfaceItem4),
-    InterfaceItem5(InterfaceItem5),
+    VariableDeclaration(InterfaceItemVariableDeclaration),
+    ParameterDeclaration(InterfaceItemParameterDeclaration),
+    LocalparamDeclaration(InterfaceItemLocalparamDeclaration),
+    ModportDeclaration(InterfaceItemModportDeclaration),
+    InterfaceIfDeclaration(InterfaceItemInterfaceIfDeclaration),
+    InterfaceForDeclaration(InterfaceItemInterfaceForDeclaration),
 }
 
 ///
@@ -3104,6 +3304,7 @@ pub enum InterfaceItem {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct InterfaceToken {
     pub interface: crate::veryl_token::OwnedToken, /* interface */
     pub comments: Box<Comments>,
@@ -3114,6 +3315,7 @@ pub struct InterfaceToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct LBrace {
     pub l_brace_token: crate::veryl_token::VerylToken,
 }
@@ -3123,6 +3325,7 @@ pub struct LBrace {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct LBraceToken {
     pub l_brace: crate::veryl_token::OwnedToken, /* { */
     pub comments: Box<Comments>,
@@ -3133,6 +3336,7 @@ pub struct LBraceToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct LBracket {
     pub l_bracket_token: crate::veryl_token::VerylToken,
 }
@@ -3142,6 +3346,7 @@ pub struct LBracket {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct LBracketToken {
     pub l_bracket: crate::veryl_token::OwnedToken, /* [ */
     pub comments: Box<Comments>,
@@ -3152,6 +3357,7 @@ pub struct LBracketToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct LParen {
     pub l_paren_token: crate::veryl_token::VerylToken,
 }
@@ -3161,6 +3367,7 @@ pub struct LParen {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct LParenToken {
     pub l_paren: crate::veryl_token::OwnedToken, /* ( */
     pub comments: Box<Comments>,
@@ -3171,6 +3378,7 @@ pub struct LParenToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Localparam {
     pub localparam_token: crate::veryl_token::VerylToken,
 }
@@ -3180,6 +3388,7 @@ pub struct Localparam {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct LocalparamDeclaration {
     pub localparam: Box<Localparam>,
     pub identifier: Box<Identifier>,
@@ -3195,6 +3404,7 @@ pub struct LocalparamDeclaration {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct LocalparamToken {
     pub localparam: crate::veryl_token::OwnedToken, /* localparam */
     pub comments: Box<Comments>,
@@ -3205,6 +3415,7 @@ pub struct LocalparamToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Logic {
     pub logic_token: crate::veryl_token::VerylToken,
 }
@@ -3214,6 +3425,7 @@ pub struct Logic {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct LogicToken {
     pub logic: crate::veryl_token::OwnedToken, /* logic */
     pub comments: Box<Comments>,
@@ -3224,6 +3436,7 @@ pub struct LogicToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct MinusGT {
     pub minus_g_t_token: crate::veryl_token::VerylToken,
 }
@@ -3233,6 +3446,7 @@ pub struct MinusGT {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct MinusGTToken {
     pub minus_g_t: crate::veryl_token::OwnedToken, /* -> */
     pub comments: Box<Comments>,
@@ -3243,6 +3457,7 @@ pub struct MinusGTToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Modport {
     pub modport_token: crate::veryl_token::VerylToken,
 }
@@ -3252,6 +3467,7 @@ pub struct Modport {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModportDeclaration {
     pub modport: Box<Modport>,
     pub identifier: Box<Identifier>,
@@ -3265,6 +3481,7 @@ pub struct ModportDeclaration {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModportItem {
     pub identifier: Box<Identifier>,
     pub colon: Box<Colon>,
@@ -3276,6 +3493,7 @@ pub struct ModportItem {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModportList {
     pub modport_item: Box<ModportItem>,
     pub modport_list_list: Vec<ModportListList>,
@@ -3287,6 +3505,7 @@ pub struct ModportList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModportListList {
     pub comma: Box<Comma>,
     pub modport_item: Box<ModportItem>,
@@ -3297,6 +3516,7 @@ pub struct ModportListList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModportListOpt {
     pub comma: Box<Comma>,
 }
@@ -3306,6 +3526,7 @@ pub struct ModportListOpt {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModportToken {
     pub modport: crate::veryl_token::OwnedToken, /* modport */
     pub comments: Box<Comments>,
@@ -3316,6 +3537,7 @@ pub struct ModportToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Module {
     pub module_token: crate::veryl_token::VerylToken,
 }
@@ -3325,6 +3547,7 @@ pub struct Module {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModuleDeclaration {
     pub module: Box<Module>,
     pub identifier: Box<Identifier>,
@@ -3340,6 +3563,7 @@ pub struct ModuleDeclaration {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModuleDeclarationList {
     pub module_item: Box<ModuleItem>,
 }
@@ -3349,6 +3573,7 @@ pub struct ModuleDeclarationList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModuleDeclarationOpt {
     pub with_parameter: Box<WithParameter>,
 }
@@ -3358,6 +3583,7 @@ pub struct ModuleDeclarationOpt {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModuleDeclarationOpt0 {
     pub port_declaration: Box<PortDeclaration>,
 }
@@ -3367,6 +3593,7 @@ pub struct ModuleDeclarationOpt0 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModuleForDeclaration {
     pub r#for: Box<For>,
     pub identifier: Box<Identifier>,
@@ -3387,6 +3614,7 @@ pub struct ModuleForDeclaration {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModuleForDeclarationList {
     pub module_item: Box<ModuleItem>,
 }
@@ -3396,6 +3624,7 @@ pub struct ModuleForDeclarationList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModuleForDeclarationOpt {
     pub step: Box<Step>,
     pub assignment_operator: Box<AssignmentOperator>,
@@ -3407,6 +3636,7 @@ pub struct ModuleForDeclarationOpt {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModuleIfDeclaration {
     pub r#if: Box<If>,
     pub expression: Box<Expression>,
@@ -3424,6 +3654,7 @@ pub struct ModuleIfDeclaration {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModuleIfDeclarationList {
     pub module_item: Box<ModuleItem>,
 }
@@ -3433,6 +3664,7 @@ pub struct ModuleIfDeclarationList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModuleIfDeclarationList0 {
     pub r#else: Box<Else>,
     pub r#if: Box<If>,
@@ -3448,6 +3680,7 @@ pub struct ModuleIfDeclarationList0 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModuleIfDeclarationList0List {
     pub module_item: Box<ModuleItem>,
 }
@@ -3457,6 +3690,7 @@ pub struct ModuleIfDeclarationList0List {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModuleIfDeclarationOpt {
     pub colon: Box<Colon>,
     pub identifier: Box<Identifier>,
@@ -3467,6 +3701,7 @@ pub struct ModuleIfDeclarationOpt {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModuleIfDeclarationOpt0 {
     pub r#else: Box<Else>,
     pub module_if_declaration_opt1: Option<Box<ModuleIfDeclarationOpt1>>,
@@ -3480,6 +3715,7 @@ pub struct ModuleIfDeclarationOpt0 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModuleIfDeclarationOpt0List {
     pub module_item: Box<ModuleItem>,
 }
@@ -3489,6 +3725,7 @@ pub struct ModuleIfDeclarationOpt0List {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModuleIfDeclarationOpt1 {
     pub colon: Box<Colon>,
     pub identifier: Box<Identifier>,
@@ -3500,16 +3737,16 @@ pub struct ModuleIfDeclarationOpt1 {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum ModuleItem {
-    ModuleItem0(ModuleItem0),
-    ModuleItem1(ModuleItem1),
-    ModuleItem2(ModuleItem2),
-    ModuleItem3(ModuleItem3),
-    ModuleItem4(ModuleItem4),
-    ModuleItem5(ModuleItem5),
-    ModuleItem6(ModuleItem6),
-    ModuleItem7(ModuleItem7),
-    ModuleItem8(ModuleItem8),
-    ModuleItem9(ModuleItem9),
+    VariableDeclaration(ModuleItemVariableDeclaration),
+    ParameterDeclaration(ModuleItemParameterDeclaration),
+    LocalparamDeclaration(ModuleItemLocalparamDeclaration),
+    AlwaysFfDeclaration(ModuleItemAlwaysFfDeclaration),
+    AlwaysCombDeclaration(ModuleItemAlwaysCombDeclaration),
+    AssignDeclaration(ModuleItemAssignDeclaration),
+    Instantiation(ModuleItemInstantiation),
+    FunctionDeclaration(ModuleItemFunctionDeclaration),
+    ModuleIfDeclaration(ModuleItemModuleIfDeclaration),
+    ModuleForDeclaration(ModuleItemModuleForDeclaration),
 }
 
 ///
@@ -3517,6 +3754,7 @@ pub enum ModuleItem {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModuleToken {
     pub module: crate::veryl_token::OwnedToken, /* module */
     pub comments: Box<Comments>,
@@ -3527,6 +3765,7 @@ pub struct ModuleToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct MultiComment {
     pub multi_comment: crate::veryl_token::OwnedToken, /* (?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+ */
 }
@@ -3536,6 +3775,7 @@ pub struct MultiComment {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Negedge {
     pub negedge_token: crate::veryl_token::VerylToken,
 }
@@ -3545,6 +3785,7 @@ pub struct Negedge {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct NegedgeToken {
     pub negedge: crate::veryl_token::OwnedToken, /* negedge */
     pub comments: Box<Comments>,
@@ -3556,8 +3797,8 @@ pub struct NegedgeToken {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum Number {
-    Number0(Number0),
-    Number1(Number1),
+    IntegralNumber(NumberIntegralNumber),
+    RealNumber(NumberRealNumber),
 }
 
 ///
@@ -3565,6 +3806,7 @@ pub enum Number {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Output {
     pub output_token: crate::veryl_token::VerylToken,
 }
@@ -3574,6 +3816,7 @@ pub struct Output {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct OutputToken {
     pub output: crate::veryl_token::OwnedToken, /* output */
     pub comments: Box<Comments>,
@@ -3584,6 +3827,7 @@ pub struct OutputToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Parameter {
     pub parameter_token: crate::veryl_token::VerylToken,
 }
@@ -3593,6 +3837,7 @@ pub struct Parameter {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ParameterDeclaration {
     pub parameter: Box<Parameter>,
     pub identifier: Box<Identifier>,
@@ -3608,6 +3853,7 @@ pub struct ParameterDeclaration {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ParameterToken {
     pub parameter: crate::veryl_token::OwnedToken, /* parameter */
     pub comments: Box<Comments>,
@@ -3618,6 +3864,7 @@ pub struct ParameterToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct PortDeclaration {
     pub l_paren: Box<LParen>,
     pub port_declaration_opt: Option<Box<PortDeclarationOpt>>,
@@ -3629,6 +3876,7 @@ pub struct PortDeclaration {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct PortDeclarationItem {
     pub identifier: Box<Identifier>,
     pub colon: Box<Colon>,
@@ -3641,6 +3889,7 @@ pub struct PortDeclarationItem {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct PortDeclarationList {
     pub port_declaration_item: Box<PortDeclarationItem>,
     pub port_declaration_list_list: Vec<PortDeclarationListList>,
@@ -3652,6 +3901,7 @@ pub struct PortDeclarationList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct PortDeclarationListList {
     pub comma: Box<Comma>,
     pub port_declaration_item: Box<PortDeclarationItem>,
@@ -3662,6 +3912,7 @@ pub struct PortDeclarationListList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct PortDeclarationListOpt {
     pub comma: Box<Comma>,
 }
@@ -3671,6 +3922,7 @@ pub struct PortDeclarationListOpt {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct PortDeclarationOpt {
     pub port_declaration_list: Box<PortDeclarationList>,
 }
@@ -3680,6 +3932,7 @@ pub struct PortDeclarationOpt {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Posedge {
     pub posedge_token: crate::veryl_token::VerylToken,
 }
@@ -3689,6 +3942,7 @@ pub struct Posedge {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct PosedgeToken {
     pub posedge: crate::veryl_token::OwnedToken, /* posedge */
     pub comments: Box<Comments>,
@@ -3699,6 +3953,7 @@ pub struct PosedgeToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct RBrace {
     pub r_brace_token: crate::veryl_token::VerylToken,
 }
@@ -3708,6 +3963,7 @@ pub struct RBrace {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct RBraceToken {
     pub r_brace: crate::veryl_token::OwnedToken, /* } */
     pub comments: Box<Comments>,
@@ -3718,6 +3974,7 @@ pub struct RBraceToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct RBracket {
     pub r_bracket_token: crate::veryl_token::VerylToken,
 }
@@ -3727,6 +3984,7 @@ pub struct RBracket {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct RBracketToken {
     pub r_bracket: crate::veryl_token::OwnedToken, /* ] */
     pub comments: Box<Comments>,
@@ -3737,6 +3995,7 @@ pub struct RBracketToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct RParen {
     pub r_paren_token: crate::veryl_token::VerylToken,
 }
@@ -3746,6 +4005,7 @@ pub struct RParen {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct RParenToken {
     pub r_paren: crate::veryl_token::OwnedToken, /* ) */
     pub comments: Box<Comments>,
@@ -3756,6 +4016,7 @@ pub struct RParenToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Range {
     pub l_bracket: Box<LBracket>,
     pub expression: Box<Expression>,
@@ -3768,6 +4029,7 @@ pub struct Range {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct RangeOpt {
     pub colon: Box<Colon>,
     pub expression: Box<Expression>,
@@ -3779,8 +4041,8 @@ pub struct RangeOpt {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum RealNumber {
-    RealNumber0(RealNumber0),
-    RealNumber1(RealNumber1),
+    FixedPoint(RealNumberFixedPoint),
+    Exponent(RealNumberExponent),
 }
 
 ///
@@ -3788,6 +4050,7 @@ pub enum RealNumber {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Ref {
     pub ref_token: crate::veryl_token::VerylToken,
 }
@@ -3797,6 +4060,7 @@ pub struct Ref {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct RefToken {
     pub r#ref: crate::veryl_token::OwnedToken, /* ref */
     pub comments: Box<Comments>,
@@ -3807,6 +4071,7 @@ pub struct RefToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Return {
     pub return_token: crate::veryl_token::VerylToken,
 }
@@ -3816,6 +4081,7 @@ pub struct Return {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ReturnStatement {
     pub r#return: Box<Return>,
     pub expression: Box<Expression>,
@@ -3827,6 +4093,7 @@ pub struct ReturnStatement {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct ReturnToken {
     pub r#return: crate::veryl_token::OwnedToken, /* return */
     pub comments: Box<Comments>,
@@ -3837,6 +4104,7 @@ pub struct ReturnToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Semicolon {
     pub semicolon_token: crate::veryl_token::VerylToken,
 }
@@ -3846,6 +4114,7 @@ pub struct Semicolon {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct SemicolonToken {
     pub semicolon: crate::veryl_token::OwnedToken, /* ; */
     pub comments: Box<Comments>,
@@ -3856,6 +4125,7 @@ pub struct SemicolonToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Start {
     pub start_token: crate::veryl_token::VerylToken,
 }
@@ -3865,6 +4135,7 @@ pub struct Start {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct StartToken {
     pub comments: Box<Comments>,
 }
@@ -3875,11 +4146,11 @@ pub struct StartToken {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum Statement {
-    Statement0(Statement0),
-    Statement1(Statement1),
-    Statement2(Statement2),
-    Statement3(Statement3),
-    Statement4(Statement4),
+    AssignmentStatement(StatementAssignmentStatement),
+    IfStatement(StatementIfStatement),
+    IfResetStatement(StatementIfResetStatement),
+    ReturnStatement(StatementReturnStatement),
+    ForStatement(StatementForStatement),
 }
 
 ///
@@ -3887,6 +4158,7 @@ pub enum Statement {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Step {
     pub step_token: crate::veryl_token::VerylToken,
 }
@@ -3896,6 +4168,7 @@ pub struct Step {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct StepToken {
     pub step: crate::veryl_token::OwnedToken, /* step */
     pub comments: Box<Comments>,
@@ -3906,6 +4179,7 @@ pub struct StepToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct SyncHigh {
     pub sync_high_token: crate::veryl_token::VerylToken,
 }
@@ -3915,6 +4189,7 @@ pub struct SyncHigh {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct SyncHighToken {
     pub sync_underscore_high: crate::veryl_token::OwnedToken, /* sync_high */
     pub comments: Box<Comments>,
@@ -3925,6 +4200,7 @@ pub struct SyncHighToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct SyncLow {
     pub sync_low_token: crate::veryl_token::VerylToken,
 }
@@ -3934,6 +4210,7 @@ pub struct SyncLow {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct SyncLowToken {
     pub sync_underscore_low: crate::veryl_token::OwnedToken, /* sync_low */
     pub comments: Box<Comments>,
@@ -3944,6 +4221,7 @@ pub struct SyncLowToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Type {
     pub type_group: Box<TypeGroup>,
     pub type_list: Vec<TypeList>,
@@ -3955,8 +4233,8 @@ pub struct Type {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum TypeGroup {
-    TypeGroup0(TypeGroup0),
-    TypeGroup1(TypeGroup1),
+    BuiltinType(TypeGroupBuiltinType),
+    Identifier(TypeGroupIdentifier),
 }
 
 ///
@@ -3964,6 +4242,7 @@ pub enum TypeGroup {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct TypeList {
     pub width: Box<Width>,
 }
@@ -3973,6 +4252,7 @@ pub struct TypeList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct U32 {
     pub u32_token: crate::veryl_token::VerylToken,
 }
@@ -3982,6 +4262,7 @@ pub struct U32 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct U32Token {
     pub u32: crate::veryl_token::OwnedToken, /* u32 */
     pub comments: Box<Comments>,
@@ -3992,6 +4273,7 @@ pub struct U32Token {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct U64 {
     pub u64_token: crate::veryl_token::VerylToken,
 }
@@ -4001,6 +4283,7 @@ pub struct U64 {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct U64Token {
     pub u64: crate::veryl_token::OwnedToken, /* u64 */
     pub comments: Box<Comments>,
@@ -4011,6 +4294,7 @@ pub struct U64Token {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct UnaryOperator {
     pub unary_operator_token: crate::veryl_token::VerylToken,
 }
@@ -4020,6 +4304,7 @@ pub struct UnaryOperator {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct UnaryOperatorToken {
     pub bang_or_tilde: crate::veryl_token::OwnedToken, /* !|~ */
     pub comments: Box<Comments>,
@@ -4030,6 +4315,7 @@ pub struct UnaryOperatorToken {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct VariableDeclaration {
     pub identifier: Box<Identifier>,
     pub colon: Box<Colon>,
@@ -4042,6 +4328,7 @@ pub struct VariableDeclaration {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Veryl {
     pub start: Box<Start>,
     pub veryl_list: Vec<VerylList>,
@@ -4052,6 +4339,7 @@ pub struct Veryl {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct VerylList {
     pub description: Box<Description>,
 }
@@ -4061,6 +4349,7 @@ pub struct VerylList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct Width {
     pub l_bracket: Box<LBracket>,
     pub expression: Box<Expression>,
@@ -4072,6 +4361,7 @@ pub struct Width {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct WithParameter {
     pub hash: Box<Hash>,
     pub l_paren: Box<LParen>,
@@ -4084,6 +4374,7 @@ pub struct WithParameter {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct WithParameterItem {
     pub with_parameter_item_group: Box<WithParameterItemGroup>,
     pub identifier: Box<Identifier>,
@@ -4099,8 +4390,8 @@ pub struct WithParameterItem {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum WithParameterItemGroup {
-    WithParameterItemGroup0(WithParameterItemGroup0),
-    WithParameterItemGroup1(WithParameterItemGroup1),
+    Parameter(WithParameterItemGroupParameter),
+    Localparam(WithParameterItemGroupLocalparam),
 }
 
 ///
@@ -4108,6 +4399,7 @@ pub enum WithParameterItemGroup {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct WithParameterList {
     pub with_parameter_item: Box<WithParameterItem>,
     pub with_parameter_list_list: Vec<WithParameterListList>,
@@ -4119,6 +4411,7 @@ pub struct WithParameterList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct WithParameterListList {
     pub comma: Box<Comma>,
     pub with_parameter_item: Box<WithParameterItem>,
@@ -4129,6 +4422,7 @@ pub struct WithParameterListList {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct WithParameterListOpt {
     pub comma: Box<Comma>,
 }
@@ -4138,6 +4432,7 @@ pub struct WithParameterListOpt {
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
 pub struct WithParameterOpt {
     pub with_parameter_list: Box<WithParameterList>,
 }
@@ -7520,11 +7815,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let integral_number = pop_item!(self, integral_number, IntegralNumber, context);
-        let number_0_built = Number0Builder::default()
+        let number_0_built = NumberIntegralNumberBuilder::default()
             .integral_number(Box::new(integral_number))
             .build()
             .into_diagnostic()?;
-        let number_0_built = Number::Number0(number_0_built);
+        let number_0_built = Number::IntegralNumber(number_0_built);
         // Calling user action here
         self.user_grammar.number(&number_0_built)?;
         self.push(ASTType::Number(number_0_built), context);
@@ -7544,11 +7839,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let real_number = pop_item!(self, real_number, RealNumber, context);
-        let number_1_built = Number1Builder::default()
+        let number_1_built = NumberRealNumberBuilder::default()
             .real_number(Box::new(real_number))
             .build()
             .into_diagnostic()?;
-        let number_1_built = Number::Number1(number_1_built);
+        let number_1_built = Number::RealNumber(number_1_built);
         // Calling user action here
         self.user_grammar.number(&number_1_built)?;
         self.push(ASTType::Number(number_1_built), context);
@@ -7568,11 +7863,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let based = pop_item!(self, based, Based, context);
-        let integral_number_0_built = IntegralNumber0Builder::default()
+        let integral_number_0_built = IntegralNumberBasedBuilder::default()
             .based(Box::new(based))
             .build()
             .into_diagnostic()?;
-        let integral_number_0_built = IntegralNumber::IntegralNumber0(integral_number_0_built);
+        let integral_number_0_built = IntegralNumber::Based(integral_number_0_built);
         // Calling user action here
         self.user_grammar
             .integral_number(&integral_number_0_built)?;
@@ -7593,11 +7888,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let base_less = pop_item!(self, base_less, BaseLess, context);
-        let integral_number_1_built = IntegralNumber1Builder::default()
+        let integral_number_1_built = IntegralNumberBaseLessBuilder::default()
             .base_less(Box::new(base_less))
             .build()
             .into_diagnostic()?;
-        let integral_number_1_built = IntegralNumber::IntegralNumber1(integral_number_1_built);
+        let integral_number_1_built = IntegralNumber::BaseLess(integral_number_1_built);
         // Calling user action here
         self.user_grammar
             .integral_number(&integral_number_1_built)?;
@@ -7618,11 +7913,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let all_bit = pop_item!(self, all_bit, AllBit, context);
-        let integral_number_2_built = IntegralNumber2Builder::default()
+        let integral_number_2_built = IntegralNumberAllBitBuilder::default()
             .all_bit(Box::new(all_bit))
             .build()
             .into_diagnostic()?;
-        let integral_number_2_built = IntegralNumber::IntegralNumber2(integral_number_2_built);
+        let integral_number_2_built = IntegralNumber::AllBit(integral_number_2_built);
         // Calling user action here
         self.user_grammar
             .integral_number(&integral_number_2_built)?;
@@ -7643,11 +7938,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let fixed_point = pop_item!(self, fixed_point, FixedPoint, context);
-        let real_number_0_built = RealNumber0Builder::default()
+        let real_number_0_built = RealNumberFixedPointBuilder::default()
             .fixed_point(Box::new(fixed_point))
             .build()
             .into_diagnostic()?;
-        let real_number_0_built = RealNumber::RealNumber0(real_number_0_built);
+        let real_number_0_built = RealNumber::FixedPoint(real_number_0_built);
         // Calling user action here
         self.user_grammar.real_number(&real_number_0_built)?;
         self.push(ASTType::RealNumber(real_number_0_built), context);
@@ -7667,11 +7962,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let exponent = pop_item!(self, exponent, Exponent, context);
-        let real_number_1_built = RealNumber1Builder::default()
+        let real_number_1_built = RealNumberExponentBuilder::default()
             .exponent(Box::new(exponent))
             .build()
             .into_diagnostic()?;
-        let real_number_1_built = RealNumber::RealNumber1(real_number_1_built);
+        let real_number_1_built = RealNumber::Exponent(real_number_1_built);
         // Calling user action here
         self.user_grammar.real_number(&real_number_1_built)?;
         self.push(ASTType::RealNumber(real_number_1_built), context);
@@ -7746,12 +8041,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let binary_operator = pop_item!(self, binary_operator, BinaryOperator, context);
-        let expression_list_group_0_built = ExpressionListGroup0Builder::default()
+        let expression_list_group_0_built = ExpressionListGroupBinaryOperatorBuilder::default()
             .binary_operator(Box::new(binary_operator))
             .build()
             .into_diagnostic()?;
         let expression_list_group_0_built =
-            ExpressionListGroup::ExpressionListGroup0(expression_list_group_0_built);
+            ExpressionListGroup::BinaryOperator(expression_list_group_0_built);
         self.push(
             ASTType::ExpressionListGroup(expression_list_group_0_built),
             context,
@@ -7772,12 +8067,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let common_operator = pop_item!(self, common_operator, CommonOperator, context);
-        let expression_list_group_1_built = ExpressionListGroup1Builder::default()
+        let expression_list_group_1_built = ExpressionListGroupCommonOperatorBuilder::default()
             .common_operator(Box::new(common_operator))
             .build()
             .into_diagnostic()?;
         let expression_list_group_1_built =
-            ExpressionListGroup::ExpressionListGroup1(expression_list_group_1_built);
+            ExpressionListGroup::CommonOperator(expression_list_group_1_built);
         self.push(
             ASTType::ExpressionListGroup(expression_list_group_1_built),
             context,
@@ -7862,12 +8157,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let unary_operator = pop_item!(self, unary_operator, UnaryOperator, context);
-        let expression1_opt_group_0_built = Expression1OptGroup0Builder::default()
+        let expression1_opt_group_0_built = Expression1OptGroupUnaryOperatorBuilder::default()
             .unary_operator(Box::new(unary_operator))
             .build()
             .into_diagnostic()?;
         let expression1_opt_group_0_built =
-            Expression1OptGroup::Expression1OptGroup0(expression1_opt_group_0_built);
+            Expression1OptGroup::UnaryOperator(expression1_opt_group_0_built);
         self.push(
             ASTType::Expression1OptGroup(expression1_opt_group_0_built),
             context,
@@ -7888,12 +8183,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let common_operator = pop_item!(self, common_operator, CommonOperator, context);
-        let expression1_opt_group_1_built = Expression1OptGroup1Builder::default()
+        let expression1_opt_group_1_built = Expression1OptGroupCommonOperatorBuilder::default()
             .common_operator(Box::new(common_operator))
             .build()
             .into_diagnostic()?;
         let expression1_opt_group_1_built =
-            Expression1OptGroup::Expression1OptGroup1(expression1_opt_group_1_built);
+            Expression1OptGroup::CommonOperator(expression1_opt_group_1_built);
         self.push(
             ASTType::Expression1OptGroup(expression1_opt_group_1_built),
             context,
@@ -7926,11 +8221,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let number = pop_item!(self, number, Number, context);
-        let factor_0_built = Factor0Builder::default()
+        let factor_0_built = FactorNumberBuilder::default()
             .number(Box::new(number))
             .build()
             .into_diagnostic()?;
-        let factor_0_built = Factor::Factor0(factor_0_built);
+        let factor_0_built = Factor::Number(factor_0_built);
         // Calling user action here
         self.user_grammar.factor(&factor_0_built)?;
         self.push(ASTType::Factor(factor_0_built), context);
@@ -7952,12 +8247,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let factor_list = pop_and_reverse_item!(self, factor_list, FactorList, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
-        let factor_1_built = Factor1Builder::default()
+        let factor_1_built = FactorIdentifierFactorListBuilder::default()
             .identifier(Box::new(identifier))
             .factor_list(factor_list)
             .build()
             .into_diagnostic()?;
-        let factor_1_built = Factor::Factor1(factor_1_built);
+        let factor_1_built = Factor::IdentifierFactorList(factor_1_built);
         // Calling user action here
         self.user_grammar.factor(&factor_1_built)?;
         self.push(ASTType::Factor(factor_1_built), context);
@@ -8019,13 +8314,13 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let r_paren = pop_item!(self, r_paren, RParen, context);
         let expression = pop_item!(self, expression, Expression, context);
         let l_paren = pop_item!(self, l_paren, LParen, context);
-        let factor_2_built = Factor2Builder::default()
+        let factor_2_built = FactorLParenExpressionRParenBuilder::default()
             .l_paren(Box::new(l_paren))
             .expression(Box::new(expression))
             .r_paren(Box::new(r_paren))
             .build()
             .into_diagnostic()?;
-        let factor_2_built = Factor::Factor2(factor_2_built);
+        let factor_2_built = Factor::LParenExpressionRParen(factor_2_built);
         // Calling user action here
         self.user_grammar.factor(&factor_2_built)?;
         self.push(ASTType::Factor(factor_2_built), context);
@@ -8145,11 +8440,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let logic = pop_item!(self, logic, Logic, context);
-        let builtin_type_0_built = BuiltinType0Builder::default()
+        let builtin_type_0_built = BuiltinTypeLogicBuilder::default()
             .logic(Box::new(logic))
             .build()
             .into_diagnostic()?;
-        let builtin_type_0_built = BuiltinType::BuiltinType0(builtin_type_0_built);
+        let builtin_type_0_built = BuiltinType::Logic(builtin_type_0_built);
         // Calling user action here
         self.user_grammar.builtin_type(&builtin_type_0_built)?;
         self.push(ASTType::BuiltinType(builtin_type_0_built), context);
@@ -8169,11 +8464,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let bit = pop_item!(self, bit, Bit, context);
-        let builtin_type_1_built = BuiltinType1Builder::default()
+        let builtin_type_1_built = BuiltinTypeBitBuilder::default()
             .bit(Box::new(bit))
             .build()
             .into_diagnostic()?;
-        let builtin_type_1_built = BuiltinType::BuiltinType1(builtin_type_1_built);
+        let builtin_type_1_built = BuiltinType::Bit(builtin_type_1_built);
         // Calling user action here
         self.user_grammar.builtin_type(&builtin_type_1_built)?;
         self.push(ASTType::BuiltinType(builtin_type_1_built), context);
@@ -8193,11 +8488,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let u32 = pop_item!(self, u32, U32, context);
-        let builtin_type_2_built = BuiltinType2Builder::default()
+        let builtin_type_2_built = BuiltinTypeU32Builder::default()
             .u32(Box::new(u32))
             .build()
             .into_diagnostic()?;
-        let builtin_type_2_built = BuiltinType::BuiltinType2(builtin_type_2_built);
+        let builtin_type_2_built = BuiltinType::U32(builtin_type_2_built);
         // Calling user action here
         self.user_grammar.builtin_type(&builtin_type_2_built)?;
         self.push(ASTType::BuiltinType(builtin_type_2_built), context);
@@ -8217,11 +8512,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let u64 = pop_item!(self, u64, U64, context);
-        let builtin_type_3_built = BuiltinType3Builder::default()
+        let builtin_type_3_built = BuiltinTypeU64Builder::default()
             .u64(Box::new(u64))
             .build()
             .into_diagnostic()?;
-        let builtin_type_3_built = BuiltinType::BuiltinType3(builtin_type_3_built);
+        let builtin_type_3_built = BuiltinType::U64(builtin_type_3_built);
         // Calling user action here
         self.user_grammar.builtin_type(&builtin_type_3_built)?;
         self.push(ASTType::BuiltinType(builtin_type_3_built), context);
@@ -8241,11 +8536,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let i32 = pop_item!(self, i32, I32, context);
-        let builtin_type_4_built = BuiltinType4Builder::default()
+        let builtin_type_4_built = BuiltinTypeI32Builder::default()
             .i32(Box::new(i32))
             .build()
             .into_diagnostic()?;
-        let builtin_type_4_built = BuiltinType::BuiltinType4(builtin_type_4_built);
+        let builtin_type_4_built = BuiltinType::I32(builtin_type_4_built);
         // Calling user action here
         self.user_grammar.builtin_type(&builtin_type_4_built)?;
         self.push(ASTType::BuiltinType(builtin_type_4_built), context);
@@ -8265,11 +8560,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let i64 = pop_item!(self, i64, I64, context);
-        let builtin_type_5_built = BuiltinType5Builder::default()
+        let builtin_type_5_built = BuiltinTypeI64Builder::default()
             .i64(Box::new(i64))
             .build()
             .into_diagnostic()?;
-        let builtin_type_5_built = BuiltinType::BuiltinType5(builtin_type_5_built);
+        let builtin_type_5_built = BuiltinType::I64(builtin_type_5_built);
         // Calling user action here
         self.user_grammar.builtin_type(&builtin_type_5_built)?;
         self.push(ASTType::BuiltinType(builtin_type_5_built), context);
@@ -8289,11 +8584,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let f32 = pop_item!(self, f32, F32, context);
-        let builtin_type_6_built = BuiltinType6Builder::default()
+        let builtin_type_6_built = BuiltinTypeF32Builder::default()
             .f32(Box::new(f32))
             .build()
             .into_diagnostic()?;
-        let builtin_type_6_built = BuiltinType::BuiltinType6(builtin_type_6_built);
+        let builtin_type_6_built = BuiltinType::F32(builtin_type_6_built);
         // Calling user action here
         self.user_grammar.builtin_type(&builtin_type_6_built)?;
         self.push(ASTType::BuiltinType(builtin_type_6_built), context);
@@ -8313,11 +8608,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let f64 = pop_item!(self, f64, F64, context);
-        let builtin_type_7_built = BuiltinType7Builder::default()
+        let builtin_type_7_built = BuiltinTypeF64Builder::default()
             .f64(Box::new(f64))
             .build()
             .into_diagnostic()?;
-        let builtin_type_7_built = BuiltinType::BuiltinType7(builtin_type_7_built);
+        let builtin_type_7_built = BuiltinType::F64(builtin_type_7_built);
         // Calling user action here
         self.user_grammar.builtin_type(&builtin_type_7_built)?;
         self.push(ASTType::BuiltinType(builtin_type_7_built), context);
@@ -8363,11 +8658,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let builtin_type = pop_item!(self, builtin_type, BuiltinType, context);
-        let type_group_0_built = TypeGroup0Builder::default()
+        let type_group_0_built = TypeGroupBuiltinTypeBuilder::default()
             .builtin_type(Box::new(builtin_type))
             .build()
             .into_diagnostic()?;
-        let type_group_0_built = TypeGroup::TypeGroup0(type_group_0_built);
+        let type_group_0_built = TypeGroup::BuiltinType(type_group_0_built);
         self.push(ASTType::TypeGroup(type_group_0_built), context);
         Ok(())
     }
@@ -8385,11 +8680,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let identifier = pop_item!(self, identifier, Identifier, context);
-        let type_group_1_built = TypeGroup1Builder::default()
+        let type_group_1_built = TypeGroupIdentifierBuilder::default()
             .identifier(Box::new(identifier))
             .build()
             .into_diagnostic()?;
-        let type_group_1_built = TypeGroup::TypeGroup1(type_group_1_built);
+        let type_group_1_built = TypeGroup::Identifier(type_group_1_built);
         self.push(ASTType::TypeGroup(type_group_1_built), context);
         Ok(())
     }
@@ -8446,11 +8741,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let assignment_statement =
             pop_item!(self, assignment_statement, AssignmentStatement, context);
-        let statement_0_built = Statement0Builder::default()
+        let statement_0_built = StatementAssignmentStatementBuilder::default()
             .assignment_statement(Box::new(assignment_statement))
             .build()
             .into_diagnostic()?;
-        let statement_0_built = Statement::Statement0(statement_0_built);
+        let statement_0_built = Statement::AssignmentStatement(statement_0_built);
         // Calling user action here
         self.user_grammar.statement(&statement_0_built)?;
         self.push(ASTType::Statement(statement_0_built), context);
@@ -8470,11 +8765,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let if_statement = pop_item!(self, if_statement, IfStatement, context);
-        let statement_1_built = Statement1Builder::default()
+        let statement_1_built = StatementIfStatementBuilder::default()
             .if_statement(Box::new(if_statement))
             .build()
             .into_diagnostic()?;
-        let statement_1_built = Statement::Statement1(statement_1_built);
+        let statement_1_built = Statement::IfStatement(statement_1_built);
         // Calling user action here
         self.user_grammar.statement(&statement_1_built)?;
         self.push(ASTType::Statement(statement_1_built), context);
@@ -8494,11 +8789,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let if_reset_statement = pop_item!(self, if_reset_statement, IfResetStatement, context);
-        let statement_2_built = Statement2Builder::default()
+        let statement_2_built = StatementIfResetStatementBuilder::default()
             .if_reset_statement(Box::new(if_reset_statement))
             .build()
             .into_diagnostic()?;
-        let statement_2_built = Statement::Statement2(statement_2_built);
+        let statement_2_built = Statement::IfResetStatement(statement_2_built);
         // Calling user action here
         self.user_grammar.statement(&statement_2_built)?;
         self.push(ASTType::Statement(statement_2_built), context);
@@ -8518,11 +8813,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let return_statement = pop_item!(self, return_statement, ReturnStatement, context);
-        let statement_3_built = Statement3Builder::default()
+        let statement_3_built = StatementReturnStatementBuilder::default()
             .return_statement(Box::new(return_statement))
             .build()
             .into_diagnostic()?;
-        let statement_3_built = Statement::Statement3(statement_3_built);
+        let statement_3_built = Statement::ReturnStatement(statement_3_built);
         // Calling user action here
         self.user_grammar.statement(&statement_3_built)?;
         self.push(ASTType::Statement(statement_3_built), context);
@@ -8542,11 +8837,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let for_statement = pop_item!(self, for_statement, ForStatement, context);
-        let statement_4_built = Statement4Builder::default()
+        let statement_4_built = StatementForStatementBuilder::default()
             .for_statement(Box::new(for_statement))
             .build()
             .into_diagnostic()?;
-        let statement_4_built = Statement::Statement4(statement_4_built);
+        let statement_4_built = Statement::ForStatement(statement_4_built);
         // Calling user action here
         self.user_grammar.statement(&statement_4_built)?;
         self.push(ASTType::Statement(statement_4_built), context);
@@ -8607,12 +8902,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let equ = pop_item!(self, equ, Equ, context);
-        let assignment_statement_group_0_built = AssignmentStatementGroup0Builder::default()
+        let assignment_statement_group_0_built = AssignmentStatementGroupEquBuilder::default()
             .equ(Box::new(equ))
             .build()
             .into_diagnostic()?;
         let assignment_statement_group_0_built =
-            AssignmentStatementGroup::AssignmentStatementGroup0(assignment_statement_group_0_built);
+            AssignmentStatementGroup::Equ(assignment_statement_group_0_built);
         self.push(
             ASTType::AssignmentStatementGroup(assignment_statement_group_0_built),
             context,
@@ -8633,12 +8928,13 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let assignment_operator = pop_item!(self, assignment_operator, AssignmentOperator, context);
-        let assignment_statement_group_1_built = AssignmentStatementGroup1Builder::default()
-            .assignment_operator(Box::new(assignment_operator))
-            .build()
-            .into_diagnostic()?;
         let assignment_statement_group_1_built =
-            AssignmentStatementGroup::AssignmentStatementGroup1(assignment_statement_group_1_built);
+            AssignmentStatementGroupAssignmentOperatorBuilder::default()
+                .assignment_operator(Box::new(assignment_operator))
+                .build()
+                .into_diagnostic()?;
+        let assignment_statement_group_1_built =
+            AssignmentStatementGroup::AssignmentOperator(assignment_statement_group_1_built);
         self.push(
             ASTType::AssignmentStatementGroup(assignment_statement_group_1_built),
             context,
@@ -9744,12 +10040,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let posedge = pop_item!(self, posedge, Posedge, context);
-        let always_ff_clock_opt_group_0_built = AlwaysFfClockOptGroup0Builder::default()
+        let always_ff_clock_opt_group_0_built = AlwaysFfClockOptGroupPosedgeBuilder::default()
             .posedge(Box::new(posedge))
             .build()
             .into_diagnostic()?;
         let always_ff_clock_opt_group_0_built =
-            AlwaysFfClockOptGroup::AlwaysFfClockOptGroup0(always_ff_clock_opt_group_0_built);
+            AlwaysFfClockOptGroup::Posedge(always_ff_clock_opt_group_0_built);
         self.push(
             ASTType::AlwaysFfClockOptGroup(always_ff_clock_opt_group_0_built),
             context,
@@ -9770,12 +10066,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let negedge = pop_item!(self, negedge, Negedge, context);
-        let always_ff_clock_opt_group_1_built = AlwaysFfClockOptGroup1Builder::default()
+        let always_ff_clock_opt_group_1_built = AlwaysFfClockOptGroupNegedgeBuilder::default()
             .negedge(Box::new(negedge))
             .build()
             .into_diagnostic()?;
         let always_ff_clock_opt_group_1_built =
-            AlwaysFfClockOptGroup::AlwaysFfClockOptGroup1(always_ff_clock_opt_group_1_built);
+            AlwaysFfClockOptGroup::Negedge(always_ff_clock_opt_group_1_built);
         self.push(
             ASTType::AlwaysFfClockOptGroup(always_ff_clock_opt_group_1_built),
             context,
@@ -9863,12 +10159,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let async_low = pop_item!(self, async_low, AsyncLow, context);
-        let always_ff_reset_opt_group_0_built = AlwaysFfResetOptGroup0Builder::default()
+        let always_ff_reset_opt_group_0_built = AlwaysFfResetOptGroupAsyncLowBuilder::default()
             .async_low(Box::new(async_low))
             .build()
             .into_diagnostic()?;
         let always_ff_reset_opt_group_0_built =
-            AlwaysFfResetOptGroup::AlwaysFfResetOptGroup0(always_ff_reset_opt_group_0_built);
+            AlwaysFfResetOptGroup::AsyncLow(always_ff_reset_opt_group_0_built);
         self.push(
             ASTType::AlwaysFfResetOptGroup(always_ff_reset_opt_group_0_built),
             context,
@@ -9889,12 +10185,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let async_high = pop_item!(self, async_high, AsyncHigh, context);
-        let always_ff_reset_opt_group_1_built = AlwaysFfResetOptGroup1Builder::default()
+        let always_ff_reset_opt_group_1_built = AlwaysFfResetOptGroupAsyncHighBuilder::default()
             .async_high(Box::new(async_high))
             .build()
             .into_diagnostic()?;
         let always_ff_reset_opt_group_1_built =
-            AlwaysFfResetOptGroup::AlwaysFfResetOptGroup1(always_ff_reset_opt_group_1_built);
+            AlwaysFfResetOptGroup::AsyncHigh(always_ff_reset_opt_group_1_built);
         self.push(
             ASTType::AlwaysFfResetOptGroup(always_ff_reset_opt_group_1_built),
             context,
@@ -9915,12 +10211,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let sync_low = pop_item!(self, sync_low, SyncLow, context);
-        let always_ff_reset_opt_group_2_built = AlwaysFfResetOptGroup2Builder::default()
+        let always_ff_reset_opt_group_2_built = AlwaysFfResetOptGroupSyncLowBuilder::default()
             .sync_low(Box::new(sync_low))
             .build()
             .into_diagnostic()?;
         let always_ff_reset_opt_group_2_built =
-            AlwaysFfResetOptGroup::AlwaysFfResetOptGroup2(always_ff_reset_opt_group_2_built);
+            AlwaysFfResetOptGroup::SyncLow(always_ff_reset_opt_group_2_built);
         self.push(
             ASTType::AlwaysFfResetOptGroup(always_ff_reset_opt_group_2_built),
             context,
@@ -9941,12 +10237,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let sync_high = pop_item!(self, sync_high, SyncHigh, context);
-        let always_ff_reset_opt_group_3_built = AlwaysFfResetOptGroup3Builder::default()
+        let always_ff_reset_opt_group_3_built = AlwaysFfResetOptGroupSyncHighBuilder::default()
             .sync_high(Box::new(sync_high))
             .build()
             .into_diagnostic()?;
         let always_ff_reset_opt_group_3_built =
-            AlwaysFfResetOptGroup::AlwaysFfResetOptGroup3(always_ff_reset_opt_group_3_built);
+            AlwaysFfResetOptGroup::SyncHigh(always_ff_reset_opt_group_3_built);
         self.push(
             ASTType::AlwaysFfResetOptGroup(always_ff_reset_opt_group_3_built),
             context,
@@ -11169,12 +11465,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let parameter = pop_item!(self, parameter, Parameter, context);
-        let with_parameter_item_group_0_built = WithParameterItemGroup0Builder::default()
+        let with_parameter_item_group_0_built = WithParameterItemGroupParameterBuilder::default()
             .parameter(Box::new(parameter))
             .build()
             .into_diagnostic()?;
         let with_parameter_item_group_0_built =
-            WithParameterItemGroup::WithParameterItemGroup0(with_parameter_item_group_0_built);
+            WithParameterItemGroup::Parameter(with_parameter_item_group_0_built);
         self.push(
             ASTType::WithParameterItemGroup(with_parameter_item_group_0_built),
             context,
@@ -11195,12 +11491,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let localparam = pop_item!(self, localparam, Localparam, context);
-        let with_parameter_item_group_1_built = WithParameterItemGroup1Builder::default()
+        let with_parameter_item_group_1_built = WithParameterItemGroupLocalparamBuilder::default()
             .localparam(Box::new(localparam))
             .build()
             .into_diagnostic()?;
         let with_parameter_item_group_1_built =
-            WithParameterItemGroup::WithParameterItemGroup1(with_parameter_item_group_1_built);
+            WithParameterItemGroup::Localparam(with_parameter_item_group_1_built);
         self.push(
             ASTType::WithParameterItemGroup(with_parameter_item_group_1_built),
             context,
@@ -11461,11 +11757,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let input = pop_item!(self, input, Input, context);
-        let direction_0_built = Direction0Builder::default()
+        let direction_0_built = DirectionInputBuilder::default()
             .input(Box::new(input))
             .build()
             .into_diagnostic()?;
-        let direction_0_built = Direction::Direction0(direction_0_built);
+        let direction_0_built = Direction::Input(direction_0_built);
         // Calling user action here
         self.user_grammar.direction(&direction_0_built)?;
         self.push(ASTType::Direction(direction_0_built), context);
@@ -11485,11 +11781,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let output = pop_item!(self, output, Output, context);
-        let direction_1_built = Direction1Builder::default()
+        let direction_1_built = DirectionOutputBuilder::default()
             .output(Box::new(output))
             .build()
             .into_diagnostic()?;
-        let direction_1_built = Direction::Direction1(direction_1_built);
+        let direction_1_built = Direction::Output(direction_1_built);
         // Calling user action here
         self.user_grammar.direction(&direction_1_built)?;
         self.push(ASTType::Direction(direction_1_built), context);
@@ -11509,11 +11805,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let inout = pop_item!(self, inout, Inout, context);
-        let direction_2_built = Direction2Builder::default()
+        let direction_2_built = DirectionInoutBuilder::default()
             .inout(Box::new(inout))
             .build()
             .into_diagnostic()?;
-        let direction_2_built = Direction::Direction2(direction_2_built);
+        let direction_2_built = Direction::Inout(direction_2_built);
         // Calling user action here
         self.user_grammar.direction(&direction_2_built)?;
         self.push(ASTType::Direction(direction_2_built), context);
@@ -11533,11 +11829,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let r#ref = pop_item!(self, r#ref, Ref, context);
-        let direction_3_built = Direction3Builder::default()
+        let direction_3_built = DirectionRefBuilder::default()
             .r#ref(Box::new(r#ref))
             .build()
             .into_diagnostic()?;
-        let direction_3_built = Direction::Direction3(direction_3_built);
+        let direction_3_built = Direction::Ref(direction_3_built);
         // Calling user action here
         self.user_grammar.direction(&direction_3_built)?;
         self.push(ASTType::Direction(direction_3_built), context);
@@ -11745,11 +12041,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let variable_declaration =
             pop_item!(self, variable_declaration, VariableDeclaration, context);
-        let function_item_0_built = FunctionItem0Builder::default()
+        let function_item_0_built = FunctionItemVariableDeclarationBuilder::default()
             .variable_declaration(Box::new(variable_declaration))
             .build()
             .into_diagnostic()?;
-        let function_item_0_built = FunctionItem::FunctionItem0(function_item_0_built);
+        let function_item_0_built = FunctionItem::VariableDeclaration(function_item_0_built);
         // Calling user action here
         self.user_grammar.function_item(&function_item_0_built)?;
         self.push(ASTType::FunctionItem(function_item_0_built), context);
@@ -11769,11 +12065,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let statement = pop_item!(self, statement, Statement, context);
-        let function_item_1_built = FunctionItem1Builder::default()
+        let function_item_1_built = FunctionItemStatementBuilder::default()
             .statement(Box::new(statement))
             .build()
             .into_diagnostic()?;
-        let function_item_1_built = FunctionItem::FunctionItem1(function_item_1_built);
+        let function_item_1_built = FunctionItem::Statement(function_item_1_built);
         // Calling user action here
         self.user_grammar.function_item(&function_item_1_built)?;
         self.push(ASTType::FunctionItem(function_item_1_built), context);
@@ -12583,11 +12879,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let variable_declaration =
             pop_item!(self, variable_declaration, VariableDeclaration, context);
-        let module_item_0_built = ModuleItem0Builder::default()
+        let module_item_0_built = ModuleItemVariableDeclarationBuilder::default()
             .variable_declaration(Box::new(variable_declaration))
             .build()
             .into_diagnostic()?;
-        let module_item_0_built = ModuleItem::ModuleItem0(module_item_0_built);
+        let module_item_0_built = ModuleItem::VariableDeclaration(module_item_0_built);
         // Calling user action here
         self.user_grammar.module_item(&module_item_0_built)?;
         self.push(ASTType::ModuleItem(module_item_0_built), context);
@@ -12608,11 +12904,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let parameter_declaration =
             pop_item!(self, parameter_declaration, ParameterDeclaration, context);
-        let module_item_1_built = ModuleItem1Builder::default()
+        let module_item_1_built = ModuleItemParameterDeclarationBuilder::default()
             .parameter_declaration(Box::new(parameter_declaration))
             .build()
             .into_diagnostic()?;
-        let module_item_1_built = ModuleItem::ModuleItem1(module_item_1_built);
+        let module_item_1_built = ModuleItem::ParameterDeclaration(module_item_1_built);
         // Calling user action here
         self.user_grammar.module_item(&module_item_1_built)?;
         self.push(ASTType::ModuleItem(module_item_1_built), context);
@@ -12633,11 +12929,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let localparam_declaration =
             pop_item!(self, localparam_declaration, LocalparamDeclaration, context);
-        let module_item_2_built = ModuleItem2Builder::default()
+        let module_item_2_built = ModuleItemLocalparamDeclarationBuilder::default()
             .localparam_declaration(Box::new(localparam_declaration))
             .build()
             .into_diagnostic()?;
-        let module_item_2_built = ModuleItem::ModuleItem2(module_item_2_built);
+        let module_item_2_built = ModuleItem::LocalparamDeclaration(module_item_2_built);
         // Calling user action here
         self.user_grammar.module_item(&module_item_2_built)?;
         self.push(ASTType::ModuleItem(module_item_2_built), context);
@@ -12658,11 +12954,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let always_ff_declaration =
             pop_item!(self, always_ff_declaration, AlwaysFfDeclaration, context);
-        let module_item_3_built = ModuleItem3Builder::default()
+        let module_item_3_built = ModuleItemAlwaysFfDeclarationBuilder::default()
             .always_ff_declaration(Box::new(always_ff_declaration))
             .build()
             .into_diagnostic()?;
-        let module_item_3_built = ModuleItem::ModuleItem3(module_item_3_built);
+        let module_item_3_built = ModuleItem::AlwaysFfDeclaration(module_item_3_built);
         // Calling user action here
         self.user_grammar.module_item(&module_item_3_built)?;
         self.push(ASTType::ModuleItem(module_item_3_built), context);
@@ -12687,11 +12983,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             AlwaysCombDeclaration,
             context
         );
-        let module_item_4_built = ModuleItem4Builder::default()
+        let module_item_4_built = ModuleItemAlwaysCombDeclarationBuilder::default()
             .always_comb_declaration(Box::new(always_comb_declaration))
             .build()
             .into_diagnostic()?;
-        let module_item_4_built = ModuleItem::ModuleItem4(module_item_4_built);
+        let module_item_4_built = ModuleItem::AlwaysCombDeclaration(module_item_4_built);
         // Calling user action here
         self.user_grammar.module_item(&module_item_4_built)?;
         self.push(ASTType::ModuleItem(module_item_4_built), context);
@@ -12711,11 +13007,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let assign_declaration = pop_item!(self, assign_declaration, AssignDeclaration, context);
-        let module_item_5_built = ModuleItem5Builder::default()
+        let module_item_5_built = ModuleItemAssignDeclarationBuilder::default()
             .assign_declaration(Box::new(assign_declaration))
             .build()
             .into_diagnostic()?;
-        let module_item_5_built = ModuleItem::ModuleItem5(module_item_5_built);
+        let module_item_5_built = ModuleItem::AssignDeclaration(module_item_5_built);
         // Calling user action here
         self.user_grammar.module_item(&module_item_5_built)?;
         self.push(ASTType::ModuleItem(module_item_5_built), context);
@@ -12735,11 +13031,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let instantiation = pop_item!(self, instantiation, Instantiation, context);
-        let module_item_6_built = ModuleItem6Builder::default()
+        let module_item_6_built = ModuleItemInstantiationBuilder::default()
             .instantiation(Box::new(instantiation))
             .build()
             .into_diagnostic()?;
-        let module_item_6_built = ModuleItem::ModuleItem6(module_item_6_built);
+        let module_item_6_built = ModuleItem::Instantiation(module_item_6_built);
         // Calling user action here
         self.user_grammar.module_item(&module_item_6_built)?;
         self.push(ASTType::ModuleItem(module_item_6_built), context);
@@ -12760,11 +13056,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let function_declaration =
             pop_item!(self, function_declaration, FunctionDeclaration, context);
-        let module_item_7_built = ModuleItem7Builder::default()
+        let module_item_7_built = ModuleItemFunctionDeclarationBuilder::default()
             .function_declaration(Box::new(function_declaration))
             .build()
             .into_diagnostic()?;
-        let module_item_7_built = ModuleItem::ModuleItem7(module_item_7_built);
+        let module_item_7_built = ModuleItem::FunctionDeclaration(module_item_7_built);
         // Calling user action here
         self.user_grammar.module_item(&module_item_7_built)?;
         self.push(ASTType::ModuleItem(module_item_7_built), context);
@@ -12785,11 +13081,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let module_if_declaration =
             pop_item!(self, module_if_declaration, ModuleIfDeclaration, context);
-        let module_item_8_built = ModuleItem8Builder::default()
+        let module_item_8_built = ModuleItemModuleIfDeclarationBuilder::default()
             .module_if_declaration(Box::new(module_if_declaration))
             .build()
             .into_diagnostic()?;
-        let module_item_8_built = ModuleItem::ModuleItem8(module_item_8_built);
+        let module_item_8_built = ModuleItem::ModuleIfDeclaration(module_item_8_built);
         // Calling user action here
         self.user_grammar.module_item(&module_item_8_built)?;
         self.push(ASTType::ModuleItem(module_item_8_built), context);
@@ -12810,11 +13106,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let module_for_declaration =
             pop_item!(self, module_for_declaration, ModuleForDeclaration, context);
-        let module_item_9_built = ModuleItem9Builder::default()
+        let module_item_9_built = ModuleItemModuleForDeclarationBuilder::default()
             .module_for_declaration(Box::new(module_for_declaration))
             .build()
             .into_diagnostic()?;
-        let module_item_9_built = ModuleItem::ModuleItem9(module_item_9_built);
+        let module_item_9_built = ModuleItem::ModuleForDeclaration(module_item_9_built);
         // Calling user action here
         self.user_grammar.module_item(&module_item_9_built)?;
         self.push(ASTType::ModuleItem(module_item_9_built), context);
@@ -13599,11 +13895,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let variable_declaration =
             pop_item!(self, variable_declaration, VariableDeclaration, context);
-        let interface_item_0_built = InterfaceItem0Builder::default()
+        let interface_item_0_built = InterfaceItemVariableDeclarationBuilder::default()
             .variable_declaration(Box::new(variable_declaration))
             .build()
             .into_diagnostic()?;
-        let interface_item_0_built = InterfaceItem::InterfaceItem0(interface_item_0_built);
+        let interface_item_0_built = InterfaceItem::VariableDeclaration(interface_item_0_built);
         // Calling user action here
         self.user_grammar.interface_item(&interface_item_0_built)?;
         self.push(ASTType::InterfaceItem(interface_item_0_built), context);
@@ -13624,11 +13920,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let parameter_declaration =
             pop_item!(self, parameter_declaration, ParameterDeclaration, context);
-        let interface_item_1_built = InterfaceItem1Builder::default()
+        let interface_item_1_built = InterfaceItemParameterDeclarationBuilder::default()
             .parameter_declaration(Box::new(parameter_declaration))
             .build()
             .into_diagnostic()?;
-        let interface_item_1_built = InterfaceItem::InterfaceItem1(interface_item_1_built);
+        let interface_item_1_built = InterfaceItem::ParameterDeclaration(interface_item_1_built);
         // Calling user action here
         self.user_grammar.interface_item(&interface_item_1_built)?;
         self.push(ASTType::InterfaceItem(interface_item_1_built), context);
@@ -13649,11 +13945,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let localparam_declaration =
             pop_item!(self, localparam_declaration, LocalparamDeclaration, context);
-        let interface_item_2_built = InterfaceItem2Builder::default()
+        let interface_item_2_built = InterfaceItemLocalparamDeclarationBuilder::default()
             .localparam_declaration(Box::new(localparam_declaration))
             .build()
             .into_diagnostic()?;
-        let interface_item_2_built = InterfaceItem::InterfaceItem2(interface_item_2_built);
+        let interface_item_2_built = InterfaceItem::LocalparamDeclaration(interface_item_2_built);
         // Calling user action here
         self.user_grammar.interface_item(&interface_item_2_built)?;
         self.push(ASTType::InterfaceItem(interface_item_2_built), context);
@@ -13673,11 +13969,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let modport_declaration = pop_item!(self, modport_declaration, ModportDeclaration, context);
-        let interface_item_3_built = InterfaceItem3Builder::default()
+        let interface_item_3_built = InterfaceItemModportDeclarationBuilder::default()
             .modport_declaration(Box::new(modport_declaration))
             .build()
             .into_diagnostic()?;
-        let interface_item_3_built = InterfaceItem::InterfaceItem3(interface_item_3_built);
+        let interface_item_3_built = InterfaceItem::ModportDeclaration(interface_item_3_built);
         // Calling user action here
         self.user_grammar.interface_item(&interface_item_3_built)?;
         self.push(ASTType::InterfaceItem(interface_item_3_built), context);
@@ -13702,11 +13998,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             InterfaceIfDeclaration,
             context
         );
-        let interface_item_4_built = InterfaceItem4Builder::default()
+        let interface_item_4_built = InterfaceItemInterfaceIfDeclarationBuilder::default()
             .interface_if_declaration(Box::new(interface_if_declaration))
             .build()
             .into_diagnostic()?;
-        let interface_item_4_built = InterfaceItem::InterfaceItem4(interface_item_4_built);
+        let interface_item_4_built = InterfaceItem::InterfaceIfDeclaration(interface_item_4_built);
         // Calling user action here
         self.user_grammar.interface_item(&interface_item_4_built)?;
         self.push(ASTType::InterfaceItem(interface_item_4_built), context);
@@ -13731,11 +14027,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             InterfaceForDeclaration,
             context
         );
-        let interface_item_5_built = InterfaceItem5Builder::default()
+        let interface_item_5_built = InterfaceItemInterfaceForDeclarationBuilder::default()
             .interface_for_declaration(Box::new(interface_for_declaration))
             .build()
             .into_diagnostic()?;
-        let interface_item_5_built = InterfaceItem::InterfaceItem5(interface_item_5_built);
+        let interface_item_5_built = InterfaceItem::InterfaceForDeclaration(interface_item_5_built);
         // Calling user action here
         self.user_grammar.interface_item(&interface_item_5_built)?;
         self.push(ASTType::InterfaceItem(interface_item_5_built), context);
@@ -13755,11 +14051,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let module_declaration = pop_item!(self, module_declaration, ModuleDeclaration, context);
-        let description_0_built = Description0Builder::default()
+        let description_0_built = DescriptionModuleDeclarationBuilder::default()
             .module_declaration(Box::new(module_declaration))
             .build()
             .into_diagnostic()?;
-        let description_0_built = Description::Description0(description_0_built);
+        let description_0_built = Description::ModuleDeclaration(description_0_built);
         // Calling user action here
         self.user_grammar.description(&description_0_built)?;
         self.push(ASTType::Description(description_0_built), context);
@@ -13780,11 +14076,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let interface_declaration =
             pop_item!(self, interface_declaration, InterfaceDeclaration, context);
-        let description_1_built = Description1Builder::default()
+        let description_1_built = DescriptionInterfaceDeclarationBuilder::default()
             .interface_declaration(Box::new(interface_declaration))
             .build()
             .into_diagnostic()?;
-        let description_1_built = Description::Description1(description_1_built);
+        let description_1_built = Description::InterfaceDeclaration(description_1_built);
         // Calling user action here
         self.user_grammar.description(&description_1_built)?;
         self.push(ASTType::Description(description_1_built), context);

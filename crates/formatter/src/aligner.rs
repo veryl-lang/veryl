@@ -144,14 +144,14 @@ impl VerylWalker for Aligner {
     /// Semantic action for non-terminal 'Number'
     fn number(&mut self, arg: &Number) {
         let token = match arg {
-            Number::Number0(x) => match &*x.integral_number {
-                IntegralNumber::IntegralNumber0(x) => &x.based.based_token,
-                IntegralNumber::IntegralNumber1(x) => &x.base_less.base_less_token,
-                IntegralNumber::IntegralNumber2(x) => &x.all_bit.all_bit_token,
+            Number::IntegralNumber(x) => match &*x.integral_number {
+                IntegralNumber::Based(x) => &x.based.based_token,
+                IntegralNumber::BaseLess(x) => &x.base_less.base_less_token,
+                IntegralNumber::AllBit(x) => &x.all_bit.all_bit_token,
             },
-            Number::Number1(x) => match &*x.real_number {
-                RealNumber::RealNumber0(x) => &x.fixed_point.fixed_point_token,
-                RealNumber::RealNumber1(x) => &x.exponent.exponent_token,
+            Number::RealNumber(x) => match &*x.real_number {
+                RealNumber::FixedPoint(x) => &x.fixed_point.fixed_point_token,
+                RealNumber::Exponent(x) => &x.exponent.exponent_token,
             },
         };
         self.aligns[align_kind::EXPRESSION].token(token);
@@ -165,12 +165,8 @@ impl VerylWalker for Aligner {
             self.aligns[align_kind::EXPRESSION].space(1);
             self.aligns[align_kind::WIDTH].space(1);
             let token = match &*x.expression_list_group {
-                ExpressionListGroup::ExpressionListGroup0(x) => {
-                    &x.binary_operator.binary_operator_token
-                }
-                ExpressionListGroup::ExpressionListGroup1(x) => {
-                    &x.common_operator.common_operator_token
-                }
+                ExpressionListGroup::BinaryOperator(x) => &x.binary_operator.binary_operator_token,
+                ExpressionListGroup::CommonOperator(x) => &x.common_operator.common_operator_token,
             };
             self.aligns[align_kind::EXPRESSION].token(token);
             self.aligns[align_kind::WIDTH].token(token);
@@ -184,12 +180,8 @@ impl VerylWalker for Aligner {
     fn expression1(&mut self, arg: &Expression1) {
         if let Some(ref x) = arg.expression1_opt {
             let token = match &*x.expression1_opt_group {
-                Expression1OptGroup::Expression1OptGroup0(x) => {
-                    &x.unary_operator.unary_operator_token
-                }
-                Expression1OptGroup::Expression1OptGroup1(x) => {
-                    &x.common_operator.common_operator_token
-                }
+                Expression1OptGroup::UnaryOperator(x) => &x.unary_operator.unary_operator_token,
+                Expression1OptGroup::CommonOperator(x) => &x.common_operator.common_operator_token,
             };
             self.aligns[align_kind::EXPRESSION].token(token);
             self.aligns[align_kind::WIDTH].token(token);
@@ -200,15 +192,15 @@ impl VerylWalker for Aligner {
     /// Semantic action for non-terminal 'Factor'
     fn factor(&mut self, arg: &Factor) {
         match arg {
-            Factor::Factor0(x) => self.number(&x.number),
-            Factor::Factor1(x) => {
+            Factor::Number(x) => self.number(&x.number),
+            Factor::IdentifierFactorList(x) => {
                 self.aligns[align_kind::EXPRESSION].token(&x.identifier.identifier_token);
                 self.aligns[align_kind::WIDTH].token(&x.identifier.identifier_token);
                 for x in &x.factor_list {
                     self.range(&x.range);
                 }
             }
-            Factor::Factor2(x) => {
+            Factor::LParenExpressionRParen(x) => {
                 self.aligns[align_kind::EXPRESSION].token(&x.l_paren.l_paren_token);
                 self.aligns[align_kind::WIDTH].token(&x.l_paren.l_paren_token);
                 self.expression(&x.expression);
@@ -244,17 +236,17 @@ impl VerylWalker for Aligner {
     /// Semantic action for non-terminal 'Type'
     fn r#type(&mut self, arg: &Type) {
         let token = match &*arg.type_group {
-            TypeGroup::TypeGroup0(x) => match &*x.builtin_type {
-                BuiltinType::BuiltinType0(x) => &x.logic.logic_token,
-                BuiltinType::BuiltinType1(x) => &x.bit.bit_token,
-                BuiltinType::BuiltinType2(x) => &x.u32.u32_token,
-                BuiltinType::BuiltinType3(x) => &x.u64.u64_token,
-                BuiltinType::BuiltinType4(x) => &x.i32.i32_token,
-                BuiltinType::BuiltinType5(x) => &x.i64.i64_token,
-                BuiltinType::BuiltinType6(x) => &x.f32.f32_token,
-                BuiltinType::BuiltinType7(x) => &x.f64.f64_token,
+            TypeGroup::BuiltinType(x) => match &*x.builtin_type {
+                BuiltinType::Logic(x) => &x.logic.logic_token,
+                BuiltinType::Bit(x) => &x.bit.bit_token,
+                BuiltinType::U32(x) => &x.u32.u32_token,
+                BuiltinType::U64(x) => &x.u64.u64_token,
+                BuiltinType::I32(x) => &x.i32.i32_token,
+                BuiltinType::I64(x) => &x.i64.i64_token,
+                BuiltinType::F32(x) => &x.f32.f32_token,
+                BuiltinType::F64(x) => &x.f64.f64_token,
             },
-            TypeGroup::TypeGroup1(x) => &x.identifier.identifier_token,
+            TypeGroup::Identifier(x) => &x.identifier.identifier_token,
         };
         self.aligns[align_kind::TYPE].start_item();
         self.aligns[align_kind::TYPE].token(token);
@@ -277,8 +269,8 @@ impl VerylWalker for Aligner {
     fn assignment_statement(&mut self, arg: &AssignmentStatement) {
         self.identifier(&arg.identifier);
         let token = match &*arg.assignment_statement_group {
-            AssignmentStatementGroup::AssignmentStatementGroup0(x) => &x.equ.equ_token,
-            AssignmentStatementGroup::AssignmentStatementGroup1(x) => {
+            AssignmentStatementGroup::Equ(x) => &x.equ.equ_token,
+            AssignmentStatementGroup::AssignmentOperator(x) => {
                 &x.assignment_operator.assignment_operator_token
             }
         };
@@ -362,10 +354,10 @@ impl VerylWalker for Aligner {
     /// Semantic action for non-terminal 'WithParameterItem'
     fn with_parameter_item(&mut self, arg: &WithParameterItem) {
         match &*arg.with_parameter_item_group {
-            WithParameterItemGroup::WithParameterItemGroup0(x) => {
+            WithParameterItemGroup::Parameter(x) => {
                 self.insert(&x.parameter.parameter_token, 1);
             }
-            WithParameterItemGroup::WithParameterItemGroup1(_) => (),
+            WithParameterItemGroup::Localparam(_) => (),
         }
         self.identifier(&arg.identifier);
         self.r#type(&arg.r#type);
@@ -427,14 +419,14 @@ impl VerylWalker for Aligner {
     /// Semantic action for non-terminal 'Direction'
     fn direction(&mut self, arg: &Direction) {
         match arg {
-            Direction::Direction0(x) => {
+            Direction::Input(x) => {
                 self.insert(&x.input.input_token, 1);
             }
-            Direction::Direction1(_) => (),
-            Direction::Direction2(x) => {
+            Direction::Output(_) => (),
+            Direction::Inout(x) => {
                 self.insert(&x.inout.inout_token, 1);
             }
-            Direction::Direction3(x) => {
+            Direction::Ref(x) => {
                 self.insert(&x.r#ref.ref_token, 3);
             }
         }

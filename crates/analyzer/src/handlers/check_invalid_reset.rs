@@ -31,7 +31,7 @@ impl<'a> VerylGrammarTrait for CheckInvalidReset<'a> {
             // Chcek first if_reset when reset signel exists
             let if_reset_required = if arg.always_ff_declaration_opt.is_some() {
                 if let Some(x) = arg.always_ff_declaration_list.first() {
-                    !matches!(&*x.statement, Statement::Statement2(_))
+                    !matches!(&*x.statement, Statement::IfResetStatement(_))
                 } else {
                     true
                 }
@@ -48,7 +48,7 @@ impl<'a> VerylGrammarTrait for CheckInvalidReset<'a> {
             // Chcek reset signal when if_reset exists
             let mut if_reset_exist = false;
             for x in &arg.always_ff_declaration_list {
-                if let Statement::Statement2(_) = &*x.statement {
+                if let Statement::IfResetStatement(_) = &*x.statement {
                     if_reset_exist = true;
                 }
             }

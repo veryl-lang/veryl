@@ -29,7 +29,7 @@ impl<'a> Handler for CheckInvalidDirection<'a> {
 impl<'a> VerylGrammarTrait for CheckInvalidDirection<'a> {
     fn direction(&mut self, arg: &Direction) -> Result<()> {
         if let HandlerPoint::Before = self.point {
-            if let Direction::Direction3(x) = arg {
+            if let Direction::Ref(x) = arg {
                 if !self.in_function {
                     self.errors.push(AnalyzeError::invalid_direction(
                         "ref",

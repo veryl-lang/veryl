@@ -7,6 +7,7 @@
 use parol_runtime::id_tree::Tree;
 use parol_runtime::lexer::{TokenStream, Tokenizer};
 use parol_runtime::miette::Result;
+use parol_runtime::once_cell::sync::Lazy;
 #[allow(unused_imports)]
 use parol_runtime::parser::{
     DFATransition, LLKParser, LookaheadDFA, ParseTreeType, ParseType, Production,
@@ -89,8 +90,8 @@ pub const TERMINALS: &[&str; 65] = &[
     /* 64 */ ERROR_TOKEN,
 ];
 
-pub const TERMINAL_NAMES: &[&str; 65] = &[
-    /*  0 */ "EndOfInput",
+pub
+const TERMINAL_NAMES : & [& str ; 65] = & [    /*  0 */ "EndOfInput",
     /*  1 */ "Newline",
     /*  2 */ "Whitespace",
     /*  3 */ "LineComment",
@@ -155,7 +156,7 @@ pub const TERMINAL_NAMES: &[&str; 65] = &[
     /* 62 */ "U64",
     /* 63 */ "LBracketAMinusZAMinusZUnderscoreRBracketLBracket0Minus9aMinusZAMinusZUnderscoreRBracketStar",
     /* 64 */ "Error",
-];
+] ;
 
 /* SCANNER_0: "INITIAL" */
 const SCANNER_0: (&[&str; 5], &[usize; 59]) = (
@@ -6483,12 +6484,12 @@ pub const PRODUCTIONS: &[Production; 360] = &[
     },
 ];
 
-parol_runtime::lazy_static::lazy_static! {
-    static ref TOKENIZERS: Vec<(&'static str, Tokenizer)> = vec![
-        ("INITIAL", Tokenizer::build(TERMINALS, SCANNER_0.0, SCANNER_0.1).unwrap()),
-
-    ];
-}
+static TOKENIZERS: Lazy<Vec<(&'static str, Tokenizer)>> = Lazy::new(|| {
+    vec![(
+        "INITIAL",
+        Tokenizer::build(TERMINALS, SCANNER_0.0, SCANNER_0.1).unwrap(),
+    )]
+});
 
 pub fn parse<'t, T>(
     input: &'t str,
