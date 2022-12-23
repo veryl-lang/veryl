@@ -482,6 +482,84 @@ impl VerylWalker for Formatter {
         self.direction(&arg.direction);
     }
 
+    /// Semantic action for non-terminal 'EnumDeclaration'
+    fn enum_declaration(&mut self, arg: &EnumDeclaration) {
+        self.r#enum(&arg.r#enum);
+        self.space(1);
+        self.identifier(&arg.identifier);
+        self.colon(&arg.colon);
+        self.space(1);
+        self.r#type(&arg.r#type);
+        self.space(1);
+        self.token_will_push(&arg.l_brace.l_brace_token);
+        self.newline_push();
+        self.enum_list(&arg.enum_list);
+        self.newline_pop();
+        self.r_brace(&arg.r_brace);
+    }
+
+    /// Semantic action for non-terminal 'EnumList'
+    fn enum_list(&mut self, arg: &EnumList) {
+        self.enum_item(&arg.enum_item);
+        for x in &arg.enum_list_list {
+            self.comma(&x.comma);
+            self.newline();
+            self.enum_item(&x.enum_item);
+        }
+        if let Some(ref x) = arg.enum_list_opt {
+            self.comma(&x.comma);
+        } else {
+            self.str(",");
+        }
+    }
+
+    /// Semantic action for non-terminal 'EnumItem'
+    fn enum_item(&mut self, arg: &EnumItem) {
+        self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.enum_item_opt {
+            self.space(1);
+            self.equ(&x.equ);
+            self.space(1);
+            self.expression(&x.expression);
+        }
+    }
+
+    /// Semantic action for non-terminal 'StructDeclaration'
+    fn struct_declaration(&mut self, arg: &StructDeclaration) {
+        self.r#struct(&arg.r#struct);
+        self.space(1);
+        self.identifier(&arg.identifier);
+        self.space(1);
+        self.token_will_push(&arg.l_brace.l_brace_token);
+        self.newline_push();
+        self.struct_list(&arg.struct_list);
+        self.newline_pop();
+        self.r_brace(&arg.r_brace);
+    }
+
+    /// Semantic action for non-terminal 'StructList'
+    fn struct_list(&mut self, arg: &StructList) {
+        self.struct_item(&arg.struct_item);
+        for x in &arg.struct_list_list {
+            self.comma(&x.comma);
+            self.newline();
+            self.struct_item(&x.struct_item);
+        }
+        if let Some(ref x) = arg.struct_list_opt {
+            self.comma(&x.comma);
+        } else {
+            self.str(",");
+        }
+    }
+
+    /// Semantic action for non-terminal 'StructItem'
+    fn struct_item(&mut self, arg: &StructItem) {
+        self.identifier(&arg.identifier);
+        self.colon(&arg.colon);
+        self.space(1);
+        self.r#type(&arg.r#type);
+    }
+
     /// Semantic action for non-terminal 'Instantiation'
     fn instantiation(&mut self, arg: &Instantiation) {
         self.identifier(&arg.identifier);

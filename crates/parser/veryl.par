@@ -51,6 +51,7 @@ AsyncHighToken : 'async_high' : OwnedToken Comments;
 AsyncLowToken  : 'async_low'  : OwnedToken Comments;
 BitToken       : 'bit'        : OwnedToken Comments;
 ElseToken      : 'else'       : OwnedToken Comments;
+EnumToken      : 'enum'       : OwnedToken Comments;
 F32Token       : 'f32'        : OwnedToken Comments;
 F64Token       : 'f64'        : OwnedToken Comments;
 ForToken       : 'for'        : OwnedToken Comments;
@@ -74,6 +75,7 @@ PosedgeToken   : 'posedge'    : OwnedToken Comments;
 RefToken       : 'ref'        : OwnedToken Comments;
 ReturnToken    : 'return'     : OwnedToken Comments;
 StepToken      : 'step'       : OwnedToken Comments;
+StructToken    : 'struct'     : OwnedToken Comments;
 SyncHighToken  : 'sync_high'  : OwnedToken Comments;
 SyncLowToken   : 'sync_low'   : OwnedToken Comments;
 U32Token       : 'u32'        : OwnedToken Comments;
@@ -125,6 +127,7 @@ AsyncHigh : AsyncHighToken : VerylToken;
 AsyncLow  : AsyncLowToken  : VerylToken;
 Bit       : BitToken       : VerylToken;
 Else      : ElseToken      : VerylToken;
+Enum      : EnumToken      : VerylToken;
 F32       : F32Token       : VerylToken;
 F64       : F64Token       : VerylToken;
 For       : ForToken       : VerylToken;
@@ -148,6 +151,7 @@ Posedge   : PosedgeToken   : VerylToken;
 Ref       : RefToken       : VerylToken;
 Return    : ReturnToken    : VerylToken;
 Step      : StepToken      : VerylToken;
+Struct    : StructToken    : VerylToken;
 SyncHigh  : SyncHighToken  : VerylToken;
 SyncLow   : SyncLowToken   : VerylToken;
 U32       : U32Token       : VerylToken;
@@ -251,6 +255,18 @@ ModportList: ModportItem { Comma ModportItem } [ Comma ];
 
 ModportItem: Identifier Colon Direction;
 
+EnumDeclaration: Enum Identifier Colon Type LBrace EnumList RBrace;
+
+EnumList: EnumItem { Comma EnumItem } [ Comma ];
+
+EnumItem: Identifier [ Equ Expression ];
+
+StructDeclaration: Struct Identifier LBrace StructList RBrace;
+
+StructList: StructItem { Comma StructItem } [ Comma ];
+
+StructItem: Identifier Colon Type;
+
 // ----------------------------------------------------------------------------
 // Instantiation
 // ----------------------------------------------------------------------------
@@ -323,6 +339,8 @@ ModuleItem: VariableDeclaration
           | FunctionDeclaration
           | ModuleIfDeclaration
           | ModuleForDeclaration
+          | EnumDeclaration
+          | StructDeclaration
           ;
 
 // ----------------------------------------------------------------------------
@@ -341,6 +359,8 @@ InterfaceItem: VariableDeclaration
              | ModportDeclaration
              | InterfaceIfDeclaration
              | InterfaceForDeclaration
+             | EnumDeclaration
+             | StructDeclaration
              ;
 
 // ----------------------------------------------------------------------------

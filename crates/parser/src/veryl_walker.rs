@@ -244,6 +244,13 @@ pub trait VerylWalker {
         after!(self, r#else, arg);
     }
 
+    /// Semantic action for non-terminal 'Enum'
+    fn r#enum(&mut self, arg: &Enum) {
+        before!(self, r#enum, arg);
+        self.veryl_token(&arg.enum_token);
+        after!(self, r#enum, arg);
+    }
+
     /// Semantic action for non-terminal 'F32'
     fn f32(&mut self, arg: &F32) {
         before!(self, f32, arg);
@@ -403,6 +410,13 @@ pub trait VerylWalker {
         before!(self, step, arg);
         self.veryl_token(&arg.step_token);
         after!(self, step, arg);
+    }
+
+    /// Semantic action for non-terminal 'Struct'
+    fn r#struct(&mut self, arg: &Struct) {
+        before!(self, r#struct, arg);
+        self.veryl_token(&arg.struct_token);
+        after!(self, r#struct, arg);
     }
 
     /// Semantic action for non-terminal 'SyncHigh'
@@ -835,6 +849,78 @@ pub trait VerylWalker {
         after!(self, modport_item, arg);
     }
 
+    /// Semantic action for non-terminal 'EnumDeclaration'
+    fn enum_declaration(&mut self, arg: &EnumDeclaration) {
+        before!(self, enum_declaration, arg);
+        self.r#enum(&arg.r#enum);
+        self.identifier(&arg.identifier);
+        self.colon(&arg.colon);
+        self.r#type(&arg.r#type);
+        self.l_brace(&arg.l_brace);
+        self.enum_list(&arg.enum_list);
+        self.r_brace(&arg.r_brace);
+        after!(self, enum_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'EnumList'
+    fn enum_list(&mut self, arg: &EnumList) {
+        before!(self, enum_list, arg);
+        self.enum_item(&arg.enum_item);
+        for x in &arg.enum_list_list {
+            self.comma(&x.comma);
+            self.enum_item(&x.enum_item);
+        }
+        if let Some(ref x) = arg.enum_list_opt {
+            self.comma(&x.comma);
+        }
+        after!(self, enum_list, arg);
+    }
+
+    /// Semantic action for non-terminal 'EnumItem'
+    fn enum_item(&mut self, arg: &EnumItem) {
+        before!(self, enum_item, arg);
+        self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.enum_item_opt {
+            self.equ(&x.equ);
+            self.expression(&x.expression);
+        }
+        after!(self, enum_item, arg);
+    }
+
+    /// Semantic action for non-terminal 'StructDeclaration'
+    fn struct_declaration(&mut self, arg: &StructDeclaration) {
+        before!(self, struct_declaration, arg);
+        self.r#struct(&arg.r#struct);
+        self.identifier(&arg.identifier);
+        self.l_brace(&arg.l_brace);
+        self.struct_list(&arg.struct_list);
+        self.r_brace(&arg.r_brace);
+        after!(self, struct_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'StructList'
+    fn struct_list(&mut self, arg: &StructList) {
+        before!(self, struct_list, arg);
+        self.struct_item(&arg.struct_item);
+        for x in &arg.struct_list_list {
+            self.comma(&x.comma);
+            self.struct_item(&x.struct_item);
+        }
+        if let Some(ref x) = arg.struct_list_opt {
+            self.comma(&x.comma);
+        }
+        after!(self, struct_list, arg);
+    }
+
+    /// Semantic action for non-terminal 'StructItem'
+    fn struct_item(&mut self, arg: &StructItem) {
+        before!(self, struct_item, arg);
+        self.identifier(&arg.identifier);
+        self.colon(&arg.colon);
+        self.r#type(&arg.r#type);
+        after!(self, struct_item, arg);
+    }
+
     /// Semantic action for non-terminal 'Instantiation'
     fn instantiation(&mut self, arg: &Instantiation) {
         before!(self, instantiation, arg);
@@ -1149,6 +1235,8 @@ pub trait VerylWalker {
             ModuleItem::ModuleForDeclaration(x) => {
                 self.module_for_declaration(&x.module_for_declaration)
             }
+            ModuleItem::EnumDeclaration(x) => self.enum_declaration(&x.enum_declaration),
+            ModuleItem::StructDeclaration(x) => self.struct_declaration(&x.struct_declaration),
         };
         after!(self, module_item, arg);
     }
@@ -1256,6 +1344,8 @@ pub trait VerylWalker {
             InterfaceItem::InterfaceForDeclaration(x) => {
                 self.interface_for_declaration(&x.interface_for_declaration)
             }
+            InterfaceItem::EnumDeclaration(x) => self.enum_declaration(&x.enum_declaration),
+            InterfaceItem::StructDeclaration(x) => self.struct_declaration(&x.struct_declaration),
         };
         after!(self, interface_item, arg);
     }

@@ -354,6 +354,16 @@ impl VerylWalker for Aligner {
         self.modport_list(&arg.modport_list);
     }
 
+    /// Semantic action for non-terminal 'EnumDeclaration'
+    fn enum_declaration(&mut self, arg: &EnumDeclaration) {
+        self.enum_list(&arg.enum_list);
+    }
+
+    /// Semantic action for non-terminal 'StructDeclaration'
+    fn struct_declaration(&mut self, arg: &StructDeclaration) {
+        self.struct_list(&arg.struct_list);
+    }
+
     /// Semantic action for non-terminal 'Instantiation'
     fn instantiation(&mut self, arg: &Instantiation) {
         if let Some(ref x) = arg.instantiation_opt {
