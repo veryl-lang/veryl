@@ -25,6 +25,12 @@ thiserror = "1.0"
 
 [workspace.metadata.release]
 tag = false
+pre-release-replacements = [
+    {file="CHANGELOG.md", search="Unreleased", replace="v{{version}}"},
+    {file="CHANGELOG.md", search="ReleaseDate", replace="{{date}}"},
+    {file="CHANGELOG.md", search="Change Log", replace="Change Log\n\n## [Unreleased](https://github.com/dalance/veryl/compare/v{{version}}...Unreleased) - ReleaseDate"},
+    {file="README.md", search = "changelog-v[0-9\\.]+", replace = "changelog-v{{version}}" },
+]
 
 [profile.dev.build-override]
 opt-level = 3
