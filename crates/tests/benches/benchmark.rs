@@ -2,6 +2,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughpu
 use std::fs;
 use veryl_analyzer::Analyzer;
 use veryl_formatter::Formatter;
+use veryl_metadata::Metadata;
 use veryl_parser::Parser;
 
 fn criterion_benchmark(c: &mut Criterion) {
@@ -10,6 +11,9 @@ fn criterion_benchmark(c: &mut Criterion) {
         let input = fs::read_to_string(testcase).unwrap();
         text.push_str(&input);
     }
+
+    let metadata_path = Metadata::search_from_current().unwrap();
+    let metadata = Metadata::load(&metadata_path).unwrap();
 
     let mut group = c.benchmark_group("throughput");
     group.throughput(Throughput::Bytes(text.len() as u64));
@@ -24,7 +28,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function("format", |b| {
         b.iter(|| {
             let parser = Parser::parse(black_box(&text), &"").unwrap();
-            let mut formatter = Formatter::new();
+            let mut formatter = Formatter::new(&metadata);
             formatter.format(&parser.veryl);
         })
     });
