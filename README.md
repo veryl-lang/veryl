@@ -36,11 +36,11 @@ For example, "off-side rule" like Python, "automatic semicolon insertion" like E
 SystemVerilog has various syntax. Some syntaxes are inherited from Verilog, and some syntaxes are added from SystemVerilog.
 Additionally some syntaxes can be written, but cannot be used actually because major EDA tools don't support them.
 So user should learn many syntaxes and whether each syntax can be used or not.
-Veryl will not support old Verlog style, unrecommended description, and so on.
+Veryl will not support old Verilog style, unrecommended description, and so on.
 
 ### Transpiler to SystemVerilog
 
-HDL alternative languages should be transpiler to the tradisional HDLs like Verlog / VHDL because major EDA tools support them.
+HDL alternative languages should be transpiler to the tradisional HDLs like Verilog / VHDL because major EDA tools support them.
 Veryl is a transpiler to SystemVerilog.
 
 Transpiler to Verilog has wide EDA tool support including OSS EDA tools.
