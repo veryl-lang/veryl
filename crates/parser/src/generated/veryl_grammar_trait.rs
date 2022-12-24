@@ -1811,7 +1811,7 @@ pub struct AlwaysCombDeclarationList {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct AlwaysCombToken {
-    pub always_underscore_comb: crate::veryl_token::OwnedToken, /* always_comb */
+    pub balways_underscore_comb_b: crate::veryl_token::OwnedToken, /* \balways_comb\b */
     pub comments: Box<Comments>,
 }
 
@@ -1934,7 +1934,7 @@ pub enum AlwaysFfResetOptGroup {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct AlwaysFfToken {
-    pub always_underscore_ff: crate::veryl_token::OwnedToken, /* always_ff */
+    pub balways_underscore_ff_b: crate::veryl_token::OwnedToken, /* \balways_ff\b */
     pub comments: Box<Comments>,
 }
 
@@ -1981,7 +1981,7 @@ pub struct AssignDeclarationOpt {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct AssignToken {
-    pub assign: crate::veryl_token::OwnedToken, /* assign */
+    pub bassign_b: crate::veryl_token::OwnedToken, /* \bassign\b */
     pub comments: Box<Comments>,
 }
 
@@ -2047,7 +2047,7 @@ pub struct AsyncHigh {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct AsyncHighToken {
-    pub async_underscore_high: crate::veryl_token::OwnedToken, /* async_high */
+    pub basync_underscore_high_b: crate::veryl_token::OwnedToken, /* \basync_high\b */
     pub comments: Box<Comments>,
 }
 
@@ -2068,7 +2068,7 @@ pub struct AsyncLow {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct AsyncLowToken {
-    pub async_underscore_low: crate::veryl_token::OwnedToken, /* async_low */
+    pub basync_underscore_low_b: crate::veryl_token::OwnedToken, /* \basync_low\b */
     pub comments: Box<Comments>,
 }
 
@@ -2155,7 +2155,7 @@ pub struct Bit {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct BitToken {
-    pub bit: crate::veryl_token::OwnedToken, /* bit */
+    pub bbit_b: crate::veryl_token::OwnedToken, /* \bbit\b */
     pub comments: Box<Comments>,
 }
 
@@ -2340,7 +2340,7 @@ pub struct Else {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ElseToken {
-    pub r#else: crate::veryl_token::OwnedToken, /* else */
+    pub belse_b: crate::veryl_token::OwnedToken, /* \belse\b */
     pub comments: Box<Comments>,
 }
 
@@ -2432,7 +2432,7 @@ pub struct EnumListOpt {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct EnumToken {
-    pub r#enum: crate::veryl_token::OwnedToken, /* enum */
+    pub benum_b: crate::veryl_token::OwnedToken, /* \benum\b */
     pub comments: Box<Comments>,
 }
 
@@ -2559,7 +2559,7 @@ pub struct F32 {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct F32Token {
-    pub f32: crate::veryl_token::OwnedToken, /* f32 */
+    pub bf32_b: crate::veryl_token::OwnedToken, /* \bf32\b */
     pub comments: Box<Comments>,
 }
 
@@ -2580,7 +2580,7 @@ pub struct F64 {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct F64Token {
-    pub f64: crate::veryl_token::OwnedToken, /* f64 */
+    pub bf64_b: crate::veryl_token::OwnedToken, /* \bf64\b */
     pub comments: Box<Comments>,
 }
 
@@ -2687,7 +2687,7 @@ pub struct ForStatementOpt {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ForToken {
-    pub r#for: crate::veryl_token::OwnedToken, /* for */
+    pub bfor_b: crate::veryl_token::OwnedToken, /* \bfor\b */
     pub comments: Box<Comments>,
 }
 
@@ -2766,7 +2766,7 @@ pub enum FunctionItem {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct FunctionToken {
-    pub function: crate::veryl_token::OwnedToken, /* function */
+    pub bfunction_b: crate::veryl_token::OwnedToken, /* \bfunction\b */
     pub comments: Box<Comments>,
 }
 
@@ -2808,7 +2808,7 @@ pub struct I32 {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct I32Token {
-    pub i32: crate::veryl_token::OwnedToken, /* i32 */
+    pub bi32_b: crate::veryl_token::OwnedToken, /* \bi32\b */
     pub comments: Box<Comments>,
 }
 
@@ -2829,7 +2829,7 @@ pub struct I64 {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct I64Token {
-    pub i64: crate::veryl_token::OwnedToken, /* i64 */
+    pub bi64_b: crate::veryl_token::OwnedToken, /* \bi64\b */
     pub comments: Box<Comments>,
 }
 
@@ -2955,7 +2955,7 @@ pub struct IfResetStatementOptList {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct IfResetToken {
-    pub if_underscore_reset: crate::veryl_token::OwnedToken, /* if_reset */
+    pub bif_underscore_reset_b: crate::veryl_token::OwnedToken, /* \bif_reset\b */
     pub comments: Box<Comments>,
 }
 
@@ -3040,7 +3040,7 @@ pub struct IfStatementOptList {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct IfToken {
-    pub r#if: crate::veryl_token::OwnedToken, /* if */
+    pub bif_b: crate::veryl_token::OwnedToken, /* \bif\b */
     pub comments: Box<Comments>,
 }
 
@@ -3061,7 +3061,7 @@ pub struct In {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct InToken {
-    pub r#in: crate::veryl_token::OwnedToken, /* in */
+    pub bin_b: crate::veryl_token::OwnedToken, /* \bin\b */
     pub comments: Box<Comments>,
 }
 
@@ -3082,7 +3082,7 @@ pub struct Inout {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct InoutToken {
-    pub inout: crate::veryl_token::OwnedToken, /* inout */
+    pub binout_b: crate::veryl_token::OwnedToken, /* \binout\b */
     pub comments: Box<Comments>,
 }
 
@@ -3103,7 +3103,7 @@ pub struct Input {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct InputToken {
-    pub input: crate::veryl_token::OwnedToken, /* input */
+    pub binput_b: crate::veryl_token::OwnedToken, /* \binput\b */
     pub comments: Box<Comments>,
 }
 
@@ -3498,7 +3498,7 @@ pub enum InterfaceItem {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct InterfaceToken {
-    pub interface: crate::veryl_token::OwnedToken, /* interface */
+    pub binterface_b: crate::veryl_token::OwnedToken, /* \binterface\b */
     pub comments: Box<Comments>,
 }
 
@@ -3598,7 +3598,7 @@ pub struct LocalparamDeclaration {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct LocalparamToken {
-    pub localparam: crate::veryl_token::OwnedToken, /* localparam */
+    pub blocalparam_b: crate::veryl_token::OwnedToken, /* \blocalparam\b */
     pub comments: Box<Comments>,
 }
 
@@ -3619,7 +3619,7 @@ pub struct Logic {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct LogicToken {
-    pub logic: crate::veryl_token::OwnedToken, /* logic */
+    pub blogic_b: crate::veryl_token::OwnedToken, /* \blogic\b */
     pub comments: Box<Comments>,
 }
 
@@ -3720,7 +3720,7 @@ pub struct ModportListOpt {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModportToken {
-    pub modport: crate::veryl_token::OwnedToken, /* modport */
+    pub bmodport_b: crate::veryl_token::OwnedToken, /* \bmodport\b */
     pub comments: Box<Comments>,
 }
 
@@ -3950,7 +3950,7 @@ pub enum ModuleItem {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModuleToken {
-    pub module: crate::veryl_token::OwnedToken, /* module */
+    pub bmodule_b: crate::veryl_token::OwnedToken, /* \bmodule\b */
     pub comments: Box<Comments>,
 }
 
@@ -3981,7 +3981,7 @@ pub struct Negedge {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct NegedgeToken {
-    pub negedge: crate::veryl_token::OwnedToken, /* negedge */
+    pub bnegedge_b: crate::veryl_token::OwnedToken, /* \bnegedge\b */
     pub comments: Box<Comments>,
 }
 
@@ -4012,7 +4012,7 @@ pub struct Output {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct OutputToken {
-    pub output: crate::veryl_token::OwnedToken, /* output */
+    pub boutput_b: crate::veryl_token::OwnedToken, /* \boutput\b */
     pub comments: Box<Comments>,
 }
 
@@ -4049,7 +4049,7 @@ pub struct ParameterDeclaration {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ParameterToken {
-    pub parameter: crate::veryl_token::OwnedToken, /* parameter */
+    pub bparameter_b: crate::veryl_token::OwnedToken, /* \bparameter\b */
     pub comments: Box<Comments>,
 }
 
@@ -4138,7 +4138,7 @@ pub struct Posedge {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct PosedgeToken {
-    pub posedge: crate::veryl_token::OwnedToken, /* posedge */
+    pub bposedge_b: crate::veryl_token::OwnedToken, /* \bposedge\b */
     pub comments: Box<Comments>,
 }
 
@@ -4256,7 +4256,7 @@ pub struct Ref {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct RefToken {
-    pub r#ref: crate::veryl_token::OwnedToken, /* ref */
+    pub bref_b: crate::veryl_token::OwnedToken, /* \bref\b */
     pub comments: Box<Comments>,
 }
 
@@ -4289,7 +4289,7 @@ pub struct ReturnStatement {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ReturnToken {
-    pub r#return: crate::veryl_token::OwnedToken, /* return */
+    pub breturn_b: crate::veryl_token::OwnedToken, /* \breturn\b */
     pub comments: Box<Comments>,
 }
 
@@ -4364,7 +4364,7 @@ pub struct Step {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct StepToken {
-    pub step: crate::veryl_token::OwnedToken, /* step */
+    pub bstep_b: crate::veryl_token::OwnedToken, /* \bstep\b */
     pub comments: Box<Comments>,
 }
 
@@ -4444,7 +4444,7 @@ pub struct StructListOpt {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct StructToken {
-    pub r#struct: crate::veryl_token::OwnedToken, /* struct */
+    pub bstruct_b: crate::veryl_token::OwnedToken, /* \bstruct\b */
     pub comments: Box<Comments>,
 }
 
@@ -4465,7 +4465,7 @@ pub struct SyncHigh {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct SyncHighToken {
-    pub sync_underscore_high: crate::veryl_token::OwnedToken, /* sync_high */
+    pub bsync_underscore_high_b: crate::veryl_token::OwnedToken, /* \bsync_high\b */
     pub comments: Box<Comments>,
 }
 
@@ -4486,7 +4486,7 @@ pub struct SyncLow {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct SyncLowToken {
-    pub sync_underscore_low: crate::veryl_token::OwnedToken, /* sync_low */
+    pub bsync_underscore_low_b: crate::veryl_token::OwnedToken, /* \bsync_low\b */
     pub comments: Box<Comments>,
 }
 
@@ -4538,7 +4538,7 @@ pub struct U32 {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct U32Token {
-    pub u32: crate::veryl_token::OwnedToken, /* u32 */
+    pub bu32_b: crate::veryl_token::OwnedToken, /* \bu32\b */
     pub comments: Box<Comments>,
 }
 
@@ -4559,7 +4559,7 @@ pub struct U64 {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct U64Token {
-    pub u64: crate::veryl_token::OwnedToken, /* u64 */
+    pub bu64_b: crate::veryl_token::OwnedToken, /* \bu64\b */
     pub comments: Box<Comments>,
 }
 
@@ -5787,24 +5787,24 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 28:
     ///
-    /// AlwaysCombToken: 'always_comb' : OwnedToken Comments;
+    /// AlwaysCombToken: /\balways_comb\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn always_comb_token(
         &mut self,
-        always_underscore_comb: &ParseTreeStackEntry<'t>,
+        balways_underscore_comb_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let always_underscore_comb = always_underscore_comb
+        let balways_underscore_comb_b = balways_underscore_comb_b
             .token(parse_tree)?
             .try_into()
             .into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let always_comb_token_built = AlwaysCombTokenBuilder::default()
-            .always_underscore_comb(always_underscore_comb)
+            .balways_underscore_comb_b(balways_underscore_comb_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -5817,24 +5817,24 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 29:
     ///
-    /// AlwaysFfToken: 'always_ff' : OwnedToken Comments;
+    /// AlwaysFfToken: /\balways_ff\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn always_ff_token(
         &mut self,
-        always_underscore_ff: &ParseTreeStackEntry<'t>,
+        balways_underscore_ff_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let always_underscore_ff = always_underscore_ff
+        let balways_underscore_ff_b = balways_underscore_ff_b
             .token(parse_tree)?
             .try_into()
             .into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let always_ff_token_built = AlwaysFfTokenBuilder::default()
-            .always_underscore_ff(always_underscore_ff)
+            .balways_underscore_ff_b(balways_underscore_ff_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -5846,21 +5846,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 30:
     ///
-    /// AssignToken: 'assign' : OwnedToken Comments;
+    /// AssignToken: /\bassign\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn assign_token(
         &mut self,
-        assign: &ParseTreeStackEntry<'t>,
+        bassign_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let assign = assign.token(parse_tree)?.try_into().into_diagnostic()?;
+        let bassign_b = bassign_b.token(parse_tree)?.try_into().into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let assign_token_built = AssignTokenBuilder::default()
-            .assign(assign)
+            .bassign_b(bassign_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -5872,24 +5872,24 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 31:
     ///
-    /// AsyncHighToken: 'async_high' : OwnedToken Comments;
+    /// AsyncHighToken: /\basync_high\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn async_high_token(
         &mut self,
-        async_underscore_high: &ParseTreeStackEntry<'t>,
+        basync_underscore_high_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let async_underscore_high = async_underscore_high
+        let basync_underscore_high_b = basync_underscore_high_b
             .token(parse_tree)?
             .try_into()
             .into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let async_high_token_built = AsyncHighTokenBuilder::default()
-            .async_underscore_high(async_underscore_high)
+            .basync_underscore_high_b(basync_underscore_high_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -5902,24 +5902,24 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 32:
     ///
-    /// AsyncLowToken: 'async_low' : OwnedToken Comments;
+    /// AsyncLowToken: /\basync_low\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn async_low_token(
         &mut self,
-        async_underscore_low: &ParseTreeStackEntry<'t>,
+        basync_underscore_low_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let async_underscore_low = async_underscore_low
+        let basync_underscore_low_b = basync_underscore_low_b
             .token(parse_tree)?
             .try_into()
             .into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let async_low_token_built = AsyncLowTokenBuilder::default()
-            .async_underscore_low(async_underscore_low)
+            .basync_underscore_low_b(basync_underscore_low_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -5931,21 +5931,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 33:
     ///
-    /// BitToken: 'bit' : OwnedToken Comments;
+    /// BitToken: /\bbit\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn bit_token(
         &mut self,
-        bit: &ParseTreeStackEntry<'t>,
+        bbit_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let bit = bit.token(parse_tree)?.try_into().into_diagnostic()?;
+        let bbit_b = bbit_b.token(parse_tree)?.try_into().into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let bit_token_built = BitTokenBuilder::default()
-            .bit(bit)
+            .bbit_b(bbit_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -5957,21 +5957,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 34:
     ///
-    /// ElseToken: 'else' : OwnedToken Comments;
+    /// ElseToken: /\belse\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn else_token(
         &mut self,
-        r#else: &ParseTreeStackEntry<'t>,
+        belse_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let r#else = r#else.token(parse_tree)?.try_into().into_diagnostic()?;
+        let belse_b = belse_b.token(parse_tree)?.try_into().into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let else_token_built = ElseTokenBuilder::default()
-            .r#else(r#else)
+            .belse_b(belse_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -5983,21 +5983,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 35:
     ///
-    /// EnumToken: 'enum' : OwnedToken Comments;
+    /// EnumToken: /\benum\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn enum_token(
         &mut self,
-        r#enum: &ParseTreeStackEntry<'t>,
+        benum_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let r#enum = r#enum.token(parse_tree)?.try_into().into_diagnostic()?;
+        let benum_b = benum_b.token(parse_tree)?.try_into().into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let enum_token_built = EnumTokenBuilder::default()
-            .r#enum(r#enum)
+            .benum_b(benum_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6009,21 +6009,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 36:
     ///
-    /// F32Token: 'f32' : OwnedToken Comments;
+    /// F32Token: /\bf32\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn f32_token(
         &mut self,
-        f32: &ParseTreeStackEntry<'t>,
+        bf32_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let f32 = f32.token(parse_tree)?.try_into().into_diagnostic()?;
+        let bf32_b = bf32_b.token(parse_tree)?.try_into().into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let f32_token_built = F32TokenBuilder::default()
-            .f32(f32)
+            .bf32_b(bf32_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6035,21 +6035,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 37:
     ///
-    /// F64Token: 'f64' : OwnedToken Comments;
+    /// F64Token: /\bf64\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn f64_token(
         &mut self,
-        f64: &ParseTreeStackEntry<'t>,
+        bf64_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let f64 = f64.token(parse_tree)?.try_into().into_diagnostic()?;
+        let bf64_b = bf64_b.token(parse_tree)?.try_into().into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let f64_token_built = F64TokenBuilder::default()
-            .f64(f64)
+            .bf64_b(bf64_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6061,21 +6061,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 38:
     ///
-    /// ForToken: 'for' : OwnedToken Comments;
+    /// ForToken: /\bfor\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn for_token(
         &mut self,
-        r#for: &ParseTreeStackEntry<'t>,
+        bfor_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let r#for = r#for.token(parse_tree)?.try_into().into_diagnostic()?;
+        let bfor_b = bfor_b.token(parse_tree)?.try_into().into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let for_token_built = ForTokenBuilder::default()
-            .r#for(r#for)
+            .bfor_b(bfor_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6087,21 +6087,24 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 39:
     ///
-    /// FunctionToken: 'function' : OwnedToken Comments;
+    /// FunctionToken: /\bfunction\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn function_token(
         &mut self,
-        function: &ParseTreeStackEntry<'t>,
+        bfunction_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let function = function.token(parse_tree)?.try_into().into_diagnostic()?;
+        let bfunction_b = bfunction_b
+            .token(parse_tree)?
+            .try_into()
+            .into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let function_token_built = FunctionTokenBuilder::default()
-            .function(function)
+            .bfunction_b(bfunction_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6113,21 +6116,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 40:
     ///
-    /// I32Token: 'i32' : OwnedToken Comments;
+    /// I32Token: /\bi32\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn i32_token(
         &mut self,
-        i32: &ParseTreeStackEntry<'t>,
+        bi32_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let i32 = i32.token(parse_tree)?.try_into().into_diagnostic()?;
+        let bi32_b = bi32_b.token(parse_tree)?.try_into().into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let i32_token_built = I32TokenBuilder::default()
-            .i32(i32)
+            .bi32_b(bi32_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6139,21 +6142,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 41:
     ///
-    /// I64Token: 'i64' : OwnedToken Comments;
+    /// I64Token: /\bi64\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn i64_token(
         &mut self,
-        i64: &ParseTreeStackEntry<'t>,
+        bi64_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let i64 = i64.token(parse_tree)?.try_into().into_diagnostic()?;
+        let bi64_b = bi64_b.token(parse_tree)?.try_into().into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let i64_token_built = I64TokenBuilder::default()
-            .i64(i64)
+            .bi64_b(bi64_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6165,24 +6168,24 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 42:
     ///
-    /// IfResetToken: 'if_reset' : OwnedToken Comments;
+    /// IfResetToken: /\bif_reset\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn if_reset_token(
         &mut self,
-        if_underscore_reset: &ParseTreeStackEntry<'t>,
+        bif_underscore_reset_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let if_underscore_reset = if_underscore_reset
+        let bif_underscore_reset_b = bif_underscore_reset_b
             .token(parse_tree)?
             .try_into()
             .into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let if_reset_token_built = IfResetTokenBuilder::default()
-            .if_underscore_reset(if_underscore_reset)
+            .bif_underscore_reset_b(bif_underscore_reset_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6194,21 +6197,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 43:
     ///
-    /// IfToken: 'if' : OwnedToken Comments;
+    /// IfToken: /\bif\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn if_token(
         &mut self,
-        r#if: &ParseTreeStackEntry<'t>,
+        bif_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let r#if = r#if.token(parse_tree)?.try_into().into_diagnostic()?;
+        let bif_b = bif_b.token(parse_tree)?.try_into().into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let if_token_built = IfTokenBuilder::default()
-            .r#if(r#if)
+            .bif_b(bif_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6220,21 +6223,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 44:
     ///
-    /// InoutToken: 'inout' : OwnedToken Comments;
+    /// InoutToken: /\binout\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn inout_token(
         &mut self,
-        inout: &ParseTreeStackEntry<'t>,
+        binout_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let inout = inout.token(parse_tree)?.try_into().into_diagnostic()?;
+        let binout_b = binout_b.token(parse_tree)?.try_into().into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let inout_token_built = InoutTokenBuilder::default()
-            .inout(inout)
+            .binout_b(binout_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6246,21 +6249,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 45:
     ///
-    /// InputToken: 'input' : OwnedToken Comments;
+    /// InputToken: /\binput\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn input_token(
         &mut self,
-        input: &ParseTreeStackEntry<'t>,
+        binput_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let input = input.token(parse_tree)?.try_into().into_diagnostic()?;
+        let binput_b = binput_b.token(parse_tree)?.try_into().into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let input_token_built = InputTokenBuilder::default()
-            .input(input)
+            .binput_b(binput_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6272,21 +6275,24 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 46:
     ///
-    /// InterfaceToken: 'interface' : OwnedToken Comments;
+    /// InterfaceToken: /\binterface\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn interface_token(
         &mut self,
-        interface: &ParseTreeStackEntry<'t>,
+        binterface_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let interface = interface.token(parse_tree)?.try_into().into_diagnostic()?;
+        let binterface_b = binterface_b
+            .token(parse_tree)?
+            .try_into()
+            .into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let interface_token_built = InterfaceTokenBuilder::default()
-            .interface(interface)
+            .binterface_b(binterface_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6298,21 +6304,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 47:
     ///
-    /// InToken: 'in' : OwnedToken Comments;
+    /// InToken: /\bin\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn in_token(
         &mut self,
-        r#in: &ParseTreeStackEntry<'t>,
+        bin_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let r#in = r#in.token(parse_tree)?.try_into().into_diagnostic()?;
+        let bin_b = bin_b.token(parse_tree)?.try_into().into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let in_token_built = InTokenBuilder::default()
-            .r#in(r#in)
+            .bin_b(bin_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6324,21 +6330,24 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 48:
     ///
-    /// LocalparamToken: 'localparam' : OwnedToken Comments;
+    /// LocalparamToken: /\blocalparam\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn localparam_token(
         &mut self,
-        localparam: &ParseTreeStackEntry<'t>,
+        blocalparam_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let localparam = localparam.token(parse_tree)?.try_into().into_diagnostic()?;
+        let blocalparam_b = blocalparam_b
+            .token(parse_tree)?
+            .try_into()
+            .into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let localparam_token_built = LocalparamTokenBuilder::default()
-            .localparam(localparam)
+            .blocalparam_b(blocalparam_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6351,21 +6360,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 49:
     ///
-    /// LogicToken: 'logic' : OwnedToken Comments;
+    /// LogicToken: /\blogic\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn logic_token(
         &mut self,
-        logic: &ParseTreeStackEntry<'t>,
+        blogic_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let logic = logic.token(parse_tree)?.try_into().into_diagnostic()?;
+        let blogic_b = blogic_b.token(parse_tree)?.try_into().into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let logic_token_built = LogicTokenBuilder::default()
-            .logic(logic)
+            .blogic_b(blogic_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6377,21 +6386,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 50:
     ///
-    /// ModportToken: 'modport' : OwnedToken Comments;
+    /// ModportToken: /\bmodport\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn modport_token(
         &mut self,
-        modport: &ParseTreeStackEntry<'t>,
+        bmodport_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let modport = modport.token(parse_tree)?.try_into().into_diagnostic()?;
+        let bmodport_b = bmodport_b.token(parse_tree)?.try_into().into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let modport_token_built = ModportTokenBuilder::default()
-            .modport(modport)
+            .bmodport_b(bmodport_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6403,21 +6412,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 51:
     ///
-    /// ModuleToken: 'module' : OwnedToken Comments;
+    /// ModuleToken: /\bmodule\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn module_token(
         &mut self,
-        module: &ParseTreeStackEntry<'t>,
+        bmodule_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let module = module.token(parse_tree)?.try_into().into_diagnostic()?;
+        let bmodule_b = bmodule_b.token(parse_tree)?.try_into().into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let module_token_built = ModuleTokenBuilder::default()
-            .module(module)
+            .bmodule_b(bmodule_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6429,21 +6438,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 52:
     ///
-    /// NegedgeToken: 'negedge' : OwnedToken Comments;
+    /// NegedgeToken: /\bnegedge\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn negedge_token(
         &mut self,
-        negedge: &ParseTreeStackEntry<'t>,
+        bnegedge_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let negedge = negedge.token(parse_tree)?.try_into().into_diagnostic()?;
+        let bnegedge_b = bnegedge_b.token(parse_tree)?.try_into().into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let negedge_token_built = NegedgeTokenBuilder::default()
-            .negedge(negedge)
+            .bnegedge_b(bnegedge_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6455,21 +6464,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 53:
     ///
-    /// OutputToken: 'output' : OwnedToken Comments;
+    /// OutputToken: /\boutput\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn output_token(
         &mut self,
-        output: &ParseTreeStackEntry<'t>,
+        boutput_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let output = output.token(parse_tree)?.try_into().into_diagnostic()?;
+        let boutput_b = boutput_b.token(parse_tree)?.try_into().into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let output_token_built = OutputTokenBuilder::default()
-            .output(output)
+            .boutput_b(boutput_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6481,21 +6490,24 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 54:
     ///
-    /// ParameterToken: 'parameter' : OwnedToken Comments;
+    /// ParameterToken: /\bparameter\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn parameter_token(
         &mut self,
-        parameter: &ParseTreeStackEntry<'t>,
+        bparameter_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let parameter = parameter.token(parse_tree)?.try_into().into_diagnostic()?;
+        let bparameter_b = bparameter_b
+            .token(parse_tree)?
+            .try_into()
+            .into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let parameter_token_built = ParameterTokenBuilder::default()
-            .parameter(parameter)
+            .bparameter_b(bparameter_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6507,21 +6519,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 55:
     ///
-    /// PosedgeToken: 'posedge' : OwnedToken Comments;
+    /// PosedgeToken: /\bposedge\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn posedge_token(
         &mut self,
-        posedge: &ParseTreeStackEntry<'t>,
+        bposedge_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let posedge = posedge.token(parse_tree)?.try_into().into_diagnostic()?;
+        let bposedge_b = bposedge_b.token(parse_tree)?.try_into().into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let posedge_token_built = PosedgeTokenBuilder::default()
-            .posedge(posedge)
+            .bposedge_b(bposedge_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6533,21 +6545,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 56:
     ///
-    /// RefToken: 'ref' : OwnedToken Comments;
+    /// RefToken: /\bref\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn ref_token(
         &mut self,
-        r#ref: &ParseTreeStackEntry<'t>,
+        bref_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let r#ref = r#ref.token(parse_tree)?.try_into().into_diagnostic()?;
+        let bref_b = bref_b.token(parse_tree)?.try_into().into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let ref_token_built = RefTokenBuilder::default()
-            .r#ref(r#ref)
+            .bref_b(bref_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6559,21 +6571,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 57:
     ///
-    /// ReturnToken: 'return' : OwnedToken Comments;
+    /// ReturnToken: /\breturn\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn return_token(
         &mut self,
-        r#return: &ParseTreeStackEntry<'t>,
+        breturn_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let r#return = r#return.token(parse_tree)?.try_into().into_diagnostic()?;
+        let breturn_b = breturn_b.token(parse_tree)?.try_into().into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let return_token_built = ReturnTokenBuilder::default()
-            .r#return(r#return)
+            .breturn_b(breturn_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6585,21 +6597,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 58:
     ///
-    /// StepToken: 'step' : OwnedToken Comments;
+    /// StepToken: /\bstep\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn step_token(
         &mut self,
-        step: &ParseTreeStackEntry<'t>,
+        bstep_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let step = step.token(parse_tree)?.try_into().into_diagnostic()?;
+        let bstep_b = bstep_b.token(parse_tree)?.try_into().into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let step_token_built = StepTokenBuilder::default()
-            .step(step)
+            .bstep_b(bstep_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6611,21 +6623,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 59:
     ///
-    /// StructToken: 'struct' : OwnedToken Comments;
+    /// StructToken: /\bstruct\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn struct_token(
         &mut self,
-        r#struct: &ParseTreeStackEntry<'t>,
+        bstruct_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let r#struct = r#struct.token(parse_tree)?.try_into().into_diagnostic()?;
+        let bstruct_b = bstruct_b.token(parse_tree)?.try_into().into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let struct_token_built = StructTokenBuilder::default()
-            .r#struct(r#struct)
+            .bstruct_b(bstruct_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6637,24 +6649,24 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 60:
     ///
-    /// SyncHighToken: 'sync_high' : OwnedToken Comments;
+    /// SyncHighToken: /\bsync_high\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn sync_high_token(
         &mut self,
-        sync_underscore_high: &ParseTreeStackEntry<'t>,
+        bsync_underscore_high_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let sync_underscore_high = sync_underscore_high
+        let bsync_underscore_high_b = bsync_underscore_high_b
             .token(parse_tree)?
             .try_into()
             .into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let sync_high_token_built = SyncHighTokenBuilder::default()
-            .sync_underscore_high(sync_underscore_high)
+            .bsync_underscore_high_b(bsync_underscore_high_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6666,24 +6678,24 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 61:
     ///
-    /// SyncLowToken: 'sync_low' : OwnedToken Comments;
+    /// SyncLowToken: /\bsync_low\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn sync_low_token(
         &mut self,
-        sync_underscore_low: &ParseTreeStackEntry<'t>,
+        bsync_underscore_low_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let sync_underscore_low = sync_underscore_low
+        let bsync_underscore_low_b = bsync_underscore_low_b
             .token(parse_tree)?
             .try_into()
             .into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let sync_low_token_built = SyncLowTokenBuilder::default()
-            .sync_underscore_low(sync_underscore_low)
+            .bsync_underscore_low_b(bsync_underscore_low_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6695,21 +6707,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 62:
     ///
-    /// U32Token: 'u32' : OwnedToken Comments;
+    /// U32Token: /\bu32\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn u32_token(
         &mut self,
-        u32: &ParseTreeStackEntry<'t>,
+        bu32_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let u32 = u32.token(parse_tree)?.try_into().into_diagnostic()?;
+        let bu32_b = bu32_b.token(parse_tree)?.try_into().into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let u32_token_built = U32TokenBuilder::default()
-            .u32(u32)
+            .bu32_b(bu32_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
@@ -6721,21 +6733,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 63:
     ///
-    /// U64Token: 'u64' : OwnedToken Comments;
+    /// U64Token: /\bu64\b/ : OwnedToken Comments;
     ///
     #[parol_runtime::function_name::named]
     fn u64_token(
         &mut self,
-        u64: &ParseTreeStackEntry<'t>,
+        bu64_b: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let u64 = u64.token(parse_tree)?.try_into().into_diagnostic()?;
+        let bu64_b = bu64_b.token(parse_tree)?.try_into().into_diagnostic()?;
         let comments = pop_item!(self, comments, Comments, context);
         let u64_token_built = U64TokenBuilder::default()
-            .u64(u64)
+            .bu64_b(bu64_b)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;

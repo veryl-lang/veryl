@@ -52,42 +52,42 @@ pub const TERMINALS: &[&str; 67] = &[
     /* 26 */ r###"\]"###,
     /* 27 */ r###"\)"###,
     /* 28 */ r###";"###,
-    /* 29 */ r###"always_comb"###,
-    /* 30 */ r###"always_ff"###,
-    /* 31 */ r###"assign"###,
-    /* 32 */ r###"async_high"###,
-    /* 33 */ r###"async_low"###,
-    /* 34 */ r###"bit"###,
-    /* 35 */ r###"else"###,
-    /* 36 */ r###"enum"###,
-    /* 37 */ r###"f32"###,
-    /* 38 */ r###"f64"###,
-    /* 39 */ r###"for"###,
-    /* 40 */ r###"function"###,
-    /* 41 */ r###"i32"###,
-    /* 42 */ r###"i64"###,
-    /* 43 */ r###"if_reset"###,
-    /* 44 */ r###"if"###,
-    /* 45 */ r###"inout"###,
-    /* 46 */ r###"input"###,
-    /* 47 */ r###"interface"###,
-    /* 48 */ r###"in"###,
-    /* 49 */ r###"localparam"###,
-    /* 50 */ r###"logic"###,
-    /* 51 */ r###"modport"###,
-    /* 52 */ r###"module"###,
-    /* 53 */ r###"negedge"###,
-    /* 54 */ r###"output"###,
-    /* 55 */ r###"parameter"###,
-    /* 56 */ r###"posedge"###,
-    /* 57 */ r###"ref"###,
-    /* 58 */ r###"return"###,
-    /* 59 */ r###"step"###,
-    /* 60 */ r###"struct"###,
-    /* 61 */ r###"sync_high"###,
-    /* 62 */ r###"sync_low"###,
-    /* 63 */ r###"u32"###,
-    /* 64 */ r###"u64"###,
+    /* 29 */ r###"\balways_comb\b"###,
+    /* 30 */ r###"\balways_ff\b"###,
+    /* 31 */ r###"\bassign\b"###,
+    /* 32 */ r###"\basync_high\b"###,
+    /* 33 */ r###"\basync_low\b"###,
+    /* 34 */ r###"\bbit\b"###,
+    /* 35 */ r###"\belse\b"###,
+    /* 36 */ r###"\benum\b"###,
+    /* 37 */ r###"\bf32\b"###,
+    /* 38 */ r###"\bf64\b"###,
+    /* 39 */ r###"\bfor\b"###,
+    /* 40 */ r###"\bfunction\b"###,
+    /* 41 */ r###"\bi32\b"###,
+    /* 42 */ r###"\bi64\b"###,
+    /* 43 */ r###"\bif_reset\b"###,
+    /* 44 */ r###"\bif\b"###,
+    /* 45 */ r###"\binout\b"###,
+    /* 46 */ r###"\binput\b"###,
+    /* 47 */ r###"\binterface\b"###,
+    /* 48 */ r###"\bin\b"###,
+    /* 49 */ r###"\blocalparam\b"###,
+    /* 50 */ r###"\blogic\b"###,
+    /* 51 */ r###"\bmodport\b"###,
+    /* 52 */ r###"\bmodule\b"###,
+    /* 53 */ r###"\bnegedge\b"###,
+    /* 54 */ r###"\boutput\b"###,
+    /* 55 */ r###"\bparameter\b"###,
+    /* 56 */ r###"\bposedge\b"###,
+    /* 57 */ r###"\bref\b"###,
+    /* 58 */ r###"\breturn\b"###,
+    /* 59 */ r###"\bstep\b"###,
+    /* 60 */ r###"\bstruct\b"###,
+    /* 61 */ r###"\bsync_high\b"###,
+    /* 62 */ r###"\bsync_low\b"###,
+    /* 63 */ r###"\bu32\b"###,
+    /* 64 */ r###"\bu64\b"###,
     /* 65 */ r###"[a-zA-Z_][0-9a-zA-Z_]*"###,
     /* 66 */ ERROR_TOKEN,
 ];
@@ -122,42 +122,42 @@ const TERMINAL_NAMES : & [& str ; 67] = & [    /*  0 */ "EndOfInput",
     /* 26 */ "RBracket",
     /* 27 */ "RParen",
     /* 28 */ "Semicolon",
-    /* 29 */ "AlwaysUnderscoreComb",
-    /* 30 */ "AlwaysUnderscoreFf",
-    /* 31 */ "Assign",
-    /* 32 */ "AsyncUnderscoreHigh",
-    /* 33 */ "AsyncUnderscoreLow",
-    /* 34 */ "Bit",
-    /* 35 */ "Else",
-    /* 36 */ "Enum",
-    /* 37 */ "F32",
-    /* 38 */ "F64",
-    /* 39 */ "For",
-    /* 40 */ "Function",
-    /* 41 */ "I32",
-    /* 42 */ "I64",
-    /* 43 */ "IfUnderscoreReset",
-    /* 44 */ "If",
-    /* 45 */ "Inout",
-    /* 46 */ "Input",
-    /* 47 */ "Interface",
-    /* 48 */ "In",
-    /* 49 */ "Localparam",
-    /* 50 */ "Logic",
-    /* 51 */ "Modport",
-    /* 52 */ "Module",
-    /* 53 */ "Negedge",
-    /* 54 */ "Output",
-    /* 55 */ "Parameter",
-    /* 56 */ "Posedge",
-    /* 57 */ "Ref",
-    /* 58 */ "Return",
-    /* 59 */ "Step",
-    /* 60 */ "Struct",
-    /* 61 */ "SyncUnderscoreHigh",
-    /* 62 */ "SyncUnderscoreLow",
-    /* 63 */ "U32",
-    /* 64 */ "U64",
+    /* 29 */ "BalwaysUnderscoreCombB",
+    /* 30 */ "BalwaysUnderscoreFfB",
+    /* 31 */ "BassignB",
+    /* 32 */ "BasyncUnderscoreHighB",
+    /* 33 */ "BasyncUnderscoreLowB",
+    /* 34 */ "BbitB",
+    /* 35 */ "BelseB",
+    /* 36 */ "BenumB",
+    /* 37 */ "Bf32B",
+    /* 38 */ "Bf64B",
+    /* 39 */ "BforB",
+    /* 40 */ "BfunctionB",
+    /* 41 */ "Bi32B",
+    /* 42 */ "Bi64B",
+    /* 43 */ "BifUnderscoreResetB",
+    /* 44 */ "BifB",
+    /* 45 */ "BinoutB",
+    /* 46 */ "BinputB",
+    /* 47 */ "BinterfaceB",
+    /* 48 */ "BinB",
+    /* 49 */ "BlocalparamB",
+    /* 50 */ "BlogicB",
+    /* 51 */ "BmodportB",
+    /* 52 */ "BmoduleB",
+    /* 53 */ "BnegedgeB",
+    /* 54 */ "BoutputB",
+    /* 55 */ "BparameterB",
+    /* 56 */ "BposedgeB",
+    /* 57 */ "BrefB",
+    /* 58 */ "BreturnB",
+    /* 59 */ "BstepB",
+    /* 60 */ "BstructB",
+    /* 61 */ "BsyncUnderscoreHighB",
+    /* 62 */ "BsyncUnderscoreLowB",
+    /* 63 */ "Bu32B",
+    /* 64 */ "Bu64B",
     /* 65 */ "LBracketAMinusZAMinusZUnderscoreRBracketLBracket0Minus9aMinusZAMinusZUnderscoreRBracketStar",
     /* 66 */ "Error",
 ] ;
@@ -196,42 +196,42 @@ const SCANNER_0: (&[&str; 5], &[usize; 61]) = (
         26, /* RBracket */
         27, /* RParen */
         28, /* Semicolon */
-        29, /* AlwaysUnderscoreComb */
-        30, /* AlwaysUnderscoreFf */
-        31, /* Assign */
-        32, /* AsyncUnderscoreHigh */
-        33, /* AsyncUnderscoreLow */
-        34, /* Bit */
-        35, /* Else */
-        36, /* Enum */
-        37, /* F32 */
-        38, /* F64 */
-        39, /* For */
-        40, /* Function */
-        41, /* I32 */
-        42, /* I64 */
-        43, /* IfUnderscoreReset */
-        44, /* If */
-        45, /* Inout */
-        46, /* Input */
-        47, /* Interface */
-        48, /* In */
-        49, /* Localparam */
-        50, /* Logic */
-        51, /* Modport */
-        52, /* Module */
-        53, /* Negedge */
-        54, /* Output */
-        55, /* Parameter */
-        56, /* Posedge */
-        57, /* Ref */
-        58, /* Return */
-        59, /* Step */
-        60, /* Struct */
-        61, /* SyncUnderscoreHigh */
-        62, /* SyncUnderscoreLow */
-        63, /* U32 */
-        64, /* U64 */
+        29, /* BalwaysUnderscoreCombB */
+        30, /* BalwaysUnderscoreFfB */
+        31, /* BassignB */
+        32, /* BasyncUnderscoreHighB */
+        33, /* BasyncUnderscoreLowB */
+        34, /* BbitB */
+        35, /* BelseB */
+        36, /* BenumB */
+        37, /* Bf32B */
+        38, /* Bf64B */
+        39, /* BforB */
+        40, /* BfunctionB */
+        41, /* Bi32B */
+        42, /* Bi64B */
+        43, /* BifUnderscoreResetB */
+        44, /* BifB */
+        45, /* BinoutB */
+        46, /* BinputB */
+        47, /* BinterfaceB */
+        48, /* BinB */
+        49, /* BlocalparamB */
+        50, /* BlogicB */
+        51, /* BmodportB */
+        52, /* BmoduleB */
+        53, /* BnegedgeB */
+        54, /* BoutputB */
+        55, /* BparameterB */
+        56, /* BposedgeB */
+        57, /* BrefB */
+        58, /* BreturnB */
+        59, /* BstepB */
+        60, /* BstructB */
+        61, /* BsyncUnderscoreHighB */
+        62, /* BsyncUnderscoreLowB */
+        63, /* Bu32B */
+        64, /* Bu64B */
         65, /* LBracketAMinusZAMinusZUnderscoreRBracketLBracket0Minus9aMinusZAMinusZUnderscoreRBracketStar */
     ],
 );
@@ -5117,182 +5117,182 @@ pub const PRODUCTIONS: &[Production; 384] = &[
         lhs: 225,
         production: &[ParseType::N(44), ParseType::T(28)],
     },
-    // 28 - AlwaysCombToken: 'always_comb' Comments;
+    // 28 - AlwaysCombToken: /\balways_comb\b/ Comments;
     Production {
         lhs: 5,
         production: &[ParseType::N(44), ParseType::T(29)],
     },
-    // 29 - AlwaysFfToken: 'always_ff' Comments;
+    // 29 - AlwaysFfToken: /\balways_ff\b/ Comments;
     Production {
         lhs: 16,
         production: &[ParseType::N(44), ParseType::T(30)],
     },
-    // 30 - AssignToken: 'assign' Comments;
+    // 30 - AssignToken: /\bassign\b/ Comments;
     Production {
         lhs: 20,
         production: &[ParseType::N(44), ParseType::T(31)],
     },
-    // 31 - AsyncHighToken: 'async_high' Comments;
+    // 31 - AsyncHighToken: /\basync_high\b/ Comments;
     Production {
         lhs: 26,
         production: &[ParseType::N(44), ParseType::T(32)],
     },
-    // 32 - AsyncLowToken: 'async_low' Comments;
+    // 32 - AsyncLowToken: /\basync_low\b/ Comments;
     Production {
         lhs: 28,
         production: &[ParseType::N(44), ParseType::T(33)],
     },
-    // 33 - BitToken: 'bit' Comments;
+    // 33 - BitToken: /\bbit\b/ Comments;
     Production {
         lhs: 36,
         production: &[ParseType::N(44), ParseType::T(34)],
     },
-    // 34 - ElseToken: 'else' Comments;
+    // 34 - ElseToken: /\belse\b/ Comments;
     Production {
         lhs: 53,
         production: &[ParseType::N(44), ParseType::T(35)],
     },
-    // 35 - EnumToken: 'enum' Comments;
+    // 35 - EnumToken: /\benum\b/ Comments;
     Production {
         lhs: 61,
         production: &[ParseType::N(44), ParseType::T(36)],
     },
-    // 36 - F32Token: 'f32' Comments;
+    // 36 - F32Token: /\bf32\b/ Comments;
     Production {
         lhs: 73,
         production: &[ParseType::N(44), ParseType::T(37)],
     },
-    // 37 - F64Token: 'f64' Comments;
+    // 37 - F64Token: /\bf64\b/ Comments;
     Production {
         lhs: 75,
         production: &[ParseType::N(44), ParseType::T(38)],
     },
-    // 38 - ForToken: 'for' Comments;
+    // 38 - ForToken: /\bfor\b/ Comments;
     Production {
         lhs: 84,
         production: &[ParseType::N(44), ParseType::T(39)],
     },
-    // 39 - FunctionToken: 'function' Comments;
+    // 39 - FunctionToken: /\bfunction\b/ Comments;
     Production {
         lhs: 91,
         production: &[ParseType::N(44), ParseType::T(40)],
     },
-    // 40 - I32Token: 'i32' Comments;
+    // 40 - I32Token: /\bi32\b/ Comments;
     Production {
         lhs: 95,
         production: &[ParseType::N(44), ParseType::T(41)],
     },
-    // 41 - I64Token: 'i64' Comments;
+    // 41 - I64Token: /\bi64\b/ Comments;
     Production {
         lhs: 97,
         production: &[ParseType::N(44), ParseType::T(42)],
     },
-    // 42 - IfResetToken: 'if_reset' Comments;
+    // 42 - IfResetToken: /\bif_reset\b/ Comments;
     Production {
         lhs: 108,
         production: &[ParseType::N(44), ParseType::T(43)],
     },
-    // 43 - IfToken: 'if' Comments;
+    // 43 - IfToken: /\bif\b/ Comments;
     Production {
         lhs: 115,
         production: &[ParseType::N(44), ParseType::T(44)],
     },
-    // 44 - InoutToken: 'inout' Comments;
+    // 44 - InoutToken: /\binout\b/ Comments;
     Production {
         lhs: 119,
         production: &[ParseType::N(44), ParseType::T(45)],
     },
-    // 45 - InputToken: 'input' Comments;
+    // 45 - InputToken: /\binput\b/ Comments;
     Production {
         lhs: 121,
         production: &[ParseType::N(44), ParseType::T(46)],
     },
-    // 46 - InterfaceToken: 'interface' Comments;
+    // 46 - InterfaceToken: /\binterface\b/ Comments;
     Production {
         lhs: 154,
         production: &[ParseType::N(44), ParseType::T(47)],
     },
-    // 47 - InToken: 'in' Comments;
+    // 47 - InToken: /\bin\b/ Comments;
     Production {
         lhs: 117,
         production: &[ParseType::N(44), ParseType::T(48)],
     },
-    // 48 - LocalparamToken: 'localparam' Comments;
+    // 48 - LocalparamToken: /\blocalparam\b/ Comments;
     Production {
         lhs: 163,
         production: &[ParseType::N(44), ParseType::T(49)],
     },
-    // 49 - LogicToken: 'logic' Comments;
+    // 49 - LogicToken: /\blogic\b/ Comments;
     Production {
         lhs: 165,
         production: &[ParseType::N(44), ParseType::T(50)],
     },
-    // 50 - ModportToken: 'modport' Comments;
+    // 50 - ModportToken: /\bmodport\b/ Comments;
     Production {
         lhs: 174,
         production: &[ParseType::N(44), ParseType::T(51)],
     },
-    // 51 - ModuleToken: 'module' Comments;
+    // 51 - ModuleToken: /\bmodule\b/ Comments;
     Production {
         lhs: 192,
         production: &[ParseType::N(44), ParseType::T(52)],
     },
-    // 52 - NegedgeToken: 'negedge' Comments;
+    // 52 - NegedgeToken: /\bnegedge\b/ Comments;
     Production {
         lhs: 195,
         production: &[ParseType::N(44), ParseType::T(53)],
     },
-    // 53 - OutputToken: 'output' Comments;
+    // 53 - OutputToken: /\boutput\b/ Comments;
     Production {
         lhs: 198,
         production: &[ParseType::N(44), ParseType::T(54)],
     },
-    // 54 - ParameterToken: 'parameter' Comments;
+    // 54 - ParameterToken: /\bparameter\b/ Comments;
     Production {
         lhs: 201,
         production: &[ParseType::N(44), ParseType::T(55)],
     },
-    // 55 - PosedgeToken: 'posedge' Comments;
+    // 55 - PosedgeToken: /\bposedge\b/ Comments;
     Production {
         lhs: 209,
         production: &[ParseType::N(44), ParseType::T(56)],
     },
-    // 56 - RefToken: 'ref' Comments;
+    // 56 - RefToken: /\bref\b/ Comments;
     Production {
         lhs: 220,
         production: &[ParseType::N(44), ParseType::T(57)],
     },
-    // 57 - ReturnToken: 'return' Comments;
+    // 57 - ReturnToken: /\breturn\b/ Comments;
     Production {
         lhs: 223,
         production: &[ParseType::N(44), ParseType::T(58)],
     },
-    // 58 - StepToken: 'step' Comments;
+    // 58 - StepToken: /\bstep\b/ Comments;
     Production {
         lhs: 230,
         production: &[ParseType::N(44), ParseType::T(59)],
     },
-    // 59 - StructToken: 'struct' Comments;
+    // 59 - StructToken: /\bstruct\b/ Comments;
     Production {
         lhs: 237,
         production: &[ParseType::N(44), ParseType::T(60)],
     },
-    // 60 - SyncHighToken: 'sync_high' Comments;
+    // 60 - SyncHighToken: /\bsync_high\b/ Comments;
     Production {
         lhs: 239,
         production: &[ParseType::N(44), ParseType::T(61)],
     },
-    // 61 - SyncLowToken: 'sync_low' Comments;
+    // 61 - SyncLowToken: /\bsync_low\b/ Comments;
     Production {
         lhs: 241,
         production: &[ParseType::N(44), ParseType::T(62)],
     },
-    // 62 - U32Token: 'u32' Comments;
+    // 62 - U32Token: /\bu32\b/ Comments;
     Production {
         lhs: 246,
         production: &[ParseType::N(44), ParseType::T(63)],
     },
-    // 63 - U64Token: 'u64' Comments;
+    // 63 - U64Token: /\bu64\b/ Comments;
     Production {
         lhs: 248,
         production: &[ParseType::N(44), ParseType::T(64)],
