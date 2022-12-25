@@ -25,7 +25,7 @@ pub enum AnalyzeError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(code(AnalyzeError::NumberOverflow), help("add if_reset statement"))]
+    #[diagnostic(code(AnalyzeError::IfResetRequired), help("add if_reset statement"))]
     #[error("if_reset statement is required for always_ff with reset signal")]
     IfResetRequired {
         #[source_code]
@@ -34,7 +34,7 @@ pub enum AnalyzeError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(code(AnalyzeError::NumberOverflow), help("add reset port"))]
+    #[diagnostic(code(AnalyzeError::ResetSignalMissing), help("add reset port"))]
     #[error("reset signal is required for always_ff with if_reset statement")]
     ResetSignalMissing {
         #[source_code]
@@ -43,7 +43,7 @@ pub enum AnalyzeError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(code(AnalyzeError::NumberOverflow), help("remove {kind} statement"))]
+    #[diagnostic(code(AnalyzeError::InvalidStatement), help("remove {kind} statement"))]
     #[error("{kind} statement can't be placed at here")]
     InvalidStatement {
         kind: String,
@@ -53,7 +53,7 @@ pub enum AnalyzeError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(code(AnalyzeError::NumberOverflow), help("remove {kind} direction"))]
+    #[diagnostic(code(AnalyzeError::InvalidDirection), help("remove {kind} direction"))]
     #[error("{kind} direction can't be placed at here")]
     InvalidDirection {
         kind: String,

@@ -11,6 +11,8 @@ pub struct Metadata {
     pub build: Build,
     #[serde(default)]
     pub format: Format,
+    #[serde(skip)]
+    pub metadata_path: PathBuf,
 }
 
 impl Metadata {
@@ -30,8 +32,10 @@ impl Metadata {
     }
 
     pub fn load<T: AsRef<Path>>(path: T) -> Result<Self, MetadataError> {
-        let text = std::fs::read_to_string(path)?;
-        let metadata: Metadata = toml::from_str(&text)?;
+        let path = path.as_ref().canonicalize()?;
+        let text = std::fs::read_to_string(&path)?;
+        let mut metadata: Metadata = toml::from_str(&text)?;
+        metadata.metadata_path = path;
         Ok(metadata)
     }
 }

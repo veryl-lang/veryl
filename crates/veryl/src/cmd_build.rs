@@ -41,7 +41,8 @@ impl CmdBuild {
             let output = match metadata.build.target {
                 Target::Source => file.with_extension("sv"),
                 Target::Directory { ref path } => {
-                    path.join(file.with_extension("sv").file_name().unwrap())
+                    let base = metadata.metadata_path.parent().unwrap().to_owned();
+                    base.join(path.join(file.with_extension("sv").file_name().unwrap()))
                 }
             };
 
