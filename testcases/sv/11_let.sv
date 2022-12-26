@@ -18,8 +18,9 @@ module ModuleA ;
 
     // module instantiation with parameter and port
     ModuleB #(
-        .a  (a ),
-        .aa (10)
+        .a  (a  ),
+        .aa (10 ),
+        .aa (100)
     ) xx (
         .a    (a  ),
         .bb   (aa ),

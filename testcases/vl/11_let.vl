@@ -17,11 +17,12 @@ module ModuleA {
 
     // module instantiation with parameter and port
     let xx: inst ModuleB #(
-        a ,
-        aa: 10,
+        a      ,
+        aa: 10 ,
+        aa: 100,
     ) {
-        a   ,
-        bb  : aa,
+        a        ,
+        bb  : aa ,
         bbbb: bbb,
     };
 
