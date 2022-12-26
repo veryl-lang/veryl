@@ -218,6 +218,44 @@ impl VerylWalker for Aligner {
                 self.aligns[align_kind::EXPRESSION].token(&x.r_paren.r_paren_token);
                 self.aligns[align_kind::WIDTH].token(&x.r_paren.r_paren_token);
             }
+            Factor::FunctionCall(x) => {
+                self.function_call(&x.function_call);
+            }
+        }
+    }
+
+    /// Semantic action for non-terminal 'FunctionCall'
+    fn function_call(&mut self, arg: &FunctionCall) {
+        if let Some(ref x) = arg.function_call_opt {
+            self.aligns[align_kind::EXPRESSION].token(&x.dollar.dollar_token);
+            self.aligns[align_kind::WIDTH].token(&x.dollar.dollar_token);
+        }
+        self.aligns[align_kind::EXPRESSION].token(&arg.identifier.identifier_token);
+        self.aligns[align_kind::WIDTH].token(&arg.identifier.identifier_token);
+        self.aligns[align_kind::EXPRESSION].space(1);
+        self.aligns[align_kind::WIDTH].space(1);
+        self.aligns[align_kind::EXPRESSION].token(&arg.l_paren.l_paren_token);
+        self.aligns[align_kind::WIDTH].token(&arg.l_paren.l_paren_token);
+        if let Some(ref x) = arg.function_call_opt0 {
+            self.function_call_arg(&x.function_call_arg);
+        }
+        self.aligns[align_kind::EXPRESSION].token(&arg.r_paren.r_paren_token);
+        self.aligns[align_kind::WIDTH].token(&arg.r_paren.r_paren_token);
+    }
+
+    /// Semantic action for non-terminal 'FunctionCallArg'
+    fn function_call_arg(&mut self, arg: &FunctionCallArg) {
+        self.expression(&arg.expression);
+        for x in &arg.function_call_arg_list {
+            self.aligns[align_kind::EXPRESSION].token(&x.comma.comma_token);
+            self.aligns[align_kind::WIDTH].token(&x.comma.comma_token);
+            self.aligns[align_kind::EXPRESSION].space(1);
+            self.aligns[align_kind::WIDTH].space(1);
+            self.expression(&x.expression);
+        }
+        if let Some(ref x) = arg.function_call_arg_opt {
+            self.aligns[align_kind::EXPRESSION].token(&x.comma.comma_token);
+            self.aligns[align_kind::WIDTH].token(&x.comma.comma_token);
         }
     }
 

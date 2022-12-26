@@ -32,6 +32,7 @@ UnaryOperatorToken     : "!|~"                                                  
 
 ColonToken    : ':' : OwnedToken Comments;
 CommaToken    : ',' : OwnedToken Comments;
+DollarToken   : '$' : OwnedToken Comments;
 DotDotToken   : '..': OwnedToken Comments;
 EquToken      : '=' : OwnedToken Comments;
 HashToken     : '#' : OwnedToken Comments;
@@ -107,6 +108,7 @@ UnaryOperator     : UnaryOperatorToken     : VerylToken;
 // Symbol
 Colon    : ColonToken    : VerylToken;
 Comma    : CommaToken    : VerylToken;
+Dollar   : DollarToken   : VerylToken;
 DotDot   : DotDotToken   : VerylToken;
 Equ      : EquToken      : VerylToken;
 Hash     : HashToken     : VerylToken;
@@ -189,7 +191,16 @@ Expression1: [ ( UnaryOperator | CommonOperator ) ] Factor;
 Factor: Number
       | Identifier { Range }
       | LParen Expression RParen
+      | FunctionCall
       ;
+
+// ----------------------------------------------------------------------------
+// Function Call
+// ----------------------------------------------------------------------------
+
+FunctionCall: [ Dollar ] Identifier LParen [ FunctionCallArg ] RParen;
+
+FunctionCallArg: Expression { Comma Expression } [ Comma ];
 
 // ----------------------------------------------------------------------------
 // Range / Width

@@ -26,4 +26,13 @@ module ModuleA ;
             return a + 2;
         endfunction
     endmodule
+
+    // function call
+    assign a = FuncA (a, b, c);
+
+    // function call with parameter
+    //assign a = FuncB #(ParamX: 1) (a, b, c);
+
+    // system function call
+    assign a = $clog2 (a);
 endmodule

@@ -183,6 +183,33 @@ impl VerylWalker for Formatter {
         }
     }
 
+    /// Semantic action for non-terminal 'FunctionCall'
+    fn function_call(&mut self, arg: &FunctionCall) {
+        if let Some(ref x) = arg.function_call_opt {
+            self.dollar(&x.dollar);
+        }
+        self.identifier(&arg.identifier);
+        self.space(1);
+        self.l_paren(&arg.l_paren);
+        if let Some(ref x) = arg.function_call_opt0 {
+            self.function_call_arg(&x.function_call_arg);
+        }
+        self.r_paren(&arg.r_paren);
+    }
+
+    /// Semantic action for non-terminal 'FunctionCallArg'
+    fn function_call_arg(&mut self, arg: &FunctionCallArg) {
+        self.expression(&arg.expression);
+        for x in &arg.function_call_arg_list {
+            self.comma(&x.comma);
+            self.space(1);
+            self.expression(&x.expression);
+        }
+        if let Some(ref x) = arg.function_call_arg_opt {
+            self.comma(&x.comma);
+        }
+    }
+
     /// Semantic action for non-terminal 'Type'
     fn r#type(&mut self, arg: &Type) {
         match &*arg.type_group {

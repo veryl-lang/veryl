@@ -264,6 +264,33 @@ impl VerylWalker for Emitter {
         }
     }
 
+    /// Semantic action for non-terminal 'FunctionCall'
+    fn function_call(&mut self, arg: &FunctionCall) {
+        if let Some(ref x) = arg.function_call_opt {
+            self.dollar(&x.dollar);
+        }
+        self.identifier(&arg.identifier);
+        self.space(1);
+        self.l_paren(&arg.l_paren);
+        if let Some(ref x) = arg.function_call_opt0 {
+            self.function_call_arg(&x.function_call_arg);
+        }
+        self.r_paren(&arg.r_paren);
+    }
+
+    /// Semantic action for non-terminal 'FunctionCallArg'
+    fn function_call_arg(&mut self, arg: &FunctionCallArg) {
+        self.expression(&arg.expression);
+        for x in &arg.function_call_arg_list {
+            self.comma(&x.comma);
+            self.space(1);
+            self.expression(&x.expression);
+        }
+        if let Some(ref x) = arg.function_call_arg_opt {
+            self.comma(&x.comma);
+        }
+    }
+
     /// Semantic action for non-terminal 'Width'
     fn width(&mut self, arg: &Width) {
         self.l_bracket(&arg.l_bracket);
@@ -970,10 +997,12 @@ impl VerylWalker for Emitter {
             self.function_item(&x.function_item);
         }
         self.newline_pop();
-        self.token(&arg.r_brace.r_brace_token.replace("endfunction"));
         if arg.function_declaration_opt.is_some() {
+            self.str("endfunction");
             self.newline_pop();
-            self.str("endmodule");
+            self.token(&arg.r_brace.r_brace_token.replace("endmodule"));
+        } else {
+            self.token(&arg.r_brace.r_brace_token.replace("endfunction"));
         }
         self.in_function = false;
     }

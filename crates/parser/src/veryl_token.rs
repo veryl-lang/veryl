@@ -121,6 +121,7 @@ token_with_comments!(AllBitToken, tick_l_bracket01_r_bracket);
 
 token_with_comments!(ColonToken, colon);
 token_with_comments!(CommaToken, comma);
+token_with_comments!(DollarToken, dollar);
 token_with_comments!(DotDotToken, dot_dot);
 token_with_comments!(EquToken, equ);
 token_with_comments!(HashToken, hash);

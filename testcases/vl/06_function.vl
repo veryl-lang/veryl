@@ -23,4 +23,13 @@ module ModuleA {
         c = a / 1;
         return a + 2;
     }
+
+    // function call
+    assign a = FuncA (a, b, c);
+
+    // function call with parameter
+    //assign a = FuncB #(ParamX: 1) (a, b, c);
+
+    // system function call
+    assign a = $clog2 (a);
 }

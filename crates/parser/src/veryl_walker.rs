@@ -111,6 +111,13 @@ pub trait VerylWalker {
         after!(self, comma, arg);
     }
 
+    /// Semantic action for non-terminal 'Dollar'
+    fn dollar(&mut self, arg: &Dollar) {
+        before!(self, dollar, arg);
+        self.veryl_token(&arg.dollar_token);
+        after!(self, dollar, arg);
+    }
+
     /// Semantic action for non-terminal 'DotDot'
     fn dot_dot(&mut self, arg: &DotDot) {
         before!(self, dot_dot, arg);
@@ -535,8 +542,38 @@ pub trait VerylWalker {
                 self.expression(&x.expression);
                 self.r_paren(&x.r_paren);
             }
+            Factor::FunctionCall(x) => self.function_call(&x.function_call),
         }
         after!(self, factor, arg);
+    }
+
+    /// Semantic action for non-terminal 'FunctionCall'
+    fn function_call(&mut self, arg: &FunctionCall) {
+        before!(self, function_call, arg);
+        if let Some(ref x) = arg.function_call_opt {
+            self.dollar(&x.dollar);
+        }
+        self.identifier(&arg.identifier);
+        self.l_paren(&arg.l_paren);
+        if let Some(ref x) = arg.function_call_opt0 {
+            self.function_call_arg(&x.function_call_arg);
+        }
+        self.r_paren(&arg.r_paren);
+        after!(self, function_call, arg);
+    }
+
+    /// Semantic action for non-terminal 'FunctionCallArg'
+    fn function_call_arg(&mut self, arg: &FunctionCallArg) {
+        before!(self, function_call_arg, arg);
+        self.expression(&arg.expression);
+        for x in &arg.function_call_arg_list {
+            self.comma(&x.comma);
+            self.expression(&x.expression);
+        }
+        if let Some(ref x) = arg.function_call_arg_opt {
+            self.comma(&x.comma);
+        }
+        after!(self, function_call_arg, arg);
     }
 
     /// Semantic action for non-terminal 'Range'
