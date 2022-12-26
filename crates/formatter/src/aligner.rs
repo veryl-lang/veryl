@@ -207,7 +207,7 @@ impl VerylWalker for Aligner {
             TypeGroup::BuiltinType(x) => self.builtin_type(&x.builtin_type),
             TypeGroup::Identifier(x) => self.identifier(&x.identifier),
         };
-        let loc = self.aligns[align_kind::TYPE].last_location.clone();
+        let loc = self.aligns[align_kind::TYPE].last_location;
         self.aligns[align_kind::TYPE].finish_item();
         self.aligns[align_kind::WIDTH].start_item();
         if arg.type_list.is_empty() {

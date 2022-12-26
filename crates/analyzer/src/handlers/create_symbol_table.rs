@@ -29,7 +29,7 @@ impl<'a> CreateSymbolTable<'a> {
         let symbol = Symbol::new(name, kind, &self.name_space, &loc);
         if !self.table.insert(name, symbol) {
             self.errors
-                .push(AnalyzeError::duplicated_identifier(name, self.text, &token));
+                .push(AnalyzeError::duplicated_identifier(name, self.text, token));
         }
     }
 }

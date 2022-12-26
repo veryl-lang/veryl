@@ -489,7 +489,7 @@ impl VerylWalker for Emitter {
                         self.str("assign");
                         self.space(1);
                     }
-                    self.str(&arg.identifier.identifier_token.text());
+                    self.str(arg.identifier.identifier_token.text());
                     self.space(1);
                     self.str("=");
                     self.space(1);
