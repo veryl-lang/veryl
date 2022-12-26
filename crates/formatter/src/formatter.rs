@@ -138,7 +138,9 @@ impl Formatter {
                 self.space(1);
             }
             for _ in 0..x.token.location.line - (self.line + self.last_newline) {
-                self.newline();
+                self.unindent();
+                self.str("\n");
+                self.indent();
             }
             self.parol_token(&x.token, false);
         }
