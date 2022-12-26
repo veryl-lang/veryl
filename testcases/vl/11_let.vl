@@ -1,0 +1,33 @@
+module ModuleA {
+    // variable declaration
+    let b  : logic         ;
+    let bb : logic [10]    ;
+    let bbb: bit   [10][10];
+
+    // variable declaration with assignment
+    let c: logic [10] = 1;
+
+    // assign declaration
+    assign a   = 1;
+    assign aa  = 1;
+    assign aaa = 1;
+
+    // module instantiation
+    let x: inst ModuleB;
+
+    // module instantiation with parameter and port
+    let xx: inst ModuleB #(
+        a ,
+        aa: 10,
+    ) {
+        a   ,
+        bb  : aa,
+        bbbb: bbb,
+    };
+
+    // interface instantiation
+    let y: inst InterfaceA;
+
+    // interface array
+    let yy: inst InterfaceA [10];
+}

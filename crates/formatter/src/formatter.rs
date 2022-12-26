@@ -353,13 +353,33 @@ impl VerylWalker for Formatter {
         self.r_brace(&arg.r_brace);
     }
 
-    /// Semantic action for non-terminal 'VariableDeclaration'
-    fn variable_declaration(&mut self, arg: &VariableDeclaration) {
+    /// Semantic action for non-terminal 'LetDeclaration'
+    fn let_declaration(&mut self, arg: &LetDeclaration) {
+        self.r#let(&arg.r#let);
+        self.space(1);
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
         self.space(1);
-        self.r#type(&arg.r#type);
+        match &*arg.let_declaration_group {
+            LetDeclarationGroup::VariableDeclaration(x) => {
+                self.variable_declaration(&x.variable_declaration)
+            }
+            LetDeclarationGroup::InstanceDeclaration(x) => {
+                self.instance_declaration(&x.instance_declaration)
+            }
+        }
         self.semicolon(&arg.semicolon);
+    }
+
+    /// Semantic action for non-terminal 'VariableDeclaration'
+    fn variable_declaration(&mut self, arg: &VariableDeclaration) {
+        self.r#type(&arg.r#type);
+        if let Some(ref x) = arg.variable_declaration_opt {
+            self.space(1);
+            self.equ(&x.equ);
+            self.space(1);
+            self.expression(&x.expression);
+        }
     }
 
     /// Semantic action for non-terminal 'ParameterDeclaration'
@@ -464,11 +484,6 @@ impl VerylWalker for Formatter {
         self.assign(&arg.assign);
         self.space(1);
         self.identifier(&arg.identifier);
-        if let Some(ref x) = arg.assign_declaration_opt {
-            self.colon(&x.colon);
-            self.space(1);
-            self.r#type(&x.r#type);
-        }
         self.space(1);
         self.equ(&arg.equ);
         self.space(1);
@@ -590,25 +605,29 @@ impl VerylWalker for Formatter {
         self.r#type(&arg.r#type);
     }
 
-    /// Semantic action for non-terminal 'Instantiation'
-    fn instantiation(&mut self, arg: &Instantiation) {
+    /// Semantic action for non-terminal 'InstanceDeclaration'
+    fn instance_declaration(&mut self, arg: &InstanceDeclaration) {
+        self.inst(&arg.inst);
+        self.space(1);
         self.identifier(&arg.identifier);
-        self.space(1);
-        self.colon_colon_colon(&arg.colon_colon_colon);
-        self.space(1);
-        self.identifier(&arg.identifier0);
-        self.space(1);
-        if let Some(ref x) = arg.instantiation_opt {
-            self.instance_parameter(&x.instance_parameter);
+        if let Some(ref x) = arg.instance_declaration_opt {
             self.space(1);
+            self.width(&x.width);
         }
-        self.token_will_push(&arg.l_brace.l_brace_token);
-        self.newline_push();
-        if let Some(ref x) = arg.instantiation_opt0 {
-            self.instance_port_list(&x.instance_port_list);
+        if let Some(ref x) = arg.instance_declaration_opt0 {
+            self.space(1);
+            self.instance_parameter(&x.instance_parameter);
         }
-        self.newline_pop();
-        self.r_brace(&arg.r_brace);
+        if let Some(ref x) = arg.instance_declaration_opt1 {
+            self.space(1);
+            self.token_will_push(&x.l_brace.l_brace_token);
+            self.newline_push();
+            if let Some(ref x) = x.instance_declaration_opt2 {
+                self.instance_port_list(&x.instance_port_list);
+            }
+            self.newline_pop();
+            self.r_brace(&x.r_brace);
+        }
     }
 
     /// Semantic action for non-terminal 'InstanceParameter'

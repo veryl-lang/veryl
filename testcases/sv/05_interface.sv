@@ -9,7 +9,7 @@ interface InterfaceA #(
     parameter  int unsigned     b   = 1;
     localparam longint unsigned bb  = 1;
 
-    // variable declaration
+    // let declaration
     logic                  a  ;
     logic [10-1:0]         aa ;
     bit   [10-1:0][10-1:0] aaa;

@@ -29,7 +29,7 @@ impl<'a> CreateSymbolTable<'a> {
         let symbol = Symbol::new(name, kind, &self.name_space, &loc);
         if !self.table.insert(name, symbol) {
             self.errors
-                .push(AnalyzeError::duplicated_identifier(name, self.text, token));
+                .push(AnalyzeError::duplicated_identifier(name, self.text, &token));
         }
     }
 }
@@ -41,7 +41,7 @@ impl<'a> Handler for CreateSymbolTable<'a> {
 }
 
 impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
-    fn variable_declaration(&mut self, arg: &VariableDeclaration) -> Result<()> {
+    fn let_declaration(&mut self, arg: &LetDeclaration) -> Result<()> {
         if let HandlerPoint::Before = self.point {
             self.insert_symbol(&arg.identifier.identifier_token, SymbolKind::Variable);
         }
@@ -58,16 +58,6 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
     fn localparam_declaration(&mut self, arg: &LocalparamDeclaration) -> Result<()> {
         if let HandlerPoint::Before = self.point {
             self.insert_symbol(&arg.identifier.identifier_token, SymbolKind::Parameter);
-        }
-        Ok(())
-    }
-
-    fn assign_declaration(&mut self, arg: &AssignDeclaration) -> Result<()> {
-        if let HandlerPoint::Before = self.point {
-            // assign with type
-            if arg.assign_declaration_opt.is_some() {
-                self.insert_symbol(&arg.identifier.identifier_token, SymbolKind::Variable);
-            }
         }
         Ok(())
     }

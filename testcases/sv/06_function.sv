@@ -5,7 +5,9 @@ module ModuleA ;
         output logic [ParamX-1:0] b,
         ref    logic [ParamX-1:0] c
     ) ;
-        b = a + 1;
+        int unsigned d ;
+        d = 1;
+        b = a + 1 + d;
         c = a / 1;
         return a + 2;
     endfunction

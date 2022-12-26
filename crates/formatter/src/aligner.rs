@@ -351,13 +351,15 @@ impl VerylWalker for Aligner {
         self.struct_list(&arg.struct_list);
     }
 
-    /// Semantic action for non-terminal 'Instantiation'
-    fn instantiation(&mut self, arg: &Instantiation) {
-        if let Some(ref x) = arg.instantiation_opt {
+    /// Semantic action for non-terminal 'InstanceDeclaration'
+    fn instance_declaration(&mut self, arg: &InstanceDeclaration) {
+        if let Some(ref x) = arg.instance_declaration_opt0 {
             self.instance_parameter(&x.instance_parameter);
         }
-        if let Some(ref x) = arg.instantiation_opt0 {
-            self.instance_port_list(&x.instance_port_list);
+        if let Some(ref x) = arg.instance_declaration_opt1 {
+            if let Some(ref x) = x.instance_declaration_opt2 {
+                self.instance_port_list(&x.instance_port_list);
+            }
         }
     }
 

@@ -17,6 +17,7 @@ pub struct Emitter {
     in_start_token: bool,
     consumed_next_newline: bool,
     in_always_ff: bool,
+    in_function: bool,
     reset_signal: Option<String>,
 }
 
@@ -34,6 +35,7 @@ impl Default for Emitter {
             in_start_token: false,
             consumed_next_newline: false,
             in_always_ff: false,
+            in_function: false,
             reset_signal: None,
         }
     }
@@ -456,12 +458,57 @@ impl VerylWalker for Emitter {
         self.token(&arg.r_brace.r_brace_token.replace("end"));
     }
 
-    /// Semantic action for non-terminal 'VariableDeclaration'
-    fn variable_declaration(&mut self, arg: &VariableDeclaration) {
-        self.type_left(&arg.r#type);
-        self.space(1);
-        self.identifier(&arg.identifier);
-        self.type_right(&arg.r#type);
+    /// Semantic action for non-terminal 'LetDeclaration'
+    fn let_declaration(&mut self, arg: &LetDeclaration) {
+        match &*arg.let_declaration_group {
+            LetDeclarationGroup::VariableDeclaration(x) => {
+                let x = &x.variable_declaration;
+                self.type_left(&x.r#type);
+                self.space(1);
+                self.identifier(&arg.identifier);
+                self.type_right(&x.r#type);
+                if let Some(ref x) = x.variable_declaration_opt {
+                    self.str(";");
+                    self.newline();
+                    if !self.in_function {
+                        self.str("assign");
+                        self.space(1);
+                    }
+                    self.str(&arg.identifier.identifier_token.text());
+                    self.space(1);
+                    self.str("=");
+                    self.space(1);
+                    self.expression(&x.expression);
+                }
+            }
+            LetDeclarationGroup::InstanceDeclaration(x) => {
+                let x = &x.instance_declaration;
+                self.token(&x.inst.inst_token.replace(""));
+                self.identifier(&x.identifier);
+                self.space(1);
+                if let Some(ref x) = x.instance_declaration_opt0 {
+                    self.instance_parameter(&x.instance_parameter);
+                    self.space(1);
+                }
+                self.identifier(&arg.identifier);
+                if let Some(ref x) = x.instance_declaration_opt {
+                    self.space(1);
+                    self.width(&x.width);
+                }
+                self.space(1);
+                if let Some(ref x) = x.instance_declaration_opt1 {
+                    self.token_will_push(&x.l_brace.l_brace_token.replace("("));
+                    self.newline_push();
+                    if let Some(ref x) = x.instance_declaration_opt2 {
+                        self.instance_port_list(&x.instance_port_list);
+                    }
+                    self.newline_pop();
+                    self.token(&x.r_brace.r_brace_token.replace(")"));
+                } else {
+                    self.str("()");
+                }
+            }
+        }
         self.semicolon(&arg.semicolon);
     }
 
@@ -607,14 +654,6 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'AssignDeclaration'
     fn assign_declaration(&mut self, arg: &AssignDeclaration) {
-        if let Some(ref x) = arg.assign_declaration_opt {
-            self.type_left(&x.r#type);
-            self.space(1);
-            self.identifier(&arg.identifier);
-            self.type_right(&x.r#type);
-            self.str(";");
-            self.newline();
-        }
         self.assign(&arg.assign);
         self.space(1);
         self.identifier(&arg.identifier);
@@ -741,27 +780,6 @@ impl VerylWalker for Emitter {
         self.space(1);
         self.identifier(&arg.identifier);
         self.type_right(&arg.r#type);
-    }
-
-    /// Semantic action for non-terminal 'Instantiation'
-    fn instantiation(&mut self, arg: &Instantiation) {
-        self.token(&arg.identifier.identifier_token.replace(""));
-        self.token(&arg.colon_colon_colon.colon_colon_colon_token.replace(""));
-        self.identifier(&arg.identifier0);
-        self.space(1);
-        if let Some(ref x) = arg.instantiation_opt {
-            self.instance_parameter(&x.instance_parameter);
-            self.space(1);
-        }
-        self.str(arg.identifier.identifier_token.text());
-        self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token.replace("("));
-        self.newline_push();
-        if let Some(ref x) = arg.instantiation_opt0 {
-            self.instance_port_list(&x.instance_port_list);
-        }
-        self.newline_pop();
-        self.token(&arg.r_brace.r_brace_token.replace(");"));
     }
 
     /// Semantic action for non-terminal 'InstanceParameter'
@@ -917,6 +935,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'FunctionDeclaration'
     fn function_declaration(&mut self, arg: &FunctionDeclaration) {
+        self.in_function = true;
         if let Some(ref x) = arg.function_declaration_opt {
             self.str("module");
             self.space(1);
@@ -954,6 +973,7 @@ impl VerylWalker for Emitter {
             self.newline_pop();
             self.str("endmodule");
         }
+        self.in_function = false;
     }
 
     /// Semantic action for non-terminal 'ModuleDeclaration'

@@ -9,10 +9,10 @@ interface InterfaceA #(
     parameter  b : u32  = 1;
     localparam bb: u64  = 1;
 
-    // variable declaration
-    a  : logic         ;
-    aa : logic [10]    ;
-    aaa: bit   [10][10];
+    // let declaration
+    let a  : logic         ;
+    let aa : logic [10]    ;
+    let aaa: bit   [10][10];
 
     // modport declaration
     modport a {

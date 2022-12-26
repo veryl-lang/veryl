@@ -48,6 +48,7 @@ syn keyword verylStatement parameter localparam
 syn keyword verylStatement posedge negedge
 syn keyword verylStatement async_high async_low sync_high sync_low
 syn keyword verylStatement always_ff always_comb assign return
+syn keyword verylStatement let inst
 hi def link verylStatement Statement
 
 syn keyword verylType logic bit

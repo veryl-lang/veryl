@@ -119,7 +119,6 @@ token_with_comments!(BasedToken, l_bracket0_minus9_r_bracket_plus_l_paren_quest_
 token_with_comments!(BaseLessToken, l_bracket0_minus9_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9_r_bracket_plus_r_paren_star);
 token_with_comments!(AllBitToken, tick_l_bracket01_r_bracket);
 
-token_with_comments!(ColonColonColonToken, colon_colon_colon);
 token_with_comments!(ColonToken, colon);
 token_with_comments!(CommaToken, comma);
 token_with_comments!(DotDotToken, dot_dot);
@@ -157,8 +156,10 @@ token_with_comments!(IfToken, bif_b);
 token_with_comments!(IfResetToken, bif_underscore_reset_b);
 token_with_comments!(InoutToken, binout_b);
 token_with_comments!(InputToken, binput_b);
+token_with_comments!(InstToken, binst_b);
 token_with_comments!(InterfaceToken, binterface_b);
 token_with_comments!(InToken, bin_b);
+token_with_comments!(LetToken, blet_b);
 token_with_comments!(LocalparamToken, blocalparam_b);
 token_with_comments!(LogicToken, blogic_b);
 token_with_comments!(ModportToken, bmodport_b);

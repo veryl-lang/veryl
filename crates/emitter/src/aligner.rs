@@ -333,6 +333,28 @@ impl VerylWalker for Aligner {
         }
     }
 
+    /// Semantic action for non-terminal 'LetDeclaration'
+    fn let_declaration(&mut self, arg: &LetDeclaration) {
+        match &*arg.let_declaration_group {
+            LetDeclarationGroup::VariableDeclaration(x) => {
+                let x = &x.variable_declaration;
+                self.identifier(&arg.identifier);
+                self.r#type(&x.r#type);
+            }
+            LetDeclarationGroup::InstanceDeclaration(x) => {
+                let x = &x.instance_declaration;
+                if let Some(ref x) = x.instance_declaration_opt0 {
+                    self.instance_parameter(&x.instance_parameter);
+                }
+                if let Some(ref x) = x.instance_declaration_opt1 {
+                    if let Some(ref x) = x.instance_declaration_opt2 {
+                        self.instance_port_list(&x.instance_port_list);
+                    }
+                }
+            }
+        }
+    }
+
     /// Semantic action for non-terminal 'ParameterDeclaration'
     fn parameter_declaration(&mut self, arg: &ParameterDeclaration) {
         self.insert(&arg.parameter.parameter_token, 1);
@@ -362,16 +384,6 @@ impl VerylWalker for Aligner {
     /// Semantic action for non-terminal 'StructDeclaration'
     fn struct_declaration(&mut self, arg: &StructDeclaration) {
         self.struct_list(&arg.struct_list);
-    }
-
-    /// Semantic action for non-terminal 'Instantiation'
-    fn instantiation(&mut self, arg: &Instantiation) {
-        if let Some(ref x) = arg.instantiation_opt {
-            self.instance_parameter(&x.instance_parameter);
-        }
-        if let Some(ref x) = arg.instantiation_opt0 {
-            self.instance_port_list(&x.instance_port_list);
-        }
     }
 
     /// Semantic action for non-terminal 'InstanceParameterItem'

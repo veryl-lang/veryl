@@ -30,19 +30,18 @@ BinaryOperatorToken    : "\*\*|\*|/|%|<<<|>>>|<<|>>|<=|>=|<|>|===|==\?|!==|!=\?|
 CommonOperatorToken    : "\+|-|&|\||\^~|\^|~\^|~&|~\|"                                        : OwnedToken Comments;
 UnaryOperatorToken     : "!|~"                                                                : OwnedToken Comments;
 
-ColonColonColonToken: ':::': OwnedToken Comments;
-ColonToken          : ':'  : OwnedToken Comments;
-CommaToken          : ','  : OwnedToken Comments;
-DotDotToken         : '..' : OwnedToken Comments;
-EquToken            : '='  : OwnedToken Comments;
-HashToken           : '#'  : OwnedToken Comments;
-LBraceToken         : '{'  : OwnedToken Comments;
-LBracketToken       : '['  : OwnedToken Comments;
-LParenToken         : '('  : OwnedToken Comments;
-RBraceToken         : '}'  : OwnedToken Comments;
-RBracketToken       : ']'  : OwnedToken Comments;
-RParenToken         : ')'  : OwnedToken Comments;
-SemicolonToken      : ';'  : OwnedToken Comments;
+ColonToken    : ':' : OwnedToken Comments;
+CommaToken    : ',' : OwnedToken Comments;
+DotDotToken   : '..': OwnedToken Comments;
+EquToken      : '=' : OwnedToken Comments;
+HashToken     : '#' : OwnedToken Comments;
+LBraceToken   : '{' : OwnedToken Comments;
+LBracketToken : '[' : OwnedToken Comments;
+LParenToken   : '(' : OwnedToken Comments;
+RBraceToken   : '}' : OwnedToken Comments;
+RBracketToken : ']' : OwnedToken Comments;
+RParenToken   : ')' : OwnedToken Comments;
+SemicolonToken: ';' : OwnedToken Comments;
 
 AlwaysCombToken: /\balways_comb\b/: OwnedToken Comments;
 AlwaysFfToken  : /\balways_ff\b/  : OwnedToken Comments;
@@ -62,8 +61,10 @@ IfResetToken   : /\bif_reset\b/   : OwnedToken Comments;
 IfToken        : /\bif\b/         : OwnedToken Comments;
 InoutToken     : /\binout\b/      : OwnedToken Comments;
 InputToken     : /\binput\b/      : OwnedToken Comments;
+InstToken      : /\binst\b/       : OwnedToken Comments;
 InterfaceToken : /\binterface\b/  : OwnedToken Comments;
 InToken        : /\bin\b/         : OwnedToken Comments;
+LetToken       : /\blet\b/        : OwnedToken Comments;
 LocalparamToken: /\blocalparam\b/ : OwnedToken Comments;
 LogicToken     : /\blogic\b/      : OwnedToken Comments;
 ModportToken   : /\bmodport\b/    : OwnedToken Comments;
@@ -104,20 +105,19 @@ BinaryOperator    : BinaryOperatorToken    : VerylToken;
 UnaryOperator     : UnaryOperatorToken     : VerylToken;
 
 // Symbol
-Colon          : ColonToken          : VerylToken;
-ColonColonColon: ColonColonColonToken: VerylToken;
-Comma          : CommaToken          : VerylToken;
-DotDot         : DotDotToken         : VerylToken;
-Equ            : EquToken            : VerylToken;
-Hash           : HashToken           : VerylToken;
-LBrace         : LBraceToken         : VerylToken;
-LBracket       : LBracketToken       : VerylToken;
-LParen         : LParenToken         : VerylToken;
-MinusGT        : MinusGTToken        : VerylToken;
-RBrace         : RBraceToken         : VerylToken;
-RBracket       : RBracketToken       : VerylToken;
-RParen         : RParenToken         : VerylToken;
-Semicolon      : SemicolonToken      : VerylToken;
+Colon    : ColonToken    : VerylToken;
+Comma    : CommaToken    : VerylToken;
+DotDot   : DotDotToken   : VerylToken;
+Equ      : EquToken      : VerylToken;
+Hash     : HashToken     : VerylToken;
+LBrace   : LBraceToken   : VerylToken;
+LBracket : LBracketToken : VerylToken;
+LParen   : LParenToken   : VerylToken;
+MinusGT  : MinusGTToken  : VerylToken;
+RBrace   : RBraceToken   : VerylToken;
+RBracket : RBracketToken : VerylToken;
+RParen   : RParenToken   : VerylToken;
+Semicolon: SemicolonToken: VerylToken;
 
 // Keyword
 AlwaysComb: AlwaysCombToken: VerylToken;
@@ -139,7 +139,9 @@ IfReset   : IfResetToken   : VerylToken;
 In        : InToken        : VerylToken;
 Inout     : InoutToken     : VerylToken;
 Input     : InputToken     : VerylToken;
+Inst      : InstToken      : VerylToken;
 Interface : InterfaceToken : VerylToken;
+Let       : LetToken       : VerylToken;
 Localparam: LocalparamToken: VerylToken;
 Logic     : LogicToken     : VerylToken;
 Modport   : ModportToken   : VerylToken;
@@ -233,7 +235,9 @@ ForStatement: For Identifier Colon Type In Expression DotDot Expression [ Step A
 // Declaration
 // ----------------------------------------------------------------------------
 
-VariableDeclaration: Identifier Colon Type Semicolon;
+LetDeclaration: Let Identifier Colon ( VariableDeclaration | InstanceDeclaration ) Semicolon;
+
+VariableDeclaration: Type [ Equ Expression ];
 
 ParameterDeclaration: Parameter Identifier Colon Type Equ Expression Semicolon;
 
@@ -247,7 +251,7 @@ AlwaysFfReset: [ AsyncLow | AsyncHigh | SyncLow | SyncHigh ] Identifier;
 
 AlwaysCombDeclaration: AlwaysComb LBrace { Statement } RBrace;
 
-AssignDeclaration: Assign Identifier [ Colon Type ] Equ Expression Semicolon;
+AssignDeclaration: Assign Identifier Equ Expression Semicolon;
 
 ModportDeclaration: Modport Identifier LBrace ModportList RBrace;
 
@@ -268,10 +272,10 @@ StructList: StructItem { Comma StructItem } [ Comma ];
 StructItem: Identifier Colon Type;
 
 // ----------------------------------------------------------------------------
-// Instantiation
+// InstanceDeclaration
 // ----------------------------------------------------------------------------
 
-Instantiation: Identifier ColonColonColon Identifier [ InstanceParameter ] LBrace [ InstancePortList ] RBrace;
+InstanceDeclaration: Inst Identifier [ Width ] [ InstanceParameter ] [ LBrace [ InstancePortList ] RBrace ];
 
 InstanceParameter: Hash LParen [ InstanceParameterList ] RParen;
 
@@ -315,7 +319,7 @@ Direction: Input
 
 FunctionDeclaration: Function Identifier [ WithParameter ] [ PortDeclaration ] MinusGT Type LBrace { FunctionItem } RBrace;
 
-FunctionItem: VariableDeclaration
+FunctionItem: LetDeclaration
             | Statement
             ;
 
@@ -329,13 +333,12 @@ ModuleIfDeclaration: If Expression Colon Identifier LBrace { ModuleItem } RBrace
 
 ModuleForDeclaration: For Identifier In Expression DotDot Expression [ Step AssignmentOperator Expression ] Colon Identifier LBrace { ModuleItem } RBrace;
 
-ModuleItem: VariableDeclaration
+ModuleItem: LetDeclaration
           | ParameterDeclaration
           | LocalparamDeclaration
           | AlwaysFfDeclaration
           | AlwaysCombDeclaration
           | AssignDeclaration
-          | Instantiation
           | FunctionDeclaration
           | ModuleIfDeclaration
           | ModuleForDeclaration
@@ -353,7 +356,7 @@ InterfaceIfDeclaration: If Expression Colon Identifier LBrace { InterfaceItem } 
 
 InterfaceForDeclaration: For Identifier In Expression DotDot Expression [ Step AssignmentOperator Expression ] Colon Identifier LBrace { InterfaceItem } RBrace;
 
-InterfaceItem: VariableDeclaration
+InterfaceItem: LetDeclaration
              | ParameterDeclaration
              | LocalparamDeclaration
              | ModportDeclaration
