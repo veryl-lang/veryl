@@ -8,9 +8,9 @@ module ModuleA {
     let c: logic [10] = 1;
 
     // assign declaration
-    assign a   = 1;
-    assign aa  = 1;
-    assign aaa = 1;
+    assign a    = 1;
+    assign aa   = 1;
+    assign aa.a = 1;
 
     // module instantiation
     let x: inst ModuleB;

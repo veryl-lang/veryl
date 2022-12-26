@@ -9,9 +9,9 @@ module ModuleA ;
     assign c = 1;
 
     // assign declaration
-    assign a   = 1;
-    assign aa  = 1;
-    assign aaa = 1;
+    assign a    = 1;
+    assign aa   = 1;
+    assign aa.a = 1;
 
     // module instantiation
     ModuleB x ();

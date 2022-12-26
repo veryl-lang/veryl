@@ -187,20 +187,6 @@ impl VerylWalker for Aligner {
         }
     }
 
-    /// Semantic action for non-terminal 'FunctionCall'
-    fn function_call(&mut self, arg: &FunctionCall) {
-        if let Some(ref x) = arg.function_call_opt {
-            self.dollar(&x.dollar);
-        }
-        self.identifier(&arg.identifier);
-        self.space(1);
-        self.l_paren(&arg.l_paren);
-        if let Some(ref x) = arg.function_call_opt0 {
-            self.function_call_arg(&x.function_call_arg);
-        }
-        self.r_paren(&arg.r_paren);
-    }
-
     /// Semantic action for non-terminal 'FunctionCallArg'
     fn function_call_arg(&mut self, arg: &FunctionCallArg) {
         self.expression(&arg.expression);
@@ -238,7 +224,7 @@ impl VerylWalker for Aligner {
     /// Semantic action for non-terminal 'AssignmentStatement'
     fn assignment_statement(&mut self, arg: &AssignmentStatement) {
         self.aligns[align_kind::IDENTIFIER].start_item();
-        self.identifier(&arg.identifier);
+        self.hierarchical_identifier(&arg.hierarchical_identifier);
         self.aligns[align_kind::IDENTIFIER].finish_item();
         self.aligns[align_kind::ASSIGNMENT].start_item();
         match &*arg.assignment_statement_group {
@@ -300,7 +286,7 @@ impl VerylWalker for Aligner {
     fn assign_declaration(&mut self, arg: &AssignDeclaration) {
         self.assign(&arg.assign);
         self.aligns[align_kind::IDENTIFIER].start_item();
-        self.identifier(&arg.identifier);
+        self.hierarchical_identifier(&arg.hierarchical_identifier);
         self.aligns[align_kind::IDENTIFIER].finish_item();
         self.equ(&arg.equ);
         self.expression(&arg.expression);

@@ -123,6 +123,7 @@ token_with_comments!(ColonToken, colon);
 token_with_comments!(CommaToken, comma);
 token_with_comments!(DollarToken, dollar);
 token_with_comments!(DotDotToken, dot_dot);
+token_with_comments!(DotToken, dot);
 token_with_comments!(EquToken, equ);
 token_with_comments!(HashToken, hash);
 token_with_comments!(LBraceToken, l_brace);

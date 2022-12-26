@@ -183,20 +183,6 @@ impl VerylWalker for Formatter {
         }
     }
 
-    /// Semantic action for non-terminal 'FunctionCall'
-    fn function_call(&mut self, arg: &FunctionCall) {
-        if let Some(ref x) = arg.function_call_opt {
-            self.dollar(&x.dollar);
-        }
-        self.identifier(&arg.identifier);
-        self.space(1);
-        self.l_paren(&arg.l_paren);
-        if let Some(ref x) = arg.function_call_opt0 {
-            self.function_call_arg(&x.function_call_arg);
-        }
-        self.r_paren(&arg.r_paren);
-    }
-
     /// Semantic action for non-terminal 'FunctionCallArg'
     fn function_call_arg(&mut self, arg: &FunctionCallArg) {
         self.expression(&arg.expression);
@@ -224,7 +210,7 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'AssignmentStatement'
     fn assignment_statement(&mut self, arg: &AssignmentStatement) {
-        self.identifier(&arg.identifier);
+        self.hierarchical_identifier(&arg.hierarchical_identifier);
         self.space(1);
         match &*arg.assignment_statement_group {
             AssignmentStatementGroup::Equ(x) => self.equ(&x.equ),
@@ -475,7 +461,7 @@ impl VerylWalker for Formatter {
             }
             self.space(1);
         }
-        self.identifier(&arg.identifier);
+        self.hierarchical_identifier(&arg.hierarchical_identifier);
     }
 
     /// Semantic action for non-terminal 'AlwaysFfReset'
@@ -489,7 +475,7 @@ impl VerylWalker for Formatter {
             }
             self.space(1);
         }
-        self.identifier(&arg.identifier);
+        self.hierarchical_identifier(&arg.hierarchical_identifier);
     }
 
     /// Semantic action for non-terminal 'AlwaysCombDeclaration'
@@ -512,7 +498,7 @@ impl VerylWalker for Formatter {
     fn assign_declaration(&mut self, arg: &AssignDeclaration) {
         self.assign(&arg.assign);
         self.space(1);
-        self.identifier(&arg.identifier);
+        self.hierarchical_identifier(&arg.hierarchical_identifier);
         self.space(1);
         self.equ(&arg.equ);
         self.space(1);

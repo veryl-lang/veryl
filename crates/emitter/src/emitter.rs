@@ -264,20 +264,6 @@ impl VerylWalker for Emitter {
         }
     }
 
-    /// Semantic action for non-terminal 'FunctionCall'
-    fn function_call(&mut self, arg: &FunctionCall) {
-        if let Some(ref x) = arg.function_call_opt {
-            self.dollar(&x.dollar);
-        }
-        self.identifier(&arg.identifier);
-        self.space(1);
-        self.l_paren(&arg.l_paren);
-        if let Some(ref x) = arg.function_call_opt0 {
-            self.function_call_arg(&x.function_call_arg);
-        }
-        self.r_paren(&arg.r_paren);
-    }
-
     /// Semantic action for non-terminal 'FunctionCallArg'
     fn function_call_arg(&mut self, arg: &FunctionCallArg) {
         self.expression(&arg.expression);
@@ -304,7 +290,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'AssignmentStatement'
     fn assignment_statement(&mut self, arg: &AssignmentStatement) {
-        self.identifier(&arg.identifier);
+        self.hierarchical_identifier(&arg.hierarchical_identifier);
         self.space(1);
         if self.in_always_ff {
             self.str("<");
@@ -616,7 +602,7 @@ impl VerylWalker for Emitter {
             }
         }
         self.space(1);
-        self.identifier(&arg.identifier);
+        self.hierarchical_identifier(&arg.hierarchical_identifier);
     }
 
     /// Semantic action for non-terminal 'AlwaysFfReset'
@@ -656,13 +642,19 @@ impl VerylWalker for Emitter {
         };
         if self.always_ff_reset_exist_in_sensitivity_list(arg) {
             self.space(1);
-            self.identifier(&arg.identifier);
+            self.hierarchical_identifier(&arg.hierarchical_identifier);
         }
-        self.reset_signal = Some(format!(
-            "{}{}",
-            prefix,
-            arg.identifier.identifier_token.text()
-        ));
+        let mut signal = arg
+            .hierarchical_identifier
+            .identifier
+            .identifier_token
+            .text()
+            .to_string();
+        for x in &arg.hierarchical_identifier.hierarchical_identifier_list {
+            signal.push_str(x.dot.dot_token.text());
+            signal.push_str(x.identifier.identifier_token.text());
+        }
+        self.reset_signal = Some(format!("{}{}", prefix, signal));
     }
 
     /// Semantic action for non-terminal 'AlwaysCombDeclaration'
@@ -685,7 +677,7 @@ impl VerylWalker for Emitter {
     fn assign_declaration(&mut self, arg: &AssignDeclaration) {
         self.assign(&arg.assign);
         self.space(1);
-        self.identifier(&arg.identifier);
+        self.hierarchical_identifier(&arg.hierarchical_identifier);
         self.space(1);
         self.equ(&arg.equ);
         self.space(1);

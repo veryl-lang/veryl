@@ -125,6 +125,13 @@ pub trait VerylWalker {
         after!(self, dot_dot, arg);
     }
 
+    /// Semantic action for non-terminal 'Dot'
+    fn dot(&mut self, arg: &Dot) {
+        before!(self, dot, arg);
+        self.veryl_token(&arg.dot_token);
+        after!(self, dot, arg);
+    }
+
     /// Semantic action for non-terminal 'Equ'
     fn equ(&mut self, arg: &Equ) {
         before!(self, equ, arg);
@@ -499,6 +506,17 @@ pub trait VerylWalker {
         after!(self, real_number, arg);
     }
 
+    /// Semantic action for non-terminal 'HierarchicalIdentifier'
+    fn hierarchical_identifier(&mut self, arg: &HierarchicalIdentifier) {
+        before!(self, hierarchical_identifier, arg);
+        self.identifier(&arg.identifier);
+        for x in &arg.hierarchical_identifier_list {
+            self.dot(&x.dot);
+            self.identifier(&x.identifier);
+        }
+        after!(self, hierarchical_identifier, arg);
+    }
+
     /// Semantic action for non-terminal 'Expression'
     fn expression(&mut self, arg: &Expression) {
         before!(self, expression, arg);
@@ -531,10 +549,24 @@ pub trait VerylWalker {
         before!(self, factor, arg);
         match arg {
             Factor::Number(x) => self.number(&x.number),
-            Factor::IdentifierFactorList(x) => {
-                self.identifier(&x.identifier);
-                for x in &x.factor_list {
-                    self.range(&x.range);
+            Factor::FactorOptHierarchicalIdentifierFactorGroup(x) => {
+                if let Some(ref x) = x.factor_opt {
+                    self.dollar(&x.dollar);
+                }
+                self.hierarchical_identifier(&x.hierarchical_identifier);
+                match &*x.factor_group {
+                    FactorGroup::FactorGroupList(x) => {
+                        for x in &x.factor_group_list {
+                            self.range(&x.range);
+                        }
+                    }
+                    FactorGroup::LParenFactorOpt0RParen(x) => {
+                        self.l_paren(&x.l_paren);
+                        if let Some(ref x) = x.factor_opt0 {
+                            self.function_call_arg(&x.function_call_arg);
+                        }
+                        self.r_paren(&x.r_paren);
+                    }
                 }
             }
             Factor::LParenExpressionRParen(x) => {
@@ -542,24 +574,8 @@ pub trait VerylWalker {
                 self.expression(&x.expression);
                 self.r_paren(&x.r_paren);
             }
-            Factor::FunctionCall(x) => self.function_call(&x.function_call),
         }
         after!(self, factor, arg);
-    }
-
-    /// Semantic action for non-terminal 'FunctionCall'
-    fn function_call(&mut self, arg: &FunctionCall) {
-        before!(self, function_call, arg);
-        if let Some(ref x) = arg.function_call_opt {
-            self.dollar(&x.dollar);
-        }
-        self.identifier(&arg.identifier);
-        self.l_paren(&arg.l_paren);
-        if let Some(ref x) = arg.function_call_opt0 {
-            self.function_call_arg(&x.function_call_arg);
-        }
-        self.r_paren(&arg.r_paren);
-        after!(self, function_call, arg);
     }
 
     /// Semantic action for non-terminal 'FunctionCallArg'
@@ -643,7 +659,7 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'AssignmentStatement'
     fn assignment_statement(&mut self, arg: &AssignmentStatement) {
         before!(self, assignment_statement, arg);
-        self.identifier(&arg.identifier);
+        self.hierarchical_identifier(&arg.hierarchical_identifier);
         match &*arg.assignment_statement_group {
             AssignmentStatementGroup::Equ(x) => self.equ(&x.equ),
             AssignmentStatementGroup::AssignmentOperator(x) => {
@@ -830,7 +846,7 @@ pub trait VerylWalker {
                 AlwaysFfClockOptGroup::Negedge(x) => self.negedge(&x.negedge),
             }
         }
-        self.identifier(&arg.identifier);
+        self.hierarchical_identifier(&arg.hierarchical_identifier);
         after!(self, always_ff_clock, arg);
     }
 
@@ -845,7 +861,7 @@ pub trait VerylWalker {
                 AlwaysFfResetOptGroup::SyncHigh(x) => self.sync_high(&x.sync_high),
             }
         }
-        self.identifier(&arg.identifier);
+        self.hierarchical_identifier(&arg.hierarchical_identifier);
         after!(self, always_ff_reset, arg);
     }
 
@@ -865,7 +881,7 @@ pub trait VerylWalker {
     fn assign_declaration(&mut self, arg: &AssignDeclaration) {
         before!(self, assign_declaration, arg);
         self.assign(&arg.assign);
-        self.identifier(&arg.identifier);
+        self.hierarchical_identifier(&arg.hierarchical_identifier);
         self.equ(&arg.equ);
         self.expression(&arg.expression);
         self.semicolon(&arg.semicolon);

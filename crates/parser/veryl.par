@@ -34,6 +34,7 @@ ColonToken    : ':' : OwnedToken Comments;
 CommaToken    : ',' : OwnedToken Comments;
 DollarToken   : '$' : OwnedToken Comments;
 DotDotToken   : '..': OwnedToken Comments;
+DotToken      : '.' : OwnedToken Comments;
 EquToken      : '=' : OwnedToken Comments;
 HashToken     : '#' : OwnedToken Comments;
 LBraceToken   : '{' : OwnedToken Comments;
@@ -110,6 +111,7 @@ Colon    : ColonToken    : VerylToken;
 Comma    : CommaToken    : VerylToken;
 Dollar   : DollarToken   : VerylToken;
 DotDot   : DotDotToken   : VerylToken;
+Dot      : DotToken      : VerylToken;
 Equ      : EquToken      : VerylToken;
 Hash     : HashToken     : VerylToken;
 LBrace   : LBraceToken   : VerylToken;
@@ -182,6 +184,12 @@ RealNumber: FixedPoint
           ;
 
 // ----------------------------------------------------------------------------
+// Hierarchical Identifier
+// ----------------------------------------------------------------------------
+
+HierarchicalIdentifier: Identifier { Dot Identifier };
+
+// ----------------------------------------------------------------------------
 // Expression
 // ----------------------------------------------------------------------------
 
@@ -189,16 +197,9 @@ Expression : Expression1 { ( BinaryOperator | CommonOperator ) Expression1 };
 Expression1: [ ( UnaryOperator | CommonOperator ) ] Factor;
 
 Factor: Number
-      | Identifier { Range }
+      | [ Dollar ] HierarchicalIdentifier ( { Range } | LParen [ FunctionCallArg ] RParen )
       | LParen Expression RParen
-      | FunctionCall
       ;
-
-// ----------------------------------------------------------------------------
-// Function Call
-// ----------------------------------------------------------------------------
-
-FunctionCall: [ Dollar ] Identifier LParen [ FunctionCallArg ] RParen;
 
 FunctionCallArg: Expression { Comma Expression } [ Comma ];
 
@@ -232,7 +233,7 @@ Statement: AssignmentStatement
          | ForStatement
          ;
 
-AssignmentStatement: Identifier ( Equ | AssignmentOperator ) Expression Semicolon;
+AssignmentStatement: HierarchicalIdentifier ( Equ | AssignmentOperator ) Expression Semicolon;
 
 IfStatement: If Expression LBrace { Statement } RBrace { Else If Expression LBrace { Statement } RBrace } [ Else LBrace { Statement } RBrace ];
 
@@ -256,13 +257,13 @@ LocalparamDeclaration: Localparam Identifier Colon Type Equ Expression Semicolon
 
 AlwaysFfDeclaration: AlwaysFf LParen AlwaysFfClock [ Comma AlwaysFfReset ] RParen LBrace { Statement } RBrace;
 
-AlwaysFfClock: [ Posedge | Negedge ] Identifier;
+AlwaysFfClock: [ Posedge | Negedge ] HierarchicalIdentifier;
 
-AlwaysFfReset: [ AsyncLow | AsyncHigh | SyncLow | SyncHigh ] Identifier;
+AlwaysFfReset: [ AsyncLow | AsyncHigh | SyncLow | SyncHigh ] HierarchicalIdentifier;
 
 AlwaysCombDeclaration: AlwaysComb LBrace { Statement } RBrace;
 
-AssignDeclaration: Assign Identifier Equ Expression Semicolon;
+AssignDeclaration: Assign HierarchicalIdentifier Equ Expression Semicolon;
 
 ModportDeclaration: Modport Identifier LBrace ModportList RBrace;
 

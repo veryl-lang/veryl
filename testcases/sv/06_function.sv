@@ -28,11 +28,11 @@ module ModuleA ;
     endmodule
 
     // function call
-    assign a = FuncA (a, b, c);
+    assign a = FuncA(a, b, c);
 
     // function call with parameter
     //assign a = FuncB #(ParamX: 1) (a, b, c);
 
     // system function call
-    assign a = $clog2 (a);
+    assign a = $clog2(a);
 endmodule
