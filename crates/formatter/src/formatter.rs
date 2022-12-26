@@ -13,6 +13,7 @@ pub struct Formatter {
     aligner: Aligner,
     last_newline: usize,
     in_start_token: bool,
+    consumed_next_newline: bool,
 }
 
 impl Default for Formatter {
@@ -25,6 +26,7 @@ impl Default for Formatter {
             aligner: Aligner::new(),
             last_newline: 0,
             in_start_token: false,
+            consumed_next_newline: false,
         }
     }
 }
@@ -51,30 +53,49 @@ impl Formatter {
     }
 
     fn unindent(&mut self) {
-        if self.string.ends_with(' ') {
+        if self
+            .string
+            .ends_with(&" ".repeat(self.indent * self.indent_width))
+        {
             self.string
                 .truncate(self.string.len() - self.indent * self.indent_width);
         }
     }
 
+    fn indent(&mut self) {
+        self.str(&" ".repeat(self.indent * self.indent_width));
+    }
+
     fn newline_push(&mut self) {
         self.unindent();
-        self.str("\n");
+        if !self.consumed_next_newline {
+            self.str("\n");
+        } else {
+            self.consumed_next_newline = false;
+        }
         self.indent += 1;
-        self.str(&" ".repeat(self.indent * self.indent_width));
+        self.indent();
     }
 
     fn newline_pop(&mut self) {
         self.unindent();
-        self.str("\n");
+        if !self.consumed_next_newline {
+            self.str("\n");
+        } else {
+            self.consumed_next_newline = false;
+        }
         self.indent -= 1;
-        self.str(&" ".repeat(self.indent * self.indent_width));
+        self.indent();
     }
 
     fn newline(&mut self) {
         self.unindent();
-        self.str("\n");
-        self.str(&" ".repeat(self.indent * self.indent_width));
+        if !self.consumed_next_newline {
+            self.str("\n");
+        } else {
+            self.consumed_next_newline = false;
+        }
+        self.indent();
     }
 
     fn space(&mut self, repeat: usize) {
@@ -87,6 +108,7 @@ impl Formatter {
         }
         let text = x.text();
         let text = if text.ends_with('\n') {
+            self.consumed_next_newline = true;
             text.trim_end()
         } else {
             text
@@ -108,7 +130,10 @@ impl Formatter {
         if will_push {
             self.indent += 1;
         }
+        // detect line comment newline which will consume the next newline
+        self.consumed_next_newline = false;
         for x in &x.comments {
+            // insert space between comments in the same line
             if x.token.location.line == self.line && !self.in_start_token {
                 self.space(1);
             }
@@ -119,6 +144,11 @@ impl Formatter {
         }
         if will_push {
             self.indent -= 1;
+        }
+        if self.consumed_next_newline {
+            self.unindent();
+            self.str("\n");
+            self.indent();
         }
     }
 

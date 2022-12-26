@@ -1,0 +1,59 @@
+module //a
+ test_module //a
+ (
+    i_clk // a
+    : // a
+     input  //a
+     logic //a
+     ,
+    i_rst_n: input  logic ,
+    i_up   : input  logic ,
+
+    i_down : input  logic    ,
+    o_count: output logic [8],
+) {
+    count //a
+    : logic //a
+     [ // a
+    8 //a
+    ] // a
+    ;
+    up_down: logic [2];
+
+    always_comb // a
+     {
+        up_down = // a
+         (i_up // a
+         << //a
+         1) // a
+         | i_down;
+    }
+
+    always_ff // a
+     (i_clk // a
+    , // a
+     i_rst_n // a
+    ) // a
+     {
+        if_reset // a
+         {
+            count = 0;
+        } // a
+         else //
+         if // a
+         up_down // a
+         == // a
+         2'b10 {
+            count = count // a
+             + 1 //a
+            ;
+        } // a
+         else // a
+         if //a
+         up_down == 2'b01 {
+            count // a
+             = count - // a
+             1;
+        }
+    }
+}
