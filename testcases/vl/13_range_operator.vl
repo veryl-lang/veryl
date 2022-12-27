@@ -1,0 +1,14 @@
+module ModuleA {
+    // bit select
+    assign a = X[0];
+
+    // range select
+    assign a = X[1:0];
+
+    // position and width
+    assign a = X[1+:2];
+    assign a = X[1-:2];
+
+    // index by step
+    assign a = X[1 step 2];
+}

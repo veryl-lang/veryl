@@ -200,6 +200,20 @@ impl VerylWalker for Aligner {
         }
     }
 
+    /// Semantic action for non-terminal 'RangeOperator'
+    fn range_operator(&mut self, arg: &RangeOperator) {
+        match arg {
+            RangeOperator::Colon(x) => self.colon(&x.colon),
+            RangeOperator::PlusColon(x) => self.plus_colon(&x.plus_colon),
+            RangeOperator::MinusColon(x) => self.minus_colon(&x.minus_colon),
+            RangeOperator::Step(x) => {
+                self.space(1);
+                self.step(&x.step);
+                self.space(1);
+            }
+        }
+    }
+
     /// Semantic action for non-terminal 'Type'
     fn r#type(&mut self, arg: &Type) {
         self.aligns[align_kind::TYPE].start_item();

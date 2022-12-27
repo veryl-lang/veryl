@@ -167,11 +167,25 @@ pub trait VerylWalker {
         after!(self, l_paren, arg);
     }
 
+    /// Semantic action for non-terminal 'MinusColon'
+    fn minus_colon(&mut self, arg: &MinusColon) {
+        before!(self, minus_colon, arg);
+        self.veryl_token(&arg.minus_colon_token);
+        after!(self, minus_colon, arg);
+    }
+
     /// Semantic action for non-terminal 'MinusGT'
     fn minus_g_t(&mut self, arg: &MinusGT) {
         before!(self, minus_g_t, arg);
         self.veryl_token(&arg.minus_g_t_token);
         after!(self, minus_g_t, arg);
+    }
+
+    /// Semantic action for non-terminal 'PlusColon'
+    fn plus_colon(&mut self, arg: &PlusColon) {
+        before!(self, plus_colon, arg);
+        self.veryl_token(&arg.plus_colon_token);
+        after!(self, plus_colon, arg);
     }
 
     /// Semantic action for non-terminal 'RBrace'
@@ -597,11 +611,23 @@ pub trait VerylWalker {
         self.l_bracket(&arg.l_bracket);
         self.expression(&arg.expression);
         if let Some(ref x) = arg.range_opt {
-            self.colon(&x.colon);
+            self.range_operator(&x.range_operator);
             self.expression(&x.expression);
         }
         self.r_bracket(&arg.r_bracket);
         after!(self, range, arg);
+    }
+
+    /// Semantic action for non-terminal 'RangeOperator'
+    fn range_operator(&mut self, arg: &RangeOperator) {
+        before!(self, range_operator, arg);
+        match arg {
+            RangeOperator::Colon(x) => self.colon(&x.colon),
+            RangeOperator::PlusColon(x) => self.plus_colon(&x.plus_colon),
+            RangeOperator::MinusColon(x) => self.minus_colon(&x.minus_colon),
+            RangeOperator::Step(x) => self.step(&x.step),
+        }
+        after!(self, range_operator, arg);
     }
 
     /// Semantic action for non-terminal 'Width'

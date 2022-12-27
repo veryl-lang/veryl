@@ -277,6 +277,28 @@ impl VerylWalker for Emitter {
         }
     }
 
+    /// Semantic action for non-terminal 'Range'
+    fn range(&mut self, arg: &Range) {
+        self.l_bracket(&arg.l_bracket);
+        self.expression(&arg.expression);
+        if let Some(ref x) = arg.range_opt {
+            match &*x.range_operator {
+                RangeOperator::Step(_) => {
+                    self.str("*(");
+                    self.expression(&x.expression);
+                    self.str(")+:(");
+                    self.expression(&x.expression);
+                    self.str(")");
+                }
+                _ => {
+                    self.range_operator(&x.range_operator);
+                    self.expression(&x.expression);
+                }
+            }
+        }
+        self.r_bracket(&arg.r_bracket);
+    }
+
     /// Semantic action for non-terminal 'Width'
     fn width(&mut self, arg: &Width) {
         self.l_bracket(&arg.l_bracket);

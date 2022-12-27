@@ -22,8 +22,10 @@ BasedToken       : /[0-9]+(?:_[0-9]+)*'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]
 BaseLessToken    : /[0-9]+(?:_[0-9]+)*/: OwnedToken Comments;
 AllBitToken      : /'[01]/: OwnedToken Comments;
 
-// '->' should be before '-'
-MinusGTToken: '->': OwnedToken Comments;
+// Some tokens should be before operator
+MinusColonToken: '-:': OwnedToken Comments;
+MinusGTToken   : '->': OwnedToken Comments;
+PlusColonToken : '+:': OwnedToken Comments;
 
 AssignmentOperatorToken: "\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<=|>>=|<<<=|>>>="                      : OwnedToken Comments;
 BinaryOperatorToken    : "\*\*|\*|/|%|<<<|>>>|<<|>>|<=|>=|<|>|===|==\?|!==|!=\?|==|!=|&&|\|\|": OwnedToken Comments;
@@ -107,21 +109,23 @@ BinaryOperator    : BinaryOperatorToken    : VerylToken;
 UnaryOperator     : UnaryOperatorToken     : VerylToken;
 
 // Symbol
-Colon    : ColonToken    : VerylToken;
-Comma    : CommaToken    : VerylToken;
-Dollar   : DollarToken   : VerylToken;
-DotDot   : DotDotToken   : VerylToken;
-Dot      : DotToken      : VerylToken;
-Equ      : EquToken      : VerylToken;
-Hash     : HashToken     : VerylToken;
-LBrace   : LBraceToken   : VerylToken;
-LBracket : LBracketToken : VerylToken;
-LParen   : LParenToken   : VerylToken;
-MinusGT  : MinusGTToken  : VerylToken;
-RBrace   : RBraceToken   : VerylToken;
-RBracket : RBracketToken : VerylToken;
-RParen   : RParenToken   : VerylToken;
-Semicolon: SemicolonToken: VerylToken;
+Colon     : ColonToken     : VerylToken;
+Comma     : CommaToken     : VerylToken;
+Dollar    : DollarToken    : VerylToken;
+DotDot    : DotDotToken    : VerylToken;
+Dot       : DotToken       : VerylToken;
+Equ       : EquToken       : VerylToken;
+Hash      : HashToken      : VerylToken;
+LBrace    : LBraceToken    : VerylToken;
+LBracket  : LBracketToken  : VerylToken;
+LParen    : LParenToken    : VerylToken;
+MinusColon: MinusColonToken: VerylToken;
+MinusGT   : MinusGTToken   : VerylToken;
+PlusColon : PlusColonToken : VerylToken;
+RBrace    : RBraceToken    : VerylToken;
+RBracket  : RBracketToken  : VerylToken;
+RParen    : RParenToken    : VerylToken;
+Semicolon : SemicolonToken : VerylToken;
 
 // Keyword
 AlwaysComb: AlwaysCombToken: VerylToken;
@@ -207,7 +211,13 @@ FunctionCallArg: Expression { Comma Expression } [ Comma ];
 // Range / Width
 // ----------------------------------------------------------------------------
 
-Range: LBracket Expression [ Colon Expression ] RBracket;
+Range: LBracket Expression [ RangeOperator Expression ] RBracket;
+
+RangeOperator: Colon
+             | PlusColon
+             | MinusColon
+             | Step
+             ;
 
 Width: LBracket Expression RBracket;
 
