@@ -1,5 +1,6 @@
 pub mod generated;
 pub mod parser;
+pub mod stringifier;
 pub mod veryl_grammar;
 pub mod veryl_grammar_trait;
 pub mod veryl_parser;
@@ -10,6 +11,7 @@ pub use parol_runtime::lexer::location::Location as ParolLocation;
 pub use parol_runtime::lexer::Token as ParolToken;
 pub use parol_runtime::miette;
 pub use parser::Parser;
+pub use stringifier::Stringifier;
 mod derive_builder {
     pub use parol_runtime::derive_builder::*;
 }

@@ -511,8 +511,14 @@ pub trait VerylWalker {
         before!(self, hierarchical_identifier, arg);
         self.identifier(&arg.identifier);
         for x in &arg.hierarchical_identifier_list {
+            self.range(&x.range);
+        }
+        for x in &arg.hierarchical_identifier_list0 {
             self.dot(&x.dot);
             self.identifier(&x.identifier);
+            for x in &x.hierarchical_identifier_list0_list {
+                self.range(&x.range);
+            }
         }
         after!(self, hierarchical_identifier, arg);
     }
@@ -549,24 +555,17 @@ pub trait VerylWalker {
         before!(self, factor, arg);
         match arg {
             Factor::Number(x) => self.number(&x.number),
-            Factor::FactorOptHierarchicalIdentifierFactorGroup(x) => {
+            Factor::FactorOptHierarchicalIdentifierFactorOpt0(x) => {
                 if let Some(ref x) = x.factor_opt {
                     self.dollar(&x.dollar);
                 }
                 self.hierarchical_identifier(&x.hierarchical_identifier);
-                match &*x.factor_group {
-                    FactorGroup::FactorGroupList(x) => {
-                        for x in &x.factor_group_list {
-                            self.range(&x.range);
-                        }
+                if let Some(ref x) = x.factor_opt0 {
+                    self.l_paren(&x.l_paren);
+                    if let Some(ref x) = x.factor_opt1 {
+                        self.function_call_arg(&x.function_call_arg);
                     }
-                    FactorGroup::LParenFactorOpt0RParen(x) => {
-                        self.l_paren(&x.l_paren);
-                        if let Some(ref x) = x.factor_opt0 {
-                            self.function_call_arg(&x.function_call_arg);
-                        }
-                        self.r_paren(&x.r_paren);
-                    }
+                    self.r_paren(&x.r_paren);
                 }
             }
             Factor::LParenExpressionRParen(x) => {

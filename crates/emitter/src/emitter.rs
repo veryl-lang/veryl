@@ -3,7 +3,7 @@ use veryl_metadata::{ClockType, Metadata, ResetType};
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::VerylToken;
 use veryl_parser::veryl_walker::VerylWalker;
-use veryl_parser::ParolToken;
+use veryl_parser::{ParolToken, Stringifier};
 
 pub struct Emitter {
     pub indent_width: usize,
@@ -644,17 +644,10 @@ impl VerylWalker for Emitter {
             self.space(1);
             self.hierarchical_identifier(&arg.hierarchical_identifier);
         }
-        let mut signal = arg
-            .hierarchical_identifier
-            .identifier
-            .identifier_token
-            .text()
-            .to_string();
-        for x in &arg.hierarchical_identifier.hierarchical_identifier_list {
-            signal.push_str(x.dot.dot_token.text());
-            signal.push_str(x.identifier.identifier_token.text());
-        }
-        self.reset_signal = Some(format!("{}{}", prefix, signal));
+
+        let mut stringifier = Stringifier::new();
+        stringifier.hierarchical_identifier(&arg.hierarchical_identifier);
+        self.reset_signal = Some(format!("{}{}", prefix, stringifier.as_str()));
     }
 
     /// Semantic action for non-terminal 'AlwaysCombDeclaration'

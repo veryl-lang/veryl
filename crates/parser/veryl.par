@@ -187,7 +187,7 @@ RealNumber: FixedPoint
 // Hierarchical Identifier
 // ----------------------------------------------------------------------------
 
-HierarchicalIdentifier: Identifier { Dot Identifier };
+HierarchicalIdentifier: Identifier { Range } { Dot Identifier { Range } };
 
 // ----------------------------------------------------------------------------
 // Expression
@@ -197,7 +197,7 @@ Expression : Expression1 { ( BinaryOperator | CommonOperator ) Expression1 };
 Expression1: [ ( UnaryOperator | CommonOperator ) ] Factor;
 
 Factor: Number
-      | [ Dollar ] HierarchicalIdentifier ( { Range } | LParen [ FunctionCallArg ] RParen )
+      | [ Dollar ] HierarchicalIdentifier [ LParen [ FunctionCallArg ] RParen ]
       | LParen Expression RParen
       ;
 
