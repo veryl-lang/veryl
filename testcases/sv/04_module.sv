@@ -5,16 +5,16 @@ module ModuleA #(
     localparam int unsigned aa  = 1
 ) (
     // module port
-    input  logic [10-1:0] a  ,
-    output logic [10-1:0] aa ,
-    inout  logic [10-1:0] aaa
+    input  logic [10-1:0] b  ,
+    output logic [10-1:0] bb ,
+    inout  logic [10-1:0] bbb
 ) ;
     // parameter declaration
-    parameter  int unsigned     b   = 1;
-    localparam longint unsigned bb  = 1;
+    parameter  int unsigned     c   = 1;
+    localparam longint unsigned cc  = 1;
 
     // variable declaration
-    logic                  b  ;
-    logic [10-1:0]         bb ;
-    bit   [10-1:0][10-1:0] bbb;
+    logic                  d  ;
+    logic [10-1:0]         dd ;
+    bit   [10-1:0][10-1:0] ddd;
 endmodule

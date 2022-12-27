@@ -10,14 +10,14 @@ interface InterfaceA #(
     localparam bb: u64  = 1;
 
     // let declaration
-    let a  : logic         ;
-    let aa : logic [10]    ;
-    let aaa: bit   [10][10];
+    let c  : logic         ;
+    let cc : logic [10]    ;
+    let ccc: bit   [10][10];
 
     // modport declaration
-    modport a {
-        a  : input ,
-        aa : output,
-        aaa: inout ,
+    modport d {
+        c  : input ,
+        cc : output,
+        ccc: inout ,
     }
 }

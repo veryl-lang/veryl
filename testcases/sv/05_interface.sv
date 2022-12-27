@@ -10,14 +10,14 @@ interface InterfaceA #(
     localparam longint unsigned bb  = 1;
 
     // let declaration
-    logic                  a  ;
-    logic [10-1:0]         aa ;
-    bit   [10-1:0][10-1:0] aaa;
+    logic                  c  ;
+    logic [10-1:0]         cc ;
+    bit   [10-1:0][10-1:0] ccc;
 
     // modport declaration
-    modport a (
-        input  a  ,
-        output aa ,
-        inout  aaa
+    modport d (
+        input  c  ,
+        output cc ,
+        inout  ccc
     );
 endinterface

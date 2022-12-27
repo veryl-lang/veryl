@@ -5,16 +5,16 @@ module ModuleA #(
     localparam aa: u32  = 1,
 ) (
     // module port
-    a  : input  logic [10],
-    aa : output logic [10],
-    aaa: inout  logic [10],
+    b  : input  logic [10],
+    bb : output logic [10],
+    bbb: inout  logic [10],
 ) {
     // parameter declaration
-    parameter  b : u32  = 1;
-    localparam bb: u64  = 1;
+    parameter  c : u32  = 1;
+    localparam cc: u64  = 1;
 
     // variable declaration
-    let b  : logic         ;
-    let bb : logic [10]    ;
-    let bbb: bit   [10][10];
+    let d  : logic         ;
+    let dd : logic [10]    ;
+    let ddd: bit   [10][10];
 }

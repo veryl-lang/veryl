@@ -88,7 +88,7 @@ impl SymbolTable {
     pub fn insert(&mut self, name: &str, symbol: Symbol) -> bool {
         let entry = self.table.entry(name.to_owned()).or_default();
         for item in entry.iter() {
-            if symbol.name_space == item.name_space && symbol.kind == item.kind {
+            if symbol.name_space == item.name_space {
                 return false;
             }
         }
@@ -101,9 +101,7 @@ impl SymbolTable {
         let mut max_depth = 0;
         if let Some(symbols) = self.table.get(name) {
             for symbol in symbols {
-                if symbol.kind == kind
-                    && name_space.included(&symbol.name_space)
-                    && symbol.name_space.depth() > max_depth
+                if name_space.included(&symbol.name_space) && symbol.name_space.depth() > max_depth
                 {
                     ret = Some(symbol);
                     max_depth = symbol.name_space.depth();
