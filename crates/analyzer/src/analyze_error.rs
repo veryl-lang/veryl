@@ -77,11 +77,45 @@ pub enum AnalyzeError {
     },
 
     #[diagnostic(code(AnalyzeError::MismatchArity), help("fix function arguments"))]
-    #[error("function \"{name}\" has {arity} arguments but {args} arguments are supplied")]
+    #[error("function \"{name}\" has {arity} arguments, but {args} arguments are supplied")]
     MismatchArity {
         name: String,
         arity: usize,
         args: usize,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(code(AnalyzeError::MitmatchType), help(""))]
+    #[error("\"{name}\" is expected to \"{expected}\", but it is \"{actual}\"")]
+    MismatchType {
+        name: String,
+        expected: String,
+        actual: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(code(AnalyzeError::MissingPort), help("add \"{port}\" port"))]
+    #[error("module \"{name}\" has \"{port}\", but it is not connected")]
+    MissingPort {
+        name: String,
+        port: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(code(AnalyzeError::UnknownPort), help("remove \"{port}\" port"))]
+    #[error("module \"{name}\" doesn't has \"{port}\", but it is connected")]
+    UnknownPort {
+        name: String,
+        port: String,
         #[source_code]
         input: NamedSource,
         #[label("Error location")]
@@ -178,6 +212,40 @@ impl AnalyzeError {
             name: name.to_string(),
             arity,
             args,
+            input: AnalyzeError::named_source(source, token),
+            error_location: token.parol_token().into(),
+        }
+    }
+
+    pub fn mismatch_type(
+        name: &str,
+        expected: &str,
+        actual: &str,
+        source: &str,
+        token: &VerylToken,
+    ) -> Self {
+        AnalyzeError::MismatchType {
+            name: name.to_string(),
+            expected: expected.to_string(),
+            actual: actual.to_string(),
+            input: AnalyzeError::named_source(source, token),
+            error_location: token.parol_token().into(),
+        }
+    }
+
+    pub fn missing_port(name: &str, port: &str, source: &str, token: &VerylToken) -> Self {
+        AnalyzeError::MissingPort {
+            name: name.to_string(),
+            port: port.to_string(),
+            input: AnalyzeError::named_source(source, token),
+            error_location: token.parol_token().into(),
+        }
+    }
+
+    pub fn unknown_port(name: &str, port: &str, source: &str, token: &VerylToken) -> Self {
+        AnalyzeError::UnknownPort {
+            name: name.to_string(),
+            port: port.to_string(),
             input: AnalyzeError::named_source(source, token),
             error_location: token.parol_token().into(),
         }

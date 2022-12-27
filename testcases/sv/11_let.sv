@@ -17,7 +17,7 @@ module ModuleA ;
     ModuleB x ();
 
     // module instantiation with parameter and port
-    ModuleB #(
+    ModuleC #(
         .a  (a  ),
         .aa (10 ),
         .aa (100)
@@ -32,4 +32,14 @@ module ModuleA ;
 
     // interface array
     InterfaceA yy [10-1:0] ();
+endmodule
+module ModuleB ;
+
+endmodule
+module ModuleC (
+    input  int unsigned a    ,
+    input  int unsigned bb   ,
+    input  int unsigned bbbb 
+) ;
+
 endmodule

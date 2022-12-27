@@ -31,6 +31,20 @@ pub enum SymbolKind {
     },
 }
 
+impl ToString for SymbolKind {
+    fn to_string(&self) -> String {
+        match self {
+            SymbolKind::Port { .. } => "port".to_string(),
+            SymbolKind::Variable { .. } => "variable".to_string(),
+            SymbolKind::Module { .. } => "module".to_string(),
+            SymbolKind::Interface { .. } => "interface".to_string(),
+            SymbolKind::Function { .. } => "function".to_string(),
+            SymbolKind::Parameter { .. } => "parameter".to_string(),
+            SymbolKind::Instance { .. } => "instance".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Direction {
     Input,
@@ -246,7 +260,7 @@ impl SymbolTable {
             if let Some(symbols) = self.table.get(name) {
                 for symbol in symbols {
                     if name_space.included(&symbol.name_space)
-                        && symbol.name_space.depth() > max_depth
+                        && symbol.name_space.depth() >= max_depth
                     {
                         ret = Some(symbol);
                         max_depth = symbol.name_space.depth();
