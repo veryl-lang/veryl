@@ -1,3 +1,4 @@
+pub mod check_function_arity;
 pub mod check_invalid_direction;
 pub mod check_invalid_number_character;
 pub mod check_invalid_reset;
@@ -5,6 +6,7 @@ pub mod check_invalid_statement;
 pub mod check_number_overflow;
 pub mod check_system_function;
 pub mod create_symbol_table;
+use check_function_arity::*;
 use check_invalid_direction::*;
 use check_invalid_number_character::*;
 use check_invalid_reset::*;
@@ -15,7 +17,6 @@ use create_symbol_table::*;
 
 use crate::analyze_error::AnalyzeError;
 use crate::symbol_table::SymbolTable;
-use std::marker::PhantomData;
 use veryl_parser::veryl_walker::Handler;
 
 pub struct Pass1Handlers<'a> {
@@ -71,21 +72,23 @@ impl<'a> Pass1Handlers<'a> {
 }
 
 pub struct Pass2Handlers<'a> {
-    x: PhantomData<&'a ()>,
+    check_function_arity: CheckFunctionArity<'a>,
 }
 
 impl<'a> Pass2Handlers<'a> {
-    pub fn new(_text: &'a str) -> Self {
+    pub fn new(text: &'a str, symbol_table: &'a SymbolTable) -> Self {
         Self {
-            x: Default::default(),
+            check_function_arity: CheckFunctionArity::new(text, symbol_table),
         }
     }
 
     pub fn get_handlers(&mut self) -> Vec<&mut dyn Handler> {
-        vec![]
+        vec![&mut self.check_function_arity as &mut dyn Handler]
     }
 
     pub fn get_errors(&mut self) -> Vec<AnalyzeError> {
-        vec![]
+        let mut ret = Vec::new();
+        ret.append(&mut self.check_function_arity.errors);
+        ret
     }
 }

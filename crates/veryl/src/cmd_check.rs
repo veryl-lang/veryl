@@ -46,11 +46,11 @@ impl CmdCheck {
             let parser = Parser::parse(&input, file)?;
 
             let mut analyzer = Analyzer::new(&input);
-            analyzer.analyze(&parser.veryl);
-            if !analyzer.errors.is_empty() {
+            let errors = analyzer.analyze(&parser.veryl);
+            if !errors.is_empty() {
                 all_pass = false;
 
-                for error in analyzer.errors {
+                for error in errors {
                     check_error.related.push(error);
                 }
             }

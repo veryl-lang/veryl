@@ -63,10 +63,25 @@ pub enum AnalyzeError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(code(AnalyzeError::InvalidDirection), help("fix system function name"))]
+    #[diagnostic(
+        code(AnalyzeError::InvalidSystemFunction),
+        help("fix system function name")
+    )]
     #[error("system function \"{name}\" is not defined")]
     InvalidSystemFunction {
         name: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(code(AnalyzeError::MismatchArity), help("fix function arguments"))]
+    #[error("function \"{name}\" has {arity} arguments but {args} arguments are supplied")]
+    MismatchArity {
+        name: String,
+        arity: usize,
+        args: usize,
         #[source_code]
         input: NamedSource,
         #[label("Error location")]
@@ -147,6 +162,22 @@ impl AnalyzeError {
     pub fn invalid_system_function(name: &str, source: &str, token: &VerylToken) -> Self {
         AnalyzeError::InvalidSystemFunction {
             name: name.to_string(),
+            input: AnalyzeError::named_source(source, token),
+            error_location: token.parol_token().into(),
+        }
+    }
+
+    pub fn mismatch_arity(
+        name: &str,
+        arity: usize,
+        args: usize,
+        source: &str,
+        token: &VerylToken,
+    ) -> Self {
+        AnalyzeError::MismatchArity {
+            name: name.to_string(),
+            arity,
+            args,
             input: AnalyzeError::named_source(source, token),
             error_location: token.parol_token().into(),
         }

@@ -1,46 +1,69 @@
 use crate::analyze_error::AnalyzeError;
 use crate::handlers::*;
+use crate::symbol_table::SymbolTable;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, VerylWalker};
 
-enum AnalyzePass {
-    Pass1,
-    Pass2,
+pub struct AnalyzerPass1<'a> {
+    handlers: Pass1Handlers<'a>,
+}
+
+impl<'a> AnalyzerPass1<'a> {
+    pub fn new(text: &'a str) -> Self {
+        AnalyzerPass1 {
+            handlers: Pass1Handlers::new(text),
+        }
+    }
+}
+
+impl<'a> VerylWalker for AnalyzerPass1<'a> {
+    fn get_handlers(&mut self) -> Option<Vec<&mut dyn Handler>> {
+        Some(self.handlers.get_handlers())
+    }
+}
+
+pub struct AnalyzerPass2<'a> {
+    handlers: Pass2Handlers<'a>,
+}
+
+impl<'a> AnalyzerPass2<'a> {
+    pub fn new(text: &'a str, symbol_table: &'a SymbolTable) -> Self {
+        AnalyzerPass2 {
+            handlers: Pass2Handlers::new(text, symbol_table),
+        }
+    }
+}
+
+impl<'a> VerylWalker for AnalyzerPass2<'a> {
+    fn get_handlers(&mut self) -> Option<Vec<&mut dyn Handler>> {
+        Some(self.handlers.get_handlers())
+    }
 }
 
 pub struct Analyzer<'a> {
-    pub errors: Vec<AnalyzeError>,
-    pass1_handlers: Pass1Handlers<'a>,
-    pass2_handlers: Pass2Handlers<'a>,
-    pass: AnalyzePass,
+    pub symbol_table: SymbolTable,
+    text: &'a str,
 }
 
 impl<'a> Analyzer<'a> {
     pub fn new(text: &'a str) -> Self {
         Analyzer {
-            errors: Vec::new(),
-            pass1_handlers: Pass1Handlers::new(text),
-            pass2_handlers: Pass2Handlers::new(text),
-            pass: AnalyzePass::Pass1,
+            symbol_table: SymbolTable::default(),
+            text,
         }
     }
 
-    pub fn analyze(&mut self, input: &Veryl) {
-        self.pass = AnalyzePass::Pass1;
-        self.veryl(input);
-        self.errors.append(&mut self.pass1_handlers.get_errors());
+    pub fn analyze(&'a mut self, input: &Veryl) -> Vec<AnalyzeError> {
+        let mut ret = Vec::new();
 
-        self.pass = AnalyzePass::Pass2;
-        self.veryl(input);
-        self.errors.append(&mut self.pass2_handlers.get_errors());
-    }
-}
+        let mut pass1 = AnalyzerPass1::new(self.text);
+        pass1.veryl(input);
+        ret.append(&mut pass1.handlers.get_errors());
 
-impl<'a> VerylWalker for Analyzer<'a> {
-    fn get_handlers(&mut self) -> Option<Vec<&mut dyn Handler>> {
-        match self.pass {
-            AnalyzePass::Pass1 => Some(self.pass1_handlers.get_handlers()),
-            AnalyzePass::Pass2 => Some(self.pass2_handlers.get_handlers()),
-        }
+        let mut pass2 = AnalyzerPass2::new(self.text, pass1.handlers.get_symbol_table());
+        pass2.veryl(input);
+        ret.append(&mut pass2.handlers.get_errors());
+
+        ret
     }
 }

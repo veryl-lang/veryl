@@ -28,9 +28,9 @@ mod analyzer {
 
         let ret = Parser::parse(&input, &file).unwrap();
         let mut analyzer = Analyzer::new(&input);
-        analyzer.analyze(&ret.veryl);
+        let errors = analyzer.analyze(&ret.veryl);
 
-        assert!(analyzer.errors.is_empty());
+        assert!(errors.is_empty());
     }
 
     include!(concat!(env!("OUT_DIR"), "/test.rs"));

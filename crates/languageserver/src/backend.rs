@@ -38,9 +38,8 @@ impl Backend {
         let diag = match Parser::parse(&text, &path) {
             Ok(x) => {
                 let mut analyzer = Analyzer::new(&text);
-                analyzer.analyze(&x.veryl);
-                let ret: Vec<_> = analyzer
-                    .errors
+                let mut errors = analyzer.analyze(&x.veryl);
+                let ret: Vec<_> = errors
                     .drain(0..)
                     .map(|x| {
                         let x: miette::ErrReport = x.into();
