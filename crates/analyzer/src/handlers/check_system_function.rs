@@ -28,31 +28,28 @@ impl<'a> Handler for CheckSystemFunction<'a> {
 
 impl<'a> VerylGrammarTrait for CheckSystemFunction<'a> {
     fn factor(&mut self, arg: &Factor) -> Result<()> {
-        match arg {
-            Factor::FactorOptHierarchicalIdentifierFactorOpt0(x) => {
-                if x.factor_opt.is_some() {
-                    let mut stringifier = Stringifier::new();
-                    stringifier.hierarchical_identifier(&x.hierarchical_identifier);
-                    match stringifier.as_str() {
-                        name if DEFINED_SYSTEM_FUNCTIONS.contains(&name) => (),
-                        name => {
-                            self.errors.push(AnalyzeError::invalid_system_function(
-                                name,
-                                self.text,
-                                &x.hierarchical_identifier.identifier.identifier_token,
-                            ));
-                        }
+        if let Factor::FactorOptHierarchicalIdentifierFactorOpt0(x) = arg {
+            if x.factor_opt.is_some() {
+                let mut stringifier = Stringifier::new();
+                stringifier.hierarchical_identifier(&x.hierarchical_identifier);
+                match stringifier.as_str() {
+                    name if DEFINED_SYSTEM_FUNCTIONS.contains(&name) => (),
+                    name => {
+                        self.errors.push(AnalyzeError::invalid_system_function(
+                            name,
+                            self.text,
+                            &x.hierarchical_identifier.identifier.identifier_token,
+                        ));
                     }
                 }
             }
-            _ => (),
         }
         Ok(())
     }
 }
 
 // Refer IEEE Std 1800-2012  Clause 20 and 21
-const DEFINED_SYSTEM_FUNCTIONS: [&'static str; 196] = [
+const DEFINED_SYSTEM_FUNCTIONS: [&str; 196] = [
     "acos",
     "acosh",
     "asin",
