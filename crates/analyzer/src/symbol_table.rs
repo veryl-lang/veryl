@@ -2,13 +2,36 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use veryl_parser::ParolLocation;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum SymbolKind {
-    Variable,
+    Port { direction: Direction },
+    Variable { r#type: Type },
     Module,
     Interface,
     Function,
     Parameter,
+}
+
+#[derive(Debug, Clone)]
+pub enum Direction {
+    Input,
+    Output,
+    Inout,
+    Ref,
+    ModPort { interface: String, modport: String },
+}
+
+#[derive(Debug, Clone)]
+pub enum Type {
+    Bit,
+    Logic,
+    U32,
+    U64,
+    I32,
+    I64,
+    F32,
+    F64,
+    UserDefined(String),
 }
 
 #[derive(Default, Debug, Clone, PartialEq)]
@@ -96,7 +119,7 @@ impl SymbolTable {
         true
     }
 
-    pub fn get(&self, name: &str, kind: SymbolKind, name_space: &NameSpace) -> Option<&Symbol> {
+    pub fn get(&self, name: &str, name_space: &NameSpace) -> Option<&Symbol> {
         let mut ret = None;
         let mut max_depth = 0;
         if let Some(symbols) = self.table.get(name) {

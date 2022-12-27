@@ -1,4 +1,6 @@
 use crate::analyze_error::AnalyzeError;
+use crate::symbol_table::Direction as SymDirection;
+use crate::symbol_table::Type as SymType;
 use crate::symbol_table::{Location, NameSpace, Symbol, SymbolKind, SymbolTable};
 use veryl_parser::miette::Result;
 use veryl_parser::veryl_grammar_trait::*;
@@ -43,7 +45,30 @@ impl<'a> Handler for CreateSymbolTable<'a> {
 impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
     fn let_declaration(&mut self, arg: &LetDeclaration) -> Result<()> {
         if let HandlerPoint::Before = self.point {
-            self.insert_symbol(&arg.identifier.identifier_token, SymbolKind::Variable);
+            match &*arg.let_declaration_group {
+                LetDeclarationGroup::VariableDeclaration(x) => {
+                    let x = &x.variable_declaration.r#type;
+                    let r#type = match &*x.type_group {
+                        TypeGroup::BuiltinType(x) => match &*x.builtin_type {
+                            BuiltinType::Logic(_) => SymType::Logic,
+                            BuiltinType::Bit(_) => SymType::Bit,
+                            BuiltinType::U32(_) => SymType::U32,
+                            BuiltinType::U64(_) => SymType::U64,
+                            BuiltinType::I32(_) => SymType::I32,
+                            BuiltinType::I64(_) => SymType::I64,
+                            BuiltinType::F32(_) => SymType::F32,
+                            BuiltinType::F64(_) => SymType::F64,
+                        },
+                        TypeGroup::Identifier(x) => {
+                            SymType::UserDefined(x.identifier.identifier_token.text().into())
+                        }
+                    };
+
+                    let kind = SymbolKind::Variable { r#type };
+                    self.insert_symbol(&arg.identifier.identifier_token, kind);
+                }
+                LetDeclarationGroup::InstanceDeclaration(_) => {}
+            }
         }
         Ok(())
     }
@@ -71,7 +96,15 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
     fn port_declaration_item(&mut self, arg: &PortDeclarationItem) -> Result<()> {
         if let HandlerPoint::Before = self.point {
-            self.insert_symbol(&arg.identifier.identifier_token, SymbolKind::Variable);
+            let direction = match &*arg.direction {
+                Direction::Input(_) => SymDirection::Input,
+                Direction::Output(_) => SymDirection::Output,
+                Direction::Inout(_) => SymDirection::Inout,
+                Direction::Ref(_) => SymDirection::Ref,
+            };
+
+            let kind = SymbolKind::Port { direction };
+            self.insert_symbol(&arg.identifier.identifier_token, kind);
         }
         Ok(())
     }
