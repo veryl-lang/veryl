@@ -63,17 +63,29 @@ impl VerylToken {
 }
 
 macro_rules! token_with_comments {
-    ($x:ident, $y:ident) => {
+    ($x:ident, $y:ident, $z:ident) => {
         impl From<&$x> for VerylToken {
             fn from(x: &$x) -> Self {
                 let mut comments = Vec::new();
                 if let Some(ref x) = x.comments.comments_opt {
-                    let mut tokens = split_comment_token(x.multi_comment.multi_comment);
+                    let mut tokens = split_comment_token(x.comments_term.comments_term);
                     comments.append(&mut tokens)
                 }
                 VerylToken {
-                    token: x.$y.clone(),
+                    token: x.$z.clone(),
                     comments,
+                }
+            }
+        }
+        impl From<&$y> for Token {
+            fn from(x: &$y) -> Self {
+                Token {
+                    text: x.$z.text,
+                    line: x.$z.line,
+                    column: x.$z.column,
+                    length: x.$z.length,
+                    pos: x.$z.pos,
+                    file_path: x.$z.file_path,
                 }
             }
         }
@@ -113,7 +125,7 @@ impl From<&StartToken> for VerylToken {
     fn from(x: &StartToken) -> Self {
         let mut comments = Vec::new();
         if let Some(ref x) = x.comments.comments_opt {
-            let mut tokens = split_comment_token(x.multi_comment.multi_comment);
+            let mut tokens = split_comment_token(x.comments_term.comments_term);
             comments.append(&mut tokens)
         }
         let text = global_table::insert_str("");
@@ -130,72 +142,84 @@ impl From<&StartToken> for VerylToken {
     }
 }
 
-token_with_comments!(FixedPointToken, l_bracket0_minus9_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9_r_bracket_plus_r_paren_star_dot_l_bracket0_minus9_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9_r_bracket_plus_r_paren_star);
-token_with_comments!(ExponentToken, l_bracket0_minus9_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9_r_bracket_plus_r_paren_star_dot_l_bracket0_minus9_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9_r_bracket_plus_r_paren_star_l_bracket_e_e_r_bracket_l_bracket_plus_minus_r_bracket_quest_l_bracket0_minus9_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9_r_bracket_plus_r_paren_star);
-token_with_comments!(BasedToken, l_bracket0_minus9_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9_r_bracket_plus_r_paren_star_tick_l_bracket_bodh_r_bracket_l_bracket0_minus9a_minus_f_a_minus_fxz_x_z_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9a_minus_f_a_minus_fxz_x_z_r_bracket_plus_r_paren_star);
-token_with_comments!(BaseLessToken, l_bracket0_minus9_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9_r_bracket_plus_r_paren_star);
-token_with_comments!(AllBitToken, tick_l_bracket01_r_bracket);
+token_with_comments!(FixedPointToken, FixedPointTerm, fixed_point_term);
+token_with_comments!(ExponentToken, ExponentTerm, exponent_term);
+token_with_comments!(BasedToken, BasedTerm, based_term);
+token_with_comments!(BaseLessToken, BaseLessTerm, base_less_term);
+token_with_comments!(AllBitToken, AllBitTerm, all_bit_term);
 
-token_with_comments!(ColonToken, colon);
-token_with_comments!(CommaToken, comma);
-token_with_comments!(DollarToken, dollar);
-token_with_comments!(DotDotToken, dot_dot);
-token_with_comments!(DotToken, dot);
-token_with_comments!(EquToken, equ);
-token_with_comments!(HashToken, hash);
-token_with_comments!(LBraceToken, l_brace);
-token_with_comments!(LBracketToken, l_bracket);
-token_with_comments!(LParenToken, l_paren);
-token_with_comments!(MinusColonToken, minus_colon);
-token_with_comments!(MinusGTToken, minus_g_t);
-token_with_comments!(PlusColonToken, plus_colon);
-token_with_comments!(RBraceToken, r_brace);
-token_with_comments!(RBracketToken, r_bracket);
-token_with_comments!(RParenToken, r_paren);
-token_with_comments!(SemicolonToken, semicolon);
+token_with_comments!(ColonToken, ColonTerm, colon_term);
+token_with_comments!(CommaToken, CommaTerm, comma_term);
+token_with_comments!(DollarToken, DollarTerm, dollar_term);
+token_with_comments!(DotDotToken, DotDotTerm, dot_dot_term);
+token_with_comments!(DotToken, DotTerm, dot_term);
+token_with_comments!(EquToken, EquTerm, equ_term);
+token_with_comments!(HashToken, HashTerm, hash_term);
+token_with_comments!(LBraceToken, LBraceTerm, l_brace_term);
+token_with_comments!(LBracketToken, LBracketTerm, l_bracket_term);
+token_with_comments!(LParenToken, LParenTerm, l_paren_term);
+token_with_comments!(MinusColonToken, MinusColonTerm, minus_colon_term);
+token_with_comments!(MinusGTToken, MinusGTTerm, minus_g_t_term);
+token_with_comments!(PlusColonToken, PlusColonTerm, plus_colon_term);
+token_with_comments!(RBraceToken, RBraceTerm, r_brace_term);
+token_with_comments!(RBracketToken, RBracketTerm, r_bracket_term);
+token_with_comments!(RParenToken, RParenTerm, r_paren_term);
+token_with_comments!(SemicolonToken, SemicolonTerm, semicolon_term);
 
-token_with_comments!(AssignmentOperatorToken, plus_equ_or_minus_equ_or_star_equ_or_slash_equ_or_percent_equ_or_amp_equ_or_or_equ_or_circumflex_equ_or_l_t_l_t_equ_or_g_t_g_t_equ_or_l_t_l_t_l_t_equ_or_g_t_g_t_g_t_equ);
-token_with_comments!(CommonOperatorToken, plus_or_minus_or_amp_or_or_or_circumflex_tilde_or_circumflex_or_tilde_circumflex_or_tilde_amp_or_tilde_or);
-token_with_comments!(BinaryOperatorToken, star_star_or_star_or_slash_or_percent_or_l_t_l_t_l_t_or_g_t_g_t_g_t_or_l_t_l_t_or_g_t_g_t_or_l_t_equ_or_g_t_equ_or_l_t_or_g_t_or_equ_equ_equ_or_equ_equ_quest_or_bang_equ_equ_or_bang_equ_quest_or_equ_equ_or_bang_equ_or_amp_amp_or_or_or);
-token_with_comments!(UnaryOperatorToken, bang_or_tilde);
+token_with_comments!(
+    AssignmentOperatorToken,
+    AssignmentOperatorTerm,
+    assignment_operator_term
+);
+token_with_comments!(
+    CommonOperatorToken,
+    CommonOperatorTerm,
+    common_operator_term
+);
+token_with_comments!(
+    BinaryOperatorToken,
+    BinaryOperatorTerm,
+    binary_operator_term
+);
+token_with_comments!(UnaryOperatorToken, UnaryOperatorTerm, unary_operator_term);
 
-token_with_comments!(AlwaysCombToken, balways_underscore_comb_b);
-token_with_comments!(AlwaysFfToken, balways_underscore_ff_b);
-token_with_comments!(AssignToken, bassign_b);
-token_with_comments!(AsyncHighToken, basync_underscore_high_b);
-token_with_comments!(AsyncLowToken, basync_underscore_low_b);
-token_with_comments!(BitToken, bbit_b);
-token_with_comments!(ElseToken, belse_b);
-token_with_comments!(EnumToken, benum_b);
-token_with_comments!(F32Token, bf32_b);
-token_with_comments!(F64Token, bf64_b);
-token_with_comments!(FunctionToken, bfunction_b);
-token_with_comments!(ForToken, bfor_b);
-token_with_comments!(I32Token, bi32_b);
-token_with_comments!(I64Token, bi64_b);
-token_with_comments!(IfToken, bif_b);
-token_with_comments!(IfResetToken, bif_underscore_reset_b);
-token_with_comments!(InoutToken, binout_b);
-token_with_comments!(InputToken, binput_b);
-token_with_comments!(InstToken, binst_b);
-token_with_comments!(InterfaceToken, binterface_b);
-token_with_comments!(InToken, bin_b);
-token_with_comments!(LetToken, blet_b);
-token_with_comments!(LocalparamToken, blocalparam_b);
-token_with_comments!(LogicToken, blogic_b);
-token_with_comments!(ModportToken, bmodport_b);
-token_with_comments!(ModuleToken, bmodule_b);
-token_with_comments!(NegedgeToken, bnegedge_b);
-token_with_comments!(OutputToken, boutput_b);
-token_with_comments!(ParameterToken, bparameter_b);
-token_with_comments!(PosedgeToken, bposedge_b);
-token_with_comments!(RefToken, bref_b);
-token_with_comments!(ReturnToken, breturn_b);
-token_with_comments!(StepToken, bstep_b);
-token_with_comments!(StructToken, bstruct_b);
-token_with_comments!(SyncHighToken, bsync_underscore_high_b);
-token_with_comments!(SyncLowToken, bsync_underscore_low_b);
-token_with_comments!(U32Token, bu32_b);
-token_with_comments!(U64Token, bu64_b);
+token_with_comments!(AlwaysCombToken, AlwaysCombTerm, always_comb_term);
+token_with_comments!(AlwaysFfToken, AlwaysFfTerm, always_ff_term);
+token_with_comments!(AssignToken, AssignTerm, assign_term);
+token_with_comments!(AsyncHighToken, AsyncHighTerm, async_high_term);
+token_with_comments!(AsyncLowToken, AsyncLowTerm, async_low_term);
+token_with_comments!(BitToken, BitTerm, bit_term);
+token_with_comments!(ElseToken, ElseTerm, else_term);
+token_with_comments!(EnumToken, EnumTerm, enum_term);
+token_with_comments!(F32Token, F32Term, f32_term);
+token_with_comments!(F64Token, F64Term, f64_term);
+token_with_comments!(FunctionToken, FunctionTerm, function_term);
+token_with_comments!(ForToken, ForTerm, for_term);
+token_with_comments!(I32Token, I32Term, i32_term);
+token_with_comments!(I64Token, I64Term, i64_term);
+token_with_comments!(IfToken, IfTerm, if_term);
+token_with_comments!(IfResetToken, IfResetTerm, if_reset_term);
+token_with_comments!(InoutToken, InoutTerm, inout_term);
+token_with_comments!(InputToken, InputTerm, input_term);
+token_with_comments!(InstToken, InstTerm, inst_term);
+token_with_comments!(InterfaceToken, InterfaceTerm, interface_term);
+token_with_comments!(InToken, InTerm, in_term);
+token_with_comments!(LetToken, LetTerm, let_term);
+token_with_comments!(LocalparamToken, LocalparamTerm, localparam_term);
+token_with_comments!(LogicToken, LogicTerm, logic_term);
+token_with_comments!(ModportToken, ModportTerm, modport_term);
+token_with_comments!(ModuleToken, ModuleTerm, module_term);
+token_with_comments!(NegedgeToken, NegedgeTerm, negedge_term);
+token_with_comments!(OutputToken, OutputTerm, output_term);
+token_with_comments!(ParameterToken, ParameterTerm, parameter_term);
+token_with_comments!(PosedgeToken, PosedgeTerm, posedge_term);
+token_with_comments!(RefToken, RefTerm, ref_term);
+token_with_comments!(ReturnToken, ReturnTerm, return_term);
+token_with_comments!(StepToken, StepTerm, step_term);
+token_with_comments!(StructToken, StructTerm, struct_term);
+token_with_comments!(SyncHighToken, SyncHighTerm, sync_high_term);
+token_with_comments!(SyncLowToken, SyncLowTerm, sync_low_term);
+token_with_comments!(U32Token, U32Term, u32_term);
+token_with_comments!(U64Token, U64Term, u64_term);
 
-token_with_comments!(IdentifierToken, l_bracket_a_minus_z_a_minus_z_underscore_r_bracket_l_bracket0_minus9a_minus_z_a_minus_z_underscore_r_bracket_star);
+token_with_comments!(IdentifierToken, IdentifierTerm, identifier_term);
