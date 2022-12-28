@@ -72,13 +72,58 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'BinaryOperatorTerm'
-    fn binary_operator_term(&mut self, _arg: &BinaryOperatorTerm) -> Result<()> {
+    /// Semantic action for non-terminal 'Operator11Term'
+    fn operator11_term(&mut self, _arg: &Operator11Term) -> Result<()> {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'CommonOperatorTerm'
-    fn common_operator_term(&mut self, _arg: &CommonOperatorTerm) -> Result<()> {
+    /// Semantic action for non-terminal 'Operator10Term'
+    fn operator10_term(&mut self, _arg: &Operator10Term) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator09Term'
+    fn operator09_term(&mut self, _arg: &Operator09Term) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator08Term'
+    fn operator08_term(&mut self, _arg: &Operator08Term) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator07Term'
+    fn operator07_term(&mut self, _arg: &Operator07Term) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator06Term'
+    fn operator06_term(&mut self, _arg: &Operator06Term) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator02Term'
+    fn operator02_term(&mut self, _arg: &Operator02Term) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator01Term'
+    fn operator01_term(&mut self, _arg: &Operator01Term) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator05Term'
+    fn operator05_term(&mut self, _arg: &Operator05Term) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator04Term'
+    fn operator04_term(&mut self, _arg: &Operator04Term) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator03Term'
+    fn operator03_term(&mut self, _arg: &Operator03Term) -> Result<()> {
         Ok(())
     }
 
@@ -392,13 +437,58 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'BinaryOperatorToken'
-    fn binary_operator_token(&mut self, _arg: &BinaryOperatorToken) -> Result<()> {
+    /// Semantic action for non-terminal 'Operator01Token'
+    fn operator01_token(&mut self, _arg: &Operator01Token) -> Result<()> {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'CommonOperatorToken'
-    fn common_operator_token(&mut self, _arg: &CommonOperatorToken) -> Result<()> {
+    /// Semantic action for non-terminal 'Operator02Token'
+    fn operator02_token(&mut self, _arg: &Operator02Token) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator03Token'
+    fn operator03_token(&mut self, _arg: &Operator03Token) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator04Token'
+    fn operator04_token(&mut self, _arg: &Operator04Token) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator05Token'
+    fn operator05_token(&mut self, _arg: &Operator05Token) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator06Token'
+    fn operator06_token(&mut self, _arg: &Operator06Token) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator07Token'
+    fn operator07_token(&mut self, _arg: &Operator07Token) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator08Token'
+    fn operator08_token(&mut self, _arg: &Operator08Token) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator09Token'
+    fn operator09_token(&mut self, _arg: &Operator09Token) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator10Token'
+    fn operator10_token(&mut self, _arg: &Operator10Token) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator11Token'
+    fn operator11_token(&mut self, _arg: &Operator11Token) -> Result<()> {
         Ok(())
     }
 
@@ -722,13 +812,58 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'CommonOperator'
-    fn common_operator(&mut self, _arg: &CommonOperator) -> Result<()> {
+    /// Semantic action for non-terminal 'Operator01'
+    fn operator01(&mut self, _arg: &Operator01) -> Result<()> {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'BinaryOperator'
-    fn binary_operator(&mut self, _arg: &BinaryOperator) -> Result<()> {
+    /// Semantic action for non-terminal 'Operator02'
+    fn operator02(&mut self, _arg: &Operator02) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator03'
+    fn operator03(&mut self, _arg: &Operator03) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator04'
+    fn operator04(&mut self, _arg: &Operator04) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator05'
+    fn operator05(&mut self, _arg: &Operator05) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator06'
+    fn operator06(&mut self, _arg: &Operator06) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator07'
+    fn operator07(&mut self, _arg: &Operator07) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator08'
+    fn operator08(&mut self, _arg: &Operator08) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator09'
+    fn operator09(&mut self, _arg: &Operator09) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator10'
+    fn operator10(&mut self, _arg: &Operator10) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Operator11'
+    fn operator11(&mut self, _arg: &Operator11) -> Result<()> {
         Ok(())
     }
 
@@ -1042,8 +1177,58 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'Expression1'
-    fn expression1(&mut self, _arg: &Expression1) -> Result<()> {
+    /// Semantic action for non-terminal 'Expression01'
+    fn expression01(&mut self, _arg: &Expression01) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Expression02'
+    fn expression02(&mut self, _arg: &Expression02) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Expression03'
+    fn expression03(&mut self, _arg: &Expression03) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Expression04'
+    fn expression04(&mut self, _arg: &Expression04) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Expression05'
+    fn expression05(&mut self, _arg: &Expression05) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Expression06'
+    fn expression06(&mut self, _arg: &Expression06) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Expression07'
+    fn expression07(&mut self, _arg: &Expression07) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Expression08'
+    fn expression08(&mut self, _arg: &Expression08) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Expression09'
+    fn expression09(&mut self, _arg: &Expression09) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Expression10'
+    fn expression10(&mut self, _arg: &Expression10) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Expression11'
+    fn expression11(&mut self, _arg: &Expression11) -> Result<()> {
         Ok(())
     }
 
@@ -1334,7 +1519,7 @@ pub trait VerylGrammarTrait {
 //
 
 ///
-/// Type derived for production 201
+/// Type derived for production 228
 ///
 /// Number: IntegralNumber;
 ///
@@ -1346,7 +1531,7 @@ pub struct NumberIntegralNumber {
 }
 
 ///
-/// Type derived for production 202
+/// Type derived for production 229
 ///
 /// Number: RealNumber;
 ///
@@ -1358,7 +1543,7 @@ pub struct NumberRealNumber {
 }
 
 ///
-/// Type derived for production 203
+/// Type derived for production 230
 ///
 /// IntegralNumber: Based;
 ///
@@ -1370,7 +1555,7 @@ pub struct IntegralNumberBased {
 }
 
 ///
-/// Type derived for production 204
+/// Type derived for production 231
 ///
 /// IntegralNumber: BaseLess;
 ///
@@ -1382,7 +1567,7 @@ pub struct IntegralNumberBaseLess {
 }
 
 ///
-/// Type derived for production 205
+/// Type derived for production 232
 ///
 /// IntegralNumber: AllBit;
 ///
@@ -1394,7 +1579,7 @@ pub struct IntegralNumberAllBit {
 }
 
 ///
-/// Type derived for production 206
+/// Type derived for production 233
 ///
 /// RealNumber: FixedPoint;
 ///
@@ -1406,7 +1591,7 @@ pub struct RealNumberFixedPoint {
 }
 
 ///
-/// Type derived for production 207
+/// Type derived for production 234
 ///
 /// RealNumber: Exponent;
 ///
@@ -1418,55 +1603,67 @@ pub struct RealNumberExponent {
 }
 
 ///
-/// Type derived for production 217
+/// Type derived for production 277
 ///
-/// ExpressionListGroup: BinaryOperator;
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ExpressionListGroupBinaryOperator {
-    pub binary_operator: Box<BinaryOperator>,
-}
-
-///
-/// Type derived for production 218
-///
-/// ExpressionListGroup: CommonOperator;
+/// Expression11OptGroup: UnaryOperator;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct ExpressionListGroupCommonOperator {
-    pub common_operator: Box<CommonOperator>,
-}
-
-///
-/// Type derived for production 222
-///
-/// Expression1OptGroup: UnaryOperator;
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct Expression1OptGroupUnaryOperator {
+pub struct Expression11OptGroupUnaryOperator {
     pub unary_operator: Box<UnaryOperator>,
 }
 
 ///
-/// Type derived for production 223
+/// Type derived for production 278
 ///
-/// Expression1OptGroup: CommonOperator;
+/// Expression11OptGroup: Operator09;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct Expression1OptGroupCommonOperator {
-    pub common_operator: Box<CommonOperator>,
+pub struct Expression11OptGroupOperator09 {
+    pub operator09: Box<Operator09>,
 }
 
 ///
-/// Type derived for production 225
+/// Type derived for production 279
+///
+/// Expression11OptGroup: Operator05;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Expression11OptGroupOperator05 {
+    pub operator05: Box<Operator05>,
+}
+
+///
+/// Type derived for production 280
+///
+/// Expression11OptGroup: Operator03;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Expression11OptGroupOperator03 {
+    pub operator03: Box<Operator03>,
+}
+
+///
+/// Type derived for production 281
+///
+/// Expression11OptGroup: Operator04;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Expression11OptGroupOperator04 {
+    pub operator04: Box<Operator04>,
+}
+
+///
+/// Type derived for production 283
 ///
 /// Factor: Number;
 ///
@@ -1478,7 +1675,7 @@ pub struct FactorNumber {
 }
 
 ///
-/// Type derived for production 226
+/// Type derived for production 284
 ///
 /// Factor: FactorOpt /* Option */ HierarchicalIdentifier FactorOpt0 /* Option */;
 ///
@@ -1492,7 +1689,7 @@ pub struct FactorFactorOptHierarchicalIdentifierFactorOpt0 {
 }
 
 ///
-/// Type derived for production 227
+/// Type derived for production 285
 ///
 /// Factor: LParen Expression RParen;
 ///
@@ -1506,7 +1703,7 @@ pub struct FactorLParenExpressionRParen {
 }
 
 ///
-/// Type derived for production 242
+/// Type derived for production 300
 ///
 /// RangeOperator: Colon;
 ///
@@ -1518,7 +1715,7 @@ pub struct RangeOperatorColon {
 }
 
 ///
-/// Type derived for production 243
+/// Type derived for production 301
 ///
 /// RangeOperator: PlusColon;
 ///
@@ -1530,7 +1727,7 @@ pub struct RangeOperatorPlusColon {
 }
 
 ///
-/// Type derived for production 244
+/// Type derived for production 302
 ///
 /// RangeOperator: MinusColon;
 ///
@@ -1542,7 +1739,7 @@ pub struct RangeOperatorMinusColon {
 }
 
 ///
-/// Type derived for production 245
+/// Type derived for production 303
 ///
 /// RangeOperator: Step;
 ///
@@ -1554,7 +1751,7 @@ pub struct RangeOperatorStep {
 }
 
 ///
-/// Type derived for production 247
+/// Type derived for production 305
 ///
 /// BuiltinType: Logic;
 ///
@@ -1566,7 +1763,7 @@ pub struct BuiltinTypeLogic {
 }
 
 ///
-/// Type derived for production 248
+/// Type derived for production 306
 ///
 /// BuiltinType: Bit;
 ///
@@ -1578,7 +1775,7 @@ pub struct BuiltinTypeBit {
 }
 
 ///
-/// Type derived for production 249
+/// Type derived for production 307
 ///
 /// BuiltinType: U32;
 ///
@@ -1590,7 +1787,7 @@ pub struct BuiltinTypeU32 {
 }
 
 ///
-/// Type derived for production 250
+/// Type derived for production 308
 ///
 /// BuiltinType: U64;
 ///
@@ -1602,7 +1799,7 @@ pub struct BuiltinTypeU64 {
 }
 
 ///
-/// Type derived for production 251
+/// Type derived for production 309
 ///
 /// BuiltinType: I32;
 ///
@@ -1614,7 +1811,7 @@ pub struct BuiltinTypeI32 {
 }
 
 ///
-/// Type derived for production 252
+/// Type derived for production 310
 ///
 /// BuiltinType: I64;
 ///
@@ -1626,7 +1823,7 @@ pub struct BuiltinTypeI64 {
 }
 
 ///
-/// Type derived for production 253
+/// Type derived for production 311
 ///
 /// BuiltinType: F32;
 ///
@@ -1638,7 +1835,7 @@ pub struct BuiltinTypeF32 {
 }
 
 ///
-/// Type derived for production 254
+/// Type derived for production 312
 ///
 /// BuiltinType: F64;
 ///
@@ -1650,7 +1847,7 @@ pub struct BuiltinTypeF64 {
 }
 
 ///
-/// Type derived for production 256
+/// Type derived for production 314
 ///
 /// TypeGroup: BuiltinType;
 ///
@@ -1662,7 +1859,7 @@ pub struct TypeGroupBuiltinType {
 }
 
 ///
-/// Type derived for production 257
+/// Type derived for production 315
 ///
 /// TypeGroup: Identifier;
 ///
@@ -1674,7 +1871,7 @@ pub struct TypeGroupIdentifier {
 }
 
 ///
-/// Type derived for production 260
+/// Type derived for production 318
 ///
 /// Statement: AssignmentStatement;
 ///
@@ -1686,7 +1883,7 @@ pub struct StatementAssignmentStatement {
 }
 
 ///
-/// Type derived for production 261
+/// Type derived for production 319
 ///
 /// Statement: IfStatement;
 ///
@@ -1698,7 +1895,7 @@ pub struct StatementIfStatement {
 }
 
 ///
-/// Type derived for production 262
+/// Type derived for production 320
 ///
 /// Statement: IfResetStatement;
 ///
@@ -1710,7 +1907,7 @@ pub struct StatementIfResetStatement {
 }
 
 ///
-/// Type derived for production 263
+/// Type derived for production 321
 ///
 /// Statement: ReturnStatement;
 ///
@@ -1722,7 +1919,7 @@ pub struct StatementReturnStatement {
 }
 
 ///
-/// Type derived for production 264
+/// Type derived for production 322
 ///
 /// Statement: ForStatement;
 ///
@@ -1734,7 +1931,7 @@ pub struct StatementForStatement {
 }
 
 ///
-/// Type derived for production 266
+/// Type derived for production 324
 ///
 /// AssignmentStatementGroup: Equ;
 ///
@@ -1746,7 +1943,7 @@ pub struct AssignmentStatementGroupEqu {
 }
 
 ///
-/// Type derived for production 267
+/// Type derived for production 325
 ///
 /// AssignmentStatementGroup: AssignmentOperator;
 ///
@@ -1758,7 +1955,7 @@ pub struct AssignmentStatementGroupAssignmentOperator {
 }
 
 ///
-/// Type derived for production 297
+/// Type derived for production 355
 ///
 /// LetDeclarationGroup: VariableDeclaration;
 ///
@@ -1770,7 +1967,7 @@ pub struct LetDeclarationGroupVariableDeclaration {
 }
 
 ///
-/// Type derived for production 298
+/// Type derived for production 356
 ///
 /// LetDeclarationGroup: InstanceDeclaration;
 ///
@@ -1782,7 +1979,7 @@ pub struct LetDeclarationGroupInstanceDeclaration {
 }
 
 ///
-/// Type derived for production 311
+/// Type derived for production 369
 ///
 /// AlwaysFfClockOptGroup: Posedge;
 ///
@@ -1794,7 +1991,7 @@ pub struct AlwaysFfClockOptGroupPosedge {
 }
 
 ///
-/// Type derived for production 312
+/// Type derived for production 370
 ///
 /// AlwaysFfClockOptGroup: Negedge;
 ///
@@ -1806,7 +2003,7 @@ pub struct AlwaysFfClockOptGroupNegedge {
 }
 
 ///
-/// Type derived for production 316
+/// Type derived for production 374
 ///
 /// AlwaysFfResetOptGroup: AsyncLow;
 ///
@@ -1818,7 +2015,7 @@ pub struct AlwaysFfResetOptGroupAsyncLow {
 }
 
 ///
-/// Type derived for production 317
+/// Type derived for production 375
 ///
 /// AlwaysFfResetOptGroup: AsyncHigh;
 ///
@@ -1830,7 +2027,7 @@ pub struct AlwaysFfResetOptGroupAsyncHigh {
 }
 
 ///
-/// Type derived for production 318
+/// Type derived for production 376
 ///
 /// AlwaysFfResetOptGroup: SyncLow;
 ///
@@ -1842,7 +2039,7 @@ pub struct AlwaysFfResetOptGroupSyncLow {
 }
 
 ///
-/// Type derived for production 319
+/// Type derived for production 377
 ///
 /// AlwaysFfResetOptGroup: SyncHigh;
 ///
@@ -1854,7 +2051,7 @@ pub struct AlwaysFfResetOptGroupSyncHigh {
 }
 
 ///
-/// Type derived for production 385
+/// Type derived for production 443
 ///
 /// WithParameterItemGroup: Parameter;
 ///
@@ -1866,7 +2063,7 @@ pub struct WithParameterItemGroupParameter {
 }
 
 ///
-/// Type derived for production 386
+/// Type derived for production 444
 ///
 /// WithParameterItemGroup: Localparam;
 ///
@@ -1878,7 +2075,7 @@ pub struct WithParameterItemGroupLocalparam {
 }
 
 ///
-/// Type derived for production 396
+/// Type derived for production 454
 ///
 /// Direction: Input;
 ///
@@ -1890,7 +2087,7 @@ pub struct DirectionInput {
 }
 
 ///
-/// Type derived for production 397
+/// Type derived for production 455
 ///
 /// Direction: Output;
 ///
@@ -1902,7 +2099,7 @@ pub struct DirectionOutput {
 }
 
 ///
-/// Type derived for production 398
+/// Type derived for production 456
 ///
 /// Direction: Inout;
 ///
@@ -1914,7 +2111,7 @@ pub struct DirectionInout {
 }
 
 ///
-/// Type derived for production 399
+/// Type derived for production 457
 ///
 /// Direction: Ref;
 ///
@@ -1926,7 +2123,7 @@ pub struct DirectionRef {
 }
 
 ///
-/// Type derived for production 407
+/// Type derived for production 465
 ///
 /// FunctionItem: LetDeclaration;
 ///
@@ -1938,7 +2135,7 @@ pub struct FunctionItemLetDeclaration {
 }
 
 ///
-/// Type derived for production 408
+/// Type derived for production 466
 ///
 /// FunctionItem: Statement;
 ///
@@ -1950,7 +2147,7 @@ pub struct FunctionItemStatement {
 }
 
 ///
-/// Type derived for production 436
+/// Type derived for production 494
 ///
 /// ModuleItem: LetDeclaration;
 ///
@@ -1962,7 +2159,7 @@ pub struct ModuleItemLetDeclaration {
 }
 
 ///
-/// Type derived for production 437
+/// Type derived for production 495
 ///
 /// ModuleItem: ParameterDeclaration;
 ///
@@ -1974,7 +2171,7 @@ pub struct ModuleItemParameterDeclaration {
 }
 
 ///
-/// Type derived for production 438
+/// Type derived for production 496
 ///
 /// ModuleItem: LocalparamDeclaration;
 ///
@@ -1986,7 +2183,7 @@ pub struct ModuleItemLocalparamDeclaration {
 }
 
 ///
-/// Type derived for production 439
+/// Type derived for production 497
 ///
 /// ModuleItem: AlwaysFfDeclaration;
 ///
@@ -1998,7 +2195,7 @@ pub struct ModuleItemAlwaysFfDeclaration {
 }
 
 ///
-/// Type derived for production 440
+/// Type derived for production 498
 ///
 /// ModuleItem: AlwaysCombDeclaration;
 ///
@@ -2010,7 +2207,7 @@ pub struct ModuleItemAlwaysCombDeclaration {
 }
 
 ///
-/// Type derived for production 441
+/// Type derived for production 499
 ///
 /// ModuleItem: AssignDeclaration;
 ///
@@ -2022,7 +2219,7 @@ pub struct ModuleItemAssignDeclaration {
 }
 
 ///
-/// Type derived for production 442
+/// Type derived for production 500
 ///
 /// ModuleItem: FunctionDeclaration;
 ///
@@ -2034,7 +2231,7 @@ pub struct ModuleItemFunctionDeclaration {
 }
 
 ///
-/// Type derived for production 443
+/// Type derived for production 501
 ///
 /// ModuleItem: ModuleIfDeclaration;
 ///
@@ -2046,7 +2243,7 @@ pub struct ModuleItemModuleIfDeclaration {
 }
 
 ///
-/// Type derived for production 444
+/// Type derived for production 502
 ///
 /// ModuleItem: ModuleForDeclaration;
 ///
@@ -2058,7 +2255,7 @@ pub struct ModuleItemModuleForDeclaration {
 }
 
 ///
-/// Type derived for production 445
+/// Type derived for production 503
 ///
 /// ModuleItem: EnumDeclaration;
 ///
@@ -2070,7 +2267,7 @@ pub struct ModuleItemEnumDeclaration {
 }
 
 ///
-/// Type derived for production 446
+/// Type derived for production 504
 ///
 /// ModuleItem: StructDeclaration;
 ///
@@ -2082,7 +2279,7 @@ pub struct ModuleItemStructDeclaration {
 }
 
 ///
-/// Type derived for production 472
+/// Type derived for production 530
 ///
 /// InterfaceItem: LetDeclaration;
 ///
@@ -2094,7 +2291,7 @@ pub struct InterfaceItemLetDeclaration {
 }
 
 ///
-/// Type derived for production 473
+/// Type derived for production 531
 ///
 /// InterfaceItem: ParameterDeclaration;
 ///
@@ -2106,7 +2303,7 @@ pub struct InterfaceItemParameterDeclaration {
 }
 
 ///
-/// Type derived for production 474
+/// Type derived for production 532
 ///
 /// InterfaceItem: LocalparamDeclaration;
 ///
@@ -2118,7 +2315,7 @@ pub struct InterfaceItemLocalparamDeclaration {
 }
 
 ///
-/// Type derived for production 475
+/// Type derived for production 533
 ///
 /// InterfaceItem: ModportDeclaration;
 ///
@@ -2130,7 +2327,7 @@ pub struct InterfaceItemModportDeclaration {
 }
 
 ///
-/// Type derived for production 476
+/// Type derived for production 534
 ///
 /// InterfaceItem: InterfaceIfDeclaration;
 ///
@@ -2142,7 +2339,7 @@ pub struct InterfaceItemInterfaceIfDeclaration {
 }
 
 ///
-/// Type derived for production 477
+/// Type derived for production 535
 ///
 /// InterfaceItem: InterfaceForDeclaration;
 ///
@@ -2154,7 +2351,7 @@ pub struct InterfaceItemInterfaceForDeclaration {
 }
 
 ///
-/// Type derived for production 478
+/// Type derived for production 536
 ///
 /// InterfaceItem: EnumDeclaration;
 ///
@@ -2166,7 +2363,7 @@ pub struct InterfaceItemEnumDeclaration {
 }
 
 ///
-/// Type derived for production 479
+/// Type derived for production 537
 ///
 /// InterfaceItem: StructDeclaration;
 ///
@@ -2178,7 +2375,7 @@ pub struct InterfaceItemStructDeclaration {
 }
 
 ///
-/// Type derived for production 480
+/// Type derived for production 538
 ///
 /// Description: ModuleDeclaration;
 ///
@@ -2190,7 +2387,7 @@ pub struct DescriptionModuleDeclaration {
 }
 
 ///
-/// Type derived for production 481
+/// Type derived for production 539
 ///
 /// Description: InterfaceDeclaration;
 ///
@@ -2648,37 +2845,6 @@ pub struct BasedToken {
 }
 
 ///
-/// Type derived for non-terminal BinaryOperator
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct BinaryOperator {
-    pub binary_operator_token: crate::veryl_token::VerylToken,
-}
-
-///
-/// Type derived for non-terminal BinaryOperatorTerm
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct BinaryOperatorTerm {
-    pub binary_operator_term: crate::veryl_token::Token, /* \*\*|\*|/|%|<<<|>>>|<<|>>|<=|>=|<|>|===|==\?|!==|!=\?|==|!=|&&|\|\| */
-}
-
-///
-/// Type derived for non-terminal BinaryOperatorToken
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct BinaryOperatorToken {
-    pub binary_operator_term: crate::veryl_token::Token,
-    pub comments: Box<Comments>,
-}
-
-///
 /// Type derived for non-terminal Bit
 ///
 #[allow(dead_code)]
@@ -2815,37 +2981,6 @@ pub struct CommentsOpt {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct CommentsTerm {
     pub comments_term: crate::veryl_token::Token, /* (?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+ */
-}
-
-///
-/// Type derived for non-terminal CommonOperator
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct CommonOperator {
-    pub common_operator_token: crate::veryl_token::VerylToken,
-}
-
-///
-/// Type derived for non-terminal CommonOperatorTerm
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct CommonOperatorTerm {
-    pub common_operator_term: crate::veryl_token::Token, /* \+|-|&|\||\^~|\^|~\^|~&|~\| */
-}
-
-///
-/// Type derived for non-terminal CommonOperatorToken
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct CommonOperatorToken {
-    pub common_operator_term: crate::veryl_token::Token,
-    pub comments: Box<Comments>,
 }
 
 ///
@@ -3165,39 +3300,262 @@ pub struct ExponentToken {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct Expression {
-    pub expression1: Box<Expression1>,
+    pub expression01: Box<Expression01>,
     pub expression_list: Vec<ExpressionList>,
 }
 
 ///
-/// Type derived for non-terminal Expression1
+/// Type derived for non-terminal Expression01
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct Expression1 {
-    pub expression1_opt: Option<Box<Expression1Opt>>,
+pub struct Expression01 {
+    pub expression02: Box<Expression02>,
+    pub expression01_list: Vec<Expression01List>,
+}
+
+///
+/// Type derived for non-terminal Expression01List
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Expression01List {
+    pub operator02: Box<Operator02>,
+    pub expression02: Box<Expression02>,
+}
+
+///
+/// Type derived for non-terminal Expression02
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Expression02 {
+    pub expression03: Box<Expression03>,
+    pub expression02_list: Vec<Expression02List>,
+}
+
+///
+/// Type derived for non-terminal Expression02List
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Expression02List {
+    pub operator03: Box<Operator03>,
+    pub expression03: Box<Expression03>,
+}
+
+///
+/// Type derived for non-terminal Expression03
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Expression03 {
+    pub expression04: Box<Expression04>,
+    pub expression03_list: Vec<Expression03List>,
+}
+
+///
+/// Type derived for non-terminal Expression03List
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Expression03List {
+    pub operator04: Box<Operator04>,
+    pub expression04: Box<Expression04>,
+}
+
+///
+/// Type derived for non-terminal Expression04
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Expression04 {
+    pub expression05: Box<Expression05>,
+    pub expression04_list: Vec<Expression04List>,
+}
+
+///
+/// Type derived for non-terminal Expression04List
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Expression04List {
+    pub operator05: Box<Operator05>,
+    pub expression05: Box<Expression05>,
+}
+
+///
+/// Type derived for non-terminal Expression05
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Expression05 {
+    pub expression06: Box<Expression06>,
+    pub expression05_list: Vec<Expression05List>,
+}
+
+///
+/// Type derived for non-terminal Expression05List
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Expression05List {
+    pub operator06: Box<Operator06>,
+    pub expression06: Box<Expression06>,
+}
+
+///
+/// Type derived for non-terminal Expression06
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Expression06 {
+    pub expression07: Box<Expression07>,
+    pub expression06_list: Vec<Expression06List>,
+}
+
+///
+/// Type derived for non-terminal Expression06List
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Expression06List {
+    pub operator07: Box<Operator07>,
+    pub expression07: Box<Expression07>,
+}
+
+///
+/// Type derived for non-terminal Expression07
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Expression07 {
+    pub expression08: Box<Expression08>,
+    pub expression07_list: Vec<Expression07List>,
+}
+
+///
+/// Type derived for non-terminal Expression07List
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Expression07List {
+    pub operator08: Box<Operator08>,
+    pub expression08: Box<Expression08>,
+}
+
+///
+/// Type derived for non-terminal Expression08
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Expression08 {
+    pub expression09: Box<Expression09>,
+    pub expression08_list: Vec<Expression08List>,
+}
+
+///
+/// Type derived for non-terminal Expression08List
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Expression08List {
+    pub operator09: Box<Operator09>,
+    pub expression09: Box<Expression09>,
+}
+
+///
+/// Type derived for non-terminal Expression09
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Expression09 {
+    pub expression10: Box<Expression10>,
+    pub expression09_list: Vec<Expression09List>,
+}
+
+///
+/// Type derived for non-terminal Expression09List
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Expression09List {
+    pub operator10: Box<Operator10>,
+    pub expression10: Box<Expression10>,
+}
+
+///
+/// Type derived for non-terminal Expression10
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Expression10 {
+    pub expression11: Box<Expression11>,
+    pub expression10_list: Vec<Expression10List>,
+}
+
+///
+/// Type derived for non-terminal Expression10List
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Expression10List {
+    pub operator11: Box<Operator11>,
+    pub expression11: Box<Expression11>,
+}
+
+///
+/// Type derived for non-terminal Expression11
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Expression11 {
+    pub expression11_opt: Option<Box<Expression11Opt>>,
     pub factor: Box<Factor>,
 }
 
 ///
-/// Type derived for non-terminal Expression1Opt
+/// Type derived for non-terminal Expression11Opt
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct Expression1Opt {
-    pub expression1_opt_group: Box<Expression1OptGroup>,
+pub struct Expression11Opt {
+    pub expression11_opt_group: Box<Expression11OptGroup>,
 }
 
 ///
-/// Type derived for non-terminal Expression1OptGroup
+/// Type derived for non-terminal Expression11OptGroup
 ///
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-pub enum Expression1OptGroup {
-    UnaryOperator(Expression1OptGroupUnaryOperator),
-    CommonOperator(Expression1OptGroupCommonOperator),
+pub enum Expression11OptGroup {
+    UnaryOperator(Expression11OptGroupUnaryOperator),
+    Operator09(Expression11OptGroupOperator09),
+    Operator05(Expression11OptGroupOperator05),
+    Operator03(Expression11OptGroupOperator03),
+    Operator04(Expression11OptGroupOperator04),
 }
 
 ///
@@ -3207,18 +3565,8 @@ pub enum Expression1OptGroup {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ExpressionList {
-    pub expression_list_group: Box<ExpressionListGroup>,
-    pub expression1: Box<Expression1>,
-}
-
-///
-/// Type derived for non-terminal ExpressionListGroup
-///
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub enum ExpressionListGroup {
-    BinaryOperator(ExpressionListGroupBinaryOperator),
-    CommonOperator(ExpressionListGroupCommonOperator),
+    pub operator01: Box<Operator01>,
+    pub expression01: Box<Expression01>,
 }
 
 ///
@@ -5138,6 +5486,347 @@ pub enum Number {
 }
 
 ///
+/// Type derived for non-terminal Operator01
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator01 {
+    pub operator01_token: crate::veryl_token::VerylToken,
+}
+
+///
+/// Type derived for non-terminal Operator01Term
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator01Term {
+    pub operator01_term: crate::veryl_token::Token, /* \|\| */
+}
+
+///
+/// Type derived for non-terminal Operator01Token
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator01Token {
+    pub operator01_term: crate::veryl_token::Token,
+    pub comments: Box<Comments>,
+}
+
+///
+/// Type derived for non-terminal Operator02
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator02 {
+    pub operator02_token: crate::veryl_token::VerylToken,
+}
+
+///
+/// Type derived for non-terminal Operator02Term
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator02Term {
+    pub operator02_term: crate::veryl_token::Token, /* && */
+}
+
+///
+/// Type derived for non-terminal Operator02Token
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator02Token {
+    pub operator02_term: crate::veryl_token::Token,
+    pub comments: Box<Comments>,
+}
+
+///
+/// Type derived for non-terminal Operator03
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator03 {
+    pub operator03_token: crate::veryl_token::VerylToken,
+}
+
+///
+/// Type derived for non-terminal Operator03Term
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator03Term {
+    pub operator03_term: crate::veryl_token::Token, /* \| */
+}
+
+///
+/// Type derived for non-terminal Operator03Token
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator03Token {
+    pub operator03_term: crate::veryl_token::Token,
+    pub comments: Box<Comments>,
+}
+
+///
+/// Type derived for non-terminal Operator04
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator04 {
+    pub operator04_token: crate::veryl_token::VerylToken,
+}
+
+///
+/// Type derived for non-terminal Operator04Term
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator04Term {
+    pub operator04_term: crate::veryl_token::Token, /* \^~|\^|~\^ */
+}
+
+///
+/// Type derived for non-terminal Operator04Token
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator04Token {
+    pub operator04_term: crate::veryl_token::Token,
+    pub comments: Box<Comments>,
+}
+
+///
+/// Type derived for non-terminal Operator05
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator05 {
+    pub operator05_token: crate::veryl_token::VerylToken,
+}
+
+///
+/// Type derived for non-terminal Operator05Term
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator05Term {
+    pub operator05_term: crate::veryl_token::Token, /* & */
+}
+
+///
+/// Type derived for non-terminal Operator05Token
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator05Token {
+    pub operator05_term: crate::veryl_token::Token,
+    pub comments: Box<Comments>,
+}
+
+///
+/// Type derived for non-terminal Operator06
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator06 {
+    pub operator06_token: crate::veryl_token::VerylToken,
+}
+
+///
+/// Type derived for non-terminal Operator06Term
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator06Term {
+    pub operator06_term: crate::veryl_token::Token, /* ===|==\?|!==|!=\?|==|!= */
+}
+
+///
+/// Type derived for non-terminal Operator06Token
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator06Token {
+    pub operator06_term: crate::veryl_token::Token,
+    pub comments: Box<Comments>,
+}
+
+///
+/// Type derived for non-terminal Operator07
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator07 {
+    pub operator07_token: crate::veryl_token::VerylToken,
+}
+
+///
+/// Type derived for non-terminal Operator07Term
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator07Term {
+    pub operator07_term: crate::veryl_token::Token, /* <=|>=|<|> */
+}
+
+///
+/// Type derived for non-terminal Operator07Token
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator07Token {
+    pub operator07_term: crate::veryl_token::Token,
+    pub comments: Box<Comments>,
+}
+
+///
+/// Type derived for non-terminal Operator08
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator08 {
+    pub operator08_token: crate::veryl_token::VerylToken,
+}
+
+///
+/// Type derived for non-terminal Operator08Term
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator08Term {
+    pub operator08_term: crate::veryl_token::Token, /* <<<|>>>|<<|>> */
+}
+
+///
+/// Type derived for non-terminal Operator08Token
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator08Token {
+    pub operator08_term: crate::veryl_token::Token,
+    pub comments: Box<Comments>,
+}
+
+///
+/// Type derived for non-terminal Operator09
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator09 {
+    pub operator09_token: crate::veryl_token::VerylToken,
+}
+
+///
+/// Type derived for non-terminal Operator09Term
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator09Term {
+    pub operator09_term: crate::veryl_token::Token, /* \+|- */
+}
+
+///
+/// Type derived for non-terminal Operator09Token
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator09Token {
+    pub operator09_term: crate::veryl_token::Token,
+    pub comments: Box<Comments>,
+}
+
+///
+/// Type derived for non-terminal Operator10
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator10 {
+    pub operator10_token: crate::veryl_token::VerylToken,
+}
+
+///
+/// Type derived for non-terminal Operator10Term
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator10Term {
+    pub operator10_term: crate::veryl_token::Token, /* \*|/|% */
+}
+
+///
+/// Type derived for non-terminal Operator10Token
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator10Token {
+    pub operator10_term: crate::veryl_token::Token,
+    pub comments: Box<Comments>,
+}
+
+///
+/// Type derived for non-terminal Operator11
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator11 {
+    pub operator11_token: crate::veryl_token::VerylToken,
+}
+
+///
+/// Type derived for non-terminal Operator11Term
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator11Term {
+    pub operator11_term: crate::veryl_token::Token, /* \*\* */
+}
+
+///
+/// Type derived for non-terminal Operator11Token
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Operator11Token {
+    pub operator11_term: crate::veryl_token::Token,
+    pub comments: Box<Comments>,
+}
+
+///
 /// Type derived for non-terminal Output
 ///
 #[allow(dead_code)]
@@ -5915,7 +6604,7 @@ pub struct UnaryOperator {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct UnaryOperatorTerm {
-    pub unary_operator_term: crate::veryl_token::Token, /* !|~ */
+    pub unary_operator_term: crate::veryl_token::Token, /* ~&|~\||!|~ */
 }
 
 ///
@@ -6114,9 +6803,6 @@ pub enum ASTType {
     Based(Based),
     BasedTerm(BasedTerm),
     BasedToken(BasedToken),
-    BinaryOperator(BinaryOperator),
-    BinaryOperatorTerm(BinaryOperatorTerm),
-    BinaryOperatorToken(BinaryOperatorToken),
     Bit(Bit),
     BitTerm(BitTerm),
     BitToken(BitToken),
@@ -6130,9 +6816,6 @@ pub enum ASTType {
     Comments(Comments),
     CommentsOpt(Option<Box<CommentsOpt>>),
     CommentsTerm(CommentsTerm),
-    CommonOperator(CommonOperator),
-    CommonOperatorTerm(CommonOperatorTerm),
-    CommonOperatorToken(CommonOperatorToken),
     Description(Description),
     Direction(Direction),
     Dollar(Dollar),
@@ -6163,11 +6846,30 @@ pub enum ASTType {
     ExponentTerm(ExponentTerm),
     ExponentToken(ExponentToken),
     Expression(Expression),
-    Expression1(Expression1),
-    Expression1Opt(Option<Box<Expression1Opt>>),
-    Expression1OptGroup(Expression1OptGroup),
+    Expression01(Expression01),
+    Expression01List(Vec<Expression01List>),
+    Expression02(Expression02),
+    Expression02List(Vec<Expression02List>),
+    Expression03(Expression03),
+    Expression03List(Vec<Expression03List>),
+    Expression04(Expression04),
+    Expression04List(Vec<Expression04List>),
+    Expression05(Expression05),
+    Expression05List(Vec<Expression05List>),
+    Expression06(Expression06),
+    Expression06List(Vec<Expression06List>),
+    Expression07(Expression07),
+    Expression07List(Vec<Expression07List>),
+    Expression08(Expression08),
+    Expression08List(Vec<Expression08List>),
+    Expression09(Expression09),
+    Expression09List(Vec<Expression09List>),
+    Expression10(Expression10),
+    Expression10List(Vec<Expression10List>),
+    Expression11(Expression11),
+    Expression11Opt(Option<Box<Expression11Opt>>),
+    Expression11OptGroup(Expression11OptGroup),
     ExpressionList(Vec<ExpressionList>),
-    ExpressionListGroup(ExpressionListGroup),
     F32(F32),
     F32Term(F32Term),
     F32Token(F32Token),
@@ -6338,6 +7040,39 @@ pub enum ASTType {
     NegedgeTerm(NegedgeTerm),
     NegedgeToken(NegedgeToken),
     Number(Number),
+    Operator01(Operator01),
+    Operator01Term(Operator01Term),
+    Operator01Token(Operator01Token),
+    Operator02(Operator02),
+    Operator02Term(Operator02Term),
+    Operator02Token(Operator02Token),
+    Operator03(Operator03),
+    Operator03Term(Operator03Term),
+    Operator03Token(Operator03Token),
+    Operator04(Operator04),
+    Operator04Term(Operator04Term),
+    Operator04Token(Operator04Token),
+    Operator05(Operator05),
+    Operator05Term(Operator05Term),
+    Operator05Token(Operator05Token),
+    Operator06(Operator06),
+    Operator06Term(Operator06Term),
+    Operator06Token(Operator06Token),
+    Operator07(Operator07),
+    Operator07Term(Operator07Term),
+    Operator07Token(Operator07Token),
+    Operator08(Operator08),
+    Operator08Term(Operator08Term),
+    Operator08Token(Operator08Token),
+    Operator09(Operator09),
+    Operator09Term(Operator09Term),
+    Operator09Token(Operator09Token),
+    Operator10(Operator10),
+    Operator10Term(Operator10Term),
+    Operator10Token(Operator10Token),
+    Operator11(Operator11),
+    Operator11Term(Operator11Term),
+    Operator11Token(Operator11Token),
     Output(Output),
     OutputTerm(OutputTerm),
     OutputToken(OutputToken),
@@ -6757,67 +7492,293 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 10:
     ///
-    /// BinaryOperatorTerm: "\*\*|\*|/|%|<<<|>>>|<<|>>|<=|>=|<|>|===|==\?|!==|!=\?|==|!=|&&|\|\|" : Token;
+    /// Operator11Term: "\*\*" : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn binary_operator_term(
+    fn operator11_term(
         &mut self,
-        binary_operator_term: &ParseTreeStackEntry<'t>,
+        operator11_term: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let binary_operator_term = binary_operator_term
+        let operator11_term = operator11_term
             .token(parse_tree)?
             .try_into()
             .into_diagnostic()?;
-        let binary_operator_term_built = BinaryOperatorTermBuilder::default()
-            .binary_operator_term(binary_operator_term)
+        let operator11_term_built = Operator11TermBuilder::default()
+            .operator11_term(operator11_term)
             .build()
             .into_diagnostic()?;
         // Calling user action here
-        self.user_grammar
-            .binary_operator_term(&binary_operator_term_built)?;
-        self.push(
-            ASTType::BinaryOperatorTerm(binary_operator_term_built),
-            context,
-        );
+        self.user_grammar.operator11_term(&operator11_term_built)?;
+        self.push(ASTType::Operator11Term(operator11_term_built), context);
         Ok(())
     }
 
     /// Semantic action for production 11:
     ///
-    /// CommonOperatorTerm: "\+|-|&|\||\^~|\^|~\^|~&|~\|" : Token;
+    /// Operator10Term: "\*|/|%" : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn common_operator_term(
+    fn operator10_term(
         &mut self,
-        common_operator_term: &ParseTreeStackEntry<'t>,
+        operator10_term: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let common_operator_term = common_operator_term
+        let operator10_term = operator10_term
             .token(parse_tree)?
             .try_into()
             .into_diagnostic()?;
-        let common_operator_term_built = CommonOperatorTermBuilder::default()
-            .common_operator_term(common_operator_term)
+        let operator10_term_built = Operator10TermBuilder::default()
+            .operator10_term(operator10_term)
             .build()
             .into_diagnostic()?;
         // Calling user action here
-        self.user_grammar
-            .common_operator_term(&common_operator_term_built)?;
-        self.push(
-            ASTType::CommonOperatorTerm(common_operator_term_built),
-            context,
-        );
+        self.user_grammar.operator10_term(&operator10_term_built)?;
+        self.push(ASTType::Operator10Term(operator10_term_built), context);
         Ok(())
     }
 
     /// Semantic action for production 12:
     ///
-    /// UnaryOperatorTerm: "!|~" : Token;
+    /// Operator09Term: "\+|-" : Token;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator09_term(
+        &mut self,
+        operator09_term: &ParseTreeStackEntry<'t>,
+        parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let operator09_term = operator09_term
+            .token(parse_tree)?
+            .try_into()
+            .into_diagnostic()?;
+        let operator09_term_built = Operator09TermBuilder::default()
+            .operator09_term(operator09_term)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.operator09_term(&operator09_term_built)?;
+        self.push(ASTType::Operator09Term(operator09_term_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 13:
+    ///
+    /// Operator08Term: "<<<|>>>|<<|>>" : Token;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator08_term(
+        &mut self,
+        operator08_term: &ParseTreeStackEntry<'t>,
+        parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let operator08_term = operator08_term
+            .token(parse_tree)?
+            .try_into()
+            .into_diagnostic()?;
+        let operator08_term_built = Operator08TermBuilder::default()
+            .operator08_term(operator08_term)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.operator08_term(&operator08_term_built)?;
+        self.push(ASTType::Operator08Term(operator08_term_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 14:
+    ///
+    /// Operator07Term: "<=|>=|<|>" : Token;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator07_term(
+        &mut self,
+        operator07_term: &ParseTreeStackEntry<'t>,
+        parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let operator07_term = operator07_term
+            .token(parse_tree)?
+            .try_into()
+            .into_diagnostic()?;
+        let operator07_term_built = Operator07TermBuilder::default()
+            .operator07_term(operator07_term)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.operator07_term(&operator07_term_built)?;
+        self.push(ASTType::Operator07Term(operator07_term_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 15:
+    ///
+    /// Operator06Term: "===|==\?|!==|!=\?|==|!=" : Token;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator06_term(
+        &mut self,
+        operator06_term: &ParseTreeStackEntry<'t>,
+        parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let operator06_term = operator06_term
+            .token(parse_tree)?
+            .try_into()
+            .into_diagnostic()?;
+        let operator06_term_built = Operator06TermBuilder::default()
+            .operator06_term(operator06_term)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.operator06_term(&operator06_term_built)?;
+        self.push(ASTType::Operator06Term(operator06_term_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 16:
+    ///
+    /// Operator02Term: "&&" : Token;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator02_term(
+        &mut self,
+        operator02_term: &ParseTreeStackEntry<'t>,
+        parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let operator02_term = operator02_term
+            .token(parse_tree)?
+            .try_into()
+            .into_diagnostic()?;
+        let operator02_term_built = Operator02TermBuilder::default()
+            .operator02_term(operator02_term)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.operator02_term(&operator02_term_built)?;
+        self.push(ASTType::Operator02Term(operator02_term_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 17:
+    ///
+    /// Operator01Term: "\|\|" : Token;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator01_term(
+        &mut self,
+        operator01_term: &ParseTreeStackEntry<'t>,
+        parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let operator01_term = operator01_term
+            .token(parse_tree)?
+            .try_into()
+            .into_diagnostic()?;
+        let operator01_term_built = Operator01TermBuilder::default()
+            .operator01_term(operator01_term)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.operator01_term(&operator01_term_built)?;
+        self.push(ASTType::Operator01Term(operator01_term_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 18:
+    ///
+    /// Operator05Term: "&" : Token;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator05_term(
+        &mut self,
+        operator05_term: &ParseTreeStackEntry<'t>,
+        parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let operator05_term = operator05_term
+            .token(parse_tree)?
+            .try_into()
+            .into_diagnostic()?;
+        let operator05_term_built = Operator05TermBuilder::default()
+            .operator05_term(operator05_term)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.operator05_term(&operator05_term_built)?;
+        self.push(ASTType::Operator05Term(operator05_term_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 19:
+    ///
+    /// Operator04Term: "\^~|\^|~\^" : Token;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator04_term(
+        &mut self,
+        operator04_term: &ParseTreeStackEntry<'t>,
+        parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let operator04_term = operator04_term
+            .token(parse_tree)?
+            .try_into()
+            .into_diagnostic()?;
+        let operator04_term_built = Operator04TermBuilder::default()
+            .operator04_term(operator04_term)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.operator04_term(&operator04_term_built)?;
+        self.push(ASTType::Operator04Term(operator04_term_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 20:
+    ///
+    /// Operator03Term: "\|" : Token;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator03_term(
+        &mut self,
+        operator03_term: &ParseTreeStackEntry<'t>,
+        parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let operator03_term = operator03_term
+            .token(parse_tree)?
+            .try_into()
+            .into_diagnostic()?;
+        let operator03_term_built = Operator03TermBuilder::default()
+            .operator03_term(operator03_term)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.operator03_term(&operator03_term_built)?;
+        self.push(ASTType::Operator03Term(operator03_term_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 21:
+    ///
+    /// UnaryOperatorTerm: "~&|~\||!|~" : Token;
     ///
     #[parol_runtime::function_name::named]
     fn unary_operator_term(
@@ -6845,7 +7806,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 13:
+    /// Semantic action for production 22:
     ///
     /// ColonTerm: ':' : Token;
     ///
@@ -6868,7 +7829,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 14:
+    /// Semantic action for production 23:
     ///
     /// CommaTerm: ',' : Token;
     ///
@@ -6891,7 +7852,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 15:
+    /// Semantic action for production 24:
     ///
     /// DollarTerm: '$' : Token;
     ///
@@ -6917,7 +7878,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 16:
+    /// Semantic action for production 25:
     ///
     /// DotDotTerm: '..' : Token;
     ///
@@ -6943,7 +7904,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 17:
+    /// Semantic action for production 26:
     ///
     /// DotTerm: '.' : Token;
     ///
@@ -6966,7 +7927,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 18:
+    /// Semantic action for production 27:
     ///
     /// EquTerm: '=' : Token;
     ///
@@ -6989,7 +7950,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 19:
+    /// Semantic action for production 28:
     ///
     /// HashTerm: '#' : Token;
     ///
@@ -7012,7 +7973,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 20:
+    /// Semantic action for production 29:
     ///
     /// LBraceTerm: '{' : Token;
     ///
@@ -7038,7 +7999,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 21:
+    /// Semantic action for production 30:
     ///
     /// LBracketTerm: '[' : Token;
     ///
@@ -7064,7 +8025,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 22:
+    /// Semantic action for production 31:
     ///
     /// LParenTerm: '(' : Token;
     ///
@@ -7090,7 +8051,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 23:
+    /// Semantic action for production 32:
     ///
     /// RBraceTerm: '}' : Token;
     ///
@@ -7116,7 +8077,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 24:
+    /// Semantic action for production 33:
     ///
     /// RBracketTerm: ']' : Token;
     ///
@@ -7142,7 +8103,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 25:
+    /// Semantic action for production 34:
     ///
     /// RParenTerm: ')' : Token;
     ///
@@ -7168,7 +8129,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 26:
+    /// Semantic action for production 35:
     ///
     /// SemicolonTerm: ';' : Token;
     ///
@@ -7194,7 +8155,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 27:
+    /// Semantic action for production 36:
     ///
     /// AlwaysCombTerm: /\balways_comb\b/ : Token;
     ///
@@ -7221,7 +8182,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 28:
+    /// Semantic action for production 37:
     ///
     /// AlwaysFfTerm: /\balways_ff\b/ : Token;
     ///
@@ -7247,7 +8208,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 29:
+    /// Semantic action for production 38:
     ///
     /// AssignTerm: /\bassign\b/ : Token;
     ///
@@ -7273,7 +8234,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 30:
+    /// Semantic action for production 39:
     ///
     /// AsyncHighTerm: /\basync_high\b/ : Token;
     ///
@@ -7299,7 +8260,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 31:
+    /// Semantic action for production 40:
     ///
     /// AsyncLowTerm: /\basync_low\b/ : Token;
     ///
@@ -7325,7 +8286,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 32:
+    /// Semantic action for production 41:
     ///
     /// BitTerm: /\bbit\b/ : Token;
     ///
@@ -7348,7 +8309,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 33:
+    /// Semantic action for production 42:
     ///
     /// ElseTerm: /\belse\b/ : Token;
     ///
@@ -7371,7 +8332,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 34:
+    /// Semantic action for production 43:
     ///
     /// EnumTerm: /\benum\b/ : Token;
     ///
@@ -7394,7 +8355,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 35:
+    /// Semantic action for production 44:
     ///
     /// F32Term: /\bf32\b/ : Token;
     ///
@@ -7417,7 +8378,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 36:
+    /// Semantic action for production 45:
     ///
     /// F64Term: /\bf64\b/ : Token;
     ///
@@ -7440,7 +8401,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 37:
+    /// Semantic action for production 46:
     ///
     /// ForTerm: /\bfor\b/ : Token;
     ///
@@ -7463,7 +8424,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 38:
+    /// Semantic action for production 47:
     ///
     /// FunctionTerm: /\bfunction\b/ : Token;
     ///
@@ -7489,7 +8450,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 39:
+    /// Semantic action for production 48:
     ///
     /// I32Term: /\bi32\b/ : Token;
     ///
@@ -7512,7 +8473,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 40:
+    /// Semantic action for production 49:
     ///
     /// I64Term: /\bi64\b/ : Token;
     ///
@@ -7535,7 +8496,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 41:
+    /// Semantic action for production 50:
     ///
     /// IfResetTerm: /\bif_reset\b/ : Token;
     ///
@@ -7561,7 +8522,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 42:
+    /// Semantic action for production 51:
     ///
     /// IfTerm: /\bif\b/ : Token;
     ///
@@ -7584,7 +8545,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 43:
+    /// Semantic action for production 52:
     ///
     /// InoutTerm: /\binout\b/ : Token;
     ///
@@ -7607,7 +8568,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 44:
+    /// Semantic action for production 53:
     ///
     /// InputTerm: /\binput\b/ : Token;
     ///
@@ -7630,7 +8591,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 45:
+    /// Semantic action for production 54:
     ///
     /// InstTerm: /\binst\b/ : Token;
     ///
@@ -7653,7 +8614,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 46:
+    /// Semantic action for production 55:
     ///
     /// InterfaceTerm: /\binterface\b/ : Token;
     ///
@@ -7679,7 +8640,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 47:
+    /// Semantic action for production 56:
     ///
     /// InTerm: /\bin\b/ : Token;
     ///
@@ -7702,7 +8663,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 48:
+    /// Semantic action for production 57:
     ///
     /// LetTerm: /\blet\b/ : Token;
     ///
@@ -7725,7 +8686,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 49:
+    /// Semantic action for production 58:
     ///
     /// LocalparamTerm: /\blocalparam\b/ : Token;
     ///
@@ -7751,7 +8712,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 50:
+    /// Semantic action for production 59:
     ///
     /// LogicTerm: /\blogic\b/ : Token;
     ///
@@ -7774,7 +8735,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 51:
+    /// Semantic action for production 60:
     ///
     /// ModportTerm: /\bmodport\b/ : Token;
     ///
@@ -7800,7 +8761,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 52:
+    /// Semantic action for production 61:
     ///
     /// ModuleTerm: /\bmodule\b/ : Token;
     ///
@@ -7826,7 +8787,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 53:
+    /// Semantic action for production 62:
     ///
     /// NegedgeTerm: /\bnegedge\b/ : Token;
     ///
@@ -7852,7 +8813,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 54:
+    /// Semantic action for production 63:
     ///
     /// OutputTerm: /\boutput\b/ : Token;
     ///
@@ -7878,7 +8839,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 55:
+    /// Semantic action for production 64:
     ///
     /// ParameterTerm: /\bparameter\b/ : Token;
     ///
@@ -7904,7 +8865,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 56:
+    /// Semantic action for production 65:
     ///
     /// PosedgeTerm: /\bposedge\b/ : Token;
     ///
@@ -7930,7 +8891,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 57:
+    /// Semantic action for production 66:
     ///
     /// RefTerm: /\bref\b/ : Token;
     ///
@@ -7953,7 +8914,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 58:
+    /// Semantic action for production 67:
     ///
     /// ReturnTerm: /\breturn\b/ : Token;
     ///
@@ -7979,7 +8940,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 59:
+    /// Semantic action for production 68:
     ///
     /// StepTerm: /\bstep\b/ : Token;
     ///
@@ -8002,7 +8963,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 60:
+    /// Semantic action for production 69:
     ///
     /// StructTerm: /\bstruct\b/ : Token;
     ///
@@ -8028,7 +8989,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 61:
+    /// Semantic action for production 70:
     ///
     /// SyncHighTerm: /\bsync_high\b/ : Token;
     ///
@@ -8054,7 +9015,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 62:
+    /// Semantic action for production 71:
     ///
     /// SyncLowTerm: /\bsync_low\b/ : Token;
     ///
@@ -8080,7 +9041,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 63:
+    /// Semantic action for production 72:
     ///
     /// U32Term: /\bu32\b/ : Token;
     ///
@@ -8103,7 +9064,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 64:
+    /// Semantic action for production 73:
     ///
     /// U64Term: /\bu64\b/ : Token;
     ///
@@ -8126,7 +9087,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 65:
+    /// Semantic action for production 74:
     ///
     /// IdentifierTerm: /[a-zA-Z_][0-9a-zA-Z_]*/ : Token;
     ///
@@ -8152,7 +9113,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 66:
+    /// Semantic action for production 75:
     ///
     /// Comments: CommentsOpt /* Option */;
     ///
@@ -8175,7 +9136,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 67:
+    /// Semantic action for production 76:
     ///
     /// CommentsOpt /* Option<T>::Some */: CommentsTerm;
     ///
@@ -8199,7 +9160,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 68:
+    /// Semantic action for production 77:
     ///
     /// CommentsOpt /* Option<T>::None */: ;
     ///
@@ -8211,7 +9172,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 69:
+    /// Semantic action for production 78:
     ///
     /// StartToken: Comments;
     ///
@@ -8234,7 +9195,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 70:
+    /// Semantic action for production 79:
     ///
     /// ExponentToken: ExponentTerm : Token Comments;
     ///
@@ -8260,7 +9221,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 71:
+    /// Semantic action for production 80:
     ///
     /// FixedPointToken: FixedPointTerm : Token Comments;
     ///
@@ -8287,7 +9248,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 72:
+    /// Semantic action for production 81:
     ///
     /// BasedToken: BasedTerm : Token Comments;
     ///
@@ -8313,7 +9274,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 73:
+    /// Semantic action for production 82:
     ///
     /// BaseLessToken: BaseLessTerm : Token Comments;
     ///
@@ -8339,7 +9300,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 74:
+    /// Semantic action for production 83:
     ///
     /// AllBitToken: AllBitTerm : Token Comments;
     ///
@@ -8365,7 +9326,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 75:
+    /// Semantic action for production 84:
     ///
     /// AssignmentOperatorToken: AssignmentOperatorTerm : Token Comments;
     ///
@@ -8400,69 +9361,304 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 76:
+    /// Semantic action for production 85:
     ///
-    /// BinaryOperatorToken: BinaryOperatorTerm : Token Comments;
+    /// Operator01Token: Operator01Term : Token Comments;
     ///
     #[parol_runtime::function_name::named]
-    fn binary_operator_token(
+    fn operator01_token(
         &mut self,
-        _binary_operator_term: &ParseTreeStackEntry<'t>,
+        _operator01_term: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
-        let binary_operator_term =
-            pop_item!(self, binary_operator_term, BinaryOperatorTerm, context);
-        let binary_operator_token_built = BinaryOperatorTokenBuilder::default()
-            .binary_operator_term((&binary_operator_term).try_into().into_diagnostic()?)
+        let operator01_term = pop_item!(self, operator01_term, Operator01Term, context);
+        let operator01_token_built = Operator01TokenBuilder::default()
+            .operator01_term((&operator01_term).try_into().into_diagnostic()?)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
         // Calling user action here
         self.user_grammar
-            .binary_operator_token(&binary_operator_token_built)?;
-        self.push(
-            ASTType::BinaryOperatorToken(binary_operator_token_built),
-            context,
-        );
+            .operator01_token(&operator01_token_built)?;
+        self.push(ASTType::Operator01Token(operator01_token_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 77:
+    /// Semantic action for production 86:
     ///
-    /// CommonOperatorToken: CommonOperatorTerm : Token Comments;
+    /// Operator02Token: Operator02Term : Token Comments;
     ///
     #[parol_runtime::function_name::named]
-    fn common_operator_token(
+    fn operator02_token(
         &mut self,
-        _common_operator_term: &ParseTreeStackEntry<'t>,
+        _operator02_term: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
-        let common_operator_term =
-            pop_item!(self, common_operator_term, CommonOperatorTerm, context);
-        let common_operator_token_built = CommonOperatorTokenBuilder::default()
-            .common_operator_term((&common_operator_term).try_into().into_diagnostic()?)
+        let operator02_term = pop_item!(self, operator02_term, Operator02Term, context);
+        let operator02_token_built = Operator02TokenBuilder::default()
+            .operator02_term((&operator02_term).try_into().into_diagnostic()?)
             .comments(Box::new(comments))
             .build()
             .into_diagnostic()?;
         // Calling user action here
         self.user_grammar
-            .common_operator_token(&common_operator_token_built)?;
-        self.push(
-            ASTType::CommonOperatorToken(common_operator_token_built),
-            context,
-        );
+            .operator02_token(&operator02_token_built)?;
+        self.push(ASTType::Operator02Token(operator02_token_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 78:
+    /// Semantic action for production 87:
+    ///
+    /// Operator03Token: Operator03Term : Token Comments;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator03_token(
+        &mut self,
+        _operator03_term: &ParseTreeStackEntry<'t>,
+        _comments: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let comments = pop_item!(self, comments, Comments, context);
+        let operator03_term = pop_item!(self, operator03_term, Operator03Term, context);
+        let operator03_token_built = Operator03TokenBuilder::default()
+            .operator03_term((&operator03_term).try_into().into_diagnostic()?)
+            .comments(Box::new(comments))
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar
+            .operator03_token(&operator03_token_built)?;
+        self.push(ASTType::Operator03Token(operator03_token_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 88:
+    ///
+    /// Operator04Token: Operator04Term : Token Comments;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator04_token(
+        &mut self,
+        _operator04_term: &ParseTreeStackEntry<'t>,
+        _comments: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let comments = pop_item!(self, comments, Comments, context);
+        let operator04_term = pop_item!(self, operator04_term, Operator04Term, context);
+        let operator04_token_built = Operator04TokenBuilder::default()
+            .operator04_term((&operator04_term).try_into().into_diagnostic()?)
+            .comments(Box::new(comments))
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar
+            .operator04_token(&operator04_token_built)?;
+        self.push(ASTType::Operator04Token(operator04_token_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 89:
+    ///
+    /// Operator05Token: Operator05Term : Token Comments;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator05_token(
+        &mut self,
+        _operator05_term: &ParseTreeStackEntry<'t>,
+        _comments: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let comments = pop_item!(self, comments, Comments, context);
+        let operator05_term = pop_item!(self, operator05_term, Operator05Term, context);
+        let operator05_token_built = Operator05TokenBuilder::default()
+            .operator05_term((&operator05_term).try_into().into_diagnostic()?)
+            .comments(Box::new(comments))
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar
+            .operator05_token(&operator05_token_built)?;
+        self.push(ASTType::Operator05Token(operator05_token_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 90:
+    ///
+    /// Operator06Token: Operator06Term : Token Comments;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator06_token(
+        &mut self,
+        _operator06_term: &ParseTreeStackEntry<'t>,
+        _comments: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let comments = pop_item!(self, comments, Comments, context);
+        let operator06_term = pop_item!(self, operator06_term, Operator06Term, context);
+        let operator06_token_built = Operator06TokenBuilder::default()
+            .operator06_term((&operator06_term).try_into().into_diagnostic()?)
+            .comments(Box::new(comments))
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar
+            .operator06_token(&operator06_token_built)?;
+        self.push(ASTType::Operator06Token(operator06_token_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 91:
+    ///
+    /// Operator07Token: Operator07Term : Token Comments;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator07_token(
+        &mut self,
+        _operator07_term: &ParseTreeStackEntry<'t>,
+        _comments: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let comments = pop_item!(self, comments, Comments, context);
+        let operator07_term = pop_item!(self, operator07_term, Operator07Term, context);
+        let operator07_token_built = Operator07TokenBuilder::default()
+            .operator07_term((&operator07_term).try_into().into_diagnostic()?)
+            .comments(Box::new(comments))
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar
+            .operator07_token(&operator07_token_built)?;
+        self.push(ASTType::Operator07Token(operator07_token_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 92:
+    ///
+    /// Operator08Token: Operator08Term : Token Comments;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator08_token(
+        &mut self,
+        _operator08_term: &ParseTreeStackEntry<'t>,
+        _comments: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let comments = pop_item!(self, comments, Comments, context);
+        let operator08_term = pop_item!(self, operator08_term, Operator08Term, context);
+        let operator08_token_built = Operator08TokenBuilder::default()
+            .operator08_term((&operator08_term).try_into().into_diagnostic()?)
+            .comments(Box::new(comments))
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar
+            .operator08_token(&operator08_token_built)?;
+        self.push(ASTType::Operator08Token(operator08_token_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 93:
+    ///
+    /// Operator09Token: Operator09Term : Token Comments;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator09_token(
+        &mut self,
+        _operator09_term: &ParseTreeStackEntry<'t>,
+        _comments: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let comments = pop_item!(self, comments, Comments, context);
+        let operator09_term = pop_item!(self, operator09_term, Operator09Term, context);
+        let operator09_token_built = Operator09TokenBuilder::default()
+            .operator09_term((&operator09_term).try_into().into_diagnostic()?)
+            .comments(Box::new(comments))
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar
+            .operator09_token(&operator09_token_built)?;
+        self.push(ASTType::Operator09Token(operator09_token_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 94:
+    ///
+    /// Operator10Token: Operator10Term : Token Comments;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator10_token(
+        &mut self,
+        _operator10_term: &ParseTreeStackEntry<'t>,
+        _comments: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let comments = pop_item!(self, comments, Comments, context);
+        let operator10_term = pop_item!(self, operator10_term, Operator10Term, context);
+        let operator10_token_built = Operator10TokenBuilder::default()
+            .operator10_term((&operator10_term).try_into().into_diagnostic()?)
+            .comments(Box::new(comments))
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar
+            .operator10_token(&operator10_token_built)?;
+        self.push(ASTType::Operator10Token(operator10_token_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 95:
+    ///
+    /// Operator11Token: Operator11Term : Token Comments;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator11_token(
+        &mut self,
+        _operator11_term: &ParseTreeStackEntry<'t>,
+        _comments: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let comments = pop_item!(self, comments, Comments, context);
+        let operator11_term = pop_item!(self, operator11_term, Operator11Term, context);
+        let operator11_token_built = Operator11TokenBuilder::default()
+            .operator11_term((&operator11_term).try_into().into_diagnostic()?)
+            .comments(Box::new(comments))
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar
+            .operator11_token(&operator11_token_built)?;
+        self.push(ASTType::Operator11Token(operator11_token_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 96:
     ///
     /// UnaryOperatorToken: UnaryOperatorTerm : Token Comments;
     ///
@@ -8492,7 +9688,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 79:
+    /// Semantic action for production 97:
     ///
     /// ColonToken: ColonTerm : Token Comments;
     ///
@@ -8518,7 +9714,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 80:
+    /// Semantic action for production 98:
     ///
     /// CommaToken: CommaTerm : Token Comments;
     ///
@@ -8544,7 +9740,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 81:
+    /// Semantic action for production 99:
     ///
     /// DollarToken: DollarTerm : Token Comments;
     ///
@@ -8570,7 +9766,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 82:
+    /// Semantic action for production 100:
     ///
     /// DotDotToken: DotDotTerm : Token Comments;
     ///
@@ -8596,7 +9792,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 83:
+    /// Semantic action for production 101:
     ///
     /// DotToken: DotTerm : Token Comments;
     ///
@@ -8622,7 +9818,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 84:
+    /// Semantic action for production 102:
     ///
     /// EquToken: EquTerm : Token Comments;
     ///
@@ -8648,7 +9844,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 85:
+    /// Semantic action for production 103:
     ///
     /// HashToken: HashTerm : Token Comments;
     ///
@@ -8674,7 +9870,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 86:
+    /// Semantic action for production 104:
     ///
     /// LBraceToken: LBraceTerm : Token Comments;
     ///
@@ -8700,7 +9896,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 87:
+    /// Semantic action for production 105:
     ///
     /// LBracketToken: LBracketTerm : Token Comments;
     ///
@@ -8726,7 +9922,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 88:
+    /// Semantic action for production 106:
     ///
     /// LParenToken: LParenTerm : Token Comments;
     ///
@@ -8752,7 +9948,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 89:
+    /// Semantic action for production 107:
     ///
     /// MinusColonToken: MinusColonTerm : Token Comments;
     ///
@@ -8779,7 +9975,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 90:
+    /// Semantic action for production 108:
     ///
     /// MinusGTToken: MinusGTTerm : Token Comments;
     ///
@@ -8805,7 +10001,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 91:
+    /// Semantic action for production 109:
     ///
     /// PlusColonToken: PlusColonTerm : Token Comments;
     ///
@@ -8832,7 +10028,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 92:
+    /// Semantic action for production 110:
     ///
     /// RBraceToken: RBraceTerm : Token Comments;
     ///
@@ -8858,7 +10054,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 93:
+    /// Semantic action for production 111:
     ///
     /// RBracketToken: RBracketTerm : Token Comments;
     ///
@@ -8884,7 +10080,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 94:
+    /// Semantic action for production 112:
     ///
     /// RParenToken: RParenTerm : Token Comments;
     ///
@@ -8910,7 +10106,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 95:
+    /// Semantic action for production 113:
     ///
     /// SemicolonToken: SemicolonTerm : Token Comments;
     ///
@@ -8936,7 +10132,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 96:
+    /// Semantic action for production 114:
     ///
     /// AlwaysCombToken: AlwaysCombTerm : Token Comments;
     ///
@@ -8963,7 +10159,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 97:
+    /// Semantic action for production 115:
     ///
     /// AlwaysFfToken: AlwaysFfTerm : Token Comments;
     ///
@@ -8989,7 +10185,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 98:
+    /// Semantic action for production 116:
     ///
     /// AssignToken: AssignTerm : Token Comments;
     ///
@@ -9015,7 +10211,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 99:
+    /// Semantic action for production 117:
     ///
     /// AsyncHighToken: AsyncHighTerm : Token Comments;
     ///
@@ -9042,7 +10238,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 100:
+    /// Semantic action for production 118:
     ///
     /// AsyncLowToken: AsyncLowTerm : Token Comments;
     ///
@@ -9068,7 +10264,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 101:
+    /// Semantic action for production 119:
     ///
     /// BitToken: BitTerm : Token Comments;
     ///
@@ -9094,7 +10290,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 102:
+    /// Semantic action for production 120:
     ///
     /// ElseToken: ElseTerm : Token Comments;
     ///
@@ -9120,7 +10316,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 103:
+    /// Semantic action for production 121:
     ///
     /// EnumToken: EnumTerm : Token Comments;
     ///
@@ -9146,7 +10342,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 104:
+    /// Semantic action for production 122:
     ///
     /// F32Token: F32Term : Token Comments;
     ///
@@ -9172,7 +10368,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 105:
+    /// Semantic action for production 123:
     ///
     /// F64Token: F64Term : Token Comments;
     ///
@@ -9198,7 +10394,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 106:
+    /// Semantic action for production 124:
     ///
     /// ForToken: ForTerm : Token Comments;
     ///
@@ -9224,7 +10420,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 107:
+    /// Semantic action for production 125:
     ///
     /// FunctionToken: FunctionTerm : Token Comments;
     ///
@@ -9250,7 +10446,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 108:
+    /// Semantic action for production 126:
     ///
     /// I32Token: I32Term : Token Comments;
     ///
@@ -9276,7 +10472,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 109:
+    /// Semantic action for production 127:
     ///
     /// I64Token: I64Term : Token Comments;
     ///
@@ -9302,7 +10498,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 110:
+    /// Semantic action for production 128:
     ///
     /// IfResetToken: IfResetTerm : Token Comments;
     ///
@@ -9328,7 +10524,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 111:
+    /// Semantic action for production 129:
     ///
     /// IfToken: IfTerm : Token Comments;
     ///
@@ -9354,7 +10550,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 112:
+    /// Semantic action for production 130:
     ///
     /// InoutToken: InoutTerm : Token Comments;
     ///
@@ -9380,7 +10576,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 113:
+    /// Semantic action for production 131:
     ///
     /// InputToken: InputTerm : Token Comments;
     ///
@@ -9406,7 +10602,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 114:
+    /// Semantic action for production 132:
     ///
     /// InstToken: InstTerm : Token Comments;
     ///
@@ -9432,7 +10628,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 115:
+    /// Semantic action for production 133:
     ///
     /// InterfaceToken: InterfaceTerm : Token Comments;
     ///
@@ -9458,7 +10654,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 116:
+    /// Semantic action for production 134:
     ///
     /// InToken: InTerm : Token Comments;
     ///
@@ -9484,7 +10680,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 117:
+    /// Semantic action for production 135:
     ///
     /// LetToken: LetTerm : Token Comments;
     ///
@@ -9510,7 +10706,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 118:
+    /// Semantic action for production 136:
     ///
     /// LocalparamToken: LocalparamTerm : Token Comments;
     ///
@@ -9537,7 +10733,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 119:
+    /// Semantic action for production 137:
     ///
     /// LogicToken: LogicTerm : Token Comments;
     ///
@@ -9563,7 +10759,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 120:
+    /// Semantic action for production 138:
     ///
     /// ModportToken: ModportTerm : Token Comments;
     ///
@@ -9589,7 +10785,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 121:
+    /// Semantic action for production 139:
     ///
     /// ModuleToken: ModuleTerm : Token Comments;
     ///
@@ -9615,7 +10811,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 122:
+    /// Semantic action for production 140:
     ///
     /// NegedgeToken: NegedgeTerm : Token Comments;
     ///
@@ -9641,7 +10837,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 123:
+    /// Semantic action for production 141:
     ///
     /// OutputToken: OutputTerm : Token Comments;
     ///
@@ -9667,7 +10863,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 124:
+    /// Semantic action for production 142:
     ///
     /// ParameterToken: ParameterTerm : Token Comments;
     ///
@@ -9693,7 +10889,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 125:
+    /// Semantic action for production 143:
     ///
     /// PosedgeToken: PosedgeTerm : Token Comments;
     ///
@@ -9719,7 +10915,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 126:
+    /// Semantic action for production 144:
     ///
     /// RefToken: RefTerm : Token Comments;
     ///
@@ -9745,7 +10941,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 127:
+    /// Semantic action for production 145:
     ///
     /// ReturnToken: ReturnTerm : Token Comments;
     ///
@@ -9771,7 +10967,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 128:
+    /// Semantic action for production 146:
     ///
     /// StepToken: StepTerm : Token Comments;
     ///
@@ -9797,7 +10993,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 129:
+    /// Semantic action for production 147:
     ///
     /// StructToken: StructTerm : Token Comments;
     ///
@@ -9823,7 +11019,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 130:
+    /// Semantic action for production 148:
     ///
     /// SyncHighToken: SyncHighTerm : Token Comments;
     ///
@@ -9849,7 +11045,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 131:
+    /// Semantic action for production 149:
     ///
     /// SyncLowToken: SyncLowTerm : Token Comments;
     ///
@@ -9875,7 +11071,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 132:
+    /// Semantic action for production 150:
     ///
     /// U32Token: U32Term : Token Comments;
     ///
@@ -9901,7 +11097,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 133:
+    /// Semantic action for production 151:
     ///
     /// U64Token: U64Term : Token Comments;
     ///
@@ -9927,7 +11123,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 134:
+    /// Semantic action for production 152:
     ///
     /// IdentifierToken: IdentifierTerm : Token Comments;
     ///
@@ -9954,7 +11150,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 135:
+    /// Semantic action for production 153:
     ///
     /// Start: StartToken : VerylToken;
     ///
@@ -9977,7 +11173,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 136:
+    /// Semantic action for production 154:
     ///
     /// Exponent: ExponentToken : VerylToken;
     ///
@@ -10000,7 +11196,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 137:
+    /// Semantic action for production 155:
     ///
     /// FixedPoint: FixedPointToken : VerylToken;
     ///
@@ -10023,7 +11219,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 138:
+    /// Semantic action for production 156:
     ///
     /// Based: BasedToken : VerylToken;
     ///
@@ -10046,7 +11242,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 139:
+    /// Semantic action for production 157:
     ///
     /// BaseLess: BaseLessToken : VerylToken;
     ///
@@ -10069,7 +11265,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 140:
+    /// Semantic action for production 158:
     ///
     /// AllBit: AllBitToken : VerylToken;
     ///
@@ -10092,7 +11288,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 141:
+    /// Semantic action for production 159:
     ///
     /// AssignmentOperator: AssignmentOperatorToken : VerylToken;
     ///
@@ -10124,55 +11320,260 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 142:
+    /// Semantic action for production 160:
     ///
-    /// CommonOperator: CommonOperatorToken : VerylToken;
+    /// Operator01: Operator01Token : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn common_operator(
+    fn operator01(
         &mut self,
-        _common_operator_token: &ParseTreeStackEntry<'t>,
+        _operator01_token: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let common_operator_token =
-            pop_item!(self, common_operator_token, CommonOperatorToken, context);
-        let common_operator_built = CommonOperatorBuilder::default()
-            .common_operator_token((&common_operator_token).try_into().into_diagnostic()?)
+        let operator01_token = pop_item!(self, operator01_token, Operator01Token, context);
+        let operator01_built = Operator01Builder::default()
+            .operator01_token((&operator01_token).try_into().into_diagnostic()?)
             .build()
             .into_diagnostic()?;
         // Calling user action here
-        self.user_grammar.common_operator(&common_operator_built)?;
-        self.push(ASTType::CommonOperator(common_operator_built), context);
+        self.user_grammar.operator01(&operator01_built)?;
+        self.push(ASTType::Operator01(operator01_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 143:
+    /// Semantic action for production 161:
     ///
-    /// BinaryOperator: BinaryOperatorToken : VerylToken;
+    /// Operator02: Operator02Token : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn binary_operator(
+    fn operator02(
         &mut self,
-        _binary_operator_token: &ParseTreeStackEntry<'t>,
+        _operator02_token: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let binary_operator_token =
-            pop_item!(self, binary_operator_token, BinaryOperatorToken, context);
-        let binary_operator_built = BinaryOperatorBuilder::default()
-            .binary_operator_token((&binary_operator_token).try_into().into_diagnostic()?)
+        let operator02_token = pop_item!(self, operator02_token, Operator02Token, context);
+        let operator02_built = Operator02Builder::default()
+            .operator02_token((&operator02_token).try_into().into_diagnostic()?)
             .build()
             .into_diagnostic()?;
         // Calling user action here
-        self.user_grammar.binary_operator(&binary_operator_built)?;
-        self.push(ASTType::BinaryOperator(binary_operator_built), context);
+        self.user_grammar.operator02(&operator02_built)?;
+        self.push(ASTType::Operator02(operator02_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 144:
+    /// Semantic action for production 162:
+    ///
+    /// Operator03: Operator03Token : VerylToken;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator03(
+        &mut self,
+        _operator03_token: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let operator03_token = pop_item!(self, operator03_token, Operator03Token, context);
+        let operator03_built = Operator03Builder::default()
+            .operator03_token((&operator03_token).try_into().into_diagnostic()?)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.operator03(&operator03_built)?;
+        self.push(ASTType::Operator03(operator03_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 163:
+    ///
+    /// Operator04: Operator04Token : VerylToken;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator04(
+        &mut self,
+        _operator04_token: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let operator04_token = pop_item!(self, operator04_token, Operator04Token, context);
+        let operator04_built = Operator04Builder::default()
+            .operator04_token((&operator04_token).try_into().into_diagnostic()?)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.operator04(&operator04_built)?;
+        self.push(ASTType::Operator04(operator04_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 164:
+    ///
+    /// Operator05: Operator05Token : VerylToken;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator05(
+        &mut self,
+        _operator05_token: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let operator05_token = pop_item!(self, operator05_token, Operator05Token, context);
+        let operator05_built = Operator05Builder::default()
+            .operator05_token((&operator05_token).try_into().into_diagnostic()?)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.operator05(&operator05_built)?;
+        self.push(ASTType::Operator05(operator05_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 165:
+    ///
+    /// Operator06: Operator06Token : VerylToken;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator06(
+        &mut self,
+        _operator06_token: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let operator06_token = pop_item!(self, operator06_token, Operator06Token, context);
+        let operator06_built = Operator06Builder::default()
+            .operator06_token((&operator06_token).try_into().into_diagnostic()?)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.operator06(&operator06_built)?;
+        self.push(ASTType::Operator06(operator06_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 166:
+    ///
+    /// Operator07: Operator07Token : VerylToken;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator07(
+        &mut self,
+        _operator07_token: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let operator07_token = pop_item!(self, operator07_token, Operator07Token, context);
+        let operator07_built = Operator07Builder::default()
+            .operator07_token((&operator07_token).try_into().into_diagnostic()?)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.operator07(&operator07_built)?;
+        self.push(ASTType::Operator07(operator07_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 167:
+    ///
+    /// Operator08: Operator08Token : VerylToken;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator08(
+        &mut self,
+        _operator08_token: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let operator08_token = pop_item!(self, operator08_token, Operator08Token, context);
+        let operator08_built = Operator08Builder::default()
+            .operator08_token((&operator08_token).try_into().into_diagnostic()?)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.operator08(&operator08_built)?;
+        self.push(ASTType::Operator08(operator08_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 168:
+    ///
+    /// Operator09: Operator09Token : VerylToken;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator09(
+        &mut self,
+        _operator09_token: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let operator09_token = pop_item!(self, operator09_token, Operator09Token, context);
+        let operator09_built = Operator09Builder::default()
+            .operator09_token((&operator09_token).try_into().into_diagnostic()?)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.operator09(&operator09_built)?;
+        self.push(ASTType::Operator09(operator09_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 169:
+    ///
+    /// Operator10: Operator10Token : VerylToken;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator10(
+        &mut self,
+        _operator10_token: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let operator10_token = pop_item!(self, operator10_token, Operator10Token, context);
+        let operator10_built = Operator10Builder::default()
+            .operator10_token((&operator10_token).try_into().into_diagnostic()?)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.operator10(&operator10_built)?;
+        self.push(ASTType::Operator10(operator10_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 170:
+    ///
+    /// Operator11: Operator11Token : VerylToken;
+    ///
+    #[parol_runtime::function_name::named]
+    fn operator11(
+        &mut self,
+        _operator11_token: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let operator11_token = pop_item!(self, operator11_token, Operator11Token, context);
+        let operator11_built = Operator11Builder::default()
+            .operator11_token((&operator11_token).try_into().into_diagnostic()?)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.operator11(&operator11_built)?;
+        self.push(ASTType::Operator11(operator11_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 171:
     ///
     /// UnaryOperator: UnaryOperatorToken : VerylToken;
     ///
@@ -10196,7 +11597,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 145:
+    /// Semantic action for production 172:
     ///
     /// Colon: ColonToken : VerylToken;
     ///
@@ -10219,7 +11620,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 146:
+    /// Semantic action for production 173:
     ///
     /// Comma: CommaToken : VerylToken;
     ///
@@ -10242,7 +11643,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 147:
+    /// Semantic action for production 174:
     ///
     /// Dollar: DollarToken : VerylToken;
     ///
@@ -10265,7 +11666,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 148:
+    /// Semantic action for production 175:
     ///
     /// DotDot: DotDotToken : VerylToken;
     ///
@@ -10288,7 +11689,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 149:
+    /// Semantic action for production 176:
     ///
     /// Dot: DotToken : VerylToken;
     ///
@@ -10311,7 +11712,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 150:
+    /// Semantic action for production 177:
     ///
     /// Equ: EquToken : VerylToken;
     ///
@@ -10334,7 +11735,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 151:
+    /// Semantic action for production 178:
     ///
     /// Hash: HashToken : VerylToken;
     ///
@@ -10357,7 +11758,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 152:
+    /// Semantic action for production 179:
     ///
     /// LBrace: LBraceToken : VerylToken;
     ///
@@ -10380,7 +11781,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 153:
+    /// Semantic action for production 180:
     ///
     /// LBracket: LBracketToken : VerylToken;
     ///
@@ -10403,7 +11804,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 154:
+    /// Semantic action for production 181:
     ///
     /// LParen: LParenToken : VerylToken;
     ///
@@ -10426,7 +11827,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 155:
+    /// Semantic action for production 182:
     ///
     /// MinusColon: MinusColonToken : VerylToken;
     ///
@@ -10449,7 +11850,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 156:
+    /// Semantic action for production 183:
     ///
     /// MinusGT: MinusGTToken : VerylToken;
     ///
@@ -10472,7 +11873,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 157:
+    /// Semantic action for production 184:
     ///
     /// PlusColon: PlusColonToken : VerylToken;
     ///
@@ -10495,7 +11896,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 158:
+    /// Semantic action for production 185:
     ///
     /// RBrace: RBraceToken : VerylToken;
     ///
@@ -10518,7 +11919,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 159:
+    /// Semantic action for production 186:
     ///
     /// RBracket: RBracketToken : VerylToken;
     ///
@@ -10541,7 +11942,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 160:
+    /// Semantic action for production 187:
     ///
     /// RParen: RParenToken : VerylToken;
     ///
@@ -10564,7 +11965,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 161:
+    /// Semantic action for production 188:
     ///
     /// Semicolon: SemicolonToken : VerylToken;
     ///
@@ -10587,7 +11988,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 162:
+    /// Semantic action for production 189:
     ///
     /// AlwaysComb: AlwaysCombToken : VerylToken;
     ///
@@ -10610,7 +12011,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 163:
+    /// Semantic action for production 190:
     ///
     /// AlwaysFf: AlwaysFfToken : VerylToken;
     ///
@@ -10633,7 +12034,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 164:
+    /// Semantic action for production 191:
     ///
     /// Assign: AssignToken : VerylToken;
     ///
@@ -10656,7 +12057,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 165:
+    /// Semantic action for production 192:
     ///
     /// AsyncHigh: AsyncHighToken : VerylToken;
     ///
@@ -10679,7 +12080,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 166:
+    /// Semantic action for production 193:
     ///
     /// AsyncLow: AsyncLowToken : VerylToken;
     ///
@@ -10702,7 +12103,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 167:
+    /// Semantic action for production 194:
     ///
     /// Bit: BitToken : VerylToken;
     ///
@@ -10725,7 +12126,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 168:
+    /// Semantic action for production 195:
     ///
     /// Else: ElseToken : VerylToken;
     ///
@@ -10748,7 +12149,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 169:
+    /// Semantic action for production 196:
     ///
     /// Enum: EnumToken : VerylToken;
     ///
@@ -10771,7 +12172,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 170:
+    /// Semantic action for production 197:
     ///
     /// F32: F32Token : VerylToken;
     ///
@@ -10794,7 +12195,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 171:
+    /// Semantic action for production 198:
     ///
     /// F64: F64Token : VerylToken;
     ///
@@ -10817,7 +12218,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 172:
+    /// Semantic action for production 199:
     ///
     /// For: ForToken : VerylToken;
     ///
@@ -10840,7 +12241,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 173:
+    /// Semantic action for production 200:
     ///
     /// Function: FunctionToken : VerylToken;
     ///
@@ -10863,7 +12264,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 174:
+    /// Semantic action for production 201:
     ///
     /// I32: I32Token : VerylToken;
     ///
@@ -10886,7 +12287,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 175:
+    /// Semantic action for production 202:
     ///
     /// I64: I64Token : VerylToken;
     ///
@@ -10909,7 +12310,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 176:
+    /// Semantic action for production 203:
     ///
     /// If: IfToken : VerylToken;
     ///
@@ -10932,7 +12333,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 177:
+    /// Semantic action for production 204:
     ///
     /// IfReset: IfResetToken : VerylToken;
     ///
@@ -10955,7 +12356,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 178:
+    /// Semantic action for production 205:
     ///
     /// In: InToken : VerylToken;
     ///
@@ -10978,7 +12379,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 179:
+    /// Semantic action for production 206:
     ///
     /// Inout: InoutToken : VerylToken;
     ///
@@ -11001,7 +12402,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 180:
+    /// Semantic action for production 207:
     ///
     /// Input: InputToken : VerylToken;
     ///
@@ -11024,7 +12425,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 181:
+    /// Semantic action for production 208:
     ///
     /// Inst: InstToken : VerylToken;
     ///
@@ -11047,7 +12448,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 182:
+    /// Semantic action for production 209:
     ///
     /// Interface: InterfaceToken : VerylToken;
     ///
@@ -11070,7 +12471,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 183:
+    /// Semantic action for production 210:
     ///
     /// Let: LetToken : VerylToken;
     ///
@@ -11093,7 +12494,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 184:
+    /// Semantic action for production 211:
     ///
     /// Localparam: LocalparamToken : VerylToken;
     ///
@@ -11116,7 +12517,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 185:
+    /// Semantic action for production 212:
     ///
     /// Logic: LogicToken : VerylToken;
     ///
@@ -11139,7 +12540,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 186:
+    /// Semantic action for production 213:
     ///
     /// Modport: ModportToken : VerylToken;
     ///
@@ -11162,7 +12563,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 187:
+    /// Semantic action for production 214:
     ///
     /// Module: ModuleToken : VerylToken;
     ///
@@ -11185,7 +12586,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 188:
+    /// Semantic action for production 215:
     ///
     /// Negedge: NegedgeToken : VerylToken;
     ///
@@ -11208,7 +12609,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 189:
+    /// Semantic action for production 216:
     ///
     /// Output: OutputToken : VerylToken;
     ///
@@ -11231,7 +12632,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 190:
+    /// Semantic action for production 217:
     ///
     /// Parameter: ParameterToken : VerylToken;
     ///
@@ -11254,7 +12655,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 191:
+    /// Semantic action for production 218:
     ///
     /// Posedge: PosedgeToken : VerylToken;
     ///
@@ -11277,7 +12678,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 192:
+    /// Semantic action for production 219:
     ///
     /// Ref: RefToken : VerylToken;
     ///
@@ -11300,7 +12701,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 193:
+    /// Semantic action for production 220:
     ///
     /// Return: ReturnToken : VerylToken;
     ///
@@ -11323,7 +12724,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 194:
+    /// Semantic action for production 221:
     ///
     /// Step: StepToken : VerylToken;
     ///
@@ -11346,7 +12747,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 195:
+    /// Semantic action for production 222:
     ///
     /// Struct: StructToken : VerylToken;
     ///
@@ -11369,7 +12770,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 196:
+    /// Semantic action for production 223:
     ///
     /// SyncHigh: SyncHighToken : VerylToken;
     ///
@@ -11392,7 +12793,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 197:
+    /// Semantic action for production 224:
     ///
     /// SyncLow: SyncLowToken : VerylToken;
     ///
@@ -11415,7 +12816,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 198:
+    /// Semantic action for production 225:
     ///
     /// U32: U32Token : VerylToken;
     ///
@@ -11438,7 +12839,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 199:
+    /// Semantic action for production 226:
     ///
     /// U64: U64Token : VerylToken;
     ///
@@ -11461,7 +12862,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 200:
+    /// Semantic action for production 227:
     ///
     /// Identifier: IdentifierToken : VerylToken;
     ///
@@ -11484,7 +12885,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 201:
+    /// Semantic action for production 228:
     ///
     /// Number: IntegralNumber;
     ///
@@ -11508,7 +12909,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 202:
+    /// Semantic action for production 229:
     ///
     /// Number: RealNumber;
     ///
@@ -11532,7 +12933,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 203:
+    /// Semantic action for production 230:
     ///
     /// IntegralNumber: Based;
     ///
@@ -11557,7 +12958,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 204:
+    /// Semantic action for production 231:
     ///
     /// IntegralNumber: BaseLess;
     ///
@@ -11582,7 +12983,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 205:
+    /// Semantic action for production 232:
     ///
     /// IntegralNumber: AllBit;
     ///
@@ -11607,7 +13008,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 206:
+    /// Semantic action for production 233:
     ///
     /// RealNumber: FixedPoint;
     ///
@@ -11631,7 +13032,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 207:
+    /// Semantic action for production 234:
     ///
     /// RealNumber: Exponent;
     ///
@@ -11655,7 +13056,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 208:
+    /// Semantic action for production 235:
     ///
     /// HierarchicalIdentifier: Identifier HierarchicalIdentifierList /* Vec */ HierarchicalIdentifierList0 /* Vec */;
     ///
@@ -11698,7 +13099,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 209:
+    /// Semantic action for production 236:
     ///
     /// HierarchicalIdentifierList0 /* Vec<T>::Push */: Dot Identifier HierarchicalIdentifierList0List /* Vec */ HierarchicalIdentifierList0;
     ///
@@ -11742,7 +13143,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 210:
+    /// Semantic action for production 237:
     ///
     /// HierarchicalIdentifierList0List /* Vec<T>::Push */: Range HierarchicalIdentifierList0List;
     ///
@@ -11776,7 +13177,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 211:
+    /// Semantic action for production 238:
     ///
     /// HierarchicalIdentifierList0List /* Vec<T>::New */: ;
     ///
@@ -11795,7 +13196,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 212:
+    /// Semantic action for production 239:
     ///
     /// HierarchicalIdentifierList0 /* Vec<T>::New */: ;
     ///
@@ -11814,7 +13215,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 213:
+    /// Semantic action for production 240:
     ///
     /// HierarchicalIdentifierList /* Vec<T>::Push */: Range HierarchicalIdentifierList;
     ///
@@ -11847,7 +13248,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 214:
+    /// Semantic action for production 241:
     ///
     /// HierarchicalIdentifierList /* Vec<T>::New */: ;
     ///
@@ -11866,23 +13267,23 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 215:
+    /// Semantic action for production 242:
     ///
-    /// Expression: Expression1 ExpressionList /* Vec */;
+    /// Expression: Expression01 ExpressionList /* Vec */;
     ///
     #[parol_runtime::function_name::named]
     fn expression(
         &mut self,
-        _expression1: &ParseTreeStackEntry<'t>,
+        _expression01: &ParseTreeStackEntry<'t>,
         _expression_list: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let expression_list = pop_and_reverse_item!(self, expression_list, ExpressionList, context);
-        let expression1 = pop_item!(self, expression1, Expression1, context);
+        let expression01 = pop_item!(self, expression01, Expression01, context);
         let expression_built = ExpressionBuilder::default()
-            .expression1(Box::new(expression1))
+            .expression01(Box::new(expression01))
             .expression_list(expression_list)
             .build()
             .into_diagnostic()?;
@@ -11892,27 +13293,26 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 216:
+    /// Semantic action for production 243:
     ///
-    /// ExpressionList /* Vec<T>::Push */: ExpressionListGroup Expression1 ExpressionList;
+    /// ExpressionList /* Vec<T>::Push */: Operator01 Expression01 ExpressionList;
     ///
     #[parol_runtime::function_name::named]
     fn expression_list_0(
         &mut self,
-        _expression_list_group: &ParseTreeStackEntry<'t>,
-        _expression1: &ParseTreeStackEntry<'t>,
+        _operator01: &ParseTreeStackEntry<'t>,
+        _expression01: &ParseTreeStackEntry<'t>,
         _expression_list: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let mut expression_list = pop_item!(self, expression_list, ExpressionList, context);
-        let expression1 = pop_item!(self, expression1, Expression1, context);
-        let expression_list_group =
-            pop_item!(self, expression_list_group, ExpressionListGroup, context);
+        let expression01 = pop_item!(self, expression01, Expression01, context);
+        let operator01 = pop_item!(self, operator01, Operator01, context);
         let expression_list_0_built = ExpressionListBuilder::default()
-            .expression1(Box::new(expression1))
-            .expression_list_group(Box::new(expression_list_group))
+            .expression01(Box::new(expression01))
+            .operator01(Box::new(operator01))
             .build()
             .into_diagnostic()?;
         // Add an element to the vector
@@ -11921,59 +13321,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 217:
-    ///
-    /// ExpressionListGroup: BinaryOperator;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression_list_group_0(
-        &mut self,
-        _binary_operator: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let binary_operator = pop_item!(self, binary_operator, BinaryOperator, context);
-        let expression_list_group_0_built = ExpressionListGroupBinaryOperatorBuilder::default()
-            .binary_operator(Box::new(binary_operator))
-            .build()
-            .into_diagnostic()?;
-        let expression_list_group_0_built =
-            ExpressionListGroup::BinaryOperator(expression_list_group_0_built);
-        self.push(
-            ASTType::ExpressionListGroup(expression_list_group_0_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 218:
-    ///
-    /// ExpressionListGroup: CommonOperator;
-    ///
-    #[parol_runtime::function_name::named]
-    fn expression_list_group_1(
-        &mut self,
-        _common_operator: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let common_operator = pop_item!(self, common_operator, CommonOperator, context);
-        let expression_list_group_1_built = ExpressionListGroupCommonOperatorBuilder::default()
-            .common_operator(Box::new(common_operator))
-            .build()
-            .into_diagnostic()?;
-        let expression_list_group_1_built =
-            ExpressionListGroup::CommonOperator(expression_list_group_1_built);
-        self.push(
-            ASTType::ExpressionListGroup(expression_list_group_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 219:
+    /// Semantic action for production 244:
     ///
     /// ExpressionList /* Vec<T>::New */: ;
     ///
@@ -11986,63 +13334,773 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 220:
+    /// Semantic action for production 245:
     ///
-    /// Expression1: Expression1Opt /* Option */ Factor;
+    /// Expression01: Expression02 Expression01List /* Vec */;
     ///
     #[parol_runtime::function_name::named]
-    fn expression1(
+    fn expression01(
         &mut self,
-        _expression1_opt: &ParseTreeStackEntry<'t>,
+        _expression02: &ParseTreeStackEntry<'t>,
+        _expression01_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let expression01_list =
+            pop_and_reverse_item!(self, expression01_list, Expression01List, context);
+        let expression02 = pop_item!(self, expression02, Expression02, context);
+        let expression01_built = Expression01Builder::default()
+            .expression02(Box::new(expression02))
+            .expression01_list(expression01_list)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.expression01(&expression01_built)?;
+        self.push(ASTType::Expression01(expression01_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 246:
+    ///
+    /// Expression01List /* Vec<T>::Push */: Operator02 Expression02 Expression01List;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression01_list_0(
+        &mut self,
+        _operator02: &ParseTreeStackEntry<'t>,
+        _expression02: &ParseTreeStackEntry<'t>,
+        _expression01_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let mut expression01_list = pop_item!(self, expression01_list, Expression01List, context);
+        let expression02 = pop_item!(self, expression02, Expression02, context);
+        let operator02 = pop_item!(self, operator02, Operator02, context);
+        let expression01_list_0_built = Expression01ListBuilder::default()
+            .expression02(Box::new(expression02))
+            .operator02(Box::new(operator02))
+            .build()
+            .into_diagnostic()?;
+        // Add an element to the vector
+        expression01_list.push(expression01_list_0_built);
+        self.push(ASTType::Expression01List(expression01_list), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 247:
+    ///
+    /// Expression01List /* Vec<T>::New */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression01_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let expression01_list_1_built = Vec::new();
+        self.push(
+            ASTType::Expression01List(expression01_list_1_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 248:
+    ///
+    /// Expression02: Expression03 Expression02List /* Vec */;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression02(
+        &mut self,
+        _expression03: &ParseTreeStackEntry<'t>,
+        _expression02_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let expression02_list =
+            pop_and_reverse_item!(self, expression02_list, Expression02List, context);
+        let expression03 = pop_item!(self, expression03, Expression03, context);
+        let expression02_built = Expression02Builder::default()
+            .expression03(Box::new(expression03))
+            .expression02_list(expression02_list)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.expression02(&expression02_built)?;
+        self.push(ASTType::Expression02(expression02_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 249:
+    ///
+    /// Expression02List /* Vec<T>::Push */: Operator03 Expression03 Expression02List;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression02_list_0(
+        &mut self,
+        _operator03: &ParseTreeStackEntry<'t>,
+        _expression03: &ParseTreeStackEntry<'t>,
+        _expression02_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let mut expression02_list = pop_item!(self, expression02_list, Expression02List, context);
+        let expression03 = pop_item!(self, expression03, Expression03, context);
+        let operator03 = pop_item!(self, operator03, Operator03, context);
+        let expression02_list_0_built = Expression02ListBuilder::default()
+            .expression03(Box::new(expression03))
+            .operator03(Box::new(operator03))
+            .build()
+            .into_diagnostic()?;
+        // Add an element to the vector
+        expression02_list.push(expression02_list_0_built);
+        self.push(ASTType::Expression02List(expression02_list), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 250:
+    ///
+    /// Expression02List /* Vec<T>::New */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression02_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let expression02_list_1_built = Vec::new();
+        self.push(
+            ASTType::Expression02List(expression02_list_1_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 251:
+    ///
+    /// Expression03: Expression04 Expression03List /* Vec */;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression03(
+        &mut self,
+        _expression04: &ParseTreeStackEntry<'t>,
+        _expression03_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let expression03_list =
+            pop_and_reverse_item!(self, expression03_list, Expression03List, context);
+        let expression04 = pop_item!(self, expression04, Expression04, context);
+        let expression03_built = Expression03Builder::default()
+            .expression04(Box::new(expression04))
+            .expression03_list(expression03_list)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.expression03(&expression03_built)?;
+        self.push(ASTType::Expression03(expression03_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 252:
+    ///
+    /// Expression03List /* Vec<T>::Push */: Operator04 Expression04 Expression03List;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression03_list_0(
+        &mut self,
+        _operator04: &ParseTreeStackEntry<'t>,
+        _expression04: &ParseTreeStackEntry<'t>,
+        _expression03_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let mut expression03_list = pop_item!(self, expression03_list, Expression03List, context);
+        let expression04 = pop_item!(self, expression04, Expression04, context);
+        let operator04 = pop_item!(self, operator04, Operator04, context);
+        let expression03_list_0_built = Expression03ListBuilder::default()
+            .expression04(Box::new(expression04))
+            .operator04(Box::new(operator04))
+            .build()
+            .into_diagnostic()?;
+        // Add an element to the vector
+        expression03_list.push(expression03_list_0_built);
+        self.push(ASTType::Expression03List(expression03_list), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 253:
+    ///
+    /// Expression03List /* Vec<T>::New */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression03_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let expression03_list_1_built = Vec::new();
+        self.push(
+            ASTType::Expression03List(expression03_list_1_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 254:
+    ///
+    /// Expression04: Expression05 Expression04List /* Vec */;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression04(
+        &mut self,
+        _expression05: &ParseTreeStackEntry<'t>,
+        _expression04_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let expression04_list =
+            pop_and_reverse_item!(self, expression04_list, Expression04List, context);
+        let expression05 = pop_item!(self, expression05, Expression05, context);
+        let expression04_built = Expression04Builder::default()
+            .expression05(Box::new(expression05))
+            .expression04_list(expression04_list)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.expression04(&expression04_built)?;
+        self.push(ASTType::Expression04(expression04_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 255:
+    ///
+    /// Expression04List /* Vec<T>::Push */: Operator05 Expression05 Expression04List;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression04_list_0(
+        &mut self,
+        _operator05: &ParseTreeStackEntry<'t>,
+        _expression05: &ParseTreeStackEntry<'t>,
+        _expression04_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let mut expression04_list = pop_item!(self, expression04_list, Expression04List, context);
+        let expression05 = pop_item!(self, expression05, Expression05, context);
+        let operator05 = pop_item!(self, operator05, Operator05, context);
+        let expression04_list_0_built = Expression04ListBuilder::default()
+            .expression05(Box::new(expression05))
+            .operator05(Box::new(operator05))
+            .build()
+            .into_diagnostic()?;
+        // Add an element to the vector
+        expression04_list.push(expression04_list_0_built);
+        self.push(ASTType::Expression04List(expression04_list), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 256:
+    ///
+    /// Expression04List /* Vec<T>::New */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression04_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let expression04_list_1_built = Vec::new();
+        self.push(
+            ASTType::Expression04List(expression04_list_1_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 257:
+    ///
+    /// Expression05: Expression06 Expression05List /* Vec */;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression05(
+        &mut self,
+        _expression06: &ParseTreeStackEntry<'t>,
+        _expression05_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let expression05_list =
+            pop_and_reverse_item!(self, expression05_list, Expression05List, context);
+        let expression06 = pop_item!(self, expression06, Expression06, context);
+        let expression05_built = Expression05Builder::default()
+            .expression06(Box::new(expression06))
+            .expression05_list(expression05_list)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.expression05(&expression05_built)?;
+        self.push(ASTType::Expression05(expression05_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 258:
+    ///
+    /// Expression05List /* Vec<T>::Push */: Operator06 Expression06 Expression05List;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression05_list_0(
+        &mut self,
+        _operator06: &ParseTreeStackEntry<'t>,
+        _expression06: &ParseTreeStackEntry<'t>,
+        _expression05_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let mut expression05_list = pop_item!(self, expression05_list, Expression05List, context);
+        let expression06 = pop_item!(self, expression06, Expression06, context);
+        let operator06 = pop_item!(self, operator06, Operator06, context);
+        let expression05_list_0_built = Expression05ListBuilder::default()
+            .expression06(Box::new(expression06))
+            .operator06(Box::new(operator06))
+            .build()
+            .into_diagnostic()?;
+        // Add an element to the vector
+        expression05_list.push(expression05_list_0_built);
+        self.push(ASTType::Expression05List(expression05_list), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 259:
+    ///
+    /// Expression05List /* Vec<T>::New */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression05_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let expression05_list_1_built = Vec::new();
+        self.push(
+            ASTType::Expression05List(expression05_list_1_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 260:
+    ///
+    /// Expression06: Expression07 Expression06List /* Vec */;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression06(
+        &mut self,
+        _expression07: &ParseTreeStackEntry<'t>,
+        _expression06_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let expression06_list =
+            pop_and_reverse_item!(self, expression06_list, Expression06List, context);
+        let expression07 = pop_item!(self, expression07, Expression07, context);
+        let expression06_built = Expression06Builder::default()
+            .expression07(Box::new(expression07))
+            .expression06_list(expression06_list)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.expression06(&expression06_built)?;
+        self.push(ASTType::Expression06(expression06_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 261:
+    ///
+    /// Expression06List /* Vec<T>::Push */: Operator07 Expression07 Expression06List;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression06_list_0(
+        &mut self,
+        _operator07: &ParseTreeStackEntry<'t>,
+        _expression07: &ParseTreeStackEntry<'t>,
+        _expression06_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let mut expression06_list = pop_item!(self, expression06_list, Expression06List, context);
+        let expression07 = pop_item!(self, expression07, Expression07, context);
+        let operator07 = pop_item!(self, operator07, Operator07, context);
+        let expression06_list_0_built = Expression06ListBuilder::default()
+            .expression07(Box::new(expression07))
+            .operator07(Box::new(operator07))
+            .build()
+            .into_diagnostic()?;
+        // Add an element to the vector
+        expression06_list.push(expression06_list_0_built);
+        self.push(ASTType::Expression06List(expression06_list), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 262:
+    ///
+    /// Expression06List /* Vec<T>::New */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression06_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let expression06_list_1_built = Vec::new();
+        self.push(
+            ASTType::Expression06List(expression06_list_1_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 263:
+    ///
+    /// Expression07: Expression08 Expression07List /* Vec */;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression07(
+        &mut self,
+        _expression08: &ParseTreeStackEntry<'t>,
+        _expression07_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let expression07_list =
+            pop_and_reverse_item!(self, expression07_list, Expression07List, context);
+        let expression08 = pop_item!(self, expression08, Expression08, context);
+        let expression07_built = Expression07Builder::default()
+            .expression08(Box::new(expression08))
+            .expression07_list(expression07_list)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.expression07(&expression07_built)?;
+        self.push(ASTType::Expression07(expression07_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 264:
+    ///
+    /// Expression07List /* Vec<T>::Push */: Operator08 Expression08 Expression07List;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression07_list_0(
+        &mut self,
+        _operator08: &ParseTreeStackEntry<'t>,
+        _expression08: &ParseTreeStackEntry<'t>,
+        _expression07_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let mut expression07_list = pop_item!(self, expression07_list, Expression07List, context);
+        let expression08 = pop_item!(self, expression08, Expression08, context);
+        let operator08 = pop_item!(self, operator08, Operator08, context);
+        let expression07_list_0_built = Expression07ListBuilder::default()
+            .expression08(Box::new(expression08))
+            .operator08(Box::new(operator08))
+            .build()
+            .into_diagnostic()?;
+        // Add an element to the vector
+        expression07_list.push(expression07_list_0_built);
+        self.push(ASTType::Expression07List(expression07_list), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 265:
+    ///
+    /// Expression07List /* Vec<T>::New */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression07_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let expression07_list_1_built = Vec::new();
+        self.push(
+            ASTType::Expression07List(expression07_list_1_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 266:
+    ///
+    /// Expression08: Expression09 Expression08List /* Vec */;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression08(
+        &mut self,
+        _expression09: &ParseTreeStackEntry<'t>,
+        _expression08_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let expression08_list =
+            pop_and_reverse_item!(self, expression08_list, Expression08List, context);
+        let expression09 = pop_item!(self, expression09, Expression09, context);
+        let expression08_built = Expression08Builder::default()
+            .expression09(Box::new(expression09))
+            .expression08_list(expression08_list)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.expression08(&expression08_built)?;
+        self.push(ASTType::Expression08(expression08_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 267:
+    ///
+    /// Expression08List /* Vec<T>::Push */: Operator09 Expression09 Expression08List;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression08_list_0(
+        &mut self,
+        _operator09: &ParseTreeStackEntry<'t>,
+        _expression09: &ParseTreeStackEntry<'t>,
+        _expression08_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let mut expression08_list = pop_item!(self, expression08_list, Expression08List, context);
+        let expression09 = pop_item!(self, expression09, Expression09, context);
+        let operator09 = pop_item!(self, operator09, Operator09, context);
+        let expression08_list_0_built = Expression08ListBuilder::default()
+            .expression09(Box::new(expression09))
+            .operator09(Box::new(operator09))
+            .build()
+            .into_diagnostic()?;
+        // Add an element to the vector
+        expression08_list.push(expression08_list_0_built);
+        self.push(ASTType::Expression08List(expression08_list), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 268:
+    ///
+    /// Expression08List /* Vec<T>::New */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression08_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let expression08_list_1_built = Vec::new();
+        self.push(
+            ASTType::Expression08List(expression08_list_1_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 269:
+    ///
+    /// Expression09: Expression10 Expression09List /* Vec */;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression09(
+        &mut self,
+        _expression10: &ParseTreeStackEntry<'t>,
+        _expression09_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let expression09_list =
+            pop_and_reverse_item!(self, expression09_list, Expression09List, context);
+        let expression10 = pop_item!(self, expression10, Expression10, context);
+        let expression09_built = Expression09Builder::default()
+            .expression10(Box::new(expression10))
+            .expression09_list(expression09_list)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.expression09(&expression09_built)?;
+        self.push(ASTType::Expression09(expression09_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 270:
+    ///
+    /// Expression09List /* Vec<T>::Push */: Operator10 Expression10 Expression09List;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression09_list_0(
+        &mut self,
+        _operator10: &ParseTreeStackEntry<'t>,
+        _expression10: &ParseTreeStackEntry<'t>,
+        _expression09_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let mut expression09_list = pop_item!(self, expression09_list, Expression09List, context);
+        let expression10 = pop_item!(self, expression10, Expression10, context);
+        let operator10 = pop_item!(self, operator10, Operator10, context);
+        let expression09_list_0_built = Expression09ListBuilder::default()
+            .expression10(Box::new(expression10))
+            .operator10(Box::new(operator10))
+            .build()
+            .into_diagnostic()?;
+        // Add an element to the vector
+        expression09_list.push(expression09_list_0_built);
+        self.push(ASTType::Expression09List(expression09_list), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 271:
+    ///
+    /// Expression09List /* Vec<T>::New */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression09_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let expression09_list_1_built = Vec::new();
+        self.push(
+            ASTType::Expression09List(expression09_list_1_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 272:
+    ///
+    /// Expression10: Expression11 Expression10List /* Vec */;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression10(
+        &mut self,
+        _expression11: &ParseTreeStackEntry<'t>,
+        _expression10_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let expression10_list =
+            pop_and_reverse_item!(self, expression10_list, Expression10List, context);
+        let expression11 = pop_item!(self, expression11, Expression11, context);
+        let expression10_built = Expression10Builder::default()
+            .expression11(Box::new(expression11))
+            .expression10_list(expression10_list)
+            .build()
+            .into_diagnostic()?;
+        // Calling user action here
+        self.user_grammar.expression10(&expression10_built)?;
+        self.push(ASTType::Expression10(expression10_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 273:
+    ///
+    /// Expression10List /* Vec<T>::Push */: Operator11 Expression11 Expression10List;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression10_list_0(
+        &mut self,
+        _operator11: &ParseTreeStackEntry<'t>,
+        _expression11: &ParseTreeStackEntry<'t>,
+        _expression10_list: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let mut expression10_list = pop_item!(self, expression10_list, Expression10List, context);
+        let expression11 = pop_item!(self, expression11, Expression11, context);
+        let operator11 = pop_item!(self, operator11, Operator11, context);
+        let expression10_list_0_built = Expression10ListBuilder::default()
+            .expression11(Box::new(expression11))
+            .operator11(Box::new(operator11))
+            .build()
+            .into_diagnostic()?;
+        // Add an element to the vector
+        expression10_list.push(expression10_list_0_built);
+        self.push(ASTType::Expression10List(expression10_list), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 274:
+    ///
+    /// Expression10List /* Vec<T>::New */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression10_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let expression10_list_1_built = Vec::new();
+        self.push(
+            ASTType::Expression10List(expression10_list_1_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 275:
+    ///
+    /// Expression11: Expression11Opt /* Option */ Factor;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression11(
+        &mut self,
+        _expression11_opt: &ParseTreeStackEntry<'t>,
         _factor: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let factor = pop_item!(self, factor, Factor, context);
-        let expression1_opt = pop_item!(self, expression1_opt, Expression1Opt, context);
-        let expression1_built = Expression1Builder::default()
-            .expression1_opt(expression1_opt)
+        let expression11_opt = pop_item!(self, expression11_opt, Expression11Opt, context);
+        let expression11_built = Expression11Builder::default()
+            .expression11_opt(expression11_opt)
             .factor(Box::new(factor))
             .build()
             .into_diagnostic()?;
         // Calling user action here
-        self.user_grammar.expression1(&expression1_built)?;
-        self.push(ASTType::Expression1(expression1_built), context);
+        self.user_grammar.expression11(&expression11_built)?;
+        self.push(ASTType::Expression11(expression11_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 221:
+    /// Semantic action for production 276:
     ///
-    /// Expression1Opt /* Option<T>::Some */: Expression1OptGroup;
+    /// Expression11Opt /* Option<T>::Some */: Expression11OptGroup;
     ///
     #[parol_runtime::function_name::named]
-    fn expression1_opt_0(
+    fn expression11_opt_0(
         &mut self,
-        _expression1_opt_group: &ParseTreeStackEntry<'t>,
+        _expression11_opt_group: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let expression1_opt_group =
-            pop_item!(self, expression1_opt_group, Expression1OptGroup, context);
-        let expression1_opt_0_built = Expression1OptBuilder::default()
-            .expression1_opt_group(Box::new(expression1_opt_group))
+        let expression11_opt_group =
+            pop_item!(self, expression11_opt_group, Expression11OptGroup, context);
+        let expression11_opt_0_built = Expression11OptBuilder::default()
+            .expression11_opt_group(Box::new(expression11_opt_group))
             .build()
             .into_diagnostic()?;
         self.push(
-            ASTType::Expression1Opt(Some(Box::new(expression1_opt_0_built))),
+            ASTType::Expression11Opt(Some(Box::new(expression11_opt_0_built))),
             context,
         );
         Ok(())
     }
 
-    /// Semantic action for production 222:
+    /// Semantic action for production 277:
     ///
-    /// Expression1OptGroup: UnaryOperator;
+    /// Expression11OptGroup: UnaryOperator;
     ///
     #[parol_runtime::function_name::named]
-    fn expression1_opt_group_0(
+    fn expression11_opt_group_0(
         &mut self,
         _unary_operator: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
@@ -12050,58 +14108,136 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let unary_operator = pop_item!(self, unary_operator, UnaryOperator, context);
-        let expression1_opt_group_0_built = Expression1OptGroupUnaryOperatorBuilder::default()
+        let expression11_opt_group_0_built = Expression11OptGroupUnaryOperatorBuilder::default()
             .unary_operator(Box::new(unary_operator))
             .build()
             .into_diagnostic()?;
-        let expression1_opt_group_0_built =
-            Expression1OptGroup::UnaryOperator(expression1_opt_group_0_built);
+        let expression11_opt_group_0_built =
+            Expression11OptGroup::UnaryOperator(expression11_opt_group_0_built);
         self.push(
-            ASTType::Expression1OptGroup(expression1_opt_group_0_built),
+            ASTType::Expression11OptGroup(expression11_opt_group_0_built),
             context,
         );
         Ok(())
     }
 
-    /// Semantic action for production 223:
+    /// Semantic action for production 278:
     ///
-    /// Expression1OptGroup: CommonOperator;
+    /// Expression11OptGroup: Operator09;
     ///
     #[parol_runtime::function_name::named]
-    fn expression1_opt_group_1(
+    fn expression11_opt_group_1(
         &mut self,
-        _common_operator: &ParseTreeStackEntry<'t>,
+        _operator09: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let common_operator = pop_item!(self, common_operator, CommonOperator, context);
-        let expression1_opt_group_1_built = Expression1OptGroupCommonOperatorBuilder::default()
-            .common_operator(Box::new(common_operator))
+        let operator09 = pop_item!(self, operator09, Operator09, context);
+        let expression11_opt_group_1_built = Expression11OptGroupOperator09Builder::default()
+            .operator09(Box::new(operator09))
             .build()
             .into_diagnostic()?;
-        let expression1_opt_group_1_built =
-            Expression1OptGroup::CommonOperator(expression1_opt_group_1_built);
+        let expression11_opt_group_1_built =
+            Expression11OptGroup::Operator09(expression11_opt_group_1_built);
         self.push(
-            ASTType::Expression1OptGroup(expression1_opt_group_1_built),
+            ASTType::Expression11OptGroup(expression11_opt_group_1_built),
             context,
         );
         Ok(())
     }
 
-    /// Semantic action for production 224:
+    /// Semantic action for production 279:
     ///
-    /// Expression1Opt /* Option<T>::None */: ;
+    /// Expression11OptGroup: Operator05;
     ///
     #[parol_runtime::function_name::named]
-    fn expression1_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn expression11_opt_group_2(
+        &mut self,
+        _operator05: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::Expression1Opt(None), context);
+        let operator05 = pop_item!(self, operator05, Operator05, context);
+        let expression11_opt_group_2_built = Expression11OptGroupOperator05Builder::default()
+            .operator05(Box::new(operator05))
+            .build()
+            .into_diagnostic()?;
+        let expression11_opt_group_2_built =
+            Expression11OptGroup::Operator05(expression11_opt_group_2_built);
+        self.push(
+            ASTType::Expression11OptGroup(expression11_opt_group_2_built),
+            context,
+        );
         Ok(())
     }
 
-    /// Semantic action for production 225:
+    /// Semantic action for production 280:
+    ///
+    /// Expression11OptGroup: Operator03;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression11_opt_group_3(
+        &mut self,
+        _operator03: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let operator03 = pop_item!(self, operator03, Operator03, context);
+        let expression11_opt_group_3_built = Expression11OptGroupOperator03Builder::default()
+            .operator03(Box::new(operator03))
+            .build()
+            .into_diagnostic()?;
+        let expression11_opt_group_3_built =
+            Expression11OptGroup::Operator03(expression11_opt_group_3_built);
+        self.push(
+            ASTType::Expression11OptGroup(expression11_opt_group_3_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 281:
+    ///
+    /// Expression11OptGroup: Operator04;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression11_opt_group_4(
+        &mut self,
+        _operator04: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let operator04 = pop_item!(self, operator04, Operator04, context);
+        let expression11_opt_group_4_built = Expression11OptGroupOperator04Builder::default()
+            .operator04(Box::new(operator04))
+            .build()
+            .into_diagnostic()?;
+        let expression11_opt_group_4_built =
+            Expression11OptGroup::Operator04(expression11_opt_group_4_built);
+        self.push(
+            ASTType::Expression11OptGroup(expression11_opt_group_4_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 282:
+    ///
+    /// Expression11Opt /* Option<T>::None */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression11_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        self.push(ASTType::Expression11Opt(None), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 283:
     ///
     /// Factor: Number;
     ///
@@ -12125,7 +14261,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 226:
+    /// Semantic action for production 284:
     ///
     /// Factor: FactorOpt /* Option */ HierarchicalIdentifier FactorOpt0 /* Option */;
     ///
@@ -12160,7 +14296,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 227:
+    /// Semantic action for production 285:
     ///
     /// Factor: LParen Expression RParen;
     ///
@@ -12190,7 +14326,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 228:
+    /// Semantic action for production 286:
     ///
     /// FactorOpt0 /* Option<T>::Some */: LParen FactorOpt1 /* Option */ RParen;
     ///
@@ -12220,7 +14356,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 229:
+    /// Semantic action for production 287:
     ///
     /// FactorOpt1 /* Option<T>::Some */: FunctionCallArg;
     ///
@@ -12244,7 +14380,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 230:
+    /// Semantic action for production 288:
     ///
     /// FactorOpt1 /* Option<T>::None */: ;
     ///
@@ -12256,7 +14392,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 231:
+    /// Semantic action for production 289:
     ///
     /// FactorOpt0 /* Option<T>::None */: ;
     ///
@@ -12268,7 +14404,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 232:
+    /// Semantic action for production 290:
     ///
     /// FactorOpt /* Option<T>::Some */: Dollar;
     ///
@@ -12292,7 +14428,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 233:
+    /// Semantic action for production 291:
     ///
     /// FactorOpt /* Option<T>::None */: ;
     ///
@@ -12304,7 +14440,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 234:
+    /// Semantic action for production 292:
     ///
     /// FunctionCallArg: Expression FunctionCallArgList /* Vec */ FunctionCallArgOpt /* Option */;
     ///
@@ -12336,7 +14472,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 235:
+    /// Semantic action for production 293:
     ///
     /// FunctionCallArgList /* Vec<T>::Push */: Comma Expression FunctionCallArgList;
     ///
@@ -12368,7 +14504,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 236:
+    /// Semantic action for production 294:
     ///
     /// FunctionCallArgList /* Vec<T>::New */: ;
     ///
@@ -12384,7 +14520,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 237:
+    /// Semantic action for production 295:
     ///
     /// FunctionCallArgOpt /* Option<T>::Some */: Comma;
     ///
@@ -12408,7 +14544,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 238:
+    /// Semantic action for production 296:
     ///
     /// FunctionCallArgOpt /* Option<T>::None */: ;
     ///
@@ -12420,7 +14556,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 239:
+    /// Semantic action for production 297:
     ///
     /// Range: LBracket Expression RangeOpt /* Option */ RBracket;
     ///
@@ -12452,7 +14588,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 240:
+    /// Semantic action for production 298:
     ///
     /// RangeOpt /* Option<T>::Some */: RangeOperator Expression;
     ///
@@ -12479,7 +14615,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 241:
+    /// Semantic action for production 299:
     ///
     /// RangeOpt /* Option<T>::None */: ;
     ///
@@ -12491,7 +14627,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 242:
+    /// Semantic action for production 300:
     ///
     /// RangeOperator: Colon;
     ///
@@ -12515,7 +14651,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 243:
+    /// Semantic action for production 301:
     ///
     /// RangeOperator: PlusColon;
     ///
@@ -12539,7 +14675,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 244:
+    /// Semantic action for production 302:
     ///
     /// RangeOperator: MinusColon;
     ///
@@ -12563,7 +14699,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 245:
+    /// Semantic action for production 303:
     ///
     /// RangeOperator: Step;
     ///
@@ -12587,7 +14723,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 246:
+    /// Semantic action for production 304:
     ///
     /// Width: LBracket Expression RBracket;
     ///
@@ -12616,7 +14752,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 247:
+    /// Semantic action for production 305:
     ///
     /// BuiltinType: Logic;
     ///
@@ -12640,7 +14776,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 248:
+    /// Semantic action for production 306:
     ///
     /// BuiltinType: Bit;
     ///
@@ -12664,7 +14800,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 249:
+    /// Semantic action for production 307:
     ///
     /// BuiltinType: U32;
     ///
@@ -12688,7 +14824,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 250:
+    /// Semantic action for production 308:
     ///
     /// BuiltinType: U64;
     ///
@@ -12712,7 +14848,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 251:
+    /// Semantic action for production 309:
     ///
     /// BuiltinType: I32;
     ///
@@ -12736,7 +14872,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 252:
+    /// Semantic action for production 310:
     ///
     /// BuiltinType: I64;
     ///
@@ -12760,7 +14896,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 253:
+    /// Semantic action for production 311:
     ///
     /// BuiltinType: F32;
     ///
@@ -12784,7 +14920,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 254:
+    /// Semantic action for production 312:
     ///
     /// BuiltinType: F64;
     ///
@@ -12808,7 +14944,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 255:
+    /// Semantic action for production 313:
     ///
     /// Type: TypeGroup TypeList /* Vec */;
     ///
@@ -12834,7 +14970,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 256:
+    /// Semantic action for production 314:
     ///
     /// TypeGroup: BuiltinType;
     ///
@@ -12856,7 +14992,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 257:
+    /// Semantic action for production 315:
     ///
     /// TypeGroup: Identifier;
     ///
@@ -12878,7 +15014,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 258:
+    /// Semantic action for production 316:
     ///
     /// TypeList /* Vec<T>::Push */: Width TypeList;
     ///
@@ -12903,7 +15039,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 259:
+    /// Semantic action for production 317:
     ///
     /// TypeList /* Vec<T>::New */: ;
     ///
@@ -12916,7 +15052,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 260:
+    /// Semantic action for production 318:
     ///
     /// Statement: AssignmentStatement;
     ///
@@ -12941,7 +15077,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 261:
+    /// Semantic action for production 319:
     ///
     /// Statement: IfStatement;
     ///
@@ -12965,7 +15101,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 262:
+    /// Semantic action for production 320:
     ///
     /// Statement: IfResetStatement;
     ///
@@ -12989,7 +15125,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 263:
+    /// Semantic action for production 321:
     ///
     /// Statement: ReturnStatement;
     ///
@@ -13013,7 +15149,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 264:
+    /// Semantic action for production 322:
     ///
     /// Statement: ForStatement;
     ///
@@ -13037,7 +15173,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 265:
+    /// Semantic action for production 323:
     ///
     /// AssignmentStatement: HierarchicalIdentifier AssignmentStatementGroup Expression Semicolon;
     ///
@@ -13083,7 +15219,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 266:
+    /// Semantic action for production 324:
     ///
     /// AssignmentStatementGroup: Equ;
     ///
@@ -13109,7 +15245,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 267:
+    /// Semantic action for production 325:
     ///
     /// AssignmentStatementGroup: AssignmentOperator;
     ///
@@ -13136,7 +15272,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 268:
+    /// Semantic action for production 326:
     ///
     /// IfStatement: If Expression LBrace IfStatementList /* Vec */ RBrace IfStatementList0 /* Vec */ IfStatementOpt /* Option */;
     ///
@@ -13179,7 +15315,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 269:
+    /// Semantic action for production 327:
     ///
     /// IfStatementList0 /* Vec<T>::Push */: Else If Expression LBrace IfStatementList0List /* Vec */ RBrace IfStatementList0;
     ///
@@ -13220,7 +15356,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 270:
+    /// Semantic action for production 328:
     ///
     /// IfStatementList0List /* Vec<T>::Push */: Statement IfStatementList0List;
     ///
@@ -13249,7 +15385,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 271:
+    /// Semantic action for production 329:
     ///
     /// IfStatementList0List /* Vec<T>::New */: ;
     ///
@@ -13265,7 +15401,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 272:
+    /// Semantic action for production 330:
     ///
     /// IfStatementList0 /* Vec<T>::New */: ;
     ///
@@ -13281,7 +15417,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 273:
+    /// Semantic action for production 331:
     ///
     /// IfStatementList /* Vec<T>::Push */: Statement IfStatementList;
     ///
@@ -13306,7 +15442,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 274:
+    /// Semantic action for production 332:
     ///
     /// IfStatementList /* Vec<T>::New */: ;
     ///
@@ -13319,7 +15455,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 275:
+    /// Semantic action for production 333:
     ///
     /// IfStatementOpt /* Option<T>::Some */: Else LBrace IfStatementOptList /* Vec */ RBrace;
     ///
@@ -13353,7 +15489,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 276:
+    /// Semantic action for production 334:
     ///
     /// IfStatementOptList /* Vec<T>::Push */: Statement IfStatementOptList;
     ///
@@ -13379,7 +15515,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 277:
+    /// Semantic action for production 335:
     ///
     /// IfStatementOptList /* Vec<T>::New */: ;
     ///
@@ -13395,7 +15531,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 278:
+    /// Semantic action for production 336:
     ///
     /// IfStatementOpt /* Option<T>::None */: ;
     ///
@@ -13407,7 +15543,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 279:
+    /// Semantic action for production 337:
     ///
     /// IfResetStatement: IfReset LBrace IfResetStatementList /* Vec */ RBrace IfResetStatementList0 /* Vec */ IfResetStatementOpt /* Option */;
     ///
@@ -13453,7 +15589,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 280:
+    /// Semantic action for production 338:
     ///
     /// IfResetStatementList0 /* Vec<T>::Push */: Else If Expression LBrace IfResetStatementList0List /* Vec */ RBrace IfResetStatementList0;
     ///
@@ -13506,7 +15642,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 281:
+    /// Semantic action for production 339:
     ///
     /// IfResetStatementList0List /* Vec<T>::Push */: Statement IfResetStatementList0List;
     ///
@@ -13539,7 +15675,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 282:
+    /// Semantic action for production 340:
     ///
     /// IfResetStatementList0List /* Vec<T>::New */: ;
     ///
@@ -13558,7 +15694,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 283:
+    /// Semantic action for production 341:
     ///
     /// IfResetStatementList0 /* Vec<T>::New */: ;
     ///
@@ -13574,7 +15710,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 284:
+    /// Semantic action for production 342:
     ///
     /// IfResetStatementList /* Vec<T>::Push */: Statement IfResetStatementList;
     ///
@@ -13603,7 +15739,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 285:
+    /// Semantic action for production 343:
     ///
     /// IfResetStatementList /* Vec<T>::New */: ;
     ///
@@ -13619,7 +15755,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 286:
+    /// Semantic action for production 344:
     ///
     /// IfResetStatementOpt /* Option<T>::Some */: Else LBrace IfResetStatementOptList /* Vec */ RBrace;
     ///
@@ -13657,7 +15793,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 287:
+    /// Semantic action for production 345:
     ///
     /// IfResetStatementOptList /* Vec<T>::Push */: Statement IfResetStatementOptList;
     ///
@@ -13690,7 +15826,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 288:
+    /// Semantic action for production 346:
     ///
     /// IfResetStatementOptList /* Vec<T>::New */: ;
     ///
@@ -13709,7 +15845,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 289:
+    /// Semantic action for production 347:
     ///
     /// IfResetStatementOpt /* Option<T>::None */: ;
     ///
@@ -13721,7 +15857,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 290:
+    /// Semantic action for production 348:
     ///
     /// ReturnStatement: Return Expression Semicolon;
     ///
@@ -13751,7 +15887,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 291:
+    /// Semantic action for production 349:
     ///
     /// ForStatement: For Identifier Colon Type In Expression DotDot Expression ForStatementOpt /* Option */ LBrace ForStatementList /* Vec */ RBrace;
     ///
@@ -13808,7 +15944,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 292:
+    /// Semantic action for production 350:
     ///
     /// ForStatementList /* Vec<T>::Push */: Statement ForStatementList;
     ///
@@ -13833,7 +15969,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 293:
+    /// Semantic action for production 351:
     ///
     /// ForStatementList /* Vec<T>::New */: ;
     ///
@@ -13849,7 +15985,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 294:
+    /// Semantic action for production 352:
     ///
     /// ForStatementOpt /* Option<T>::Some */: Step AssignmentOperator Expression;
     ///
@@ -13879,7 +16015,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 295:
+    /// Semantic action for production 353:
     ///
     /// ForStatementOpt /* Option<T>::None */: ;
     ///
@@ -13891,7 +16027,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 296:
+    /// Semantic action for production 354:
     ///
     /// LetDeclaration: Let Identifier Colon LetDeclarationGroup Semicolon;
     ///
@@ -13927,7 +16063,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 297:
+    /// Semantic action for production 355:
     ///
     /// LetDeclarationGroup: VariableDeclaration;
     ///
@@ -13955,7 +16091,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 298:
+    /// Semantic action for production 356:
     ///
     /// LetDeclarationGroup: InstanceDeclaration;
     ///
@@ -13983,7 +16119,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 299:
+    /// Semantic action for production 357:
     ///
     /// VariableDeclaration: Type VariableDeclarationOpt /* Option */;
     ///
@@ -14018,7 +16154,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 300:
+    /// Semantic action for production 358:
     ///
     /// VariableDeclarationOpt /* Option<T>::Some */: Equ Expression;
     ///
@@ -14045,7 +16181,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 301:
+    /// Semantic action for production 359:
     ///
     /// VariableDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -14057,7 +16193,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 302:
+    /// Semantic action for production 360:
     ///
     /// ParameterDeclaration: Parameter Identifier Colon Type Equ Expression Semicolon;
     ///
@@ -14102,7 +16238,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 303:
+    /// Semantic action for production 361:
     ///
     /// LocalparamDeclaration: Localparam Identifier Colon Type Equ Expression Semicolon;
     ///
@@ -14147,7 +16283,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 304:
+    /// Semantic action for production 362:
     ///
     /// AlwaysFfDeclaration: AlwaysFf LParen AlwaysFfClock AlwaysFfDeclarationOpt /* Option */ RParen LBrace AlwaysFfDeclarationList /* Vec */ RBrace;
     ///
@@ -14205,7 +16341,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 305:
+    /// Semantic action for production 363:
     ///
     /// AlwaysFfDeclarationList /* Vec<T>::Push */: Statement AlwaysFfDeclarationList;
     ///
@@ -14238,7 +16374,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 306:
+    /// Semantic action for production 364:
     ///
     /// AlwaysFfDeclarationList /* Vec<T>::New */: ;
     ///
@@ -14257,7 +16393,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 307:
+    /// Semantic action for production 365:
     ///
     /// AlwaysFfDeclarationOpt /* Option<T>::Some */: Comma AlwaysFfReset;
     ///
@@ -14284,7 +16420,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 308:
+    /// Semantic action for production 366:
     ///
     /// AlwaysFfDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -14296,7 +16432,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 309:
+    /// Semantic action for production 367:
     ///
     /// AlwaysFfClock: AlwaysFfClockOpt /* Option */ HierarchicalIdentifier;
     ///
@@ -14327,7 +16463,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 310:
+    /// Semantic action for production 368:
     ///
     /// AlwaysFfClockOpt /* Option<T>::Some */: AlwaysFfClockOptGroup;
     ///
@@ -14356,7 +16492,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 311:
+    /// Semantic action for production 369:
     ///
     /// AlwaysFfClockOptGroup: Posedge;
     ///
@@ -14382,7 +16518,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 312:
+    /// Semantic action for production 370:
     ///
     /// AlwaysFfClockOptGroup: Negedge;
     ///
@@ -14408,7 +16544,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 313:
+    /// Semantic action for production 371:
     ///
     /// AlwaysFfClockOpt /* Option<T>::None */: ;
     ///
@@ -14420,7 +16556,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 314:
+    /// Semantic action for production 372:
     ///
     /// AlwaysFfReset: AlwaysFfResetOpt /* Option */ HierarchicalIdentifier;
     ///
@@ -14451,7 +16587,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 315:
+    /// Semantic action for production 373:
     ///
     /// AlwaysFfResetOpt /* Option<T>::Some */: AlwaysFfResetOptGroup;
     ///
@@ -14480,7 +16616,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 316:
+    /// Semantic action for production 374:
     ///
     /// AlwaysFfResetOptGroup: AsyncLow;
     ///
@@ -14506,7 +16642,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 317:
+    /// Semantic action for production 375:
     ///
     /// AlwaysFfResetOptGroup: AsyncHigh;
     ///
@@ -14532,7 +16668,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 318:
+    /// Semantic action for production 376:
     ///
     /// AlwaysFfResetOptGroup: SyncLow;
     ///
@@ -14558,7 +16694,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 319:
+    /// Semantic action for production 377:
     ///
     /// AlwaysFfResetOptGroup: SyncHigh;
     ///
@@ -14584,7 +16720,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 320:
+    /// Semantic action for production 378:
     ///
     /// AlwaysFfResetOpt /* Option<T>::None */: ;
     ///
@@ -14596,7 +16732,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 321:
+    /// Semantic action for production 379:
     ///
     /// AlwaysCombDeclaration: AlwaysComb LBrace AlwaysCombDeclarationList /* Vec */ RBrace;
     ///
@@ -14637,7 +16773,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 322:
+    /// Semantic action for production 380:
     ///
     /// AlwaysCombDeclarationList /* Vec<T>::Push */: Statement AlwaysCombDeclarationList;
     ///
@@ -14670,7 +16806,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 323:
+    /// Semantic action for production 381:
     ///
     /// AlwaysCombDeclarationList /* Vec<T>::New */: ;
     ///
@@ -14689,7 +16825,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 324:
+    /// Semantic action for production 382:
     ///
     /// AssignDeclaration: Assign HierarchicalIdentifier Equ Expression Semicolon;
     ///
@@ -14733,7 +16869,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 325:
+    /// Semantic action for production 383:
     ///
     /// ModportDeclaration: Modport Identifier LBrace ModportList RBrace;
     ///
@@ -14772,7 +16908,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 326:
+    /// Semantic action for production 384:
     ///
     /// ModportList: ModportItem ModportListList /* Vec */ ModportListOpt /* Option */;
     ///
@@ -14802,7 +16938,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 327:
+    /// Semantic action for production 385:
     ///
     /// ModportListList /* Vec<T>::Push */: Comma ModportItem ModportListList;
     ///
@@ -14830,7 +16966,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 328:
+    /// Semantic action for production 386:
     ///
     /// ModportListList /* Vec<T>::New */: ;
     ///
@@ -14843,7 +16979,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 329:
+    /// Semantic action for production 387:
     ///
     /// ModportListOpt /* Option<T>::Some */: Comma;
     ///
@@ -14867,7 +17003,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 330:
+    /// Semantic action for production 388:
     ///
     /// ModportListOpt /* Option<T>::None */: ;
     ///
@@ -14879,7 +17015,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 331:
+    /// Semantic action for production 389:
     ///
     /// ModportItem: Identifier Colon Direction;
     ///
@@ -14908,7 +17044,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 332:
+    /// Semantic action for production 390:
     ///
     /// EnumDeclaration: Enum Identifier Colon Type LBrace EnumList RBrace;
     ///
@@ -14950,7 +17086,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 333:
+    /// Semantic action for production 391:
     ///
     /// EnumList: EnumItem EnumListList /* Vec */ EnumListOpt /* Option */;
     ///
@@ -14979,7 +17115,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 334:
+    /// Semantic action for production 392:
     ///
     /// EnumListList /* Vec<T>::Push */: Comma EnumItem EnumListList;
     ///
@@ -15007,7 +17143,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 335:
+    /// Semantic action for production 393:
     ///
     /// EnumListList /* Vec<T>::New */: ;
     ///
@@ -15020,7 +17156,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 336:
+    /// Semantic action for production 394:
     ///
     /// EnumListOpt /* Option<T>::Some */: Comma;
     ///
@@ -15044,7 +17180,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 337:
+    /// Semantic action for production 395:
     ///
     /// EnumListOpt /* Option<T>::None */: ;
     ///
@@ -15056,7 +17192,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 338:
+    /// Semantic action for production 396:
     ///
     /// EnumItem: Identifier EnumItemOpt /* Option */;
     ///
@@ -15082,7 +17218,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 339:
+    /// Semantic action for production 397:
     ///
     /// EnumItemOpt /* Option<T>::Some */: Equ Expression;
     ///
@@ -15109,7 +17245,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 340:
+    /// Semantic action for production 398:
     ///
     /// EnumItemOpt /* Option<T>::None */: ;
     ///
@@ -15121,7 +17257,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 341:
+    /// Semantic action for production 399:
     ///
     /// StructDeclaration: Struct Identifier LBrace StructList RBrace;
     ///
@@ -15160,7 +17296,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 342:
+    /// Semantic action for production 400:
     ///
     /// StructList: StructItem StructListList /* Vec */ StructListOpt /* Option */;
     ///
@@ -15190,7 +17326,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 343:
+    /// Semantic action for production 401:
     ///
     /// StructListList /* Vec<T>::Push */: Comma StructItem StructListList;
     ///
@@ -15218,7 +17354,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 344:
+    /// Semantic action for production 402:
     ///
     /// StructListList /* Vec<T>::New */: ;
     ///
@@ -15231,7 +17367,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 345:
+    /// Semantic action for production 403:
     ///
     /// StructListOpt /* Option<T>::Some */: Comma;
     ///
@@ -15255,7 +17391,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 346:
+    /// Semantic action for production 404:
     ///
     /// StructListOpt /* Option<T>::None */: ;
     ///
@@ -15267,7 +17403,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 347:
+    /// Semantic action for production 405:
     ///
     /// StructItem: Identifier Colon Type;
     ///
@@ -15296,7 +17432,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 348:
+    /// Semantic action for production 406:
     ///
     /// InstanceDeclaration: Inst Identifier InstanceDeclarationOpt /* Option */ InstanceDeclarationOpt0 /* Option */ InstanceDeclarationOpt1 /* Option */;
     ///
@@ -15350,7 +17486,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 349:
+    /// Semantic action for production 407:
     ///
     /// InstanceDeclarationOpt1 /* Option<T>::Some */: LBrace InstanceDeclarationOpt2 /* Option */ RBrace;
     ///
@@ -15385,7 +17521,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 350:
+    /// Semantic action for production 408:
     ///
     /// InstanceDeclarationOpt2 /* Option<T>::Some */: InstancePortList;
     ///
@@ -15409,7 +17545,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 351:
+    /// Semantic action for production 409:
     ///
     /// InstanceDeclarationOpt2 /* Option<T>::None */: ;
     ///
@@ -15421,7 +17557,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 352:
+    /// Semantic action for production 410:
     ///
     /// InstanceDeclarationOpt1 /* Option<T>::None */: ;
     ///
@@ -15433,7 +17569,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 353:
+    /// Semantic action for production 411:
     ///
     /// InstanceDeclarationOpt0 /* Option<T>::Some */: InstanceParameter;
     ///
@@ -15457,7 +17593,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 354:
+    /// Semantic action for production 412:
     ///
     /// InstanceDeclarationOpt0 /* Option<T>::None */: ;
     ///
@@ -15469,7 +17605,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 355:
+    /// Semantic action for production 413:
     ///
     /// InstanceDeclarationOpt /* Option<T>::Some */: Width;
     ///
@@ -15493,7 +17629,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 356:
+    /// Semantic action for production 414:
     ///
     /// InstanceDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -15505,7 +17641,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 357:
+    /// Semantic action for production 415:
     ///
     /// InstanceParameter: Hash LParen InstanceParameterOpt /* Option */ RParen;
     ///
@@ -15542,7 +17678,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 358:
+    /// Semantic action for production 416:
     ///
     /// InstanceParameterOpt /* Option<T>::Some */: InstanceParameterList;
     ///
@@ -15571,7 +17707,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 359:
+    /// Semantic action for production 417:
     ///
     /// InstanceParameterOpt /* Option<T>::None */: ;
     ///
@@ -15583,7 +17719,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 360:
+    /// Semantic action for production 418:
     ///
     /// InstanceParameterList: InstanceParameterItem InstanceParameterListList /* Vec */ InstanceParameterListOpt /* Option */;
     ///
@@ -15631,7 +17767,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 361:
+    /// Semantic action for production 419:
     ///
     /// InstanceParameterListList /* Vec<T>::Push */: Comma InstanceParameterItem InstanceParameterListList;
     ///
@@ -15672,7 +17808,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 362:
+    /// Semantic action for production 420:
     ///
     /// InstanceParameterListList /* Vec<T>::New */: ;
     ///
@@ -15691,7 +17827,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 363:
+    /// Semantic action for production 421:
     ///
     /// InstanceParameterListOpt /* Option<T>::Some */: Comma;
     ///
@@ -15715,7 +17851,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 364:
+    /// Semantic action for production 422:
     ///
     /// InstanceParameterListOpt /* Option<T>::None */: ;
     ///
@@ -15730,7 +17866,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 365:
+    /// Semantic action for production 423:
     ///
     /// InstanceParameterItem: Identifier InstanceParameterItemOpt /* Option */;
     ///
@@ -15765,7 +17901,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 366:
+    /// Semantic action for production 424:
     ///
     /// InstanceParameterItemOpt /* Option<T>::Some */: Colon Expression;
     ///
@@ -15792,7 +17928,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 367:
+    /// Semantic action for production 425:
     ///
     /// InstanceParameterItemOpt /* Option<T>::None */: ;
     ///
@@ -15807,7 +17943,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 368:
+    /// Semantic action for production 426:
     ///
     /// InstancePortList: InstancePortItem InstancePortListList /* Vec */ InstancePortListOpt /* Option */;
     ///
@@ -15839,7 +17975,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 369:
+    /// Semantic action for production 427:
     ///
     /// InstancePortListList /* Vec<T>::Push */: Comma InstancePortItem InstancePortListList;
     ///
@@ -15871,7 +18007,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 370:
+    /// Semantic action for production 428:
     ///
     /// InstancePortListList /* Vec<T>::New */: ;
     ///
@@ -15887,7 +18023,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 371:
+    /// Semantic action for production 429:
     ///
     /// InstancePortListOpt /* Option<T>::Some */: Comma;
     ///
@@ -15911,7 +18047,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 372:
+    /// Semantic action for production 430:
     ///
     /// InstancePortListOpt /* Option<T>::None */: ;
     ///
@@ -15923,7 +18059,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 373:
+    /// Semantic action for production 431:
     ///
     /// InstancePortItem: Identifier InstancePortItemOpt /* Option */;
     ///
@@ -15951,7 +18087,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 374:
+    /// Semantic action for production 432:
     ///
     /// InstancePortItemOpt /* Option<T>::Some */: Colon Expression;
     ///
@@ -15978,7 +18114,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 375:
+    /// Semantic action for production 433:
     ///
     /// InstancePortItemOpt /* Option<T>::None */: ;
     ///
@@ -15990,7 +18126,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 376:
+    /// Semantic action for production 434:
     ///
     /// WithParameter: Hash LParen WithParameterOpt /* Option */ RParen;
     ///
@@ -16022,7 +18158,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 377:
+    /// Semantic action for production 435:
     ///
     /// WithParameterOpt /* Option<T>::Some */: WithParameterList;
     ///
@@ -16046,7 +18182,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 378:
+    /// Semantic action for production 436:
     ///
     /// WithParameterOpt /* Option<T>::None */: ;
     ///
@@ -16058,7 +18194,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 379:
+    /// Semantic action for production 437:
     ///
     /// WithParameterList: WithParameterItem WithParameterListList /* Vec */ WithParameterListOpt /* Option */;
     ///
@@ -16097,7 +18233,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 380:
+    /// Semantic action for production 438:
     ///
     /// WithParameterListList /* Vec<T>::Push */: Comma WithParameterItem WithParameterListList;
     ///
@@ -16133,7 +18269,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 381:
+    /// Semantic action for production 439:
     ///
     /// WithParameterListList /* Vec<T>::New */: ;
     ///
@@ -16149,7 +18285,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 382:
+    /// Semantic action for production 440:
     ///
     /// WithParameterListOpt /* Option<T>::Some */: Comma;
     ///
@@ -16173,7 +18309,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 383:
+    /// Semantic action for production 441:
     ///
     /// WithParameterListOpt /* Option<T>::None */: ;
     ///
@@ -16185,7 +18321,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 384:
+    /// Semantic action for production 442:
     ///
     /// WithParameterItem: WithParameterItemGroup Identifier Colon Type Equ Expression;
     ///
@@ -16232,7 +18368,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 385:
+    /// Semantic action for production 443:
     ///
     /// WithParameterItemGroup: Parameter;
     ///
@@ -16258,7 +18394,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 386:
+    /// Semantic action for production 444:
     ///
     /// WithParameterItemGroup: Localparam;
     ///
@@ -16284,7 +18420,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 387:
+    /// Semantic action for production 445:
     ///
     /// PortDeclaration: LParen PortDeclarationOpt /* Option */ RParen;
     ///
@@ -16315,7 +18451,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 388:
+    /// Semantic action for production 446:
     ///
     /// PortDeclarationOpt /* Option<T>::Some */: PortDeclarationList;
     ///
@@ -16340,7 +18476,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 389:
+    /// Semantic action for production 447:
     ///
     /// PortDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -16352,7 +18488,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 390:
+    /// Semantic action for production 448:
     ///
     /// PortDeclarationList: PortDeclarationItem PortDeclarationListList /* Vec */ PortDeclarationListOpt /* Option */;
     ///
@@ -16396,7 +18532,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 391:
+    /// Semantic action for production 449:
     ///
     /// PortDeclarationListList /* Vec<T>::Push */: Comma PortDeclarationItem PortDeclarationListList;
     ///
@@ -16433,7 +18569,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 392:
+    /// Semantic action for production 450:
     ///
     /// PortDeclarationListList /* Vec<T>::New */: ;
     ///
@@ -16452,7 +18588,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 393:
+    /// Semantic action for production 451:
     ///
     /// PortDeclarationListOpt /* Option<T>::Some */: Comma;
     ///
@@ -16476,7 +18612,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 394:
+    /// Semantic action for production 452:
     ///
     /// PortDeclarationListOpt /* Option<T>::None */: ;
     ///
@@ -16488,7 +18624,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 395:
+    /// Semantic action for production 453:
     ///
     /// PortDeclarationItem: Identifier Colon Direction Type;
     ///
@@ -16524,7 +18660,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 396:
+    /// Semantic action for production 454:
     ///
     /// Direction: Input;
     ///
@@ -16548,7 +18684,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 397:
+    /// Semantic action for production 455:
     ///
     /// Direction: Output;
     ///
@@ -16572,7 +18708,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 398:
+    /// Semantic action for production 456:
     ///
     /// Direction: Inout;
     ///
@@ -16596,7 +18732,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 399:
+    /// Semantic action for production 457:
     ///
     /// Direction: Ref;
     ///
@@ -16620,7 +18756,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 400:
+    /// Semantic action for production 458:
     ///
     /// FunctionDeclaration: Function Identifier FunctionDeclarationOpt /* Option */ FunctionDeclarationOpt0 /* Option */ MinusGT Type LBrace FunctionDeclarationList /* Vec */ RBrace;
     ///
@@ -16686,7 +18822,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 401:
+    /// Semantic action for production 459:
     ///
     /// FunctionDeclarationList /* Vec<T>::Push */: FunctionItem FunctionDeclarationList;
     ///
@@ -16719,7 +18855,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 402:
+    /// Semantic action for production 460:
     ///
     /// FunctionDeclarationList /* Vec<T>::New */: ;
     ///
@@ -16735,7 +18871,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 403:
+    /// Semantic action for production 461:
     ///
     /// FunctionDeclarationOpt0 /* Option<T>::Some */: PortDeclaration;
     ///
@@ -16759,7 +18895,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 404:
+    /// Semantic action for production 462:
     ///
     /// FunctionDeclarationOpt0 /* Option<T>::None */: ;
     ///
@@ -16771,7 +18907,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 405:
+    /// Semantic action for production 463:
     ///
     /// FunctionDeclarationOpt /* Option<T>::Some */: WithParameter;
     ///
@@ -16795,7 +18931,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 406:
+    /// Semantic action for production 464:
     ///
     /// FunctionDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -16807,7 +18943,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 407:
+    /// Semantic action for production 465:
     ///
     /// FunctionItem: LetDeclaration;
     ///
@@ -16831,7 +18967,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 408:
+    /// Semantic action for production 466:
     ///
     /// FunctionItem: Statement;
     ///
@@ -16855,7 +18991,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 409:
+    /// Semantic action for production 467:
     ///
     /// ModuleDeclaration: Module Identifier ModuleDeclarationOpt /* Option */ ModuleDeclarationOpt0 /* Option */ LBrace ModuleDeclarationList /* Vec */ RBrace;
     ///
@@ -16911,7 +19047,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 410:
+    /// Semantic action for production 468:
     ///
     /// ModuleDeclarationList /* Vec<T>::Push */: ModuleItem ModuleDeclarationList;
     ///
@@ -16944,7 +19080,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 411:
+    /// Semantic action for production 469:
     ///
     /// ModuleDeclarationList /* Vec<T>::New */: ;
     ///
@@ -16960,7 +19096,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 412:
+    /// Semantic action for production 470:
     ///
     /// ModuleDeclarationOpt0 /* Option<T>::Some */: PortDeclaration;
     ///
@@ -16984,7 +19120,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 413:
+    /// Semantic action for production 471:
     ///
     /// ModuleDeclarationOpt0 /* Option<T>::None */: ;
     ///
@@ -16996,7 +19132,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 414:
+    /// Semantic action for production 472:
     ///
     /// ModuleDeclarationOpt /* Option<T>::Some */: WithParameter;
     ///
@@ -17020,7 +19156,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 415:
+    /// Semantic action for production 473:
     ///
     /// ModuleDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -17032,7 +19168,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 416:
+    /// Semantic action for production 474:
     ///
     /// ModuleIfDeclaration: If Expression Colon Identifier LBrace ModuleIfDeclarationList /* Vec */ RBrace ModuleIfDeclarationList0 /* Vec */ ModuleIfDeclarationOpt0 /* Option */;
     ///
@@ -17098,7 +19234,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 417:
+    /// Semantic action for production 475:
     ///
     /// ModuleIfDeclarationList0 /* Vec<T>::Push */: Else If Expression ModuleIfDeclarationOpt /* Option */ LBrace ModuleIfDeclarationList0List /* Vec */ RBrace ModuleIfDeclarationList0;
     ///
@@ -17159,7 +19295,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 418:
+    /// Semantic action for production 476:
     ///
     /// ModuleIfDeclarationList0List /* Vec<T>::Push */: ModuleItem ModuleIfDeclarationList0List;
     ///
@@ -17193,7 +19329,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 419:
+    /// Semantic action for production 477:
     ///
     /// ModuleIfDeclarationList0List /* Vec<T>::New */: ;
     ///
@@ -17212,7 +19348,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 420:
+    /// Semantic action for production 478:
     ///
     /// ModuleIfDeclarationList0 /* Vec<T>::New */: ;
     ///
@@ -17231,7 +19367,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 421:
+    /// Semantic action for production 479:
     ///
     /// ModuleIfDeclarationList /* Vec<T>::Push */: ModuleItem ModuleIfDeclarationList;
     ///
@@ -17264,7 +19400,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 422:
+    /// Semantic action for production 480:
     ///
     /// ModuleIfDeclarationList /* Vec<T>::New */: ;
     ///
@@ -17283,7 +19419,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 423:
+    /// Semantic action for production 481:
     ///
     /// ModuleIfDeclarationOpt0 /* Option<T>::Some */: Else ModuleIfDeclarationOpt1 /* Option */ LBrace ModuleIfDeclarationOpt0List /* Vec */ RBrace;
     ///
@@ -17329,7 +19465,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 424:
+    /// Semantic action for production 482:
     ///
     /// ModuleIfDeclarationOpt0List /* Vec<T>::Push */: ModuleItem ModuleIfDeclarationOpt0List;
     ///
@@ -17362,7 +19498,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 425:
+    /// Semantic action for production 483:
     ///
     /// ModuleIfDeclarationOpt0List /* Vec<T>::New */: ;
     ///
@@ -17381,7 +19517,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 426:
+    /// Semantic action for production 484:
     ///
     /// ModuleIfDeclarationOpt1 /* Option<T>::Some */: Colon Identifier;
     ///
@@ -17408,7 +19544,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 427:
+    /// Semantic action for production 485:
     ///
     /// ModuleIfDeclarationOpt1 /* Option<T>::None */: ;
     ///
@@ -17423,7 +19559,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 428:
+    /// Semantic action for production 486:
     ///
     /// ModuleIfDeclarationOpt0 /* Option<T>::None */: ;
     ///
@@ -17438,7 +19574,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 429:
+    /// Semantic action for production 487:
     ///
     /// ModuleIfDeclarationOpt /* Option<T>::Some */: Colon Identifier;
     ///
@@ -17465,7 +19601,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 430:
+    /// Semantic action for production 488:
     ///
     /// ModuleIfDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -17477,7 +19613,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 431:
+    /// Semantic action for production 489:
     ///
     /// ModuleForDeclaration: For Identifier In Expression DotDot Expression ModuleForDeclarationOpt /* Option */ Colon Identifier LBrace ModuleForDeclarationList /* Vec */ RBrace;
     ///
@@ -17547,7 +19683,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 432:
+    /// Semantic action for production 490:
     ///
     /// ModuleForDeclarationList /* Vec<T>::Push */: ModuleItem ModuleForDeclarationList;
     ///
@@ -17580,7 +19716,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 433:
+    /// Semantic action for production 491:
     ///
     /// ModuleForDeclarationList /* Vec<T>::New */: ;
     ///
@@ -17599,7 +19735,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 434:
+    /// Semantic action for production 492:
     ///
     /// ModuleForDeclarationOpt /* Option<T>::Some */: Step AssignmentOperator Expression;
     ///
@@ -17629,7 +19765,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 435:
+    /// Semantic action for production 493:
     ///
     /// ModuleForDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -17644,7 +19780,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 436:
+    /// Semantic action for production 494:
     ///
     /// ModuleItem: LetDeclaration;
     ///
@@ -17668,7 +19804,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 437:
+    /// Semantic action for production 495:
     ///
     /// ModuleItem: ParameterDeclaration;
     ///
@@ -17693,7 +19829,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 438:
+    /// Semantic action for production 496:
     ///
     /// ModuleItem: LocalparamDeclaration;
     ///
@@ -17718,7 +19854,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 439:
+    /// Semantic action for production 497:
     ///
     /// ModuleItem: AlwaysFfDeclaration;
     ///
@@ -17743,7 +19879,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 440:
+    /// Semantic action for production 498:
     ///
     /// ModuleItem: AlwaysCombDeclaration;
     ///
@@ -17772,7 +19908,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 441:
+    /// Semantic action for production 499:
     ///
     /// ModuleItem: AssignDeclaration;
     ///
@@ -17796,7 +19932,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 442:
+    /// Semantic action for production 500:
     ///
     /// ModuleItem: FunctionDeclaration;
     ///
@@ -17821,7 +19957,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 443:
+    /// Semantic action for production 501:
     ///
     /// ModuleItem: ModuleIfDeclaration;
     ///
@@ -17846,7 +19982,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 444:
+    /// Semantic action for production 502:
     ///
     /// ModuleItem: ModuleForDeclaration;
     ///
@@ -17871,7 +20007,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 445:
+    /// Semantic action for production 503:
     ///
     /// ModuleItem: EnumDeclaration;
     ///
@@ -17895,7 +20031,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 446:
+    /// Semantic action for production 504:
     ///
     /// ModuleItem: StructDeclaration;
     ///
@@ -17919,7 +20055,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 447:
+    /// Semantic action for production 505:
     ///
     /// InterfaceDeclaration: Interface Identifier InterfaceDeclarationOpt /* Option */ LBrace InterfaceDeclarationList /* Vec */ RBrace;
     ///
@@ -17971,7 +20107,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 448:
+    /// Semantic action for production 506:
     ///
     /// InterfaceDeclarationList /* Vec<T>::Push */: InterfaceItem InterfaceDeclarationList;
     ///
@@ -18004,7 +20140,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 449:
+    /// Semantic action for production 507:
     ///
     /// InterfaceDeclarationList /* Vec<T>::New */: ;
     ///
@@ -18023,7 +20159,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 450:
+    /// Semantic action for production 508:
     ///
     /// InterfaceDeclarationOpt /* Option<T>::Some */: WithParameter;
     ///
@@ -18047,7 +20183,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 451:
+    /// Semantic action for production 509:
     ///
     /// InterfaceDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -18059,7 +20195,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 452:
+    /// Semantic action for production 510:
     ///
     /// InterfaceIfDeclaration: If Expression Colon Identifier LBrace InterfaceIfDeclarationList /* Vec */ RBrace InterfaceIfDeclarationList0 /* Vec */ InterfaceIfDeclarationOpt0 /* Option */;
     ///
@@ -18125,7 +20261,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 453:
+    /// Semantic action for production 511:
     ///
     /// InterfaceIfDeclarationList0 /* Vec<T>::Push */: Else If Expression InterfaceIfDeclarationOpt /* Option */ LBrace InterfaceIfDeclarationList0List /* Vec */ RBrace InterfaceIfDeclarationList0;
     ///
@@ -18186,7 +20322,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 454:
+    /// Semantic action for production 512:
     ///
     /// InterfaceIfDeclarationList0List /* Vec<T>::Push */: InterfaceItem InterfaceIfDeclarationList0List;
     ///
@@ -18220,7 +20356,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 455:
+    /// Semantic action for production 513:
     ///
     /// InterfaceIfDeclarationList0List /* Vec<T>::New */: ;
     ///
@@ -18239,7 +20375,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 456:
+    /// Semantic action for production 514:
     ///
     /// InterfaceIfDeclarationList0 /* Vec<T>::New */: ;
     ///
@@ -18258,7 +20394,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 457:
+    /// Semantic action for production 515:
     ///
     /// InterfaceIfDeclarationList /* Vec<T>::Push */: InterfaceItem InterfaceIfDeclarationList;
     ///
@@ -18291,7 +20427,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 458:
+    /// Semantic action for production 516:
     ///
     /// InterfaceIfDeclarationList /* Vec<T>::New */: ;
     ///
@@ -18310,7 +20446,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 459:
+    /// Semantic action for production 517:
     ///
     /// InterfaceIfDeclarationOpt0 /* Option<T>::Some */: Else InterfaceIfDeclarationOpt1 /* Option */ LBrace InterfaceIfDeclarationOpt0List /* Vec */ RBrace;
     ///
@@ -18358,7 +20494,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 460:
+    /// Semantic action for production 518:
     ///
     /// InterfaceIfDeclarationOpt0List /* Vec<T>::Push */: InterfaceItem InterfaceIfDeclarationOpt0List;
     ///
@@ -18392,7 +20528,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 461:
+    /// Semantic action for production 519:
     ///
     /// InterfaceIfDeclarationOpt0List /* Vec<T>::New */: ;
     ///
@@ -18411,7 +20547,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 462:
+    /// Semantic action for production 520:
     ///
     /// InterfaceIfDeclarationOpt1 /* Option<T>::Some */: Colon Identifier;
     ///
@@ -18440,7 +20576,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 463:
+    /// Semantic action for production 521:
     ///
     /// InterfaceIfDeclarationOpt1 /* Option<T>::None */: ;
     ///
@@ -18455,7 +20591,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 464:
+    /// Semantic action for production 522:
     ///
     /// InterfaceIfDeclarationOpt0 /* Option<T>::None */: ;
     ///
@@ -18470,7 +20606,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 465:
+    /// Semantic action for production 523:
     ///
     /// InterfaceIfDeclarationOpt /* Option<T>::Some */: Colon Identifier;
     ///
@@ -18499,7 +20635,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 466:
+    /// Semantic action for production 524:
     ///
     /// InterfaceIfDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -18514,7 +20650,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 467:
+    /// Semantic action for production 525:
     ///
     /// InterfaceForDeclaration: For Identifier In Expression DotDot Expression InterfaceForDeclarationOpt /* Option */ Colon Identifier LBrace InterfaceForDeclarationList /* Vec */ RBrace;
     ///
@@ -18584,7 +20720,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 468:
+    /// Semantic action for production 526:
     ///
     /// InterfaceForDeclarationList /* Vec<T>::Push */: InterfaceItem InterfaceForDeclarationList;
     ///
@@ -18617,7 +20753,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 469:
+    /// Semantic action for production 527:
     ///
     /// InterfaceForDeclarationList /* Vec<T>::New */: ;
     ///
@@ -18636,7 +20772,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 470:
+    /// Semantic action for production 528:
     ///
     /// InterfaceForDeclarationOpt /* Option<T>::Some */: Step AssignmentOperator Expression;
     ///
@@ -18668,7 +20804,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 471:
+    /// Semantic action for production 529:
     ///
     /// InterfaceForDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -18683,7 +20819,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 472:
+    /// Semantic action for production 530:
     ///
     /// InterfaceItem: LetDeclaration;
     ///
@@ -18707,7 +20843,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 473:
+    /// Semantic action for production 531:
     ///
     /// InterfaceItem: ParameterDeclaration;
     ///
@@ -18732,7 +20868,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 474:
+    /// Semantic action for production 532:
     ///
     /// InterfaceItem: LocalparamDeclaration;
     ///
@@ -18757,7 +20893,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 475:
+    /// Semantic action for production 533:
     ///
     /// InterfaceItem: ModportDeclaration;
     ///
@@ -18781,7 +20917,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 476:
+    /// Semantic action for production 534:
     ///
     /// InterfaceItem: InterfaceIfDeclaration;
     ///
@@ -18810,7 +20946,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 477:
+    /// Semantic action for production 535:
     ///
     /// InterfaceItem: InterfaceForDeclaration;
     ///
@@ -18839,7 +20975,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 478:
+    /// Semantic action for production 536:
     ///
     /// InterfaceItem: EnumDeclaration;
     ///
@@ -18863,7 +20999,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 479:
+    /// Semantic action for production 537:
     ///
     /// InterfaceItem: StructDeclaration;
     ///
@@ -18887,7 +21023,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 480:
+    /// Semantic action for production 538:
     ///
     /// Description: ModuleDeclaration;
     ///
@@ -18911,7 +21047,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 481:
+    /// Semantic action for production 539:
     ///
     /// Description: InterfaceDeclaration;
     ///
@@ -18936,7 +21072,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 482:
+    /// Semantic action for production 540:
     ///
     /// Veryl: Start VerylList /* Vec */;
     ///
@@ -18962,7 +21098,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 483:
+    /// Semantic action for production 541:
     ///
     /// VerylList /* Vec<T>::Push */: Description VerylList;
     ///
@@ -18987,7 +21123,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 484:
+    /// Semantic action for production 542:
     ///
     /// VerylList /* Vec<T>::New */: ;
     ///
@@ -19022,299 +21158,347 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             7 => self.minus_g_t_term(&children[0], parse_tree),
             8 => self.plus_colon_term(&children[0], parse_tree),
             9 => self.assignment_operator_term(&children[0], parse_tree),
-            10 => self.binary_operator_term(&children[0], parse_tree),
-            11 => self.common_operator_term(&children[0], parse_tree),
-            12 => self.unary_operator_term(&children[0], parse_tree),
-            13 => self.colon_term(&children[0], parse_tree),
-            14 => self.comma_term(&children[0], parse_tree),
-            15 => self.dollar_term(&children[0], parse_tree),
-            16 => self.dot_dot_term(&children[0], parse_tree),
-            17 => self.dot_term(&children[0], parse_tree),
-            18 => self.equ_term(&children[0], parse_tree),
-            19 => self.hash_term(&children[0], parse_tree),
-            20 => self.l_brace_term(&children[0], parse_tree),
-            21 => self.l_bracket_term(&children[0], parse_tree),
-            22 => self.l_paren_term(&children[0], parse_tree),
-            23 => self.r_brace_term(&children[0], parse_tree),
-            24 => self.r_bracket_term(&children[0], parse_tree),
-            25 => self.r_paren_term(&children[0], parse_tree),
-            26 => self.semicolon_term(&children[0], parse_tree),
-            27 => self.always_comb_term(&children[0], parse_tree),
-            28 => self.always_ff_term(&children[0], parse_tree),
-            29 => self.assign_term(&children[0], parse_tree),
-            30 => self.async_high_term(&children[0], parse_tree),
-            31 => self.async_low_term(&children[0], parse_tree),
-            32 => self.bit_term(&children[0], parse_tree),
-            33 => self.else_term(&children[0], parse_tree),
-            34 => self.enum_term(&children[0], parse_tree),
-            35 => self.f32_term(&children[0], parse_tree),
-            36 => self.f64_term(&children[0], parse_tree),
-            37 => self.for_term(&children[0], parse_tree),
-            38 => self.function_term(&children[0], parse_tree),
-            39 => self.i32_term(&children[0], parse_tree),
-            40 => self.i64_term(&children[0], parse_tree),
-            41 => self.if_reset_term(&children[0], parse_tree),
-            42 => self.if_term(&children[0], parse_tree),
-            43 => self.inout_term(&children[0], parse_tree),
-            44 => self.input_term(&children[0], parse_tree),
-            45 => self.inst_term(&children[0], parse_tree),
-            46 => self.interface_term(&children[0], parse_tree),
-            47 => self.in_term(&children[0], parse_tree),
-            48 => self.let_term(&children[0], parse_tree),
-            49 => self.localparam_term(&children[0], parse_tree),
-            50 => self.logic_term(&children[0], parse_tree),
-            51 => self.modport_term(&children[0], parse_tree),
-            52 => self.module_term(&children[0], parse_tree),
-            53 => self.negedge_term(&children[0], parse_tree),
-            54 => self.output_term(&children[0], parse_tree),
-            55 => self.parameter_term(&children[0], parse_tree),
-            56 => self.posedge_term(&children[0], parse_tree),
-            57 => self.ref_term(&children[0], parse_tree),
-            58 => self.return_term(&children[0], parse_tree),
-            59 => self.step_term(&children[0], parse_tree),
-            60 => self.struct_term(&children[0], parse_tree),
-            61 => self.sync_high_term(&children[0], parse_tree),
-            62 => self.sync_low_term(&children[0], parse_tree),
-            63 => self.u32_term(&children[0], parse_tree),
-            64 => self.u64_term(&children[0], parse_tree),
-            65 => self.identifier_term(&children[0], parse_tree),
-            66 => self.comments(&children[0], parse_tree),
-            67 => self.comments_opt_0(&children[0], parse_tree),
-            68 => self.comments_opt_1(parse_tree),
-            69 => self.start_token(&children[0], parse_tree),
-            70 => self.exponent_token(&children[0], &children[1], parse_tree),
-            71 => self.fixed_point_token(&children[0], &children[1], parse_tree),
-            72 => self.based_token(&children[0], &children[1], parse_tree),
-            73 => self.base_less_token(&children[0], &children[1], parse_tree),
-            74 => self.all_bit_token(&children[0], &children[1], parse_tree),
-            75 => self.assignment_operator_token(&children[0], &children[1], parse_tree),
-            76 => self.binary_operator_token(&children[0], &children[1], parse_tree),
-            77 => self.common_operator_token(&children[0], &children[1], parse_tree),
-            78 => self.unary_operator_token(&children[0], &children[1], parse_tree),
-            79 => self.colon_token(&children[0], &children[1], parse_tree),
-            80 => self.comma_token(&children[0], &children[1], parse_tree),
-            81 => self.dollar_token(&children[0], &children[1], parse_tree),
-            82 => self.dot_dot_token(&children[0], &children[1], parse_tree),
-            83 => self.dot_token(&children[0], &children[1], parse_tree),
-            84 => self.equ_token(&children[0], &children[1], parse_tree),
-            85 => self.hash_token(&children[0], &children[1], parse_tree),
-            86 => self.l_brace_token(&children[0], &children[1], parse_tree),
-            87 => self.l_bracket_token(&children[0], &children[1], parse_tree),
-            88 => self.l_paren_token(&children[0], &children[1], parse_tree),
-            89 => self.minus_colon_token(&children[0], &children[1], parse_tree),
-            90 => self.minus_g_t_token(&children[0], &children[1], parse_tree),
-            91 => self.plus_colon_token(&children[0], &children[1], parse_tree),
-            92 => self.r_brace_token(&children[0], &children[1], parse_tree),
-            93 => self.r_bracket_token(&children[0], &children[1], parse_tree),
-            94 => self.r_paren_token(&children[0], &children[1], parse_tree),
-            95 => self.semicolon_token(&children[0], &children[1], parse_tree),
-            96 => self.always_comb_token(&children[0], &children[1], parse_tree),
-            97 => self.always_ff_token(&children[0], &children[1], parse_tree),
-            98 => self.assign_token(&children[0], &children[1], parse_tree),
-            99 => self.async_high_token(&children[0], &children[1], parse_tree),
-            100 => self.async_low_token(&children[0], &children[1], parse_tree),
-            101 => self.bit_token(&children[0], &children[1], parse_tree),
-            102 => self.else_token(&children[0], &children[1], parse_tree),
-            103 => self.enum_token(&children[0], &children[1], parse_tree),
-            104 => self.f32_token(&children[0], &children[1], parse_tree),
-            105 => self.f64_token(&children[0], &children[1], parse_tree),
-            106 => self.for_token(&children[0], &children[1], parse_tree),
-            107 => self.function_token(&children[0], &children[1], parse_tree),
-            108 => self.i32_token(&children[0], &children[1], parse_tree),
-            109 => self.i64_token(&children[0], &children[1], parse_tree),
-            110 => self.if_reset_token(&children[0], &children[1], parse_tree),
-            111 => self.if_token(&children[0], &children[1], parse_tree),
-            112 => self.inout_token(&children[0], &children[1], parse_tree),
-            113 => self.input_token(&children[0], &children[1], parse_tree),
-            114 => self.inst_token(&children[0], &children[1], parse_tree),
-            115 => self.interface_token(&children[0], &children[1], parse_tree),
-            116 => self.in_token(&children[0], &children[1], parse_tree),
-            117 => self.let_token(&children[0], &children[1], parse_tree),
-            118 => self.localparam_token(&children[0], &children[1], parse_tree),
-            119 => self.logic_token(&children[0], &children[1], parse_tree),
-            120 => self.modport_token(&children[0], &children[1], parse_tree),
-            121 => self.module_token(&children[0], &children[1], parse_tree),
-            122 => self.negedge_token(&children[0], &children[1], parse_tree),
-            123 => self.output_token(&children[0], &children[1], parse_tree),
-            124 => self.parameter_token(&children[0], &children[1], parse_tree),
-            125 => self.posedge_token(&children[0], &children[1], parse_tree),
-            126 => self.ref_token(&children[0], &children[1], parse_tree),
-            127 => self.return_token(&children[0], &children[1], parse_tree),
-            128 => self.step_token(&children[0], &children[1], parse_tree),
-            129 => self.struct_token(&children[0], &children[1], parse_tree),
-            130 => self.sync_high_token(&children[0], &children[1], parse_tree),
-            131 => self.sync_low_token(&children[0], &children[1], parse_tree),
-            132 => self.u32_token(&children[0], &children[1], parse_tree),
-            133 => self.u64_token(&children[0], &children[1], parse_tree),
-            134 => self.identifier_token(&children[0], &children[1], parse_tree),
-            135 => self.start(&children[0], parse_tree),
-            136 => self.exponent(&children[0], parse_tree),
-            137 => self.fixed_point(&children[0], parse_tree),
-            138 => self.based(&children[0], parse_tree),
-            139 => self.base_less(&children[0], parse_tree),
-            140 => self.all_bit(&children[0], parse_tree),
-            141 => self.assignment_operator(&children[0], parse_tree),
-            142 => self.common_operator(&children[0], parse_tree),
-            143 => self.binary_operator(&children[0], parse_tree),
-            144 => self.unary_operator(&children[0], parse_tree),
-            145 => self.colon(&children[0], parse_tree),
-            146 => self.comma(&children[0], parse_tree),
-            147 => self.dollar(&children[0], parse_tree),
-            148 => self.dot_dot(&children[0], parse_tree),
-            149 => self.dot(&children[0], parse_tree),
-            150 => self.equ(&children[0], parse_tree),
-            151 => self.hash(&children[0], parse_tree),
-            152 => self.l_brace(&children[0], parse_tree),
-            153 => self.l_bracket(&children[0], parse_tree),
-            154 => self.l_paren(&children[0], parse_tree),
-            155 => self.minus_colon(&children[0], parse_tree),
-            156 => self.minus_g_t(&children[0], parse_tree),
-            157 => self.plus_colon(&children[0], parse_tree),
-            158 => self.r_brace(&children[0], parse_tree),
-            159 => self.r_bracket(&children[0], parse_tree),
-            160 => self.r_paren(&children[0], parse_tree),
-            161 => self.semicolon(&children[0], parse_tree),
-            162 => self.always_comb(&children[0], parse_tree),
-            163 => self.always_ff(&children[0], parse_tree),
-            164 => self.assign(&children[0], parse_tree),
-            165 => self.async_high(&children[0], parse_tree),
-            166 => self.async_low(&children[0], parse_tree),
-            167 => self.bit(&children[0], parse_tree),
-            168 => self.r#else(&children[0], parse_tree),
-            169 => self.r#enum(&children[0], parse_tree),
-            170 => self.f32(&children[0], parse_tree),
-            171 => self.f64(&children[0], parse_tree),
-            172 => self.r#for(&children[0], parse_tree),
-            173 => self.function(&children[0], parse_tree),
-            174 => self.i32(&children[0], parse_tree),
-            175 => self.i64(&children[0], parse_tree),
-            176 => self.r#if(&children[0], parse_tree),
-            177 => self.if_reset(&children[0], parse_tree),
-            178 => self.r#in(&children[0], parse_tree),
-            179 => self.inout(&children[0], parse_tree),
-            180 => self.input(&children[0], parse_tree),
-            181 => self.inst(&children[0], parse_tree),
-            182 => self.interface(&children[0], parse_tree),
-            183 => self.r#let(&children[0], parse_tree),
-            184 => self.localparam(&children[0], parse_tree),
-            185 => self.logic(&children[0], parse_tree),
-            186 => self.modport(&children[0], parse_tree),
-            187 => self.module(&children[0], parse_tree),
-            188 => self.negedge(&children[0], parse_tree),
-            189 => self.output(&children[0], parse_tree),
-            190 => self.parameter(&children[0], parse_tree),
-            191 => self.posedge(&children[0], parse_tree),
-            192 => self.r#ref(&children[0], parse_tree),
-            193 => self.r#return(&children[0], parse_tree),
-            194 => self.step(&children[0], parse_tree),
-            195 => self.r#struct(&children[0], parse_tree),
-            196 => self.sync_high(&children[0], parse_tree),
-            197 => self.sync_low(&children[0], parse_tree),
-            198 => self.u32(&children[0], parse_tree),
-            199 => self.u64(&children[0], parse_tree),
-            200 => self.identifier(&children[0], parse_tree),
-            201 => self.number_0(&children[0], parse_tree),
-            202 => self.number_1(&children[0], parse_tree),
-            203 => self.integral_number_0(&children[0], parse_tree),
-            204 => self.integral_number_1(&children[0], parse_tree),
-            205 => self.integral_number_2(&children[0], parse_tree),
-            206 => self.real_number_0(&children[0], parse_tree),
-            207 => self.real_number_1(&children[0], parse_tree),
-            208 => {
+            10 => self.operator11_term(&children[0], parse_tree),
+            11 => self.operator10_term(&children[0], parse_tree),
+            12 => self.operator09_term(&children[0], parse_tree),
+            13 => self.operator08_term(&children[0], parse_tree),
+            14 => self.operator07_term(&children[0], parse_tree),
+            15 => self.operator06_term(&children[0], parse_tree),
+            16 => self.operator02_term(&children[0], parse_tree),
+            17 => self.operator01_term(&children[0], parse_tree),
+            18 => self.operator05_term(&children[0], parse_tree),
+            19 => self.operator04_term(&children[0], parse_tree),
+            20 => self.operator03_term(&children[0], parse_tree),
+            21 => self.unary_operator_term(&children[0], parse_tree),
+            22 => self.colon_term(&children[0], parse_tree),
+            23 => self.comma_term(&children[0], parse_tree),
+            24 => self.dollar_term(&children[0], parse_tree),
+            25 => self.dot_dot_term(&children[0], parse_tree),
+            26 => self.dot_term(&children[0], parse_tree),
+            27 => self.equ_term(&children[0], parse_tree),
+            28 => self.hash_term(&children[0], parse_tree),
+            29 => self.l_brace_term(&children[0], parse_tree),
+            30 => self.l_bracket_term(&children[0], parse_tree),
+            31 => self.l_paren_term(&children[0], parse_tree),
+            32 => self.r_brace_term(&children[0], parse_tree),
+            33 => self.r_bracket_term(&children[0], parse_tree),
+            34 => self.r_paren_term(&children[0], parse_tree),
+            35 => self.semicolon_term(&children[0], parse_tree),
+            36 => self.always_comb_term(&children[0], parse_tree),
+            37 => self.always_ff_term(&children[0], parse_tree),
+            38 => self.assign_term(&children[0], parse_tree),
+            39 => self.async_high_term(&children[0], parse_tree),
+            40 => self.async_low_term(&children[0], parse_tree),
+            41 => self.bit_term(&children[0], parse_tree),
+            42 => self.else_term(&children[0], parse_tree),
+            43 => self.enum_term(&children[0], parse_tree),
+            44 => self.f32_term(&children[0], parse_tree),
+            45 => self.f64_term(&children[0], parse_tree),
+            46 => self.for_term(&children[0], parse_tree),
+            47 => self.function_term(&children[0], parse_tree),
+            48 => self.i32_term(&children[0], parse_tree),
+            49 => self.i64_term(&children[0], parse_tree),
+            50 => self.if_reset_term(&children[0], parse_tree),
+            51 => self.if_term(&children[0], parse_tree),
+            52 => self.inout_term(&children[0], parse_tree),
+            53 => self.input_term(&children[0], parse_tree),
+            54 => self.inst_term(&children[0], parse_tree),
+            55 => self.interface_term(&children[0], parse_tree),
+            56 => self.in_term(&children[0], parse_tree),
+            57 => self.let_term(&children[0], parse_tree),
+            58 => self.localparam_term(&children[0], parse_tree),
+            59 => self.logic_term(&children[0], parse_tree),
+            60 => self.modport_term(&children[0], parse_tree),
+            61 => self.module_term(&children[0], parse_tree),
+            62 => self.negedge_term(&children[0], parse_tree),
+            63 => self.output_term(&children[0], parse_tree),
+            64 => self.parameter_term(&children[0], parse_tree),
+            65 => self.posedge_term(&children[0], parse_tree),
+            66 => self.ref_term(&children[0], parse_tree),
+            67 => self.return_term(&children[0], parse_tree),
+            68 => self.step_term(&children[0], parse_tree),
+            69 => self.struct_term(&children[0], parse_tree),
+            70 => self.sync_high_term(&children[0], parse_tree),
+            71 => self.sync_low_term(&children[0], parse_tree),
+            72 => self.u32_term(&children[0], parse_tree),
+            73 => self.u64_term(&children[0], parse_tree),
+            74 => self.identifier_term(&children[0], parse_tree),
+            75 => self.comments(&children[0], parse_tree),
+            76 => self.comments_opt_0(&children[0], parse_tree),
+            77 => self.comments_opt_1(parse_tree),
+            78 => self.start_token(&children[0], parse_tree),
+            79 => self.exponent_token(&children[0], &children[1], parse_tree),
+            80 => self.fixed_point_token(&children[0], &children[1], parse_tree),
+            81 => self.based_token(&children[0], &children[1], parse_tree),
+            82 => self.base_less_token(&children[0], &children[1], parse_tree),
+            83 => self.all_bit_token(&children[0], &children[1], parse_tree),
+            84 => self.assignment_operator_token(&children[0], &children[1], parse_tree),
+            85 => self.operator01_token(&children[0], &children[1], parse_tree),
+            86 => self.operator02_token(&children[0], &children[1], parse_tree),
+            87 => self.operator03_token(&children[0], &children[1], parse_tree),
+            88 => self.operator04_token(&children[0], &children[1], parse_tree),
+            89 => self.operator05_token(&children[0], &children[1], parse_tree),
+            90 => self.operator06_token(&children[0], &children[1], parse_tree),
+            91 => self.operator07_token(&children[0], &children[1], parse_tree),
+            92 => self.operator08_token(&children[0], &children[1], parse_tree),
+            93 => self.operator09_token(&children[0], &children[1], parse_tree),
+            94 => self.operator10_token(&children[0], &children[1], parse_tree),
+            95 => self.operator11_token(&children[0], &children[1], parse_tree),
+            96 => self.unary_operator_token(&children[0], &children[1], parse_tree),
+            97 => self.colon_token(&children[0], &children[1], parse_tree),
+            98 => self.comma_token(&children[0], &children[1], parse_tree),
+            99 => self.dollar_token(&children[0], &children[1], parse_tree),
+            100 => self.dot_dot_token(&children[0], &children[1], parse_tree),
+            101 => self.dot_token(&children[0], &children[1], parse_tree),
+            102 => self.equ_token(&children[0], &children[1], parse_tree),
+            103 => self.hash_token(&children[0], &children[1], parse_tree),
+            104 => self.l_brace_token(&children[0], &children[1], parse_tree),
+            105 => self.l_bracket_token(&children[0], &children[1], parse_tree),
+            106 => self.l_paren_token(&children[0], &children[1], parse_tree),
+            107 => self.minus_colon_token(&children[0], &children[1], parse_tree),
+            108 => self.minus_g_t_token(&children[0], &children[1], parse_tree),
+            109 => self.plus_colon_token(&children[0], &children[1], parse_tree),
+            110 => self.r_brace_token(&children[0], &children[1], parse_tree),
+            111 => self.r_bracket_token(&children[0], &children[1], parse_tree),
+            112 => self.r_paren_token(&children[0], &children[1], parse_tree),
+            113 => self.semicolon_token(&children[0], &children[1], parse_tree),
+            114 => self.always_comb_token(&children[0], &children[1], parse_tree),
+            115 => self.always_ff_token(&children[0], &children[1], parse_tree),
+            116 => self.assign_token(&children[0], &children[1], parse_tree),
+            117 => self.async_high_token(&children[0], &children[1], parse_tree),
+            118 => self.async_low_token(&children[0], &children[1], parse_tree),
+            119 => self.bit_token(&children[0], &children[1], parse_tree),
+            120 => self.else_token(&children[0], &children[1], parse_tree),
+            121 => self.enum_token(&children[0], &children[1], parse_tree),
+            122 => self.f32_token(&children[0], &children[1], parse_tree),
+            123 => self.f64_token(&children[0], &children[1], parse_tree),
+            124 => self.for_token(&children[0], &children[1], parse_tree),
+            125 => self.function_token(&children[0], &children[1], parse_tree),
+            126 => self.i32_token(&children[0], &children[1], parse_tree),
+            127 => self.i64_token(&children[0], &children[1], parse_tree),
+            128 => self.if_reset_token(&children[0], &children[1], parse_tree),
+            129 => self.if_token(&children[0], &children[1], parse_tree),
+            130 => self.inout_token(&children[0], &children[1], parse_tree),
+            131 => self.input_token(&children[0], &children[1], parse_tree),
+            132 => self.inst_token(&children[0], &children[1], parse_tree),
+            133 => self.interface_token(&children[0], &children[1], parse_tree),
+            134 => self.in_token(&children[0], &children[1], parse_tree),
+            135 => self.let_token(&children[0], &children[1], parse_tree),
+            136 => self.localparam_token(&children[0], &children[1], parse_tree),
+            137 => self.logic_token(&children[0], &children[1], parse_tree),
+            138 => self.modport_token(&children[0], &children[1], parse_tree),
+            139 => self.module_token(&children[0], &children[1], parse_tree),
+            140 => self.negedge_token(&children[0], &children[1], parse_tree),
+            141 => self.output_token(&children[0], &children[1], parse_tree),
+            142 => self.parameter_token(&children[0], &children[1], parse_tree),
+            143 => self.posedge_token(&children[0], &children[1], parse_tree),
+            144 => self.ref_token(&children[0], &children[1], parse_tree),
+            145 => self.return_token(&children[0], &children[1], parse_tree),
+            146 => self.step_token(&children[0], &children[1], parse_tree),
+            147 => self.struct_token(&children[0], &children[1], parse_tree),
+            148 => self.sync_high_token(&children[0], &children[1], parse_tree),
+            149 => self.sync_low_token(&children[0], &children[1], parse_tree),
+            150 => self.u32_token(&children[0], &children[1], parse_tree),
+            151 => self.u64_token(&children[0], &children[1], parse_tree),
+            152 => self.identifier_token(&children[0], &children[1], parse_tree),
+            153 => self.start(&children[0], parse_tree),
+            154 => self.exponent(&children[0], parse_tree),
+            155 => self.fixed_point(&children[0], parse_tree),
+            156 => self.based(&children[0], parse_tree),
+            157 => self.base_less(&children[0], parse_tree),
+            158 => self.all_bit(&children[0], parse_tree),
+            159 => self.assignment_operator(&children[0], parse_tree),
+            160 => self.operator01(&children[0], parse_tree),
+            161 => self.operator02(&children[0], parse_tree),
+            162 => self.operator03(&children[0], parse_tree),
+            163 => self.operator04(&children[0], parse_tree),
+            164 => self.operator05(&children[0], parse_tree),
+            165 => self.operator06(&children[0], parse_tree),
+            166 => self.operator07(&children[0], parse_tree),
+            167 => self.operator08(&children[0], parse_tree),
+            168 => self.operator09(&children[0], parse_tree),
+            169 => self.operator10(&children[0], parse_tree),
+            170 => self.operator11(&children[0], parse_tree),
+            171 => self.unary_operator(&children[0], parse_tree),
+            172 => self.colon(&children[0], parse_tree),
+            173 => self.comma(&children[0], parse_tree),
+            174 => self.dollar(&children[0], parse_tree),
+            175 => self.dot_dot(&children[0], parse_tree),
+            176 => self.dot(&children[0], parse_tree),
+            177 => self.equ(&children[0], parse_tree),
+            178 => self.hash(&children[0], parse_tree),
+            179 => self.l_brace(&children[0], parse_tree),
+            180 => self.l_bracket(&children[0], parse_tree),
+            181 => self.l_paren(&children[0], parse_tree),
+            182 => self.minus_colon(&children[0], parse_tree),
+            183 => self.minus_g_t(&children[0], parse_tree),
+            184 => self.plus_colon(&children[0], parse_tree),
+            185 => self.r_brace(&children[0], parse_tree),
+            186 => self.r_bracket(&children[0], parse_tree),
+            187 => self.r_paren(&children[0], parse_tree),
+            188 => self.semicolon(&children[0], parse_tree),
+            189 => self.always_comb(&children[0], parse_tree),
+            190 => self.always_ff(&children[0], parse_tree),
+            191 => self.assign(&children[0], parse_tree),
+            192 => self.async_high(&children[0], parse_tree),
+            193 => self.async_low(&children[0], parse_tree),
+            194 => self.bit(&children[0], parse_tree),
+            195 => self.r#else(&children[0], parse_tree),
+            196 => self.r#enum(&children[0], parse_tree),
+            197 => self.f32(&children[0], parse_tree),
+            198 => self.f64(&children[0], parse_tree),
+            199 => self.r#for(&children[0], parse_tree),
+            200 => self.function(&children[0], parse_tree),
+            201 => self.i32(&children[0], parse_tree),
+            202 => self.i64(&children[0], parse_tree),
+            203 => self.r#if(&children[0], parse_tree),
+            204 => self.if_reset(&children[0], parse_tree),
+            205 => self.r#in(&children[0], parse_tree),
+            206 => self.inout(&children[0], parse_tree),
+            207 => self.input(&children[0], parse_tree),
+            208 => self.inst(&children[0], parse_tree),
+            209 => self.interface(&children[0], parse_tree),
+            210 => self.r#let(&children[0], parse_tree),
+            211 => self.localparam(&children[0], parse_tree),
+            212 => self.logic(&children[0], parse_tree),
+            213 => self.modport(&children[0], parse_tree),
+            214 => self.module(&children[0], parse_tree),
+            215 => self.negedge(&children[0], parse_tree),
+            216 => self.output(&children[0], parse_tree),
+            217 => self.parameter(&children[0], parse_tree),
+            218 => self.posedge(&children[0], parse_tree),
+            219 => self.r#ref(&children[0], parse_tree),
+            220 => self.r#return(&children[0], parse_tree),
+            221 => self.step(&children[0], parse_tree),
+            222 => self.r#struct(&children[0], parse_tree),
+            223 => self.sync_high(&children[0], parse_tree),
+            224 => self.sync_low(&children[0], parse_tree),
+            225 => self.u32(&children[0], parse_tree),
+            226 => self.u64(&children[0], parse_tree),
+            227 => self.identifier(&children[0], parse_tree),
+            228 => self.number_0(&children[0], parse_tree),
+            229 => self.number_1(&children[0], parse_tree),
+            230 => self.integral_number_0(&children[0], parse_tree),
+            231 => self.integral_number_1(&children[0], parse_tree),
+            232 => self.integral_number_2(&children[0], parse_tree),
+            233 => self.real_number_0(&children[0], parse_tree),
+            234 => self.real_number_1(&children[0], parse_tree),
+            235 => {
                 self.hierarchical_identifier(&children[0], &children[1], &children[2], parse_tree)
             }
-            209 => self.hierarchical_identifier_list0_0(
+            236 => self.hierarchical_identifier_list0_0(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 parse_tree,
             ),
-            210 => {
+            237 => {
                 self.hierarchical_identifier_list0_list_0(&children[0], &children[1], parse_tree)
             }
-            211 => self.hierarchical_identifier_list0_list_1(parse_tree),
-            212 => self.hierarchical_identifier_list0_1(parse_tree),
-            213 => self.hierarchical_identifier_list_0(&children[0], &children[1], parse_tree),
-            214 => self.hierarchical_identifier_list_1(parse_tree),
-            215 => self.expression(&children[0], &children[1], parse_tree),
-            216 => self.expression_list_0(&children[0], &children[1], &children[2], parse_tree),
-            217 => self.expression_list_group_0(&children[0], parse_tree),
-            218 => self.expression_list_group_1(&children[0], parse_tree),
-            219 => self.expression_list_1(parse_tree),
-            220 => self.expression1(&children[0], &children[1], parse_tree),
-            221 => self.expression1_opt_0(&children[0], parse_tree),
-            222 => self.expression1_opt_group_0(&children[0], parse_tree),
-            223 => self.expression1_opt_group_1(&children[0], parse_tree),
-            224 => self.expression1_opt_1(parse_tree),
-            225 => self.factor_0(&children[0], parse_tree),
-            226 => self.factor_1(&children[0], &children[1], &children[2], parse_tree),
-            227 => self.factor_2(&children[0], &children[1], &children[2], parse_tree),
-            228 => self.factor_opt0_0(&children[0], &children[1], &children[2], parse_tree),
-            229 => self.factor_opt1_0(&children[0], parse_tree),
-            230 => self.factor_opt1_1(parse_tree),
-            231 => self.factor_opt0_1(parse_tree),
-            232 => self.factor_opt_0(&children[0], parse_tree),
-            233 => self.factor_opt_1(parse_tree),
-            234 => self.function_call_arg(&children[0], &children[1], &children[2], parse_tree),
-            235 => {
+            238 => self.hierarchical_identifier_list0_list_1(parse_tree),
+            239 => self.hierarchical_identifier_list0_1(parse_tree),
+            240 => self.hierarchical_identifier_list_0(&children[0], &children[1], parse_tree),
+            241 => self.hierarchical_identifier_list_1(parse_tree),
+            242 => self.expression(&children[0], &children[1], parse_tree),
+            243 => self.expression_list_0(&children[0], &children[1], &children[2], parse_tree),
+            244 => self.expression_list_1(parse_tree),
+            245 => self.expression01(&children[0], &children[1], parse_tree),
+            246 => self.expression01_list_0(&children[0], &children[1], &children[2], parse_tree),
+            247 => self.expression01_list_1(parse_tree),
+            248 => self.expression02(&children[0], &children[1], parse_tree),
+            249 => self.expression02_list_0(&children[0], &children[1], &children[2], parse_tree),
+            250 => self.expression02_list_1(parse_tree),
+            251 => self.expression03(&children[0], &children[1], parse_tree),
+            252 => self.expression03_list_0(&children[0], &children[1], &children[2], parse_tree),
+            253 => self.expression03_list_1(parse_tree),
+            254 => self.expression04(&children[0], &children[1], parse_tree),
+            255 => self.expression04_list_0(&children[0], &children[1], &children[2], parse_tree),
+            256 => self.expression04_list_1(parse_tree),
+            257 => self.expression05(&children[0], &children[1], parse_tree),
+            258 => self.expression05_list_0(&children[0], &children[1], &children[2], parse_tree),
+            259 => self.expression05_list_1(parse_tree),
+            260 => self.expression06(&children[0], &children[1], parse_tree),
+            261 => self.expression06_list_0(&children[0], &children[1], &children[2], parse_tree),
+            262 => self.expression06_list_1(parse_tree),
+            263 => self.expression07(&children[0], &children[1], parse_tree),
+            264 => self.expression07_list_0(&children[0], &children[1], &children[2], parse_tree),
+            265 => self.expression07_list_1(parse_tree),
+            266 => self.expression08(&children[0], &children[1], parse_tree),
+            267 => self.expression08_list_0(&children[0], &children[1], &children[2], parse_tree),
+            268 => self.expression08_list_1(parse_tree),
+            269 => self.expression09(&children[0], &children[1], parse_tree),
+            270 => self.expression09_list_0(&children[0], &children[1], &children[2], parse_tree),
+            271 => self.expression09_list_1(parse_tree),
+            272 => self.expression10(&children[0], &children[1], parse_tree),
+            273 => self.expression10_list_0(&children[0], &children[1], &children[2], parse_tree),
+            274 => self.expression10_list_1(parse_tree),
+            275 => self.expression11(&children[0], &children[1], parse_tree),
+            276 => self.expression11_opt_0(&children[0], parse_tree),
+            277 => self.expression11_opt_group_0(&children[0], parse_tree),
+            278 => self.expression11_opt_group_1(&children[0], parse_tree),
+            279 => self.expression11_opt_group_2(&children[0], parse_tree),
+            280 => self.expression11_opt_group_3(&children[0], parse_tree),
+            281 => self.expression11_opt_group_4(&children[0], parse_tree),
+            282 => self.expression11_opt_1(parse_tree),
+            283 => self.factor_0(&children[0], parse_tree),
+            284 => self.factor_1(&children[0], &children[1], &children[2], parse_tree),
+            285 => self.factor_2(&children[0], &children[1], &children[2], parse_tree),
+            286 => self.factor_opt0_0(&children[0], &children[1], &children[2], parse_tree),
+            287 => self.factor_opt1_0(&children[0], parse_tree),
+            288 => self.factor_opt1_1(parse_tree),
+            289 => self.factor_opt0_1(parse_tree),
+            290 => self.factor_opt_0(&children[0], parse_tree),
+            291 => self.factor_opt_1(parse_tree),
+            292 => self.function_call_arg(&children[0], &children[1], &children[2], parse_tree),
+            293 => {
                 self.function_call_arg_list_0(&children[0], &children[1], &children[2], parse_tree)
             }
-            236 => self.function_call_arg_list_1(parse_tree),
-            237 => self.function_call_arg_opt_0(&children[0], parse_tree),
-            238 => self.function_call_arg_opt_1(parse_tree),
-            239 => self.range(
+            294 => self.function_call_arg_list_1(parse_tree),
+            295 => self.function_call_arg_opt_0(&children[0], parse_tree),
+            296 => self.function_call_arg_opt_1(parse_tree),
+            297 => self.range(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 parse_tree,
             ),
-            240 => self.range_opt_0(&children[0], &children[1], parse_tree),
-            241 => self.range_opt_1(parse_tree),
-            242 => self.range_operator_0(&children[0], parse_tree),
-            243 => self.range_operator_1(&children[0], parse_tree),
-            244 => self.range_operator_2(&children[0], parse_tree),
-            245 => self.range_operator_3(&children[0], parse_tree),
-            246 => self.width(&children[0], &children[1], &children[2], parse_tree),
-            247 => self.builtin_type_0(&children[0], parse_tree),
-            248 => self.builtin_type_1(&children[0], parse_tree),
-            249 => self.builtin_type_2(&children[0], parse_tree),
-            250 => self.builtin_type_3(&children[0], parse_tree),
-            251 => self.builtin_type_4(&children[0], parse_tree),
-            252 => self.builtin_type_5(&children[0], parse_tree),
-            253 => self.builtin_type_6(&children[0], parse_tree),
-            254 => self.builtin_type_7(&children[0], parse_tree),
-            255 => self.r#type(&children[0], &children[1], parse_tree),
-            256 => self.type_group_0(&children[0], parse_tree),
-            257 => self.type_group_1(&children[0], parse_tree),
-            258 => self.type_list_0(&children[0], &children[1], parse_tree),
-            259 => self.type_list_1(parse_tree),
-            260 => self.statement_0(&children[0], parse_tree),
-            261 => self.statement_1(&children[0], parse_tree),
-            262 => self.statement_2(&children[0], parse_tree),
-            263 => self.statement_3(&children[0], parse_tree),
-            264 => self.statement_4(&children[0], parse_tree),
-            265 => self.assignment_statement(
+            298 => self.range_opt_0(&children[0], &children[1], parse_tree),
+            299 => self.range_opt_1(parse_tree),
+            300 => self.range_operator_0(&children[0], parse_tree),
+            301 => self.range_operator_1(&children[0], parse_tree),
+            302 => self.range_operator_2(&children[0], parse_tree),
+            303 => self.range_operator_3(&children[0], parse_tree),
+            304 => self.width(&children[0], &children[1], &children[2], parse_tree),
+            305 => self.builtin_type_0(&children[0], parse_tree),
+            306 => self.builtin_type_1(&children[0], parse_tree),
+            307 => self.builtin_type_2(&children[0], parse_tree),
+            308 => self.builtin_type_3(&children[0], parse_tree),
+            309 => self.builtin_type_4(&children[0], parse_tree),
+            310 => self.builtin_type_5(&children[0], parse_tree),
+            311 => self.builtin_type_6(&children[0], parse_tree),
+            312 => self.builtin_type_7(&children[0], parse_tree),
+            313 => self.r#type(&children[0], &children[1], parse_tree),
+            314 => self.type_group_0(&children[0], parse_tree),
+            315 => self.type_group_1(&children[0], parse_tree),
+            316 => self.type_list_0(&children[0], &children[1], parse_tree),
+            317 => self.type_list_1(parse_tree),
+            318 => self.statement_0(&children[0], parse_tree),
+            319 => self.statement_1(&children[0], parse_tree),
+            320 => self.statement_2(&children[0], parse_tree),
+            321 => self.statement_3(&children[0], parse_tree),
+            322 => self.statement_4(&children[0], parse_tree),
+            323 => self.assignment_statement(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 parse_tree,
             ),
-            266 => self.assignment_statement_group_0(&children[0], parse_tree),
-            267 => self.assignment_statement_group_1(&children[0], parse_tree),
-            268 => self.if_statement(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-                &children[5],
-                &children[6],
-                parse_tree,
-            ),
-            269 => self.if_statement_list0_0(
+            324 => self.assignment_statement_group_0(&children[0], parse_tree),
+            325 => self.assignment_statement_group_1(&children[0], parse_tree),
+            326 => self.if_statement(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -19324,31 +21508,7 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[6],
                 parse_tree,
             ),
-            270 => self.if_statement_list0_list_0(&children[0], &children[1], parse_tree),
-            271 => self.if_statement_list0_list_1(parse_tree),
-            272 => self.if_statement_list0_1(parse_tree),
-            273 => self.if_statement_list_0(&children[0], &children[1], parse_tree),
-            274 => self.if_statement_list_1(parse_tree),
-            275 => self.if_statement_opt_0(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                parse_tree,
-            ),
-            276 => self.if_statement_opt_list_0(&children[0], &children[1], parse_tree),
-            277 => self.if_statement_opt_list_1(parse_tree),
-            278 => self.if_statement_opt_1(parse_tree),
-            279 => self.if_reset_statement(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-                &children[5],
-                parse_tree,
-            ),
-            280 => self.if_reset_statement_list0_0(
+            327 => self.if_statement_list0_0(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -19358,23 +21518,57 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[6],
                 parse_tree,
             ),
-            281 => self.if_reset_statement_list0_list_0(&children[0], &children[1], parse_tree),
-            282 => self.if_reset_statement_list0_list_1(parse_tree),
-            283 => self.if_reset_statement_list0_1(parse_tree),
-            284 => self.if_reset_statement_list_0(&children[0], &children[1], parse_tree),
-            285 => self.if_reset_statement_list_1(parse_tree),
-            286 => self.if_reset_statement_opt_0(
+            328 => self.if_statement_list0_list_0(&children[0], &children[1], parse_tree),
+            329 => self.if_statement_list0_list_1(parse_tree),
+            330 => self.if_statement_list0_1(parse_tree),
+            331 => self.if_statement_list_0(&children[0], &children[1], parse_tree),
+            332 => self.if_statement_list_1(parse_tree),
+            333 => self.if_statement_opt_0(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 parse_tree,
             ),
-            287 => self.if_reset_statement_opt_list_0(&children[0], &children[1], parse_tree),
-            288 => self.if_reset_statement_opt_list_1(parse_tree),
-            289 => self.if_reset_statement_opt_1(parse_tree),
-            290 => self.return_statement(&children[0], &children[1], &children[2], parse_tree),
-            291 => self.for_statement(
+            334 => self.if_statement_opt_list_0(&children[0], &children[1], parse_tree),
+            335 => self.if_statement_opt_list_1(parse_tree),
+            336 => self.if_statement_opt_1(parse_tree),
+            337 => self.if_reset_statement(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                &children[4],
+                &children[5],
+                parse_tree,
+            ),
+            338 => self.if_reset_statement_list0_0(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                &children[4],
+                &children[5],
+                &children[6],
+                parse_tree,
+            ),
+            339 => self.if_reset_statement_list0_list_0(&children[0], &children[1], parse_tree),
+            340 => self.if_reset_statement_list0_list_1(parse_tree),
+            341 => self.if_reset_statement_list0_1(parse_tree),
+            342 => self.if_reset_statement_list_0(&children[0], &children[1], parse_tree),
+            343 => self.if_reset_statement_list_1(parse_tree),
+            344 => self.if_reset_statement_opt_0(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                parse_tree,
+            ),
+            345 => self.if_reset_statement_opt_list_0(&children[0], &children[1], parse_tree),
+            346 => self.if_reset_statement_opt_list_1(parse_tree),
+            347 => self.if_reset_statement_opt_1(parse_tree),
+            348 => self.return_statement(&children[0], &children[1], &children[2], parse_tree),
+            349 => self.for_statement(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -19389,11 +21583,11 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[11],
                 parse_tree,
             ),
-            292 => self.for_statement_list_0(&children[0], &children[1], parse_tree),
-            293 => self.for_statement_list_1(parse_tree),
-            294 => self.for_statement_opt_0(&children[0], &children[1], &children[2], parse_tree),
-            295 => self.for_statement_opt_1(parse_tree),
-            296 => self.let_declaration(
+            350 => self.for_statement_list_0(&children[0], &children[1], parse_tree),
+            351 => self.for_statement_list_1(parse_tree),
+            352 => self.for_statement_opt_0(&children[0], &children[1], &children[2], parse_tree),
+            353 => self.for_statement_opt_1(parse_tree),
+            354 => self.let_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -19401,22 +21595,12 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 parse_tree,
             ),
-            297 => self.let_declaration_group_0(&children[0], parse_tree),
-            298 => self.let_declaration_group_1(&children[0], parse_tree),
-            299 => self.variable_declaration(&children[0], &children[1], parse_tree),
-            300 => self.variable_declaration_opt_0(&children[0], &children[1], parse_tree),
-            301 => self.variable_declaration_opt_1(parse_tree),
-            302 => self.parameter_declaration(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-                &children[5],
-                &children[6],
-                parse_tree,
-            ),
-            303 => self.localparam_declaration(
+            355 => self.let_declaration_group_0(&children[0], parse_tree),
+            356 => self.let_declaration_group_1(&children[0], parse_tree),
+            357 => self.variable_declaration(&children[0], &children[1], parse_tree),
+            358 => self.variable_declaration_opt_0(&children[0], &children[1], parse_tree),
+            359 => self.variable_declaration_opt_1(parse_tree),
+            360 => self.parameter_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -19426,7 +21610,17 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[6],
                 parse_tree,
             ),
-            304 => self.always_ff_declaration(
+            361 => self.localparam_declaration(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                &children[4],
+                &children[5],
+                &children[6],
+                parse_tree,
+            ),
+            362 => self.always_ff_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -19437,40 +21631,32 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[7],
                 parse_tree,
             ),
-            305 => self.always_ff_declaration_list_0(&children[0], &children[1], parse_tree),
-            306 => self.always_ff_declaration_list_1(parse_tree),
-            307 => self.always_ff_declaration_opt_0(&children[0], &children[1], parse_tree),
-            308 => self.always_ff_declaration_opt_1(parse_tree),
-            309 => self.always_ff_clock(&children[0], &children[1], parse_tree),
-            310 => self.always_ff_clock_opt_0(&children[0], parse_tree),
-            311 => self.always_ff_clock_opt_group_0(&children[0], parse_tree),
-            312 => self.always_ff_clock_opt_group_1(&children[0], parse_tree),
-            313 => self.always_ff_clock_opt_1(parse_tree),
-            314 => self.always_ff_reset(&children[0], &children[1], parse_tree),
-            315 => self.always_ff_reset_opt_0(&children[0], parse_tree),
-            316 => self.always_ff_reset_opt_group_0(&children[0], parse_tree),
-            317 => self.always_ff_reset_opt_group_1(&children[0], parse_tree),
-            318 => self.always_ff_reset_opt_group_2(&children[0], parse_tree),
-            319 => self.always_ff_reset_opt_group_3(&children[0], parse_tree),
-            320 => self.always_ff_reset_opt_1(parse_tree),
-            321 => self.always_comb_declaration(
+            363 => self.always_ff_declaration_list_0(&children[0], &children[1], parse_tree),
+            364 => self.always_ff_declaration_list_1(parse_tree),
+            365 => self.always_ff_declaration_opt_0(&children[0], &children[1], parse_tree),
+            366 => self.always_ff_declaration_opt_1(parse_tree),
+            367 => self.always_ff_clock(&children[0], &children[1], parse_tree),
+            368 => self.always_ff_clock_opt_0(&children[0], parse_tree),
+            369 => self.always_ff_clock_opt_group_0(&children[0], parse_tree),
+            370 => self.always_ff_clock_opt_group_1(&children[0], parse_tree),
+            371 => self.always_ff_clock_opt_1(parse_tree),
+            372 => self.always_ff_reset(&children[0], &children[1], parse_tree),
+            373 => self.always_ff_reset_opt_0(&children[0], parse_tree),
+            374 => self.always_ff_reset_opt_group_0(&children[0], parse_tree),
+            375 => self.always_ff_reset_opt_group_1(&children[0], parse_tree),
+            376 => self.always_ff_reset_opt_group_2(&children[0], parse_tree),
+            377 => self.always_ff_reset_opt_group_3(&children[0], parse_tree),
+            378 => self.always_ff_reset_opt_1(parse_tree),
+            379 => self.always_comb_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 parse_tree,
             ),
-            322 => self.always_comb_declaration_list_0(&children[0], &children[1], parse_tree),
-            323 => self.always_comb_declaration_list_1(parse_tree),
-            324 => self.assign_declaration(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-                parse_tree,
-            ),
-            325 => self.modport_declaration(
+            380 => self.always_comb_declaration_list_0(&children[0], &children[1], parse_tree),
+            381 => self.always_comb_declaration_list_1(parse_tree),
+            382 => self.assign_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -19478,13 +21664,21 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 parse_tree,
             ),
-            326 => self.modport_list(&children[0], &children[1], &children[2], parse_tree),
-            327 => self.modport_list_list_0(&children[0], &children[1], &children[2], parse_tree),
-            328 => self.modport_list_list_1(parse_tree),
-            329 => self.modport_list_opt_0(&children[0], parse_tree),
-            330 => self.modport_list_opt_1(parse_tree),
-            331 => self.modport_item(&children[0], &children[1], &children[2], parse_tree),
-            332 => self.enum_declaration(
+            383 => self.modport_declaration(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                &children[4],
+                parse_tree,
+            ),
+            384 => self.modport_list(&children[0], &children[1], &children[2], parse_tree),
+            385 => self.modport_list_list_0(&children[0], &children[1], &children[2], parse_tree),
+            386 => self.modport_list_list_1(parse_tree),
+            387 => self.modport_list_opt_0(&children[0], parse_tree),
+            388 => self.modport_list_opt_1(parse_tree),
+            389 => self.modport_item(&children[0], &children[1], &children[2], parse_tree),
+            390 => self.enum_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -19494,15 +21688,15 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[6],
                 parse_tree,
             ),
-            333 => self.enum_list(&children[0], &children[1], &children[2], parse_tree),
-            334 => self.enum_list_list_0(&children[0], &children[1], &children[2], parse_tree),
-            335 => self.enum_list_list_1(parse_tree),
-            336 => self.enum_list_opt_0(&children[0], parse_tree),
-            337 => self.enum_list_opt_1(parse_tree),
-            338 => self.enum_item(&children[0], &children[1], parse_tree),
-            339 => self.enum_item_opt_0(&children[0], &children[1], parse_tree),
-            340 => self.enum_item_opt_1(parse_tree),
-            341 => self.struct_declaration(
+            391 => self.enum_list(&children[0], &children[1], &children[2], parse_tree),
+            392 => self.enum_list_list_0(&children[0], &children[1], &children[2], parse_tree),
+            393 => self.enum_list_list_1(parse_tree),
+            394 => self.enum_list_opt_0(&children[0], parse_tree),
+            395 => self.enum_list_opt_1(parse_tree),
+            396 => self.enum_item(&children[0], &children[1], parse_tree),
+            397 => self.enum_item_opt_0(&children[0], &children[1], parse_tree),
+            398 => self.enum_item_opt_1(parse_tree),
+            399 => self.struct_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -19510,13 +21704,13 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 parse_tree,
             ),
-            342 => self.struct_list(&children[0], &children[1], &children[2], parse_tree),
-            343 => self.struct_list_list_0(&children[0], &children[1], &children[2], parse_tree),
-            344 => self.struct_list_list_1(parse_tree),
-            345 => self.struct_list_opt_0(&children[0], parse_tree),
-            346 => self.struct_list_opt_1(parse_tree),
-            347 => self.struct_item(&children[0], &children[1], &children[2], parse_tree),
-            348 => self.instance_declaration(
+            400 => self.struct_list(&children[0], &children[1], &children[2], parse_tree),
+            401 => self.struct_list_list_0(&children[0], &children[1], &children[2], parse_tree),
+            402 => self.struct_list_list_1(parse_tree),
+            403 => self.struct_list_opt_0(&children[0], parse_tree),
+            404 => self.struct_list_opt_1(parse_tree),
+            405 => self.struct_item(&children[0], &children[1], &children[2], parse_tree),
+            406 => self.instance_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -19524,144 +21718,108 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 parse_tree,
             ),
-            349 => self.instance_declaration_opt1_0(
+            407 => self.instance_declaration_opt1_0(
                 &children[0],
                 &children[1],
                 &children[2],
                 parse_tree,
             ),
-            350 => self.instance_declaration_opt2_0(&children[0], parse_tree),
-            351 => self.instance_declaration_opt2_1(parse_tree),
-            352 => self.instance_declaration_opt1_1(parse_tree),
-            353 => self.instance_declaration_opt0_0(&children[0], parse_tree),
-            354 => self.instance_declaration_opt0_1(parse_tree),
-            355 => self.instance_declaration_opt_0(&children[0], parse_tree),
-            356 => self.instance_declaration_opt_1(parse_tree),
-            357 => self.instance_parameter(
+            408 => self.instance_declaration_opt2_0(&children[0], parse_tree),
+            409 => self.instance_declaration_opt2_1(parse_tree),
+            410 => self.instance_declaration_opt1_1(parse_tree),
+            411 => self.instance_declaration_opt0_0(&children[0], parse_tree),
+            412 => self.instance_declaration_opt0_1(parse_tree),
+            413 => self.instance_declaration_opt_0(&children[0], parse_tree),
+            414 => self.instance_declaration_opt_1(parse_tree),
+            415 => self.instance_parameter(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 parse_tree,
             ),
-            358 => self.instance_parameter_opt_0(&children[0], parse_tree),
-            359 => self.instance_parameter_opt_1(parse_tree),
-            360 => {
+            416 => self.instance_parameter_opt_0(&children[0], parse_tree),
+            417 => self.instance_parameter_opt_1(parse_tree),
+            418 => {
                 self.instance_parameter_list(&children[0], &children[1], &children[2], parse_tree)
             }
-            361 => self.instance_parameter_list_list_0(
+            419 => self.instance_parameter_list_list_0(
                 &children[0],
                 &children[1],
                 &children[2],
                 parse_tree,
             ),
-            362 => self.instance_parameter_list_list_1(parse_tree),
-            363 => self.instance_parameter_list_opt_0(&children[0], parse_tree),
-            364 => self.instance_parameter_list_opt_1(parse_tree),
-            365 => self.instance_parameter_item(&children[0], &children[1], parse_tree),
-            366 => self.instance_parameter_item_opt_0(&children[0], &children[1], parse_tree),
-            367 => self.instance_parameter_item_opt_1(parse_tree),
-            368 => self.instance_port_list(&children[0], &children[1], &children[2], parse_tree),
-            369 => {
+            420 => self.instance_parameter_list_list_1(parse_tree),
+            421 => self.instance_parameter_list_opt_0(&children[0], parse_tree),
+            422 => self.instance_parameter_list_opt_1(parse_tree),
+            423 => self.instance_parameter_item(&children[0], &children[1], parse_tree),
+            424 => self.instance_parameter_item_opt_0(&children[0], &children[1], parse_tree),
+            425 => self.instance_parameter_item_opt_1(parse_tree),
+            426 => self.instance_port_list(&children[0], &children[1], &children[2], parse_tree),
+            427 => {
                 self.instance_port_list_list_0(&children[0], &children[1], &children[2], parse_tree)
             }
-            370 => self.instance_port_list_list_1(parse_tree),
-            371 => self.instance_port_list_opt_0(&children[0], parse_tree),
-            372 => self.instance_port_list_opt_1(parse_tree),
-            373 => self.instance_port_item(&children[0], &children[1], parse_tree),
-            374 => self.instance_port_item_opt_0(&children[0], &children[1], parse_tree),
-            375 => self.instance_port_item_opt_1(parse_tree),
-            376 => self.with_parameter(
+            428 => self.instance_port_list_list_1(parse_tree),
+            429 => self.instance_port_list_opt_0(&children[0], parse_tree),
+            430 => self.instance_port_list_opt_1(parse_tree),
+            431 => self.instance_port_item(&children[0], &children[1], parse_tree),
+            432 => self.instance_port_item_opt_0(&children[0], &children[1], parse_tree),
+            433 => self.instance_port_item_opt_1(parse_tree),
+            434 => self.with_parameter(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 parse_tree,
             ),
-            377 => self.with_parameter_opt_0(&children[0], parse_tree),
-            378 => self.with_parameter_opt_1(parse_tree),
-            379 => self.with_parameter_list(&children[0], &children[1], &children[2], parse_tree),
-            380 => self.with_parameter_list_list_0(
+            435 => self.with_parameter_opt_0(&children[0], parse_tree),
+            436 => self.with_parameter_opt_1(parse_tree),
+            437 => self.with_parameter_list(&children[0], &children[1], &children[2], parse_tree),
+            438 => self.with_parameter_list_list_0(
                 &children[0],
                 &children[1],
                 &children[2],
                 parse_tree,
             ),
-            381 => self.with_parameter_list_list_1(parse_tree),
-            382 => self.with_parameter_list_opt_0(&children[0], parse_tree),
-            383 => self.with_parameter_list_opt_1(parse_tree),
-            384 => self.with_parameter_item(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-                &children[5],
-                parse_tree,
-            ),
-            385 => self.with_parameter_item_group_0(&children[0], parse_tree),
-            386 => self.with_parameter_item_group_1(&children[0], parse_tree),
-            387 => self.port_declaration(&children[0], &children[1], &children[2], parse_tree),
-            388 => self.port_declaration_opt_0(&children[0], parse_tree),
-            389 => self.port_declaration_opt_1(parse_tree),
-            390 => self.port_declaration_list(&children[0], &children[1], &children[2], parse_tree),
-            391 => self.port_declaration_list_list_0(
-                &children[0],
-                &children[1],
-                &children[2],
-                parse_tree,
-            ),
-            392 => self.port_declaration_list_list_1(parse_tree),
-            393 => self.port_declaration_list_opt_0(&children[0], parse_tree),
-            394 => self.port_declaration_list_opt_1(parse_tree),
-            395 => self.port_declaration_item(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                parse_tree,
-            ),
-            396 => self.direction_0(&children[0], parse_tree),
-            397 => self.direction_1(&children[0], parse_tree),
-            398 => self.direction_2(&children[0], parse_tree),
-            399 => self.direction_3(&children[0], parse_tree),
-            400 => self.function_declaration(
+            439 => self.with_parameter_list_list_1(parse_tree),
+            440 => self.with_parameter_list_opt_0(&children[0], parse_tree),
+            441 => self.with_parameter_list_opt_1(parse_tree),
+            442 => self.with_parameter_item(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
                 &children[5],
-                &children[6],
-                &children[7],
-                &children[8],
                 parse_tree,
             ),
-            401 => self.function_declaration_list_0(&children[0], &children[1], parse_tree),
-            402 => self.function_declaration_list_1(parse_tree),
-            403 => self.function_declaration_opt0_0(&children[0], parse_tree),
-            404 => self.function_declaration_opt0_1(parse_tree),
-            405 => self.function_declaration_opt_0(&children[0], parse_tree),
-            406 => self.function_declaration_opt_1(parse_tree),
-            407 => self.function_item_0(&children[0], parse_tree),
-            408 => self.function_item_1(&children[0], parse_tree),
-            409 => self.module_declaration(
+            443 => self.with_parameter_item_group_0(&children[0], parse_tree),
+            444 => self.with_parameter_item_group_1(&children[0], parse_tree),
+            445 => self.port_declaration(&children[0], &children[1], &children[2], parse_tree),
+            446 => self.port_declaration_opt_0(&children[0], parse_tree),
+            447 => self.port_declaration_opt_1(parse_tree),
+            448 => self.port_declaration_list(&children[0], &children[1], &children[2], parse_tree),
+            449 => self.port_declaration_list_list_0(
+                &children[0],
+                &children[1],
+                &children[2],
+                parse_tree,
+            ),
+            450 => self.port_declaration_list_list_1(parse_tree),
+            451 => self.port_declaration_list_opt_0(&children[0], parse_tree),
+            452 => self.port_declaration_list_opt_1(parse_tree),
+            453 => self.port_declaration_item(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
-                &children[4],
-                &children[5],
-                &children[6],
                 parse_tree,
             ),
-            410 => self.module_declaration_list_0(&children[0], &children[1], parse_tree),
-            411 => self.module_declaration_list_1(parse_tree),
-            412 => self.module_declaration_opt0_0(&children[0], parse_tree),
-            413 => self.module_declaration_opt0_1(parse_tree),
-            414 => self.module_declaration_opt_0(&children[0], parse_tree),
-            415 => self.module_declaration_opt_1(parse_tree),
-            416 => self.module_if_declaration(
+            454 => self.direction_0(&children[0], parse_tree),
+            455 => self.direction_1(&children[0], parse_tree),
+            456 => self.direction_2(&children[0], parse_tree),
+            457 => self.direction_3(&children[0], parse_tree),
+            458 => self.function_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -19673,7 +21831,43 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[8],
                 parse_tree,
             ),
-            417 => self.module_if_declaration_list0_0(
+            459 => self.function_declaration_list_0(&children[0], &children[1], parse_tree),
+            460 => self.function_declaration_list_1(parse_tree),
+            461 => self.function_declaration_opt0_0(&children[0], parse_tree),
+            462 => self.function_declaration_opt0_1(parse_tree),
+            463 => self.function_declaration_opt_0(&children[0], parse_tree),
+            464 => self.function_declaration_opt_1(parse_tree),
+            465 => self.function_item_0(&children[0], parse_tree),
+            466 => self.function_item_1(&children[0], parse_tree),
+            467 => self.module_declaration(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                &children[4],
+                &children[5],
+                &children[6],
+                parse_tree,
+            ),
+            468 => self.module_declaration_list_0(&children[0], &children[1], parse_tree),
+            469 => self.module_declaration_list_1(parse_tree),
+            470 => self.module_declaration_opt0_0(&children[0], parse_tree),
+            471 => self.module_declaration_opt0_1(parse_tree),
+            472 => self.module_declaration_opt_0(&children[0], parse_tree),
+            473 => self.module_declaration_opt_1(parse_tree),
+            474 => self.module_if_declaration(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                &children[4],
+                &children[5],
+                &children[6],
+                &children[7],
+                &children[8],
+                parse_tree,
+            ),
+            475 => self.module_if_declaration_list0_0(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -19684,12 +21878,12 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[7],
                 parse_tree,
             ),
-            418 => self.module_if_declaration_list0_list_0(&children[0], &children[1], parse_tree),
-            419 => self.module_if_declaration_list0_list_1(parse_tree),
-            420 => self.module_if_declaration_list0_1(parse_tree),
-            421 => self.module_if_declaration_list_0(&children[0], &children[1], parse_tree),
-            422 => self.module_if_declaration_list_1(parse_tree),
-            423 => self.module_if_declaration_opt0_0(
+            476 => self.module_if_declaration_list0_list_0(&children[0], &children[1], parse_tree),
+            477 => self.module_if_declaration_list0_list_1(parse_tree),
+            478 => self.module_if_declaration_list0_1(parse_tree),
+            479 => self.module_if_declaration_list_0(&children[0], &children[1], parse_tree),
+            480 => self.module_if_declaration_list_1(parse_tree),
+            481 => self.module_if_declaration_opt0_0(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -19697,14 +21891,14 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 parse_tree,
             ),
-            424 => self.module_if_declaration_opt0_list_0(&children[0], &children[1], parse_tree),
-            425 => self.module_if_declaration_opt0_list_1(parse_tree),
-            426 => self.module_if_declaration_opt1_0(&children[0], &children[1], parse_tree),
-            427 => self.module_if_declaration_opt1_1(parse_tree),
-            428 => self.module_if_declaration_opt0_1(parse_tree),
-            429 => self.module_if_declaration_opt_0(&children[0], &children[1], parse_tree),
-            430 => self.module_if_declaration_opt_1(parse_tree),
-            431 => self.module_for_declaration(
+            482 => self.module_if_declaration_opt0_list_0(&children[0], &children[1], parse_tree),
+            483 => self.module_if_declaration_opt0_list_1(parse_tree),
+            484 => self.module_if_declaration_opt1_0(&children[0], &children[1], parse_tree),
+            485 => self.module_if_declaration_opt1_1(parse_tree),
+            486 => self.module_if_declaration_opt0_1(parse_tree),
+            487 => self.module_if_declaration_opt_0(&children[0], &children[1], parse_tree),
+            488 => self.module_if_declaration_opt_1(parse_tree),
+            489 => self.module_for_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -19719,27 +21913,27 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[11],
                 parse_tree,
             ),
-            432 => self.module_for_declaration_list_0(&children[0], &children[1], parse_tree),
-            433 => self.module_for_declaration_list_1(parse_tree),
-            434 => self.module_for_declaration_opt_0(
+            490 => self.module_for_declaration_list_0(&children[0], &children[1], parse_tree),
+            491 => self.module_for_declaration_list_1(parse_tree),
+            492 => self.module_for_declaration_opt_0(
                 &children[0],
                 &children[1],
                 &children[2],
                 parse_tree,
             ),
-            435 => self.module_for_declaration_opt_1(parse_tree),
-            436 => self.module_item_0(&children[0], parse_tree),
-            437 => self.module_item_1(&children[0], parse_tree),
-            438 => self.module_item_2(&children[0], parse_tree),
-            439 => self.module_item_3(&children[0], parse_tree),
-            440 => self.module_item_4(&children[0], parse_tree),
-            441 => self.module_item_5(&children[0], parse_tree),
-            442 => self.module_item_6(&children[0], parse_tree),
-            443 => self.module_item_7(&children[0], parse_tree),
-            444 => self.module_item_8(&children[0], parse_tree),
-            445 => self.module_item_9(&children[0], parse_tree),
-            446 => self.module_item_10(&children[0], parse_tree),
-            447 => self.interface_declaration(
+            493 => self.module_for_declaration_opt_1(parse_tree),
+            494 => self.module_item_0(&children[0], parse_tree),
+            495 => self.module_item_1(&children[0], parse_tree),
+            496 => self.module_item_2(&children[0], parse_tree),
+            497 => self.module_item_3(&children[0], parse_tree),
+            498 => self.module_item_4(&children[0], parse_tree),
+            499 => self.module_item_5(&children[0], parse_tree),
+            500 => self.module_item_6(&children[0], parse_tree),
+            501 => self.module_item_7(&children[0], parse_tree),
+            502 => self.module_item_8(&children[0], parse_tree),
+            503 => self.module_item_9(&children[0], parse_tree),
+            504 => self.module_item_10(&children[0], parse_tree),
+            505 => self.interface_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -19748,11 +21942,11 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[5],
                 parse_tree,
             ),
-            448 => self.interface_declaration_list_0(&children[0], &children[1], parse_tree),
-            449 => self.interface_declaration_list_1(parse_tree),
-            450 => self.interface_declaration_opt_0(&children[0], parse_tree),
-            451 => self.interface_declaration_opt_1(parse_tree),
-            452 => self.interface_if_declaration(
+            506 => self.interface_declaration_list_0(&children[0], &children[1], parse_tree),
+            507 => self.interface_declaration_list_1(parse_tree),
+            508 => self.interface_declaration_opt_0(&children[0], parse_tree),
+            509 => self.interface_declaration_opt_1(parse_tree),
+            510 => self.interface_if_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -19764,7 +21958,7 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[8],
                 parse_tree,
             ),
-            453 => self.interface_if_declaration_list0_0(
+            511 => self.interface_if_declaration_list0_0(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -19775,14 +21969,14 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[7],
                 parse_tree,
             ),
-            454 => {
+            512 => {
                 self.interface_if_declaration_list0_list_0(&children[0], &children[1], parse_tree)
             }
-            455 => self.interface_if_declaration_list0_list_1(parse_tree),
-            456 => self.interface_if_declaration_list0_1(parse_tree),
-            457 => self.interface_if_declaration_list_0(&children[0], &children[1], parse_tree),
-            458 => self.interface_if_declaration_list_1(parse_tree),
-            459 => self.interface_if_declaration_opt0_0(
+            513 => self.interface_if_declaration_list0_list_1(parse_tree),
+            514 => self.interface_if_declaration_list0_1(parse_tree),
+            515 => self.interface_if_declaration_list_0(&children[0], &children[1], parse_tree),
+            516 => self.interface_if_declaration_list_1(parse_tree),
+            517 => self.interface_if_declaration_opt0_0(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -19790,16 +21984,16 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 parse_tree,
             ),
-            460 => {
+            518 => {
                 self.interface_if_declaration_opt0_list_0(&children[0], &children[1], parse_tree)
             }
-            461 => self.interface_if_declaration_opt0_list_1(parse_tree),
-            462 => self.interface_if_declaration_opt1_0(&children[0], &children[1], parse_tree),
-            463 => self.interface_if_declaration_opt1_1(parse_tree),
-            464 => self.interface_if_declaration_opt0_1(parse_tree),
-            465 => self.interface_if_declaration_opt_0(&children[0], &children[1], parse_tree),
-            466 => self.interface_if_declaration_opt_1(parse_tree),
-            467 => self.interface_for_declaration(
+            519 => self.interface_if_declaration_opt0_list_1(parse_tree),
+            520 => self.interface_if_declaration_opt1_0(&children[0], &children[1], parse_tree),
+            521 => self.interface_if_declaration_opt1_1(parse_tree),
+            522 => self.interface_if_declaration_opt0_1(parse_tree),
+            523 => self.interface_if_declaration_opt_0(&children[0], &children[1], parse_tree),
+            524 => self.interface_if_declaration_opt_1(parse_tree),
+            525 => self.interface_for_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -19814,28 +22008,28 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[11],
                 parse_tree,
             ),
-            468 => self.interface_for_declaration_list_0(&children[0], &children[1], parse_tree),
-            469 => self.interface_for_declaration_list_1(parse_tree),
-            470 => self.interface_for_declaration_opt_0(
+            526 => self.interface_for_declaration_list_0(&children[0], &children[1], parse_tree),
+            527 => self.interface_for_declaration_list_1(parse_tree),
+            528 => self.interface_for_declaration_opt_0(
                 &children[0],
                 &children[1],
                 &children[2],
                 parse_tree,
             ),
-            471 => self.interface_for_declaration_opt_1(parse_tree),
-            472 => self.interface_item_0(&children[0], parse_tree),
-            473 => self.interface_item_1(&children[0], parse_tree),
-            474 => self.interface_item_2(&children[0], parse_tree),
-            475 => self.interface_item_3(&children[0], parse_tree),
-            476 => self.interface_item_4(&children[0], parse_tree),
-            477 => self.interface_item_5(&children[0], parse_tree),
-            478 => self.interface_item_6(&children[0], parse_tree),
-            479 => self.interface_item_7(&children[0], parse_tree),
-            480 => self.description_0(&children[0], parse_tree),
-            481 => self.description_1(&children[0], parse_tree),
-            482 => self.veryl(&children[0], &children[1], parse_tree),
-            483 => self.veryl_list_0(&children[0], &children[1], parse_tree),
-            484 => self.veryl_list_1(parse_tree),
+            529 => self.interface_for_declaration_opt_1(parse_tree),
+            530 => self.interface_item_0(&children[0], parse_tree),
+            531 => self.interface_item_1(&children[0], parse_tree),
+            532 => self.interface_item_2(&children[0], parse_tree),
+            533 => self.interface_item_3(&children[0], parse_tree),
+            534 => self.interface_item_4(&children[0], parse_tree),
+            535 => self.interface_item_5(&children[0], parse_tree),
+            536 => self.interface_item_6(&children[0], parse_tree),
+            537 => self.interface_item_7(&children[0], parse_tree),
+            538 => self.description_0(&children[0], parse_tree),
+            539 => self.description_1(&children[0], parse_tree),
+            540 => self.veryl(&children[0], &children[1], parse_tree),
+            541 => self.veryl_list_0(&children[0], &children[1], parse_tree),
+            542 => self.veryl_list_1(parse_tree),
             _ => Err(miette!("Unhandled production number: {}", prod_num)),
         }
     }

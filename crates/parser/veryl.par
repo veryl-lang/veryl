@@ -11,6 +11,8 @@
 // Terminal
 // ----------------------------------------------------------------------------
 
+// Longest match should be first
+
 CommentsTerm          : "(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+"    : Token;
 ExponentTerm          : /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/  : Token;
 FixedPointTerm        : /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/                             : Token;
@@ -21,9 +23,18 @@ MinusColonTerm        : '-:'                                                    
 MinusGTTerm           : '->'                                                                 : Token;
 PlusColonTerm         : '+:'                                                                 : Token;
 AssignmentOperatorTerm: "\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<=|>>=|<<<=|>>>="                      : Token;
-BinaryOperatorTerm    : "\*\*|\*|/|%|<<<|>>>|<<|>>|<=|>=|<|>|===|==\?|!==|!=\?|==|!=|&&|\|\|": Token;
-CommonOperatorTerm    : "\+|-|&|\||\^~|\^|~\^|~&|~\|"                                        : Token;
-UnaryOperatorTerm     : "!|~"                                                                : Token;
+Operator11Term        : "\*\*"                                                               : Token;
+Operator10Term        : "\*|/|%"                                                             : Token;
+Operator09Term        : "\+|-"                                                               : Token;
+Operator08Term        : "<<<|>>>|<<|>>"                                                      : Token;
+Operator07Term        : "<=|>=|<|>"                                                          : Token;
+Operator06Term        : "===|==\?|!==|!=\?|==|!="                                            : Token;
+Operator02Term        : "&&"                                                                 : Token;
+Operator01Term        : "\|\|"                                                               : Token;
+Operator05Term        : "&"                                                                  : Token;
+Operator04Term        : "\^~|\^|~\^"                                                         : Token;
+Operator03Term        : "\|"                                                                 : Token;
+UnaryOperatorTerm     : "~&|~\||!|~"                                                         : Token;
 ColonTerm             : ':'                                                                  : Token;
 CommaTerm             : ','                                                                  : Token;
 DollarTerm            : '$'                                                                  : Token;
@@ -92,11 +103,18 @@ BasedToken     : BasedTerm     : Token Comments;
 BaseLessToken  : BaseLessTerm  : Token Comments;
 AllBitToken    : AllBitTerm    : Token Comments;
 
-// Some tokens should be before operator
-
 AssignmentOperatorToken: AssignmentOperatorTerm: Token Comments;
-BinaryOperatorToken    : BinaryOperatorTerm    : Token Comments;
-CommonOperatorToken    : CommonOperatorTerm    : Token Comments;
+Operator01Token        : Operator01Term        : Token Comments;
+Operator02Token        : Operator02Term        : Token Comments;
+Operator03Token        : Operator03Term        : Token Comments;
+Operator04Token        : Operator04Term        : Token Comments;
+Operator05Token        : Operator05Term        : Token Comments;
+Operator06Token        : Operator06Term        : Token Comments;
+Operator07Token        : Operator07Term        : Token Comments;
+Operator08Token        : Operator08Term        : Token Comments;
+Operator09Token        : Operator09Term        : Token Comments;
+Operator10Token        : Operator10Term        : Token Comments;
+Operator11Token        : Operator11Term        : Token Comments;
 UnaryOperatorToken     : UnaryOperatorTerm     : Token Comments;
 
 ColonToken     : ColonTerm     : Token Comments;
@@ -174,8 +192,17 @@ AllBit    : AllBitToken    : VerylToken;
 
 // Operator
 AssignmentOperator: AssignmentOperatorToken: VerylToken;
-CommonOperator    : CommonOperatorToken    : VerylToken;
-BinaryOperator    : BinaryOperatorToken    : VerylToken;
+Operator01        : Operator01Token        : VerylToken;
+Operator02        : Operator02Token        : VerylToken;
+Operator03        : Operator03Token        : VerylToken;
+Operator04        : Operator04Token        : VerylToken;
+Operator05        : Operator05Token        : VerylToken;
+Operator06        : Operator06Token        : VerylToken;
+Operator07        : Operator07Token        : VerylToken;
+Operator08        : Operator08Token        : VerylToken;
+Operator09        : Operator09Token        : VerylToken;
+Operator10        : Operator10Token        : VerylToken;
+Operator11        : Operator11Token        : VerylToken;
 UnaryOperator     : UnaryOperatorToken     : VerylToken;
 
 // Symbol
@@ -267,8 +294,18 @@ HierarchicalIdentifier: Identifier { Range } { Dot Identifier { Range } };
 // Expression
 // ----------------------------------------------------------------------------
 
-Expression : Expression1 { ( BinaryOperator | CommonOperator ) Expression1 };
-Expression1: [ ( UnaryOperator | CommonOperator ) ] Factor;
+Expression  : Expression01 { Operator01 Expression01 };
+Expression01: Expression02 { Operator02 Expression02 };
+Expression02: Expression03 { Operator03 Expression03 };
+Expression03: Expression04 { Operator04 Expression04 };
+Expression04: Expression05 { Operator05 Expression05 };
+Expression05: Expression06 { Operator06 Expression06 };
+Expression06: Expression07 { Operator07 Expression07 };
+Expression07: Expression08 { Operator08 Expression08 };
+Expression08: Expression09 { Operator09 Expression09 };
+Expression09: Expression10 { Operator10 Expression10 };
+Expression10: Expression11 { Operator11 Expression11 };
+Expression11: [ ( UnaryOperator | Operator09 | Operator05 | Operator03 | Operator04 ) ] Factor;
 
 Factor: Number
       | [ Dollar ] HierarchicalIdentifier [ LParen [ FunctionCallArg ] RParen ]

@@ -76,18 +76,81 @@ pub trait VerylWalker {
         after!(self, assignment_operator, arg);
     }
 
-    /// Semantic action for non-terminal 'CommonOperator'
-    fn common_operator(&mut self, arg: &CommonOperator) {
-        before!(self, common_operator, arg);
-        self.veryl_token(&arg.common_operator_token);
-        after!(self, common_operator, arg);
+    /// Semantic action for non-terminal 'Operator01'
+    fn operator01(&mut self, arg: &Operator01) {
+        before!(self, operator01, arg);
+        self.veryl_token(&arg.operator01_token);
+        after!(self, operator01, arg);
     }
 
-    /// Semantic action for non-terminal 'BinaryOperator'
-    fn binary_operator(&mut self, arg: &BinaryOperator) {
-        before!(self, binary_operator, arg);
-        self.veryl_token(&arg.binary_operator_token);
-        after!(self, binary_operator, arg);
+    /// Semantic action for non-terminal 'Operator02'
+    fn operator02(&mut self, arg: &Operator02) {
+        before!(self, operator02, arg);
+        self.veryl_token(&arg.operator02_token);
+        after!(self, operator02, arg);
+    }
+
+    /// Semantic action for non-terminal 'Operator03'
+    fn operator03(&mut self, arg: &Operator03) {
+        before!(self, operator03, arg);
+        self.veryl_token(&arg.operator03_token);
+        after!(self, operator03, arg);
+    }
+
+    /// Semantic action for non-terminal 'Operator04'
+    fn operator04(&mut self, arg: &Operator04) {
+        before!(self, operator04, arg);
+        self.veryl_token(&arg.operator04_token);
+        after!(self, operator04, arg);
+    }
+
+    /// Semantic action for non-terminal 'Operator05'
+    fn operator05(&mut self, arg: &Operator05) {
+        before!(self, operator05, arg);
+        self.veryl_token(&arg.operator05_token);
+        after!(self, operator05, arg);
+    }
+
+    /// Semantic action for non-terminal 'Operator06'
+    fn operator06(&mut self, arg: &Operator06) {
+        before!(self, operator06, arg);
+        self.veryl_token(&arg.operator06_token);
+        after!(self, operator06, arg);
+    }
+
+    /// Semantic action for non-terminal 'Operator07'
+    fn operator07(&mut self, arg: &Operator07) {
+        before!(self, operator07, arg);
+        self.veryl_token(&arg.operator07_token);
+        after!(self, operator07, arg);
+    }
+
+    /// Semantic action for non-terminal 'Operator08'
+    fn operator08(&mut self, arg: &Operator08) {
+        before!(self, operator08, arg);
+        self.veryl_token(&arg.operator08_token);
+        after!(self, operator08, arg);
+    }
+
+    /// Semantic action for non-terminal 'Operator09'
+    fn operator09(&mut self, arg: &Operator09) {
+        before!(self, operator09, arg);
+        self.veryl_token(&arg.operator09_token);
+        after!(self, operator09, arg);
+    }
+
+    /// Semantic action for non-terminal 'Operator10'
+    fn operator10(&mut self, arg: &Operator10) {
+        before!(self, operator10, arg);
+        self.veryl_token(&arg.operator10_token);
+        after!(self, operator10, arg);
+    }
+
+    /// Semantic action for non-terminal 'Operator11'
+    fn operator11(&mut self, arg: &Operator11) {
+        before!(self, operator11, arg);
+        self.veryl_token(&arg.operator11_token);
+        after!(self, operator11, arg);
     }
 
     /// Semantic action for non-terminal 'UnaryOperator'
@@ -540,28 +603,138 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'Expression'
     fn expression(&mut self, arg: &Expression) {
         before!(self, expression, arg);
-        self.expression1(&arg.expression1);
+        self.expression01(&arg.expression01);
         for x in &arg.expression_list {
-            match &*x.expression_list_group {
-                ExpressionListGroup::BinaryOperator(x) => self.binary_operator(&x.binary_operator),
-                ExpressionListGroup::CommonOperator(x) => self.common_operator(&x.common_operator),
-            };
-            self.expression1(&x.expression1);
+            self.operator01(&x.operator01);
+            self.expression01(&x.expression01);
         }
         after!(self, expression, arg);
     }
 
-    /// Semantic action for non-terminal 'Expression1'
-    fn expression1(&mut self, arg: &Expression1) {
-        before!(self, expression1, arg);
-        if let Some(ref x) = arg.expression1_opt {
-            match &*x.expression1_opt_group {
-                Expression1OptGroup::UnaryOperator(x) => self.unary_operator(&x.unary_operator),
-                Expression1OptGroup::CommonOperator(x) => self.common_operator(&x.common_operator),
-            };
+    /// Semantic action for non-terminal 'Expression01'
+    fn expression01(&mut self, arg: &Expression01) {
+        before!(self, expression01, arg);
+        self.expression02(&arg.expression02);
+        for x in &arg.expression01_list {
+            self.operator02(&x.operator02);
+            self.expression02(&x.expression02);
+        }
+        after!(self, expression01, arg);
+    }
+
+    /// Semantic action for non-terminal 'Expression02'
+    fn expression02(&mut self, arg: &Expression02) {
+        before!(self, expression02, arg);
+        self.expression03(&arg.expression03);
+        for x in &arg.expression02_list {
+            self.operator03(&x.operator03);
+            self.expression03(&x.expression03);
+        }
+        after!(self, expression02, arg);
+    }
+
+    /// Semantic action for non-terminal 'Expression03'
+    fn expression03(&mut self, arg: &Expression03) {
+        before!(self, expression03, arg);
+        self.expression04(&arg.expression04);
+        for x in &arg.expression03_list {
+            self.operator04(&x.operator04);
+            self.expression04(&x.expression04);
+        }
+        after!(self, expression03, arg);
+    }
+
+    /// Semantic action for non-terminal 'Expression04'
+    fn expression04(&mut self, arg: &Expression04) {
+        before!(self, expression04, arg);
+        self.expression05(&arg.expression05);
+        for x in &arg.expression04_list {
+            self.operator05(&x.operator05);
+            self.expression05(&x.expression05);
+        }
+        after!(self, expression04, arg);
+    }
+
+    /// Semantic action for non-terminal 'Expression05'
+    fn expression05(&mut self, arg: &Expression05) {
+        before!(self, expression05, arg);
+        self.expression06(&arg.expression06);
+        for x in &arg.expression05_list {
+            self.operator06(&x.operator06);
+            self.expression06(&x.expression06);
+        }
+        after!(self, expression05, arg);
+    }
+
+    /// Semantic action for non-terminal 'Expression06'
+    fn expression06(&mut self, arg: &Expression06) {
+        before!(self, expression06, arg);
+        self.expression07(&arg.expression07);
+        for x in &arg.expression06_list {
+            self.operator07(&x.operator07);
+            self.expression07(&x.expression07);
+        }
+        after!(self, expression06, arg);
+    }
+
+    /// Semantic action for non-terminal 'Expression07'
+    fn expression07(&mut self, arg: &Expression07) {
+        before!(self, expression07, arg);
+        self.expression08(&arg.expression08);
+        for x in &arg.expression07_list {
+            self.operator08(&x.operator08);
+            self.expression08(&x.expression08);
+        }
+        after!(self, expression07, arg);
+    }
+
+    /// Semantic action for non-terminal 'Expression08'
+    fn expression08(&mut self, arg: &Expression08) {
+        before!(self, expression08, arg);
+        self.expression09(&arg.expression09);
+        for x in &arg.expression08_list {
+            self.operator09(&x.operator09);
+            self.expression09(&x.expression09);
+        }
+        after!(self, expression08, arg);
+    }
+
+    /// Semantic action for non-terminal 'Expression09'
+    fn expression09(&mut self, arg: &Expression09) {
+        before!(self, expression09, arg);
+        self.expression10(&arg.expression10);
+        for x in &arg.expression09_list {
+            self.operator10(&x.operator10);
+            self.expression10(&x.expression10);
+        }
+        after!(self, expression09, arg);
+    }
+
+    /// Semantic action for non-terminal 'Expression10'
+    fn expression10(&mut self, arg: &Expression10) {
+        before!(self, expression10, arg);
+        self.expression11(&arg.expression11);
+        for x in &arg.expression10_list {
+            self.operator11(&x.operator11);
+            self.expression11(&x.expression11);
+        }
+        after!(self, expression10, arg);
+    }
+
+    /// Semantic action for non-terminal 'Expression11'
+    fn expression11(&mut self, arg: &Expression11) {
+        before!(self, expression11, arg);
+        if let Some(ref x) = arg.expression11_opt {
+            match &*x.expression11_opt_group {
+                Expression11OptGroup::UnaryOperator(x) => self.unary_operator(&x.unary_operator),
+                Expression11OptGroup::Operator03(x) => self.operator03(&x.operator03),
+                Expression11OptGroup::Operator04(x) => self.operator04(&x.operator04),
+                Expression11OptGroup::Operator05(x) => self.operator05(&x.operator05),
+                Expression11OptGroup::Operator09(x) => self.operator09(&x.operator09),
+            }
         }
         self.factor(&arg.factor);
-        after!(self, expression1, arg);
+        after!(self, expression11, arg);
     }
 
     /// Semantic action for non-terminal 'Factor'

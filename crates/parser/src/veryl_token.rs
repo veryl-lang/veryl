@@ -171,16 +171,17 @@ token_with_comments!(
     AssignmentOperatorTerm,
     assignment_operator_term
 );
-token_with_comments!(
-    CommonOperatorToken,
-    CommonOperatorTerm,
-    common_operator_term
-);
-token_with_comments!(
-    BinaryOperatorToken,
-    BinaryOperatorTerm,
-    binary_operator_term
-);
+token_with_comments!(Operator01Token, Operator01Term, operator01_term);
+token_with_comments!(Operator02Token, Operator02Term, operator02_term);
+token_with_comments!(Operator03Token, Operator03Term, operator03_term);
+token_with_comments!(Operator04Token, Operator04Term, operator04_term);
+token_with_comments!(Operator05Token, Operator05Term, operator05_term);
+token_with_comments!(Operator06Token, Operator06Term, operator06_term);
+token_with_comments!(Operator07Token, Operator07Term, operator07_term);
+token_with_comments!(Operator08Token, Operator08Term, operator08_term);
+token_with_comments!(Operator09Token, Operator09Term, operator09_term);
+token_with_comments!(Operator10Token, Operator10Term, operator10_term);
+token_with_comments!(Operator11Token, Operator11Term, operator11_term);
 token_with_comments!(UnaryOperatorToken, UnaryOperatorTerm, unary_operator_term);
 
 token_with_comments!(AlwaysCombToken, AlwaysCombTerm, always_comb_term);
