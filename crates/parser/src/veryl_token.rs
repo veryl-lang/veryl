@@ -1,50 +1,64 @@
+use crate::global_table;
 use crate::veryl_grammar_trait::*;
-use parol_runtime::lexer::{Location, Token};
+use parol_runtime::miette;
 use regex::Regex;
 
-#[derive(Debug, Clone)]
-pub struct OwnedToken {
-    pub token: parol_runtime::lexer::Token<'static>,
+#[derive(Debug, Clone, Copy)]
+pub struct Token {
+    pub text: usize,
+    pub line: usize,
+    pub column: usize,
+    pub length: usize,
+    pub pos: usize,
+    pub file_path: usize,
 }
 
-impl<'t> From<&parol_runtime::lexer::Token<'t>> for OwnedToken {
+impl<'t> From<&parol_runtime::lexer::Token<'t>> for Token {
     fn from(x: &parol_runtime::lexer::Token<'t>) -> Self {
-        OwnedToken {
-            token: x.clone().into_owned(),
+        let text = global_table::insert_str(x.text());
+        let file_path = global_table::insert_path(&x.location.file_name);
+        let source_span: miette::SourceSpan = (&x.location).into();
+        Token {
+            text,
+            line: x.location.line,
+            column: x.location.column,
+            length: x.location.length,
+            pos: source_span.offset(),
+            file_path,
         }
+    }
+}
+
+impl From<&Token> for parol_runtime::miette::SourceSpan {
+    fn from(x: &Token) -> Self {
+        (x.pos - x.length, x.length).into()
+    }
+}
+
+impl From<Token> for parol_runtime::miette::SourceSpan {
+    fn from(x: Token) -> Self {
+        (x.pos - x.length, x.length).into()
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct VerylToken {
-    pub token: OwnedToken,
-    pub comments: Vec<OwnedToken>,
+    pub token: Token,
+    pub comments: Vec<Token>,
 }
 
 impl VerylToken {
     pub fn replace(&self, text: &str) -> Self {
-        let mut location = self.token.token.location.clone();
-        location.length = text.len();
-        let token = parol_runtime::lexer::Token::with(
-            text.to_owned(),
-            self.token.token.token_type,
-            location,
-        );
+        let length = text.len();
+        let text = global_table::insert_str(text);
         let mut ret = self.clone();
-        ret.token.token = token;
+        ret.token.text = text;
+        ret.token.length = length;
         ret
     }
 
-    pub fn text(&self) -> &str {
-        self.token.token.text()
-    }
-
-    pub fn location(&self) -> &Location {
-        &self.token.token.location
-    }
-
-    pub fn parol_token(&self) -> &Token {
-        &self.token.token
+    pub fn text(&self) -> String {
+        global_table::get_str_value(self.token.text).unwrap()
     }
 }
 
@@ -54,7 +68,7 @@ macro_rules! token_with_comments {
             fn from(x: &$x) -> Self {
                 let mut comments = Vec::new();
                 if let Some(ref x) = x.comments.comments_opt {
-                    let mut tokens = split_comment_token(x.multi_comment.multi_comment.clone());
+                    let mut tokens = split_comment_token(x.multi_comment.multi_comment);
                     comments.append(&mut tokens)
                 }
                 VerylToken {
@@ -66,14 +80,14 @@ macro_rules! token_with_comments {
     };
 }
 
-fn split_comment_token(token: OwnedToken) -> Vec<OwnedToken> {
-    let mut line = token.token.location.line;
-    let text = token.token.text();
+fn split_comment_token(token: Token) -> Vec<Token> {
+    let mut line = token.line;
+    let text = global_table::get_str_value(token.text).unwrap();
     let re = Regex::new(r"((?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))").unwrap();
 
     let mut prev_pos = 0;
     let mut ret = Vec::new();
-    for cap in re.captures_iter(text) {
+    for cap in re.captures_iter(&text) {
         let cap = cap.get(0).unwrap();
         let pos = cap.start();
         let length = cap.end() - pos;
@@ -81,18 +95,15 @@ fn split_comment_token(token: OwnedToken) -> Vec<OwnedToken> {
         line += text[prev_pos..pos].matches('\n').count();
         prev_pos = pos;
 
-        let location = Location::with(
+        let text = global_table::insert_str(&text[pos..pos + length]);
+        let token = Token {
+            text,
             line,
-            0, // column is not used
+            column: 0,
             length,
-            0, // start_pos is not used
-            0, // pos is not used
-            token.token.location.file_name.clone(),
-        );
-
-        let text = String::from(&text[pos..pos + length]);
-        let token = parol_runtime::lexer::Token::with(text, 0, location);
-        let token = OwnedToken { token };
+            pos: pos + length,
+            file_path: token.file_path,
+        };
         ret.push(token);
     }
     ret
@@ -102,12 +113,18 @@ impl From<&StartToken> for VerylToken {
     fn from(x: &StartToken) -> Self {
         let mut comments = Vec::new();
         if let Some(ref x) = x.comments.comments_opt {
-            let mut tokens = split_comment_token(x.multi_comment.multi_comment.clone());
+            let mut tokens = split_comment_token(x.multi_comment.multi_comment);
             comments.append(&mut tokens)
         }
-        let location = Location::with(1, 1, 0, 0, 0, std::path::Path::new(""));
-        let token = OwnedToken {
-            token: Token::with("", 0, location),
+        let text = global_table::insert_str("");
+        let file_path = global_table::insert_path(std::path::Path::new(""));
+        let token = Token {
+            text,
+            line: 1,
+            column: 1,
+            length: 0,
+            pos: 0,
+            file_path,
         };
         VerylToken { token, comments }
     }

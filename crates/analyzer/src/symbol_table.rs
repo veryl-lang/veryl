@@ -1,7 +1,6 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
 use veryl_parser::veryl_grammar_trait::{BuiltinType, TypeGroup};
-use veryl_parser::ParolLocation;
+use veryl_parser::veryl_token::Token;
 
 #[derive(Debug, Clone)]
 pub enum SymbolKind {
@@ -27,7 +26,7 @@ pub enum SymbolKind {
         scope: ParameterScope,
     },
     Instance {
-        name: String,
+        name: usize,
     },
 }
 
@@ -51,7 +50,7 @@ pub enum Direction {
     Output,
     Inout,
     Ref,
-    ModPort { interface: String, modport: String },
+    ModPort { interface: usize, modport: usize },
 }
 
 impl From<&veryl_parser::veryl_grammar_trait::Direction> for Direction {
@@ -75,7 +74,7 @@ pub enum Type {
     I64,
     F32,
     F64,
-    UserDefined(String),
+    UserDefined(usize),
 }
 
 impl From<&veryl_parser::veryl_grammar_trait::Type> for Type {
@@ -91,16 +90,14 @@ impl From<&veryl_parser::veryl_grammar_trait::Type> for Type {
                 BuiltinType::F32(_) => Type::F32,
                 BuiltinType::F64(_) => Type::F64,
             },
-            TypeGroup::Identifier(x) => {
-                Type::UserDefined(x.identifier.identifier_token.text().into())
-            }
+            TypeGroup::Identifier(x) => Type::UserDefined(x.identifier.identifier_token.token.text),
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct Port {
-    pub name: String,
+    pub name: usize,
     pub direction: Direction,
 }
 
@@ -108,7 +105,7 @@ impl From<&veryl_parser::veryl_grammar_trait::PortDeclarationItem> for Port {
     fn from(value: &veryl_parser::veryl_grammar_trait::PortDeclarationItem) -> Self {
         let direction: Direction = (&*value.direction).into();
         Port {
-            name: value.identifier.identifier_token.text().into(),
+            name: value.identifier.identifier_token.token.text,
             direction,
         }
     }
@@ -122,7 +119,7 @@ pub enum ParameterScope {
 
 #[derive(Debug, Clone)]
 pub struct Parameter {
-    pub name: String,
+    pub name: usize,
     pub r#type: Type,
     pub scope: ParameterScope,
 }
@@ -139,7 +136,7 @@ impl From<&veryl_parser::veryl_grammar_trait::WithParameterItem> for Parameter {
         };
         let r#type: Type = (&*value.r#type).into();
         Parameter {
-            name: value.identifier.identifier_token.text().into(),
+            name: value.identifier.identifier_token.token.text,
             r#type,
             scope,
         }
@@ -148,15 +145,15 @@ impl From<&veryl_parser::veryl_grammar_trait::WithParameterItem> for Parameter {
 
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct HierarchicalName {
-    pub paths: Vec<String>,
+    pub paths: Vec<usize>,
 }
 
 impl From<&veryl_parser::veryl_grammar_trait::HierarchicalIdentifier> for HierarchicalName {
     fn from(value: &veryl_parser::veryl_grammar_trait::HierarchicalIdentifier) -> Self {
         let mut paths = Vec::new();
-        paths.push(value.identifier.identifier_token.text().into());
+        paths.push(value.identifier.identifier_token.token.text);
         for x in &value.hierarchical_identifier_list0 {
-            paths.push(x.identifier.identifier_token.text().into());
+            paths.push(x.identifier.identifier_token.token.text);
         }
         Self { paths }
     }
@@ -164,12 +161,12 @@ impl From<&veryl_parser::veryl_grammar_trait::HierarchicalIdentifier> for Hierar
 
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct NameSpace {
-    pub paths: Vec<String>,
+    pub paths: Vec<usize>,
 }
 
 impl NameSpace {
-    pub fn push(&mut self, path: &str) {
-        self.paths.push(path.to_owned());
+    pub fn push(&mut self, path: usize) {
+        self.paths.push(path);
     }
 
     pub fn pop(&mut self) {
@@ -195,49 +192,30 @@ impl NameSpace {
 }
 
 #[derive(Debug, Clone)]
-pub struct Location {
-    pub line: usize,
-    pub column: usize,
-    pub file_name: PathBuf,
-}
-
-impl From<&ParolLocation> for Location {
-    fn from(x: &ParolLocation) -> Self {
-        Self {
-            line: x.line,
-            column: x.column,
-            file_name: PathBuf::from(&*x.file_name),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
 pub struct Symbol {
-    pub name: String,
+    pub token: Token,
     pub kind: SymbolKind,
     pub name_space: NameSpace,
-    pub location: Location,
 }
 
 impl Symbol {
-    pub fn new(name: &str, kind: SymbolKind, name_space: &NameSpace, location: &Location) -> Self {
+    pub fn new(token: &Token, kind: SymbolKind, name_space: &NameSpace) -> Self {
         Self {
-            name: name.to_owned(),
+            token: *token,
             kind,
             name_space: name_space.to_owned(),
-            location: location.to_owned(),
         }
     }
 }
 
 #[derive(Clone, Default, Debug)]
 pub struct SymbolTable {
-    table: HashMap<String, Vec<Symbol>>,
+    table: HashMap<usize, Vec<Symbol>>,
 }
 
 impl SymbolTable {
-    pub fn insert(&mut self, name: &str, symbol: Symbol) -> bool {
-        let entry = self.table.entry(name.to_owned()).or_default();
+    pub fn insert(&mut self, token: &Token, symbol: Symbol) -> bool {
+        let entry = self.table.entry(token.text).or_default();
         for item in entry.iter() {
             if symbol.name_space == item.name_space {
                 return false;
@@ -268,7 +246,7 @@ impl SymbolTable {
                 }
 
                 if let Some(ret) = ret {
-                    if let SymbolKind::Instance { ref name } = ret.kind {
+                    if let SymbolKind::Instance { name } = ret.kind {
                         name_space = NameSpace::default();
                         name_space.push(name);
                     }

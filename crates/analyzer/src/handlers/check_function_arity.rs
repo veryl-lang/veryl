@@ -1,5 +1,6 @@
 use crate::analyze_error::AnalyzeError;
 use crate::symbol_table::{HierarchicalName, NameSpace, SymbolKind, SymbolTable};
+use veryl_parser::global_table;
 use veryl_parser::miette::Result;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
@@ -62,8 +63,11 @@ impl<'a> VerylGrammarTrait for CheckFunctionArity<'a> {
 
                 if let Some(arity) = arity {
                     if arity != args {
+                        let name =
+                            global_table::get_str_value(*hierarchical_name.paths.last().unwrap())
+                                .unwrap();
                         self.errors.push(AnalyzeError::mismatch_arity(
-                            hierarchical_name.paths.last().unwrap(),
+                            &name,
                             arity,
                             args,
                             self.text,
@@ -80,7 +84,7 @@ impl<'a> VerylGrammarTrait for CheckFunctionArity<'a> {
     fn function_declaration(&mut self, arg: &FunctionDeclaration) -> Result<()> {
         match self.point {
             HandlerPoint::Before => {
-                let name = arg.identifier.identifier_token.text();
+                let name = arg.identifier.identifier_token.token.text;
                 self.name_space.push(name)
             }
             HandlerPoint::After => self.name_space.pop(),
@@ -91,7 +95,7 @@ impl<'a> VerylGrammarTrait for CheckFunctionArity<'a> {
     fn module_declaration(&mut self, arg: &ModuleDeclaration) -> Result<()> {
         match self.point {
             HandlerPoint::Before => {
-                let name = arg.identifier.identifier_token.text();
+                let name = arg.identifier.identifier_token.token.text;
                 self.name_space.push(name)
             }
             HandlerPoint::After => self.name_space.pop(),
@@ -102,7 +106,7 @@ impl<'a> VerylGrammarTrait for CheckFunctionArity<'a> {
     fn interface_declaration(&mut self, arg: &InterfaceDeclaration) -> Result<()> {
         match self.point {
             HandlerPoint::Before => {
-                let name = arg.identifier.identifier_token.text();
+                let name = arg.identifier.identifier_token.token.text;
                 self.name_space.push(name)
             }
             HandlerPoint::After => self.name_space.pop(),

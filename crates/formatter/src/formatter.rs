@@ -1,9 +1,9 @@
 use crate::aligner::{Aligner, Location};
 use veryl_metadata::Metadata;
+use veryl_parser::global_table;
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::VerylToken;
+use veryl_parser::veryl_token::{Token, VerylToken};
 use veryl_parser::veryl_walker::VerylWalker;
-use veryl_parser::ParolToken;
 
 pub struct Formatter {
     pub indent_width: usize,
@@ -102,26 +102,26 @@ impl Formatter {
         self.str(&" ".repeat(repeat));
     }
 
-    fn parol_token(&mut self, x: &ParolToken, adjust_line: bool) {
-        if adjust_line && x.location.line - self.line > 1 {
+    fn push_token(&mut self, x: &Token, adjust_line: bool) {
+        if adjust_line && x.line - self.line > 1 {
             self.newline();
         }
-        let text = x.text();
+        let text = global_table::get_str_value(x.text).unwrap();
         let text = if text.ends_with('\n') {
             self.consumed_next_newline = true;
             text.trim_end()
         } else {
-            text
+            &text
         };
         self.last_newline = text.matches('\n').count();
         self.str(text);
-        self.line = x.location.line;
+        self.line = x.line;
     }
 
     fn process_token(&mut self, x: &VerylToken, will_push: bool) {
-        self.parol_token(x.parol_token(), true);
+        self.push_token(&x.token, true);
 
-        let loc: Location = x.location().into();
+        let loc: Location = x.token.into();
         if let Some(width) = self.aligner.additions.get(&loc) {
             self.space(*width);
         }
@@ -134,15 +134,15 @@ impl Formatter {
         self.consumed_next_newline = false;
         for x in &x.comments {
             // insert space between comments in the same line
-            if x.token.location.line == self.line && !self.in_start_token {
+            if x.line == self.line && !self.in_start_token {
                 self.space(1);
             }
-            for _ in 0..x.token.location.line - (self.line + self.last_newline) {
+            for _ in 0..x.line - (self.line + self.last_newline) {
                 self.unindent();
                 self.str("\n");
                 self.indent();
             }
-            self.parol_token(&x.token, false);
+            self.push_token(x, false);
         }
         if will_push {
             self.indent -= 1;

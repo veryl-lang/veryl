@@ -1,9 +1,10 @@
 use crate::aligner::{Aligner, Location};
 use veryl_metadata::{ClockType, Metadata, ResetType};
+use veryl_parser::global_table;
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::VerylToken;
+use veryl_parser::veryl_token::{Token, VerylToken};
 use veryl_parser::veryl_walker::VerylWalker;
-use veryl_parser::{ParolToken, Stringifier};
+use veryl_parser::Stringifier;
 
 pub struct Emitter {
     pub indent_width: usize,
@@ -114,23 +115,23 @@ impl Emitter {
         self.str(&" ".repeat(repeat));
     }
 
-    fn parol_token(&mut self, x: &ParolToken) {
-        let text = x.text();
+    fn push_token(&mut self, x: &Token) {
+        let text = global_table::get_str_value(x.text).unwrap();
         let text = if text.ends_with('\n') {
             self.consumed_next_newline = true;
             text.trim_end()
         } else {
-            text
+            &text
         };
         self.last_newline = text.matches('\n').count();
         self.str(text);
-        self.line = x.location.line;
+        self.line = x.line;
     }
 
     fn process_token(&mut self, x: &VerylToken, will_push: bool, duplicated: Option<usize>) {
-        self.parol_token(x.parol_token());
+        self.push_token(&x.token);
 
-        let mut loc: Location = x.location().into();
+        let mut loc: Location = x.token.into();
         loc.duplicated = duplicated;
         if let Some(width) = self.aligner.additions.get(&loc) {
             self.space(*width);
@@ -148,15 +149,15 @@ impl Emitter {
         self.consumed_next_newline = false;
         for x in &x.comments {
             // insert space between comments in the same line
-            if x.token.location.line == self.line && !self.in_start_token {
+            if x.line == self.line && !self.in_start_token {
                 self.space(1);
             }
-            for _ in 0..x.token.location.line - (self.line + self.last_newline) {
+            for _ in 0..x.line - (self.line + self.last_newline) {
                 self.unindent();
                 self.str("\n");
                 self.indent();
             }
-            self.parol_token(&x.token);
+            self.push_token(x);
         }
         if will_push {
             self.indent -= 1;
@@ -511,7 +512,7 @@ impl VerylWalker for Emitter {
                         self.str("assign");
                         self.space(1);
                     }
-                    self.str(arg.identifier.identifier_token.text());
+                    self.str(&arg.identifier.identifier_token.text());
                     self.space(1);
                     self.str("=");
                     self.space(1);
@@ -1080,7 +1081,7 @@ impl VerylWalker for Emitter {
             } else {
                 self.space(1);
                 self.str(":");
-                self.str(arg.identifier.identifier_token.text());
+                self.str(&arg.identifier.identifier_token.text());
             }
             self.token_will_push(&x.l_brace.l_brace_token.replace(""));
             self.newline_push();
@@ -1105,7 +1106,7 @@ impl VerylWalker for Emitter {
             } else {
                 self.space(1);
                 self.str(":");
-                self.str(arg.identifier.identifier_token.text());
+                self.str(&arg.identifier.identifier_token.text());
             }
             self.token_will_push(&x.l_brace.l_brace_token.replace(""));
             self.newline_push();
@@ -1231,7 +1232,7 @@ impl VerylWalker for Emitter {
             } else {
                 self.space(1);
                 self.str(":");
-                self.str(arg.identifier.identifier_token.text());
+                self.str(&arg.identifier.identifier_token.text());
             }
             self.token_will_push(&x.l_brace.l_brace_token.replace(""));
             self.newline_push();
@@ -1256,7 +1257,7 @@ impl VerylWalker for Emitter {
             } else {
                 self.space(1);
                 self.str(":");
-                self.str(arg.identifier.identifier_token.text());
+                self.str(&arg.identifier.identifier_token.text());
             }
             self.token_will_push(&x.l_brace.l_brace_token.replace(""));
             self.newline_push();

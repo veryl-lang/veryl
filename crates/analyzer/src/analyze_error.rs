@@ -1,4 +1,5 @@
 use thiserror::Error;
+use veryl_parser::global_table;
 use veryl_parser::miette::{self, Diagnostic, NamedSource, SourceSpan};
 use veryl_parser::veryl_token::VerylToken;
 
@@ -136,7 +137,9 @@ pub enum AnalyzeError {
 impl AnalyzeError {
     fn named_source(source: &str, token: &VerylToken) -> NamedSource {
         NamedSource::new(
-            token.location().file_name.to_string_lossy(),
+            global_table::get_path_value(token.token.file_path)
+                .unwrap()
+                .to_string_lossy(),
             source.to_string(),
         )
     }
@@ -151,7 +154,7 @@ impl AnalyzeError {
             cause,
             kind: kind.to_string(),
             input: AnalyzeError::named_source(source, token),
-            error_location: token.parol_token().into(),
+            error_location: token.token.into(),
         }
     }
 
@@ -159,21 +162,21 @@ impl AnalyzeError {
         AnalyzeError::NumberOverflow {
             width,
             input: AnalyzeError::named_source(source, token),
-            error_location: token.parol_token().into(),
+            error_location: token.token.into(),
         }
     }
 
     pub fn if_reset_required(source: &str, token: &VerylToken) -> Self {
         AnalyzeError::IfResetRequired {
             input: AnalyzeError::named_source(source, token),
-            error_location: token.parol_token().into(),
+            error_location: token.token.into(),
         }
     }
 
     pub fn reset_signal_missing(source: &str, token: &VerylToken) -> Self {
         AnalyzeError::ResetSignalMissing {
             input: AnalyzeError::named_source(source, token),
-            error_location: token.parol_token().into(),
+            error_location: token.token.into(),
         }
     }
 
@@ -181,7 +184,7 @@ impl AnalyzeError {
         AnalyzeError::InvalidStatement {
             kind: kind.to_string(),
             input: AnalyzeError::named_source(source, token),
-            error_location: token.parol_token().into(),
+            error_location: token.token.into(),
         }
     }
 
@@ -189,7 +192,7 @@ impl AnalyzeError {
         AnalyzeError::InvalidDirection {
             kind: kind.to_string(),
             input: AnalyzeError::named_source(source, token),
-            error_location: token.parol_token().into(),
+            error_location: token.token.into(),
         }
     }
 
@@ -197,7 +200,7 @@ impl AnalyzeError {
         AnalyzeError::InvalidSystemFunction {
             name: name.to_string(),
             input: AnalyzeError::named_source(source, token),
-            error_location: token.parol_token().into(),
+            error_location: token.token.into(),
         }
     }
 
@@ -213,7 +216,7 @@ impl AnalyzeError {
             arity,
             args,
             input: AnalyzeError::named_source(source, token),
-            error_location: token.parol_token().into(),
+            error_location: token.token.into(),
         }
     }
 
@@ -229,7 +232,7 @@ impl AnalyzeError {
             expected: expected.to_string(),
             actual: actual.to_string(),
             input: AnalyzeError::named_source(source, token),
-            error_location: token.parol_token().into(),
+            error_location: token.token.into(),
         }
     }
 
@@ -238,7 +241,7 @@ impl AnalyzeError {
             name: name.to_string(),
             port: port.to_string(),
             input: AnalyzeError::named_source(source, token),
-            error_location: token.parol_token().into(),
+            error_location: token.token.into(),
         }
     }
 
@@ -247,7 +250,7 @@ impl AnalyzeError {
             name: name.to_string(),
             port: port.to_string(),
             input: AnalyzeError::named_source(source, token),
-            error_location: token.parol_token().into(),
+            error_location: token.token.into(),
         }
     }
 
@@ -255,7 +258,7 @@ impl AnalyzeError {
         AnalyzeError::DuplicatedIdentifier {
             identifier: identifier.to_string(),
             input: AnalyzeError::named_source(source, token),
-            error_location: token.parol_token().into(),
+            error_location: token.token.into(),
         }
     }
 }

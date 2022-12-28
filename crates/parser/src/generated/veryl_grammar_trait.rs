@@ -1898,7 +1898,7 @@ pub struct AllBit {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct AllBitToken {
-    pub tick_l_bracket01_r_bracket: crate::veryl_token::OwnedToken, /* '[01] */
+    pub tick_l_bracket01_r_bracket: crate::veryl_token::Token, /* '[01] */
     pub comments: Box<Comments>,
 }
 
@@ -1942,7 +1942,7 @@ pub struct AlwaysCombDeclarationList {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct AlwaysCombToken {
-    pub balways_underscore_comb_b: crate::veryl_token::OwnedToken, /* \balways_comb\b */
+    pub balways_underscore_comb_b: crate::veryl_token::Token, /* \balways_comb\b */
     pub comments: Box<Comments>,
 }
 
@@ -2065,7 +2065,7 @@ pub enum AlwaysFfResetOptGroup {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct AlwaysFfToken {
-    pub balways_underscore_ff_b: crate::veryl_token::OwnedToken, /* \balways_ff\b */
+    pub balways_underscore_ff_b: crate::veryl_token::Token, /* \balways_ff\b */
     pub comments: Box<Comments>,
 }
 
@@ -2100,7 +2100,7 @@ pub struct AssignDeclaration {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct AssignToken {
-    pub bassign_b: crate::veryl_token::OwnedToken, /* \bassign\b */
+    pub bassign_b: crate::veryl_token::Token, /* \bassign\b */
     pub comments: Box<Comments>,
 }
 
@@ -2122,7 +2122,7 @@ pub struct AssignmentOperator {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct AssignmentOperatorToken {
     pub plus_equ_or_minus_equ_or_star_equ_or_slash_equ_or_percent_equ_or_amp_equ_or_or_equ_or_circumflex_equ_or_l_t_l_t_equ_or_g_t_g_t_equ_or_l_t_l_t_l_t_equ_or_g_t_g_t_g_t_equ:
-        crate::veryl_token::OwnedToken, /* \+=|-=|\*=|/=|%=|&=|\|=|\^=|<<=|>>=|<<<=|>>>= */
+        crate::veryl_token::Token, /* \+=|-=|\*=|/=|%=|&=|\|=|\^=|<<=|>>=|<<<=|>>>= */
     pub comments: Box<Comments>,
 }
 
@@ -2166,7 +2166,7 @@ pub struct AsyncHigh {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct AsyncHighToken {
-    pub basync_underscore_high_b: crate::veryl_token::OwnedToken, /* \basync_high\b */
+    pub basync_underscore_high_b: crate::veryl_token::Token, /* \basync_high\b */
     pub comments: Box<Comments>,
 }
 
@@ -2187,7 +2187,7 @@ pub struct AsyncLow {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct AsyncLowToken {
-    pub basync_underscore_low_b: crate::veryl_token::OwnedToken, /* \basync_low\b */
+    pub basync_underscore_low_b: crate::veryl_token::Token, /* \basync_low\b */
     pub comments: Box<Comments>,
 }
 
@@ -2209,7 +2209,7 @@ pub struct BaseLess {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct BaseLessToken {
     pub l_bracket0_minus9_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9_r_bracket_plus_r_paren_star:
-        crate::veryl_token::OwnedToken, /* [0-9]+(?:_[0-9]+)* */
+        crate::veryl_token::Token, /* [0-9]+(?:_[0-9]+)* */
     pub comments: Box<Comments>,
 }
 
@@ -2231,7 +2231,7 @@ pub struct Based {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct BasedToken {
     pub l_bracket0_minus9_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9_r_bracket_plus_r_paren_star_tick_l_bracket_bodh_r_bracket_l_bracket0_minus9a_minus_f_a_minus_fxz_x_z_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9a_minus_f_a_minus_fxz_x_z_r_bracket_plus_r_paren_star:
-        crate::veryl_token::OwnedToken, /* [0-9]+(?:_[0-9]+)*'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)* */
+        crate::veryl_token::Token, /* [0-9]+(?:_[0-9]+)*'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)* */
     pub comments: Box<Comments>,
 }
 
@@ -2253,7 +2253,7 @@ pub struct BinaryOperator {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct BinaryOperatorToken {
     pub star_star_or_star_or_slash_or_percent_or_l_t_l_t_l_t_or_g_t_g_t_g_t_or_l_t_l_t_or_g_t_g_t_or_l_t_equ_or_g_t_equ_or_l_t_or_g_t_or_equ_equ_equ_or_equ_equ_quest_or_bang_equ_equ_or_bang_equ_quest_or_equ_equ_or_bang_equ_or_amp_amp_or_or_or:
-        crate::veryl_token::OwnedToken, /* \*\*|\*|/|%|<<<|>>>|<<|>>|<=|>=|<|>|===|==\?|!==|!=\?|==|!=|&&|\|\| */
+        crate::veryl_token::Token, /* \*\*|\*|/|%|<<<|>>>|<<|>>|<=|>=|<|>|===|==\?|!==|!=\?|==|!=|&&|\|\| */
     pub comments: Box<Comments>,
 }
 
@@ -2274,7 +2274,7 @@ pub struct Bit {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct BitToken {
-    pub bbit_b: crate::veryl_token::OwnedToken, /* \bbit\b */
+    pub bbit_b: crate::veryl_token::Token, /* \bbit\b */
     pub comments: Box<Comments>,
 }
 
@@ -2311,7 +2311,7 @@ pub struct Colon {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ColonToken {
-    pub colon: crate::veryl_token::OwnedToken, /* : */
+    pub colon: crate::veryl_token::Token, /* : */
     pub comments: Box<Comments>,
 }
 
@@ -2332,7 +2332,7 @@ pub struct Comma {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct CommaToken {
-    pub comma: crate::veryl_token::OwnedToken, /* , */
+    pub comma: crate::veryl_token::Token, /* , */
     pub comments: Box<Comments>,
 }
 
@@ -2374,7 +2374,7 @@ pub struct CommonOperator {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct CommonOperatorToken {
     pub plus_or_minus_or_amp_or_or_or_circumflex_tilde_or_circumflex_or_tilde_circumflex_or_tilde_amp_or_tilde_or:
-        crate::veryl_token::OwnedToken, /* \+|-|&|\||\^~|\^|~\^|~&|~\| */
+        crate::veryl_token::Token, /* \+|-|&|\||\^~|\^|~\^|~&|~\| */
     pub comments: Box<Comments>,
 }
 
@@ -2417,7 +2417,7 @@ pub struct Dollar {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct DollarToken {
-    pub dollar: crate::veryl_token::OwnedToken, /* $ */
+    pub dollar: crate::veryl_token::Token, /* $ */
     pub comments: Box<Comments>,
 }
 
@@ -2448,7 +2448,7 @@ pub struct DotDot {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct DotDotToken {
-    pub dot_dot: crate::veryl_token::OwnedToken, /* .. */
+    pub dot_dot: crate::veryl_token::Token, /* .. */
     pub comments: Box<Comments>,
 }
 
@@ -2459,7 +2459,7 @@ pub struct DotDotToken {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct DotToken {
-    pub dot: crate::veryl_token::OwnedToken, /* . */
+    pub dot: crate::veryl_token::Token, /* . */
     pub comments: Box<Comments>,
 }
 
@@ -2480,7 +2480,7 @@ pub struct Else {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ElseToken {
-    pub belse_b: crate::veryl_token::OwnedToken, /* \belse\b */
+    pub belse_b: crate::veryl_token::Token, /* \belse\b */
     pub comments: Box<Comments>,
 }
 
@@ -2572,7 +2572,7 @@ pub struct EnumListOpt {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct EnumToken {
-    pub benum_b: crate::veryl_token::OwnedToken, /* \benum\b */
+    pub benum_b: crate::veryl_token::Token, /* \benum\b */
     pub comments: Box<Comments>,
 }
 
@@ -2593,7 +2593,7 @@ pub struct Equ {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct EquToken {
-    pub equ: crate::veryl_token::OwnedToken, /* = */
+    pub equ: crate::veryl_token::Token, /* = */
     pub comments: Box<Comments>,
 }
 
@@ -2615,7 +2615,7 @@ pub struct Exponent {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ExponentToken {
     pub l_bracket0_minus9_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9_r_bracket_plus_r_paren_star_dot_l_bracket0_minus9_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9_r_bracket_plus_r_paren_star_l_bracket_e_e_r_bracket_l_bracket_plus_minus_r_bracket_quest_l_bracket0_minus9_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9_r_bracket_plus_r_paren_star:
-        crate::veryl_token::OwnedToken, /* [0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)* */
+        crate::veryl_token::Token, /* [0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)* */
     pub comments: Box<Comments>,
 }
 
@@ -2699,7 +2699,7 @@ pub struct F32 {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct F32Token {
-    pub bf32_b: crate::veryl_token::OwnedToken, /* \bf32\b */
+    pub bf32_b: crate::veryl_token::Token, /* \bf32\b */
     pub comments: Box<Comments>,
 }
 
@@ -2720,7 +2720,7 @@ pub struct F64 {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct F64Token {
-    pub bf64_b: crate::veryl_token::OwnedToken, /* \bf64\b */
+    pub bf64_b: crate::veryl_token::Token, /* \bf64\b */
     pub comments: Box<Comments>,
 }
 
@@ -2785,7 +2785,7 @@ pub struct FixedPoint {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct FixedPointToken {
     pub l_bracket0_minus9_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9_r_bracket_plus_r_paren_star_dot_l_bracket0_minus9_r_bracket_plus_l_paren_quest_colon_underscore_l_bracket0_minus9_r_bracket_plus_r_paren_star:
-        crate::veryl_token::OwnedToken, /* [0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)* */
+        crate::veryl_token::Token, /* [0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)* */
     pub comments: Box<Comments>,
 }
 
@@ -2849,7 +2849,7 @@ pub struct ForStatementOpt {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ForToken {
-    pub bfor_b: crate::veryl_token::OwnedToken, /* \bfor\b */
+    pub bfor_b: crate::veryl_token::Token, /* \bfor\b */
     pub comments: Box<Comments>,
 }
 
@@ -2961,7 +2961,7 @@ pub enum FunctionItem {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct FunctionToken {
-    pub bfunction_b: crate::veryl_token::OwnedToken, /* \bfunction\b */
+    pub bfunction_b: crate::veryl_token::Token, /* \bfunction\b */
     pub comments: Box<Comments>,
 }
 
@@ -2982,7 +2982,7 @@ pub struct Hash {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct HashToken {
-    pub hash: crate::veryl_token::OwnedToken, /* # */
+    pub hash: crate::veryl_token::Token, /* # */
     pub comments: Box<Comments>,
 }
 
@@ -3047,7 +3047,7 @@ pub struct I32 {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct I32Token {
-    pub bi32_b: crate::veryl_token::OwnedToken, /* \bi32\b */
+    pub bi32_b: crate::veryl_token::Token, /* \bi32\b */
     pub comments: Box<Comments>,
 }
 
@@ -3068,7 +3068,7 @@ pub struct I64 {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct I64Token {
-    pub bi64_b: crate::veryl_token::OwnedToken, /* \bi64\b */
+    pub bi64_b: crate::veryl_token::Token, /* \bi64\b */
     pub comments: Box<Comments>,
 }
 
@@ -3090,7 +3090,7 @@ pub struct Identifier {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct IdentifierToken {
     pub l_bracket_a_minus_z_a_minus_z_underscore_r_bracket_l_bracket0_minus9a_minus_z_a_minus_z_underscore_r_bracket_star:
-        crate::veryl_token::OwnedToken, /* [a-zA-Z_][0-9a-zA-Z_]* */
+        crate::veryl_token::Token, /* [a-zA-Z_][0-9a-zA-Z_]* */
     pub comments: Box<Comments>,
 }
 
@@ -3194,7 +3194,7 @@ pub struct IfResetStatementOptList {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct IfResetToken {
-    pub bif_underscore_reset_b: crate::veryl_token::OwnedToken, /* \bif_reset\b */
+    pub bif_underscore_reset_b: crate::veryl_token::Token, /* \bif_reset\b */
     pub comments: Box<Comments>,
 }
 
@@ -3279,7 +3279,7 @@ pub struct IfStatementOptList {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct IfToken {
-    pub bif_b: crate::veryl_token::OwnedToken, /* \bif\b */
+    pub bif_b: crate::veryl_token::Token, /* \bif\b */
     pub comments: Box<Comments>,
 }
 
@@ -3300,7 +3300,7 @@ pub struct In {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct InToken {
-    pub bin_b: crate::veryl_token::OwnedToken, /* \bin\b */
+    pub bin_b: crate::veryl_token::Token, /* \bin\b */
     pub comments: Box<Comments>,
 }
 
@@ -3321,7 +3321,7 @@ pub struct Inout {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct InoutToken {
-    pub binout_b: crate::veryl_token::OwnedToken, /* \binout\b */
+    pub binout_b: crate::veryl_token::Token, /* \binout\b */
     pub comments: Box<Comments>,
 }
 
@@ -3342,7 +3342,7 @@ pub struct Input {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct InputToken {
-    pub binput_b: crate::veryl_token::OwnedToken, /* \binput\b */
+    pub binput_b: crate::veryl_token::Token, /* \binput\b */
     pub comments: Box<Comments>,
 }
 
@@ -3363,7 +3363,7 @@ pub struct Inst {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct InstToken {
-    pub binst_b: crate::veryl_token::OwnedToken, /* \binst\b */
+    pub binst_b: crate::veryl_token::Token, /* \binst\b */
     pub comments: Box<Comments>,
 }
 
@@ -3778,7 +3778,7 @@ pub enum InterfaceItem {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct InterfaceToken {
-    pub binterface_b: crate::veryl_token::OwnedToken, /* \binterface\b */
+    pub binterface_b: crate::veryl_token::Token, /* \binterface\b */
     pub comments: Box<Comments>,
 }
 
@@ -3799,7 +3799,7 @@ pub struct LBrace {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct LBraceToken {
-    pub l_brace: crate::veryl_token::OwnedToken, /* { */
+    pub l_brace: crate::veryl_token::Token, /* { */
     pub comments: Box<Comments>,
 }
 
@@ -3820,7 +3820,7 @@ pub struct LBracket {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct LBracketToken {
-    pub l_bracket: crate::veryl_token::OwnedToken, /* [ */
+    pub l_bracket: crate::veryl_token::Token, /* [ */
     pub comments: Box<Comments>,
 }
 
@@ -3841,7 +3841,7 @@ pub struct LParen {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct LParenToken {
-    pub l_paren: crate::veryl_token::OwnedToken, /* ( */
+    pub l_paren: crate::veryl_token::Token, /* ( */
     pub comments: Box<Comments>,
 }
 
@@ -3886,7 +3886,7 @@ pub enum LetDeclarationGroup {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct LetToken {
-    pub blet_b: crate::veryl_token::OwnedToken, /* \blet\b */
+    pub blet_b: crate::veryl_token::Token, /* \blet\b */
     pub comments: Box<Comments>,
 }
 
@@ -3923,7 +3923,7 @@ pub struct LocalparamDeclaration {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct LocalparamToken {
-    pub blocalparam_b: crate::veryl_token::OwnedToken, /* \blocalparam\b */
+    pub blocalparam_b: crate::veryl_token::Token, /* \blocalparam\b */
     pub comments: Box<Comments>,
 }
 
@@ -3944,7 +3944,7 @@ pub struct Logic {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct LogicToken {
-    pub blogic_b: crate::veryl_token::OwnedToken, /* \blogic\b */
+    pub blogic_b: crate::veryl_token::Token, /* \blogic\b */
     pub comments: Box<Comments>,
 }
 
@@ -3965,7 +3965,7 @@ pub struct MinusColon {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct MinusColonToken {
-    pub minus_colon: crate::veryl_token::OwnedToken, /* -: */
+    pub minus_colon: crate::veryl_token::Token, /* -: */
     pub comments: Box<Comments>,
 }
 
@@ -3986,7 +3986,7 @@ pub struct MinusGT {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct MinusGTToken {
-    pub minus_g_t: crate::veryl_token::OwnedToken, /* -> */
+    pub minus_g_t: crate::veryl_token::Token, /* -> */
     pub comments: Box<Comments>,
 }
 
@@ -4066,7 +4066,7 @@ pub struct ModportListOpt {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModportToken {
-    pub bmodport_b: crate::veryl_token::OwnedToken, /* \bmodport\b */
+    pub bmodport_b: crate::veryl_token::Token, /* \bmodport\b */
     pub comments: Box<Comments>,
 }
 
@@ -4295,7 +4295,7 @@ pub enum ModuleItem {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModuleToken {
-    pub bmodule_b: crate::veryl_token::OwnedToken, /* \bmodule\b */
+    pub bmodule_b: crate::veryl_token::Token, /* \bmodule\b */
     pub comments: Box<Comments>,
 }
 
@@ -4306,7 +4306,7 @@ pub struct ModuleToken {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct MultiComment {
-    pub multi_comment: crate::veryl_token::OwnedToken, /* (?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+ */
+    pub multi_comment: crate::veryl_token::Token, /* (?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+ */
 }
 
 ///
@@ -4326,7 +4326,7 @@ pub struct Negedge {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct NegedgeToken {
-    pub bnegedge_b: crate::veryl_token::OwnedToken, /* \bnegedge\b */
+    pub bnegedge_b: crate::veryl_token::Token, /* \bnegedge\b */
     pub comments: Box<Comments>,
 }
 
@@ -4357,7 +4357,7 @@ pub struct Output {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct OutputToken {
-    pub boutput_b: crate::veryl_token::OwnedToken, /* \boutput\b */
+    pub boutput_b: crate::veryl_token::Token, /* \boutput\b */
     pub comments: Box<Comments>,
 }
 
@@ -4394,7 +4394,7 @@ pub struct ParameterDeclaration {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ParameterToken {
-    pub bparameter_b: crate::veryl_token::OwnedToken, /* \bparameter\b */
+    pub bparameter_b: crate::veryl_token::Token, /* \bparameter\b */
     pub comments: Box<Comments>,
 }
 
@@ -4415,7 +4415,7 @@ pub struct PlusColon {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct PlusColonToken {
-    pub plus_colon: crate::veryl_token::OwnedToken, /* +: */
+    pub plus_colon: crate::veryl_token::Token, /* +: */
     pub comments: Box<Comments>,
 }
 
@@ -4504,7 +4504,7 @@ pub struct Posedge {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct PosedgeToken {
-    pub bposedge_b: crate::veryl_token::OwnedToken, /* \bposedge\b */
+    pub bposedge_b: crate::veryl_token::Token, /* \bposedge\b */
     pub comments: Box<Comments>,
 }
 
@@ -4525,7 +4525,7 @@ pub struct RBrace {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct RBraceToken {
-    pub r_brace: crate::veryl_token::OwnedToken, /* } */
+    pub r_brace: crate::veryl_token::Token, /* } */
     pub comments: Box<Comments>,
 }
 
@@ -4546,7 +4546,7 @@ pub struct RBracket {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct RBracketToken {
-    pub r_bracket: crate::veryl_token::OwnedToken, /* ] */
+    pub r_bracket: crate::veryl_token::Token, /* ] */
     pub comments: Box<Comments>,
 }
 
@@ -4567,7 +4567,7 @@ pub struct RParen {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct RParenToken {
-    pub r_paren: crate::veryl_token::OwnedToken, /* ) */
+    pub r_paren: crate::veryl_token::Token, /* ) */
     pub comments: Box<Comments>,
 }
 
@@ -4634,7 +4634,7 @@ pub struct Ref {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct RefToken {
-    pub bref_b: crate::veryl_token::OwnedToken, /* \bref\b */
+    pub bref_b: crate::veryl_token::Token, /* \bref\b */
     pub comments: Box<Comments>,
 }
 
@@ -4667,7 +4667,7 @@ pub struct ReturnStatement {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ReturnToken {
-    pub breturn_b: crate::veryl_token::OwnedToken, /* \breturn\b */
+    pub breturn_b: crate::veryl_token::Token, /* \breturn\b */
     pub comments: Box<Comments>,
 }
 
@@ -4688,7 +4688,7 @@ pub struct Semicolon {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct SemicolonToken {
-    pub semicolon: crate::veryl_token::OwnedToken, /* ; */
+    pub semicolon: crate::veryl_token::Token, /* ; */
     pub comments: Box<Comments>,
 }
 
@@ -4742,7 +4742,7 @@ pub struct Step {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct StepToken {
-    pub bstep_b: crate::veryl_token::OwnedToken, /* \bstep\b */
+    pub bstep_b: crate::veryl_token::Token, /* \bstep\b */
     pub comments: Box<Comments>,
 }
 
@@ -4822,7 +4822,7 @@ pub struct StructListOpt {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct StructToken {
-    pub bstruct_b: crate::veryl_token::OwnedToken, /* \bstruct\b */
+    pub bstruct_b: crate::veryl_token::Token, /* \bstruct\b */
     pub comments: Box<Comments>,
 }
 
@@ -4843,7 +4843,7 @@ pub struct SyncHigh {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct SyncHighToken {
-    pub bsync_underscore_high_b: crate::veryl_token::OwnedToken, /* \bsync_high\b */
+    pub bsync_underscore_high_b: crate::veryl_token::Token, /* \bsync_high\b */
     pub comments: Box<Comments>,
 }
 
@@ -4864,7 +4864,7 @@ pub struct SyncLow {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct SyncLowToken {
-    pub bsync_underscore_low_b: crate::veryl_token::OwnedToken, /* \bsync_low\b */
+    pub bsync_underscore_low_b: crate::veryl_token::Token, /* \bsync_low\b */
     pub comments: Box<Comments>,
 }
 
@@ -4916,7 +4916,7 @@ pub struct U32 {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct U32Token {
-    pub bu32_b: crate::veryl_token::OwnedToken, /* \bu32\b */
+    pub bu32_b: crate::veryl_token::Token, /* \bu32\b */
     pub comments: Box<Comments>,
 }
 
@@ -4937,7 +4937,7 @@ pub struct U64 {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct U64Token {
-    pub bu64_b: crate::veryl_token::OwnedToken, /* \bu64\b */
+    pub bu64_b: crate::veryl_token::Token, /* \bu64\b */
     pub comments: Box<Comments>,
 }
 
@@ -4958,7 +4958,7 @@ pub struct UnaryOperator {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct UnaryOperatorToken {
-    pub bang_or_tilde: crate::veryl_token::OwnedToken, /* !|~ */
+    pub bang_or_tilde: crate::veryl_token::Token, /* !|~ */
     pub comments: Box<Comments>,
 }
 
@@ -5462,7 +5462,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 0:
     ///
-    /// MultiComment: "(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+" : OwnedToken;
+    /// MultiComment: "(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+" : Token;
     ///
     #[parol_runtime::function_name::named]
     fn multi_comment(
@@ -5570,7 +5570,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 5:
     ///
-    /// ExponentToken: /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/ : OwnedToken Comments;
+    /// ExponentToken: /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn exponent_token(
@@ -5596,7 +5596,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 6:
     ///
-    /// FixedPointToken: /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/ : OwnedToken Comments;
+    /// FixedPointToken: /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn fixed_point_token(
@@ -5623,7 +5623,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 7:
     ///
-    /// BasedToken: /[0-9]+(?:_[0-9]+)*'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/ : OwnedToken Comments;
+    /// BasedToken: /[0-9]+(?:_[0-9]+)*'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn based_token(
@@ -5649,7 +5649,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 8:
     ///
-    /// BaseLessToken: /[0-9]+(?:_[0-9]+)*/ : OwnedToken Comments;
+    /// BaseLessToken: /[0-9]+(?:_[0-9]+)*/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn base_less_token(
@@ -5675,7 +5675,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 9:
     ///
-    /// AllBitToken: /'[01]/ : OwnedToken Comments;
+    /// AllBitToken: /'[01]/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn all_bit_token(
@@ -5704,7 +5704,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 10:
     ///
-    /// MinusColonToken: '-:' : OwnedToken Comments;
+    /// MinusColonToken: '-:' : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn minus_colon_token(
@@ -5734,7 +5734,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 11:
     ///
-    /// MinusGTToken: '->' : OwnedToken Comments;
+    /// MinusGTToken: '->' : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn minus_g_t_token(
@@ -5760,7 +5760,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 12:
     ///
-    /// PlusColonToken: '+:' : OwnedToken Comments;
+    /// PlusColonToken: '+:' : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn plus_colon_token(
@@ -5787,7 +5787,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 13:
     ///
-    /// AssignmentOperatorToken: "\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<=|>>=|<<<=|>>>=" : OwnedToken Comments;
+    /// AssignmentOperatorToken: "\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<=|>>=|<<<=|>>>=" : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn assignment_operator_token(
@@ -5817,7 +5817,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 14:
     ///
-    /// BinaryOperatorToken: "\*\*|\*|/|%|<<<|>>>|<<|>>|<=|>=|<|>|===|==\?|!==|!=\?|==|!=|&&|\|\|" : OwnedToken Comments;
+    /// BinaryOperatorToken: "\*\*|\*|/|%|<<<|>>>|<<|>>|<=|>=|<|>|===|==\?|!==|!=\?|==|!=|&&|\|\|" : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn binary_operator_token(
@@ -5847,7 +5847,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 15:
     ///
-    /// CommonOperatorToken: "\+|-|&|\||\^~|\^|~\^|~&|~\|" : OwnedToken Comments;
+    /// CommonOperatorToken: "\+|-|&|\||\^~|\^|~\^|~&|~\|" : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn common_operator_token(
@@ -5877,7 +5877,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 16:
     ///
-    /// UnaryOperatorToken: "!|~" : OwnedToken Comments;
+    /// UnaryOperatorToken: "!|~" : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn unary_operator_token(
@@ -5910,7 +5910,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 17:
     ///
-    /// ColonToken: ':' : OwnedToken Comments;
+    /// ColonToken: ':' : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn colon_token(
@@ -5936,7 +5936,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 18:
     ///
-    /// CommaToken: ',' : OwnedToken Comments;
+    /// CommaToken: ',' : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn comma_token(
@@ -5962,7 +5962,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 19:
     ///
-    /// DollarToken: '$' : OwnedToken Comments;
+    /// DollarToken: '$' : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn dollar_token(
@@ -5988,7 +5988,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 20:
     ///
-    /// DotDotToken: '..' : OwnedToken Comments;
+    /// DotDotToken: '..' : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn dot_dot_token(
@@ -6014,7 +6014,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 21:
     ///
-    /// DotToken: '.' : OwnedToken Comments;
+    /// DotToken: '.' : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn dot_token(
@@ -6040,7 +6040,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 22:
     ///
-    /// EquToken: '=' : OwnedToken Comments;
+    /// EquToken: '=' : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn equ_token(
@@ -6066,7 +6066,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 23:
     ///
-    /// HashToken: '#' : OwnedToken Comments;
+    /// HashToken: '#' : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn hash_token(
@@ -6092,7 +6092,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 24:
     ///
-    /// LBraceToken: '{' : OwnedToken Comments;
+    /// LBraceToken: '{' : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn l_brace_token(
@@ -6118,7 +6118,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 25:
     ///
-    /// LBracketToken: '[' : OwnedToken Comments;
+    /// LBracketToken: '[' : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn l_bracket_token(
@@ -6144,7 +6144,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 26:
     ///
-    /// LParenToken: '(' : OwnedToken Comments;
+    /// LParenToken: '(' : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn l_paren_token(
@@ -6170,7 +6170,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 27:
     ///
-    /// RBraceToken: '}' : OwnedToken Comments;
+    /// RBraceToken: '}' : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn r_brace_token(
@@ -6196,7 +6196,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 28:
     ///
-    /// RBracketToken: ']' : OwnedToken Comments;
+    /// RBracketToken: ']' : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn r_bracket_token(
@@ -6222,7 +6222,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 29:
     ///
-    /// RParenToken: ')' : OwnedToken Comments;
+    /// RParenToken: ')' : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn r_paren_token(
@@ -6248,7 +6248,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 30:
     ///
-    /// SemicolonToken: ';' : OwnedToken Comments;
+    /// SemicolonToken: ';' : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn semicolon_token(
@@ -6274,7 +6274,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 31:
     ///
-    /// AlwaysCombToken: /\balways_comb\b/ : OwnedToken Comments;
+    /// AlwaysCombToken: /\balways_comb\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn always_comb_token(
@@ -6304,7 +6304,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 32:
     ///
-    /// AlwaysFfToken: /\balways_ff\b/ : OwnedToken Comments;
+    /// AlwaysFfToken: /\balways_ff\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn always_ff_token(
@@ -6333,7 +6333,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 33:
     ///
-    /// AssignToken: /\bassign\b/ : OwnedToken Comments;
+    /// AssignToken: /\bassign\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn assign_token(
@@ -6359,7 +6359,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 34:
     ///
-    /// AsyncHighToken: /\basync_high\b/ : OwnedToken Comments;
+    /// AsyncHighToken: /\basync_high\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn async_high_token(
@@ -6389,7 +6389,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 35:
     ///
-    /// AsyncLowToken: /\basync_low\b/ : OwnedToken Comments;
+    /// AsyncLowToken: /\basync_low\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn async_low_token(
@@ -6418,7 +6418,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 36:
     ///
-    /// BitToken: /\bbit\b/ : OwnedToken Comments;
+    /// BitToken: /\bbit\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn bit_token(
@@ -6444,7 +6444,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 37:
     ///
-    /// ElseToken: /\belse\b/ : OwnedToken Comments;
+    /// ElseToken: /\belse\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn else_token(
@@ -6470,7 +6470,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 38:
     ///
-    /// EnumToken: /\benum\b/ : OwnedToken Comments;
+    /// EnumToken: /\benum\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn enum_token(
@@ -6496,7 +6496,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 39:
     ///
-    /// F32Token: /\bf32\b/ : OwnedToken Comments;
+    /// F32Token: /\bf32\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn f32_token(
@@ -6522,7 +6522,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 40:
     ///
-    /// F64Token: /\bf64\b/ : OwnedToken Comments;
+    /// F64Token: /\bf64\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn f64_token(
@@ -6548,7 +6548,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 41:
     ///
-    /// ForToken: /\bfor\b/ : OwnedToken Comments;
+    /// ForToken: /\bfor\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn for_token(
@@ -6574,7 +6574,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 42:
     ///
-    /// FunctionToken: /\bfunction\b/ : OwnedToken Comments;
+    /// FunctionToken: /\bfunction\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn function_token(
@@ -6603,7 +6603,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 43:
     ///
-    /// I32Token: /\bi32\b/ : OwnedToken Comments;
+    /// I32Token: /\bi32\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn i32_token(
@@ -6629,7 +6629,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 44:
     ///
-    /// I64Token: /\bi64\b/ : OwnedToken Comments;
+    /// I64Token: /\bi64\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn i64_token(
@@ -6655,7 +6655,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 45:
     ///
-    /// IfResetToken: /\bif_reset\b/ : OwnedToken Comments;
+    /// IfResetToken: /\bif_reset\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn if_reset_token(
@@ -6684,7 +6684,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 46:
     ///
-    /// IfToken: /\bif\b/ : OwnedToken Comments;
+    /// IfToken: /\bif\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn if_token(
@@ -6710,7 +6710,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 47:
     ///
-    /// InoutToken: /\binout\b/ : OwnedToken Comments;
+    /// InoutToken: /\binout\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn inout_token(
@@ -6736,7 +6736,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 48:
     ///
-    /// InputToken: /\binput\b/ : OwnedToken Comments;
+    /// InputToken: /\binput\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn input_token(
@@ -6762,7 +6762,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 49:
     ///
-    /// InstToken: /\binst\b/ : OwnedToken Comments;
+    /// InstToken: /\binst\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn inst_token(
@@ -6788,7 +6788,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 50:
     ///
-    /// InterfaceToken: /\binterface\b/ : OwnedToken Comments;
+    /// InterfaceToken: /\binterface\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn interface_token(
@@ -6817,7 +6817,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 51:
     ///
-    /// InToken: /\bin\b/ : OwnedToken Comments;
+    /// InToken: /\bin\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn in_token(
@@ -6843,7 +6843,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 52:
     ///
-    /// LetToken: /\blet\b/ : OwnedToken Comments;
+    /// LetToken: /\blet\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn let_token(
@@ -6869,7 +6869,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 53:
     ///
-    /// LocalparamToken: /\blocalparam\b/ : OwnedToken Comments;
+    /// LocalparamToken: /\blocalparam\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn localparam_token(
@@ -6899,7 +6899,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 54:
     ///
-    /// LogicToken: /\blogic\b/ : OwnedToken Comments;
+    /// LogicToken: /\blogic\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn logic_token(
@@ -6925,7 +6925,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 55:
     ///
-    /// ModportToken: /\bmodport\b/ : OwnedToken Comments;
+    /// ModportToken: /\bmodport\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn modport_token(
@@ -6951,7 +6951,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 56:
     ///
-    /// ModuleToken: /\bmodule\b/ : OwnedToken Comments;
+    /// ModuleToken: /\bmodule\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn module_token(
@@ -6977,7 +6977,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 57:
     ///
-    /// NegedgeToken: /\bnegedge\b/ : OwnedToken Comments;
+    /// NegedgeToken: /\bnegedge\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn negedge_token(
@@ -7003,7 +7003,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 58:
     ///
-    /// OutputToken: /\boutput\b/ : OwnedToken Comments;
+    /// OutputToken: /\boutput\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn output_token(
@@ -7029,7 +7029,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 59:
     ///
-    /// ParameterToken: /\bparameter\b/ : OwnedToken Comments;
+    /// ParameterToken: /\bparameter\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn parameter_token(
@@ -7058,7 +7058,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 60:
     ///
-    /// PosedgeToken: /\bposedge\b/ : OwnedToken Comments;
+    /// PosedgeToken: /\bposedge\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn posedge_token(
@@ -7084,7 +7084,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 61:
     ///
-    /// RefToken: /\bref\b/ : OwnedToken Comments;
+    /// RefToken: /\bref\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn ref_token(
@@ -7110,7 +7110,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 62:
     ///
-    /// ReturnToken: /\breturn\b/ : OwnedToken Comments;
+    /// ReturnToken: /\breturn\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn return_token(
@@ -7136,7 +7136,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 63:
     ///
-    /// StepToken: /\bstep\b/ : OwnedToken Comments;
+    /// StepToken: /\bstep\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn step_token(
@@ -7162,7 +7162,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 64:
     ///
-    /// StructToken: /\bstruct\b/ : OwnedToken Comments;
+    /// StructToken: /\bstruct\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn struct_token(
@@ -7188,7 +7188,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 65:
     ///
-    /// SyncHighToken: /\bsync_high\b/ : OwnedToken Comments;
+    /// SyncHighToken: /\bsync_high\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn sync_high_token(
@@ -7217,7 +7217,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 66:
     ///
-    /// SyncLowToken: /\bsync_low\b/ : OwnedToken Comments;
+    /// SyncLowToken: /\bsync_low\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn sync_low_token(
@@ -7246,7 +7246,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 67:
     ///
-    /// U32Token: /\bu32\b/ : OwnedToken Comments;
+    /// U32Token: /\bu32\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn u32_token(
@@ -7272,7 +7272,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 68:
     ///
-    /// U64Token: /\bu64\b/ : OwnedToken Comments;
+    /// U64Token: /\bu64\b/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn u64_token(
@@ -7298,7 +7298,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 69:
     ///
-    /// IdentifierToken: /[a-zA-Z_][0-9a-zA-Z_]*/ : OwnedToken Comments;
+    /// IdentifierToken: /[a-zA-Z_][0-9a-zA-Z_]*/ : Token Comments;
     ///
     #[parol_runtime::function_name::named]
     fn identifier_token(

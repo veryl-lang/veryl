@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::VerylToken;
+use veryl_parser::veryl_token::{Token, VerylToken};
 use veryl_parser::veryl_walker::VerylWalker;
-use veryl_parser::ParolLocation;
 
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Hash)]
 pub struct Location {
@@ -12,8 +11,8 @@ pub struct Location {
     pub duplicated: Option<usize>,
 }
 
-impl From<&ParolLocation> for Location {
-    fn from(x: &ParolLocation) -> Self {
+impl From<&Token> for Location {
+    fn from(x: &Token) -> Self {
         Self {
             line: x.line,
             column: x.column,
@@ -23,8 +22,8 @@ impl From<&ParolLocation> for Location {
     }
 }
 
-impl From<ParolLocation> for Location {
-    fn from(x: ParolLocation) -> Self {
+impl From<Token> for Location {
+    fn from(x: Token) -> Self {
         Self {
             line: x.line,
             column: x.column,
@@ -74,8 +73,8 @@ impl Align {
     }
 
     fn token(&mut self, x: &VerylToken) {
-        self.width += x.location().length;
-        let loc: Location = x.location().into();
+        self.width += x.token.length;
+        let loc: Location = x.token.into();
         self.last_location = Some(loc);
     }
 
@@ -85,8 +84,8 @@ impl Align {
     }
 
     fn duplicated_token(&mut self, x: &VerylToken, i: usize) {
-        self.width += x.location().length;
-        let mut loc: Location = x.location().into();
+        self.width += x.token.length;
+        let mut loc: Location = x.token.into();
         loc.duplicated = Some(i);
         self.last_location = Some(loc);
     }
@@ -135,7 +134,7 @@ impl Aligner {
     }
 
     fn insert(&mut self, token: &VerylToken, width: usize) {
-        let loc: Location = token.location().into();
+        let loc: Location = token.token.into();
         self.additions
             .entry(loc)
             .and_modify(|val| *val += width)
