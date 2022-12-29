@@ -11,38 +11,4 @@ module ModuleA {
     assign a    = 1;
     assign aa   = 1;
     assign aa.a = 1;
-
-    // module instantiation
-    let x: inst ModuleB;
-
-    // module instantiation with parameter and port
-    let xx: inst ModuleC #(
-        a      ,
-        aa: 10 ,
-        aa: 100,
-    ) {
-        a        ,
-        bb  : aa ,
-        bbbb: bbb,
-    };
-
-    // interface instantiation
-    let y: inst InterfaceA;
-
-    // interface array
-    let yy: inst InterfaceA [10];
-}
-
-module ModuleB {
-
-
-}
-
-module ModuleC (
-    a   : input  u32 ,
-    bb  : input  u32 ,
-    bbbb: input  u32 ,
-) {
-
-
 }

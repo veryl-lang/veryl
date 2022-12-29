@@ -969,25 +969,13 @@ pub trait VerylWalker {
         self.r#let(&arg.r#let);
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
-        match &*arg.let_declaration_group {
-            LetDeclarationGroup::VariableDeclaration(x) => {
-                self.variable_declaration(&x.variable_declaration)
-            }
-            LetDeclarationGroup::InstanceDeclaration(x) => {
-                self.instance_declaration(&x.instance_declaration)
-            }
-        }
-        self.semicolon(&arg.semicolon);
-        after!(self, let_declaration, arg);
-    }
-
-    /// Semantic action for non-terminal 'VariableDeclaration'
-    fn variable_declaration(&mut self, arg: &VariableDeclaration) {
         self.r#type(&arg.r#type);
-        if let Some(ref x) = arg.variable_declaration_opt {
+        if let Some(ref x) = arg.let_declaration_opt {
             self.equ(&x.equ);
             self.expression(&x.expression);
         }
+        self.semicolon(&arg.semicolon);
+        after!(self, let_declaration, arg);
     }
 
     /// Semantic action for non-terminal 'ParameterDeclaration'
@@ -1192,87 +1180,90 @@ pub trait VerylWalker {
         after!(self, struct_item, arg);
     }
 
-    /// Semantic action for non-terminal 'InstanceDeclaration'
-    fn instance_declaration(&mut self, arg: &InstanceDeclaration) {
-        before!(self, instance_declaration, arg);
+    /// Semantic action for non-terminal 'InstDeclaration'
+    fn inst_declaration(&mut self, arg: &InstDeclaration) {
+        before!(self, inst_declaration, arg);
         self.inst(&arg.inst);
         self.identifier(&arg.identifier);
-        if let Some(ref x) = arg.instance_declaration_opt {
+        self.colon(&arg.colon);
+        self.identifier(&arg.identifier0);
+        if let Some(ref x) = arg.inst_declaration_opt {
             self.width(&x.width);
         }
-        if let Some(ref x) = arg.instance_declaration_opt0 {
-            self.instance_parameter(&x.instance_parameter);
+        if let Some(ref x) = arg.inst_declaration_opt0 {
+            self.inst_parameter(&x.inst_parameter);
         }
-        if let Some(ref x) = arg.instance_declaration_opt1 {
+        if let Some(ref x) = arg.inst_declaration_opt1 {
             self.l_brace(&x.l_brace);
-            if let Some(ref x) = x.instance_declaration_opt2 {
-                self.instance_port_list(&x.instance_port_list);
+            if let Some(ref x) = x.inst_declaration_opt2 {
+                self.inst_port_list(&x.inst_port_list);
             }
             self.r_brace(&x.r_brace);
         }
-        after!(self, instance_declaration, arg);
+        self.semicolon(&arg.semicolon);
+        after!(self, inst_declaration, arg);
     }
 
-    /// Semantic action for non-terminal 'InstanceParameter'
-    fn instance_parameter(&mut self, arg: &InstanceParameter) {
-        before!(self, instance_parameter, arg);
+    /// Semantic action for non-terminal 'InstParameter'
+    fn inst_parameter(&mut self, arg: &InstParameter) {
+        before!(self, inst_parameter, arg);
         self.hash(&arg.hash);
         self.l_paren(&arg.l_paren);
-        if let Some(ref x) = arg.instance_parameter_opt {
-            self.instance_parameter_list(&x.instance_parameter_list);
+        if let Some(ref x) = arg.inst_parameter_opt {
+            self.inst_parameter_list(&x.inst_parameter_list);
         }
         self.r_paren(&arg.r_paren);
-        after!(self, instance_parameter, arg);
+        after!(self, inst_parameter, arg);
     }
 
-    /// Semantic action for non-terminal 'InstanceParameterList'
-    fn instance_parameter_list(&mut self, arg: &InstanceParameterList) {
-        before!(self, instance_parameter_list, arg);
-        self.instance_parameter_item(&arg.instance_parameter_item);
-        for x in &arg.instance_parameter_list_list {
+    /// Semantic action for non-terminal 'InstParameterList'
+    fn inst_parameter_list(&mut self, arg: &InstParameterList) {
+        before!(self, inst_parameter_list, arg);
+        self.inst_parameter_item(&arg.inst_parameter_item);
+        for x in &arg.inst_parameter_list_list {
             self.comma(&x.comma);
-            self.instance_parameter_item(&x.instance_parameter_item);
+            self.inst_parameter_item(&x.inst_parameter_item);
         }
-        if let Some(ref x) = arg.instance_parameter_list_opt {
+        if let Some(ref x) = arg.inst_parameter_list_opt {
             self.comma(&x.comma);
         }
-        after!(self, instance_parameter_list, arg);
+        after!(self, inst_parameter_list, arg);
     }
 
-    /// Semantic action for non-terminal 'InstanceParameterItem'
-    fn instance_parameter_item(&mut self, arg: &InstanceParameterItem) {
-        before!(self, instance_parameter_item, arg);
+    /// Semantic action for non-terminal 'InstParameterItem'
+    fn inst_parameter_item(&mut self, arg: &InstParameterItem) {
+        before!(self, inst_parameter_item, arg);
         self.identifier(&arg.identifier);
-        if let Some(ref x) = arg.instance_parameter_item_opt {
+        if let Some(ref x) = arg.inst_parameter_item_opt {
             self.colon(&x.colon);
             self.expression(&x.expression);
         }
-        after!(self, instance_parameter_item, arg);
+        after!(self, inst_parameter_item, arg);
     }
 
-    /// Semantic action for non-terminal 'InstancePortList'
-    fn instance_port_list(&mut self, arg: &InstancePortList) {
-        before!(self, instance_port_list, arg);
-        self.instance_port_item(&arg.instance_port_item);
-        for x in &arg.instance_port_list_list {
+    /// Semantic action for non-terminal 'InstPortList'
+    fn inst_port_list(&mut self, arg: &InstPortList) {
+        before!(self, inst_port_list, arg);
+        self.inst_port_item(&arg.inst_port_item);
+        for x in &arg.inst_port_list_list {
             self.comma(&x.comma);
-            self.instance_port_item(&x.instance_port_item);
+            self.inst_port_item(&x.inst_port_item);
         }
-        if let Some(ref x) = arg.instance_port_list_opt {
+        if let Some(ref x) = arg.inst_port_list_opt {
             self.comma(&x.comma);
         }
-        after!(self, instance_port_list, arg);
+        after!(self, inst_port_list, arg);
     }
 
-    /// Semantic action for non-terminal 'InstancePortItem'
-    fn instance_port_item(&mut self, arg: &InstancePortItem) {
-        before!(self, instance_port_item, arg);
+    /// Semantic action for non-terminal 'InstPortItem'
+    fn inst_port_item(&mut self, arg: &InstPortItem) {
+        before!(self, inst_port_item, arg);
         self.identifier(&arg.identifier);
-        if let Some(ref x) = arg.instance_port_item_opt {
+        if let Some(ref x) = arg.inst_port_item_opt {
             self.colon(&x.colon);
             self.expression(&x.expression);
         }
-        after!(self, instance_port_item, arg);
+        after!(self, inst_port_item, arg);
     }
 
     /// Semantic action for non-terminal 'WithParameter'
@@ -1483,6 +1474,7 @@ pub trait VerylWalker {
         before!(self, module_item, arg);
         match arg {
             ModuleItem::LetDeclaration(x) => self.let_declaration(&x.let_declaration),
+            ModuleItem::InstDeclaration(x) => self.inst_declaration(&x.inst_declaration),
             ModuleItem::ParameterDeclaration(x) => {
                 self.parameter_declaration(&x.parameter_declaration)
             }

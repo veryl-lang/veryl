@@ -364,9 +364,7 @@ ForStatement: For Identifier Colon Type In Expression DotDot Expression [ Step A
 // Declaration
 // ----------------------------------------------------------------------------
 
-LetDeclaration: Let Identifier Colon ( VariableDeclaration | InstanceDeclaration ) Semicolon;
-
-VariableDeclaration: Type [ Equ Expression ];
+LetDeclaration: Let Identifier Colon Type [ Equ Expression ] Semicolon;
 
 ParameterDeclaration: Parameter Identifier Colon Type Equ Expression Semicolon;
 
@@ -401,20 +399,20 @@ StructList: StructItem { Comma StructItem } [ Comma ];
 StructItem: Identifier Colon Type;
 
 // ----------------------------------------------------------------------------
-// InstanceDeclaration
+// InstDeclaration
 // ----------------------------------------------------------------------------
 
-InstanceDeclaration: Inst Identifier [ Width ] [ InstanceParameter ] [ LBrace [ InstancePortList ] RBrace ];
+InstDeclaration: Inst Identifier Colon Identifier [ Width ] [ InstParameter ] [ LBrace [ InstPortList ] RBrace ] Semicolon;
 
-InstanceParameter: Hash LParen [ InstanceParameterList ] RParen;
+InstParameter: Hash LParen [ InstParameterList ] RParen;
 
-InstanceParameterList: InstanceParameterItem { Comma InstanceParameterItem } [ Comma ];
+InstParameterList: InstParameterItem { Comma InstParameterItem } [ Comma ];
 
-InstanceParameterItem: Identifier [ Colon Expression ];
+InstParameterItem: Identifier [ Colon Expression ];
 
-InstancePortList: InstancePortItem { Comma InstancePortItem } [ Comma ];
+InstPortList: InstPortItem { Comma InstPortItem } [ Comma ];
 
-InstancePortItem: Identifier [ Colon Expression ];
+InstPortItem: Identifier [ Colon Expression ];
 
 // ----------------------------------------------------------------------------
 // WithParameter
@@ -463,6 +461,7 @@ ModuleIfDeclaration: If Expression Colon Identifier LBrace { ModuleItem } RBrace
 ModuleForDeclaration: For Identifier In Expression DotDot Expression [ Step AssignmentOperator Expression ] Colon Identifier LBrace { ModuleItem } RBrace;
 
 ModuleItem: LetDeclaration
+          | InstDeclaration
           | ParameterDeclaration
           | LocalparamDeclaration
           | AlwaysFfDeclaration

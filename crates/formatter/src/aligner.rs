@@ -365,13 +365,10 @@ impl VerylWalker for Aligner {
         self.identifier(&arg.identifier);
         self.aligns[align_kind::IDENTIFIER].finish_item();
         self.colon(&arg.colon);
-        match &*arg.let_declaration_group {
-            LetDeclarationGroup::VariableDeclaration(x) => {
-                self.variable_declaration(&x.variable_declaration)
-            }
-            LetDeclarationGroup::InstanceDeclaration(x) => {
-                self.instance_declaration(&x.instance_declaration)
-            }
+        self.r#type(&arg.r#type);
+        if let Some(ref x) = arg.let_declaration_opt {
+            self.equ(&x.equ);
+            self.expression(&x.expression);
         }
         self.semicolon(&arg.semicolon);
     }
@@ -431,12 +428,40 @@ impl VerylWalker for Aligner {
         self.r#type(&arg.r#type);
     }
 
-    /// Semantic action for non-terminal 'InstanceParameterItem'
-    fn instance_parameter_item(&mut self, arg: &InstanceParameterItem) {
+    /// Semantic action for non-terminal 'InstDeclaration'
+    fn inst_declaration(&mut self, arg: &InstDeclaration) {
+        self.inst(&arg.inst);
         self.aligns[align_kind::IDENTIFIER].start_item();
         self.identifier(&arg.identifier);
         self.aligns[align_kind::IDENTIFIER].finish_item();
-        if let Some(ref x) = arg.instance_parameter_item_opt {
+        self.colon(&arg.colon);
+        self.identifier(&arg.identifier0);
+        // skip align at single line
+        if arg.inst_declaration_opt1.is_none() {
+            return;
+        }
+        if let Some(ref x) = arg.inst_declaration_opt {
+            self.width(&x.width);
+        }
+        if let Some(ref x) = arg.inst_declaration_opt0 {
+            self.inst_parameter(&x.inst_parameter);
+        }
+        if let Some(ref x) = arg.inst_declaration_opt1 {
+            self.l_brace(&x.l_brace);
+            if let Some(ref x) = x.inst_declaration_opt2 {
+                self.inst_port_list(&x.inst_port_list);
+            }
+            self.r_brace(&x.r_brace);
+        }
+        self.semicolon(&arg.semicolon);
+    }
+
+    /// Semantic action for non-terminal 'InstParameterItem'
+    fn inst_parameter_item(&mut self, arg: &InstParameterItem) {
+        self.aligns[align_kind::IDENTIFIER].start_item();
+        self.identifier(&arg.identifier);
+        self.aligns[align_kind::IDENTIFIER].finish_item();
+        if let Some(ref x) = arg.inst_parameter_item_opt {
             self.colon(&x.colon);
             self.space(1);
             self.aligns[align_kind::EXPRESSION].start_item();
@@ -450,12 +475,12 @@ impl VerylWalker for Aligner {
         }
     }
 
-    /// Semantic action for non-terminal 'InstancePortItem'
-    fn instance_port_item(&mut self, arg: &InstancePortItem) {
+    /// Semantic action for non-terminal 'InstPortItem'
+    fn inst_port_item(&mut self, arg: &InstPortItem) {
         self.aligns[align_kind::IDENTIFIER].start_item();
         self.identifier(&arg.identifier);
         self.aligns[align_kind::IDENTIFIER].finish_item();
-        if let Some(ref x) = arg.instance_port_item_opt {
+        if let Some(ref x) = arg.inst_port_item_opt {
             self.colon(&x.colon);
             self.space(1);
             self.aligns[align_kind::EXPRESSION].start_item();

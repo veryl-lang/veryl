@@ -14,6 +14,7 @@ pub struct Formatter {
     last_newline: usize,
     in_start_token: bool,
     consumed_next_newline: bool,
+    single_line: bool,
 }
 
 impl Default for Formatter {
@@ -27,6 +28,7 @@ impl Default for Formatter {
             last_newline: 0,
             in_start_token: false,
             consumed_next_newline: false,
+            single_line: false,
         }
     }
 }
@@ -496,26 +498,14 @@ impl VerylWalker for Formatter {
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
         self.space(1);
-        match &*arg.let_declaration_group {
-            LetDeclarationGroup::VariableDeclaration(x) => {
-                self.variable_declaration(&x.variable_declaration)
-            }
-            LetDeclarationGroup::InstanceDeclaration(x) => {
-                self.instance_declaration(&x.instance_declaration)
-            }
-        }
-        self.semicolon(&arg.semicolon);
-    }
-
-    /// Semantic action for non-terminal 'VariableDeclaration'
-    fn variable_declaration(&mut self, arg: &VariableDeclaration) {
         self.r#type(&arg.r#type);
-        if let Some(ref x) = arg.variable_declaration_opt {
+        if let Some(ref x) = arg.let_declaration_opt {
             self.space(1);
             self.equ(&x.equ);
             self.space(1);
             self.expression(&x.expression);
         }
+        self.semicolon(&arg.semicolon);
     }
 
     /// Semantic action for non-terminal 'ParameterDeclaration'
@@ -741,87 +731,105 @@ impl VerylWalker for Formatter {
         self.r#type(&arg.r#type);
     }
 
-    /// Semantic action for non-terminal 'InstanceDeclaration'
-    fn instance_declaration(&mut self, arg: &InstanceDeclaration) {
+    /// Semantic action for non-terminal 'InstDeclaration'
+    fn inst_declaration(&mut self, arg: &InstDeclaration) {
+        if arg.inst_declaration_opt1.is_none() {
+            self.single_line = true;
+        }
         self.inst(&arg.inst);
         self.space(1);
         self.identifier(&arg.identifier);
-        if let Some(ref x) = arg.instance_declaration_opt {
+        self.colon(&arg.colon);
+        self.space(1);
+        self.identifier(&arg.identifier0);
+        if let Some(ref x) = arg.inst_declaration_opt {
             self.space(1);
             self.width(&x.width);
         }
-        if let Some(ref x) = arg.instance_declaration_opt0 {
+        if let Some(ref x) = arg.inst_declaration_opt0 {
             self.space(1);
-            self.instance_parameter(&x.instance_parameter);
+            self.inst_parameter(&x.inst_parameter);
         }
-        if let Some(ref x) = arg.instance_declaration_opt1 {
+        if let Some(ref x) = arg.inst_declaration_opt1 {
             self.space(1);
             self.token_will_push(&x.l_brace.l_brace_token);
             self.newline_push();
-            if let Some(ref x) = x.instance_declaration_opt2 {
-                self.instance_port_list(&x.instance_port_list);
+            if let Some(ref x) = x.inst_declaration_opt2 {
+                self.inst_port_list(&x.inst_port_list);
             }
             self.newline_pop();
             self.r_brace(&x.r_brace);
         }
+        self.semicolon(&arg.semicolon);
+        self.single_line = false;
     }
 
-    /// Semantic action for non-terminal 'InstanceParameter'
-    fn instance_parameter(&mut self, arg: &InstanceParameter) {
+    /// Semantic action for non-terminal 'InstParameter'
+    fn inst_parameter(&mut self, arg: &InstParameter) {
         self.hash(&arg.hash);
-        self.token_will_push(&arg.l_paren.l_paren_token);
-        self.newline_push();
-        if let Some(ref x) = arg.instance_parameter_opt {
-            self.instance_parameter_list(&x.instance_parameter_list);
+        if self.single_line {
+            self.l_paren(&arg.l_paren);
+        } else {
+            self.token_will_push(&arg.l_paren.l_paren_token);
+            self.newline_push();
         }
-        self.newline_pop();
+        if let Some(ref x) = arg.inst_parameter_opt {
+            self.inst_parameter_list(&x.inst_parameter_list);
+        }
+        if !self.single_line {
+            self.newline_pop();
+        }
         self.r_paren(&arg.r_paren);
     }
 
-    /// Semantic action for non-terminal 'InstanceParameterList'
-    fn instance_parameter_list(&mut self, arg: &InstanceParameterList) {
-        self.instance_parameter_item(&arg.instance_parameter_item);
-        for x in &arg.instance_parameter_list_list {
+    /// Semantic action for non-terminal 'InstParameterList'
+    fn inst_parameter_list(&mut self, arg: &InstParameterList) {
+        self.inst_parameter_item(&arg.inst_parameter_item);
+        for x in &arg.inst_parameter_list_list {
             self.comma(&x.comma);
-            self.newline();
-            self.instance_parameter_item(&x.instance_parameter_item);
+            if self.single_line {
+                self.space(1);
+            } else {
+                self.newline();
+            }
+            self.inst_parameter_item(&x.inst_parameter_item);
         }
-        if let Some(ref x) = arg.instance_parameter_list_opt {
+        if let Some(ref x) = arg.inst_parameter_list_opt {
             self.comma(&x.comma);
         } else {
             self.str(",");
         }
     }
 
-    /// Semantic action for non-terminal 'InstanceParameterItem'
-    fn instance_parameter_item(&mut self, arg: &InstanceParameterItem) {
+    /// Semantic action for non-terminal 'InstParameterItem'
+    fn inst_parameter_item(&mut self, arg: &InstParameterItem) {
         self.identifier(&arg.identifier);
-        if let Some(ref x) = arg.instance_parameter_item_opt {
+        if let Some(ref x) = arg.inst_parameter_item_opt {
             self.colon(&x.colon);
             self.space(1);
             self.expression(&x.expression);
         }
     }
 
-    /// Semantic action for non-terminal 'InstancePortList'
-    fn instance_port_list(&mut self, arg: &InstancePortList) {
-        self.instance_port_item(&arg.instance_port_item);
-        for x in &arg.instance_port_list_list {
+    /// Semantic action for non-terminal 'InstPortList'
+    fn inst_port_list(&mut self, arg: &InstPortList) {
+        self.inst_port_item(&arg.inst_port_item);
+        for x in &arg.inst_port_list_list {
             self.comma(&x.comma);
             self.newline();
-            self.instance_port_item(&x.instance_port_item);
+            self.inst_port_item(&x.inst_port_item);
         }
-        if let Some(ref x) = arg.instance_port_list_opt {
+        if let Some(ref x) = arg.inst_port_list_opt {
             self.comma(&x.comma);
         } else {
             self.str(",");
         }
     }
 
-    /// Semantic action for non-terminal 'InstancePortItem'
-    fn instance_port_item(&mut self, arg: &InstancePortItem) {
+    /// Semantic action for non-terminal 'InstPortItem'
+    fn inst_port_item(&mut self, arg: &InstPortItem) {
         self.identifier(&arg.identifier);
-        if let Some(ref x) = arg.instance_port_item_opt {
+        if let Some(ref x) = arg.inst_port_item_opt {
             self.colon(&x.colon);
             self.space(1);
             self.expression(&x.expression);

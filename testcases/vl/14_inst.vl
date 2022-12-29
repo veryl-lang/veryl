@@ -1,0 +1,39 @@
+module ModuleA {
+    // module instantiation
+    inst x: ModuleB;
+
+    // module instantiation with parameter and port
+    inst xx: ModuleC #(
+        a      ,
+        aa: 10 ,
+        aa: 100,
+    ) {
+        a        ,
+        bb  : aa ,
+        bbbb: bbb,
+    };
+
+    // interface instantiation
+    inst y: InterfaceA;
+
+    // interface instantiation with parameter
+    inst yy : InterfaceA #(a, b: 10,);
+    inst xxx: InterfaceA #(a, b: 10,);
+
+    // interface array
+    inst yyy: InterfaceA [10];
+}
+
+module ModuleB {
+
+
+}
+
+module ModuleC (
+    a   : input  u32 ,
+    bb  : input  u32 ,
+    bbbb: input  u32 ,
+) {
+
+
+}

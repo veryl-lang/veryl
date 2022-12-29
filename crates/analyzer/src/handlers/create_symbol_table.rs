@@ -44,24 +44,9 @@ impl<'a> Handler for CreateSymbolTable<'a> {
 impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
     fn let_declaration(&mut self, arg: &LetDeclaration) -> Result<()> {
         if let HandlerPoint::Before = self.point {
-            match &*arg.let_declaration_group {
-                LetDeclarationGroup::VariableDeclaration(x) => {
-                    let x = &x.variable_declaration.r#type;
-                    let r#type: SymType = (&**x).into();
-                    let kind = SymbolKind::Variable { r#type };
-                    self.insert_symbol(&arg.identifier.identifier_token, kind);
-                }
-                LetDeclarationGroup::InstanceDeclaration(x) => {
-                    let name = x
-                        .instance_declaration
-                        .identifier
-                        .identifier_token
-                        .token
-                        .text;
-                    let kind = SymbolKind::Instance { name };
-                    self.insert_symbol(&arg.identifier.identifier_token, kind);
-                }
-            }
+            let r#type: SymType = (&*arg.r#type).into();
+            let kind = SymbolKind::Variable { r#type };
+            self.insert_symbol(&arg.identifier.identifier_token, kind);
         }
         Ok(())
     }
@@ -85,6 +70,15 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 r#type,
                 scope: ParameterScope::Local,
             };
+            self.insert_symbol(&arg.identifier.identifier_token, kind);
+        }
+        Ok(())
+    }
+
+    fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<()> {
+        if let HandlerPoint::Before = self.point {
+            let name = arg.identifier0.identifier_token.token.text;
+            let kind = SymbolKind::Instance { name };
             self.insert_symbol(&arg.identifier.identifier_token, kind);
         }
         Ok(())
