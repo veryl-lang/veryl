@@ -5,8 +5,8 @@ interface InterfaceA #(
     parameter  int unsigned aa   = 1,
     localparam int unsigned aaa  = 1
 ) ;
-    // parameter declaration
-    parameter  int unsigned     b   = 1;
+    // localparam declaration
+    localparam int unsigned     b   = 1;
     localparam longint unsigned bb  = 1;
 
     // let declaration

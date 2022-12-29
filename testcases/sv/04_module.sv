@@ -9,8 +9,8 @@ module ModuleA #(
     output logic [10-1:0] bb ,
     inout  logic [10-1:0] bbb
 ) ;
-    // parameter declaration
-    parameter  int unsigned     c   = 1;
+    // localparam declaration
+    localparam int unsigned     c   = 1;
     localparam longint unsigned cc  = 1;
 
     // variable declaration

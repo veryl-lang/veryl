@@ -366,8 +366,6 @@ ForStatement: For Identifier Colon Type In Expression DotDot Expression [ Step A
 
 LetDeclaration: Let Identifier Colon Type [ Equ Expression ] Semicolon;
 
-ParameterDeclaration: Parameter Identifier Colon Type Equ Expression Semicolon;
-
 LocalparamDeclaration: Localparam Identifier Colon Type Equ Expression Semicolon;
 
 AlwaysFfDeclaration: AlwaysFf LParen AlwaysFfClock [ Comma AlwaysFfReset ] RParen LBrace { Statement } RBrace;
@@ -462,7 +460,6 @@ ModuleForDeclaration: For Identifier In Expression DotDot Expression [ Step Assi
 
 ModuleItem: LetDeclaration
           | InstDeclaration
-          | ParameterDeclaration
           | LocalparamDeclaration
           | AlwaysFfDeclaration
           | AlwaysCombDeclaration
@@ -485,7 +482,6 @@ InterfaceIfDeclaration: If Expression Colon Identifier LBrace { InterfaceItem } 
 InterfaceForDeclaration: For Identifier In Expression DotDot Expression [ Step AssignmentOperator Expression ] Colon Identifier LBrace { InterfaceItem } RBrace;
 
 InterfaceItem: LetDeclaration
-             | ParameterDeclaration
              | LocalparamDeclaration
              | ModportDeclaration
              | InterfaceIfDeclaration

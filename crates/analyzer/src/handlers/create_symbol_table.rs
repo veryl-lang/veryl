@@ -51,18 +51,6 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         Ok(())
     }
 
-    fn parameter_declaration(&mut self, arg: &ParameterDeclaration) -> Result<()> {
-        if let HandlerPoint::Before = self.point {
-            let r#type: SymType = (&*arg.r#type).into();
-            let kind = SymbolKind::Parameter {
-                r#type,
-                scope: ParameterScope::Global,
-            };
-            self.insert_symbol(&arg.identifier.identifier_token, kind);
-        }
-        Ok(())
-    }
-
     fn localparam_declaration(&mut self, arg: &LocalparamDeclaration) -> Result<()> {
         if let HandlerPoint::Before = self.point {
             let r#type: SymType = (&*arg.r#type).into();

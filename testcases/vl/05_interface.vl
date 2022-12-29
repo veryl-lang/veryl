@@ -5,8 +5,8 @@ interface InterfaceA #(
     parameter  aa : u32  = 1,
     localparam aaa: u32  = 1,
 ) {
-    // parameter declaration
-    parameter  b : u32  = 1;
+    // localparam declaration
+    localparam b : u32  = 1;
     localparam bb: u64  = 1;
 
     // let declaration

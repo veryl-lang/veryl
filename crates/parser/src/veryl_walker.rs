@@ -978,19 +978,6 @@ pub trait VerylWalker {
         after!(self, let_declaration, arg);
     }
 
-    /// Semantic action for non-terminal 'ParameterDeclaration'
-    fn parameter_declaration(&mut self, arg: &ParameterDeclaration) {
-        before!(self, parameter_declaration, arg);
-        self.parameter(&arg.parameter);
-        self.identifier(&arg.identifier);
-        self.colon(&arg.colon);
-        self.r#type(&arg.r#type);
-        self.equ(&arg.equ);
-        self.expression(&arg.expression);
-        self.semicolon(&arg.semicolon);
-        after!(self, parameter_declaration, arg);
-    }
-
     /// Semantic action for non-terminal 'LocalparamDeclaration'
     fn localparam_declaration(&mut self, arg: &LocalparamDeclaration) {
         before!(self, localparam_declaration, arg);
@@ -1475,9 +1462,6 @@ pub trait VerylWalker {
         match arg {
             ModuleItem::LetDeclaration(x) => self.let_declaration(&x.let_declaration),
             ModuleItem::InstDeclaration(x) => self.inst_declaration(&x.inst_declaration),
-            ModuleItem::ParameterDeclaration(x) => {
-                self.parameter_declaration(&x.parameter_declaration)
-            }
             ModuleItem::LocalparamDeclaration(x) => {
                 self.localparam_declaration(&x.localparam_declaration)
             }
@@ -1589,9 +1573,6 @@ pub trait VerylWalker {
         before!(self, interface_item, arg);
         match arg {
             InterfaceItem::LetDeclaration(x) => self.let_declaration(&x.let_declaration),
-            InterfaceItem::ParameterDeclaration(x) => {
-                self.parameter_declaration(&x.parameter_declaration)
-            }
             InterfaceItem::LocalparamDeclaration(x) => {
                 self.localparam_declaration(&x.localparam_declaration)
             }

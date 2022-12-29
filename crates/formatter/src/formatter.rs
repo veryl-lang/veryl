@@ -508,21 +508,6 @@ impl VerylWalker for Formatter {
         self.semicolon(&arg.semicolon);
     }
 
-    /// Semantic action for non-terminal 'ParameterDeclaration'
-    fn parameter_declaration(&mut self, arg: &ParameterDeclaration) {
-        self.parameter(&arg.parameter);
-        self.space(1);
-        self.identifier(&arg.identifier);
-        self.colon(&arg.colon);
-        self.space(1);
-        self.r#type(&arg.r#type);
-        self.space(1);
-        self.equ(&arg.equ);
-        self.space(1);
-        self.expression(&arg.expression);
-        self.semicolon(&arg.semicolon);
-    }
-
     /// Semantic action for non-terminal 'LocalparamDeclaration'
     fn localparam_declaration(&mut self, arg: &LocalparamDeclaration) {
         self.localparam(&arg.localparam);
