@@ -97,12 +97,14 @@ mod align_kind {
     pub const EXPRESSION: usize = 2;
     pub const WIDTH: usize = 3;
     pub const ASSIGNMENT: usize = 4;
+    pub const PARAMETER: usize = 5;
+    pub const DIRECTION: usize = 6;
 }
 
 #[derive(Default)]
 pub struct Aligner {
     pub additions: HashMap<Location, usize>,
-    aligns: [Align; 5],
+    aligns: [Align; 7],
 }
 
 impl Aligner {
@@ -150,26 +152,6 @@ impl VerylWalker for Aligner {
         for i in 0..self.aligns.len() {
             self.aligns[i].token(arg);
         }
-    }
-
-    /// Semantic action for non-terminal 'Inout'
-    fn inout(&mut self, arg: &Inout) {
-        self.insert(&arg.inout_token, 1);
-    }
-
-    /// Semantic action for non-terminal 'Input'
-    fn input(&mut self, arg: &Input) {
-        self.insert(&arg.input_token, 1);
-    }
-
-    /// Semantic action for non-terminal 'Parameter'
-    fn parameter(&mut self, arg: &Parameter) {
-        self.insert(&arg.parameter_token, 1);
-    }
-
-    /// Semantic action for non-terminal 'Ref'
-    fn r#ref(&mut self, arg: &Ref) {
-        self.insert(&arg.ref_token, 3);
     }
 
     /// Semantic action for non-terminal 'Expression'
@@ -483,10 +465,12 @@ impl VerylWalker for Aligner {
 
     /// Semantic action for non-terminal 'WithParameterItem'
     fn with_parameter_item(&mut self, arg: &WithParameterItem) {
+        self.aligns[align_kind::PARAMETER].start_item();
         match &*arg.with_parameter_item_group {
             WithParameterItemGroup::Parameter(x) => self.parameter(&x.parameter),
             WithParameterItemGroup::Localparam(x) => self.localparam(&x.localparam),
         };
+        self.aligns[align_kind::PARAMETER].finish_item();
         self.aligns[align_kind::IDENTIFIER].start_item();
         self.identifier(&arg.identifier);
         self.aligns[align_kind::IDENTIFIER].finish_item();
@@ -506,6 +490,18 @@ impl VerylWalker for Aligner {
         self.colon(&arg.colon);
         self.direction(&arg.direction);
         self.r#type(&arg.r#type);
+    }
+
+    /// Semantic action for non-terminal 'Direction'
+    fn direction(&mut self, arg: &Direction) {
+        self.aligns[align_kind::DIRECTION].start_item();
+        match arg {
+            Direction::Input(x) => self.input(&x.input),
+            Direction::Output(x) => self.output(&x.output),
+            Direction::Inout(x) => self.inout(&x.inout),
+            Direction::Ref(x) => self.r#ref(&x.r#ref),
+        };
+        self.aligns[align_kind::DIRECTION].finish_item();
     }
 
     /// Semantic action for non-terminal 'FunctionDeclaration'

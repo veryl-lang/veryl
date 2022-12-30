@@ -27,9 +27,9 @@ module ModuleB ;
 
 endmodule
 module ModuleC (
-    input  int unsigned a    ,
-    input  int unsigned bb   ,
-    input  int unsigned bbbb 
+    input int unsigned a    ,
+    input int unsigned bb   ,
+    input int unsigned bbbb 
 ) ;
 
 endmodule

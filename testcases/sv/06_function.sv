@@ -14,7 +14,7 @@ module ModuleA ;
 
     // function with parameter
     module FuncB #(
-        parameter  int unsigned ParamX  = 1
+        parameter int unsigned ParamX  = 1
     );
         function automatic logic [ParamX-1:0] FuncB(
             input  logic [ParamX-1:0] a,

@@ -30,9 +30,9 @@ module ModuleB {
 }
 
 module ModuleC (
-    a   : input  u32 ,
-    bb  : input  u32 ,
-    bbbb: input  u32 ,
+    a   : input u32 ,
+    bb  : input u32 ,
+    bbbb: input u32 ,
 ) {
 
 

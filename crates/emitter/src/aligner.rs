@@ -101,12 +101,14 @@ mod align_kind {
     pub const EXPRESSION: usize = 2;
     pub const WIDTH: usize = 3;
     pub const ASSIGNMENT: usize = 4;
+    pub const PARAMETER: usize = 5;
+    pub const DIRECTION: usize = 6;
 }
 
 #[derive(Default)]
 pub struct Aligner {
     pub additions: HashMap<Location, usize>,
-    aligns: [Align; 5],
+    aligns: [Align; 7],
 }
 
 impl Aligner {
@@ -131,14 +133,6 @@ impl Aligner {
         for i in 0..self.aligns.len() {
             self.aligns[i].finish_group();
         }
-    }
-
-    fn insert(&mut self, token: &VerylToken, width: usize) {
-        let loc: Location = token.token.into();
-        self.additions
-            .entry(loc)
-            .and_modify(|val| *val += width)
-            .or_insert(width);
     }
 
     fn space(&mut self, repeat: usize) {
@@ -174,26 +168,6 @@ impl VerylWalker for Aligner {
     /// Semantic action for non-terminal 'I64'
     fn i64(&mut self, arg: &I64) {
         self.veryl_token(&arg.i64_token.replace("signed longint"));
-    }
-
-    /// Semantic action for non-terminal 'Inout'
-    fn inout(&mut self, arg: &Inout) {
-        self.insert(&arg.inout_token, 1);
-    }
-
-    /// Semantic action for non-terminal 'Input'
-    fn input(&mut self, arg: &Input) {
-        self.insert(&arg.input_token, 1);
-    }
-
-    /// Semantic action for non-terminal 'Parameter'
-    fn parameter(&mut self, arg: &Parameter) {
-        self.insert(&arg.parameter_token, 1);
-    }
-
-    /// Semantic action for non-terminal 'Ref'
-    fn r#ref(&mut self, arg: &Ref) {
-        self.insert(&arg.ref_token, 3);
     }
 
     /// Semantic action for non-terminal 'U32'
@@ -511,10 +485,12 @@ impl VerylWalker for Aligner {
 
     /// Semantic action for non-terminal 'WithParameterItem'
     fn with_parameter_item(&mut self, arg: &WithParameterItem) {
+        self.aligns[align_kind::PARAMETER].start_item();
         match &*arg.with_parameter_item_group {
             WithParameterItemGroup::Parameter(x) => self.parameter(&x.parameter),
             WithParameterItemGroup::Localparam(x) => self.localparam(&x.localparam),
         };
+        self.aligns[align_kind::PARAMETER].finish_item();
         self.aligns[align_kind::IDENTIFIER].start_item();
         self.identifier(&arg.identifier);
         self.aligns[align_kind::IDENTIFIER].finish_item();
@@ -534,6 +510,18 @@ impl VerylWalker for Aligner {
         self.colon(&arg.colon);
         self.direction(&arg.direction);
         self.r#type(&arg.r#type);
+    }
+
+    /// Semantic action for non-terminal 'Direction'
+    fn direction(&mut self, arg: &Direction) {
+        self.aligns[align_kind::DIRECTION].start_item();
+        match arg {
+            Direction::Input(x) => self.input(&x.input),
+            Direction::Output(x) => self.output(&x.output),
+            Direction::Inout(x) => self.inout(&x.inout),
+            Direction::Ref(x) => self.r#ref(&x.r#ref),
+        };
+        self.aligns[align_kind::DIRECTION].finish_item();
     }
 
     /// Semantic action for non-terminal 'FunctionDeclaration'

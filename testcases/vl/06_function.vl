@@ -13,7 +13,7 @@ module ModuleA {
 
     // function with parameter
     function FuncB #(
-        parameter  ParamX: u32  = 1,
+        parameter ParamX: u32  = 1,
     ) (
         a: input  logic [ParamX],
         b: output logic [ParamX],

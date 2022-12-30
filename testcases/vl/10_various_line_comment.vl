@@ -3,11 +3,11 @@ module //a
  (
     i_clk // a
     : // a
-     input  //a
+     input //a
      logic //a
      ,
-    i_rst_n: input  logic ,
-    i_up   : input  logic ,
+    i_rst_n: input logic ,
+    i_up   : input logic ,
 
     i_down : input  logic    ,
     o_count: output logic [8],
