@@ -106,7 +106,7 @@ mod align_kind {
 #[derive(Default)]
 pub struct Aligner {
     pub additions: HashMap<Location, usize>,
-    aligns: [Align; 5],
+    aligns: [Align; 20],
 }
 
 impl Aligner {

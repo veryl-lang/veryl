@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use veryl_parser::global_table::StrId;
 use veryl_parser::veryl_grammar_trait::{BuiltinType, TypeGroup};
 use veryl_parser::veryl_token::Token;
 
@@ -26,7 +27,7 @@ pub enum SymbolKind {
         scope: ParameterScope,
     },
     Instance {
-        name: Vec<usize>,
+        name: Vec<StrId>,
     },
 }
 
@@ -50,7 +51,7 @@ pub enum Direction {
     Output,
     Inout,
     Ref,
-    ModPort { interface: usize, modport: usize },
+    ModPort { interface: StrId, modport: StrId },
 }
 
 impl From<&veryl_parser::veryl_grammar_trait::Direction> for Direction {
@@ -74,7 +75,7 @@ pub enum Type {
     I64,
     F32,
     F64,
-    UserDefined(Vec<usize>),
+    UserDefined(Vec<StrId>),
 }
 
 impl From<&veryl_parser::veryl_grammar_trait::Type> for Type {
@@ -105,7 +106,7 @@ impl From<&veryl_parser::veryl_grammar_trait::Type> for Type {
 
 #[derive(Debug, Clone)]
 pub struct Port {
-    pub name: usize,
+    pub name: StrId,
     pub direction: Direction,
 }
 
@@ -127,7 +128,7 @@ pub enum ParameterScope {
 
 #[derive(Debug, Clone)]
 pub struct Parameter {
-    pub name: usize,
+    pub name: StrId,
     pub r#type: Type,
     pub scope: ParameterScope,
 }
@@ -153,12 +154,12 @@ impl From<&veryl_parser::veryl_grammar_trait::WithParameterItem> for Parameter {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Name {
-    Hierarchical(Vec<usize>),
-    Scoped(Vec<usize>),
+    Hierarchical(Vec<StrId>),
+    Scoped(Vec<StrId>),
 }
 
 impl Name {
-    pub fn as_slice(&self) -> &[usize] {
+    pub fn as_slice(&self) -> &[StrId] {
         match self {
             Name::Hierarchical(x) => x.as_slice(),
             Name::Scoped(x) => x.as_slice(),
@@ -218,11 +219,11 @@ impl From<&veryl_parser::veryl_grammar_trait::ScopedOrHierIdentifier> for Name {
 
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct Namespace {
-    pub paths: Vec<usize>,
+    pub paths: Vec<StrId>,
 }
 
 impl Namespace {
-    pub fn push(&mut self, path: usize) {
+    pub fn push(&mut self, path: StrId) {
         self.paths.push(path);
     }
 
@@ -267,7 +268,7 @@ impl Symbol {
 
 #[derive(Clone, Default, Debug)]
 pub struct SymbolTable {
-    table: HashMap<usize, Vec<Symbol>>,
+    table: HashMap<StrId, Vec<Symbol>>,
 }
 
 impl SymbolTable {
@@ -289,7 +290,7 @@ impl SymbolTable {
         }
     }
 
-    fn get_hierarchical(&self, paths: &[usize], namespace: &Namespace) -> Option<&Symbol> {
+    fn get_hierarchical(&self, paths: &[StrId], namespace: &Namespace) -> Option<&Symbol> {
         let mut ret = None;
         let mut namespace = namespace.clone();
         for name in paths {

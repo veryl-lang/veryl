@@ -1,24 +1,28 @@
 use crate::global_table;
+use crate::global_table::{PathId, StrId, TokenId};
 use crate::veryl_grammar_trait::*;
 use parol_runtime::miette;
 use regex::Regex;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Token {
-    pub text: usize,
+    pub id: TokenId,
+    pub text: StrId,
     pub line: usize,
     pub column: usize,
     pub length: usize,
     pub pos: usize,
-    pub file_path: usize,
+    pub file_path: PathId,
 }
 
 impl<'t> From<&parol_runtime::lexer::Token<'t>> for Token {
     fn from(x: &parol_runtime::lexer::Token<'t>) -> Self {
+        let id = global_table::get_token_id();
         let text = global_table::insert_str(x.text());
         let file_path = global_table::insert_path(&x.location.file_name);
         let source_span: miette::SourceSpan = (&x.location).into();
         Token {
+            id,
             text,
             line: x.location.line,
             column: x.location.column,
@@ -80,6 +84,7 @@ macro_rules! token_with_comments {
         impl From<&$y> for Token {
             fn from(x: &$y) -> Self {
                 Token {
+                    id: x.$z.id,
                     text: x.$z.text,
                     line: x.$z.line,
                     column: x.$z.column,
@@ -107,8 +112,10 @@ fn split_comment_token(token: Token) -> Vec<Token> {
         line += text[prev_pos..pos].matches('\n').count();
         prev_pos = pos;
 
+        let id = global_table::get_token_id();
         let text = global_table::insert_str(&text[pos..pos + length]);
         let token = Token {
+            id,
             text,
             line,
             column: 0,
@@ -128,9 +135,11 @@ impl From<&StartToken> for VerylToken {
             let mut tokens = split_comment_token(x.comments_term.comments_term);
             comments.append(&mut tokens)
         }
+        let id = global_table::get_token_id();
         let text = global_table::insert_str("");
         let file_path = global_table::insert_path(std::path::Path::new(""));
         let token = Token {
+            id,
             text,
             line: 1,
             column: 1,
