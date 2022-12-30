@@ -1,5 +1,5 @@
 use crate::analyze_error::AnalyzeError;
-use crate::symbol_table::{HierarchicalName, NameSpace, SymbolKind, SymbolTable};
+use crate::symbol_table::{Name, Namespace, SymbolKind, SymbolTable};
 use veryl_parser::global_table;
 use veryl_parser::miette::Result;
 use veryl_parser::veryl_grammar_trait::*;
@@ -10,7 +10,7 @@ pub struct CheckFunctionArity<'a> {
     text: &'a str,
     symbol_table: &'a SymbolTable,
     point: HandlerPoint,
-    name_space: NameSpace,
+    namespace: Namespace,
 }
 
 impl<'a> CheckFunctionArity<'a> {
@@ -20,7 +20,7 @@ impl<'a> CheckFunctionArity<'a> {
             text,
             symbol_table,
             point: HandlerPoint::Before,
-            name_space: NameSpace::default(),
+            namespace: Namespace::default(),
         }
     }
 }
@@ -34,14 +34,14 @@ impl<'a> Handler for CheckFunctionArity<'a> {
 impl<'a> VerylGrammarTrait for CheckFunctionArity<'a> {
     fn factor(&mut self, arg: &Factor) -> Result<()> {
         if let HandlerPoint::Before = self.point {
-            if let Factor::FactorOptHierarchicalIdentifierFactorOpt0(x) = arg {
+            if let Factor::FactorOptScopedOrHierIdentifierFactorOpt0(x) = arg {
                 // skip system function
                 if x.factor_opt.is_some() {
                     return Ok(());
                 }
 
-                let hierarchical_name: HierarchicalName = (&*x.hierarchical_identifier).into();
-                let symbol = self.symbol_table.get(&hierarchical_name, &self.name_space);
+                let name: Name = (&*x.scoped_or_hier_identifier).into();
+                let symbol = self.symbol_table.get(&name, &self.namespace);
 
                 let arity = if let Some(symbol) = symbol {
                     if let SymbolKind::Function { ref ports, .. } = symbol.kind {
@@ -64,14 +64,13 @@ impl<'a> VerylGrammarTrait for CheckFunctionArity<'a> {
                 if let Some(arity) = arity {
                     if arity != args {
                         let name =
-                            global_table::get_str_value(*hierarchical_name.paths.last().unwrap())
-                                .unwrap();
+                            global_table::get_str_value(*name.as_slice().last().unwrap()).unwrap();
                         self.errors.push(AnalyzeError::mismatch_arity(
                             &name,
                             arity,
                             args,
                             self.text,
-                            &x.hierarchical_identifier.identifier.identifier_token,
+                            &x.scoped_or_hier_identifier.identifier.identifier_token,
                         ));
                     }
                 }
@@ -85,9 +84,9 @@ impl<'a> VerylGrammarTrait for CheckFunctionArity<'a> {
         match self.point {
             HandlerPoint::Before => {
                 let name = arg.identifier.identifier_token.token.text;
-                self.name_space.push(name)
+                self.namespace.push(name)
             }
-            HandlerPoint::After => self.name_space.pop(),
+            HandlerPoint::After => self.namespace.pop(),
         }
         Ok(())
     }
@@ -96,9 +95,9 @@ impl<'a> VerylGrammarTrait for CheckFunctionArity<'a> {
         match self.point {
             HandlerPoint::Before => {
                 let name = arg.identifier.identifier_token.token.text;
-                self.name_space.push(name)
+                self.namespace.push(name)
             }
-            HandlerPoint::After => self.name_space.pop(),
+            HandlerPoint::After => self.namespace.pop(),
         }
         Ok(())
     }
@@ -107,9 +106,9 @@ impl<'a> VerylGrammarTrait for CheckFunctionArity<'a> {
         match self.point {
             HandlerPoint::Before => {
                 let name = arg.identifier.identifier_token.token.text;
-                self.name_space.push(name)
+                self.namespace.push(name)
             }
-            HandlerPoint::After => self.name_space.pop(),
+            HandlerPoint::After => self.namespace.pop(),
         }
         Ok(())
     }

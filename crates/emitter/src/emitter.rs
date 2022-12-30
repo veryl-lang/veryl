@@ -184,25 +184,27 @@ impl Emitter {
     }
 
     fn type_left(&mut self, input: &Type) {
-        let (width, token) = match &*input.type_group {
-            TypeGroup::BuiltinType(x) => match &*x.builtin_type {
-                BuiltinType::Logic(x) => (true, x.logic.logic_token.clone()),
-                BuiltinType::Bit(x) => (true, x.bit.bit_token.clone()),
-                BuiltinType::U32(x) => (false, x.u32.u32_token.replace("int unsigned")),
-                BuiltinType::U64(x) => (false, x.u64.u64_token.replace("longint unsigned")),
-                BuiltinType::I32(x) => (false, x.i32.i32_token.replace("int signed")),
-                BuiltinType::I64(x) => (false, x.i64.i64_token.replace("longint signed")),
-                BuiltinType::F32(x) => (false, x.f32.f32_token.replace("shortreal")),
-                BuiltinType::F64(x) => (false, x.f64.f64_token.replace("real")),
-            },
-            TypeGroup::Identifier(x) => (false, x.identifier.identifier_token.clone()),
-        };
-        self.token(&token);
-        if width {
-            self.space(1);
-            for x in &input.type_list {
-                self.width(&x.width);
+        match &*input.type_group {
+            TypeGroup::BuiltinType(x) => {
+                let (width, token) = match &*x.builtin_type {
+                    BuiltinType::Logic(x) => (true, x.logic.logic_token.clone()),
+                    BuiltinType::Bit(x) => (true, x.bit.bit_token.clone()),
+                    BuiltinType::U32(x) => (false, x.u32.u32_token.replace("int unsigned")),
+                    BuiltinType::U64(x) => (false, x.u64.u64_token.replace("longint unsigned")),
+                    BuiltinType::I32(x) => (false, x.i32.i32_token.replace("int signed")),
+                    BuiltinType::I64(x) => (false, x.i64.i64_token.replace("longint signed")),
+                    BuiltinType::F32(x) => (false, x.f32.f32_token.replace("shortreal")),
+                    BuiltinType::F64(x) => (false, x.f64.f64_token.replace("real")),
+                };
+                self.token(&token);
+                if width {
+                    self.space(1);
+                    for x in &input.type_list {
+                        self.width(&x.width);
+                    }
+                }
             }
+            TypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
         }
     }
 
@@ -218,7 +220,7 @@ impl Emitter {
                 BuiltinType::F32(_) => true,
                 BuiltinType::F64(_) => true,
             },
-            TypeGroup::Identifier(_) => true,
+            TypeGroup::ScopedIdentifier(_) => true,
         };
         if width {
             self.space(1);
@@ -887,7 +889,7 @@ impl VerylWalker for Emitter {
             self.single_line = true;
         }
         self.token(&arg.inst.inst_token.replace(""));
-        self.identifier(&arg.identifier0);
+        self.scoped_identifier(&arg.scoped_identifier);
         self.space(1);
         if let Some(ref x) = arg.inst_declaration_opt0 {
             self.inst_parameter(&x.inst_parameter);

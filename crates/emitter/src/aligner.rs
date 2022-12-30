@@ -353,7 +353,7 @@ impl VerylWalker for Aligner {
         self.aligns[align_kind::TYPE].start_item();
         match &*arg.type_group {
             TypeGroup::BuiltinType(x) => self.builtin_type(&x.builtin_type),
-            TypeGroup::Identifier(x) => self.identifier(&x.identifier),
+            TypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
         };
         let loc = self.aligns[align_kind::TYPE].last_location;
         self.aligns[align_kind::TYPE].finish_item();
@@ -450,7 +450,7 @@ impl VerylWalker for Aligner {
         self.identifier(&arg.identifier);
         self.aligns[align_kind::IDENTIFIER].finish_item();
         self.colon(&arg.colon);
-        self.identifier(&arg.identifier0);
+        self.scoped_identifier(&arg.scoped_identifier);
         // skip align at single line
         if arg.inst_declaration_opt1.is_none() {
             return;

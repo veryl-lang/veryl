@@ -323,7 +323,7 @@ impl VerylWalker for Formatter {
     fn r#type(&mut self, arg: &Type) {
         match &*arg.type_group {
             TypeGroup::BuiltinType(x) => self.builtin_type(&x.builtin_type),
-            TypeGroup::Identifier(x) => self.identifier(&x.identifier),
+            TypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
         };
         self.space(1);
         for x in &arg.type_list {
@@ -726,7 +726,7 @@ impl VerylWalker for Formatter {
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
         self.space(1);
-        self.identifier(&arg.identifier0);
+        self.scoped_identifier(&arg.scoped_identifier);
         if let Some(ref x) = arg.inst_declaration_opt {
             self.space(1);
             self.width(&x.width);

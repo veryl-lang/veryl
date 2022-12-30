@@ -167,6 +167,13 @@ pub trait VerylWalker {
         after!(self, colon, arg);
     }
 
+    /// Semantic action for non-terminal 'ColonColon'
+    fn colon_colon(&mut self, arg: &ColonColon) {
+        before!(self, colon_colon, arg);
+        self.veryl_token(&arg.colon_colon_token);
+        after!(self, colon_colon, arg);
+    }
+
     /// Semantic action for non-terminal 'Comma'
     fn comma(&mut self, arg: &Comma) {
         before!(self, comma, arg);
@@ -600,6 +607,46 @@ pub trait VerylWalker {
         after!(self, hierarchical_identifier, arg);
     }
 
+    /// Semantic action for non-terminal 'ScopedIdentifier'
+    fn scoped_identifier(&mut self, arg: &ScopedIdentifier) {
+        before!(self, scoped_identifier, arg);
+        self.identifier(&arg.identifier);
+        for x in &arg.scoped_identifier_list {
+            self.colon_colon(&x.colon_colon);
+            self.identifier(&x.identifier);
+        }
+        after!(self, scoped_identifier, arg);
+    }
+
+    /// Semantic action for non-terminal 'ScopedOrHierIdentifier'
+    fn scoped_or_hier_identifier(&mut self, arg: &ScopedOrHierIdentifier) {
+        before!(self, scoped_or_hier_identifier, arg);
+        self.identifier(&arg.identifier);
+        match &*arg.scoped_or_hier_identifier_group {
+            ScopedOrHierIdentifierGroup::ColonColonIdentifierScopedOrHierIdentifierGroupList(x) => {
+                self.colon_colon(&x.colon_colon);
+                self.identifier(&x.identifier);
+                for x in &x.scoped_or_hier_identifier_group_list {
+                self.colon_colon(&x.colon_colon);
+                self.identifier(&x.identifier);
+                }
+            }
+            ScopedOrHierIdentifierGroup::ScopedOrHierIdentifierGroupList0ScopedOrHierIdentifierGroupList1(x) => {
+                for x in &x.scoped_or_hier_identifier_group_list0 {
+                    self.range(&x.range);
+                }
+                for x in &x.scoped_or_hier_identifier_group_list1 {
+                    self.dot(&x.dot);
+                    self.identifier(&x.identifier);
+                    for x in &x.scoped_or_hier_identifier_group_list1_list{
+                        self.range(&x.range);
+                    }
+                }
+            }
+        }
+        after!(self, scoped_or_hier_identifier, arg);
+    }
+
     /// Semantic action for non-terminal 'Expression'
     fn expression(&mut self, arg: &Expression) {
         before!(self, expression, arg);
@@ -742,11 +789,11 @@ pub trait VerylWalker {
         before!(self, factor, arg);
         match arg {
             Factor::Number(x) => self.number(&x.number),
-            Factor::FactorOptHierarchicalIdentifierFactorOpt0(x) => {
+            Factor::FactorOptScopedOrHierIdentifierFactorOpt0(x) => {
                 if let Some(ref x) = x.factor_opt {
                     self.dollar(&x.dollar);
                 }
-                self.hierarchical_identifier(&x.hierarchical_identifier);
+                self.scoped_or_hier_identifier(&x.scoped_or_hier_identifier);
                 if let Some(ref x) = x.factor_opt0 {
                     self.l_paren(&x.l_paren);
                     if let Some(ref x) = x.factor_opt1 {
@@ -833,7 +880,7 @@ pub trait VerylWalker {
         before!(self, r#type, arg);
         match &*arg.type_group {
             TypeGroup::BuiltinType(x) => self.builtin_type(&x.builtin_type),
-            TypeGroup::Identifier(x) => self.identifier(&x.identifier),
+            TypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
         };
         for x in &arg.type_list {
             self.width(&x.width);
@@ -1173,7 +1220,7 @@ pub trait VerylWalker {
         self.inst(&arg.inst);
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
-        self.identifier(&arg.identifier0);
+        self.scoped_identifier(&arg.scoped_identifier);
         if let Some(ref x) = arg.inst_declaration_opt {
             self.width(&x.width);
         }

@@ -28,17 +28,17 @@ impl<'a> Handler for CheckSystemFunction<'a> {
 
 impl<'a> VerylGrammarTrait for CheckSystemFunction<'a> {
     fn factor(&mut self, arg: &Factor) -> Result<()> {
-        if let Factor::FactorOptHierarchicalIdentifierFactorOpt0(x) = arg {
+        if let Factor::FactorOptScopedOrHierIdentifierFactorOpt0(x) = arg {
             if x.factor_opt.is_some() {
                 let mut stringifier = Stringifier::new();
-                stringifier.hierarchical_identifier(&x.hierarchical_identifier);
+                stringifier.scoped_or_hier_identifier(&x.scoped_or_hier_identifier);
                 match stringifier.as_str() {
                     name if DEFINED_SYSTEM_FUNCTIONS.contains(&name) => (),
                     name => {
                         self.errors.push(AnalyzeError::invalid_system_function(
                             name,
                             self.text,
-                            &x.hierarchical_identifier.identifier.identifier_token,
+                            &x.scoped_or_hier_identifier.identifier.identifier_token,
                         ));
                     }
                 }

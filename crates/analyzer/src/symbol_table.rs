@@ -26,7 +26,7 @@ pub enum SymbolKind {
         scope: ParameterScope,
     },
     Instance {
-        name: usize,
+        name: Vec<usize>,
     },
 }
 
@@ -74,7 +74,7 @@ pub enum Type {
     I64,
     F32,
     F64,
-    UserDefined(usize),
+    UserDefined(Vec<usize>),
 }
 
 impl From<&veryl_parser::veryl_grammar_trait::Type> for Type {
@@ -90,7 +90,15 @@ impl From<&veryl_parser::veryl_grammar_trait::Type> for Type {
                 BuiltinType::F32(_) => Type::F32,
                 BuiltinType::F64(_) => Type::F64,
             },
-            TypeGroup::Identifier(x) => Type::UserDefined(x.identifier.identifier_token.token.text),
+            TypeGroup::ScopedIdentifier(x) => {
+                let x = &x.scoped_identifier;
+                let mut name = Vec::new();
+                name.push(x.identifier.identifier_token.token.text);
+                for x in &x.scoped_identifier_list {
+                    name.push(x.identifier.identifier_token.token.text);
+                }
+                Type::UserDefined(name)
+            }
         }
     }
 }
@@ -143,28 +151,77 @@ impl From<&veryl_parser::veryl_grammar_trait::WithParameterItem> for Parameter {
     }
 }
 
-#[derive(Default, Debug, Clone, PartialEq)]
-pub struct HierarchicalName {
-    pub paths: Vec<usize>,
+#[derive(Debug, Clone, PartialEq)]
+pub enum Name {
+    Hierarchical(Vec<usize>),
+    Scoped(Vec<usize>),
 }
 
-impl From<&veryl_parser::veryl_grammar_trait::HierarchicalIdentifier> for HierarchicalName {
+impl Name {
+    pub fn as_slice(&self) -> &[usize] {
+        match self {
+            Name::Hierarchical(x) => x.as_slice(),
+            Name::Scoped(x) => x.as_slice(),
+        }
+    }
+}
+
+impl Default for Name {
+    fn default() -> Self {
+        Name::Hierarchical(vec![])
+    }
+}
+
+impl From<&veryl_parser::veryl_grammar_trait::HierarchicalIdentifier> for Name {
     fn from(value: &veryl_parser::veryl_grammar_trait::HierarchicalIdentifier) -> Self {
         let mut paths = Vec::new();
         paths.push(value.identifier.identifier_token.token.text);
         for x in &value.hierarchical_identifier_list0 {
             paths.push(x.identifier.identifier_token.token.text);
         }
-        Self { paths }
+        Name::Hierarchical(paths)
+    }
+}
+
+impl From<&veryl_parser::veryl_grammar_trait::ScopedIdentifier> for Name {
+    fn from(value: &veryl_parser::veryl_grammar_trait::ScopedIdentifier) -> Self {
+        let mut paths = Vec::new();
+        paths.push(value.identifier.identifier_token.token.text);
+        for x in &value.scoped_identifier_list {
+            paths.push(x.identifier.identifier_token.token.text);
+        }
+        Name::Scoped(paths)
+    }
+}
+
+impl From<&veryl_parser::veryl_grammar_trait::ScopedOrHierIdentifier> for Name {
+    fn from(value: &veryl_parser::veryl_grammar_trait::ScopedOrHierIdentifier) -> Self {
+        let mut paths = Vec::new();
+        paths.push(value.identifier.identifier_token.token.text);
+        match &*value.scoped_or_hier_identifier_group {
+            veryl_parser::veryl_grammar_trait::ScopedOrHierIdentifierGroup::ColonColonIdentifierScopedOrHierIdentifierGroupList(x) => {
+                paths.push(x.identifier.identifier_token.token.text);
+                for x in &x.scoped_or_hier_identifier_group_list {
+                    paths.push(x.identifier.identifier_token.token.text);
+                }
+                Name::Scoped(paths)
+            },
+            veryl_parser::veryl_grammar_trait::ScopedOrHierIdentifierGroup::ScopedOrHierIdentifierGroupList0ScopedOrHierIdentifierGroupList1(x) => {
+                for x in &x.scoped_or_hier_identifier_group_list1 {
+                    paths.push(x.identifier.identifier_token.token.text);
+                }
+                Name::Hierarchical(paths)
+            },
+        }
     }
 }
 
 #[derive(Default, Debug, Clone, PartialEq)]
-pub struct NameSpace {
+pub struct Namespace {
     pub paths: Vec<usize>,
 }
 
-impl NameSpace {
+impl Namespace {
     pub fn push(&mut self, path: usize) {
         self.paths.push(path);
     }
@@ -177,7 +234,7 @@ impl NameSpace {
         self.paths.len()
     }
 
-    pub fn included(&self, x: &NameSpace) -> bool {
+    pub fn included(&self, x: &Namespace) -> bool {
         for (i, x) in x.paths.iter().enumerate() {
             if let Some(path) = self.paths.get(i) {
                 if path != x {
@@ -195,15 +252,15 @@ impl NameSpace {
 pub struct Symbol {
     pub token: Token,
     pub kind: SymbolKind,
-    pub name_space: NameSpace,
+    pub namespace: Namespace,
 }
 
 impl Symbol {
-    pub fn new(token: &Token, kind: SymbolKind, name_space: &NameSpace) -> Self {
+    pub fn new(token: &Token, kind: SymbolKind, namespace: &Namespace) -> Self {
         Self {
             token: *token,
             kind,
-            name_space: name_space.to_owned(),
+            namespace: namespace.to_owned(),
         }
     }
 }
@@ -217,7 +274,7 @@ impl SymbolTable {
     pub fn insert(&mut self, token: &Token, symbol: Symbol) -> bool {
         let entry = self.table.entry(token.text).or_default();
         for item in entry.iter() {
-            if symbol.name_space == item.name_space {
+            if symbol.namespace == item.namespace {
                 return false;
             }
         }
@@ -225,30 +282,35 @@ impl SymbolTable {
         true
     }
 
-    pub fn get(
-        &self,
-        hierarchical_name: &HierarchicalName,
-        name_space: &NameSpace,
-    ) -> Option<&Symbol> {
+    pub fn get(&self, identifier: &Name, namespace: &Namespace) -> Option<&Symbol> {
+        match identifier {
+            Name::Hierarchical(x) => self.get_hierarchical(x, namespace),
+            Name::Scoped(_) => todo!(),
+        }
+    }
+
+    fn get_hierarchical(&self, paths: &[usize], namespace: &Namespace) -> Option<&Symbol> {
         let mut ret = None;
-        let mut name_space = name_space.clone();
-        for name in &hierarchical_name.paths {
+        let mut namespace = namespace.clone();
+        for name in paths {
             let mut max_depth = 0;
             ret = None;
             if let Some(symbols) = self.table.get(name) {
                 for symbol in symbols {
-                    if name_space.included(&symbol.name_space)
-                        && symbol.name_space.depth() >= max_depth
+                    if namespace.included(&symbol.namespace)
+                        && symbol.namespace.depth() >= max_depth
                     {
                         ret = Some(symbol);
-                        max_depth = symbol.name_space.depth();
+                        max_depth = symbol.namespace.depth();
                     }
                 }
 
                 if let Some(ret) = ret {
-                    if let SymbolKind::Instance { name } = ret.kind {
-                        name_space = NameSpace::default();
-                        name_space.push(name);
+                    if let SymbolKind::Instance { ref name } = ret.kind {
+                        namespace = Namespace::default();
+                        for x in name {
+                            namespace.push(*x);
+                        }
                     }
                 } else {
                     return None;

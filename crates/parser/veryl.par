@@ -35,6 +35,7 @@ Operator05Term        : "&"                                                     
 Operator04Term        : "\^~|\^|~\^"                                                         : Token;
 Operator03Term        : "\|"                                                                 : Token;
 UnaryOperatorTerm     : "~&|~\||!|~"                                                         : Token;
+ColonColonTerm        : '::'                                                                 : Token;
 ColonTerm             : ':'                                                                  : Token;
 CommaTerm             : ','                                                                  : Token;
 DollarTerm            : '$'                                                                  : Token;
@@ -118,6 +119,7 @@ Operator11Token        : Operator11Term        : Token Comments;
 UnaryOperatorToken     : UnaryOperatorTerm     : Token Comments;
 
 ColonToken     : ColonTerm     : Token Comments;
+ColonColonToken: ColonColonTerm: Token Comments;
 CommaToken     : CommaTerm     : Token Comments;
 DollarToken    : DollarTerm    : Token Comments;
 DotDotToken    : DotDotTerm    : Token Comments;
@@ -207,6 +209,7 @@ UnaryOperator     : UnaryOperatorToken     : VerylToken;
 
 // Symbol
 Colon     : ColonToken     : VerylToken;
+ColonColon: ColonColonToken: VerylToken;
 Comma     : CommaToken     : VerylToken;
 Dollar    : DollarToken    : VerylToken;
 DotDot    : DotDotToken    : VerylToken;
@@ -285,10 +288,12 @@ RealNumber: FixedPoint
           ;
 
 // ----------------------------------------------------------------------------
-// Hierarchical Identifier
+// Complex Identifier
 // ----------------------------------------------------------------------------
 
 HierarchicalIdentifier: Identifier { Range } { Dot Identifier { Range } };
+ScopedIdentifier      : Identifier { ColonColon Identifier };
+ScopedOrHierIdentifier: Identifier ( ColonColon Identifier { ColonColon Identifier } | ( { Range } { Dot Identifier { Range } } ) );
 
 // ----------------------------------------------------------------------------
 // Expression
@@ -308,7 +313,7 @@ Expression10: Expression11 { Operator11 Expression11 };
 Expression11: [ ( UnaryOperator | Operator09 | Operator05 | Operator03 | Operator04 ) ] Factor;
 
 Factor: Number
-      | [ Dollar ] HierarchicalIdentifier [ LParen [ FunctionCallArg ] RParen ]
+      | [ Dollar ] ScopedOrHierIdentifier [ LParen [ FunctionCallArg ] RParen ]
       | LParen Expression RParen
       ;
 
@@ -337,7 +342,7 @@ BuiltinType: Logic
            | U32 | U64 | I32 | I64 | F32 | F64
            ;
 
-Type: ( BuiltinType | Identifier ) { Width };
+Type: ( BuiltinType | ScopedIdentifier ) { Width };
 
 // ----------------------------------------------------------------------------
 // Statement
@@ -400,7 +405,7 @@ StructItem: Identifier Colon Type;
 // InstDeclaration
 // ----------------------------------------------------------------------------
 
-InstDeclaration: Inst Identifier Colon Identifier [ Width ] [ InstParameter ] [ LBrace [ InstPortList ] RBrace ] Semicolon;
+InstDeclaration: Inst Identifier Colon ScopedIdentifier [ Width ] [ InstParameter ] [ LBrace [ InstPortList ] RBrace ] Semicolon;
 
 InstParameter: Hash LParen [ InstParameterList ] RParen;
 

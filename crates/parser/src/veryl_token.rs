@@ -149,6 +149,7 @@ token_with_comments!(BaseLessToken, BaseLessTerm, base_less_term);
 token_with_comments!(AllBitToken, AllBitTerm, all_bit_term);
 
 token_with_comments!(ColonToken, ColonTerm, colon_term);
+token_with_comments!(ColonColonToken, ColonColonTerm, colon_colon_term);
 token_with_comments!(CommaToken, CommaTerm, comma_term);
 token_with_comments!(DollarToken, DollarTerm, dollar_term);
 token_with_comments!(DotDotToken, DotDotTerm, dot_dot_term);

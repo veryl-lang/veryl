@@ -1,5 +1,5 @@
 use crate::analyze_error::AnalyzeError;
-use crate::symbol_table::{HierarchicalName, NameSpace, SymbolKind, SymbolTable};
+use crate::symbol_table::{Name, Namespace, SymbolKind, SymbolTable};
 use veryl_parser::global_table;
 use veryl_parser::miette::Result;
 use veryl_parser::veryl_grammar_trait::*;
@@ -10,7 +10,7 @@ pub struct CheckModuleInstance<'a> {
     text: &'a str,
     symbol_table: &'a SymbolTable,
     point: HandlerPoint,
-    name_space: NameSpace,
+    namespace: Namespace,
 }
 
 impl<'a> CheckModuleInstance<'a> {
@@ -20,7 +20,7 @@ impl<'a> CheckModuleInstance<'a> {
             text,
             symbol_table,
             point: HandlerPoint::Before,
-            name_space: NameSpace::default(),
+            namespace: Namespace::default(),
         }
     }
 }
@@ -34,8 +34,12 @@ impl<'a> Handler for CheckModuleInstance<'a> {
 impl<'a> VerylGrammarTrait for CheckModuleInstance<'a> {
     fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<()> {
         if let HandlerPoint::Before = self.point {
-            let name = arg.identifier0.identifier_token.token.text;
-            let name = &HierarchicalName { paths: vec![name] };
+            let mut name = Vec::new();
+            name.push(arg.scoped_identifier.identifier.identifier_token.token.text);
+            for x in &arg.scoped_identifier.scoped_identifier_list {
+                name.push(x.identifier.identifier_token.token.text);
+            }
+            let name = &Name::Hierarchical(name);
 
             let mut connected_ports = Vec::new();
             if let Some(ref x) = arg.inst_declaration_opt1 {
@@ -49,13 +53,14 @@ impl<'a> VerylGrammarTrait for CheckModuleInstance<'a> {
                 }
             }
 
-            let symbol = self.symbol_table.get(name, &self.name_space);
+            let symbol = self.symbol_table.get(name, &self.namespace);
             if let Some(symbol) = symbol {
                 if let SymbolKind::Module { ref ports, .. } = symbol.kind {
                     for port in ports {
                         if !connected_ports.contains(&port.name) {
                             let name =
-                                global_table::get_str_value(*name.paths.last().unwrap()).unwrap();
+                                global_table::get_str_value(*name.as_slice().last().unwrap())
+                                    .unwrap();
                             let port = global_table::get_str_value(port.name).unwrap();
                             self.errors.push(AnalyzeError::missing_port(
                                 &name,
@@ -68,7 +73,8 @@ impl<'a> VerylGrammarTrait for CheckModuleInstance<'a> {
                     for port in &connected_ports {
                         if !ports.iter().any(|x| &x.name == port) {
                             let name =
-                                global_table::get_str_value(*name.paths.last().unwrap()).unwrap();
+                                global_table::get_str_value(*name.as_slice().last().unwrap())
+                                    .unwrap();
                             let port = global_table::get_str_value(*port).unwrap();
                             self.errors.push(AnalyzeError::unknown_port(
                                 &name,
@@ -79,7 +85,8 @@ impl<'a> VerylGrammarTrait for CheckModuleInstance<'a> {
                         }
                     }
                 } else {
-                    let name = global_table::get_str_value(*name.paths.last().unwrap()).unwrap();
+                    let name =
+                        global_table::get_str_value(*name.as_slice().last().unwrap()).unwrap();
                     self.errors.push(AnalyzeError::mismatch_type(
                         &name,
                         "module",
@@ -97,9 +104,9 @@ impl<'a> VerylGrammarTrait for CheckModuleInstance<'a> {
         match self.point {
             HandlerPoint::Before => {
                 let name = arg.identifier.identifier_token.token.text;
-                self.name_space.push(name)
+                self.namespace.push(name)
             }
-            HandlerPoint::After => self.name_space.pop(),
+            HandlerPoint::After => self.namespace.pop(),
         }
         Ok(())
     }
@@ -108,9 +115,9 @@ impl<'a> VerylGrammarTrait for CheckModuleInstance<'a> {
         match self.point {
             HandlerPoint::Before => {
                 let name = arg.identifier.identifier_token.token.text;
-                self.name_space.push(name)
+                self.namespace.push(name)
             }
-            HandlerPoint::After => self.name_space.pop(),
+            HandlerPoint::After => self.namespace.pop(),
         }
         Ok(())
     }
@@ -119,9 +126,9 @@ impl<'a> VerylGrammarTrait for CheckModuleInstance<'a> {
         match self.point {
             HandlerPoint::Before => {
                 let name = arg.identifier.identifier_token.token.text;
-                self.name_space.push(name)
+                self.namespace.push(name)
             }
-            HandlerPoint::After => self.name_space.pop(),
+            HandlerPoint::After => self.namespace.pop(),
         }
         Ok(())
     }
