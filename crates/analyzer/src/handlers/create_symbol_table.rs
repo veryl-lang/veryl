@@ -1,7 +1,8 @@
 use crate::analyze_error::AnalyzeError;
+use crate::namespace_table;
 use crate::symbol_table::Direction as SymDirection;
 use crate::symbol_table::Type as SymType;
-use crate::symbol_table::{Namespace, ParameterScope, Symbol, SymbolKind, SymbolTable};
+use crate::symbol_table::{self, Namespace, ParameterScope, Symbol, SymbolKind};
 use veryl_parser::global_table;
 use veryl_parser::miette::Result;
 use veryl_parser::veryl_grammar_trait::*;
@@ -11,7 +12,6 @@ use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 #[derive(Default)]
 pub struct CreateSymbolTable<'a> {
     pub errors: Vec<AnalyzeError>,
-    pub table: SymbolTable,
     text: &'a str,
     point: HandlerPoint,
     namespace: Namespace,
@@ -27,7 +27,7 @@ impl<'a> CreateSymbolTable<'a> {
 
     fn insert_symbol(&mut self, token: &VerylToken, kind: SymbolKind) {
         let symbol = Symbol::new(&token.token, kind, &self.namespace);
-        if !self.table.insert(&token.token, symbol) {
+        if !symbol_table::insert(&token.token, symbol) {
             let text = global_table::get_str_value(token.token.text).unwrap();
             self.errors
                 .push(AnalyzeError::duplicated_identifier(&text, self.text, token));
@@ -42,6 +42,15 @@ impl<'a> Handler for CreateSymbolTable<'a> {
 }
 
 impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
+    fn identifier(&mut self, arg: &Identifier) -> Result<()> {
+        if let HandlerPoint::Before = self.point {
+            let id = arg.identifier_token.token.id;
+            let file_path = arg.identifier_token.token.file_path;
+            namespace_table::insert(id, file_path, &self.namespace);
+        }
+        Ok(())
+    }
+
     fn let_declaration(&mut self, arg: &LetDeclaration) -> Result<()> {
         if let HandlerPoint::Before = self.point {
             let r#type: SymType = (&*arg.r#type).into();

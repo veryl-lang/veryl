@@ -17,7 +17,7 @@ pub struct Token {
 
 impl<'t> From<&parol_runtime::lexer::Token<'t>> for Token {
     fn from(x: &parol_runtime::lexer::Token<'t>) -> Self {
-        let id = global_table::get_token_id();
+        let id = global_table::new_token_id();
         let text = global_table::insert_str(x.text());
         let file_path = global_table::insert_path(&x.location.file_name);
         let source_span: miette::SourceSpan = (&x.location).into();
@@ -112,7 +112,7 @@ fn split_comment_token(token: Token) -> Vec<Token> {
         line += text[prev_pos..pos].matches('\n').count();
         prev_pos = pos;
 
-        let id = global_table::get_token_id();
+        let id = global_table::new_token_id();
         let text = global_table::insert_str(&text[pos..pos + length]);
         let token = Token {
             id,
@@ -135,7 +135,7 @@ impl From<&StartToken> for VerylToken {
             let mut tokens = split_comment_token(x.comments_term.comments_term);
             comments.append(&mut tokens)
         }
-        let id = global_table::get_token_id();
+        let id = global_table::new_token_id();
         let text = global_table::insert_str("");
         let file_path = global_table::insert_path(std::path::Path::new(""));
         let token = Token {

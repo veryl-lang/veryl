@@ -6,6 +6,7 @@ use veryl_parser::miette::Result;
 
 mod cmd_build;
 mod cmd_check;
+mod cmd_dump;
 mod cmd_fmt;
 mod cmd_init;
 mod cmd_metadata;
@@ -32,6 +33,7 @@ enum Commands {
     Check(OptCheck),
     Build(OptBuild),
     Metadata(OptMetadata),
+    Dump(OptDump),
 }
 
 /// Create a new package
@@ -135,6 +137,33 @@ pub enum Format {
     Json,
 }
 
+/// Dump debug info
+#[derive(Args)]
+pub struct OptDump {
+    /// Target files
+    pub files: Vec<PathBuf>,
+
+    /// output syntex tree
+    #[arg(long)]
+    pub syntax_tree: bool,
+
+    /// output symbol table
+    #[arg(long)]
+    pub symbol_table: bool,
+
+    /// output namespace table
+    #[arg(long)]
+    pub namespace_table: bool,
+
+    /// No output printed to stdout
+    #[arg(long)]
+    pub quiet: bool,
+
+    /// Use verbose output
+    #[arg(long)]
+    pub verbose: bool,
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------------------------------------------------
@@ -161,6 +190,7 @@ fn main() -> Result<ExitCode> {
             cmd_build::CmdBuild::new(x).exec(&metadata)?
         }
         Commands::Metadata(x) => cmd_metadata::CmdMetadata::new(x).exec(&metadata)?,
+        Commands::Dump(x) => cmd_dump::CmdDump::new(x).exec(&metadata)?,
     };
     if ret {
         Ok(ExitCode::SUCCESS)

@@ -18,7 +18,6 @@ use check_system_function::*;
 use create_symbol_table::*;
 
 use crate::analyze_error::AnalyzeError;
-use crate::symbol_table::SymbolTable;
 use veryl_parser::veryl_walker::Handler;
 
 pub struct Pass1Handlers<'a> {
@@ -67,10 +66,6 @@ impl<'a> Pass1Handlers<'a> {
         ret.append(&mut self.create_symbol_table.errors);
         ret
     }
-
-    pub fn get_symbol_table(&mut self) -> &SymbolTable {
-        &self.create_symbol_table.table
-    }
 }
 
 pub struct Pass2Handlers<'a> {
@@ -79,10 +74,10 @@ pub struct Pass2Handlers<'a> {
 }
 
 impl<'a> Pass2Handlers<'a> {
-    pub fn new(text: &'a str, symbol_table: &'a SymbolTable) -> Self {
+    pub fn new(text: &'a str) -> Self {
         Self {
-            check_function_arity: CheckFunctionArity::new(text, symbol_table),
-            check_module_instance: CheckModuleInstance::new(text, symbol_table),
+            check_function_arity: CheckFunctionArity::new(text),
+            check_module_instance: CheckModuleInstance::new(text),
         }
     }
 

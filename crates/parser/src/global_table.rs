@@ -1,5 +1,7 @@
 use bimap::BiMap;
+use std::borrow::Borrow;
 use std::cell::RefCell;
+use std::fmt;
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
 
@@ -33,8 +35,8 @@ where
         self.table.get_by_right(&id)
     }
 
-    pub fn get_id<V: AsRef<T>>(&self, value: V) -> Option<U> {
-        self.table.get_by_left(value.as_ref()).copied()
+    pub fn get_id<V: Borrow<T>>(&self, value: V) -> Option<U> {
+        self.table.get_by_left(value.borrow()).copied()
     }
 }
 
@@ -61,6 +63,24 @@ impl Incrementable for PathId {
     }
 }
 
+impl fmt::Display for StrId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", get_str_value(*self).unwrap())
+    }
+}
+
+impl fmt::Display for PathId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", get_path_value(*self).unwrap().to_string_lossy())
+    }
+}
+
+impl fmt::Display for TokenId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 thread_local!(static STRING_TABLE: RefCell<GlobalTable<String, StrId>> = RefCell::new(GlobalTable::default()));
 thread_local!(static PATHBUF_TABLE: RefCell<GlobalTable<PathBuf, PathId>> = RefCell::new(GlobalTable::default()));
 thread_local!(static TOKEN_ID: RefCell<usize> = RefCell::new(0));
@@ -81,15 +101,15 @@ pub fn get_path_value(id: PathId) -> Option<PathBuf> {
     PATHBUF_TABLE.with(|f| f.borrow().get_value(id).map(|x| x.to_owned()))
 }
 
-pub fn get_str_id<T: AsRef<String>>(value: T) -> Option<StrId> {
+pub fn get_str_id<T: Borrow<String>>(value: T) -> Option<StrId> {
     STRING_TABLE.with(|f| f.borrow().get_id(value).map(|x| x.to_owned()))
 }
 
-pub fn get_path_id<T: AsRef<PathBuf>>(value: T) -> Option<PathId> {
+pub fn get_path_id<T: Borrow<PathBuf>>(value: T) -> Option<PathId> {
     PATHBUF_TABLE.with(|f| f.borrow().get_id(value).map(|x| x.to_owned()))
 }
 
-pub fn get_token_id() -> TokenId {
+pub fn new_token_id() -> TokenId {
     TOKEN_ID.with(|f| {
         let mut ret = f.borrow_mut();
         *ret += 1;

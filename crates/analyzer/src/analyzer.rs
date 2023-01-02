@@ -1,6 +1,5 @@
 use crate::analyze_error::AnalyzeError;
 use crate::handlers::*;
-use crate::symbol_table::SymbolTable;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, VerylWalker};
 
@@ -27,9 +26,9 @@ pub struct AnalyzerPass2<'a> {
 }
 
 impl<'a> AnalyzerPass2<'a> {
-    pub fn new(text: &'a str, symbol_table: &'a SymbolTable) -> Self {
+    pub fn new(text: &'a str) -> Self {
         AnalyzerPass2 {
-            handlers: Pass2Handlers::new(text, symbol_table),
+            handlers: Pass2Handlers::new(text),
         }
     }
 }
@@ -41,16 +40,12 @@ impl<'a> VerylWalker for AnalyzerPass2<'a> {
 }
 
 pub struct Analyzer<'a> {
-    pub symbol_table: SymbolTable,
     text: &'a str,
 }
 
 impl<'a> Analyzer<'a> {
     pub fn new(text: &'a str) -> Self {
-        Analyzer {
-            symbol_table: SymbolTable::default(),
-            text,
-        }
+        Analyzer { text }
     }
 
     pub fn analyze(&'a mut self, input: &Veryl) -> Vec<AnalyzeError> {
@@ -60,7 +55,7 @@ impl<'a> Analyzer<'a> {
         pass1.veryl(input);
         ret.append(&mut pass1.handlers.get_errors());
 
-        let mut pass2 = AnalyzerPass2::new(self.text, pass1.handlers.get_symbol_table());
+        let mut pass2 = AnalyzerPass2::new(self.text);
         pass2.veryl(input);
         ret.append(&mut pass2.handlers.get_errors());
 

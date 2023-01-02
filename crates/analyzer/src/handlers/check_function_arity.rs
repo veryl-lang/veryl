@@ -1,5 +1,6 @@
 use crate::analyze_error::AnalyzeError;
-use crate::symbol_table::{Name, Namespace, SymbolKind, SymbolTable};
+use crate::namespace_table;
+use crate::symbol_table::{self, Name, SymbolKind};
 use veryl_parser::global_table;
 use veryl_parser::miette::Result;
 use veryl_parser::veryl_grammar_trait::*;
@@ -8,19 +9,15 @@ use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 pub struct CheckFunctionArity<'a> {
     pub errors: Vec<AnalyzeError>,
     text: &'a str,
-    symbol_table: &'a SymbolTable,
     point: HandlerPoint,
-    namespace: Namespace,
 }
 
 impl<'a> CheckFunctionArity<'a> {
-    pub fn new(text: &'a str, symbol_table: &'a SymbolTable) -> Self {
+    pub fn new(text: &'a str) -> Self {
         Self {
             errors: Vec::new(),
             text,
-            symbol_table,
             point: HandlerPoint::Before,
-            namespace: Namespace::default(),
         }
     }
 }
@@ -41,7 +38,15 @@ impl<'a> VerylGrammarTrait for CheckFunctionArity<'a> {
                 }
 
                 let name: Name = (&*x.scoped_or_hier_identifier).into();
-                let symbol = self.symbol_table.get(&name, &self.namespace);
+                let namespace = namespace_table::get(
+                    x.scoped_or_hier_identifier
+                        .identifier
+                        .identifier_token
+                        .token
+                        .id,
+                )
+                .unwrap();
+                let symbol = symbol_table::get(&name, &namespace);
 
                 let arity = if let Some(symbol) = symbol {
                     if let SymbolKind::Function { ref ports, .. } = symbol.kind {
@@ -77,39 +82,6 @@ impl<'a> VerylGrammarTrait for CheckFunctionArity<'a> {
             }
         }
 
-        Ok(())
-    }
-
-    fn function_declaration(&mut self, arg: &FunctionDeclaration) -> Result<()> {
-        match self.point {
-            HandlerPoint::Before => {
-                let name = arg.identifier.identifier_token.token.text;
-                self.namespace.push(name)
-            }
-            HandlerPoint::After => self.namespace.pop(),
-        }
-        Ok(())
-    }
-
-    fn module_declaration(&mut self, arg: &ModuleDeclaration) -> Result<()> {
-        match self.point {
-            HandlerPoint::Before => {
-                let name = arg.identifier.identifier_token.token.text;
-                self.namespace.push(name)
-            }
-            HandlerPoint::After => self.namespace.pop(),
-        }
-        Ok(())
-    }
-
-    fn interface_declaration(&mut self, arg: &InterfaceDeclaration) -> Result<()> {
-        match self.point {
-            HandlerPoint::Before => {
-                let name = arg.identifier.identifier_token.token.text;
-                self.namespace.push(name)
-            }
-            HandlerPoint::After => self.namespace.pop(),
-        }
         Ok(())
     }
 }

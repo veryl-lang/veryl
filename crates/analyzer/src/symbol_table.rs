@@ -1,5 +1,7 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
-use veryl_parser::global_table::StrId;
+use std::fmt;
+use veryl_parser::global_table::{PathId, StrId};
 use veryl_parser::veryl_grammar_trait::{BuiltinType, TypeGroup};
 use veryl_parser::veryl_token::Token;
 
@@ -249,6 +251,20 @@ impl Namespace {
     }
 }
 
+impl fmt::Display for Namespace {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if let Some(first) = self.paths.first() {
+            write!(f, "{}", first)?;
+            for path in &self.paths[1..] {
+                write!(f, "::{}", path)?;
+            }
+        } else {
+            write!(f, "")?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Symbol {
     pub token: Token,
@@ -263,6 +279,13 @@ impl Symbol {
             kind,
             namespace: namespace.to_owned(),
         }
+    }
+}
+
+impl fmt::Display for Symbol {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?} @ {}", self.kind, self.namespace)?;
+        Ok(())
     }
 }
 
@@ -283,8 +306,8 @@ impl SymbolTable {
         true
     }
 
-    pub fn get(&self, identifier: &Name, namespace: &Namespace) -> Option<&Symbol> {
-        match identifier {
+    pub fn get(&self, name: &Name, namespace: &Namespace) -> Option<&Symbol> {
+        match name {
             Name::Hierarchical(x) => self.get_hierarchical(x, namespace),
             Name::Scoped(_) => todo!(),
         }
@@ -322,4 +345,45 @@ impl SymbolTable {
         }
         ret
     }
+
+    pub fn dump(&self) -> String {
+        format!("{}", self)
+    }
+
+    pub fn drop(&mut self, file_path: PathId) {
+        for (_, symbols) in self.table.iter_mut() {
+            symbols.retain(|x| x.token.file_path != file_path);
+        }
+    }
+}
+
+impl fmt::Display for SymbolTable {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "SymbolTable [\n")?;
+        for (k, v) in &self.table {
+            for symbol in v {
+                write!(f, "    {}: {},\n", k, symbol)?;
+            }
+        }
+        write!(f, "]\n")?;
+        Ok(())
+    }
+}
+
+thread_local!(static SYMBOL_TABLE: RefCell<SymbolTable> = RefCell::new(SymbolTable::default()));
+
+pub fn insert(token: &Token, symbol: Symbol) -> bool {
+    SYMBOL_TABLE.with(|f| f.borrow_mut().insert(token, symbol))
+}
+
+pub fn get(name: &Name, namespace: &Namespace) -> Option<Symbol> {
+    SYMBOL_TABLE.with(|f| f.borrow().get(name, namespace).cloned())
+}
+
+pub fn dump() -> String {
+    SYMBOL_TABLE.with(|f| f.borrow().dump())
+}
+
+pub fn drop(file_path: PathId) {
+    SYMBOL_TABLE.with(|f| f.borrow_mut().drop(file_path))
 }

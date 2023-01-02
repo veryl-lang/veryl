@@ -1,12 +1,13 @@
 use dashmap::DashMap;
 use ropey::Rope;
+use std::path::Path;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 use veryl_analyzer::Analyzer;
 use veryl_formatter::Formatter;
 use veryl_metadata::Metadata;
-use veryl_parser::{miette, Parser, ParserError};
+use veryl_parser::{global_table, miette, Parser, ParserError};
 
 #[derive(Debug)]
 pub struct Backend {
@@ -37,6 +38,10 @@ impl Backend {
 
         let diag = match Parser::parse(&text, &path) {
             Ok(x) => {
+                if let Some(path) = global_table::get_path_id(Path::new(&path).to_path_buf()) {
+                    veryl_analyzer::symbol_table::drop(path);
+                    veryl_analyzer::namespace_table::drop(path);
+                }
                 let mut analyzer = Analyzer::new(&text);
                 let mut errors = analyzer.analyze(&x.veryl);
                 let ret: Vec<_> = errors
