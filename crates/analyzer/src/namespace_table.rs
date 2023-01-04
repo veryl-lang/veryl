@@ -29,7 +29,7 @@ impl NamespaceTable {
 
 impl fmt::Display for NamespaceTable {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "NamespaceTable [\n")?;
+        writeln!(f, "NamespaceTable [")?;
         let mut id_witdh = 0;
         let mut namespace_width = 0;
         let mut vec: Vec<_> = self.table.iter().collect();
@@ -39,9 +39,9 @@ impl fmt::Display for NamespaceTable {
             namespace_width = namespace_width.max(format!("{}", v.0).len());
         }
         for (k, v) in &vec {
-            write!(
+            writeln!(
                 f,
-                "    {:id_witdh$}: {:namespace_width$} @ {},\n",
+                "    {:id_witdh$}: {:namespace_width$} @ {},",
                 k,
                 v.0,
                 v.1,
@@ -49,7 +49,7 @@ impl fmt::Display for NamespaceTable {
                 namespace_width = namespace_width,
             )?;
         }
-        write!(f, "]\n")?;
+        writeln!(f, "]")?;
         Ok(())
     }
 }

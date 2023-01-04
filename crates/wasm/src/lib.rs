@@ -74,7 +74,7 @@ pub fn parse(source: &str) -> ParseResult {
         }
         Err(e) => ParseResult {
             code: "".to_owned(),
-            err: format!("{}", render_err(e)),
+            err: render_err(e),
         },
     }
 }
@@ -93,7 +93,7 @@ pub fn format(source: &str) -> ParseResult {
         }
         Err(e) => ParseResult {
             code: "".to_owned(),
-            err: format!("{}", render_err(e)),
+            err: render_err(e),
         },
     }
 }

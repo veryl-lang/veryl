@@ -141,7 +141,7 @@ impl SymbolTable {
 
 impl fmt::Display for SymbolTable {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "SymbolTable [\n")?;
+        writeln!(f, "SymbolTable [")?;
         let mut symbol_width = 0;
         let mut namespace_width = 0;
         let mut vec: Vec<_> = self.table.iter().collect();
@@ -154,9 +154,9 @@ impl fmt::Display for SymbolTable {
         }
         for (k, v) in &vec {
             for symbol in *v {
-                write!(
+                writeln!(
                     f,
-                    "    {:symbol_width$} @ {:namespace_width$}: {:?},\n",
+                    "    {:symbol_width$} @ {:namespace_width$}: {:?},",
                     k,
                     symbol.namespace,
                     symbol.kind,
@@ -165,7 +165,7 @@ impl fmt::Display for SymbolTable {
                 )?;
             }
         }
-        write!(f, "]\n")?;
+        writeln!(f, "]")?;
         Ok(())
     }
 }
