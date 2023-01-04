@@ -40,11 +40,11 @@ where
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct StrId(usize);
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PathId(usize);
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TokenId(usize);
 
 pub trait Incrementable {
@@ -65,13 +65,15 @@ impl Incrementable for PathId {
 
 impl fmt::Display for StrId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", get_str_value(*self).unwrap())
+        let text = format!("{}", get_str_value(*self).unwrap());
+        text.fmt(f)
     }
 }
 
 impl fmt::Display for PathId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", get_path_value(*self).unwrap().to_string_lossy())
+        let text = format!("{}", get_path_value(*self).unwrap().to_string_lossy());
+        text.fmt(f)
     }
 }
 

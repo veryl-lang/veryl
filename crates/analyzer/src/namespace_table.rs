@@ -1,4 +1,4 @@
-use crate::symbol_table::Namespace;
+use crate::namespace::Namespace;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
@@ -30,8 +30,24 @@ impl NamespaceTable {
 impl fmt::Display for NamespaceTable {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "NamespaceTable [\n")?;
-        for (k, v) in &self.table {
-            write!(f, "    {:<8}: {} @ {},\n", k, v.0, v.1)?;
+        let mut id_witdh = 0;
+        let mut namespace_width = 0;
+        let mut vec: Vec<_> = self.table.iter().collect();
+        vec.sort_by(|x, y| x.0.cmp(y.0));
+        for (k, v) in &vec {
+            id_witdh = id_witdh.max(format!("{}", k).len());
+            namespace_width = namespace_width.max(format!("{}", v.0).len());
+        }
+        for (k, v) in &vec {
+            write!(
+                f,
+                "    {:id_witdh$}: {:namespace_width$} @ {},\n",
+                k,
+                v.0,
+                v.1,
+                id_witdh = id_witdh,
+                namespace_width = namespace_width,
+            )?;
         }
         write!(f, "]\n")?;
         Ok(())

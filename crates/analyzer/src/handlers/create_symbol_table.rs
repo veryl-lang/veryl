@@ -1,8 +1,10 @@
 use crate::analyze_error::AnalyzeError;
+use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol_table::Direction as SymDirection;
-use crate::symbol_table::Type as SymType;
-use crate::symbol_table::{self, Namespace, ParameterScope, Symbol, SymbolKind};
+use crate::symbol::Direction as SymDirection;
+use crate::symbol::Type as SymType;
+use crate::symbol::{ParameterScope, Symbol, SymbolKind};
+use crate::symbol_table;
 use veryl_parser::global_table;
 use veryl_parser::miette::Result;
 use veryl_parser::veryl_grammar_trait::*;

@@ -1,6 +1,7 @@
 use crate::analyze_error::AnalyzeError;
 use crate::namespace_table;
-use crate::symbol_table::{self, Name, SymbolKind};
+use crate::symbol::SymbolKind;
+use crate::symbol_table::{self, Name};
 use veryl_parser::global_table;
 use veryl_parser::miette::Result;
 use veryl_parser::veryl_grammar_trait::*;
