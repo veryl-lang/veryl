@@ -1744,6 +1744,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "veryl-wasm"
+version = "0.1.0"
+dependencies = [
+ "semver",
+ "veryl-analyzer",
+ "veryl-emitter",
+ "veryl-formatter",
+ "veryl-metadata",
+ "veryl-parser",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "walkdir"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

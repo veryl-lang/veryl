@@ -1,0 +1,22 @@
+name: Deploy Playground
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+      - uses: jetli/wasm-pack-action@v0.4.0
+      - name: Build wasm
+          run: wasm-pack build --target web -d playground --no-typescript --dev
+          working-directory: crates/wasm
+      - name: Deploy
+          uses: peaceiris/actions-gh-pages@v3
+          with:
+            github_token: ${{ secrets.GITHUB_TOKEN }}
+            publish_dir: ./crates/wasm/playground
