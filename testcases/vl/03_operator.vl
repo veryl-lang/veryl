@@ -1,4 +1,4 @@
-module ModuleA {
+module Module03 {
     // unary arithmetic
     assign a  = +1;
     assign aa = -1;

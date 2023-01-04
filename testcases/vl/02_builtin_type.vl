@@ -1,4 +1,4 @@
-module ModuleA {
+module Module02 {
     // unsigned integer
     let a : u32 ;
     let aa: u64 ;

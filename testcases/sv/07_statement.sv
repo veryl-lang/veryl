@@ -1,4 +1,4 @@
-module ModuleA ;
+module Module07 ;
     always_comb begin
         // assignment statement
         a =    1;

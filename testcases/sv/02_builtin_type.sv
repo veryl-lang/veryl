@@ -1,4 +1,4 @@
-module ModuleA ;
+module Module02 ;
     // unsigned integer
     int unsigned     a  ;
     longint unsigned aa ;

@@ -181,6 +181,32 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         Ok(())
     }
 
+    fn module_if_declaration(&mut self, arg: &ModuleIfDeclaration) -> Result<()> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.insert_symbol(&arg.identifier.identifier_token, SymbolKind::Block);
+
+                let name = arg.identifier.identifier_token.token.text;
+                self.namespace.push(name)
+            }
+            HandlerPoint::After => self.namespace.pop(),
+        }
+        Ok(())
+    }
+
+    fn module_for_declaration(&mut self, arg: &ModuleForDeclaration) -> Result<()> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.insert_symbol(&arg.identifier0.identifier_token, SymbolKind::Block);
+
+                let name = arg.identifier0.identifier_token.token.text;
+                self.namespace.push(name)
+            }
+            HandlerPoint::After => self.namespace.pop(),
+        }
+        Ok(())
+    }
+
     fn interface_declaration(&mut self, arg: &InterfaceDeclaration) -> Result<()> {
         match self.point {
             HandlerPoint::Before => {
@@ -200,6 +226,32 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 );
 
                 let name = arg.identifier.identifier_token.token.text;
+                self.namespace.push(name)
+            }
+            HandlerPoint::After => self.namespace.pop(),
+        }
+        Ok(())
+    }
+
+    fn interface_if_declaration(&mut self, arg: &InterfaceIfDeclaration) -> Result<()> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.insert_symbol(&arg.identifier.identifier_token, SymbolKind::Block);
+
+                let name = arg.identifier.identifier_token.token.text;
+                self.namespace.push(name)
+            }
+            HandlerPoint::After => self.namespace.pop(),
+        }
+        Ok(())
+    }
+
+    fn interface_for_declaration(&mut self, arg: &InterfaceForDeclaration) -> Result<()> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.insert_symbol(&arg.identifier0.identifier_token, SymbolKind::Block);
+
+                let name = arg.identifier0.identifier_token.token.text;
                 self.namespace.push(name)
             }
             HandlerPoint::After => self.namespace.pop(),

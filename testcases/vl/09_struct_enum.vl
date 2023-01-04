@@ -1,4 +1,4 @@
-module ModuleA {
+module Module09 {
     // struct declaration
     struct A {
         a  : logic [10],

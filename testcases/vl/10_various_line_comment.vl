@@ -1,5 +1,5 @@
 module //a
- test_module //a
+ Module10 //a
  (
     i_clk // a
     : // a

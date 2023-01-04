@@ -1,4 +1,4 @@
-module ModuleA {
+module Module01 {
     // integer
     localparam a : u32  = 0123456789;
     localparam aa: u32  = 01234_56789;

@@ -1,6 +1,7 @@
-module ModuleA {
+module Module08 {
     // if declaration
     if a == 1 :label {
+        let a: logic ;
         always_ff (i_clk) {
             a = 1;
         }
@@ -19,14 +20,16 @@ module ModuleA {
     }
 
     // for declaration
-    for a in 0..10 :label {
+    for a in 0..10 :label2 {
+        let a: logic ;
         always_ff (i_clk) {
             a = 1;
         }
     }
 
     // for declaration with custom step
-    for a in 0..10 step += 2 :label {
+    for a in 0..10 step += 2 :label3 {
+        let a: logic ;
         always_ff (i_clk) {
             a = 1;
         }

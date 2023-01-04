@@ -35,13 +35,13 @@ impl<'t> From<&parol_runtime::lexer::Token<'t>> for Token {
 
 impl From<&Token> for parol_runtime::miette::SourceSpan {
     fn from(x: &Token) -> Self {
-        (x.pos - x.length, x.length).into()
+        (x.pos, x.length).into()
     }
 }
 
 impl From<Token> for parol_runtime::miette::SourceSpan {
     fn from(x: Token) -> Self {
-        (x.pos - x.length, x.length).into()
+        (x.pos, x.length).into()
     }
 }
 

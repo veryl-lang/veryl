@@ -1,4 +1,4 @@
-module ModuleA {
+module Module13 {
     // bit select
     assign a = X[0];
 

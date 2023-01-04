@@ -1,4 +1,4 @@
-module ModuleA {
+module Module12 {
     // always_ff declaration with default polarity
     always_ff (i_clk, i_rst) {
         if_reset {

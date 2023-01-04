@@ -1,9 +1,9 @@
-module ModuleA {
+module Module14 {
     // module instantiation
-    inst x: ModuleB;
+    inst x: Module14B;
 
     // module instantiation with parameter and port
-    inst xx: ModuleC #(
+    inst xx: Module14C #(
         a      ,
         aa: 10 ,
         aa: 100,
@@ -24,12 +24,12 @@ module ModuleA {
     inst yyy: InterfaceA [10];
 }
 
-module ModuleB {
+module Module14B {
 
 
 }
 
-module ModuleC (
+module Module14C (
     a   : input u32 ,
     bb  : input u32 ,
     bbbb: input u32 ,

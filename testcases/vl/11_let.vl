@@ -1,4 +1,4 @@
-module ModuleA {
+module Module11 {
     // variable declaration
     let b  : logic         ;
     let bb : logic [10]    ;

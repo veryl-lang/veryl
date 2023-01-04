@@ -1,4 +1,4 @@
-module ModuleA {
+module Module06 {
     // function without parameter
     function FuncA (
         a: input  logic [ParamX],

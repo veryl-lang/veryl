@@ -1,4 +1,4 @@
-module ModuleA ;
+module Module12 ;
     // always_ff declaration with default polarity
     always_ff @ (posedge i_clk, negedge i_rst) begin
         if (!i_rst) begin

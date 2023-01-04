@@ -1,4 +1,4 @@
-module ModuleA ;
+module Module01 ;
     // integer
     localparam int unsigned a   = 0123456789;
     localparam int unsigned aa  = 01234_56789;

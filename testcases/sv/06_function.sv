@@ -1,4 +1,4 @@
-module ModuleA ;
+module Module06 ;
     // function without parameter
     function automatic logic [ParamX-1:0] FuncA(
         input  logic [ParamX-1:0] a,

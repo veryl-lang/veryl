@@ -1,4 +1,4 @@
-module ModuleA ;
+module Module11 ;
     // variable declaration
     logic                  b  ;
     logic [10-1:0]         bb ;

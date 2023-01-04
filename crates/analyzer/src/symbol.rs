@@ -46,6 +46,7 @@ pub enum SymbolKind {
     Instance {
         name: Vec<StrId>,
     },
+    Block,
 }
 
 impl ToString for SymbolKind {
@@ -58,6 +59,7 @@ impl ToString for SymbolKind {
             SymbolKind::Function { .. } => "function".to_string(),
             SymbolKind::Parameter { .. } => "parameter".to_string(),
             SymbolKind::Instance { .. } => "instance".to_string(),
+            SymbolKind::Block { .. } => "block".to_string(),
         }
     }
 }
