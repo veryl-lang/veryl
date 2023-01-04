@@ -9,6 +9,8 @@ If you have any idea, please open [Issue](https://github.com/dalance/veryl/issue
 [![Crates.io](https://img.shields.io/crates/v/veryl.svg)](https://crates.io/crates/veryl)
 [![Changelog](https://img.shields.io/badge/changelog-v0.1.3-green.svg)](https://github.com/dalance/veryl/blob/master/CHANGELOG.md)
 
+[PlayGround](https://dalance.github.io/veryl/)
+
 ## Documentation quick links
 
 * [Concepts](#concepts)
