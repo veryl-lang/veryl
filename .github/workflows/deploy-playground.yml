@@ -17,6 +17,9 @@ jobs:
       - name: Build wasm
         run: wasm-pack build --target web -d playground/pkg --no-typescript --dev
         working-directory: crates/wasm
+      - name: Remove .gitignore
+        run: rm playground/pkg/.gitignore
+        working-directory: crates/wasm
       - name: Deploy
         uses: peaceiris/actions-gh-pages@v3
         with:
