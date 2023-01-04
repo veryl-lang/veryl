@@ -425,7 +425,7 @@
 /* 416 */ StructListOpt /* Option<T>::Some */: Comma;
 /* 417 */ StructListOpt /* Option<T>::None */: ;
 /* 418 */ StructItem: Identifier Colon Type;
-/* 419 */ InstDeclaration: Inst Identifier Colon ScopedIdentifier InstDeclarationOpt /* Option */ InstDeclarationOpt0 /* Option */ InstDeclarationOpt1 /* Option */ Semicolon;
+/* 419 */ InstDeclaration: Inst Identifier Colon Identifier InstDeclarationOpt /* Option */ InstDeclarationOpt0 /* Option */ InstDeclarationOpt1 /* Option */ Semicolon;
 /* 420 */ InstDeclarationOpt1 /* Option<T>::Some */: LBrace InstDeclarationOpt2 /* Option */ RBrace;
 /* 421 */ InstDeclarationOpt2 /* Option<T>::Some */: InstPortList;
 /* 422 */ InstDeclarationOpt2 /* Option<T>::None */: ;

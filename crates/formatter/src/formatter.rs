@@ -726,7 +726,7 @@ impl VerylWalker for Formatter {
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
         self.space(1);
-        self.scoped_identifier(&arg.scoped_identifier);
+        self.identifier(&arg.identifier0);
         if let Some(ref x) = arg.inst_declaration_opt {
             self.space(1);
             self.width(&x.width);

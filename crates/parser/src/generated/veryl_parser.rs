@@ -6620,7 +6620,6 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 405] = &[
             DFATransition(0, 27, 1),
             DFATransition(0, 29, 2),
             DFATransition(0, 33, 2),
-            DFATransition(0, 34, 2),
             DFATransition(0, 35, 2),
             DFATransition(0, 36, 2),
             DFATransition(0, 38, 2),
@@ -9519,7 +9518,7 @@ pub const PRODUCTIONS: &[Production; 555] = &[
         lhs: 371,
         production: &[ParseType::N(383), ParseType::N(45), ParseType::N(154)],
     },
-    // 419 - InstDeclaration: Inst Identifier Colon ScopedIdentifier InstDeclarationOpt /* Option */ InstDeclarationOpt0 /* Option */ InstDeclarationOpt1 /* Option */ Semicolon;
+    // 419 - InstDeclaration: Inst Identifier Colon Identifier InstDeclarationOpt /* Option */ InstDeclarationOpt0 /* Option */ InstDeclarationOpt1 /* Option */ Semicolon;
     Production {
         lhs: 185,
         production: &[
@@ -9527,7 +9526,7 @@ pub const PRODUCTIONS: &[Production; 555] = &[
             ParseType::N(188),
             ParseType::N(187),
             ParseType::N(186),
-            ParseType::N(352),
+            ParseType::N(154),
             ParseType::N(45),
             ParseType::N(154),
             ParseType::N(184),

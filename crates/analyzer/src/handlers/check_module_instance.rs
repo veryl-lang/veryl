@@ -32,12 +32,7 @@ impl<'a> Handler for CheckModuleInstance<'a> {
 impl<'a> VerylGrammarTrait for CheckModuleInstance<'a> {
     fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<()> {
         if let HandlerPoint::Before = self.point {
-            let mut name = Vec::new();
-            name.push(arg.scoped_identifier.identifier.identifier_token.token.text);
-            for x in &arg.scoped_identifier.scoped_identifier_list {
-                name.push(x.identifier.identifier_token.token.text);
-            }
-            let name = &Name::Hierarchical(name);
+            let name = &Name::Hierarchical(vec![arg.identifier0.identifier_token.token.text]);
 
             let mut connected_ports = Vec::new();
             if let Some(ref x) = arg.inst_declaration_opt1 {
@@ -89,7 +84,7 @@ impl<'a> VerylGrammarTrait for CheckModuleInstance<'a> {
                     self.errors.push(AnalyzeError::mismatch_type(
                         &name,
                         "module",
-                        &symbol.kind.to_string(),
+                        &symbol.kind.to_kind_name(),
                         self.text,
                         &arg.identifier.identifier_token,
                     ));

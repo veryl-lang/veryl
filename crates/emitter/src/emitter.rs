@@ -889,7 +889,7 @@ impl VerylWalker for Emitter {
             self.single_line = true;
         }
         self.token(&arg.inst.inst_token.replace(""));
-        self.scoped_identifier(&arg.scoped_identifier);
+        self.identifier(&arg.identifier0);
         self.space(1);
         if let Some(ref x) = arg.inst_declaration_opt0 {
             self.inst_parameter(&x.inst_parameter);

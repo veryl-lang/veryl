@@ -1,4 +1,5 @@
 use crate::namespace::Namespace;
+use std::fmt;
 use veryl_parser::global_table::StrId;
 use veryl_parser::veryl_grammar_trait::{BuiltinType, TypeGroup};
 use veryl_parser::veryl_token::Token;
@@ -44,13 +45,13 @@ pub enum SymbolKind {
         scope: ParameterScope,
     },
     Instance {
-        name: Vec<StrId>,
+        name: StrId,
     },
     Block,
 }
 
-impl ToString for SymbolKind {
-    fn to_string(&self) -> String {
+impl SymbolKind {
+    pub fn to_kind_name(&self) -> String {
         match self {
             SymbolKind::Port { .. } => "port".to_string(),
             SymbolKind::Variable { .. } => "variable".to_string(),
@@ -61,6 +62,24 @@ impl ToString for SymbolKind {
             SymbolKind::Instance { .. } => "instance".to_string(),
             SymbolKind::Block { .. } => "block".to_string(),
         }
+    }
+}
+
+impl fmt::Display for SymbolKind {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let text = match self {
+            SymbolKind::Port { .. } => "port".to_string(),
+            SymbolKind::Variable { .. } => "variable".to_string(),
+            SymbolKind::Module { .. } => "module".to_string(),
+            SymbolKind::Interface { .. } => "interface".to_string(),
+            SymbolKind::Function { .. } => "function".to_string(),
+            SymbolKind::Parameter { .. } => "parameter".to_string(),
+            SymbolKind::Instance { name } => {
+                format!("instance [{}]", name)
+            }
+            SymbolKind::Block => "block".to_string(),
+        };
+        text.fmt(f)
     }
 }
 

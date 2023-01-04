@@ -405,7 +405,7 @@ StructItem: Identifier Colon Type;
 // InstDeclaration
 // ----------------------------------------------------------------------------
 
-InstDeclaration: Inst Identifier Colon ScopedIdentifier [ Width ] [ InstParameter ] [ LBrace [ InstPortList ] RBrace ] Semicolon;
+InstDeclaration: Inst Identifier Colon Identifier [ Width ] [ InstParameter ] [ LBrace [ InstPortList ] RBrace ] Semicolon;
 
 InstParameter: Hash LParen [ InstParameterList ] RParen;
 

@@ -4429,7 +4429,7 @@ pub struct InstDeclaration {
     pub inst: Box<Inst>,
     pub identifier: Box<Identifier>,
     pub colon: Box<Colon>,
-    pub scoped_identifier: Box<ScopedIdentifier>,
+    pub identifier0: Box<Identifier>,
     pub inst_declaration_opt: Option<Box<InstDeclarationOpt>>,
     pub inst_declaration_opt0: Option<Box<InstDeclarationOpt0>>,
     pub inst_declaration_opt1: Option<Box<InstDeclarationOpt1>>,
@@ -17904,7 +17904,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 419:
     ///
-    /// InstDeclaration: Inst Identifier Colon ScopedIdentifier InstDeclarationOpt /* Option */ InstDeclarationOpt0 /* Option */ InstDeclarationOpt1 /* Option */ Semicolon;
+    /// InstDeclaration: Inst Identifier Colon Identifier InstDeclarationOpt /* Option */ InstDeclarationOpt0 /* Option */ InstDeclarationOpt1 /* Option */ Semicolon;
     ///
     #[parol_runtime::function_name::named]
     fn inst_declaration(
@@ -17912,7 +17912,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         _inst: &ParseTreeStackEntry<'t>,
         _identifier: &ParseTreeStackEntry<'t>,
         _colon: &ParseTreeStackEntry<'t>,
-        _scoped_identifier: &ParseTreeStackEntry<'t>,
+        _identifier0: &ParseTreeStackEntry<'t>,
         _inst_declaration_opt: &ParseTreeStackEntry<'t>,
         _inst_declaration_opt0: &ParseTreeStackEntry<'t>,
         _inst_declaration_opt1: &ParseTreeStackEntry<'t>,
@@ -17928,7 +17928,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             pop_item!(self, inst_declaration_opt0, InstDeclarationOpt0, context);
         let inst_declaration_opt =
             pop_item!(self, inst_declaration_opt, InstDeclarationOpt, context);
-        let scoped_identifier = pop_item!(self, scoped_identifier, ScopedIdentifier, context);
+        let identifier0 = pop_item!(self, identifier0, Identifier, context);
         let colon = pop_item!(self, colon, Colon, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
         let inst = pop_item!(self, inst, Inst, context);
@@ -17936,7 +17936,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             .inst(Box::new(inst))
             .identifier(Box::new(identifier))
             .colon(Box::new(colon))
-            .scoped_identifier(Box::new(scoped_identifier))
+            .identifier0(Box::new(identifier0))
             .inst_declaration_opt(inst_declaration_opt)
             .inst_declaration_opt0(inst_declaration_opt0)
             .inst_declaration_opt1(inst_declaration_opt1)

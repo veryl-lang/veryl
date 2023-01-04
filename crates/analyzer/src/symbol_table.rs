@@ -114,9 +114,7 @@ impl SymbolTable {
                 if let Some(ret) = ret {
                     if let SymbolKind::Instance { ref name } = ret.kind {
                         namespace = Namespace::default();
-                        for x in name {
-                            namespace.push(*x);
-                        }
+                        namespace.push(*name);
                     }
                 } else {
                     return None;
@@ -156,7 +154,7 @@ impl fmt::Display for SymbolTable {
             for symbol in *v {
                 writeln!(
                     f,
-                    "    {:symbol_width$} @ {:namespace_width$}: {:?},",
+                    "    {:symbol_width$} @ {:namespace_width$}: {},",
                     k,
                     symbol.namespace,
                     symbol.kind,

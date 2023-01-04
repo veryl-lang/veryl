@@ -35,14 +35,14 @@ impl CmdDump {
             let parser = Parser::parse(&input, file)?;
             let mut analyzer = Analyzer::new(&input);
             analyzer.analyze(&parser.veryl);
+        }
 
-            if self.opt.symbol_table {
-                println!("{}", veryl_analyzer::symbol_table::dump());
-            }
+        if self.opt.symbol_table {
+            println!("{}", veryl_analyzer::symbol_table::dump());
+        }
 
-            if self.opt.namespace_table {
-                println!("{}", veryl_analyzer::namespace_table::dump());
-            }
+        if self.opt.namespace_table {
+            println!("{}", veryl_analyzer::namespace_table::dump());
         }
 
         let elapsed_time = now.elapsed();
