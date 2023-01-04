@@ -15,7 +15,7 @@ jobs:
           toolchain: stable
       - uses: jetli/wasm-pack-action@v0.4.0
       - name: Build wasm
-        run: wasm-pack build --target web -d playground --no-typescript --dev
+        run: wasm-pack build --target web -d playground/pkg --no-typescript --dev
         working-directory: crates/wasm
       - name: Deploy
         uses: peaceiris/actions-gh-pages@v3
