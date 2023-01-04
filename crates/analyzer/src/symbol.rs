@@ -45,7 +45,7 @@ pub enum SymbolKind {
         scope: ParameterScope,
     },
     Instance {
-        name: StrId,
+        type_name: StrId,
     },
     Block,
 }
@@ -74,8 +74,8 @@ impl fmt::Display for SymbolKind {
             SymbolKind::Interface { .. } => "interface".to_string(),
             SymbolKind::Function { .. } => "function".to_string(),
             SymbolKind::Parameter { .. } => "parameter".to_string(),
-            SymbolKind::Instance { name } => {
-                format!("instance [{}]", name)
+            SymbolKind::Instance { type_name } => {
+                format!("instance [{}]", type_name)
             }
             SymbolKind::Block => "block".to_string(),
         };

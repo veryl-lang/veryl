@@ -76,8 +76,8 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
     fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<()> {
         if let HandlerPoint::Before = self.point {
-            let name = arg.identifier0.identifier_token.token.text;
-            let kind = SymbolKind::Instance { name };
+            let type_name = arg.identifier0.identifier_token.token.text;
+            let kind = SymbolKind::Instance { type_name };
             self.insert_symbol(&arg.identifier.identifier_token, kind);
         }
         Ok(())
