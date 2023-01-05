@@ -611,13 +611,13 @@ impl VerylWalker for Emitter {
         self.token(&arg.r_brace.r_brace_token.replace("end"));
     }
 
-    /// Semantic action for non-terminal 'LetDeclaration'
-    fn let_declaration(&mut self, arg: &LetDeclaration) {
+    /// Semantic action for non-terminal 'VarDeclaration'
+    fn var_declaration(&mut self, arg: &VarDeclaration) {
         self.type_left(&arg.r#type);
         self.space(1);
         self.identifier(&arg.identifier);
         self.type_right(&arg.r#type);
-        if let Some(ref x) = arg.let_declaration_opt {
+        if let Some(ref x) = arg.var_declaration_opt {
             self.str(";");
             self.newline();
             if !self.in_function {

@@ -54,7 +54,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         Ok(())
     }
 
-    fn let_declaration(&mut self, arg: &LetDeclaration) -> Result<()> {
+    fn var_declaration(&mut self, arg: &VarDeclaration) -> Result<()> {
         if let HandlerPoint::Before = self.point {
             let r#type: SymType = (&*arg.r#type).into();
             let kind = SymbolKind::Variable { r#type };

@@ -12,13 +12,13 @@ module //a
     i_down : input  logic    ,
     o_count: output logic [8],
 ) {
-    let count //a
+    var count //a
     : logic //a
      [ // a
     8 //a
     ] // a
     ;
-    let up_down: logic [2];
+    var up_down: logic [2];
 
     always_comb // a
      {

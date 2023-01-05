@@ -360,15 +360,15 @@ impl VerylWalker for Aligner {
         self.semicolon(&arg.semicolon);
     }
 
-    /// Semantic action for non-terminal 'LetDeclaration'
-    fn let_declaration(&mut self, arg: &LetDeclaration) {
-        self.r#let(&arg.r#let);
+    /// Semantic action for non-terminal 'VarDeclaration'
+    fn var_declaration(&mut self, arg: &VarDeclaration) {
+        self.var(&arg.var);
         self.aligns[align_kind::IDENTIFIER].start_item();
         self.identifier(&arg.identifier);
         self.aligns[align_kind::IDENTIFIER].finish_item();
         self.colon(&arg.colon);
         self.r#type(&arg.r#type);
-        if let Some(ref x) = arg.let_declaration_opt {
+        if let Some(ref x) = arg.var_declaration_opt {
             self.equ(&x.equ);
             self.expression(&x.expression);
         }

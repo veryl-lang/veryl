@@ -14,7 +14,7 @@ module Module04 #(
     localparam cc: u64  = 1;
 
     // variable declaration
-    let d  : logic         ;
-    let dd : logic [10]    ;
-    let ddd: bit   [10][10];
+    var d  : logic         ;
+    var dd : logic [10]    ;
+    var ddd: bit   [10][10];
 }

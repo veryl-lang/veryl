@@ -9,10 +9,10 @@ interface Interface05 #(
     localparam b : u32  = 1;
     localparam bb: u64  = 1;
 
-    // let declaration
-    let c  : logic         ;
-    let cc : logic [10]    ;
-    let ccc: bit   [10][10];
+    // variable declaration
+    var c  : logic         ;
+    var cc : logic [10]    ;
+    var ccc: bit   [10][10];
 
     // modport declaration
     modport d {

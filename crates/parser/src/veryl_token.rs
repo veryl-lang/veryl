@@ -214,7 +214,6 @@ token_with_comments!(InputToken, InputTerm, input_term);
 token_with_comments!(InstToken, InstTerm, inst_term);
 token_with_comments!(InterfaceToken, InterfaceTerm, interface_term);
 token_with_comments!(InToken, InTerm, in_term);
-token_with_comments!(LetToken, LetTerm, let_term);
 token_with_comments!(LocalparamToken, LocalparamTerm, localparam_term);
 token_with_comments!(LogicToken, LogicTerm, logic_term);
 token_with_comments!(ModportToken, ModportTerm, modport_term);
@@ -231,5 +230,6 @@ token_with_comments!(SyncHighToken, SyncHighTerm, sync_high_term);
 token_with_comments!(SyncLowToken, SyncLowTerm, sync_low_term);
 token_with_comments!(U32Token, U32Term, u32_term);
 token_with_comments!(U64Token, U64Term, u64_term);
+token_with_comments!(VarToken, VarTerm, var_term);
 
 token_with_comments!(IdentifierToken, IdentifierTerm, identifier_term);

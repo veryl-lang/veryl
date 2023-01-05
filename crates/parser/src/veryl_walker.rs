@@ -433,13 +433,6 @@ pub trait VerylWalker {
         after!(self, interface, arg);
     }
 
-    /// Semantic action for non-terminal 'Let'
-    fn r#let(&mut self, arg: &Let) {
-        before!(self, r#let, arg);
-        self.veryl_token(&arg.let_token);
-        after!(self, r#let, arg);
-    }
-
     /// Semantic action for non-terminal 'Localparam'
     fn localparam(&mut self, arg: &Localparam) {
         before!(self, localparam, arg);
@@ -550,6 +543,13 @@ pub trait VerylWalker {
         before!(self, u64, arg);
         self.veryl_token(&arg.u64_token);
         after!(self, u64, arg);
+    }
+
+    /// Semantic action for non-terminal 'Var'
+    fn var(&mut self, arg: &Var) {
+        before!(self, var, arg);
+        self.veryl_token(&arg.var_token);
+        after!(self, var, arg);
     }
 
     /// Semantic action for non-terminal 'Identifier'
@@ -1010,19 +1010,19 @@ pub trait VerylWalker {
         after!(self, for_statement, arg);
     }
 
-    /// Semantic action for non-terminal 'LetDeclaration'
-    fn let_declaration(&mut self, arg: &LetDeclaration) {
-        before!(self, let_declaration, arg);
-        self.r#let(&arg.r#let);
+    /// Semantic action for non-terminal 'VarDeclaration'
+    fn var_declaration(&mut self, arg: &VarDeclaration) {
+        before!(self, var_declaration, arg);
+        self.var(&arg.var);
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
         self.r#type(&arg.r#type);
-        if let Some(ref x) = arg.let_declaration_opt {
+        if let Some(ref x) = arg.var_declaration_opt {
             self.equ(&x.equ);
             self.expression(&x.expression);
         }
         self.semicolon(&arg.semicolon);
-        after!(self, let_declaration, arg);
+        after!(self, var_declaration, arg);
     }
 
     /// Semantic action for non-terminal 'LocalparamDeclaration'
@@ -1413,7 +1413,7 @@ pub trait VerylWalker {
     fn function_item(&mut self, arg: &FunctionItem) {
         before!(self, function_item, arg);
         match arg {
-            FunctionItem::LetDeclaration(x) => self.let_declaration(&x.let_declaration),
+            FunctionItem::VarDeclaration(x) => self.var_declaration(&x.var_declaration),
             FunctionItem::Statement(x) => self.statement(&x.statement),
         };
         after!(self, function_item, arg);
@@ -1507,7 +1507,7 @@ pub trait VerylWalker {
     fn module_item(&mut self, arg: &ModuleItem) {
         before!(self, module_item, arg);
         match arg {
-            ModuleItem::LetDeclaration(x) => self.let_declaration(&x.let_declaration),
+            ModuleItem::VarDeclaration(x) => self.var_declaration(&x.var_declaration),
             ModuleItem::InstDeclaration(x) => self.inst_declaration(&x.inst_declaration),
             ModuleItem::LocalparamDeclaration(x) => {
                 self.localparam_declaration(&x.localparam_declaration)
@@ -1620,7 +1620,7 @@ pub trait VerylWalker {
     fn interface_item(&mut self, arg: &InterfaceItem) {
         before!(self, interface_item, arg);
         match arg {
-            InterfaceItem::LetDeclaration(x) => self.let_declaration(&x.let_declaration),
+            InterfaceItem::VarDeclaration(x) => self.var_declaration(&x.var_declaration),
             InterfaceItem::LocalparamDeclaration(x) => {
                 self.localparam_declaration(&x.localparam_declaration)
             }

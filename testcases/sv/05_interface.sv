@@ -9,7 +9,7 @@ interface Interface05 #(
     localparam int unsigned     b   = 1;
     localparam longint unsigned bb  = 1;
 
-    // let declaration
+    // variable declaration
     logic                  c  ;
     logic [10-1:0]         cc ;
     bit   [10-1:0][10-1:0] ccc;

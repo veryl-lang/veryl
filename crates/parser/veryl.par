@@ -71,7 +71,6 @@ InputTerm             : /\binput\b/                                             
 InstTerm              : /\binst\b/                                                           : Token;
 InterfaceTerm         : /\binterface\b/                                                      : Token;
 InTerm                : /\bin\b/                                                             : Token;
-LetTerm               : /\blet\b/                                                            : Token;
 LocalparamTerm        : /\blocalparam\b/                                                     : Token;
 LogicTerm             : /\blogic\b/                                                          : Token;
 ModportTerm           : /\bmodport\b/                                                        : Token;
@@ -88,6 +87,7 @@ SyncHighTerm          : /\bsync_high\b/                                         
 SyncLowTerm           : /\bsync_low\b/                                                       : Token;
 U32Term               : /\bu32\b/                                                            : Token;
 U64Term               : /\bu64\b/                                                            : Token;
+VarTerm               : /\bvar\b/                                                            : Token;
 IdentifierTerm        : /[a-zA-Z_][0-9a-zA-Z_]*/                                             : Token;
 
 // ----------------------------------------------------------------------------
@@ -158,7 +158,6 @@ InputToken     : InputTerm     : Token Comments;
 InstToken      : InstTerm      : Token Comments;
 InterfaceToken : InterfaceTerm : Token Comments;
 InToken        : InTerm        : Token Comments;
-LetToken       : LetTerm       : Token Comments;
 LocalparamToken: LocalparamTerm: Token Comments;
 LogicToken     : LogicTerm     : Token Comments;
 ModportToken   : ModportTerm   : Token Comments;
@@ -175,6 +174,7 @@ SyncHighToken  : SyncHighTerm  : Token Comments;
 SyncLowToken   : SyncLowTerm   : Token Comments;
 U32Token       : U32Term       : Token Comments;
 U64Token       : U64Term       : Token Comments;
+VarToken       : VarTerm       : Token Comments;
 
 IdentifierToken: IdentifierTerm: Token Comments;
 
@@ -249,7 +249,6 @@ Inout     : InoutToken     : VerylToken;
 Input     : InputToken     : VerylToken;
 Inst      : InstToken      : VerylToken;
 Interface : InterfaceToken : VerylToken;
-Let       : LetToken       : VerylToken;
 Localparam: LocalparamToken: VerylToken;
 Logic     : LogicToken     : VerylToken;
 Modport   : ModportToken   : VerylToken;
@@ -266,6 +265,7 @@ SyncHigh  : SyncHighToken  : VerylToken;
 SyncLow   : SyncLowToken   : VerylToken;
 U32       : U32Token       : VerylToken;
 U64       : U64Token       : VerylToken;
+Var       : VarToken       : VerylToken;
 
 // Identifier
 Identifier: IdentifierToken: VerylToken;
@@ -369,7 +369,7 @@ ForStatement: For Identifier Colon Type In Expression DotDot Expression [ Step A
 // Declaration
 // ----------------------------------------------------------------------------
 
-LetDeclaration: Let Identifier Colon Type [ Equ Expression ] Semicolon;
+VarDeclaration: Var Identifier Colon Type [ Equ Expression ] Semicolon;
 
 LocalparamDeclaration: Localparam Identifier Colon Type Equ Expression Semicolon;
 
@@ -449,7 +449,7 @@ Direction: Input
 
 FunctionDeclaration: Function Identifier [ WithParameter ] [ PortDeclaration ] MinusGT Type LBrace { FunctionItem } RBrace;
 
-FunctionItem: LetDeclaration
+FunctionItem: VarDeclaration
             | Statement
             ;
 
@@ -467,7 +467,7 @@ ModuleNamedBlock: Colon Identifier LBrace { ModuleItem } RBrace;
 
 ModuleOptionalNamedBlock: [ Colon Identifier ] LBrace { ModuleItem } RBrace;
 
-ModuleItem: LetDeclaration
+ModuleItem: VarDeclaration
           | InstDeclaration
           | LocalparamDeclaration
           | AlwaysFfDeclaration
@@ -495,7 +495,7 @@ InterfaceNamedBlock: Colon Identifier LBrace { InterfaceItem } RBrace;
 
 InterfaceOptionalNamedBlock: [ Colon Identifier ] LBrace { InterfaceItem } RBrace;
 
-InterfaceItem: LetDeclaration
+InterfaceItem: VarDeclaration
              | LocalparamDeclaration
              | ModportDeclaration
              | InterfaceIfDeclaration
