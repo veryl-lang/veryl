@@ -1,8 +1,10 @@
 use crate::namespace::Namespace;
 use std::fmt;
 use veryl_parser::resource_table::StrId;
-use veryl_parser::veryl_grammar_trait::{BuiltinType, TypeGroup};
+use veryl_parser::veryl_grammar_trait::{BuiltinType, Expression, TypeGroup};
 use veryl_parser::veryl_token::Token;
+use veryl_parser::veryl_walker::VerylWalker;
+use veryl_parser::Stringifier;
 
 #[derive(Debug, Clone)]
 pub struct Symbol {
@@ -23,44 +25,27 @@ impl Symbol {
 
 #[derive(Debug, Clone)]
 pub enum SymbolKind {
-    Port {
-        direction: Direction,
-    },
-    Variable {
-        r#type: Type,
-    },
-    Module {
-        parameters: Vec<Parameter>,
-        ports: Vec<Port>,
-    },
-    Interface {
-        parameters: Vec<Parameter>,
-    },
-    Function {
-        parameters: Vec<Parameter>,
-        ports: Vec<Port>,
-    },
-    Parameter {
-        r#type: Type,
-        scope: ParameterScope,
-    },
-    Instance {
-        type_name: StrId,
-    },
+    Port(PortProperty),
+    Variable(VariableProperty),
+    Module(ModuleProperty),
+    Interface(InterfaceProperty),
+    Function(FunctionProperty),
+    Parameter(ParameterProperty),
+    Instance(InstanceProperty),
     Block,
 }
 
 impl SymbolKind {
     pub fn to_kind_name(&self) -> String {
         match self {
-            SymbolKind::Port { .. } => "port".to_string(),
-            SymbolKind::Variable { .. } => "variable".to_string(),
-            SymbolKind::Module { .. } => "module".to_string(),
-            SymbolKind::Interface { .. } => "interface".to_string(),
-            SymbolKind::Function { .. } => "function".to_string(),
-            SymbolKind::Parameter { .. } => "parameter".to_string(),
-            SymbolKind::Instance { .. } => "instance".to_string(),
-            SymbolKind::Block { .. } => "block".to_string(),
+            SymbolKind::Port(_) => "port".to_string(),
+            SymbolKind::Variable(_) => "variable".to_string(),
+            SymbolKind::Module(_) => "module".to_string(),
+            SymbolKind::Interface(_) => "interface".to_string(),
+            SymbolKind::Function(_) => "function".to_string(),
+            SymbolKind::Parameter(_) => "parameter".to_string(),
+            SymbolKind::Instance(_) => "instance".to_string(),
+            SymbolKind::Block => "block".to_string(),
         }
     }
 }
@@ -68,50 +53,58 @@ impl SymbolKind {
 impl fmt::Display for SymbolKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let text = match self {
-            SymbolKind::Port { direction } => {
-                format!("port [{}]", direction)
+            SymbolKind::Port(x) => {
+                format!("port [{}]", x.direction)
             }
-            SymbolKind::Variable { r#type } => {
-                format!("variable [{}]", r#type)
+            SymbolKind::Variable(x) => {
+                format!("variable [{}]", x.r#type)
             }
-            SymbolKind::Module { parameters, ports } => {
+            SymbolKind::Module(x) => {
                 let mut text = "module [".to_string();
-                for parameter in parameters {
+                for parameter in &x.parameters {
                     text.push_str(&format!("{}, ", parameter));
                 }
                 text.push_str("] [");
-                for port in ports {
+                for port in &x.ports {
                     text.push_str(&format!("{}, ", port));
                 }
-                text.push_str("]");
+                text.push(']');
                 text
             }
-            SymbolKind::Interface { parameters } => {
+            SymbolKind::Interface(x) => {
                 let mut text = "interface [".to_string();
-                for parameter in parameters {
+                for parameter in &x.parameters {
                     text.push_str(&format!("{}, ", parameter));
                 }
-                text.push_str("]");
+                text.push(']');
                 text
             }
-            SymbolKind::Function { parameters, ports } => {
+            SymbolKind::Function(x) => {
                 let mut text = "function [".to_string();
-                for parameter in parameters {
+                for parameter in &x.parameters {
                     text.push_str(&format!("{}, ", parameter));
                 }
                 text.push_str("] [");
-                for port in ports {
+                for port in &x.ports {
                     text.push_str(&format!("{}, ", port));
                 }
-                text.push_str("]");
+                text.push(']');
                 text
             }
-            SymbolKind::Parameter { r#type, scope } => match scope {
-                ParameterScope::Global => format!("parameter [{}]", r#type),
-                ParameterScope::Local => format!("localparam [{}]", r#type),
-            },
-            SymbolKind::Instance { type_name } => {
-                format!("instance [{}]", type_name)
+            SymbolKind::Parameter(x) => {
+                let mut stringifier = Stringifier::new();
+                stringifier.expression(&x.value);
+                match x.scope {
+                    ParameterScope::Global => {
+                        format!("parameter [{}] ({})", x.r#type, stringifier.as_str())
+                    }
+                    ParameterScope::Local => {
+                        format!("localparam [{}] ({})", x.r#type, stringifier.as_str())
+                    }
+                }
+            }
+            SymbolKind::Instance(x) => {
+                format!("instance [{}]", x.type_name)
             }
             SymbolKind::Block => "block".to_string(),
         };
@@ -217,14 +210,24 @@ impl From<&veryl_parser::veryl_grammar_trait::Type> for Type {
 }
 
 #[derive(Debug, Clone)]
+pub struct VariableProperty {
+    pub r#type: Type,
+}
+
+#[derive(Debug, Clone)]
+pub struct PortProperty {
+    pub direction: Direction,
+}
+
+#[derive(Debug, Clone)]
 pub struct Port {
     pub name: StrId,
-    pub direction: Direction,
+    pub property: PortProperty,
 }
 
 impl fmt::Display for Port {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let text = format!("{} [{}]", self.name, self.direction);
+        let text = format!("{} [{}]", self.name, self.property.direction);
         text.fmt(f)
     }
 }
@@ -232,9 +235,10 @@ impl fmt::Display for Port {
 impl From<&veryl_parser::veryl_grammar_trait::PortDeclarationItem> for Port {
     fn from(value: &veryl_parser::veryl_grammar_trait::PortDeclarationItem) -> Self {
         let direction: Direction = (&*value.direction).into();
+        let property = PortProperty { direction };
         Port {
             name: value.identifier.identifier_token.token.text,
-            direction,
+            property,
         }
     }
 }
@@ -246,15 +250,21 @@ pub enum ParameterScope {
 }
 
 #[derive(Debug, Clone)]
-pub struct Parameter {
-    pub name: StrId,
+pub struct ParameterProperty {
     pub r#type: Type,
     pub scope: ParameterScope,
+    pub value: Expression,
+}
+
+#[derive(Debug, Clone)]
+pub struct Parameter {
+    pub name: StrId,
+    pub property: ParameterProperty,
 }
 
 impl fmt::Display for Parameter {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let text = format!("{} [{}]", self.name, self.r#type);
+        let text = format!("{} [{}]", self.name, self.property.r#type);
         text.fmt(f)
     }
 }
@@ -270,10 +280,36 @@ impl From<&veryl_parser::veryl_grammar_trait::WithParameterItem> for Parameter {
             }
         };
         let r#type: Type = (&*value.r#type).into();
-        Parameter {
-            name: value.identifier.identifier_token.token.text,
+        let property = ParameterProperty {
             r#type,
             scope,
+            value: *value.expression.clone(),
+        };
+        Parameter {
+            name: value.identifier.identifier_token.token.text,
+            property,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct ModuleProperty {
+    pub parameters: Vec<Parameter>,
+    pub ports: Vec<Port>,
+}
+
+#[derive(Debug, Clone)]
+pub struct InterfaceProperty {
+    pub parameters: Vec<Parameter>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FunctionProperty {
+    pub parameters: Vec<Parameter>,
+    pub ports: Vec<Port>,
+}
+
+#[derive(Debug, Clone)]
+pub struct InstanceProperty {
+    pub type_name: StrId,
 }

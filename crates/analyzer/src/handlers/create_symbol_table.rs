@@ -3,7 +3,10 @@ use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::Direction as SymDirection;
 use crate::symbol::Type as SymType;
-use crate::symbol::{ParameterScope, Symbol, SymbolKind};
+use crate::symbol::{
+    FunctionProperty, InstanceProperty, InterfaceProperty, ModuleProperty, ParameterProperty,
+    ParameterScope, PortProperty, Symbol, SymbolKind, VariableProperty,
+};
 use crate::symbol_table;
 use veryl_parser::miette::Result;
 use veryl_parser::resource_table::{self, StrId};
@@ -57,7 +60,8 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
     fn var_declaration(&mut self, arg: &VarDeclaration) -> Result<()> {
         if let HandlerPoint::Before = self.point {
             let r#type: SymType = (&*arg.r#type).into();
-            let kind = SymbolKind::Variable { r#type };
+            let property = VariableProperty { r#type };
+            let kind = SymbolKind::Variable(property);
             self.insert_symbol(&arg.identifier.identifier_token, kind);
         }
         Ok(())
@@ -66,10 +70,12 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
     fn localparam_declaration(&mut self, arg: &LocalparamDeclaration) -> Result<()> {
         if let HandlerPoint::Before = self.point {
             let r#type: SymType = (&*arg.r#type).into();
-            let kind = SymbolKind::Parameter {
+            let value = *arg.expression.clone();
+            let kind = SymbolKind::Parameter(ParameterProperty {
                 r#type,
                 scope: ParameterScope::Local,
-            };
+                value,
+            });
             self.insert_symbol(&arg.identifier.identifier_token, kind);
         }
         Ok(())
@@ -78,7 +84,8 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
     fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<()> {
         if let HandlerPoint::Before = self.point {
             let type_name = arg.identifier0.identifier_token.token.text;
-            let kind = SymbolKind::Instance { type_name };
+            let property = InstanceProperty { type_name };
+            let kind = SymbolKind::Instance(property);
             self.insert_symbol(&arg.identifier.identifier_token, kind);
         }
         Ok(())
@@ -91,7 +98,13 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 WithParameterItemGroup::Localparam(_) => ParameterScope::Local,
             };
             let r#type: SymType = (&*arg.r#type).into();
-            let kind = SymbolKind::Parameter { r#type, scope };
+            let value = *arg.expression.clone();
+            let property = ParameterProperty {
+                r#type,
+                scope,
+                value,
+            };
+            let kind = SymbolKind::Parameter(property);
             self.insert_symbol(&arg.identifier.identifier_token, kind);
         }
         Ok(())
@@ -100,7 +113,8 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
     fn port_declaration_item(&mut self, arg: &PortDeclarationItem) -> Result<()> {
         if let HandlerPoint::Before = self.point {
             let direction: SymDirection = (&*arg.direction).into();
-            let kind = SymbolKind::Port { direction };
+            let property = PortProperty { direction };
+            let kind = SymbolKind::Port(property);
             self.insert_symbol(&arg.identifier.identifier_token, kind);
         }
         Ok(())
@@ -129,9 +143,10 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                         }
                     }
                 }
+                let property = FunctionProperty { parameters, ports };
                 self.insert_symbol(
                     &arg.identifier.identifier_token,
-                    SymbolKind::Function { parameters, ports },
+                    SymbolKind::Function(property),
                 );
 
                 let name = arg.identifier.identifier_token.token.text;
@@ -165,9 +180,10 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                         }
                     }
                 }
+                let property = ModuleProperty { parameters, ports };
                 self.insert_symbol(
                     &arg.identifier.identifier_token,
-                    SymbolKind::Module { parameters, ports },
+                    SymbolKind::Module(property),
                 );
 
                 let name = arg.identifier.identifier_token.token.text;
@@ -222,9 +238,10 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                         }
                     }
                 }
+                let property = InterfaceProperty { parameters };
                 self.insert_symbol(
                     &arg.identifier.identifier_token,
-                    SymbolKind::Interface { parameters },
+                    SymbolKind::Interface(property),
                 );
 
                 let name = arg.identifier.identifier_token.token.text;

@@ -112,9 +112,9 @@ impl SymbolTable {
                 }
 
                 if let Some(ret) = ret {
-                    if let SymbolKind::Instance { ref type_name } = ret.kind {
+                    if let SymbolKind::Instance(ref x) = ret.kind {
                         namespace = Namespace::default();
-                        namespace.push(*type_name);
+                        namespace.push(x.type_name);
                     }
                 } else {
                     return None;

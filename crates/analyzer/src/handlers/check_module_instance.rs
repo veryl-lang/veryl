@@ -49,8 +49,8 @@ impl<'a> VerylGrammarTrait for CheckModuleInstance<'a> {
             let namespace = namespace_table::get(arg.identifier.identifier_token.token.id).unwrap();
             let symbol = symbol_table::get(name, &namespace);
             if let Some(symbol) = symbol {
-                if let SymbolKind::Module { ref ports, .. } = symbol.kind {
-                    for port in ports {
+                if let SymbolKind::Module(x) = symbol.kind {
+                    for port in &x.ports {
                         if !connected_ports.contains(&port.name) {
                             let name =
                                 resource_table::get_str_value(*name.as_slice().last().unwrap())
@@ -65,7 +65,7 @@ impl<'a> VerylGrammarTrait for CheckModuleInstance<'a> {
                         }
                     }
                     for port in &connected_ports {
-                        if !ports.iter().any(|x| &x.name == port) {
+                        if !x.ports.iter().any(|x| &x.name == port) {
                             let name =
                                 resource_table::get_str_value(*name.as_slice().last().unwrap())
                                     .unwrap();

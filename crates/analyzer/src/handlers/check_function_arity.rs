@@ -50,8 +50,8 @@ impl<'a> VerylGrammarTrait for CheckFunctionArity<'a> {
                 let symbol = symbol_table::get(&name, &namespace);
 
                 let arity = if let Some(symbol) = symbol {
-                    if let SymbolKind::Function { ref ports, .. } = symbol.kind {
-                        Some(ports.len())
+                    if let SymbolKind::Function(x) = symbol.kind {
+                        Some(x.ports.len())
                     } else {
                         None
                     }
