@@ -199,6 +199,8 @@ token_with_comments!(AssignToken, AssignTerm, assign_term);
 token_with_comments!(AsyncHighToken, AsyncHighTerm, async_high_term);
 token_with_comments!(AsyncLowToken, AsyncLowTerm, async_low_term);
 token_with_comments!(BitToken, BitTerm, bit_term);
+token_with_comments!(CaseToken, CaseTerm, case_term);
+token_with_comments!(DefaultToken, DefaultTerm, default_term);
 token_with_comments!(ElseToken, ElseTerm, else_term);
 token_with_comments!(EnumToken, EnumTerm, enum_term);
 token_with_comments!(F32Token, F32Term, f32_term);

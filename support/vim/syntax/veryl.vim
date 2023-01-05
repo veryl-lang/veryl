@@ -58,7 +58,7 @@ hi def link verylType Type
 syn keyword verylDirection input output inout ref
 hi def link verylDirection Keyword
 
-syn keyword verylConditional if if_reset else for in
+syn keyword verylConditional if if_reset else for in case
 hi def link verylConditional Conditional
 
 syn keyword verylRepeat for in step

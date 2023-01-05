@@ -491,6 +491,49 @@ impl VerylWalker for Formatter {
         self.r_brace(&arg.r_brace);
     }
 
+    /// Semantic action for non-terminal 'CaseStatement'
+    fn case_statement(&mut self, arg: &CaseStatement) {
+        self.case(&arg.case);
+        self.space(1);
+        self.expression(&arg.expression);
+        self.space(1);
+        self.token_will_push(&arg.l_brace.l_brace_token);
+        self.newline_push();
+        for (i, x) in arg.case_statement_list.iter().enumerate() {
+            if i != 0 {
+                self.newline();
+            }
+            self.case_item(&x.case_item);
+        }
+        self.newline_pop();
+        self.r_brace(&arg.r_brace);
+    }
+
+    /// Semantic action for non-terminal 'CaseItem'
+    fn case_item(&mut self, arg: &CaseItem) {
+        match &*arg.case_item_group {
+            CaseItemGroup::Expression(x) => self.expression(&x.expression),
+            CaseItemGroup::Defaul(x) => self.defaul(&x.defaul),
+        }
+        self.colon(&arg.colon);
+        self.space(1);
+        match &*arg.case_item_group0 {
+            CaseItemGroup0::Statement(x) => self.statement(&x.statement),
+            CaseItemGroup0::LBraceCaseItemGroup0ListRBrace(x) => {
+                self.token_will_push(&x.l_brace.l_brace_token);
+                self.newline_push();
+                for (i, x) in x.case_item_group0_list.iter().enumerate() {
+                    if i != 0 {
+                        self.newline();
+                    }
+                    self.statement(&x.statement);
+                }
+                self.newline_pop();
+                self.r_brace(&x.r_brace);
+            }
+        }
+    }
+
     /// Semantic action for non-terminal 'VarDeclaration'
     fn var_declaration(&mut self, arg: &VarDeclaration) {
         self.var(&arg.var);

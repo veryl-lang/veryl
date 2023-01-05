@@ -360,6 +360,27 @@ impl VerylWalker for Aligner {
         self.semicolon(&arg.semicolon);
     }
 
+    /// Semantic action for non-terminal 'CaseItem'
+    fn case_item(&mut self, arg: &CaseItem) {
+        self.aligns[align_kind::EXPRESSION].start_item();
+        match &*arg.case_item_group {
+            CaseItemGroup::Expression(x) => self.expression(&x.expression),
+            CaseItemGroup::Defaul(x) => self.defaul(&x.defaul),
+        }
+        self.aligns[align_kind::EXPRESSION].finish_item();
+        self.colon(&arg.colon);
+        match &*arg.case_item_group0 {
+            CaseItemGroup0::Statement(x) => self.statement(&x.statement),
+            CaseItemGroup0::LBraceCaseItemGroup0ListRBrace(x) => {
+                self.l_brace(&x.l_brace);
+                for x in &x.case_item_group0_list {
+                    self.statement(&x.statement);
+                }
+                self.r_brace(&x.r_brace);
+            }
+        }
+    }
+
     /// Semantic action for non-terminal 'VarDeclaration'
     fn var_declaration(&mut self, arg: &VarDeclaration) {
         self.var(&arg.var);

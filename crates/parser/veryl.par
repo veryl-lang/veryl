@@ -56,6 +56,8 @@ AssignTerm            : /\bassign\b/                                            
 AsyncHighTerm         : /\basync_high\b/                                                     : Token;
 AsyncLowTerm          : /\basync_low\b/                                                      : Token;
 BitTerm               : /\bbit\b/                                                            : Token;
+CaseTerm              : /\bcase\b/                                                           : Token;
+DefaultTerm           : /\bdefault\b/                                                        : Token;
 ElseTerm              : /\belse\b/                                                           : Token;
 EnumTerm              : /\benum\b/                                                           : Token;
 F32Term               : /\bf32\b/                                                            : Token;
@@ -143,6 +145,8 @@ AssignToken    : AssignTerm    : Token Comments;
 AsyncHighToken : AsyncHighTerm : Token Comments;
 AsyncLowToken  : AsyncLowTerm  : Token Comments;
 BitToken       : BitTerm       : Token Comments;
+CaseToken      : CaseTerm      : Token Comments;
+DefaultToken   : DefaultTerm   : Token Comments;
 ElseToken      : ElseTerm      : Token Comments;
 EnumToken      : EnumTerm      : Token Comments;
 F32Token       : F32Term       : Token Comments;
@@ -234,6 +238,8 @@ Assign    : AssignToken    : VerylToken;
 AsyncHigh : AsyncHighToken : VerylToken;
 AsyncLow  : AsyncLowToken  : VerylToken;
 Bit       : BitToken       : VerylToken;
+Case      : CaseToken      : VerylToken;
+Defaul    : DefaultToken   : VerylToken; // avoid to conflict with Rust's Default trait
 Else      : ElseToken      : VerylToken;
 Enum      : EnumToken      : VerylToken;
 F32       : F32Token       : VerylToken;
@@ -353,6 +359,7 @@ Statement: AssignmentStatement
          | IfResetStatement
          | ReturnStatement
          | ForStatement
+         | CaseStatement
          ;
 
 AssignmentStatement: HierarchicalIdentifier ( Equ | AssignmentOperator ) Expression Semicolon;
@@ -364,6 +371,10 @@ IfResetStatement: IfReset LBrace { Statement } RBrace { Else If Expression LBrac
 ReturnStatement: Return Expression Semicolon;
 
 ForStatement: For Identifier Colon Type In Expression DotDot Expression [ Step AssignmentOperator Expression ] LBrace { Statement } RBrace;
+
+CaseStatement: Case Expression LBrace { CaseItem } RBrace;
+
+CaseItem: ( Expression | Defaul ) Colon ( Statement | LBrace { Statement } RBrace );
 
 // ----------------------------------------------------------------------------
 // Declaration

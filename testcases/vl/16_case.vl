@@ -1,0 +1,15 @@
+module Module16 {
+    always_comb {
+        case x {
+            0: a = 1;
+            1: a = 1;
+            2: {
+                a = 1;
+                a = 1;
+                a = 1;
+            }
+            y - 1  : a = 1;
+            default: a = 1;
+        }
+    }
+}

@@ -328,6 +328,20 @@ pub trait VerylWalker {
         after!(self, bit, arg);
     }
 
+    /// Semantic action for non-terminal 'Case'
+    fn case(&mut self, arg: &Case) {
+        before!(self, case, arg);
+        self.veryl_token(&arg.case_token);
+        after!(self, case, arg);
+    }
+
+    /// Semantic action for non-terminal 'Defaul'
+    fn defaul(&mut self, arg: &Defaul) {
+        before!(self, defaul, arg);
+        self.veryl_token(&arg.default_token);
+        after!(self, defaul, arg);
+    }
+
     /// Semantic action for non-terminal 'Else'
     fn r#else(&mut self, arg: &Else) {
         before!(self, r#else, arg);
@@ -897,6 +911,7 @@ pub trait VerylWalker {
             Statement::IfResetStatement(x) => self.if_reset_statement(&x.if_reset_statement),
             Statement::ReturnStatement(x) => self.return_statement(&x.return_statement),
             Statement::ForStatement(x) => self.for_statement(&x.for_statement),
+            Statement::CaseStatement(x) => self.case_statement(&x.case_statement),
         };
         after!(self, statement, arg);
     }
@@ -1008,6 +1023,40 @@ pub trait VerylWalker {
         }
         self.r_brace(&arg.r_brace);
         after!(self, for_statement, arg);
+    }
+
+    /// Semantic action for non-terminal 'CaseStatement'
+    fn case_statement(&mut self, arg: &CaseStatement) {
+        before!(self, case_statement, arg);
+        self.case(&arg.case);
+        self.expression(&arg.expression);
+        self.l_brace(&arg.l_brace);
+        for x in &arg.case_statement_list {
+            self.case_item(&x.case_item);
+        }
+        self.r_brace(&arg.r_brace);
+        after!(self, case_statement, arg);
+    }
+
+    /// Semantic action for non-terminal 'CaseItem'
+    fn case_item(&mut self, arg: &CaseItem) {
+        before!(self, case_item, arg);
+        match &*arg.case_item_group {
+            CaseItemGroup::Expression(x) => self.expression(&x.expression),
+            CaseItemGroup::Defaul(x) => self.defaul(&x.defaul),
+        }
+        self.colon(&arg.colon);
+        match &*arg.case_item_group0 {
+            CaseItemGroup0::Statement(x) => self.statement(&x.statement),
+            CaseItemGroup0::LBraceCaseItemGroup0ListRBrace(x) => {
+                self.l_brace(&x.l_brace);
+                for x in &x.case_item_group0_list {
+                    self.statement(&x.statement);
+                }
+                self.r_brace(&x.r_brace);
+            }
+        }
+        after!(self, case_item, arg);
     }
 
     /// Semantic action for non-terminal 'VarDeclaration'
