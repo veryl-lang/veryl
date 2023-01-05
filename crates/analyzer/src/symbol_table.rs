@@ -3,7 +3,7 @@ use crate::symbol::{Symbol, SymbolKind};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
-use veryl_parser::global_table::{PathId, StrId};
+use veryl_parser::resource_table::{PathId, StrId};
 use veryl_parser::veryl_token::Token;
 
 #[derive(Debug, Clone, PartialEq)]

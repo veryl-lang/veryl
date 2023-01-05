@@ -2,8 +2,8 @@ use crate::analyze_error::AnalyzeError;
 use crate::namespace_table;
 use crate::symbol::SymbolKind;
 use crate::symbol_table::{self, Name};
-use veryl_parser::global_table;
 use veryl_parser::miette::Result;
+use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 
@@ -69,8 +69,8 @@ impl<'a> VerylGrammarTrait for CheckFunctionArity<'a> {
 
                 if let Some(arity) = arity {
                     if arity != args {
-                        let name =
-                            global_table::get_str_value(*name.as_slice().last().unwrap()).unwrap();
+                        let name = resource_table::get_str_value(*name.as_slice().last().unwrap())
+                            .unwrap();
                         self.errors.push(AnalyzeError::mismatch_arity(
                             &name,
                             arity,

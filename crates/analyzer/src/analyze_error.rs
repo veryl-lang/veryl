@@ -1,6 +1,6 @@
 use thiserror::Error;
-use veryl_parser::global_table;
 use veryl_parser::miette::{self, Diagnostic, NamedSource, SourceSpan};
+use veryl_parser::resource_table;
 use veryl_parser::veryl_token::VerylToken;
 
 #[derive(Error, Diagnostic, Debug)]
@@ -137,7 +137,7 @@ pub enum AnalyzeError {
 impl AnalyzeError {
     fn named_source(source: &str, token: &VerylToken) -> NamedSource {
         NamedSource::new(
-            global_table::get_path_value(token.token.file_path)
+            resource_table::get_path_value(token.token.file_path)
                 .unwrap()
                 .to_string_lossy(),
             source.to_string(),

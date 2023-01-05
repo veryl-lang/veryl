@@ -1,6 +1,6 @@
 use crate::aligner::{Aligner, Location};
 use veryl_metadata::{ClockType, Metadata, ResetType};
-use veryl_parser::global_table;
+use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::{Token, VerylToken};
 use veryl_parser::veryl_walker::VerylWalker;
@@ -118,7 +118,7 @@ impl Emitter {
     }
 
     fn push_token(&mut self, x: &Token) {
-        let text = global_table::get_str_value(x.text).unwrap();
+        let text = resource_table::get_str_value(x.text).unwrap();
         let text = if text.ends_with('\n') {
             self.consumed_next_newline = true;
             text.trim_end()

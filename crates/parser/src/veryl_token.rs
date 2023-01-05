@@ -1,5 +1,4 @@
-use crate::global_table;
-use crate::global_table::{PathId, StrId, TokenId};
+use crate::resource_table::{self, PathId, StrId, TokenId};
 use crate::veryl_grammar_trait::*;
 use parol_runtime::miette;
 use regex::Regex;
@@ -17,9 +16,9 @@ pub struct Token {
 
 impl<'t> From<&parol_runtime::lexer::Token<'t>> for Token {
     fn from(x: &parol_runtime::lexer::Token<'t>) -> Self {
-        let id = global_table::new_token_id();
-        let text = global_table::insert_str(x.text());
-        let file_path = global_table::insert_path(&x.location.file_name);
+        let id = resource_table::new_token_id();
+        let text = resource_table::insert_str(x.text());
+        let file_path = resource_table::insert_path(&x.location.file_name);
         let source_span: miette::SourceSpan = (&x.location).into();
         Token {
             id,
@@ -54,7 +53,7 @@ pub struct VerylToken {
 impl VerylToken {
     pub fn replace(&self, text: &str) -> Self {
         let length = text.len();
-        let text = global_table::insert_str(text);
+        let text = resource_table::insert_str(text);
         let mut ret = self.clone();
         ret.token.text = text;
         ret.token.length = length;
@@ -62,7 +61,7 @@ impl VerylToken {
     }
 
     pub fn text(&self) -> String {
-        global_table::get_str_value(self.token.text).unwrap()
+        resource_table::get_str_value(self.token.text).unwrap()
     }
 }
 
@@ -99,7 +98,7 @@ macro_rules! token_with_comments {
 
 fn split_comment_token(token: Token) -> Vec<Token> {
     let mut line = token.line;
-    let text = global_table::get_str_value(token.text).unwrap();
+    let text = resource_table::get_str_value(token.text).unwrap();
     let re = Regex::new(r"((?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))").unwrap();
 
     let mut prev_pos = 0;
@@ -112,8 +111,8 @@ fn split_comment_token(token: Token) -> Vec<Token> {
         line += text[prev_pos..pos].matches('\n').count();
         prev_pos = pos;
 
-        let id = global_table::new_token_id();
-        let text = global_table::insert_str(&text[pos..pos + length]);
+        let id = resource_table::new_token_id();
+        let text = resource_table::insert_str(&text[pos..pos + length]);
         let token = Token {
             id,
             text,
@@ -135,9 +134,9 @@ impl From<&StartToken> for VerylToken {
             let mut tokens = split_comment_token(x.comments_term.comments_term);
             comments.append(&mut tokens)
         }
-        let id = global_table::new_token_id();
-        let text = global_table::insert_str("");
-        let file_path = global_table::insert_path(std::path::Path::new(""));
+        let id = resource_table::new_token_id();
+        let text = resource_table::insert_str("");
+        let file_path = resource_table::insert_path(std::path::Path::new(""));
         let token = Token {
             id,
             text,

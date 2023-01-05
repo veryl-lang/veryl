@@ -1,6 +1,6 @@
 pub mod generated;
-pub mod global_table;
 pub mod parser;
+pub mod resource_table;
 pub mod stringifier;
 pub mod veryl_grammar;
 pub mod veryl_grammar_trait;

@@ -5,8 +5,8 @@ use crate::symbol::Direction as SymDirection;
 use crate::symbol::Type as SymType;
 use crate::symbol::{ParameterScope, Symbol, SymbolKind};
 use crate::symbol_table;
-use veryl_parser::global_table;
 use veryl_parser::miette::Result;
+use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::VerylToken;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
@@ -30,7 +30,7 @@ impl<'a> CreateSymbolTable<'a> {
     fn insert_symbol(&mut self, token: &VerylToken, kind: SymbolKind) {
         let symbol = Symbol::new(&token.token, kind, &self.namespace);
         if !symbol_table::insert(&token.token, symbol) {
-            let text = global_table::get_str_value(token.token.text).unwrap();
+            let text = resource_table::get_str_value(token.token.text).unwrap();
             self.errors
                 .push(AnalyzeError::duplicated_identifier(&text, self.text, token));
         }

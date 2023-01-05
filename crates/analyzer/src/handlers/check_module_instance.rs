@@ -2,8 +2,8 @@ use crate::analyze_error::AnalyzeError;
 use crate::namespace_table;
 use crate::symbol::SymbolKind;
 use crate::symbol_table::{self, Name};
-use veryl_parser::global_table;
 use veryl_parser::miette::Result;
+use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 
@@ -53,9 +53,9 @@ impl<'a> VerylGrammarTrait for CheckModuleInstance<'a> {
                     for port in ports {
                         if !connected_ports.contains(&port.name) {
                             let name =
-                                global_table::get_str_value(*name.as_slice().last().unwrap())
+                                resource_table::get_str_value(*name.as_slice().last().unwrap())
                                     .unwrap();
-                            let port = global_table::get_str_value(port.name).unwrap();
+                            let port = resource_table::get_str_value(port.name).unwrap();
                             self.errors.push(AnalyzeError::missing_port(
                                 &name,
                                 &port,
@@ -67,9 +67,9 @@ impl<'a> VerylGrammarTrait for CheckModuleInstance<'a> {
                     for port in &connected_ports {
                         if !ports.iter().any(|x| &x.name == port) {
                             let name =
-                                global_table::get_str_value(*name.as_slice().last().unwrap())
+                                resource_table::get_str_value(*name.as_slice().last().unwrap())
                                     .unwrap();
-                            let port = global_table::get_str_value(*port).unwrap();
+                            let port = resource_table::get_str_value(*port).unwrap();
                             self.errors.push(AnalyzeError::unknown_port(
                                 &name,
                                 &port,
@@ -80,7 +80,7 @@ impl<'a> VerylGrammarTrait for CheckModuleInstance<'a> {
                     }
                 } else {
                     let name =
-                        global_table::get_str_value(*name.as_slice().last().unwrap()).unwrap();
+                        resource_table::get_str_value(*name.as_slice().last().unwrap()).unwrap();
                     self.errors.push(AnalyzeError::mismatch_type(
                         &name,
                         "module",

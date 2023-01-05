@@ -1,5 +1,5 @@
 use std::fmt;
-use veryl_parser::global_table::StrId;
+use veryl_parser::resource_table::StrId;
 
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct Namespace {

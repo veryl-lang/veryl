@@ -1,6 +1,6 @@
 use crate::namespace::Namespace;
 use std::fmt;
-use veryl_parser::global_table::StrId;
+use veryl_parser::resource_table::StrId;
 use veryl_parser::veryl_grammar_trait::{BuiltinType, TypeGroup};
 use veryl_parser::veryl_token::Token;
 
