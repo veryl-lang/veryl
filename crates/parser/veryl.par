@@ -459,9 +459,13 @@ FunctionItem: LetDeclaration
 
 ModuleDeclaration: Module Identifier [ WithParameter ] [ PortDeclaration ] LBrace { ModuleItem } RBrace;
 
-ModuleIfDeclaration: If Expression Colon Identifier LBrace { ModuleItem } RBrace { Else If Expression [ Colon Identifier ] LBrace { ModuleItem } RBrace } [ Else [ Colon Identifier ] LBrace { ModuleItem } RBrace ];
+ModuleIfDeclaration: If Expression ModuleNamedBlock { Else If Expression ModuleOptionalNamedBlock } [ Else ModuleOptionalNamedBlock ];
 
-ModuleForDeclaration: For Identifier In Expression DotDot Expression [ Step AssignmentOperator Expression ] Colon Identifier LBrace { ModuleItem } RBrace;
+ModuleForDeclaration: For Identifier In Expression DotDot Expression [ Step AssignmentOperator Expression ] ModuleNamedBlock;
+
+ModuleNamedBlock: Colon Identifier LBrace { ModuleItem } RBrace;
+
+ModuleOptionalNamedBlock: [ Colon Identifier ] LBrace { ModuleItem } RBrace;
 
 ModuleItem: LetDeclaration
           | InstDeclaration
@@ -474,6 +478,7 @@ ModuleItem: LetDeclaration
           | ModuleForDeclaration
           | EnumDeclaration
           | StructDeclaration
+          | ModuleNamedBlock
           ;
 
 // ----------------------------------------------------------------------------
@@ -482,9 +487,13 @@ ModuleItem: LetDeclaration
 
 InterfaceDeclaration: Interface Identifier [ WithParameter ] LBrace { InterfaceItem } RBrace;
 
-InterfaceIfDeclaration: If Expression Colon Identifier LBrace { InterfaceItem } RBrace { Else If Expression [ Colon Identifier ] LBrace { InterfaceItem } RBrace } [ Else [ Colon Identifier ] LBrace { InterfaceItem } RBrace ];
+InterfaceIfDeclaration: If Expression InterfaceNamedBlock { Else If Expression InterfaceOptionalNamedBlock } [ Else InterfaceOptionalNamedBlock ];
 
-InterfaceForDeclaration: For Identifier In Expression DotDot Expression [ Step AssignmentOperator Expression ] Colon Identifier LBrace { InterfaceItem } RBrace;
+InterfaceForDeclaration: For Identifier In Expression DotDot Expression [ Step AssignmentOperator Expression ] InterfaceNamedBlock;
+
+InterfaceNamedBlock: Colon Identifier LBrace { InterfaceItem } RBrace;
+
+InterfaceOptionalNamedBlock: [ Colon Identifier ] LBrace { InterfaceItem } RBrace;
 
 InterfaceItem: LetDeclaration
              | LocalparamDeclaration
@@ -493,6 +502,7 @@ InterfaceItem: LetDeclaration
              | InterfaceForDeclaration
              | EnumDeclaration
              | StructDeclaration
+             | InterfaceNamedBlock
              ;
 
 // ----------------------------------------------------------------------------

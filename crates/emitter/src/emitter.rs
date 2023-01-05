@@ -20,7 +20,9 @@ pub struct Emitter {
     single_line: bool,
     in_always_ff: bool,
     in_function: bool,
+    in_generate: bool,
     reset_signal: Option<String>,
+    default_block: Option<String>,
 }
 
 impl Default for Emitter {
@@ -39,7 +41,9 @@ impl Default for Emitter {
             single_line: false,
             in_always_ff: false,
             in_function: false,
+            in_generate: false,
             reset_signal: None,
+            default_block: None,
         }
     }
 }
@@ -1150,27 +1154,15 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ModuleIfDeclaration'
     fn module_if_declaration(&mut self, arg: &ModuleIfDeclaration) {
+        self.in_generate = true;
         self.r#if(&arg.r#if);
         self.space(1);
         self.str("(");
         self.expression(&arg.expression);
         self.str(")");
         self.space(1);
-        self.str("begin");
-        self.space(1);
-        self.colon(&arg.colon);
-        self.identifier(&arg.identifier);
-        self.token_will_push(&arg.l_brace.l_brace_token.replace(""));
-        self.newline_push();
-        for (i, x) in arg.module_if_declaration_list.iter().enumerate() {
-            if i != 0 {
-                self.newline();
-            }
-            self.module_item(&x.module_item);
-        }
-        self.newline_pop();
-        self.token(&arg.r_brace.r_brace_token.replace("end"));
-        for x in &arg.module_if_declaration_list0 {
+        self.module_named_block(&arg.module_named_block);
+        for x in &arg.module_if_declaration_list {
             self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
@@ -1180,56 +1172,20 @@ impl VerylWalker for Emitter {
             self.expression(&x.expression);
             self.str(")");
             self.space(1);
-            self.str("begin");
-            if let Some(ref x) = x.module_if_declaration_opt {
-                self.space(1);
-                self.colon(&x.colon);
-                self.identifier(&x.identifier);
-            } else {
-                self.space(1);
-                self.str(":");
-                self.str(&arg.identifier.identifier_token.text());
-            }
-            self.token_will_push(&x.l_brace.l_brace_token.replace(""));
-            self.newline_push();
-            for (i, x) in x.module_if_declaration_list0_list.iter().enumerate() {
-                if i != 0 {
-                    self.newline();
-                }
-                self.module_item(&x.module_item);
-            }
-            self.newline_pop();
-            self.token(&x.r_brace.r_brace_token.replace("end"));
+            self.module_optional_named_block(&x.module_optional_named_block);
         }
-        if let Some(ref x) = arg.module_if_declaration_opt0 {
+        if let Some(ref x) = arg.module_if_declaration_opt {
             self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
-            self.str("begin");
-            if let Some(ref x) = x.module_if_declaration_opt1 {
-                self.space(1);
-                self.colon(&x.colon);
-                self.identifier(&x.identifier);
-            } else {
-                self.space(1);
-                self.str(":");
-                self.str(&arg.identifier.identifier_token.text());
-            }
-            self.token_will_push(&x.l_brace.l_brace_token.replace(""));
-            self.newline_push();
-            for (i, x) in x.module_if_declaration_opt0_list.iter().enumerate() {
-                if i != 0 {
-                    self.newline();
-                }
-                self.module_item(&x.module_item);
-            }
-            self.newline_pop();
-            self.token(&x.r_brace.r_brace_token.replace("end"));
+            self.module_optional_named_block(&x.module_optional_named_block);
         }
+        self.in_generate = false;
     }
 
     /// Semantic action for non-terminal 'ModuleForDeclaration'
     fn module_for_declaration(&mut self, arg: &ModuleForDeclaration) {
+        self.in_generate = true;
         self.r#for(&arg.r#for);
         self.space(1);
         self.str("(");
@@ -1261,13 +1217,51 @@ impl VerylWalker for Emitter {
         }
         self.str(")");
         self.space(1);
+        self.module_named_block(&arg.module_named_block);
+        self.in_generate = false;
+    }
+
+    /// Semantic action for non-terminal 'ModuleNamedBlock'
+    fn module_named_block(&mut self, arg: &ModuleNamedBlock) {
+        if !self.in_generate {
+            self.str("if");
+            self.space(1);
+            self.str("(1)");
+            self.space(1);
+        }
         self.str("begin");
         self.space(1);
         self.colon(&arg.colon);
-        self.identifier(&arg.identifier0);
+        self.identifier(&arg.identifier);
+        self.default_block = Some(arg.identifier.identifier_token.text());
         self.token_will_push(&arg.l_brace.l_brace_token.replace(""));
         self.newline_push();
-        for (i, x) in arg.module_for_declaration_list.iter().enumerate() {
+        for (i, x) in arg.module_named_block_list.iter().enumerate() {
+            if i != 0 {
+                self.newline();
+            }
+            self.module_item(&x.module_item);
+        }
+        self.newline_pop();
+        self.token(&arg.r_brace.r_brace_token.replace("end"));
+    }
+
+    /// Semantic action for non-terminal 'ModuleOptionalNamedBlock'
+    fn module_optional_named_block(&mut self, arg: &ModuleOptionalNamedBlock) {
+        self.str("begin");
+        if let Some(ref x) = arg.module_optional_named_block_opt {
+            self.space(1);
+            self.colon(&x.colon);
+            self.identifier(&x.identifier);
+        } else {
+            self.space(1);
+            self.str(":");
+            let name = self.default_block.clone().unwrap();
+            self.str(&name);
+        }
+        self.token_will_push(&arg.l_brace.l_brace_token.replace(""));
+        self.newline_push();
+        for (i, x) in arg.module_optional_named_block_list.iter().enumerate() {
             if i != 0 {
                 self.newline();
             }
@@ -1301,27 +1295,15 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'InterfaceIfDeclaration'
     fn interface_if_declaration(&mut self, arg: &InterfaceIfDeclaration) {
+        self.in_generate = true;
         self.r#if(&arg.r#if);
         self.space(1);
         self.str("(");
         self.expression(&arg.expression);
         self.str(")");
         self.space(1);
-        self.str("begin");
-        self.space(1);
-        self.colon(&arg.colon);
-        self.identifier(&arg.identifier);
-        self.token_will_push(&arg.l_brace.l_brace_token.replace(""));
-        self.newline_push();
-        for (i, x) in arg.interface_if_declaration_list.iter().enumerate() {
-            if i != 0 {
-                self.newline();
-            }
-            self.interface_item(&x.interface_item);
-        }
-        self.newline_pop();
-        self.token(&arg.r_brace.r_brace_token.replace("end"));
-        for x in &arg.interface_if_declaration_list0 {
+        self.interface_named_block(&arg.interface_named_block);
+        for x in &arg.interface_if_declaration_list {
             self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
@@ -1331,56 +1313,20 @@ impl VerylWalker for Emitter {
             self.expression(&x.expression);
             self.str(")");
             self.space(1);
-            self.str("begin");
-            if let Some(ref x) = x.interface_if_declaration_opt {
-                self.space(1);
-                self.colon(&x.colon);
-                self.identifier(&x.identifier);
-            } else {
-                self.space(1);
-                self.str(":");
-                self.str(&arg.identifier.identifier_token.text());
-            }
-            self.token_will_push(&x.l_brace.l_brace_token.replace(""));
-            self.newline_push();
-            for (i, x) in x.interface_if_declaration_list0_list.iter().enumerate() {
-                if i != 0 {
-                    self.newline();
-                }
-                self.interface_item(&x.interface_item);
-            }
-            self.newline_pop();
-            self.token(&x.r_brace.r_brace_token.replace("end"));
+            self.interface_optional_named_block(&x.interface_optional_named_block);
         }
-        if let Some(ref x) = arg.interface_if_declaration_opt0 {
+        if let Some(ref x) = arg.interface_if_declaration_opt {
             self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
-            self.str("begin");
-            if let Some(ref x) = x.interface_if_declaration_opt1 {
-                self.space(1);
-                self.colon(&x.colon);
-                self.identifier(&x.identifier);
-            } else {
-                self.space(1);
-                self.str(":");
-                self.str(&arg.identifier.identifier_token.text());
-            }
-            self.token_will_push(&x.l_brace.l_brace_token.replace(""));
-            self.newline_push();
-            for (i, x) in x.interface_if_declaration_opt0_list.iter().enumerate() {
-                if i != 0 {
-                    self.newline();
-                }
-                self.interface_item(&x.interface_item);
-            }
-            self.newline_pop();
-            self.token(&x.r_brace.r_brace_token.replace("end"));
+            self.interface_optional_named_block(&x.interface_optional_named_block);
         }
+        self.in_generate = false;
     }
 
     /// Semantic action for non-terminal 'InterfaceForDeclaration'
     fn interface_for_declaration(&mut self, arg: &InterfaceForDeclaration) {
+        self.in_generate = true;
         self.r#for(&arg.r#for);
         self.space(1);
         self.str("(");
@@ -1412,13 +1358,51 @@ impl VerylWalker for Emitter {
         }
         self.str(")");
         self.space(1);
+        self.interface_named_block(&arg.interface_named_block);
+        self.in_generate = false;
+    }
+
+    /// Semantic action for non-terminal 'InterfaceNamedBlock'
+    fn interface_named_block(&mut self, arg: &InterfaceNamedBlock) {
+        if !self.in_generate {
+            self.str("if");
+            self.space(1);
+            self.str("(1)");
+            self.space(1);
+        }
         self.str("begin");
         self.space(1);
         self.colon(&arg.colon);
-        self.identifier(&arg.identifier0);
+        self.identifier(&arg.identifier);
+        self.default_block = Some(arg.identifier.identifier_token.text());
         self.token_will_push(&arg.l_brace.l_brace_token.replace(""));
         self.newline_push();
-        for (i, x) in arg.interface_for_declaration_list.iter().enumerate() {
+        for (i, x) in arg.interface_named_block_list.iter().enumerate() {
+            if i != 0 {
+                self.newline();
+            }
+            self.interface_item(&x.interface_item);
+        }
+        self.newline_pop();
+        self.token(&arg.r_brace.r_brace_token.replace("end"));
+    }
+
+    /// Semantic action for non-terminal 'InterfaceOptionalNamedBlock'
+    fn interface_optional_named_block(&mut self, arg: &InterfaceOptionalNamedBlock) {
+        self.str("begin");
+        if let Some(ref x) = arg.interface_optional_named_block_opt {
+            self.space(1);
+            self.colon(&x.colon);
+            self.identifier(&x.identifier);
+        } else {
+            self.space(1);
+            self.str(":");
+            let name = self.default_block.clone().unwrap();
+            self.str(&name);
+        }
+        self.token_will_push(&arg.l_brace.l_brace_token.replace(""));
+        self.newline_push();
+        for (i, x) in arg.interface_optional_named_block_list.iter().enumerate() {
             if i != 0 {
                 self.newline();
             }

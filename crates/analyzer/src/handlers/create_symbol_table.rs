@@ -6,7 +6,7 @@ use crate::symbol::Type as SymType;
 use crate::symbol::{ParameterScope, Symbol, SymbolKind};
 use crate::symbol_table;
 use veryl_parser::miette::Result;
-use veryl_parser::resource_table;
+use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::VerylToken;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
@@ -17,6 +17,7 @@ pub struct CreateSymbolTable<'a> {
     text: &'a str,
     point: HandlerPoint,
     namespace: Namespace,
+    default_block: Option<StrId>,
 }
 
 impl<'a> CreateSymbolTable<'a> {
@@ -177,12 +178,13 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         Ok(())
     }
 
-    fn module_if_declaration(&mut self, arg: &ModuleIfDeclaration) -> Result<()> {
+    fn module_named_block(&mut self, arg: &ModuleNamedBlock) -> Result<()> {
         match self.point {
             HandlerPoint::Before => {
                 self.insert_symbol(&arg.identifier.identifier_token, SymbolKind::Block);
 
                 let name = arg.identifier.identifier_token.token.text;
+                self.default_block = Some(name);
                 self.namespace.push(name)
             }
             HandlerPoint::After => self.namespace.pop(),
@@ -190,12 +192,16 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         Ok(())
     }
 
-    fn module_for_declaration(&mut self, arg: &ModuleForDeclaration) -> Result<()> {
+    fn module_optional_named_block(&mut self, arg: &ModuleOptionalNamedBlock) -> Result<()> {
         match self.point {
             HandlerPoint::Before => {
-                self.insert_symbol(&arg.identifier0.identifier_token, SymbolKind::Block);
+                let name = if let Some(ref x) = arg.module_optional_named_block_opt {
+                    self.insert_symbol(&x.identifier.identifier_token, SymbolKind::Block);
+                    x.identifier.identifier_token.token.text
+                } else {
+                    self.default_block.unwrap()
+                };
 
-                let name = arg.identifier0.identifier_token.token.text;
                 self.namespace.push(name)
             }
             HandlerPoint::After => self.namespace.pop(),
@@ -229,12 +235,13 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         Ok(())
     }
 
-    fn interface_if_declaration(&mut self, arg: &InterfaceIfDeclaration) -> Result<()> {
+    fn interface_named_block(&mut self, arg: &InterfaceNamedBlock) -> Result<()> {
         match self.point {
             HandlerPoint::Before => {
                 self.insert_symbol(&arg.identifier.identifier_token, SymbolKind::Block);
 
                 let name = arg.identifier.identifier_token.token.text;
+                self.default_block = Some(name);
                 self.namespace.push(name)
             }
             HandlerPoint::After => self.namespace.pop(),
@@ -242,12 +249,16 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         Ok(())
     }
 
-    fn interface_for_declaration(&mut self, arg: &InterfaceForDeclaration) -> Result<()> {
+    fn interface_optional_named_block(&mut self, arg: &InterfaceOptionalNamedBlock) -> Result<()> {
         match self.point {
             HandlerPoint::Before => {
-                self.insert_symbol(&arg.identifier0.identifier_token, SymbolKind::Block);
+                let name = if let Some(ref x) = arg.interface_optional_named_block_opt {
+                    self.insert_symbol(&x.identifier.identifier_token, SymbolKind::Block);
+                    x.identifier.identifier_token.token.text
+                } else {
+                    self.default_block.unwrap()
+                };
 
-                let name = arg.identifier0.identifier_token.token.text;
                 self.namespace.push(name)
             }
             HandlerPoint::After => self.namespace.pop(),

@@ -970,20 +970,8 @@ impl VerylWalker for Formatter {
         self.space(1);
         self.expression(&arg.expression);
         self.space(1);
-        self.colon(&arg.colon);
-        self.identifier(&arg.identifier);
-        self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token);
-        self.newline_push();
-        for (i, x) in arg.module_if_declaration_list.iter().enumerate() {
-            if i != 0 {
-                self.newline();
-            }
-            self.module_item(&x.module_item);
-        }
-        self.newline_pop();
-        self.r_brace(&arg.r_brace);
-        for x in &arg.module_if_declaration_list0 {
+        self.module_named_block(&arg.module_named_block);
+        for x in &arg.module_if_declaration_list {
             self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
@@ -991,41 +979,13 @@ impl VerylWalker for Formatter {
             self.space(1);
             self.expression(&x.expression);
             self.space(1);
-            if let Some(ref x) = x.module_if_declaration_opt {
-                self.colon(&x.colon);
-                self.identifier(&x.identifier);
-                self.space(1);
-            }
-            self.token_will_push(&x.l_brace.l_brace_token);
-            self.newline_push();
-            for (i, x) in x.module_if_declaration_list0_list.iter().enumerate() {
-                if i != 0 {
-                    self.newline();
-                }
-                self.module_item(&x.module_item);
-            }
-            self.newline_pop();
-            self.r_brace(&x.r_brace);
+            self.module_optional_named_block(&x.module_optional_named_block);
         }
-        if let Some(ref x) = arg.module_if_declaration_opt0 {
+        if let Some(ref x) = arg.module_if_declaration_opt {
             self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
-            if let Some(ref x) = x.module_if_declaration_opt1 {
-                self.colon(&x.colon);
-                self.identifier(&x.identifier);
-                self.space(1);
-            }
-            self.token_will_push(&x.l_brace.l_brace_token);
-            self.newline_push();
-            for (i, x) in x.module_if_declaration_opt0_list.iter().enumerate() {
-                if i != 0 {
-                    self.newline();
-                }
-                self.module_item(&x.module_item);
-            }
-            self.newline_pop();
-            self.r_brace(&x.r_brace);
+            self.module_optional_named_block(&x.module_optional_named_block);
         }
     }
 
@@ -1049,12 +1009,36 @@ impl VerylWalker for Formatter {
             self.expression(&x.expression);
             self.space(1);
         }
+        self.module_named_block(&arg.module_named_block);
+    }
+
+    /// Semantic action for non-terminal 'ModuleNamedBlock'
+    fn module_named_block(&mut self, arg: &ModuleNamedBlock) {
         self.colon(&arg.colon);
-        self.identifier(&arg.identifier0);
+        self.identifier(&arg.identifier);
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
-        for (i, x) in arg.module_for_declaration_list.iter().enumerate() {
+        for (i, x) in arg.module_named_block_list.iter().enumerate() {
+            if i != 0 {
+                self.newline();
+            }
+            self.module_item(&x.module_item);
+        }
+        self.newline_pop();
+        self.r_brace(&arg.r_brace);
+    }
+
+    /// Semantic action for non-terminal 'ModuleOptionalNamedBlock'
+    fn module_optional_named_block(&mut self, arg: &ModuleOptionalNamedBlock) {
+        if let Some(ref x) = arg.module_optional_named_block_opt {
+            self.colon(&x.colon);
+            self.identifier(&x.identifier);
+            self.space(1);
+        }
+        self.token_will_push(&arg.l_brace.l_brace_token);
+        self.newline_push();
+        for (i, x) in arg.module_optional_named_block_list.iter().enumerate() {
             if i != 0 {
                 self.newline();
             }
@@ -1092,20 +1076,8 @@ impl VerylWalker for Formatter {
         self.space(1);
         self.expression(&arg.expression);
         self.space(1);
-        self.colon(&arg.colon);
-        self.identifier(&arg.identifier);
-        self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token);
-        self.newline_push();
-        for (i, x) in arg.interface_if_declaration_list.iter().enumerate() {
-            if i != 0 {
-                self.newline();
-            }
-            self.interface_item(&x.interface_item);
-        }
-        self.newline_pop();
-        self.r_brace(&arg.r_brace);
-        for x in &arg.interface_if_declaration_list0 {
+        self.interface_named_block(&arg.interface_named_block);
+        for x in &arg.interface_if_declaration_list {
             self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
@@ -1113,41 +1085,13 @@ impl VerylWalker for Formatter {
             self.space(1);
             self.expression(&x.expression);
             self.space(1);
-            if let Some(ref x) = x.interface_if_declaration_opt {
-                self.colon(&x.colon);
-                self.identifier(&x.identifier);
-                self.space(1);
-            }
-            self.token_will_push(&x.l_brace.l_brace_token);
-            self.newline_push();
-            for (i, x) in x.interface_if_declaration_list0_list.iter().enumerate() {
-                if i != 0 {
-                    self.newline();
-                }
-                self.interface_item(&x.interface_item);
-            }
-            self.newline_pop();
-            self.r_brace(&x.r_brace);
+            self.interface_optional_named_block(&x.interface_optional_named_block);
         }
-        if let Some(ref x) = arg.interface_if_declaration_opt0 {
+        if let Some(ref x) = arg.interface_if_declaration_opt {
             self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
-            if let Some(ref x) = x.interface_if_declaration_opt1 {
-                self.colon(&x.colon);
-                self.identifier(&x.identifier);
-                self.space(1);
-            }
-            self.token_will_push(&x.l_brace.l_brace_token);
-            self.newline_push();
-            for (i, x) in x.interface_if_declaration_opt0_list.iter().enumerate() {
-                if i != 0 {
-                    self.newline();
-                }
-                self.interface_item(&x.interface_item);
-            }
-            self.newline_pop();
-            self.r_brace(&x.r_brace);
+            self.interface_optional_named_block(&x.interface_optional_named_block);
         }
     }
 
@@ -1171,12 +1115,36 @@ impl VerylWalker for Formatter {
             self.expression(&x.expression);
             self.space(1);
         }
+        self.interface_named_block(&arg.interface_named_block);
+    }
+
+    /// Semantic action for non-terminal 'InterfaceNamedBlock'
+    fn interface_named_block(&mut self, arg: &InterfaceNamedBlock) {
         self.colon(&arg.colon);
-        self.identifier(&arg.identifier0);
+        self.identifier(&arg.identifier);
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
-        for (i, x) in arg.interface_for_declaration_list.iter().enumerate() {
+        for (i, x) in arg.interface_named_block_list.iter().enumerate() {
+            if i != 0 {
+                self.newline();
+            }
+            self.interface_item(&x.interface_item);
+        }
+        self.newline_pop();
+        self.r_brace(&arg.r_brace);
+    }
+
+    /// Semantic action for non-terminal 'InterfaceOptionalNamedBlock'
+    fn interface_optional_named_block(&mut self, arg: &InterfaceOptionalNamedBlock) {
+        if let Some(ref x) = arg.interface_optional_named_block_opt {
+            self.colon(&x.colon);
+            self.identifier(&x.identifier);
+            self.space(1);
+        }
+        self.token_will_push(&arg.l_brace.l_brace_token);
+        self.newline_push();
+        for (i, x) in arg.interface_optional_named_block_list.iter().enumerate() {
             if i != 0 {
                 self.newline();
             }

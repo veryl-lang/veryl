@@ -1443,38 +1443,16 @@ pub trait VerylWalker {
         before!(self, module_if_declaration, arg);
         self.r#if(&arg.r#if);
         self.expression(&arg.expression);
-        self.colon(&arg.colon);
-        self.identifier(&arg.identifier);
-        self.l_brace(&arg.l_brace);
+        self.module_named_block(&arg.module_named_block);
         for x in &arg.module_if_declaration_list {
-            self.module_item(&x.module_item);
-        }
-        self.r_brace(&arg.r_brace);
-        for x in &arg.module_if_declaration_list0 {
             self.r#else(&x.r#else);
             self.r#if(&x.r#if);
             self.expression(&x.expression);
-            if let Some(ref x) = x.module_if_declaration_opt {
-                self.colon(&x.colon);
-                self.identifier(&x.identifier);
-            }
-            self.l_brace(&x.l_brace);
-            for x in &x.module_if_declaration_list0_list {
-                self.module_item(&x.module_item);
-            }
-            self.r_brace(&x.r_brace);
+            self.module_optional_named_block(&x.module_optional_named_block);
         }
-        if let Some(ref x) = arg.module_if_declaration_opt0 {
+        if let Some(ref x) = arg.module_if_declaration_opt {
             self.r#else(&x.r#else);
-            if let Some(ref x) = x.module_if_declaration_opt1 {
-                self.colon(&x.colon);
-                self.identifier(&x.identifier);
-            }
-            self.l_brace(&x.l_brace);
-            for x in &x.module_if_declaration_opt0_list {
-                self.module_item(&x.module_item);
-            }
-            self.r_brace(&x.r_brace);
+            self.module_optional_named_block(&x.module_optional_named_block);
         }
         after!(self, module_if_declaration, arg);
     }
@@ -1493,14 +1471,36 @@ pub trait VerylWalker {
             self.assignment_operator(&x.assignment_operator);
             self.expression(&x.expression);
         }
+        self.module_named_block(&arg.module_named_block);
+        after!(self, module_for_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'ModuleNamedBlock'
+    fn module_named_block(&mut self, arg: &ModuleNamedBlock) {
+        before!(self, module_named_block, arg);
         self.colon(&arg.colon);
-        self.identifier(&arg.identifier0);
+        self.identifier(&arg.identifier);
         self.l_brace(&arg.l_brace);
-        for x in &arg.module_for_declaration_list {
+        for x in &arg.module_named_block_list {
             self.module_item(&x.module_item);
         }
         self.r_brace(&arg.r_brace);
-        after!(self, module_for_declaration, arg);
+        after!(self, module_named_block, arg);
+    }
+
+    /// Semantic action for non-terminal 'ModuleOptionalNamedBlock'
+    fn module_optional_named_block(&mut self, arg: &ModuleOptionalNamedBlock) {
+        before!(self, module_optional_named_block, arg);
+        if let Some(ref x) = arg.module_optional_named_block_opt {
+            self.colon(&x.colon);
+            self.identifier(&x.identifier);
+        }
+        self.l_brace(&arg.l_brace);
+        for x in &arg.module_optional_named_block_list {
+            self.module_item(&x.module_item);
+        }
+        self.r_brace(&arg.r_brace);
+        after!(self, module_optional_named_block, arg);
     }
 
     /// Semantic action for non-terminal 'ModuleItem'
@@ -1530,6 +1530,7 @@ pub trait VerylWalker {
             }
             ModuleItem::EnumDeclaration(x) => self.enum_declaration(&x.enum_declaration),
             ModuleItem::StructDeclaration(x) => self.struct_declaration(&x.struct_declaration),
+            ModuleItem::ModuleNamedBlock(x) => self.module_named_block(&x.module_named_block),
         };
         after!(self, module_item, arg);
     }
@@ -1555,38 +1556,16 @@ pub trait VerylWalker {
         before!(self, interface_if_declaration, arg);
         self.r#if(&arg.r#if);
         self.expression(&arg.expression);
-        self.colon(&arg.colon);
-        self.identifier(&arg.identifier);
-        self.l_brace(&arg.l_brace);
+        self.interface_named_block(&arg.interface_named_block);
         for x in &arg.interface_if_declaration_list {
-            self.interface_item(&x.interface_item);
-        }
-        self.r_brace(&arg.r_brace);
-        for x in &arg.interface_if_declaration_list0 {
             self.r#else(&x.r#else);
             self.r#if(&x.r#if);
             self.expression(&x.expression);
-            if let Some(ref x) = x.interface_if_declaration_opt {
-                self.colon(&x.colon);
-                self.identifier(&x.identifier);
-            }
-            self.l_brace(&x.l_brace);
-            for x in &x.interface_if_declaration_list0_list {
-                self.interface_item(&x.interface_item);
-            }
-            self.r_brace(&x.r_brace);
+            self.interface_optional_named_block(&x.interface_optional_named_block);
         }
-        if let Some(ref x) = arg.interface_if_declaration_opt0 {
+        if let Some(ref x) = arg.interface_if_declaration_opt {
             self.r#else(&x.r#else);
-            if let Some(ref x) = x.interface_if_declaration_opt1 {
-                self.colon(&x.colon);
-                self.identifier(&x.identifier);
-            }
-            self.l_brace(&x.l_brace);
-            for x in &x.interface_if_declaration_opt0_list {
-                self.interface_item(&x.interface_item);
-            }
-            self.r_brace(&x.r_brace);
+            self.interface_optional_named_block(&x.interface_optional_named_block);
         }
         after!(self, interface_if_declaration, arg);
     }
@@ -1605,14 +1584,36 @@ pub trait VerylWalker {
             self.assignment_operator(&x.assignment_operator);
             self.expression(&x.expression);
         }
+        self.interface_named_block(&arg.interface_named_block);
+        after!(self, interface_for_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'InterfaceNamedBlock'
+    fn interface_named_block(&mut self, arg: &InterfaceNamedBlock) {
+        before!(self, interface_named_block, arg);
         self.colon(&arg.colon);
-        self.identifier(&arg.identifier0);
+        self.identifier(&arg.identifier);
         self.l_brace(&arg.l_brace);
-        for x in &arg.interface_for_declaration_list {
+        for x in &arg.interface_named_block_list {
             self.interface_item(&x.interface_item);
         }
         self.r_brace(&arg.r_brace);
-        after!(self, interface_for_declaration, arg);
+        after!(self, interface_named_block, arg);
+    }
+
+    /// Semantic action for non-terminal 'InterfaceOptionalNamedBlock'
+    fn interface_optional_named_block(&mut self, arg: &InterfaceOptionalNamedBlock) {
+        before!(self, interface_optional_named_block, arg);
+        if let Some(ref x) = arg.interface_optional_named_block_opt {
+            self.colon(&x.colon);
+            self.identifier(&x.identifier);
+        }
+        self.l_brace(&arg.l_brace);
+        for x in &arg.interface_optional_named_block_list {
+            self.interface_item(&x.interface_item);
+        }
+        self.r_brace(&arg.r_brace);
+        after!(self, interface_optional_named_block, arg);
     }
 
     /// Semantic action for non-terminal 'InterfaceItem'
@@ -1634,6 +1635,9 @@ pub trait VerylWalker {
             }
             InterfaceItem::EnumDeclaration(x) => self.enum_declaration(&x.enum_declaration),
             InterfaceItem::StructDeclaration(x) => self.struct_declaration(&x.struct_declaration),
+            InterfaceItem::InterfaceNamedBlock(x) => {
+                self.interface_named_block(&x.interface_named_block)
+            }
         };
         after!(self, interface_item, arg);
     }

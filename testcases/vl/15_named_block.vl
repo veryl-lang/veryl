@@ -1,0 +1,11 @@
+module Module15 {
+    let a: logic ;
+
+    :label {
+        let a: logic ;
+    }
+
+    :label1 {
+        let a: logic ;
+    }
+}
