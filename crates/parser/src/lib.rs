@@ -14,3 +14,5 @@ pub use stringifier::Stringifier;
 mod derive_builder {
     pub use parol_runtime::derive_builder::*;
 }
+#[cfg(test)]
+mod tests;

@@ -771,13 +771,13 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'Expression11'
     fn expression11(&mut self, arg: &Expression11) {
         before!(self, expression11, arg);
-        if let Some(ref x) = arg.expression11_opt {
-            match &*x.expression11_opt_group {
-                Expression11OptGroup::UnaryOperator(x) => self.unary_operator(&x.unary_operator),
-                Expression11OptGroup::Operator03(x) => self.operator03(&x.operator03),
-                Expression11OptGroup::Operator04(x) => self.operator04(&x.operator04),
-                Expression11OptGroup::Operator05(x) => self.operator05(&x.operator05),
-                Expression11OptGroup::Operator09(x) => self.operator09(&x.operator09),
+        for x in &arg.expression11_list {
+            match &*x.expression11_list_group {
+                Expression11ListGroup::UnaryOperator(x) => self.unary_operator(&x.unary_operator),
+                Expression11ListGroup::Operator03(x) => self.operator03(&x.operator03),
+                Expression11ListGroup::Operator04(x) => self.operator04(&x.operator04),
+                Expression11ListGroup::Operator05(x) => self.operator05(&x.operator05),
+                Expression11ListGroup::Operator09(x) => self.operator09(&x.operator09),
             }
         }
         self.factor(&arg.factor);

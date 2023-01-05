@@ -1668,60 +1668,60 @@ pub struct ScopedOrHierIdentifierGroupScopedOrHierIdentifierGroupList0ScopedOrHi
 ///
 /// Type derived for production 294
 ///
-/// Expression11OptGroup: UnaryOperator;
+/// Expression11ListGroup: UnaryOperator;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct Expression11OptGroupUnaryOperator {
+pub struct Expression11ListGroupUnaryOperator {
     pub unary_operator: Box<UnaryOperator>,
 }
 
 ///
 /// Type derived for production 295
 ///
-/// Expression11OptGroup: Operator09;
+/// Expression11ListGroup: Operator09;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct Expression11OptGroupOperator09 {
+pub struct Expression11ListGroupOperator09 {
     pub operator09: Box<Operator09>,
 }
 
 ///
 /// Type derived for production 296
 ///
-/// Expression11OptGroup: Operator05;
+/// Expression11ListGroup: Operator05;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct Expression11OptGroupOperator05 {
+pub struct Expression11ListGroupOperator05 {
     pub operator05: Box<Operator05>,
 }
 
 ///
 /// Type derived for production 297
 ///
-/// Expression11OptGroup: Operator03;
+/// Expression11ListGroup: Operator03;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct Expression11OptGroupOperator03 {
+pub struct Expression11ListGroupOperator03 {
     pub operator03: Box<Operator03>,
 }
 
 ///
 /// Type derived for production 298
 ///
-/// Expression11OptGroup: Operator04;
+/// Expression11ListGroup: Operator04;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct Expression11OptGroupOperator04 {
+pub struct Expression11ListGroupOperator04 {
     pub operator04: Box<Operator04>,
 }
 
@@ -3613,31 +3613,31 @@ pub struct Expression10List {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct Expression11 {
-    pub expression11_opt: Option<Box<Expression11Opt>>,
+    pub expression11_list: Vec<Expression11List>,
     pub factor: Box<Factor>,
 }
 
 ///
-/// Type derived for non-terminal Expression11Opt
+/// Type derived for non-terminal Expression11List
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct Expression11Opt {
-    pub expression11_opt_group: Box<Expression11OptGroup>,
+pub struct Expression11List {
+    pub expression11_list_group: Box<Expression11ListGroup>,
 }
 
 ///
-/// Type derived for non-terminal Expression11OptGroup
+/// Type derived for non-terminal Expression11ListGroup
 ///
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-pub enum Expression11OptGroup {
-    UnaryOperator(Expression11OptGroupUnaryOperator),
-    Operator09(Expression11OptGroupOperator09),
-    Operator05(Expression11OptGroupOperator05),
-    Operator03(Expression11OptGroupOperator03),
-    Operator04(Expression11OptGroupOperator04),
+pub enum Expression11ListGroup {
+    UnaryOperator(Expression11ListGroupUnaryOperator),
+    Operator09(Expression11ListGroupOperator09),
+    Operator05(Expression11ListGroupOperator05),
+    Operator03(Expression11ListGroupOperator03),
+    Operator04(Expression11ListGroupOperator04),
 }
 
 ///
@@ -6974,8 +6974,8 @@ pub enum ASTType {
     Expression10(Expression10),
     Expression10List(Vec<Expression10List>),
     Expression11(Expression11),
-    Expression11Opt(Option<Box<Expression11Opt>>),
-    Expression11OptGroup(Expression11OptGroup),
+    Expression11List(Vec<Expression11List>),
+    Expression11ListGroup(Expression11ListGroup),
     ExpressionList(Vec<ExpressionList>),
     F32(F32),
     F32Term(F32Term),
@@ -14658,21 +14658,22 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 292:
     ///
-    /// Expression11: Expression11Opt /* Option */ Factor;
+    /// Expression11: Expression11List /* Vec */ Factor;
     ///
     #[parol_runtime::function_name::named]
     fn expression11(
         &mut self,
-        _expression11_opt: &ParseTreeStackEntry<'t>,
+        _expression11_list: &ParseTreeStackEntry<'t>,
         _factor: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let factor = pop_item!(self, factor, Factor, context);
-        let expression11_opt = pop_item!(self, expression11_opt, Expression11Opt, context);
+        let expression11_list =
+            pop_and_reverse_item!(self, expression11_list, Expression11List, context);
         let expression11_built = Expression11Builder::default()
-            .expression11_opt(expression11_opt)
+            .expression11_list(expression11_list)
             .factor(Box::new(factor))
             .build()
             .into_diagnostic()?;
@@ -14684,35 +14685,40 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 293:
     ///
-    /// Expression11Opt /* Option<T>::Some */: Expression11OptGroup;
+    /// Expression11List /* Vec<T>::Push */: Expression11ListGroup Expression11List;
     ///
     #[parol_runtime::function_name::named]
-    fn expression11_opt_0(
+    fn expression11_list_0(
         &mut self,
-        _expression11_opt_group: &ParseTreeStackEntry<'t>,
+        _expression11_list_group: &ParseTreeStackEntry<'t>,
+        _expression11_list: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let expression11_opt_group =
-            pop_item!(self, expression11_opt_group, Expression11OptGroup, context);
-        let expression11_opt_0_built = Expression11OptBuilder::default()
-            .expression11_opt_group(Box::new(expression11_opt_group))
+        let mut expression11_list = pop_item!(self, expression11_list, Expression11List, context);
+        let expression11_list_group = pop_item!(
+            self,
+            expression11_list_group,
+            Expression11ListGroup,
+            context
+        );
+        let expression11_list_0_built = Expression11ListBuilder::default()
+            .expression11_list_group(Box::new(expression11_list_group))
             .build()
             .into_diagnostic()?;
-        self.push(
-            ASTType::Expression11Opt(Some(Box::new(expression11_opt_0_built))),
-            context,
-        );
+        // Add an element to the vector
+        expression11_list.push(expression11_list_0_built);
+        self.push(ASTType::Expression11List(expression11_list), context);
         Ok(())
     }
 
     /// Semantic action for production 294:
     ///
-    /// Expression11OptGroup: UnaryOperator;
+    /// Expression11ListGroup: UnaryOperator;
     ///
     #[parol_runtime::function_name::named]
-    fn expression11_opt_group_0(
+    fn expression11_list_group_0(
         &mut self,
         _unary_operator: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
@@ -14720,14 +14726,14 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let unary_operator = pop_item!(self, unary_operator, UnaryOperator, context);
-        let expression11_opt_group_0_built = Expression11OptGroupUnaryOperatorBuilder::default()
+        let expression11_list_group_0_built = Expression11ListGroupUnaryOperatorBuilder::default()
             .unary_operator(Box::new(unary_operator))
             .build()
             .into_diagnostic()?;
-        let expression11_opt_group_0_built =
-            Expression11OptGroup::UnaryOperator(expression11_opt_group_0_built);
+        let expression11_list_group_0_built =
+            Expression11ListGroup::UnaryOperator(expression11_list_group_0_built);
         self.push(
-            ASTType::Expression11OptGroup(expression11_opt_group_0_built),
+            ASTType::Expression11ListGroup(expression11_list_group_0_built),
             context,
         );
         Ok(())
@@ -14735,10 +14741,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 295:
     ///
-    /// Expression11OptGroup: Operator09;
+    /// Expression11ListGroup: Operator09;
     ///
     #[parol_runtime::function_name::named]
-    fn expression11_opt_group_1(
+    fn expression11_list_group_1(
         &mut self,
         _operator09: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
@@ -14746,14 +14752,14 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator09 = pop_item!(self, operator09, Operator09, context);
-        let expression11_opt_group_1_built = Expression11OptGroupOperator09Builder::default()
+        let expression11_list_group_1_built = Expression11ListGroupOperator09Builder::default()
             .operator09(Box::new(operator09))
             .build()
             .into_diagnostic()?;
-        let expression11_opt_group_1_built =
-            Expression11OptGroup::Operator09(expression11_opt_group_1_built);
+        let expression11_list_group_1_built =
+            Expression11ListGroup::Operator09(expression11_list_group_1_built);
         self.push(
-            ASTType::Expression11OptGroup(expression11_opt_group_1_built),
+            ASTType::Expression11ListGroup(expression11_list_group_1_built),
             context,
         );
         Ok(())
@@ -14761,10 +14767,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 296:
     ///
-    /// Expression11OptGroup: Operator05;
+    /// Expression11ListGroup: Operator05;
     ///
     #[parol_runtime::function_name::named]
-    fn expression11_opt_group_2(
+    fn expression11_list_group_2(
         &mut self,
         _operator05: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
@@ -14772,14 +14778,14 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator05 = pop_item!(self, operator05, Operator05, context);
-        let expression11_opt_group_2_built = Expression11OptGroupOperator05Builder::default()
+        let expression11_list_group_2_built = Expression11ListGroupOperator05Builder::default()
             .operator05(Box::new(operator05))
             .build()
             .into_diagnostic()?;
-        let expression11_opt_group_2_built =
-            Expression11OptGroup::Operator05(expression11_opt_group_2_built);
+        let expression11_list_group_2_built =
+            Expression11ListGroup::Operator05(expression11_list_group_2_built);
         self.push(
-            ASTType::Expression11OptGroup(expression11_opt_group_2_built),
+            ASTType::Expression11ListGroup(expression11_list_group_2_built),
             context,
         );
         Ok(())
@@ -14787,10 +14793,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 297:
     ///
-    /// Expression11OptGroup: Operator03;
+    /// Expression11ListGroup: Operator03;
     ///
     #[parol_runtime::function_name::named]
-    fn expression11_opt_group_3(
+    fn expression11_list_group_3(
         &mut self,
         _operator03: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
@@ -14798,14 +14804,14 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator03 = pop_item!(self, operator03, Operator03, context);
-        let expression11_opt_group_3_built = Expression11OptGroupOperator03Builder::default()
+        let expression11_list_group_3_built = Expression11ListGroupOperator03Builder::default()
             .operator03(Box::new(operator03))
             .build()
             .into_diagnostic()?;
-        let expression11_opt_group_3_built =
-            Expression11OptGroup::Operator03(expression11_opt_group_3_built);
+        let expression11_list_group_3_built =
+            Expression11ListGroup::Operator03(expression11_list_group_3_built);
         self.push(
-            ASTType::Expression11OptGroup(expression11_opt_group_3_built),
+            ASTType::Expression11ListGroup(expression11_list_group_3_built),
             context,
         );
         Ok(())
@@ -14813,10 +14819,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 298:
     ///
-    /// Expression11OptGroup: Operator04;
+    /// Expression11ListGroup: Operator04;
     ///
     #[parol_runtime::function_name::named]
-    fn expression11_opt_group_4(
+    fn expression11_list_group_4(
         &mut self,
         _operator04: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
@@ -14824,14 +14830,14 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator04 = pop_item!(self, operator04, Operator04, context);
-        let expression11_opt_group_4_built = Expression11OptGroupOperator04Builder::default()
+        let expression11_list_group_4_built = Expression11ListGroupOperator04Builder::default()
             .operator04(Box::new(operator04))
             .build()
             .into_diagnostic()?;
-        let expression11_opt_group_4_built =
-            Expression11OptGroup::Operator04(expression11_opt_group_4_built);
+        let expression11_list_group_4_built =
+            Expression11ListGroup::Operator04(expression11_list_group_4_built);
         self.push(
-            ASTType::Expression11OptGroup(expression11_opt_group_4_built),
+            ASTType::Expression11ListGroup(expression11_list_group_4_built),
             context,
         );
         Ok(())
@@ -14839,13 +14845,17 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 299:
     ///
-    /// Expression11Opt /* Option<T>::None */: ;
+    /// Expression11List /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn expression11_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn expression11_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::Expression11Opt(None), context);
+        let expression11_list_1_built = Vec::new();
+        self.push(
+            ASTType::Expression11List(expression11_list_1_built),
+            context,
+        );
         Ok(())
     }
 
@@ -21674,13 +21684,13 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             290 => self.expression10_list_0(&children[0], &children[1], &children[2], parse_tree),
             291 => self.expression10_list_1(parse_tree),
             292 => self.expression11(&children[0], &children[1], parse_tree),
-            293 => self.expression11_opt_0(&children[0], parse_tree),
-            294 => self.expression11_opt_group_0(&children[0], parse_tree),
-            295 => self.expression11_opt_group_1(&children[0], parse_tree),
-            296 => self.expression11_opt_group_2(&children[0], parse_tree),
-            297 => self.expression11_opt_group_3(&children[0], parse_tree),
-            298 => self.expression11_opt_group_4(&children[0], parse_tree),
-            299 => self.expression11_opt_1(parse_tree),
+            293 => self.expression11_list_0(&children[0], &children[1], parse_tree),
+            294 => self.expression11_list_group_0(&children[0], parse_tree),
+            295 => self.expression11_list_group_1(&children[0], parse_tree),
+            296 => self.expression11_list_group_2(&children[0], parse_tree),
+            297 => self.expression11_list_group_3(&children[0], parse_tree),
+            298 => self.expression11_list_group_4(&children[0], parse_tree),
+            299 => self.expression11_list_1(parse_tree),
             300 => self.factor_0(&children[0], parse_tree),
             301 => self.factor_1(&children[0], &children[1], &children[2], parse_tree),
             302 => self.factor_2(&children[0], &children[1], &children[2], parse_tree),

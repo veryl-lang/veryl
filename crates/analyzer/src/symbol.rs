@@ -68,12 +68,48 @@ impl SymbolKind {
 impl fmt::Display for SymbolKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let text = match self {
-            SymbolKind::Port { .. } => "port".to_string(),
-            SymbolKind::Variable { .. } => "variable".to_string(),
-            SymbolKind::Module { .. } => "module".to_string(),
-            SymbolKind::Interface { .. } => "interface".to_string(),
-            SymbolKind::Function { .. } => "function".to_string(),
-            SymbolKind::Parameter { .. } => "parameter".to_string(),
+            SymbolKind::Port { direction } => {
+                format!("port [{}]", direction)
+            }
+            SymbolKind::Variable { r#type } => {
+                format!("variable [{}]", r#type)
+            }
+            SymbolKind::Module { parameters, ports } => {
+                let mut text = "module [".to_string();
+                for parameter in parameters {
+                    text.push_str(&format!("{}, ", parameter));
+                }
+                text.push_str("] [");
+                for port in ports {
+                    text.push_str(&format!("{}, ", port));
+                }
+                text.push_str("]");
+                text
+            }
+            SymbolKind::Interface { parameters } => {
+                let mut text = "interface [".to_string();
+                for parameter in parameters {
+                    text.push_str(&format!("{}, ", parameter));
+                }
+                text.push_str("]");
+                text
+            }
+            SymbolKind::Function { parameters, ports } => {
+                let mut text = "function [".to_string();
+                for parameter in parameters {
+                    text.push_str(&format!("{}, ", parameter));
+                }
+                text.push_str("] [");
+                for port in ports {
+                    text.push_str(&format!("{}, ", port));
+                }
+                text.push_str("]");
+                text
+            }
+            SymbolKind::Parameter { r#type, scope } => match scope {
+                ParameterScope::Global => format!("parameter [{}]", r#type),
+                ParameterScope::Local => format!("localparam [{}]", r#type),
+            },
             SymbolKind::Instance { type_name } => {
                 format!("instance [{}]", type_name)
             }
@@ -90,6 +126,21 @@ pub enum Direction {
     Inout,
     Ref,
     ModPort { interface: StrId, modport: StrId },
+}
+
+impl fmt::Display for Direction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let text = match self {
+            Direction::Input => "input".to_string(),
+            Direction::Output => "output".to_string(),
+            Direction::Inout => "inout".to_string(),
+            Direction::Ref => "ref".to_string(),
+            Direction::ModPort { interface, modport } => {
+                format!("{}.{}", interface, modport)
+            }
+        };
+        text.fmt(f)
+    }
 }
 
 impl From<&veryl_parser::veryl_grammar_trait::Direction> for Direction {
@@ -114,6 +165,29 @@ pub enum Type {
     F32,
     F64,
     UserDefined(Vec<StrId>),
+}
+
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let text = match self {
+            Type::Bit => "bit".to_string(),
+            Type::Logic => "logic".to_string(),
+            Type::U32 => "u32".to_string(),
+            Type::U64 => "u64".to_string(),
+            Type::I32 => "i32".to_string(),
+            Type::I64 => "i64".to_string(),
+            Type::F32 => "f32".to_string(),
+            Type::F64 => "f64".to_string(),
+            Type::UserDefined(paths) => {
+                let mut text = format!("{}", paths.first().unwrap());
+                for path in &paths[1..] {
+                    text.push_str(&format!("::{}", path));
+                }
+                text
+            }
+        };
+        text.fmt(f)
+    }
 }
 
 impl From<&veryl_parser::veryl_grammar_trait::Type> for Type {
@@ -148,6 +222,13 @@ pub struct Port {
     pub direction: Direction,
 }
 
+impl fmt::Display for Port {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let text = format!("{} [{}]", self.name, self.direction);
+        text.fmt(f)
+    }
+}
+
 impl From<&veryl_parser::veryl_grammar_trait::PortDeclarationItem> for Port {
     fn from(value: &veryl_parser::veryl_grammar_trait::PortDeclarationItem) -> Self {
         let direction: Direction = (&*value.direction).into();
@@ -169,6 +250,13 @@ pub struct Parameter {
     pub name: StrId,
     pub r#type: Type,
     pub scope: ParameterScope,
+}
+
+impl fmt::Display for Parameter {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let text = format!("{} [{}]", self.name, self.r#type);
+        text.fmt(f)
+    }
 }
 
 impl From<&veryl_parser::veryl_grammar_trait::WithParameterItem> for Parameter {

@@ -310,7 +310,7 @@ Expression07: Expression08 { Operator08 Expression08 };
 Expression08: Expression09 { Operator09 Expression09 };
 Expression09: Expression10 { Operator10 Expression10 };
 Expression10: Expression11 { Operator11 Expression11 };
-Expression11: [ ( UnaryOperator | Operator09 | Operator05 | Operator03 | Operator04 ) ] Factor;
+Expression11: { ( UnaryOperator | Operator09 | Operator05 | Operator03 | Operator04 ) } Factor;
 
 Factor: Number
       | [ Dollar ] ScopedOrHierIdentifier [ LParen [ FunctionCallArg ] RParen ]
