@@ -9,6 +9,7 @@ license.workspace     = true
 readme.workspace      = true
 description.workspace = true
 edition               = "2021"
+exclude               = ["build.rs"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -21,9 +22,3 @@ thiserror     = {workspace = true}
 [build-dependencies]
 parol   = "0.15.1"
 walkdir = "2.3.2"
-
-[profile.dev.build-override]
-opt-level = 3
-
-[profile.release.build-override]
-opt-level = 3
