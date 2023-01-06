@@ -517,6 +517,13 @@ pub trait VerylWalker {
         after!(self, r#ref, arg);
     }
 
+    /// Semantic action for non-terminal 'Repeat'
+    fn repeat(&mut self, arg: &Repeat) {
+        before!(self, repeat, arg);
+        self.veryl_token(&arg.repeat_token);
+        after!(self, repeat, arg);
+    }
+
     /// Semantic action for non-terminal 'Return'
     fn r#return(&mut self, arg: &Return) {
         before!(self, r#return, arg);
@@ -837,6 +844,11 @@ pub trait VerylWalker {
                 self.expression(&x.expression);
                 self.r_paren(&x.r_paren);
             }
+            Factor::LBraceConcatenationListRBrace(x) => {
+                self.l_brace(&x.l_brace);
+                self.concatenation_list(&x.concatenation_list);
+                self.r_brace(&x.r_brace);
+            }
         }
         after!(self, factor, arg);
     }
@@ -853,6 +865,31 @@ pub trait VerylWalker {
             self.comma(&x.comma);
         }
         after!(self, function_call_arg, arg);
+    }
+
+    /// Semantic action for non-terminal 'ConcatenationList'
+    fn concatenation_list(&mut self, arg: &ConcatenationList) {
+        before!(self, concatenation_list, arg);
+        self.concatenation_item(&arg.concatenation_item);
+        for x in &arg.concatenation_list_list {
+            self.comma(&x.comma);
+            self.concatenation_item(&x.concatenation_item);
+        }
+        if let Some(ref x) = arg.concatenation_list_opt {
+            self.comma(&x.comma);
+        }
+        after!(self, concatenation_list, arg);
+    }
+
+    /// Semantic action for non-terminal 'ConcatenationItem'
+    fn concatenation_item(&mut self, arg: &ConcatenationItem) {
+        before!(self, concatenation_item, arg);
+        self.expression(&arg.expression);
+        if let Some(ref x) = arg.concatenation_item_opt {
+            self.repeat(&x.repeat);
+            self.expression(&x.expression);
+        }
+        after!(self, concatenation_item, arg);
     }
 
     /// Semantic action for non-terminal 'Range'

@@ -83,6 +83,7 @@ PackageTerm           : /\bpackage\b/                                           
 ParameterTerm         : /\bparameter\b/                                                      : Token;
 PosedgeTerm           : /\bposedge\b/                                                        : Token;
 RefTerm               : /\bref\b/                                                            : Token;
+RepeatTerm            : /\brepeat\b/                                                         : Token;
 ReturnTerm            : /\breturn\b/                                                         : Token;
 StepTerm              : /\bstep\b/                                                           : Token;
 StructTerm            : /\bstruct\b/                                                         : Token;
@@ -173,6 +174,7 @@ PackageToken   : PackageTerm   : Token Comments;
 ParameterToken : ParameterTerm : Token Comments;
 PosedgeToken   : PosedgeTerm   : Token Comments;
 RefToken       : RefTerm       : Token Comments;
+RepeatToken    : RepeatTerm    : Token Comments;
 ReturnToken    : ReturnTerm    : Token Comments;
 StepToken      : StepTerm      : Token Comments;
 StructToken    : StructTerm    : Token Comments;
@@ -267,6 +269,7 @@ Package   : PackageToken   : VerylToken;
 Parameter : ParameterToken : VerylToken;
 Posedge   : PosedgeToken   : VerylToken;
 Ref       : RefToken       : VerylToken;
+Repeat    : RepeatToken    : VerylToken;
 Return    : ReturnToken    : VerylToken;
 Step      : StepToken      : VerylToken;
 Struct    : StructToken    : VerylToken;
@@ -325,9 +328,14 @@ Expression11: { ( UnaryOperator | Operator09 | Operator05 | Operator03 | Operato
 Factor: Number
       | [ Dollar ] ScopedOrHierIdentifier [ LParen [ FunctionCallArg ] RParen ]
       | LParen Expression RParen
+      | LBrace ConcatenationList RBrace
       ;
 
 FunctionCallArg: Expression { Comma Expression } [ Comma ];
+
+ConcatenationList: ConcatenationItem { Comma ConcatenationItem } [ Comma ];
+
+ConcatenationItem: Expression [ Repeat Expression ];
 
 // ----------------------------------------------------------------------------
 // Range / Width

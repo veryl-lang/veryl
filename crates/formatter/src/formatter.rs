@@ -305,6 +305,30 @@ impl VerylWalker for Formatter {
         }
     }
 
+    /// Semantic action for non-terminal 'ConcatenationList'
+    fn concatenation_list(&mut self, arg: &ConcatenationList) {
+        self.concatenation_item(&arg.concatenation_item);
+        for x in &arg.concatenation_list_list {
+            self.comma(&x.comma);
+            self.space(1);
+            self.concatenation_item(&x.concatenation_item);
+        }
+        if let Some(ref x) = arg.concatenation_list_opt {
+            self.comma(&x.comma);
+        }
+    }
+
+    /// Semantic action for non-terminal 'ConcatenationItem'
+    fn concatenation_item(&mut self, arg: &ConcatenationItem) {
+        self.expression(&arg.expression);
+        if let Some(ref x) = arg.concatenation_item_opt {
+            self.space(1);
+            self.repeat(&x.repeat);
+            self.space(1);
+            self.expression(&x.expression);
+        }
+    }
+
     /// Semantic action for non-terminal 'RangeOperator'
     fn range_operator(&mut self, arg: &RangeOperator) {
         match arg {

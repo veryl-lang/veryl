@@ -226,6 +226,7 @@ token_with_comments!(PackageToken, PackageTerm, package_term);
 token_with_comments!(ParameterToken, ParameterTerm, parameter_term);
 token_with_comments!(PosedgeToken, PosedgeTerm, posedge_term);
 token_with_comments!(RefToken, RefTerm, ref_term);
+token_with_comments!(RepeatToken, RepeatTerm, repeat_term);
 token_with_comments!(ReturnToken, ReturnTerm, return_term);
 token_with_comments!(StepToken, StepTerm, step_term);
 token_with_comments!(StructToken, StructTerm, struct_term);

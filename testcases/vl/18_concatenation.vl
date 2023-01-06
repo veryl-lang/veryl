@@ -1,0 +1,4 @@
+module Module18 {
+    assign a = {a[10:0], b};
+    assign a = {a[10:0] repeat 10, b repeat 4};
+}

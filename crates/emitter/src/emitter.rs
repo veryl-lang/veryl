@@ -395,6 +395,33 @@ impl VerylWalker for Emitter {
         }
     }
 
+    /// Semantic action for non-terminal 'ConcatenationList'
+    fn concatenation_list(&mut self, arg: &ConcatenationList) {
+        self.concatenation_item(&arg.concatenation_item);
+        for x in &arg.concatenation_list_list {
+            self.comma(&x.comma);
+            self.space(1);
+            self.concatenation_item(&x.concatenation_item);
+        }
+        if let Some(ref x) = arg.concatenation_list_opt {
+            self.comma(&x.comma);
+        }
+    }
+
+    /// Semantic action for non-terminal 'ConcatenationItem'
+    fn concatenation_item(&mut self, arg: &ConcatenationItem) {
+        if let Some(ref x) = arg.concatenation_item_opt {
+            self.str("{");
+            self.expression(&x.expression);
+            self.str("{");
+            self.expression(&arg.expression);
+            self.str("}");
+            self.str("}");
+        } else {
+            self.expression(&arg.expression);
+        }
+    }
+
     /// Semantic action for non-terminal 'Range'
     fn range(&mut self, arg: &Range) {
         self.l_bracket(&arg.l_bracket);

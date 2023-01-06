@@ -61,7 +61,7 @@ hi def link verylDirection Keyword
 syn keyword verylConditional if if_reset else for in case
 hi def link verylConditional Conditional
 
-syn keyword verylRepeat for in step
+syn keyword verylRepeat for in step repeat
 hi def link verylRepeat Repeat
 
 " Identifier
