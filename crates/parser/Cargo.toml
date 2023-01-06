@@ -21,3 +21,9 @@ thiserror     = {workspace = true}
 [build-dependencies]
 parol   = "0.15.1"
 walkdir = "2.3.2"
+
+[profile.dev.build-override]
+opt-level = 3
+
+[profile.release.build-override]
+opt-level = 3
