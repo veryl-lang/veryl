@@ -316,6 +316,7 @@ impl LanguageServer for Backend {
                     veryl_analyzer::symbol::SymbolKind::Parameter(_) => SymbolKind::CONSTANT,
                     veryl_analyzer::symbol::SymbolKind::Instance(_) => SymbolKind::OBJECT,
                     veryl_analyzer::symbol::SymbolKind::Block => SymbolKind::NAMESPACE,
+                    veryl_analyzer::symbol::SymbolKind::Package => SymbolKind::PACKAGE,
                 };
                 let location = Backend::to_location(&symbol.token);
                 #[allow(deprecated)]

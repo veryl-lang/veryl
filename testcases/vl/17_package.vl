@@ -1,0 +1,33 @@
+package Package17 {
+    // localparam declaration
+    localparam a: u32  = 1;
+
+    // variable declaration
+    var b: logic ;
+
+    // struct declaration
+    struct A {
+        a  : logic [10],
+        aa : logic [10],
+        aaa: u32       ,
+    }
+
+    // enum declaration
+    enum B: logic [2] {
+        X = 1,
+        Y = 2,
+        Z,
+    }
+
+    // function declaration
+    function FuncA (
+        a: input  logic [ParamX],
+        b: output logic [ParamX],
+        c: ref    logic [ParamX],
+    ) -> logic [ParamX] {
+        var d: u32  = 1;
+        b = a + 1 + d;
+        c = a / 1;
+        return a + 2;
+    }
+}

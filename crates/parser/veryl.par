@@ -79,6 +79,7 @@ ModportTerm           : /\bmodport\b/                                           
 ModuleTerm            : /\bmodule\b/                                                         : Token;
 NegedgeTerm           : /\bnegedge\b/                                                        : Token;
 OutputTerm            : /\boutput\b/                                                         : Token;
+PackageTerm           : /\bpackage\b/                                                        : Token;
 ParameterTerm         : /\bparameter\b/                                                      : Token;
 PosedgeTerm           : /\bposedge\b/                                                        : Token;
 RefTerm               : /\bref\b/                                                            : Token;
@@ -168,6 +169,7 @@ ModportToken   : ModportTerm   : Token Comments;
 ModuleToken    : ModuleTerm    : Token Comments;
 NegedgeToken   : NegedgeTerm   : Token Comments;
 OutputToken    : OutputTerm    : Token Comments;
+PackageToken   : PackageTerm   : Token Comments;
 ParameterToken : ParameterTerm : Token Comments;
 PosedgeToken   : PosedgeTerm   : Token Comments;
 RefToken       : RefTerm       : Token Comments;
@@ -261,6 +263,7 @@ Modport   : ModportToken   : VerylToken;
 Module    : ModuleToken    : VerylToken;
 Negedge   : NegedgeToken   : VerylToken;
 Output    : OutputToken    : VerylToken;
+Package   : PackageToken   : VerylToken;
 Parameter : ParameterToken : VerylToken;
 Posedge   : PosedgeToken   : VerylToken;
 Ref       : RefToken       : VerylToken;
@@ -514,7 +517,21 @@ InterfaceItem: VarDeclaration
              | EnumDeclaration
              | StructDeclaration
              | InterfaceNamedBlock
+             | FunctionDeclaration
              ;
+
+// ----------------------------------------------------------------------------
+// Package
+// ----------------------------------------------------------------------------
+
+PackageDeclaration: Package Identifier LBrace { PackageItem } RBrace;
+
+PackageItem: VarDeclaration
+           | LocalparamDeclaration
+           | EnumDeclaration
+           | StructDeclaration
+           | FunctionDeclaration
+           ;
 
 // ----------------------------------------------------------------------------
 // Description
@@ -522,6 +539,7 @@ InterfaceItem: VarDeclaration
 
 Description: ModuleDeclaration
            | InterfaceDeclaration
+           | PackageDeclaration
            ;
 
 // ----------------------------------------------------------------------------

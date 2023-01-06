@@ -489,6 +489,13 @@ pub trait VerylWalker {
         after!(self, output, arg);
     }
 
+    /// Semantic action for non-terminal 'Package'
+    fn package(&mut self, arg: &Package) {
+        before!(self, package, arg);
+        self.veryl_token(&arg.package_token);
+        after!(self, package, arg);
+    }
+
     /// Semantic action for non-terminal 'Parameter'
     fn parameter(&mut self, arg: &Parameter) {
         before!(self, parameter, arg);
@@ -1687,8 +1694,41 @@ pub trait VerylWalker {
             InterfaceItem::InterfaceNamedBlock(x) => {
                 self.interface_named_block(&x.interface_named_block)
             }
+            InterfaceItem::FunctionDeclaration(x) => {
+                self.function_declaration(&x.function_declaration)
+            }
         };
         after!(self, interface_item, arg);
+    }
+
+    /// Semantic action for non-terminal 'PackageDeclaration'
+    fn package_declaration(&mut self, arg: &PackageDeclaration) {
+        before!(self, package_declaration, arg);
+        self.package(&arg.package);
+        self.identifier(&arg.identifier);
+        self.l_brace(&arg.l_brace);
+        for x in &arg.package_declaration_list {
+            self.package_item(&x.package_item);
+        }
+        self.r_brace(&arg.r_brace);
+        after!(self, package_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'PackageItem'
+    fn package_item(&mut self, arg: &PackageItem) {
+        before!(self, package_item, arg);
+        match arg {
+            PackageItem::VarDeclaration(x) => self.var_declaration(&x.var_declaration),
+            PackageItem::LocalparamDeclaration(x) => {
+                self.localparam_declaration(&x.localparam_declaration)
+            }
+            PackageItem::EnumDeclaration(x) => self.enum_declaration(&x.enum_declaration),
+            PackageItem::StructDeclaration(x) => self.struct_declaration(&x.struct_declaration),
+            PackageItem::FunctionDeclaration(x) => {
+                self.function_declaration(&x.function_declaration)
+            }
+        }
+        after!(self, package_item, arg);
     }
 
     /// Semantic action for non-terminal 'Description'
@@ -1699,6 +1739,7 @@ pub trait VerylWalker {
             Description::InterfaceDeclaration(x) => {
                 self.interface_declaration(&x.interface_declaration)
             }
+            Description::PackageDeclaration(x) => self.package_declaration(&x.package_declaration),
         };
         after!(self, description, arg);
     }

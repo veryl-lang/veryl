@@ -282,4 +282,17 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         }
         Ok(())
     }
+
+    fn package_declaration(&mut self, arg: &PackageDeclaration) -> Result<()> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.insert_symbol(&arg.identifier.identifier_token, SymbolKind::Package);
+
+                let name = arg.identifier.identifier_token.token.text;
+                self.namespace.push(name)
+            }
+            HandlerPoint::After => self.namespace.pop(),
+        }
+        Ok(())
+    }
 }

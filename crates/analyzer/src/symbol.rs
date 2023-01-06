@@ -33,6 +33,7 @@ pub enum SymbolKind {
     Parameter(ParameterProperty),
     Instance(InstanceProperty),
     Block,
+    Package,
 }
 
 impl SymbolKind {
@@ -46,6 +47,7 @@ impl SymbolKind {
             SymbolKind::Parameter(_) => "parameter".to_string(),
             SymbolKind::Instance(_) => "instance".to_string(),
             SymbolKind::Block => "block".to_string(),
+            SymbolKind::Package => "package".to_string(),
         }
     }
 }
@@ -107,6 +109,7 @@ impl fmt::Display for SymbolKind {
                 format!("instance [{}]", x.type_name)
             }
             SymbolKind::Block => "block".to_string(),
+            SymbolKind::Package => "package".to_string(),
         };
         text.fmt(f)
     }

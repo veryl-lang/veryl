@@ -40,7 +40,7 @@ syn match verylSymbol "[)(#@:;}{,.\[\]]"
 hi def link verylSymbol Special
 
 " Keyword
-syn keyword verylStructure module interface function modport
+syn keyword verylStructure module interface function modport package
 syn keyword verylStructure enum struct
 hi def link verylStructure Structure
 

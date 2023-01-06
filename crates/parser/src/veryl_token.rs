@@ -222,6 +222,7 @@ token_with_comments!(ModportToken, ModportTerm, modport_term);
 token_with_comments!(ModuleToken, ModuleTerm, module_term);
 token_with_comments!(NegedgeToken, NegedgeTerm, negedge_term);
 token_with_comments!(OutputToken, OutputTerm, output_term);
+token_with_comments!(PackageToken, PackageTerm, package_term);
 token_with_comments!(ParameterToken, ParameterTerm, parameter_term);
 token_with_comments!(PosedgeToken, PosedgeTerm, posedge_term);
 token_with_comments!(RefToken, RefTerm, ref_term);

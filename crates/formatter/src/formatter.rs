@@ -1197,6 +1197,24 @@ impl VerylWalker for Formatter {
         self.r_brace(&arg.r_brace);
     }
 
+    /// Semantic action for non-terminal 'PackageDeclaration'
+    fn package_declaration(&mut self, arg: &PackageDeclaration) {
+        self.package(&arg.package);
+        self.space(1);
+        self.identifier(&arg.identifier);
+        self.space(1);
+        self.token_will_push(&arg.l_brace.l_brace_token);
+        self.newline_push();
+        for (i, x) in arg.package_declaration_list.iter().enumerate() {
+            if i != 0 {
+                self.newline();
+            }
+            self.package_item(&x.package_item);
+        }
+        self.newline_pop();
+        self.r_brace(&arg.r_brace);
+    }
+
     /// Semantic action for non-terminal 'Veryl'
     fn veryl(&mut self, arg: &Veryl) {
         self.in_start_token = true;
