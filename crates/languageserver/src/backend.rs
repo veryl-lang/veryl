@@ -191,6 +191,7 @@ impl LanguageServer for Backend {
                 definition_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -330,6 +331,30 @@ impl LanguageServer for Backend {
             }
         }
         Ok(Some(ret))
+    }
+
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let path = uri.to_string();
+        if let Some(parser) = self.parser_map.get(&path) {
+            let mut finder = Finder::new();
+            finder.line = params.text_document_position_params.position.line as usize + 1;
+            finder.column = params.text_document_position_params.position.character as usize + 1;
+            finder.veryl(&parser.veryl);
+            if let Some(token) = finder.token {
+                let namespace = namespace_table::get(token.id).unwrap();
+                let name = Name::Hierarchical(vec![token.text]);
+                if let Some(symbol) = symbol_table::get(&name, &namespace) {
+                    let text = symbol.kind.to_string();
+                    let hover = Hover {
+                        contents: HoverContents::Scalar(MarkedString::String(text)),
+                        range: None,
+                    };
+                    return Ok(Some(hover));
+                }
+            }
+        }
+        Ok(None)
     }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
