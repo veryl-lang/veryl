@@ -1,17 +1,23 @@
 use dashmap::DashMap;
+use glob::glob;
 use ropey::Rope;
+use serde_json::Value;
 use std::path::Path;
+use std::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
-use veryl_analyzer::Analyzer;
+use veryl_analyzer::symbol_table::Name;
+use veryl_analyzer::{namespace_table, symbol_table, Analyzer};
 use veryl_formatter::Formatter;
 use veryl_metadata::Metadata;
-use veryl_parser::{miette, resource_table, Parser, ParserError};
+use veryl_parser::veryl_walker::VerylWalker;
+use veryl_parser::{miette, resource_table, Finder, Parser, ParserError};
 
 #[derive(Debug)]
 pub struct Backend {
     client: Client,
+    root_uri: Mutex<Option<Url>>,
     document_map: DashMap<String, Rope>,
     parser_map: DashMap<String, Parser>,
 }
@@ -26,6 +32,7 @@ impl Backend {
     pub fn new(client: Client) -> Self {
         Self {
             client,
+            root_uri: Mutex::new(None),
             document_map: DashMap::new(),
             parser_map: DashMap::new(),
         }
@@ -39,8 +46,8 @@ impl Backend {
         let diag = match Parser::parse(&text, &path) {
             Ok(x) => {
                 if let Some(path) = resource_table::get_path_id(Path::new(&path).to_path_buf()) {
-                    veryl_analyzer::symbol_table::drop(path);
-                    veryl_analyzer::namespace_table::drop(path);
+                    symbol_table::drop(path);
+                    namespace_table::drop(path);
                 }
                 let mut analyzer = Analyzer::new(&text);
                 let mut errors = analyzer.analyze(&x.veryl);
@@ -64,6 +71,29 @@ impl Backend {
             .await;
 
         self.document_map.insert(path, rope);
+    }
+
+    async fn background_analyze(&self, path: &Path) {
+        if let Ok(text) = std::fs::read_to_string(path) {
+            if let Ok(uri) = Url::from_file_path(path) {
+                let path = uri.to_string();
+                if self.document_map.contains_key(&path) {
+                    return;
+                }
+                if let Ok(x) = Parser::parse(&text, &path) {
+                    if let Some(path) = resource_table::get_path_id(Path::new(&path).to_path_buf())
+                    {
+                        symbol_table::drop(path);
+                        namespace_table::drop(path);
+                    }
+                    let mut analyzer = Analyzer::new(&text);
+                    let _ = analyzer.analyze(&x.veryl);
+                    self.client
+                        .log_message(MessageType::INFO, format!("background_analyze: {}", path))
+                        .await;
+                }
+            }
+        }
     }
 
     fn to_diag(err: miette::ErrReport, rope: &Rope) -> Diagnostic {
@@ -126,7 +156,13 @@ impl Backend {
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
-    async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        if let Some(root_uri) = params.root_uri {
+            if let Ok(mut x) = self.root_uri.lock() {
+                x.replace(root_uri);
+            }
+        }
+
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
@@ -139,6 +175,7 @@ impl LanguageServer for Backend {
                     }),
                     file_operations: None,
                 }),
+                definition_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
             },
@@ -153,6 +190,42 @@ impl LanguageServer for Backend {
         self.client
             .log_message(MessageType::INFO, "server initialized!")
             .await;
+
+        let root = if let Ok(x) = self.root_uri.lock() {
+            if let Some(ref x) = *x {
+                if x.scheme() == "file" {
+                    x.to_file_path().ok()
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some(root) = root {
+            let glob_pattern = format!("{}/**/*.vl", root.to_string_lossy());
+            let register_options = format!(
+                "{{ \"watchers\": [ {{\"globPattern\": \"{}\"}} ] }}",
+                glob_pattern
+            );
+            let register_options: Value = serde_json::from_str(&register_options).unwrap();
+
+            let registration = Registration {
+                id: "workspace/didChangeWatchedFiles".to_string(),
+                method: "workspace/didChangeWatchedFiles".to_string(),
+                register_options: Some(register_options),
+            };
+            let _ = self.client.register_capability(vec![registration]).await;
+
+            for entry in glob(&glob_pattern).unwrap() {
+                if let Ok(path) = entry {
+                    self.background_analyze(&path).await;
+                }
+            }
+        }
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
@@ -179,9 +252,52 @@ impl LanguageServer for Backend {
         .await
     }
 
+    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        for change in params.changes {
+            self.client
+                .log_message(
+                    MessageType::INFO,
+                    format!("did_change_watched_files: {:?}", change),
+                )
+                .await;
+        }
+    }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let path = uri.to_string();
+        if let Some(parser) = self.parser_map.get(&path) {
+            let mut finder = Finder::new();
+            finder.line = params.text_document_position_params.position.line as usize + 1;
+            finder.column = params.text_document_position_params.position.character as usize + 1;
+            finder.veryl(&parser.veryl);
+            if let Some(token) = finder.token {
+                let namespace = namespace_table::get(token.id).unwrap();
+                let name = Name::Hierarchical(vec![token.text]);
+                if let Some(symbol) = symbol_table::get(&name, &namespace) {
+                    let line = symbol.token.line as u32 - 1;
+                    let column = symbol.token.column as u32 - 1;
+                    let length = symbol.token.length as u32;
+                    let uri = Url::parse(&symbol.token.file_path.to_string()).unwrap();
+                    let range = Range::new(
+                        Position::new(line, column),
+                        Position::new(line, column + length),
+                    );
+                    let location = Location { uri, range };
+                    return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+                }
+            }
+        }
+        Ok(None)
+    }
+
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
-        let path = params.text_document.uri.to_string();
-        if let Ok(metadata_path) = Metadata::search_from(params.text_document.uri.path()) {
+        let uri = params.text_document.uri;
+        let path = uri.to_string();
+        if let Ok(metadata_path) = Metadata::search_from(uri.path()) {
             if let Ok(metadata) = Metadata::load(metadata_path) {
                 if let Some(rope) = self.document_map.get(&path) {
                     let line = rope.len_lines() as u32;
