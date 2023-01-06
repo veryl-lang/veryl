@@ -21,16 +21,16 @@ clean:
 
 release_lnx:
 	cargo build --locked --release --target=x86_64-unknown-linux-musl $(addprefix --bin , ${BIN_NAMES})
-	zip -j ${ZIP_NAME}-v${VERSION}-x86_64-linux.zip $(addprefix target/x86_64-unknown-linux-musl/release/, ${BIN_NAMES})
+	zip -j ${ZIP_NAME}-x86_64-linux.zip $(addprefix target/x86_64-unknown-linux-musl/release/, ${BIN_NAMES})
 
 release_win:
 	cargo build --locked --release --target=x86_64-pc-windows-msvc $(addprefix --bin , ${BIN_NAMES})
 	mv -v $(addsuffix .exe, $(addprefix target/x86_64-pc-windows-msvc/release/, ${BIN_NAMES})) ./
-	7z a ${ZIP_NAME}-v${VERSION}-x86_64-windows.zip $(addsuffix .exe, ${BIN_NAMES})
+	7z a ${ZIP_NAME}-x86_64-windows.zip $(addsuffix .exe, ${BIN_NAMES})
 
 release_mac:
 	cargo build --locked --release --target=x86_64-apple-darwin $(addprefix --bin , ${BIN_NAMES})
-	zip -j ${ZIP_NAME}-v${VERSION}-x86_64-mac.zip $(addprefix target/x86_64-apple-darwin/release/, ${BIN_NAMES})
+	zip -j ${ZIP_NAME}-x86_64-mac.zip $(addprefix target/x86_64-apple-darwin/release/, ${BIN_NAMES})
 
 release_rpm:
 	mkdir -p target
