@@ -15,7 +15,7 @@ edition               = "2021"
 [dependencies]
 dashmap         = "5.4.0"
 ropey           = "1.5.1"
-tokio           = {version = "1.23.1", features = ["full"]}
+tokio           = {version = "1.24.0", features = ["full"]}
 tower-lsp       = "0.17.0"
 veryl-analyzer  = {version = "0.1.3", path = "../analyzer"}
 veryl-formatter = {version = "0.1.3", path = "../formatter"}
