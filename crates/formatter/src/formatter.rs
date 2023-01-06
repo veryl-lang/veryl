@@ -324,6 +324,7 @@ impl VerylWalker for Formatter {
         match &*arg.type_group {
             TypeGroup::BuiltinType(x) => self.builtin_type(&x.builtin_type),
             TypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
+            TypeGroup::ModportIdentifier(x) => self.modport_identifier(&x.modport_identifier),
         };
         self.space(1);
         for x in &arg.type_list {
@@ -946,9 +947,14 @@ impl VerylWalker for Formatter {
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
         self.space(1);
-        self.direction(&arg.direction);
-        self.space(1);
-        self.r#type(&arg.r#type);
+        match &*arg.port_declaration_item_group {
+            PortDeclarationItemGroup::DirectionType(x) => {
+                self.direction(&x.direction);
+                self.space(1);
+                self.r#type(&x.r#type);
+            }
+            PortDeclarationItemGroup::Interface(x) => self.interface(&x.interface),
+        }
     }
 
     /// Semantic action for non-terminal 'FunctionDeclaration'

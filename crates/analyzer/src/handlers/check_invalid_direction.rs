@@ -9,6 +9,7 @@ pub struct CheckInvalidDirection<'a> {
     text: &'a str,
     point: HandlerPoint,
     in_function: bool,
+    in_module: bool,
 }
 
 impl<'a> CheckInvalidDirection<'a> {
@@ -29,14 +30,26 @@ impl<'a> Handler for CheckInvalidDirection<'a> {
 impl<'a> VerylGrammarTrait for CheckInvalidDirection<'a> {
     fn direction(&mut self, arg: &Direction) -> Result<()> {
         if let HandlerPoint::Before = self.point {
-            if let Direction::Ref(x) = arg {
-                if !self.in_function {
-                    self.errors.push(AnalyzeError::invalid_direction(
-                        "ref",
-                        self.text,
-                        &x.r#ref.ref_token,
-                    ));
+            match arg {
+                Direction::Ref(x) => {
+                    if !self.in_function {
+                        self.errors.push(AnalyzeError::invalid_direction(
+                            "ref",
+                            self.text,
+                            &x.r#ref.ref_token,
+                        ));
+                    }
                 }
+                Direction::Modport(x) => {
+                    if !self.in_module {
+                        self.errors.push(AnalyzeError::invalid_direction(
+                            "modport",
+                            self.text,
+                            &x.modport.modport_token,
+                        ));
+                    }
+                }
+                _ => (),
             }
         }
         Ok(())
@@ -46,6 +59,14 @@ impl<'a> VerylGrammarTrait for CheckInvalidDirection<'a> {
         match self.point {
             HandlerPoint::Before => self.in_function = true,
             HandlerPoint::After => self.in_function = false,
+        }
+        Ok(())
+    }
+
+    fn module_declaration(&mut self, _arg: &ModuleDeclaration) -> Result<()> {
+        match self.point {
+            HandlerPoint::Before => self.in_module = true,
+            HandlerPoint::After => self.in_module = false,
         }
         Ok(())
     }

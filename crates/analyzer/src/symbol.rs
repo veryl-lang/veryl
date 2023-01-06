@@ -56,7 +56,11 @@ impl fmt::Display for SymbolKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let text = match self {
             SymbolKind::Port(x) => {
-                format!("port [{}]", x.direction)
+                if let Some(ref r#type) = x.r#type {
+                    format!("port [{} {}]", x.direction, r#type)
+                } else {
+                    format!("port [{}]", x.direction)
+                }
             }
             SymbolKind::Variable(x) => {
                 format!("variable [{}]", x.r#type)
@@ -121,7 +125,8 @@ pub enum Direction {
     Output,
     Inout,
     Ref,
-    ModPort { interface: StrId, modport: StrId },
+    Interface,
+    Modport,
 }
 
 impl fmt::Display for Direction {
@@ -131,9 +136,8 @@ impl fmt::Display for Direction {
             Direction::Output => "output".to_string(),
             Direction::Inout => "inout".to_string(),
             Direction::Ref => "ref".to_string(),
-            Direction::ModPort { interface, modport } => {
-                format!("{}.{}", interface, modport)
-            }
+            Direction::Interface => "interface".to_string(),
+            Direction::Modport => "modport".to_string(),
         };
         text.fmt(f)
     }
@@ -146,6 +150,7 @@ impl From<&veryl_parser::veryl_grammar_trait::Direction> for Direction {
             veryl_parser::veryl_grammar_trait::Direction::Output(_) => Direction::Output,
             veryl_parser::veryl_grammar_trait::Direction::Inout(_) => Direction::Inout,
             veryl_parser::veryl_grammar_trait::Direction::Ref(_) => Direction::Ref,
+            veryl_parser::veryl_grammar_trait::Direction::Modport(_) => Direction::Modport,
         }
     }
 }
@@ -161,6 +166,7 @@ pub enum Type {
     F32,
     F64,
     UserDefined(Vec<StrId>),
+    Modport(StrId, StrId),
 }
 
 impl fmt::Display for Type {
@@ -180,6 +186,9 @@ impl fmt::Display for Type {
                     text.push_str(&format!("::{}", path));
                 }
                 text
+            }
+            Type::Modport(interface, modport) => {
+                format!("{}.{}", interface, modport)
             }
         };
         text.fmt(f)
@@ -208,6 +217,12 @@ impl From<&veryl_parser::veryl_grammar_trait::Type> for Type {
                 }
                 Type::UserDefined(name)
             }
+            TypeGroup::ModportIdentifier(x) => {
+                let x = &x.modport_identifier;
+                let interface = x.identifier.identifier_token.token.text;
+                let modport = x.identifier0.identifier_token.token.text;
+                Type::Modport(interface, modport)
+            }
         }
     }
 }
@@ -219,6 +234,7 @@ pub struct VariableProperty {
 
 #[derive(Debug, Clone)]
 pub struct PortProperty {
+    pub r#type: Option<Type>,
     pub direction: Direction,
 }
 
@@ -237,8 +253,22 @@ impl fmt::Display for Port {
 
 impl From<&veryl_parser::veryl_grammar_trait::PortDeclarationItem> for Port {
     fn from(value: &veryl_parser::veryl_grammar_trait::PortDeclarationItem) -> Self {
-        let direction: Direction = (&*value.direction).into();
-        let property = PortProperty { direction };
+        let property = match &*value.port_declaration_item_group {
+            veryl_parser::veryl_grammar_trait::PortDeclarationItemGroup::DirectionType(x) => {
+                let r#type: Type = (&*x.r#type).into();
+                let direction: Direction = (&*x.direction).into();
+                PortProperty {
+                    r#type: Some(r#type),
+                    direction,
+                }
+            }
+            veryl_parser::veryl_grammar_trait::PortDeclarationItemGroup::Interface(_) => {
+                PortProperty {
+                    r#type: None,
+                    direction: Direction::Interface,
+                }
+            }
+        };
         Port {
             name: value.identifier.identifier_token.token.text,
             property,

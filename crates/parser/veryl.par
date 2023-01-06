@@ -302,6 +302,7 @@ RealNumber: FixedPoint
 
 HierarchicalIdentifier: Identifier { Range } { Dot Identifier { Range } };
 ScopedIdentifier      : Identifier { ColonColon Identifier };
+ModportIdentifier     : Identifier Dot Identifier;
 ScopedOrHierIdentifier: Identifier ( ColonColon Identifier { ColonColon Identifier } | ( { Range } { Dot Identifier { Range } } ) );
 
 // ----------------------------------------------------------------------------
@@ -351,7 +352,7 @@ BuiltinType: Logic
            | U32 | U64 | I32 | I64 | F32 | F64
            ;
 
-Type: ( BuiltinType | ScopedIdentifier ) { Width };
+Type: ( BuiltinType | ScopedIdentifier | ModportIdentifier ) { Width };
 
 // ----------------------------------------------------------------------------
 // Statement
@@ -449,12 +450,13 @@ PortDeclaration: LParen [ PortDeclarationList ] RParen;
 
 PortDeclarationList: PortDeclarationItem { Comma PortDeclarationItem } [ Comma ];
 
-PortDeclarationItem: Identifier Colon Direction Type;
+PortDeclarationItem: Identifier Colon ( Direction Type | Interface );
 
 Direction: Input
          | Output
          | Inout
          | Ref
+         | Modport
          ;
 
 // ----------------------------------------------------------------------------

@@ -639,6 +639,15 @@ pub trait VerylWalker {
         after!(self, scoped_identifier, arg);
     }
 
+    /// Semantic action for non-terminal 'ModportIdentifier'
+    fn modport_identifier(&mut self, arg: &ModportIdentifier) {
+        before!(self, modport_identifier, arg);
+        self.identifier(&arg.identifier);
+        self.dot(&arg.dot);
+        self.identifier(&arg.identifier0);
+        after!(self, modport_identifier, arg);
+    }
+
     /// Semantic action for non-terminal 'ScopedOrHierIdentifier'
     fn scoped_or_hier_identifier(&mut self, arg: &ScopedOrHierIdentifier) {
         before!(self, scoped_or_hier_identifier, arg);
@@ -902,6 +911,7 @@ pub trait VerylWalker {
         match &*arg.type_group {
             TypeGroup::BuiltinType(x) => self.builtin_type(&x.builtin_type),
             TypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
+            TypeGroup::ModportIdentifier(x) => self.modport_identifier(&x.modport_identifier),
         };
         for x in &arg.type_list {
             self.width(&x.width);
@@ -1427,8 +1437,13 @@ pub trait VerylWalker {
         before!(self, port_declaration_item, arg);
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
-        self.direction(&arg.direction);
-        self.r#type(&arg.r#type);
+        match &*arg.port_declaration_item_group {
+            PortDeclarationItemGroup::DirectionType(x) => {
+                self.direction(&x.direction);
+                self.r#type(&x.r#type);
+            }
+            PortDeclarationItemGroup::Interface(x) => self.interface(&x.interface),
+        }
         after!(self, port_declaration_item, arg);
     }
 
@@ -1440,6 +1455,7 @@ pub trait VerylWalker {
             Direction::Output(x) => self.output(&x.output),
             Direction::Inout(x) => self.inout(&x.inout),
             Direction::Ref(x) => self.r#ref(&x.r#ref),
+            Direction::Modport(x) => self.modport(&x.modport),
         };
         after!(self, direction, arg);
     }

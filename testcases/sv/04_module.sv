@@ -5,9 +5,11 @@ module Module04 #(
     localparam int unsigned aa  = 1
 ) (
     // module port
-    input  logic [10-1:0] b  ,
-    output logic [10-1:0] bb ,
-    inout  logic [10-1:0] bbb
+    input  logic [10-1:0] b    ,
+    output logic [10-1:0] bb   ,
+    inout  logic [10-1:0] bbb  ,
+    interface bbbb ,
+    Interface05.d bbbbb 
 ) ;
     // localparam declaration
     localparam int unsigned     c   = 1;

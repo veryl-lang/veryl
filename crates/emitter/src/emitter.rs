@@ -209,6 +209,7 @@ impl Emitter {
                 }
             }
             TypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
+            TypeGroup::ModportIdentifier(x) => self.modport_identifier(&x.modport_identifier),
         }
     }
 
@@ -225,6 +226,7 @@ impl Emitter {
                 BuiltinType::F64(_) => true,
             },
             TypeGroup::ScopedIdentifier(_) => true,
+            TypeGroup::ModportIdentifier(_) => true,
         };
         if width {
             self.space(1);
@@ -1116,12 +1118,35 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'PortDeclarationItem'
     fn port_declaration_item(&mut self, arg: &PortDeclarationItem) {
-        self.direction(&arg.direction);
-        self.space(1);
-        self.r#type_left(&arg.r#type);
-        self.space(1);
-        self.identifier(&arg.identifier);
-        self.r#type_right(&arg.r#type);
+        match &*arg.port_declaration_item_group {
+            PortDeclarationItemGroup::DirectionType(x) => {
+                self.direction(&x.direction);
+                if let Direction::Modport(_) = *x.direction {
+                } else {
+                    self.space(1);
+                }
+                self.r#type_left(&x.r#type);
+                self.space(1);
+                self.identifier(&arg.identifier);
+                self.r#type_right(&x.r#type);
+            }
+            PortDeclarationItemGroup::Interface(x) => {
+                self.interface(&x.interface);
+                self.space(1);
+                self.identifier(&arg.identifier);
+            }
+        }
+    }
+
+    /// Semantic action for non-terminal 'Direction'
+    fn direction(&mut self, arg: &Direction) {
+        match arg {
+            Direction::Input(x) => self.input(&x.input),
+            Direction::Output(x) => self.output(&x.output),
+            Direction::Inout(x) => self.inout(&x.inout),
+            Direction::Ref(x) => self.r#ref(&x.r#ref),
+            Direction::Modport(_) => (),
+        };
     }
 
     /// Semantic action for non-terminal 'FunctionDeclaration'

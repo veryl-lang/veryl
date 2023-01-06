@@ -112,8 +112,20 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
     fn port_declaration_item(&mut self, arg: &PortDeclarationItem) -> Result<()> {
         if let HandlerPoint::Before = self.point {
-            let direction: SymDirection = (&*arg.direction).into();
-            let property = PortProperty { direction };
+            let property = match &*arg.port_declaration_item_group {
+                PortDeclarationItemGroup::DirectionType(x) => {
+                    let r#type: SymType = (&*x.r#type).into();
+                    let direction: SymDirection = (&*x.direction).into();
+                    PortProperty {
+                        r#type: Some(r#type),
+                        direction,
+                    }
+                }
+                PortDeclarationItemGroup::Interface(_) => PortProperty {
+                    r#type: None,
+                    direction: SymDirection::Interface,
+                },
+            };
             let kind = SymbolKind::Port(property);
             self.insert_symbol(&arg.identifier.identifier_token, kind);
         }

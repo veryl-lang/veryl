@@ -308,6 +308,7 @@ impl VerylWalker for Aligner {
         match &*arg.type_group {
             TypeGroup::BuiltinType(x) => self.builtin_type(&x.builtin_type),
             TypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
+            TypeGroup::ModportIdentifier(x) => self.modport_identifier(&x.modport_identifier),
         };
         let loc = self.aligns[align_kind::TYPE].last_location;
         self.aligns[align_kind::TYPE].finish_item();
@@ -509,8 +510,13 @@ impl VerylWalker for Aligner {
         self.identifier(&arg.identifier);
         self.aligns[align_kind::IDENTIFIER].finish_item();
         self.colon(&arg.colon);
-        self.direction(&arg.direction);
-        self.r#type(&arg.r#type);
+        match &*arg.port_declaration_item_group {
+            PortDeclarationItemGroup::DirectionType(x) => {
+                self.direction(&x.direction);
+                self.r#type(&x.r#type);
+            }
+            PortDeclarationItemGroup::Interface(x) => self.interface(&x.interface),
+        }
     }
 
     /// Semantic action for non-terminal 'Direction'
@@ -521,6 +527,7 @@ impl VerylWalker for Aligner {
             Direction::Output(x) => self.output(&x.output),
             Direction::Inout(x) => self.inout(&x.inout),
             Direction::Ref(x) => self.r#ref(&x.r#ref),
+            Direction::Modport(x) => self.modport(&x.modport),
         };
         self.aligns[align_kind::DIRECTION].finish_item();
     }
