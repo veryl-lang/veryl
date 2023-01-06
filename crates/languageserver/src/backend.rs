@@ -11,6 +11,7 @@ use veryl_analyzer::symbol_table::Name;
 use veryl_analyzer::{namespace_table, symbol_table, Analyzer};
 use veryl_formatter::Formatter;
 use veryl_metadata::Metadata;
+use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::VerylWalker;
 use veryl_parser::{miette, resource_table, Finder, Parser, ParserError};
 
@@ -152,6 +153,18 @@ impl Backend {
             text.replace("LA(1) (", "").replace(')', "")
         }
     }
+
+    fn to_location(token: &Token) -> Location {
+        let line = token.line as u32 - 1;
+        let column = token.column as u32 - 1;
+        let length = token.length as u32;
+        let uri = Url::parse(&token.file_path.to_string()).unwrap();
+        let range = Range::new(
+            Position::new(line, column),
+            Position::new(line, column + length),
+        );
+        Location { uri, range }
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -177,6 +190,7 @@ impl LanguageServer for Backend {
                 }),
                 definition_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
+                workspace_symbol_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -276,20 +290,46 @@ impl LanguageServer for Backend {
                 let namespace = namespace_table::get(token.id).unwrap();
                 let name = Name::Hierarchical(vec![token.text]);
                 if let Some(symbol) = symbol_table::get(&name, &namespace) {
-                    let line = symbol.token.line as u32 - 1;
-                    let column = symbol.token.column as u32 - 1;
-                    let length = symbol.token.length as u32;
-                    let uri = Url::parse(&symbol.token.file_path.to_string()).unwrap();
-                    let range = Range::new(
-                        Position::new(line, column),
-                        Position::new(line, column + length),
-                    );
-                    let location = Location { uri, range };
+                    let location = Backend::to_location(&symbol.token);
                     return Ok(Some(GotoDefinitionResponse::Scalar(location)));
                 }
             }
         }
         Ok(None)
+    }
+
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> Result<Option<Vec<SymbolInformation>>> {
+        let mut ret = Vec::new();
+        for symbol in symbol_table::get_all() {
+            let name = symbol.token.text.to_string();
+            if name.contains(&params.query) {
+                let kind = match symbol.kind {
+                    veryl_analyzer::symbol::SymbolKind::Port(_) => SymbolKind::VARIABLE,
+                    veryl_analyzer::symbol::SymbolKind::Variable(_) => SymbolKind::VARIABLE,
+                    veryl_analyzer::symbol::SymbolKind::Module(_) => SymbolKind::MODULE,
+                    veryl_analyzer::symbol::SymbolKind::Interface(_) => SymbolKind::INTERFACE,
+                    veryl_analyzer::symbol::SymbolKind::Function(_) => SymbolKind::FUNCTION,
+                    veryl_analyzer::symbol::SymbolKind::Parameter(_) => SymbolKind::CONSTANT,
+                    veryl_analyzer::symbol::SymbolKind::Instance(_) => SymbolKind::OBJECT,
+                    veryl_analyzer::symbol::SymbolKind::Block => SymbolKind::NAMESPACE,
+                };
+                let location = Backend::to_location(&symbol.token);
+                #[allow(deprecated)]
+                let symbol_info = SymbolInformation {
+                    name,
+                    kind,
+                    tags: None,
+                    deprecated: None,
+                    location,
+                    container_name: None,
+                };
+                ret.push(symbol_info);
+            }
+        }
+        Ok(Some(ret))
     }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {

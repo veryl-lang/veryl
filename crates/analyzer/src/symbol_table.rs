@@ -95,6 +95,15 @@ impl SymbolTable {
         }
     }
 
+    pub fn get_all(&self) -> Vec<Symbol> {
+        let mut ret = Vec::new();
+        for value in self.table.values() {
+            let mut value = value.clone();
+            ret.append(&mut value);
+        }
+        ret
+    }
+
     fn get_hierarchical(&self, paths: &[StrId], namespace: &Namespace) -> Option<&Symbol> {
         let mut ret = None;
         let mut namespace = namespace.clone();
@@ -176,6 +185,10 @@ pub fn insert(token: &Token, symbol: Symbol) -> bool {
 
 pub fn get(name: &Name, namespace: &Namespace) -> Option<Symbol> {
     SYMBOL_TABLE.with(|f| f.borrow().get(name, namespace).cloned())
+}
+
+pub fn get_all() -> Vec<Symbol> {
+    SYMBOL_TABLE.with(|f| f.borrow().get_all())
 }
 
 pub fn dump() -> String {
