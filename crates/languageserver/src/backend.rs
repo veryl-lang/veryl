@@ -220,10 +220,8 @@ impl LanguageServer for Backend {
             };
             let _ = self.client.register_capability(vec![registration]).await;
 
-            for entry in glob(&glob_pattern).unwrap() {
-                if let Ok(path) = entry {
-                    self.background_analyze(&path).await;
-                }
+            for entry in glob(&glob_pattern).unwrap().flatten() {
+                self.background_analyze(&entry).await;
             }
         }
     }
