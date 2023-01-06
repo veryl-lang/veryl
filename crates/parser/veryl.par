@@ -89,6 +89,7 @@ StepTerm              : /\bstep\b/                                              
 StructTerm            : /\bstruct\b/                                                         : Token;
 SyncHighTerm          : /\bsync_high\b/                                                      : Token;
 SyncLowTerm           : /\bsync_low\b/                                                       : Token;
+TriTerm               : /\btri\b/                                                            : Token;
 U32Term               : /\bu32\b/                                                            : Token;
 U64Term               : /\bu64\b/                                                            : Token;
 VarTerm               : /\bvar\b/                                                            : Token;
@@ -180,6 +181,7 @@ StepToken      : StepTerm      : Token Comments;
 StructToken    : StructTerm    : Token Comments;
 SyncHighToken  : SyncHighTerm  : Token Comments;
 SyncLowToken   : SyncLowTerm   : Token Comments;
+TriToken       : TriTerm       : Token Comments;
 U32Token       : U32Term       : Token Comments;
 U64Token       : U64Term       : Token Comments;
 VarToken       : VarTerm       : Token Comments;
@@ -275,6 +277,7 @@ Step      : StepToken      : VerylToken;
 Struct    : StructToken    : VerylToken;
 SyncHigh  : SyncHighToken  : VerylToken;
 SyncLow   : SyncLowToken   : VerylToken;
+Tri       : TriToken       : VerylToken;
 U32       : U32Token       : VerylToken;
 U64       : U64Token       : VerylToken;
 Var       : VarToken       : VerylToken;
@@ -356,6 +359,7 @@ Width: LBracket Expression RBracket;
 // ----------------------------------------------------------------------------
 
 BuiltinType: Logic
+           | Tri
            | Bit
            | U32 | U64 | I32 | I64 | F32 | F64
            ;

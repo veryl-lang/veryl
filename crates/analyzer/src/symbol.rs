@@ -159,6 +159,7 @@ impl From<&veryl_parser::veryl_grammar_trait::Direction> for Direction {
 pub enum Type {
     Bit,
     Logic,
+    Tri,
     U32,
     U64,
     I32,
@@ -174,6 +175,7 @@ impl fmt::Display for Type {
         let text = match self {
             Type::Bit => "bit".to_string(),
             Type::Logic => "logic".to_string(),
+            Type::Tri => "tri".to_string(),
             Type::U32 => "u32".to_string(),
             Type::U64 => "u64".to_string(),
             Type::I32 => "i32".to_string(),
@@ -200,6 +202,7 @@ impl From<&veryl_parser::veryl_grammar_trait::Type> for Type {
         match &*value.type_group {
             TypeGroup::BuiltinType(x) => match &*x.builtin_type {
                 BuiltinType::Logic(_) => Type::Logic,
+                BuiltinType::Tri(_) => Type::Tri,
                 BuiltinType::Bit(_) => Type::Bit,
                 BuiltinType::U32(_) => Type::U32,
                 BuiltinType::U64(_) => Type::U64,

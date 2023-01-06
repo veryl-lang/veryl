@@ -22,7 +22,7 @@ use parol_runtime::lexer::tokenizer::{
     ERROR_TOKEN, NEW_LINE_TOKEN, UNMATCHABLE_TOKEN, WHITESPACE_TOKEN,
 };
 
-pub const TERMINALS: &[&str; 86] = &[
+pub const TERMINALS: &[&str; 87] = &[
     /*  0 */ UNMATCHABLE_TOKEN,
     /*  1 */ UNMATCHABLE_TOKEN,
     /*  2 */ UNMATCHABLE_TOKEN,
@@ -104,14 +104,15 @@ pub const TERMINALS: &[&str; 86] = &[
     /* 78 */ r###"\bstruct\b"###,
     /* 79 */ r###"\bsync_high\b"###,
     /* 80 */ r###"\bsync_low\b"###,
-    /* 81 */ r###"\bu32\b"###,
-    /* 82 */ r###"\bu64\b"###,
-    /* 83 */ r###"\bvar\b"###,
-    /* 84 */ r###"[a-zA-Z_][0-9a-zA-Z_]*"###,
-    /* 85 */ ERROR_TOKEN,
+    /* 81 */ r###"\btri\b"###,
+    /* 82 */ r###"\bu32\b"###,
+    /* 83 */ r###"\bu64\b"###,
+    /* 84 */ r###"\bvar\b"###,
+    /* 85 */ r###"[a-zA-Z_][0-9a-zA-Z_]*"###,
+    /* 86 */ ERROR_TOKEN,
 ];
 
-pub const TERMINAL_NAMES: &[&str; 86] = &[
+pub const TERMINAL_NAMES: &[&str; 87] = &[
     /*  0 */ "EndOfInput",
     /*  1 */ "Newline",
     /*  2 */ "Whitespace",
@@ -193,15 +194,16 @@ pub const TERMINAL_NAMES: &[&str; 86] = &[
     /* 78 */ "StructTerm",
     /* 79 */ "SyncHighTerm",
     /* 80 */ "SyncLowTerm",
-    /* 81 */ "U32Term",
-    /* 82 */ "U64Term",
-    /* 83 */ "VarTerm",
-    /* 84 */ "IdentifierTerm",
-    /* 85 */ "Error",
+    /* 81 */ "TriTerm",
+    /* 82 */ "U32Term",
+    /* 83 */ "U64Term",
+    /* 84 */ "VarTerm",
+    /* 85 */ "IdentifierTerm",
+    /* 86 */ "Error",
 ];
 
 /* SCANNER_0: "INITIAL" */
-const SCANNER_0: (&[&str; 5], &[usize; 80]) = (
+const SCANNER_0: (&[&str; 5], &[usize; 81]) = (
     &[
         /*  0 */ UNMATCHABLE_TOKEN,
         /*  1 */ NEW_LINE_TOKEN,
@@ -286,16 +288,17 @@ const SCANNER_0: (&[&str; 5], &[usize; 80]) = (
         78, /* StructTerm */
         79, /* SyncHighTerm */
         80, /* SyncLowTerm */
-        81, /* U32Term */
-        82, /* U64Term */
-        83, /* VarTerm */
-        84, /* IdentifierTerm */
+        81, /* TriTerm */
+        82, /* U32Term */
+        83, /* U64Term */
+        84, /* VarTerm */
+        85, /* IdentifierTerm */
     ],
 );
 
 const MAX_K: usize = 3;
 
-pub const NON_TERMINALS: &[&str; 431] = &[
+pub const NON_TERMINALS: &[&str; 434] = &[
     /*   0 */ "AllBit",
     /*   1 */ "AllBitTerm",
     /*   2 */ "AllBitToken",
@@ -700,39 +703,42 @@ pub const NON_TERMINALS: &[&str; 431] = &[
     /* 401 */ "SyncLow",
     /* 402 */ "SyncLowTerm",
     /* 403 */ "SyncLowToken",
-    /* 404 */ "Type",
-    /* 405 */ "TypeGroup",
-    /* 406 */ "TypeList",
-    /* 407 */ "U32",
-    /* 408 */ "U32Term",
-    /* 409 */ "U32Token",
-    /* 410 */ "U64",
-    /* 411 */ "U64Term",
-    /* 412 */ "U64Token",
-    /* 413 */ "UnaryOperator",
-    /* 414 */ "UnaryOperatorTerm",
-    /* 415 */ "UnaryOperatorToken",
-    /* 416 */ "Var",
-    /* 417 */ "VarDeclaration",
-    /* 418 */ "VarDeclarationOpt",
-    /* 419 */ "VarTerm",
-    /* 420 */ "VarToken",
-    /* 421 */ "Veryl",
-    /* 422 */ "VerylList",
-    /* 423 */ "Width",
-    /* 424 */ "WithParameter",
-    /* 425 */ "WithParameterItem",
-    /* 426 */ "WithParameterItemGroup",
-    /* 427 */ "WithParameterList",
-    /* 428 */ "WithParameterListList",
-    /* 429 */ "WithParameterListOpt",
-    /* 430 */ "WithParameterOpt",
+    /* 404 */ "Tri",
+    /* 405 */ "TriTerm",
+    /* 406 */ "TriToken",
+    /* 407 */ "Type",
+    /* 408 */ "TypeGroup",
+    /* 409 */ "TypeList",
+    /* 410 */ "U32",
+    /* 411 */ "U32Term",
+    /* 412 */ "U32Token",
+    /* 413 */ "U64",
+    /* 414 */ "U64Term",
+    /* 415 */ "U64Token",
+    /* 416 */ "UnaryOperator",
+    /* 417 */ "UnaryOperatorTerm",
+    /* 418 */ "UnaryOperatorToken",
+    /* 419 */ "Var",
+    /* 420 */ "VarDeclaration",
+    /* 421 */ "VarDeclarationOpt",
+    /* 422 */ "VarTerm",
+    /* 423 */ "VarToken",
+    /* 424 */ "Veryl",
+    /* 425 */ "VerylList",
+    /* 426 */ "Width",
+    /* 427 */ "WithParameter",
+    /* 428 */ "WithParameterItem",
+    /* 429 */ "WithParameterItemGroup",
+    /* 430 */ "WithParameterList",
+    /* 431 */ "WithParameterListList",
+    /* 432 */ "WithParameterListOpt",
+    /* 433 */ "WithParameterOpt",
 ];
 
-pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
+pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 434] = &[
     /* 0 - "AllBit" */
     LookaheadDFA {
-        states: &[Some(168)],
+        states: &[Some(170)],
         transitions: &[],
         k: 0,
     },
@@ -744,25 +750,25 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 2 - "AllBitToken" */
     LookaheadDFA {
-        states: &[Some(88)],
+        states: &[Some(89)],
         transitions: &[],
         k: 0,
     },
     /* 3 - "AlwaysComb" */
     LookaheadDFA {
-        states: &[Some(200)],
+        states: &[Some(202)],
         transitions: &[],
         k: 0,
     },
     /* 4 - "AlwaysCombDeclaration" */
     LookaheadDFA {
-        states: &[Some(426)],
+        states: &[Some(430)],
         transitions: &[],
         k: 0,
     },
     /* 5 - "AlwaysCombDeclarationList" */
     LookaheadDFA {
-        states: &[None, Some(427), Some(428)],
+        states: &[None, Some(431), Some(432)],
         transitions: &[
             DFATransition(0, 38, 2),
             DFATransition(0, 48, 1),
@@ -770,7 +776,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 58, 1),
             DFATransition(0, 59, 1),
             DFATransition(0, 76, 1),
-            DFATransition(0, 84, 1),
+            DFATransition(0, 85, 1),
         ],
         k: 1,
     },
@@ -782,47 +788,47 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 7 - "AlwaysCombToken" */
     LookaheadDFA {
-        states: &[Some(120)],
+        states: &[Some(121)],
         transitions: &[],
         k: 0,
     },
     /* 8 - "AlwaysFf" */
     LookaheadDFA {
-        states: &[Some(201)],
+        states: &[Some(203)],
         transitions: &[],
         k: 0,
     },
     /* 9 - "AlwaysFfClock" */
     LookaheadDFA {
-        states: &[Some(414)],
+        states: &[Some(418)],
         transitions: &[],
         k: 0,
     },
     /* 10 - "AlwaysFfClockOpt" */
     LookaheadDFA {
-        states: &[None, Some(415), Some(418)],
+        states: &[None, Some(419), Some(422)],
         transitions: &[
             DFATransition(0, 69, 1),
             DFATransition(0, 73, 1),
-            DFATransition(0, 84, 2),
+            DFATransition(0, 85, 2),
         ],
         k: 1,
     },
     /* 11 - "AlwaysFfClockOptGroup" */
     LookaheadDFA {
-        states: &[None, Some(416), Some(417)],
+        states: &[None, Some(420), Some(421)],
         transitions: &[DFATransition(0, 69, 2), DFATransition(0, 73, 1)],
         k: 1,
     },
     /* 12 - "AlwaysFfDeclaration" */
     LookaheadDFA {
-        states: &[Some(409)],
+        states: &[Some(413)],
         transitions: &[],
         k: 0,
     },
     /* 13 - "AlwaysFfDeclarationList" */
     LookaheadDFA {
-        states: &[None, Some(410), Some(411)],
+        states: &[None, Some(414), Some(415)],
         transitions: &[
             DFATransition(0, 38, 2),
             DFATransition(0, 48, 1),
@@ -830,37 +836,37 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 58, 1),
             DFATransition(0, 59, 1),
             DFATransition(0, 76, 1),
-            DFATransition(0, 84, 1),
+            DFATransition(0, 85, 1),
         ],
         k: 1,
     },
     /* 14 - "AlwaysFfDeclarationOpt" */
     LookaheadDFA {
-        states: &[None, Some(412), Some(413)],
+        states: &[None, Some(416), Some(417)],
         transitions: &[DFATransition(0, 29, 1), DFATransition(0, 40, 2)],
         k: 1,
     },
     /* 15 - "AlwaysFfReset" */
     LookaheadDFA {
-        states: &[Some(419)],
+        states: &[Some(423)],
         transitions: &[],
         k: 0,
     },
     /* 16 - "AlwaysFfResetOpt" */
     LookaheadDFA {
-        states: &[None, Some(420), Some(425)],
+        states: &[None, Some(424), Some(429)],
         transitions: &[
             DFATransition(0, 45, 1),
             DFATransition(0, 46, 1),
             DFATransition(0, 79, 1),
             DFATransition(0, 80, 1),
-            DFATransition(0, 84, 2),
+            DFATransition(0, 85, 2),
         ],
         k: 1,
     },
     /* 17 - "AlwaysFfResetOptGroup" */
     LookaheadDFA {
-        states: &[None, Some(421), Some(422), Some(423), Some(424)],
+        states: &[None, Some(425), Some(426), Some(427), Some(428)],
         transitions: &[
             DFATransition(0, 45, 2),
             DFATransition(0, 46, 1),
@@ -877,19 +883,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 19 - "AlwaysFfToken" */
     LookaheadDFA {
-        states: &[Some(121)],
+        states: &[Some(122)],
         transitions: &[],
         k: 0,
     },
     /* 20 - "Assign" */
     LookaheadDFA {
-        states: &[Some(202)],
+        states: &[Some(204)],
         transitions: &[],
         k: 0,
     },
     /* 21 - "AssignDeclaration" */
     LookaheadDFA {
-        states: &[Some(429)],
+        states: &[Some(433)],
         transitions: &[],
         k: 0,
     },
@@ -901,13 +907,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 23 - "AssignToken" */
     LookaheadDFA {
-        states: &[Some(122)],
+        states: &[Some(123)],
         transitions: &[],
         k: 0,
     },
     /* 24 - "AssignmentOperator" */
     LookaheadDFA {
-        states: &[Some(169)],
+        states: &[Some(171)],
         transitions: &[],
         k: 0,
     },
@@ -919,25 +925,25 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 26 - "AssignmentOperatorToken" */
     LookaheadDFA {
-        states: &[Some(89)],
+        states: &[Some(90)],
         transitions: &[],
         k: 0,
     },
     /* 27 - "AssignmentStatement" */
     LookaheadDFA {
-        states: &[Some(364)],
+        states: &[Some(368)],
         transitions: &[],
         k: 0,
     },
     /* 28 - "AssignmentStatementGroup" */
     LookaheadDFA {
-        states: &[None, Some(365), Some(366)],
+        states: &[None, Some(369), Some(370)],
         transitions: &[DFATransition(0, 14, 2), DFATransition(0, 33, 1)],
         k: 1,
     },
     /* 29 - "AsyncHigh" */
     LookaheadDFA {
-        states: &[Some(203)],
+        states: &[Some(205)],
         transitions: &[],
         k: 0,
     },
@@ -949,13 +955,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 31 - "AsyncHighToken" */
     LookaheadDFA {
-        states: &[Some(123)],
+        states: &[Some(124)],
         transitions: &[],
         k: 0,
     },
     /* 32 - "AsyncLow" */
     LookaheadDFA {
-        states: &[Some(204)],
+        states: &[Some(206)],
         transitions: &[],
         k: 0,
     },
@@ -967,13 +973,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 34 - "AsyncLowToken" */
     LookaheadDFA {
-        states: &[Some(124)],
+        states: &[Some(125)],
         transitions: &[],
         k: 0,
     },
     /* 35 - "BaseLess" */
     LookaheadDFA {
-        states: &[Some(167)],
+        states: &[Some(169)],
         transitions: &[],
         k: 0,
     },
@@ -985,13 +991,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 37 - "BaseLessToken" */
     LookaheadDFA {
-        states: &[Some(87)],
+        states: &[Some(88)],
         transitions: &[],
         k: 0,
     },
     /* 38 - "Based" */
     LookaheadDFA {
-        states: &[Some(166)],
+        states: &[Some(168)],
         transitions: &[],
         k: 0,
     },
@@ -1003,13 +1009,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 40 - "BasedToken" */
     LookaheadDFA {
-        states: &[Some(86)],
+        states: &[Some(87)],
         transitions: &[],
         k: 0,
     },
     /* 41 - "Bit" */
     LookaheadDFA {
-        states: &[Some(205)],
+        states: &[Some(207)],
         transitions: &[],
         k: 0,
     },
@@ -1021,7 +1027,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 43 - "BitToken" */
     LookaheadDFA {
-        states: &[Some(125)],
+        states: &[Some(126)],
         transitions: &[],
         k: 0,
     },
@@ -1029,42 +1035,44 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     LookaheadDFA {
         states: &[
             None,
-            Some(344),
-            Some(345),
-            Some(346),
             Some(347),
             Some(348),
             Some(349),
             Some(350),
             Some(351),
+            Some(352),
+            Some(353),
+            Some(354),
+            Some(355),
         ],
         transitions: &[
-            DFATransition(0, 47, 2),
-            DFATransition(0, 52, 7),
-            DFATransition(0, 53, 8),
-            DFATransition(0, 56, 5),
-            DFATransition(0, 57, 6),
+            DFATransition(0, 47, 3),
+            DFATransition(0, 52, 8),
+            DFATransition(0, 53, 9),
+            DFATransition(0, 56, 6),
+            DFATransition(0, 57, 7),
             DFATransition(0, 66, 1),
-            DFATransition(0, 81, 3),
+            DFATransition(0, 81, 2),
             DFATransition(0, 82, 4),
+            DFATransition(0, 83, 5),
         ],
         k: 1,
     },
     /* 45 - "Case" */
     LookaheadDFA {
-        states: &[Some(206)],
+        states: &[Some(208)],
         transitions: &[],
         k: 0,
     },
     /* 46 - "CaseItem" */
     LookaheadDFA {
-        states: &[Some(398)],
+        states: &[Some(402)],
         transitions: &[],
         k: 0,
     },
     /* 47 - "CaseItemGroup" */
     LookaheadDFA {
-        states: &[None, Some(403), Some(404)],
+        states: &[None, Some(407), Some(408)],
         transitions: &[
             DFATransition(0, 6, 1),
             DFATransition(0, 7, 1),
@@ -1080,13 +1088,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 35, 1),
             DFATransition(0, 37, 1),
             DFATransition(0, 49, 2),
-            DFATransition(0, 84, 1),
+            DFATransition(0, 85, 1),
         ],
         k: 1,
     },
     /* 48 - "CaseItemGroup0" */
     LookaheadDFA {
-        states: &[None, Some(399), Some(400)],
+        states: &[None, Some(403), Some(404)],
         transitions: &[
             DFATransition(0, 35, 2),
             DFATransition(0, 48, 1),
@@ -1094,13 +1102,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 58, 1),
             DFATransition(0, 59, 1),
             DFATransition(0, 76, 1),
-            DFATransition(0, 84, 1),
+            DFATransition(0, 85, 1),
         ],
         k: 1,
     },
     /* 49 - "CaseItemGroup0List" */
     LookaheadDFA {
-        states: &[None, Some(401), Some(402)],
+        states: &[None, Some(405), Some(406)],
         transitions: &[
             DFATransition(0, 38, 2),
             DFATransition(0, 48, 1),
@@ -1108,19 +1116,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 58, 1),
             DFATransition(0, 59, 1),
             DFATransition(0, 76, 1),
-            DFATransition(0, 84, 1),
+            DFATransition(0, 85, 1),
         ],
         k: 1,
     },
     /* 50 - "CaseStatement" */
     LookaheadDFA {
-        states: &[Some(395)],
+        states: &[Some(399)],
         transitions: &[],
         k: 0,
     },
     /* 51 - "CaseStatementList" */
     LookaheadDFA {
-        states: &[None, Some(396), Some(397)],
+        states: &[None, Some(400), Some(401)],
         transitions: &[
             DFATransition(0, 6, 1),
             DFATransition(0, 7, 1),
@@ -1137,7 +1145,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 37, 1),
             DFATransition(0, 38, 2),
             DFATransition(0, 49, 1),
-            DFATransition(0, 84, 1),
+            DFATransition(0, 85, 1),
         ],
         k: 1,
     },
@@ -1149,19 +1157,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 53 - "CaseToken" */
     LookaheadDFA {
-        states: &[Some(126)],
+        states: &[Some(127)],
         transitions: &[],
         k: 0,
     },
     /* 54 - "Colon" */
     LookaheadDFA {
-        states: &[Some(182)],
+        states: &[Some(184)],
         transitions: &[],
         k: 0,
     },
     /* 55 - "ColonColon" */
     LookaheadDFA {
-        states: &[Some(183)],
+        states: &[Some(185)],
         transitions: &[],
         k: 0,
     },
@@ -1173,7 +1181,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 57 - "ColonColonToken" */
     LookaheadDFA {
-        states: &[Some(103)],
+        states: &[Some(104)],
         transitions: &[],
         k: 0,
     },
@@ -1185,13 +1193,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 59 - "ColonToken" */
     LookaheadDFA {
-        states: &[Some(102)],
+        states: &[Some(103)],
         transitions: &[],
         k: 0,
     },
     /* 60 - "Comma" */
     LookaheadDFA {
-        states: &[Some(184)],
+        states: &[Some(186)],
         transitions: &[],
         k: 0,
     },
@@ -1203,19 +1211,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 62 - "CommaToken" */
     LookaheadDFA {
-        states: &[Some(104)],
+        states: &[Some(105)],
         transitions: &[],
         k: 0,
     },
     /* 63 - "Comments" */
     LookaheadDFA {
-        states: &[Some(80)],
+        states: &[Some(81)],
         transitions: &[],
         k: 0,
     },
     /* 64 - "CommentsOpt" */
     LookaheadDFA {
-        states: &[None, Some(81), Some(82)],
+        states: &[None, Some(82), Some(83)],
         transitions: &[
             DFATransition(0, 0, 2),
             DFATransition(0, 5, 1),
@@ -1298,6 +1306,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 82, 2),
             DFATransition(0, 83, 2),
             DFATransition(0, 84, 2),
+            DFATransition(0, 85, 2),
         ],
         k: 1,
     },
@@ -1309,13 +1318,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 66 - "ConcatenationItem" */
     LookaheadDFA {
-        states: &[Some(333)],
+        states: &[Some(336)],
         transitions: &[],
         k: 0,
     },
     /* 67 - "ConcatenationItemOpt" */
     LookaheadDFA {
-        states: &[None, Some(334), Some(335)],
+        states: &[None, Some(337), Some(338)],
         transitions: &[
             DFATransition(0, 29, 2),
             DFATransition(0, 38, 2),
@@ -1325,7 +1334,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 68 - "ConcatenationList" */
     LookaheadDFA {
-        states: &[Some(328)],
+        states: &[Some(331)],
         transitions: &[],
         k: 0,
     },
@@ -1335,7 +1344,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             None,
             None,
             None,
-            Some(329),
+            Some(332),
             None,
             None,
             None,
@@ -1352,7 +1361,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             None,
             None,
             None,
-            Some(330),
+            Some(333),
             None,
             None,
             None,
@@ -1396,7 +1405,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(1, 35, 15),
             DFATransition(1, 37, 16),
             DFATransition(1, 38, 19),
-            DFATransition(1, 84, 17),
+            DFATransition(1, 85, 17),
             DFATransition(2, 6, 3),
             DFATransition(2, 7, 3),
             DFATransition(2, 8, 3),
@@ -1411,7 +1420,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(2, 35, 3),
             DFATransition(2, 37, 3),
             DFATransition(2, 38, 20),
-            DFATransition(2, 84, 3),
+            DFATransition(2, 85, 3),
             DFATransition(4, 5, 3),
             DFATransition(4, 15, 3),
             DFATransition(4, 16, 3),
@@ -1501,7 +1510,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(9, 30, 3),
             DFATransition(9, 35, 3),
             DFATransition(9, 37, 3),
-            DFATransition(9, 84, 3),
+            DFATransition(9, 85, 3),
             DFATransition(10, 5, 3),
             DFATransition(10, 6, 3),
             DFATransition(10, 7, 3),
@@ -1516,7 +1525,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(10, 30, 3),
             DFATransition(10, 35, 3),
             DFATransition(10, 37, 3),
-            DFATransition(10, 84, 3),
+            DFATransition(10, 85, 3),
             DFATransition(11, 5, 3),
             DFATransition(11, 6, 3),
             DFATransition(11, 7, 3),
@@ -1531,7 +1540,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(11, 30, 3),
             DFATransition(11, 35, 3),
             DFATransition(11, 37, 3),
-            DFATransition(11, 84, 3),
+            DFATransition(11, 85, 3),
             DFATransition(12, 5, 3),
             DFATransition(12, 6, 3),
             DFATransition(12, 7, 3),
@@ -1546,7 +1555,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(12, 30, 3),
             DFATransition(12, 35, 3),
             DFATransition(12, 37, 3),
-            DFATransition(12, 84, 3),
+            DFATransition(12, 85, 3),
             DFATransition(13, 5, 3),
             DFATransition(13, 6, 3),
             DFATransition(13, 7, 3),
@@ -1561,9 +1570,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(13, 30, 3),
             DFATransition(13, 35, 3),
             DFATransition(13, 37, 3),
-            DFATransition(13, 84, 3),
+            DFATransition(13, 85, 3),
             DFATransition(14, 5, 3),
-            DFATransition(14, 84, 3),
+            DFATransition(14, 85, 3),
             DFATransition(15, 5, 3),
             DFATransition(15, 6, 3),
             DFATransition(15, 7, 3),
@@ -1578,7 +1587,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(15, 30, 3),
             DFATransition(15, 35, 3),
             DFATransition(15, 37, 3),
-            DFATransition(15, 84, 3),
+            DFATransition(15, 85, 3),
             DFATransition(16, 5, 3),
             DFATransition(16, 6, 3),
             DFATransition(16, 7, 3),
@@ -1593,7 +1602,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(16, 30, 3),
             DFATransition(16, 35, 3),
             DFATransition(16, 37, 3),
-            DFATransition(16, 84, 3),
+            DFATransition(16, 85, 3),
             DFATransition(17, 5, 3),
             DFATransition(17, 15, 3),
             DFATransition(17, 16, 3),
@@ -1698,7 +1707,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(22, 30, 20),
             DFATransition(22, 35, 20),
             DFATransition(22, 37, 20),
-            DFATransition(22, 84, 20),
+            DFATransition(22, 85, 20),
             DFATransition(23, 5, 20),
             DFATransition(23, 6, 20),
             DFATransition(23, 7, 20),
@@ -1713,7 +1722,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(23, 30, 20),
             DFATransition(23, 35, 20),
             DFATransition(23, 37, 20),
-            DFATransition(23, 84, 20),
+            DFATransition(23, 85, 20),
             DFATransition(24, 5, 20),
             DFATransition(24, 6, 20),
             DFATransition(24, 7, 20),
@@ -1728,7 +1737,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(24, 30, 20),
             DFATransition(24, 35, 20),
             DFATransition(24, 37, 20),
-            DFATransition(24, 84, 20),
+            DFATransition(24, 85, 20),
             DFATransition(25, 5, 20),
             DFATransition(25, 6, 20),
             DFATransition(25, 7, 20),
@@ -1743,7 +1752,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(25, 30, 20),
             DFATransition(25, 35, 20),
             DFATransition(25, 37, 20),
-            DFATransition(25, 84, 20),
+            DFATransition(25, 85, 20),
             DFATransition(26, 5, 20),
             DFATransition(26, 6, 20),
             DFATransition(26, 7, 20),
@@ -1758,7 +1767,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(26, 30, 20),
             DFATransition(26, 35, 20),
             DFATransition(26, 37, 20),
-            DFATransition(26, 84, 20),
+            DFATransition(26, 85, 20),
             DFATransition(27, 5, 20),
             DFATransition(27, 6, 20),
             DFATransition(27, 7, 20),
@@ -1773,7 +1782,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(27, 30, 20),
             DFATransition(27, 35, 20),
             DFATransition(27, 37, 20),
-            DFATransition(27, 84, 20),
+            DFATransition(27, 85, 20),
             DFATransition(28, 5, 20),
             DFATransition(28, 6, 20),
             DFATransition(28, 7, 20),
@@ -1788,7 +1797,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(28, 30, 20),
             DFATransition(28, 35, 20),
             DFATransition(28, 37, 20),
-            DFATransition(28, 84, 20),
+            DFATransition(28, 85, 20),
             DFATransition(29, 5, 20),
             DFATransition(29, 6, 20),
             DFATransition(29, 7, 20),
@@ -1803,7 +1812,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(29, 30, 20),
             DFATransition(29, 35, 20),
             DFATransition(29, 37, 20),
-            DFATransition(29, 84, 20),
+            DFATransition(29, 85, 20),
             DFATransition(30, 5, 20),
             DFATransition(30, 6, 20),
             DFATransition(30, 7, 20),
@@ -1818,7 +1827,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(30, 30, 20),
             DFATransition(30, 35, 20),
             DFATransition(30, 37, 20),
-            DFATransition(30, 84, 20),
+            DFATransition(30, 85, 20),
             DFATransition(31, 5, 20),
             DFATransition(31, 6, 20),
             DFATransition(31, 7, 20),
@@ -1833,7 +1842,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(31, 30, 20),
             DFATransition(31, 35, 20),
             DFATransition(31, 37, 20),
-            DFATransition(31, 84, 20),
+            DFATransition(31, 85, 20),
             DFATransition(32, 5, 20),
             DFATransition(32, 6, 20),
             DFATransition(32, 7, 20),
@@ -1848,7 +1857,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(32, 30, 20),
             DFATransition(32, 35, 20),
             DFATransition(32, 37, 20),
-            DFATransition(32, 84, 20),
+            DFATransition(32, 85, 20),
             DFATransition(33, 5, 20),
             DFATransition(33, 6, 20),
             DFATransition(33, 7, 20),
@@ -1863,7 +1872,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(33, 30, 20),
             DFATransition(33, 35, 20),
             DFATransition(33, 37, 20),
-            DFATransition(33, 84, 20),
+            DFATransition(33, 85, 20),
             DFATransition(34, 5, 20),
             DFATransition(34, 6, 20),
             DFATransition(34, 7, 20),
@@ -1878,7 +1887,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(34, 30, 20),
             DFATransition(34, 35, 20),
             DFATransition(34, 37, 20),
-            DFATransition(34, 84, 20),
+            DFATransition(34, 85, 20),
             DFATransition(35, 5, 20),
             DFATransition(35, 6, 20),
             DFATransition(35, 7, 20),
@@ -1898,7 +1907,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(35, 58, 20),
             DFATransition(35, 59, 20),
             DFATransition(35, 76, 20),
-            DFATransition(35, 84, 20),
+            DFATransition(35, 85, 20),
             DFATransition(36, 5, 20),
             DFATransition(36, 6, 20),
             DFATransition(36, 7, 20),
@@ -1917,7 +1926,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(36, 40, 20),
             DFATransition(36, 65, 20),
             DFATransition(36, 72, 20),
-            DFATransition(36, 84, 20),
+            DFATransition(36, 85, 20),
             DFATransition(37, 5, 20),
             DFATransition(37, 6, 20),
             DFATransition(37, 7, 20),
@@ -1932,7 +1941,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(37, 30, 20),
             DFATransition(37, 35, 20),
             DFATransition(37, 37, 20),
-            DFATransition(37, 84, 20),
+            DFATransition(37, 85, 20),
             DFATransition(38, 5, 20),
             DFATransition(38, 6, 20),
             DFATransition(38, 7, 20),
@@ -1964,8 +1973,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(38, 67, 20),
             DFATransition(38, 76, 20),
             DFATransition(38, 78, 20),
-            DFATransition(38, 83, 20),
             DFATransition(38, 84, 20),
+            DFATransition(38, 85, 20),
             DFATransition(39, 5, 20),
             DFATransition(39, 11, 20),
             DFATransition(39, 13, 20),
@@ -2001,7 +2010,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(39, 75, 20),
             DFATransition(39, 77, 20),
             DFATransition(39, 78, 20),
-            DFATransition(39, 83, 20),
+            DFATransition(39, 84, 20),
             DFATransition(40, 5, 20),
             DFATransition(40, 11, 20),
             DFATransition(40, 13, 20),
@@ -2090,8 +2099,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(42, 67, 20),
             DFATransition(42, 76, 20),
             DFATransition(42, 78, 20),
-            DFATransition(42, 83, 20),
             DFATransition(42, 84, 20),
+            DFATransition(42, 85, 20),
             DFATransition(43, 5, 20),
             DFATransition(43, 6, 20),
             DFATransition(43, 7, 20),
@@ -2106,7 +2115,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(43, 30, 20),
             DFATransition(43, 35, 20),
             DFATransition(43, 37, 20),
-            DFATransition(43, 84, 20),
+            DFATransition(43, 85, 20),
             DFATransition(44, 5, 20),
             DFATransition(44, 6, 20),
             DFATransition(44, 7, 20),
@@ -2122,19 +2131,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(44, 30, 20),
             DFATransition(44, 35, 20),
             DFATransition(44, 37, 20),
-            DFATransition(44, 84, 20),
+            DFATransition(44, 85, 20),
         ],
         k: 3,
     },
     /* 70 - "ConcatenationListOpt" */
     LookaheadDFA {
-        states: &[None, Some(331), Some(332)],
+        states: &[None, Some(334), Some(335)],
         transitions: &[DFATransition(0, 29, 1), DFATransition(0, 38, 2)],
         k: 1,
     },
     /* 71 - "Defaul" */
     LookaheadDFA {
-        states: &[Some(207)],
+        states: &[Some(209)],
         transitions: &[],
         k: 0,
     },
@@ -2146,13 +2155,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 73 - "DefaultToken" */
     LookaheadDFA {
-        states: &[Some(127)],
+        states: &[Some(128)],
         transitions: &[],
         k: 0,
     },
     /* 74 - "Description" */
     LookaheadDFA {
-        states: &[None, Some(590), Some(591), Some(592)],
+        states: &[None, Some(594), Some(595), Some(596)],
         transitions: &[
             DFATransition(0, 63, 2),
             DFATransition(0, 68, 1),
@@ -2162,7 +2171,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 75 - "Direction" */
     LookaheadDFA {
-        states: &[None, Some(503), Some(504), Some(505), Some(506), Some(507)],
+        states: &[None, Some(507), Some(508), Some(509), Some(510), Some(511)],
         transitions: &[
             DFATransition(0, 60, 3),
             DFATransition(0, 61, 1),
@@ -2174,7 +2183,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 76 - "Dollar" */
     LookaheadDFA {
-        states: &[Some(185)],
+        states: &[Some(187)],
         transitions: &[],
         k: 0,
     },
@@ -2186,19 +2195,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 78 - "DollarToken" */
     LookaheadDFA {
-        states: &[Some(105)],
+        states: &[Some(106)],
         transitions: &[],
         k: 0,
     },
     /* 79 - "Dot" */
     LookaheadDFA {
-        states: &[Some(187)],
+        states: &[Some(189)],
         transitions: &[],
         k: 0,
     },
     /* 80 - "DotDot" */
     LookaheadDFA {
-        states: &[Some(186)],
+        states: &[Some(188)],
         transitions: &[],
         k: 0,
     },
@@ -2210,7 +2219,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 82 - "DotDotToken" */
     LookaheadDFA {
-        states: &[Some(106)],
+        states: &[Some(107)],
         transitions: &[],
         k: 0,
     },
@@ -2222,13 +2231,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 84 - "DotToken" */
     LookaheadDFA {
-        states: &[Some(107)],
+        states: &[Some(108)],
         transitions: &[],
         k: 0,
     },
     /* 85 - "Else" */
     LookaheadDFA {
-        states: &[Some(208)],
+        states: &[Some(210)],
         transitions: &[],
         k: 0,
     },
@@ -2240,31 +2249,31 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 87 - "ElseToken" */
     LookaheadDFA {
-        states: &[Some(128)],
+        states: &[Some(129)],
         transitions: &[],
         k: 0,
     },
     /* 88 - "Enum" */
     LookaheadDFA {
-        states: &[Some(209)],
+        states: &[Some(211)],
         transitions: &[],
         k: 0,
     },
     /* 89 - "EnumDeclaration" */
     LookaheadDFA {
-        states: &[Some(437)],
+        states: &[Some(441)],
         transitions: &[],
         k: 0,
     },
     /* 90 - "EnumItem" */
     LookaheadDFA {
-        states: &[Some(443)],
+        states: &[Some(447)],
         transitions: &[],
         k: 0,
     },
     /* 91 - "EnumItemOpt" */
     LookaheadDFA {
-        states: &[None, Some(444), Some(445)],
+        states: &[None, Some(448), Some(449)],
         transitions: &[
             DFATransition(0, 29, 2),
             DFATransition(0, 33, 1),
@@ -2274,7 +2283,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 92 - "EnumList" */
     LookaheadDFA {
-        states: &[Some(438)],
+        states: &[Some(442)],
         transitions: &[],
         k: 0,
     },
@@ -2284,11 +2293,11 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             None,
             None,
             None,
-            Some(439),
+            Some(443),
             None,
             None,
             None,
-            Some(440),
+            Some(444),
             None,
             None,
             None,
@@ -2310,9 +2319,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 38, 5),
             DFATransition(1, 5, 2),
             DFATransition(1, 38, 6),
-            DFATransition(1, 84, 4),
+            DFATransition(1, 85, 4),
             DFATransition(2, 38, 7),
-            DFATransition(2, 84, 3),
+            DFATransition(2, 85, 3),
             DFATransition(4, 5, 3),
             DFATransition(4, 29, 3),
             DFATransition(4, 33, 3),
@@ -2331,7 +2340,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(5, 65, 19),
             DFATransition(5, 67, 20),
             DFATransition(5, 78, 21),
-            DFATransition(5, 83, 22),
+            DFATransition(5, 84, 22),
             DFATransition(6, 5, 7),
             DFATransition(6, 28, 7),
             DFATransition(6, 38, 7),
@@ -2346,7 +2355,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(6, 65, 7),
             DFATransition(6, 67, 7),
             DFATransition(6, 78, 7),
-            DFATransition(6, 83, 7),
+            DFATransition(6, 84, 7),
             DFATransition(8, 28, 7),
             DFATransition(8, 38, 7),
             DFATransition(8, 42, 7),
@@ -2360,9 +2369,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(8, 65, 7),
             DFATransition(8, 67, 7),
             DFATransition(8, 78, 7),
-            DFATransition(8, 83, 7),
+            DFATransition(8, 84, 7),
             DFATransition(9, 5, 7),
-            DFATransition(9, 84, 7),
+            DFATransition(9, 85, 7),
             DFATransition(10, 0, 7),
             DFATransition(10, 5, 7),
             DFATransition(10, 28, 7),
@@ -2382,19 +2391,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(10, 68, 7),
             DFATransition(10, 71, 7),
             DFATransition(10, 78, 7),
-            DFATransition(10, 83, 7),
+            DFATransition(10, 84, 7),
             DFATransition(11, 5, 7),
             DFATransition(11, 35, 7),
             DFATransition(12, 5, 7),
             DFATransition(12, 37, 7),
             DFATransition(13, 5, 7),
-            DFATransition(13, 84, 7),
+            DFATransition(13, 85, 7),
             DFATransition(14, 5, 7),
-            DFATransition(14, 84, 7),
+            DFATransition(14, 85, 7),
             DFATransition(15, 5, 7),
-            DFATransition(15, 84, 7),
+            DFATransition(15, 85, 7),
             DFATransition(16, 5, 7),
-            DFATransition(16, 84, 7),
+            DFATransition(16, 85, 7),
             DFATransition(17, 5, 7),
             DFATransition(17, 6, 7),
             DFATransition(17, 7, 7),
@@ -2409,23 +2418,23 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(17, 30, 7),
             DFATransition(17, 35, 7),
             DFATransition(17, 37, 7),
-            DFATransition(17, 84, 7),
+            DFATransition(17, 85, 7),
             DFATransition(18, 5, 7),
-            DFATransition(18, 84, 7),
+            DFATransition(18, 85, 7),
             DFATransition(19, 5, 7),
-            DFATransition(19, 84, 7),
+            DFATransition(19, 85, 7),
             DFATransition(20, 5, 7),
-            DFATransition(20, 84, 7),
+            DFATransition(20, 85, 7),
             DFATransition(21, 5, 7),
-            DFATransition(21, 84, 7),
+            DFATransition(21, 85, 7),
             DFATransition(22, 5, 7),
-            DFATransition(22, 84, 7),
+            DFATransition(22, 85, 7),
         ],
         k: 3,
     },
     /* 94 - "EnumListOpt" */
     LookaheadDFA {
-        states: &[None, Some(441), Some(442)],
+        states: &[None, Some(445), Some(446)],
         transitions: &[DFATransition(0, 29, 1), DFATransition(0, 38, 2)],
         k: 1,
     },
@@ -2437,13 +2446,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 96 - "EnumToken" */
     LookaheadDFA {
-        states: &[Some(129)],
+        states: &[Some(130)],
         transitions: &[],
         k: 0,
     },
     /* 97 - "Equ" */
     LookaheadDFA {
-        states: &[Some(188)],
+        states: &[Some(190)],
         transitions: &[],
         k: 0,
     },
@@ -2455,13 +2464,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 99 - "EquToken" */
     LookaheadDFA {
-        states: &[Some(108)],
+        states: &[Some(109)],
         transitions: &[],
         k: 0,
     },
     /* 100 - "Exponent" */
     LookaheadDFA {
-        states: &[Some(164)],
+        states: &[Some(166)],
         transitions: &[],
         k: 0,
     },
@@ -2473,25 +2482,25 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 102 - "ExponentToken" */
     LookaheadDFA {
-        states: &[Some(84)],
+        states: &[Some(85)],
         transitions: &[],
         k: 0,
     },
     /* 103 - "Expression" */
     LookaheadDFA {
-        states: &[Some(272)],
+        states: &[Some(275)],
         transitions: &[],
         k: 0,
     },
     /* 104 - "Expression01" */
     LookaheadDFA {
-        states: &[Some(275)],
+        states: &[Some(278)],
         transitions: &[],
         k: 0,
     },
     /* 105 - "Expression01List" */
     LookaheadDFA {
-        states: &[None, Some(276), Some(277)],
+        states: &[None, Some(279), Some(280)],
         transitions: &[
             DFATransition(0, 11, 2),
             DFATransition(0, 13, 2),
@@ -2512,13 +2521,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 106 - "Expression02" */
     LookaheadDFA {
-        states: &[Some(278)],
+        states: &[Some(281)],
         transitions: &[],
         k: 0,
     },
     /* 107 - "Expression02List" */
     LookaheadDFA {
-        states: &[None, Some(279), Some(280)],
+        states: &[None, Some(282), Some(283)],
         transitions: &[
             DFATransition(0, 11, 2),
             DFATransition(0, 13, 2),
@@ -2540,13 +2549,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 108 - "Expression03" */
     LookaheadDFA {
-        states: &[Some(281)],
+        states: &[Some(284)],
         transitions: &[],
         k: 0,
     },
     /* 109 - "Expression03List" */
     LookaheadDFA {
-        states: &[None, Some(282), Some(283)],
+        states: &[None, Some(285), Some(286)],
         transitions: &[
             DFATransition(0, 11, 2),
             DFATransition(0, 13, 2),
@@ -2569,13 +2578,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 110 - "Expression04" */
     LookaheadDFA {
-        states: &[Some(284)],
+        states: &[Some(287)],
         transitions: &[],
         k: 0,
     },
     /* 111 - "Expression04List" */
     LookaheadDFA {
-        states: &[None, Some(285), Some(286)],
+        states: &[None, Some(288), Some(289)],
         transitions: &[
             DFATransition(0, 11, 2),
             DFATransition(0, 13, 2),
@@ -2599,13 +2608,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 112 - "Expression05" */
     LookaheadDFA {
-        states: &[Some(287)],
+        states: &[Some(290)],
         transitions: &[],
         k: 0,
     },
     /* 113 - "Expression05List" */
     LookaheadDFA {
-        states: &[None, Some(288), Some(289)],
+        states: &[None, Some(291), Some(292)],
         transitions: &[
             DFATransition(0, 11, 2),
             DFATransition(0, 13, 2),
@@ -2630,13 +2639,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 114 - "Expression06" */
     LookaheadDFA {
-        states: &[Some(290)],
+        states: &[Some(293)],
         transitions: &[],
         k: 0,
     },
     /* 115 - "Expression06List" */
     LookaheadDFA {
-        states: &[None, Some(291), Some(292)],
+        states: &[None, Some(294), Some(295)],
         transitions: &[
             DFATransition(0, 11, 2),
             DFATransition(0, 13, 2),
@@ -2662,13 +2671,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 116 - "Expression07" */
     LookaheadDFA {
-        states: &[Some(293)],
+        states: &[Some(296)],
         transitions: &[],
         k: 0,
     },
     /* 117 - "Expression07List" */
     LookaheadDFA {
-        states: &[None, Some(294), Some(295)],
+        states: &[None, Some(297), Some(298)],
         transitions: &[
             DFATransition(0, 11, 2),
             DFATransition(0, 13, 2),
@@ -2695,13 +2704,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 118 - "Expression08" */
     LookaheadDFA {
-        states: &[Some(296)],
+        states: &[Some(299)],
         transitions: &[],
         k: 0,
     },
     /* 119 - "Expression08List" */
     LookaheadDFA {
-        states: &[None, Some(297), Some(298)],
+        states: &[None, Some(300), Some(301)],
         transitions: &[
             DFATransition(0, 11, 2),
             DFATransition(0, 13, 2),
@@ -2729,13 +2738,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 120 - "Expression09" */
     LookaheadDFA {
-        states: &[Some(299)],
+        states: &[Some(302)],
         transitions: &[],
         k: 0,
     },
     /* 121 - "Expression09List" */
     LookaheadDFA {
-        states: &[None, Some(300), Some(301)],
+        states: &[None, Some(303), Some(304)],
         transitions: &[
             DFATransition(0, 11, 2),
             DFATransition(0, 13, 2),
@@ -2764,13 +2773,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 122 - "Expression10" */
     LookaheadDFA {
-        states: &[Some(302)],
+        states: &[Some(305)],
         transitions: &[],
         k: 0,
     },
     /* 123 - "Expression10List" */
     LookaheadDFA {
-        states: &[None, Some(303), Some(304)],
+        states: &[None, Some(306), Some(307)],
         transitions: &[
             DFATransition(0, 11, 2),
             DFATransition(0, 13, 2),
@@ -2800,13 +2809,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 124 - "Expression11" */
     LookaheadDFA {
-        states: &[Some(305)],
+        states: &[Some(308)],
         transitions: &[],
         k: 0,
     },
     /* 125 - "Expression11List" */
     LookaheadDFA {
-        states: &[None, Some(306), Some(312)],
+        states: &[None, Some(309), Some(315)],
         transitions: &[
             DFATransition(0, 6, 2),
             DFATransition(0, 7, 2),
@@ -2821,13 +2830,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 30, 2),
             DFATransition(0, 35, 2),
             DFATransition(0, 37, 2),
-            DFATransition(0, 84, 2),
+            DFATransition(0, 85, 2),
         ],
         k: 1,
     },
     /* 126 - "Expression11ListGroup" */
     LookaheadDFA {
-        states: &[None, Some(307), Some(308), Some(309), Some(310), Some(311)],
+        states: &[None, Some(310), Some(311), Some(312), Some(313), Some(314)],
         transitions: &[
             DFATransition(0, 17, 2),
             DFATransition(0, 23, 3),
@@ -2839,7 +2848,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 127 - "ExpressionList" */
     LookaheadDFA {
-        states: &[None, Some(273), Some(274)],
+        states: &[None, Some(276), Some(277)],
         transitions: &[
             DFATransition(0, 11, 2),
             DFATransition(0, 13, 2),
@@ -2859,7 +2868,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 128 - "F32" */
     LookaheadDFA {
-        states: &[Some(210)],
+        states: &[Some(212)],
         transitions: &[],
         k: 0,
     },
@@ -2871,13 +2880,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 130 - "F32Token" */
     LookaheadDFA {
-        states: &[Some(130)],
+        states: &[Some(131)],
         transitions: &[],
         k: 0,
     },
     /* 131 - "F64" */
     LookaheadDFA {
-        states: &[Some(211)],
+        states: &[Some(213)],
         transitions: &[],
         k: 0,
     },
@@ -2889,13 +2898,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 133 - "F64Token" */
     LookaheadDFA {
-        states: &[Some(131)],
+        states: &[Some(132)],
         transitions: &[],
         k: 0,
     },
     /* 134 - "Factor" */
     LookaheadDFA {
-        states: &[None, Some(313), Some(314), Some(315), Some(316)],
+        states: &[None, Some(316), Some(317), Some(318), Some(319)],
         transitions: &[
             DFATransition(0, 6, 1),
             DFATransition(0, 7, 1),
@@ -2905,19 +2914,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 30, 2),
             DFATransition(0, 35, 4),
             DFATransition(0, 37, 3),
-            DFATransition(0, 84, 2),
+            DFATransition(0, 85, 2),
         ],
         k: 1,
     },
     /* 135 - "FactorOpt" */
     LookaheadDFA {
-        states: &[None, Some(321), Some(322)],
-        transitions: &[DFATransition(0, 30, 1), DFATransition(0, 84, 2)],
+        states: &[None, Some(324), Some(325)],
+        transitions: &[DFATransition(0, 30, 1), DFATransition(0, 85, 2)],
         k: 1,
     },
     /* 136 - "FactorOpt0" */
     LookaheadDFA {
-        states: &[None, Some(317), Some(320)],
+        states: &[None, Some(320), Some(323)],
         transitions: &[
             DFATransition(0, 11, 2),
             DFATransition(0, 13, 2),
@@ -2948,7 +2957,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 137 - "FactorOpt1" */
     LookaheadDFA {
-        states: &[None, Some(318), Some(319)],
+        states: &[None, Some(321), Some(322)],
         transitions: &[
             DFATransition(0, 6, 1),
             DFATransition(0, 7, 1),
@@ -2964,13 +2973,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 35, 1),
             DFATransition(0, 37, 1),
             DFATransition(0, 40, 2),
-            DFATransition(0, 84, 1),
+            DFATransition(0, 85, 1),
         ],
         k: 1,
     },
     /* 138 - "FixedPoint" */
     LookaheadDFA {
-        states: &[Some(165)],
+        states: &[Some(167)],
         transitions: &[],
         k: 0,
     },
@@ -2982,25 +2991,25 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 140 - "FixedPointToken" */
     LookaheadDFA {
-        states: &[Some(85)],
+        states: &[Some(86)],
         transitions: &[],
         k: 0,
     },
     /* 141 - "For" */
     LookaheadDFA {
-        states: &[Some(212)],
+        states: &[Some(214)],
         transitions: &[],
         k: 0,
     },
     /* 142 - "ForStatement" */
     LookaheadDFA {
-        states: &[Some(390)],
+        states: &[Some(394)],
         transitions: &[],
         k: 0,
     },
     /* 143 - "ForStatementList" */
     LookaheadDFA {
-        states: &[None, Some(391), Some(392)],
+        states: &[None, Some(395), Some(396)],
         transitions: &[
             DFATransition(0, 38, 2),
             DFATransition(0, 48, 1),
@@ -3008,13 +3017,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 58, 1),
             DFATransition(0, 59, 1),
             DFATransition(0, 76, 1),
-            DFATransition(0, 84, 1),
+            DFATransition(0, 85, 1),
         ],
         k: 1,
     },
     /* 144 - "ForStatementOpt" */
     LookaheadDFA {
-        states: &[None, Some(393), Some(394)],
+        states: &[None, Some(397), Some(398)],
         transitions: &[DFATransition(0, 35, 2), DFATransition(0, 77, 1)],
         k: 1,
     },
@@ -3026,19 +3035,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 146 - "ForToken" */
     LookaheadDFA {
-        states: &[Some(132)],
+        states: &[Some(133)],
         transitions: &[],
         k: 0,
     },
     /* 147 - "Function" */
     LookaheadDFA {
-        states: &[Some(213)],
+        states: &[Some(215)],
         transitions: &[],
         k: 0,
     },
     /* 148 - "FunctionCallArg" */
     LookaheadDFA {
-        states: &[Some(323)],
+        states: &[Some(326)],
         transitions: &[],
         k: 0,
     },
@@ -3048,7 +3057,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             None,
             None,
             None,
-            Some(324),
+            Some(327),
             None,
             None,
             None,
@@ -3065,7 +3074,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             None,
             None,
             None,
-            Some(325),
+            Some(328),
             None,
             None,
             None,
@@ -3109,7 +3118,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(1, 35, 15),
             DFATransition(1, 37, 16),
             DFATransition(1, 40, 19),
-            DFATransition(1, 84, 17),
+            DFATransition(1, 85, 17),
             DFATransition(2, 6, 3),
             DFATransition(2, 7, 3),
             DFATransition(2, 8, 3),
@@ -3124,7 +3133,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(2, 35, 3),
             DFATransition(2, 37, 3),
             DFATransition(2, 40, 20),
-            DFATransition(2, 84, 3),
+            DFATransition(2, 85, 3),
             DFATransition(4, 5, 3),
             DFATransition(4, 15, 3),
             DFATransition(4, 16, 3),
@@ -3209,7 +3218,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(9, 30, 3),
             DFATransition(9, 35, 3),
             DFATransition(9, 37, 3),
-            DFATransition(9, 84, 3),
+            DFATransition(9, 85, 3),
             DFATransition(10, 5, 3),
             DFATransition(10, 6, 3),
             DFATransition(10, 7, 3),
@@ -3224,7 +3233,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(10, 30, 3),
             DFATransition(10, 35, 3),
             DFATransition(10, 37, 3),
-            DFATransition(10, 84, 3),
+            DFATransition(10, 85, 3),
             DFATransition(11, 5, 3),
             DFATransition(11, 6, 3),
             DFATransition(11, 7, 3),
@@ -3239,7 +3248,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(11, 30, 3),
             DFATransition(11, 35, 3),
             DFATransition(11, 37, 3),
-            DFATransition(11, 84, 3),
+            DFATransition(11, 85, 3),
             DFATransition(12, 5, 3),
             DFATransition(12, 6, 3),
             DFATransition(12, 7, 3),
@@ -3254,7 +3263,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(12, 30, 3),
             DFATransition(12, 35, 3),
             DFATransition(12, 37, 3),
-            DFATransition(12, 84, 3),
+            DFATransition(12, 85, 3),
             DFATransition(13, 5, 3),
             DFATransition(13, 6, 3),
             DFATransition(13, 7, 3),
@@ -3269,9 +3278,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(13, 30, 3),
             DFATransition(13, 35, 3),
             DFATransition(13, 37, 3),
-            DFATransition(13, 84, 3),
+            DFATransition(13, 85, 3),
             DFATransition(14, 5, 3),
-            DFATransition(14, 84, 3),
+            DFATransition(14, 85, 3),
             DFATransition(15, 5, 3),
             DFATransition(15, 6, 3),
             DFATransition(15, 7, 3),
@@ -3286,7 +3295,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(15, 30, 3),
             DFATransition(15, 35, 3),
             DFATransition(15, 37, 3),
-            DFATransition(15, 84, 3),
+            DFATransition(15, 85, 3),
             DFATransition(16, 5, 3),
             DFATransition(16, 6, 3),
             DFATransition(16, 7, 3),
@@ -3301,7 +3310,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(16, 30, 3),
             DFATransition(16, 35, 3),
             DFATransition(16, 37, 3),
-            DFATransition(16, 84, 3),
+            DFATransition(16, 85, 3),
             DFATransition(17, 5, 3),
             DFATransition(17, 15, 3),
             DFATransition(17, 16, 3),
@@ -3405,7 +3414,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(22, 30, 20),
             DFATransition(22, 35, 20),
             DFATransition(22, 37, 20),
-            DFATransition(22, 84, 20),
+            DFATransition(22, 85, 20),
             DFATransition(23, 5, 20),
             DFATransition(23, 6, 20),
             DFATransition(23, 7, 20),
@@ -3420,7 +3429,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(23, 30, 20),
             DFATransition(23, 35, 20),
             DFATransition(23, 37, 20),
-            DFATransition(23, 84, 20),
+            DFATransition(23, 85, 20),
             DFATransition(24, 5, 20),
             DFATransition(24, 6, 20),
             DFATransition(24, 7, 20),
@@ -3435,7 +3444,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(24, 30, 20),
             DFATransition(24, 35, 20),
             DFATransition(24, 37, 20),
-            DFATransition(24, 84, 20),
+            DFATransition(24, 85, 20),
             DFATransition(25, 5, 20),
             DFATransition(25, 6, 20),
             DFATransition(25, 7, 20),
@@ -3450,7 +3459,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(25, 30, 20),
             DFATransition(25, 35, 20),
             DFATransition(25, 37, 20),
-            DFATransition(25, 84, 20),
+            DFATransition(25, 85, 20),
             DFATransition(26, 5, 20),
             DFATransition(26, 6, 20),
             DFATransition(26, 7, 20),
@@ -3465,7 +3474,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(26, 30, 20),
             DFATransition(26, 35, 20),
             DFATransition(26, 37, 20),
-            DFATransition(26, 84, 20),
+            DFATransition(26, 85, 20),
             DFATransition(27, 5, 20),
             DFATransition(27, 6, 20),
             DFATransition(27, 7, 20),
@@ -3480,7 +3489,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(27, 30, 20),
             DFATransition(27, 35, 20),
             DFATransition(27, 37, 20),
-            DFATransition(27, 84, 20),
+            DFATransition(27, 85, 20),
             DFATransition(28, 5, 20),
             DFATransition(28, 6, 20),
             DFATransition(28, 7, 20),
@@ -3495,7 +3504,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(28, 30, 20),
             DFATransition(28, 35, 20),
             DFATransition(28, 37, 20),
-            DFATransition(28, 84, 20),
+            DFATransition(28, 85, 20),
             DFATransition(29, 5, 20),
             DFATransition(29, 6, 20),
             DFATransition(29, 7, 20),
@@ -3510,7 +3519,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(29, 30, 20),
             DFATransition(29, 35, 20),
             DFATransition(29, 37, 20),
-            DFATransition(29, 84, 20),
+            DFATransition(29, 85, 20),
             DFATransition(30, 5, 20),
             DFATransition(30, 6, 20),
             DFATransition(30, 7, 20),
@@ -3525,7 +3534,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(30, 30, 20),
             DFATransition(30, 35, 20),
             DFATransition(30, 37, 20),
-            DFATransition(30, 84, 20),
+            DFATransition(30, 85, 20),
             DFATransition(31, 5, 20),
             DFATransition(31, 6, 20),
             DFATransition(31, 7, 20),
@@ -3540,7 +3549,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(31, 30, 20),
             DFATransition(31, 35, 20),
             DFATransition(31, 37, 20),
-            DFATransition(31, 84, 20),
+            DFATransition(31, 85, 20),
             DFATransition(32, 5, 20),
             DFATransition(32, 6, 20),
             DFATransition(32, 7, 20),
@@ -3555,7 +3564,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(32, 30, 20),
             DFATransition(32, 35, 20),
             DFATransition(32, 37, 20),
-            DFATransition(32, 84, 20),
+            DFATransition(32, 85, 20),
             DFATransition(33, 5, 20),
             DFATransition(33, 6, 20),
             DFATransition(33, 7, 20),
@@ -3570,7 +3579,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(33, 30, 20),
             DFATransition(33, 35, 20),
             DFATransition(33, 37, 20),
-            DFATransition(33, 84, 20),
+            DFATransition(33, 85, 20),
             DFATransition(34, 5, 20),
             DFATransition(34, 6, 20),
             DFATransition(34, 7, 20),
@@ -3585,7 +3594,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(34, 30, 20),
             DFATransition(34, 35, 20),
             DFATransition(34, 37, 20),
-            DFATransition(34, 84, 20),
+            DFATransition(34, 85, 20),
             DFATransition(35, 5, 20),
             DFATransition(35, 6, 20),
             DFATransition(35, 7, 20),
@@ -3605,7 +3614,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(35, 58, 20),
             DFATransition(35, 59, 20),
             DFATransition(35, 76, 20),
-            DFATransition(35, 84, 20),
+            DFATransition(35, 85, 20),
             DFATransition(36, 5, 20),
             DFATransition(36, 6, 20),
             DFATransition(36, 7, 20),
@@ -3624,7 +3633,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(36, 40, 20),
             DFATransition(36, 65, 20),
             DFATransition(36, 72, 20),
-            DFATransition(36, 84, 20),
+            DFATransition(36, 85, 20),
             DFATransition(37, 5, 20),
             DFATransition(37, 6, 20),
             DFATransition(37, 7, 20),
@@ -3639,7 +3648,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(37, 30, 20),
             DFATransition(37, 35, 20),
             DFATransition(37, 37, 20),
-            DFATransition(37, 84, 20),
+            DFATransition(37, 85, 20),
             DFATransition(38, 5, 20),
             DFATransition(38, 6, 20),
             DFATransition(38, 7, 20),
@@ -3671,8 +3680,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(38, 67, 20),
             DFATransition(38, 76, 20),
             DFATransition(38, 78, 20),
-            DFATransition(38, 83, 20),
             DFATransition(38, 84, 20),
+            DFATransition(38, 85, 20),
             DFATransition(39, 5, 20),
             DFATransition(39, 11, 20),
             DFATransition(39, 13, 20),
@@ -3708,7 +3717,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(39, 75, 20),
             DFATransition(39, 77, 20),
             DFATransition(39, 78, 20),
-            DFATransition(39, 83, 20),
+            DFATransition(39, 84, 20),
             DFATransition(40, 5, 20),
             DFATransition(40, 11, 20),
             DFATransition(40, 13, 20),
@@ -3797,8 +3806,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(42, 67, 20),
             DFATransition(42, 76, 20),
             DFATransition(42, 78, 20),
-            DFATransition(42, 83, 20),
             DFATransition(42, 84, 20),
+            DFATransition(42, 85, 20),
             DFATransition(43, 5, 20),
             DFATransition(43, 6, 20),
             DFATransition(43, 7, 20),
@@ -3813,7 +3822,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(43, 30, 20),
             DFATransition(43, 35, 20),
             DFATransition(43, 37, 20),
-            DFATransition(43, 84, 20),
+            DFATransition(43, 85, 20),
             DFATransition(44, 5, 20),
             DFATransition(44, 6, 20),
             DFATransition(44, 7, 20),
@@ -3829,25 +3838,25 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(44, 30, 20),
             DFATransition(44, 35, 20),
             DFATransition(44, 37, 20),
-            DFATransition(44, 84, 20),
+            DFATransition(44, 85, 20),
         ],
         k: 3,
     },
     /* 150 - "FunctionCallArgOpt" */
     LookaheadDFA {
-        states: &[None, Some(326), Some(327)],
+        states: &[None, Some(329), Some(330)],
         transitions: &[DFATransition(0, 29, 1), DFATransition(0, 40, 2)],
         k: 1,
     },
     /* 151 - "FunctionDeclaration" */
     LookaheadDFA {
-        states: &[Some(508)],
+        states: &[Some(512)],
         transitions: &[],
         k: 0,
     },
     /* 152 - "FunctionDeclarationList" */
     LookaheadDFA {
-        states: &[None, Some(509), Some(510)],
+        states: &[None, Some(513), Some(514)],
         transitions: &[
             DFATransition(0, 38, 2),
             DFATransition(0, 48, 1),
@@ -3855,14 +3864,14 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 58, 1),
             DFATransition(0, 59, 1),
             DFATransition(0, 76, 1),
-            DFATransition(0, 83, 1),
             DFATransition(0, 84, 1),
+            DFATransition(0, 85, 1),
         ],
         k: 1,
     },
     /* 153 - "FunctionDeclarationOpt" */
     LookaheadDFA {
-        states: &[None, Some(513), Some(514)],
+        states: &[None, Some(517), Some(518)],
         transitions: &[
             DFATransition(0, 12, 2),
             DFATransition(0, 34, 1),
@@ -3872,21 +3881,21 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 154 - "FunctionDeclarationOpt0" */
     LookaheadDFA {
-        states: &[None, Some(511), Some(512)],
+        states: &[None, Some(515), Some(516)],
         transitions: &[DFATransition(0, 12, 2), DFATransition(0, 37, 1)],
         k: 1,
     },
     /* 155 - "FunctionItem" */
     LookaheadDFA {
-        states: &[None, Some(515), Some(516)],
+        states: &[None, Some(519), Some(520)],
         transitions: &[
             DFATransition(0, 48, 2),
             DFATransition(0, 54, 2),
             DFATransition(0, 58, 2),
             DFATransition(0, 59, 2),
             DFATransition(0, 76, 2),
-            DFATransition(0, 83, 1),
-            DFATransition(0, 84, 2),
+            DFATransition(0, 84, 1),
+            DFATransition(0, 85, 2),
         ],
         k: 1,
     },
@@ -3898,13 +3907,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 157 - "FunctionToken" */
     LookaheadDFA {
-        states: &[Some(133)],
+        states: &[Some(134)],
         transitions: &[],
         k: 0,
     },
     /* 158 - "Hash" */
     LookaheadDFA {
-        states: &[Some(189)],
+        states: &[Some(191)],
         transitions: &[],
         k: 0,
     },
@@ -3916,19 +3925,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 160 - "HashToken" */
     LookaheadDFA {
-        states: &[Some(109)],
+        states: &[Some(110)],
         transitions: &[],
         k: 0,
     },
     /* 161 - "HierarchicalIdentifier" */
     LookaheadDFA {
-        states: &[Some(250)],
+        states: &[Some(253)],
         transitions: &[],
         k: 0,
     },
     /* 162 - "HierarchicalIdentifierList" */
     LookaheadDFA {
-        states: &[None, Some(255), Some(256)],
+        states: &[None, Some(258), Some(259)],
         transitions: &[
             DFATransition(0, 14, 2),
             DFATransition(0, 29, 2),
@@ -3941,7 +3950,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 163 - "HierarchicalIdentifierList0" */
     LookaheadDFA {
-        states: &[None, Some(251), Some(254)],
+        states: &[None, Some(254), Some(257)],
         transitions: &[
             DFATransition(0, 14, 2),
             DFATransition(0, 29, 2),
@@ -3953,7 +3962,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 164 - "HierarchicalIdentifierList0List" */
     LookaheadDFA {
-        states: &[None, Some(252), Some(253)],
+        states: &[None, Some(255), Some(256)],
         transitions: &[
             DFATransition(0, 14, 2),
             DFATransition(0, 29, 2),
@@ -3966,7 +3975,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 165 - "I32" */
     LookaheadDFA {
-        states: &[Some(214)],
+        states: &[Some(216)],
         transitions: &[],
         k: 0,
     },
@@ -3978,13 +3987,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 167 - "I32Token" */
     LookaheadDFA {
-        states: &[Some(134)],
+        states: &[Some(135)],
         transitions: &[],
         k: 0,
     },
     /* 168 - "I64" */
     LookaheadDFA {
-        states: &[Some(215)],
+        states: &[Some(217)],
         transitions: &[],
         k: 0,
     },
@@ -3996,49 +4005,49 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 170 - "I64Token" */
     LookaheadDFA {
-        states: &[Some(135)],
+        states: &[Some(136)],
         transitions: &[],
         k: 0,
     },
     /* 171 - "Identifier" */
     LookaheadDFA {
-        states: &[Some(242)],
+        states: &[Some(245)],
         transitions: &[],
         k: 0,
     },
     /* 172 - "IdentifierTerm" */
     LookaheadDFA {
-        states: &[Some(79)],
+        states: &[Some(80)],
         transitions: &[],
         k: 0,
     },
     /* 173 - "IdentifierToken" */
     LookaheadDFA {
-        states: &[Some(162)],
+        states: &[Some(164)],
         transitions: &[],
         k: 0,
     },
     /* 174 - "If" */
     LookaheadDFA {
-        states: &[Some(216)],
+        states: &[Some(218)],
         transitions: &[],
         k: 0,
     },
     /* 175 - "IfReset" */
     LookaheadDFA {
-        states: &[Some(217)],
+        states: &[Some(219)],
         transitions: &[],
         k: 0,
     },
     /* 176 - "IfResetStatement" */
     LookaheadDFA {
-        states: &[Some(378)],
+        states: &[Some(382)],
         transitions: &[],
         k: 0,
     },
     /* 177 - "IfResetStatementList" */
     LookaheadDFA {
-        states: &[None, Some(383), Some(384)],
+        states: &[None, Some(387), Some(388)],
         transitions: &[
             DFATransition(0, 38, 2),
             DFATransition(0, 48, 1),
@@ -4046,7 +4055,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 58, 1),
             DFATransition(0, 59, 1),
             DFATransition(0, 76, 1),
-            DFATransition(0, 84, 1),
+            DFATransition(0, 85, 1),
         ],
         k: 1,
     },
@@ -4056,7 +4065,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             None,
             None,
             None,
-            Some(379),
+            Some(383),
             None,
             None,
             None,
@@ -4093,7 +4102,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             None,
             None,
             None,
-            Some(382),
+            Some(386),
             None,
             None,
             None,
@@ -4383,8 +4392,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 58, 22),
             DFATransition(0, 59, 23),
             DFATransition(0, 76, 24),
-            DFATransition(0, 83, 25),
-            DFATransition(0, 84, 26),
+            DFATransition(0, 84, 25),
+            DFATransition(0, 85, 26),
             DFATransition(1, 5, 2),
             DFATransition(1, 35, 251),
             DFATransition(1, 59, 4),
@@ -4404,7 +4413,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(4, 30, 3),
             DFATransition(4, 35, 3),
             DFATransition(4, 37, 3),
-            DFATransition(4, 84, 3),
+            DFATransition(4, 85, 3),
             DFATransition(5, 5, 27),
             DFATransition(5, 15, 28),
             DFATransition(5, 16, 29),
@@ -4484,7 +4493,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(10, 30, 104),
             DFATransition(10, 35, 105),
             DFATransition(10, 37, 106),
-            DFATransition(10, 84, 107),
+            DFATransition(10, 85, 107),
             DFATransition(11, 5, 108),
             DFATransition(11, 6, 109),
             DFATransition(11, 7, 110),
@@ -4499,7 +4508,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(11, 30, 119),
             DFATransition(11, 35, 120),
             DFATransition(11, 37, 121),
-            DFATransition(11, 84, 122),
+            DFATransition(11, 85, 122),
             DFATransition(12, 5, 123),
             DFATransition(12, 6, 124),
             DFATransition(12, 7, 125),
@@ -4514,7 +4523,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(12, 30, 134),
             DFATransition(12, 35, 135),
             DFATransition(12, 37, 136),
-            DFATransition(12, 84, 137),
+            DFATransition(12, 85, 137),
             DFATransition(13, 5, 138),
             DFATransition(13, 6, 139),
             DFATransition(13, 7, 140),
@@ -4529,7 +4538,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(13, 30, 149),
             DFATransition(13, 35, 150),
             DFATransition(13, 37, 151),
-            DFATransition(13, 84, 152),
+            DFATransition(13, 85, 152),
             DFATransition(14, 5, 153),
             DFATransition(14, 6, 154),
             DFATransition(14, 7, 155),
@@ -4544,9 +4553,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(14, 30, 164),
             DFATransition(14, 35, 165),
             DFATransition(14, 37, 166),
-            DFATransition(14, 84, 167),
+            DFATransition(14, 85, 167),
             DFATransition(15, 5, 168),
-            DFATransition(15, 84, 169),
+            DFATransition(15, 85, 169),
             DFATransition(16, 5, 170),
             DFATransition(16, 6, 171),
             DFATransition(16, 7, 172),
@@ -4561,7 +4570,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(16, 30, 181),
             DFATransition(16, 35, 182),
             DFATransition(16, 37, 183),
-            DFATransition(16, 84, 184),
+            DFATransition(16, 85, 184),
             DFATransition(17, 5, 185),
             DFATransition(17, 6, 186),
             DFATransition(17, 7, 187),
@@ -4576,7 +4585,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(17, 30, 196),
             DFATransition(17, 35, 197),
             DFATransition(17, 37, 198),
-            DFATransition(17, 84, 199),
+            DFATransition(17, 85, 199),
             DFATransition(18, 5, 200),
             DFATransition(18, 6, 201),
             DFATransition(18, 7, 202),
@@ -4609,8 +4618,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(18, 67, 229),
             DFATransition(18, 76, 230),
             DFATransition(18, 78, 231),
-            DFATransition(18, 83, 232),
-            DFATransition(18, 84, 233),
+            DFATransition(18, 84, 232),
+            DFATransition(18, 85, 233),
             DFATransition(19, 5, 234),
             DFATransition(19, 6, 235),
             DFATransition(19, 7, 236),
@@ -4625,11 +4634,11 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(19, 30, 245),
             DFATransition(19, 35, 246),
             DFATransition(19, 37, 247),
-            DFATransition(19, 84, 248),
+            DFATransition(19, 85, 248),
             DFATransition(20, 5, 249),
             DFATransition(20, 28, 250),
             DFATransition(21, 5, 252),
-            DFATransition(21, 84, 253),
+            DFATransition(21, 85, 253),
             DFATransition(22, 5, 254),
             DFATransition(22, 35, 255),
             DFATransition(23, 5, 256),
@@ -4646,7 +4655,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(23, 30, 267),
             DFATransition(23, 35, 268),
             DFATransition(23, 37, 269),
-            DFATransition(23, 84, 270),
+            DFATransition(23, 85, 270),
             DFATransition(24, 5, 271),
             DFATransition(24, 6, 272),
             DFATransition(24, 7, 273),
@@ -4661,9 +4670,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(24, 30, 282),
             DFATransition(24, 35, 283),
             DFATransition(24, 37, 284),
-            DFATransition(24, 84, 285),
+            DFATransition(24, 85, 285),
             DFATransition(25, 5, 286),
-            DFATransition(25, 84, 287),
+            DFATransition(25, 85, 287),
             DFATransition(26, 5, 288),
             DFATransition(26, 14, 289),
             DFATransition(26, 15, 290),
@@ -4709,7 +4718,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(28, 30, 40),
             DFATransition(28, 35, 40),
             DFATransition(28, 37, 40),
-            DFATransition(28, 84, 40),
+            DFATransition(28, 85, 40),
             DFATransition(29, 5, 40),
             DFATransition(29, 6, 40),
             DFATransition(29, 7, 40),
@@ -4724,7 +4733,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(29, 30, 40),
             DFATransition(29, 35, 40),
             DFATransition(29, 37, 40),
-            DFATransition(29, 84, 40),
+            DFATransition(29, 85, 40),
             DFATransition(30, 5, 40),
             DFATransition(30, 6, 40),
             DFATransition(30, 7, 40),
@@ -4739,7 +4748,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(30, 30, 40),
             DFATransition(30, 35, 40),
             DFATransition(30, 37, 40),
-            DFATransition(30, 84, 40),
+            DFATransition(30, 85, 40),
             DFATransition(31, 5, 40),
             DFATransition(31, 6, 40),
             DFATransition(31, 7, 40),
@@ -4754,7 +4763,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(31, 30, 40),
             DFATransition(31, 35, 40),
             DFATransition(31, 37, 40),
-            DFATransition(31, 84, 40),
+            DFATransition(31, 85, 40),
             DFATransition(32, 5, 40),
             DFATransition(32, 6, 40),
             DFATransition(32, 7, 40),
@@ -4769,7 +4778,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(32, 30, 40),
             DFATransition(32, 35, 40),
             DFATransition(32, 37, 40),
-            DFATransition(32, 84, 40),
+            DFATransition(32, 85, 40),
             DFATransition(33, 5, 40),
             DFATransition(33, 6, 40),
             DFATransition(33, 7, 40),
@@ -4784,7 +4793,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(33, 30, 40),
             DFATransition(33, 35, 40),
             DFATransition(33, 37, 40),
-            DFATransition(33, 84, 40),
+            DFATransition(33, 85, 40),
             DFATransition(34, 5, 40),
             DFATransition(34, 6, 40),
             DFATransition(34, 7, 40),
@@ -4799,7 +4808,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(34, 30, 40),
             DFATransition(34, 35, 40),
             DFATransition(34, 37, 40),
-            DFATransition(34, 84, 40),
+            DFATransition(34, 85, 40),
             DFATransition(35, 5, 40),
             DFATransition(35, 6, 40),
             DFATransition(35, 7, 40),
@@ -4814,7 +4823,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(35, 30, 40),
             DFATransition(35, 35, 40),
             DFATransition(35, 37, 40),
-            DFATransition(35, 84, 40),
+            DFATransition(35, 85, 40),
             DFATransition(36, 5, 40),
             DFATransition(36, 6, 40),
             DFATransition(36, 7, 40),
@@ -4829,7 +4838,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(36, 30, 40),
             DFATransition(36, 35, 40),
             DFATransition(36, 37, 40),
-            DFATransition(36, 84, 40),
+            DFATransition(36, 85, 40),
             DFATransition(37, 5, 40),
             DFATransition(37, 6, 40),
             DFATransition(37, 7, 40),
@@ -4844,7 +4853,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(37, 30, 40),
             DFATransition(37, 35, 40),
             DFATransition(37, 37, 40),
-            DFATransition(37, 84, 40),
+            DFATransition(37, 85, 40),
             DFATransition(38, 5, 40),
             DFATransition(38, 6, 40),
             DFATransition(38, 7, 40),
@@ -4859,7 +4868,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(38, 30, 40),
             DFATransition(38, 35, 40),
             DFATransition(38, 37, 40),
-            DFATransition(38, 84, 40),
+            DFATransition(38, 85, 40),
             DFATransition(39, 5, 40),
             DFATransition(39, 35, 40),
             DFATransition(39, 48, 40),
@@ -4867,7 +4876,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(39, 58, 40),
             DFATransition(39, 59, 40),
             DFATransition(39, 76, 40),
-            DFATransition(39, 84, 40),
+            DFATransition(39, 85, 40),
             DFATransition(41, 15, 40),
             DFATransition(41, 16, 40),
             DFATransition(41, 17, 40),
@@ -4894,7 +4903,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(42, 30, 40),
             DFATransition(42, 35, 40),
             DFATransition(42, 37, 40),
-            DFATransition(42, 84, 40),
+            DFATransition(42, 85, 40),
             DFATransition(43, 5, 40),
             DFATransition(43, 6, 40),
             DFATransition(43, 7, 40),
@@ -4909,7 +4918,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(43, 30, 40),
             DFATransition(43, 35, 40),
             DFATransition(43, 37, 40),
-            DFATransition(43, 84, 40),
+            DFATransition(43, 85, 40),
             DFATransition(44, 5, 40),
             DFATransition(44, 6, 40),
             DFATransition(44, 7, 40),
@@ -4924,7 +4933,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(44, 30, 40),
             DFATransition(44, 35, 40),
             DFATransition(44, 37, 40),
-            DFATransition(44, 84, 40),
+            DFATransition(44, 85, 40),
             DFATransition(45, 5, 40),
             DFATransition(45, 6, 40),
             DFATransition(45, 7, 40),
@@ -4939,7 +4948,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(45, 30, 40),
             DFATransition(45, 35, 40),
             DFATransition(45, 37, 40),
-            DFATransition(45, 84, 40),
+            DFATransition(45, 85, 40),
             DFATransition(46, 5, 40),
             DFATransition(46, 6, 40),
             DFATransition(46, 7, 40),
@@ -4954,7 +4963,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(46, 30, 40),
             DFATransition(46, 35, 40),
             DFATransition(46, 37, 40),
-            DFATransition(46, 84, 40),
+            DFATransition(46, 85, 40),
             DFATransition(47, 5, 40),
             DFATransition(47, 6, 40),
             DFATransition(47, 7, 40),
@@ -4969,7 +4978,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(47, 30, 40),
             DFATransition(47, 35, 40),
             DFATransition(47, 37, 40),
-            DFATransition(47, 84, 40),
+            DFATransition(47, 85, 40),
             DFATransition(48, 5, 40),
             DFATransition(48, 6, 40),
             DFATransition(48, 7, 40),
@@ -4984,7 +4993,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(48, 30, 40),
             DFATransition(48, 35, 40),
             DFATransition(48, 37, 40),
-            DFATransition(48, 84, 40),
+            DFATransition(48, 85, 40),
             DFATransition(49, 5, 40),
             DFATransition(49, 6, 40),
             DFATransition(49, 7, 40),
@@ -4999,7 +5008,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(49, 30, 40),
             DFATransition(49, 35, 40),
             DFATransition(49, 37, 40),
-            DFATransition(49, 84, 40),
+            DFATransition(49, 85, 40),
             DFATransition(50, 5, 40),
             DFATransition(50, 6, 40),
             DFATransition(50, 7, 40),
@@ -5014,7 +5023,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(50, 30, 40),
             DFATransition(50, 35, 40),
             DFATransition(50, 37, 40),
-            DFATransition(50, 84, 40),
+            DFATransition(50, 85, 40),
             DFATransition(51, 5, 40),
             DFATransition(51, 6, 40),
             DFATransition(51, 7, 40),
@@ -5029,7 +5038,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(51, 30, 40),
             DFATransition(51, 35, 40),
             DFATransition(51, 37, 40),
-            DFATransition(51, 84, 40),
+            DFATransition(51, 85, 40),
             DFATransition(52, 5, 40),
             DFATransition(52, 6, 40),
             DFATransition(52, 7, 40),
@@ -5044,7 +5053,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(52, 30, 40),
             DFATransition(52, 35, 40),
             DFATransition(52, 37, 40),
-            DFATransition(52, 84, 40),
+            DFATransition(52, 85, 40),
             DFATransition(53, 5, 40),
             DFATransition(53, 35, 40),
             DFATransition(53, 48, 40),
@@ -5052,7 +5061,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(53, 58, 40),
             DFATransition(53, 59, 40),
             DFATransition(53, 76, 40),
-            DFATransition(53, 84, 40),
+            DFATransition(53, 85, 40),
             DFATransition(54, 15, 40),
             DFATransition(54, 16, 40),
             DFATransition(54, 17, 40),
@@ -5079,7 +5088,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(55, 30, 40),
             DFATransition(55, 35, 40),
             DFATransition(55, 37, 40),
-            DFATransition(55, 84, 40),
+            DFATransition(55, 85, 40),
             DFATransition(56, 5, 40),
             DFATransition(56, 6, 40),
             DFATransition(56, 7, 40),
@@ -5094,7 +5103,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(56, 30, 40),
             DFATransition(56, 35, 40),
             DFATransition(56, 37, 40),
-            DFATransition(56, 84, 40),
+            DFATransition(56, 85, 40),
             DFATransition(57, 5, 40),
             DFATransition(57, 6, 40),
             DFATransition(57, 7, 40),
@@ -5109,7 +5118,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(57, 30, 40),
             DFATransition(57, 35, 40),
             DFATransition(57, 37, 40),
-            DFATransition(57, 84, 40),
+            DFATransition(57, 85, 40),
             DFATransition(58, 5, 40),
             DFATransition(58, 6, 40),
             DFATransition(58, 7, 40),
@@ -5124,7 +5133,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(58, 30, 40),
             DFATransition(58, 35, 40),
             DFATransition(58, 37, 40),
-            DFATransition(58, 84, 40),
+            DFATransition(58, 85, 40),
             DFATransition(59, 5, 40),
             DFATransition(59, 6, 40),
             DFATransition(59, 7, 40),
@@ -5139,7 +5148,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(59, 30, 40),
             DFATransition(59, 35, 40),
             DFATransition(59, 37, 40),
-            DFATransition(59, 84, 40),
+            DFATransition(59, 85, 40),
             DFATransition(60, 5, 40),
             DFATransition(60, 6, 40),
             DFATransition(60, 7, 40),
@@ -5154,7 +5163,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(60, 30, 40),
             DFATransition(60, 35, 40),
             DFATransition(60, 37, 40),
-            DFATransition(60, 84, 40),
+            DFATransition(60, 85, 40),
             DFATransition(61, 5, 40),
             DFATransition(61, 6, 40),
             DFATransition(61, 7, 40),
@@ -5169,7 +5178,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(61, 30, 40),
             DFATransition(61, 35, 40),
             DFATransition(61, 37, 40),
-            DFATransition(61, 84, 40),
+            DFATransition(61, 85, 40),
             DFATransition(62, 5, 40),
             DFATransition(62, 6, 40),
             DFATransition(62, 7, 40),
@@ -5184,7 +5193,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(62, 30, 40),
             DFATransition(62, 35, 40),
             DFATransition(62, 37, 40),
-            DFATransition(62, 84, 40),
+            DFATransition(62, 85, 40),
             DFATransition(63, 5, 40),
             DFATransition(63, 6, 40),
             DFATransition(63, 7, 40),
@@ -5199,7 +5208,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(63, 30, 40),
             DFATransition(63, 35, 40),
             DFATransition(63, 37, 40),
-            DFATransition(63, 84, 40),
+            DFATransition(63, 85, 40),
             DFATransition(64, 5, 40),
             DFATransition(64, 6, 40),
             DFATransition(64, 7, 40),
@@ -5214,7 +5223,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(64, 30, 40),
             DFATransition(64, 35, 40),
             DFATransition(64, 37, 40),
-            DFATransition(64, 84, 40),
+            DFATransition(64, 85, 40),
             DFATransition(65, 5, 40),
             DFATransition(65, 6, 40),
             DFATransition(65, 7, 40),
@@ -5229,7 +5238,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(65, 30, 40),
             DFATransition(65, 35, 40),
             DFATransition(65, 37, 40),
-            DFATransition(65, 84, 40),
+            DFATransition(65, 85, 40),
             DFATransition(66, 5, 40),
             DFATransition(66, 35, 40),
             DFATransition(66, 48, 40),
@@ -5237,7 +5246,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(66, 58, 40),
             DFATransition(66, 59, 40),
             DFATransition(66, 76, 40),
-            DFATransition(66, 84, 40),
+            DFATransition(66, 85, 40),
             DFATransition(67, 15, 40),
             DFATransition(67, 16, 40),
             DFATransition(67, 17, 40),
@@ -5264,7 +5273,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(68, 30, 40),
             DFATransition(68, 35, 40),
             DFATransition(68, 37, 40),
-            DFATransition(68, 84, 40),
+            DFATransition(68, 85, 40),
             DFATransition(69, 5, 40),
             DFATransition(69, 6, 40),
             DFATransition(69, 7, 40),
@@ -5279,7 +5288,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(69, 30, 40),
             DFATransition(69, 35, 40),
             DFATransition(69, 37, 40),
-            DFATransition(69, 84, 40),
+            DFATransition(69, 85, 40),
             DFATransition(70, 5, 40),
             DFATransition(70, 6, 40),
             DFATransition(70, 7, 40),
@@ -5294,7 +5303,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(70, 30, 40),
             DFATransition(70, 35, 40),
             DFATransition(70, 37, 40),
-            DFATransition(70, 84, 40),
+            DFATransition(70, 85, 40),
             DFATransition(71, 5, 40),
             DFATransition(71, 6, 40),
             DFATransition(71, 7, 40),
@@ -5309,7 +5318,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(71, 30, 40),
             DFATransition(71, 35, 40),
             DFATransition(71, 37, 40),
-            DFATransition(71, 84, 40),
+            DFATransition(71, 85, 40),
             DFATransition(72, 5, 40),
             DFATransition(72, 6, 40),
             DFATransition(72, 7, 40),
@@ -5324,7 +5333,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(72, 30, 40),
             DFATransition(72, 35, 40),
             DFATransition(72, 37, 40),
-            DFATransition(72, 84, 40),
+            DFATransition(72, 85, 40),
             DFATransition(73, 5, 40),
             DFATransition(73, 6, 40),
             DFATransition(73, 7, 40),
@@ -5339,7 +5348,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(73, 30, 40),
             DFATransition(73, 35, 40),
             DFATransition(73, 37, 40),
-            DFATransition(73, 84, 40),
+            DFATransition(73, 85, 40),
             DFATransition(74, 5, 40),
             DFATransition(74, 6, 40),
             DFATransition(74, 7, 40),
@@ -5354,7 +5363,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(74, 30, 40),
             DFATransition(74, 35, 40),
             DFATransition(74, 37, 40),
-            DFATransition(74, 84, 40),
+            DFATransition(74, 85, 40),
             DFATransition(75, 5, 40),
             DFATransition(75, 6, 40),
             DFATransition(75, 7, 40),
@@ -5369,7 +5378,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(75, 30, 40),
             DFATransition(75, 35, 40),
             DFATransition(75, 37, 40),
-            DFATransition(75, 84, 40),
+            DFATransition(75, 85, 40),
             DFATransition(76, 5, 40),
             DFATransition(76, 6, 40),
             DFATransition(76, 7, 40),
@@ -5384,7 +5393,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(76, 30, 40),
             DFATransition(76, 35, 40),
             DFATransition(76, 37, 40),
-            DFATransition(76, 84, 40),
+            DFATransition(76, 85, 40),
             DFATransition(77, 5, 40),
             DFATransition(77, 6, 40),
             DFATransition(77, 7, 40),
@@ -5399,7 +5408,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(77, 30, 40),
             DFATransition(77, 35, 40),
             DFATransition(77, 37, 40),
-            DFATransition(77, 84, 40),
+            DFATransition(77, 85, 40),
             DFATransition(78, 5, 40),
             DFATransition(78, 6, 40),
             DFATransition(78, 7, 40),
@@ -5414,7 +5423,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(78, 30, 40),
             DFATransition(78, 35, 40),
             DFATransition(78, 37, 40),
-            DFATransition(78, 84, 40),
+            DFATransition(78, 85, 40),
             DFATransition(79, 5, 40),
             DFATransition(79, 35, 40),
             DFATransition(79, 48, 40),
@@ -5422,7 +5431,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(79, 58, 40),
             DFATransition(79, 59, 40),
             DFATransition(79, 76, 40),
-            DFATransition(79, 84, 40),
+            DFATransition(79, 85, 40),
             DFATransition(80, 15, 40),
             DFATransition(80, 16, 40),
             DFATransition(80, 17, 40),
@@ -5449,7 +5458,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(81, 30, 40),
             DFATransition(81, 35, 40),
             DFATransition(81, 37, 40),
-            DFATransition(81, 84, 40),
+            DFATransition(81, 85, 40),
             DFATransition(82, 5, 40),
             DFATransition(82, 6, 40),
             DFATransition(82, 7, 40),
@@ -5464,7 +5473,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(82, 30, 40),
             DFATransition(82, 35, 40),
             DFATransition(82, 37, 40),
-            DFATransition(82, 84, 40),
+            DFATransition(82, 85, 40),
             DFATransition(83, 5, 40),
             DFATransition(83, 6, 40),
             DFATransition(83, 7, 40),
@@ -5479,7 +5488,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(83, 30, 40),
             DFATransition(83, 35, 40),
             DFATransition(83, 37, 40),
-            DFATransition(83, 84, 40),
+            DFATransition(83, 85, 40),
             DFATransition(84, 5, 40),
             DFATransition(84, 6, 40),
             DFATransition(84, 7, 40),
@@ -5494,7 +5503,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(84, 30, 40),
             DFATransition(84, 35, 40),
             DFATransition(84, 37, 40),
-            DFATransition(84, 84, 40),
+            DFATransition(84, 85, 40),
             DFATransition(85, 5, 40),
             DFATransition(85, 6, 40),
             DFATransition(85, 7, 40),
@@ -5509,7 +5518,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(85, 30, 40),
             DFATransition(85, 35, 40),
             DFATransition(85, 37, 40),
-            DFATransition(85, 84, 40),
+            DFATransition(85, 85, 40),
             DFATransition(86, 5, 40),
             DFATransition(86, 6, 40),
             DFATransition(86, 7, 40),
@@ -5524,7 +5533,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(86, 30, 40),
             DFATransition(86, 35, 40),
             DFATransition(86, 37, 40),
-            DFATransition(86, 84, 40),
+            DFATransition(86, 85, 40),
             DFATransition(87, 5, 40),
             DFATransition(87, 6, 40),
             DFATransition(87, 7, 40),
@@ -5539,7 +5548,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(87, 30, 40),
             DFATransition(87, 35, 40),
             DFATransition(87, 37, 40),
-            DFATransition(87, 84, 40),
+            DFATransition(87, 85, 40),
             DFATransition(88, 5, 40),
             DFATransition(88, 6, 40),
             DFATransition(88, 7, 40),
@@ -5554,7 +5563,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(88, 30, 40),
             DFATransition(88, 35, 40),
             DFATransition(88, 37, 40),
-            DFATransition(88, 84, 40),
+            DFATransition(88, 85, 40),
             DFATransition(89, 5, 40),
             DFATransition(89, 6, 40),
             DFATransition(89, 7, 40),
@@ -5569,7 +5578,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(89, 30, 40),
             DFATransition(89, 35, 40),
             DFATransition(89, 37, 40),
-            DFATransition(89, 84, 40),
+            DFATransition(89, 85, 40),
             DFATransition(90, 5, 40),
             DFATransition(90, 6, 40),
             DFATransition(90, 7, 40),
@@ -5584,7 +5593,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(90, 30, 40),
             DFATransition(90, 35, 40),
             DFATransition(90, 37, 40),
-            DFATransition(90, 84, 40),
+            DFATransition(90, 85, 40),
             DFATransition(91, 5, 40),
             DFATransition(91, 6, 40),
             DFATransition(91, 7, 40),
@@ -5599,7 +5608,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(91, 30, 40),
             DFATransition(91, 35, 40),
             DFATransition(91, 37, 40),
-            DFATransition(91, 84, 40),
+            DFATransition(91, 85, 40),
             DFATransition(92, 5, 40),
             DFATransition(92, 35, 40),
             DFATransition(92, 48, 40),
@@ -5607,7 +5616,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(92, 58, 40),
             DFATransition(92, 59, 40),
             DFATransition(92, 76, 40),
-            DFATransition(92, 84, 40),
+            DFATransition(92, 85, 40),
             DFATransition(93, 6, 40),
             DFATransition(93, 7, 40),
             DFATransition(93, 8, 40),
@@ -5621,7 +5630,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(93, 30, 40),
             DFATransition(93, 35, 40),
             DFATransition(93, 37, 40),
-            DFATransition(93, 84, 40),
+            DFATransition(93, 85, 40),
             DFATransition(94, 5, 40),
             DFATransition(94, 15, 40),
             DFATransition(94, 16, 40),
@@ -5701,7 +5710,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(99, 30, 40),
             DFATransition(99, 35, 40),
             DFATransition(99, 37, 40),
-            DFATransition(99, 84, 40),
+            DFATransition(99, 85, 40),
             DFATransition(100, 5, 40),
             DFATransition(100, 6, 40),
             DFATransition(100, 7, 40),
@@ -5716,7 +5725,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(100, 30, 40),
             DFATransition(100, 35, 40),
             DFATransition(100, 37, 40),
-            DFATransition(100, 84, 40),
+            DFATransition(100, 85, 40),
             DFATransition(101, 5, 40),
             DFATransition(101, 6, 40),
             DFATransition(101, 7, 40),
@@ -5731,7 +5740,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(101, 30, 40),
             DFATransition(101, 35, 40),
             DFATransition(101, 37, 40),
-            DFATransition(101, 84, 40),
+            DFATransition(101, 85, 40),
             DFATransition(102, 5, 40),
             DFATransition(102, 6, 40),
             DFATransition(102, 7, 40),
@@ -5746,7 +5755,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(102, 30, 40),
             DFATransition(102, 35, 40),
             DFATransition(102, 37, 40),
-            DFATransition(102, 84, 40),
+            DFATransition(102, 85, 40),
             DFATransition(103, 5, 40),
             DFATransition(103, 6, 40),
             DFATransition(103, 7, 40),
@@ -5761,9 +5770,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(103, 30, 40),
             DFATransition(103, 35, 40),
             DFATransition(103, 37, 40),
-            DFATransition(103, 84, 40),
+            DFATransition(103, 85, 40),
             DFATransition(104, 5, 40),
-            DFATransition(104, 84, 40),
+            DFATransition(104, 85, 40),
             DFATransition(105, 5, 40),
             DFATransition(105, 6, 40),
             DFATransition(105, 7, 40),
@@ -5778,7 +5787,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(105, 30, 40),
             DFATransition(105, 35, 40),
             DFATransition(105, 37, 40),
-            DFATransition(105, 84, 40),
+            DFATransition(105, 85, 40),
             DFATransition(106, 5, 40),
             DFATransition(106, 6, 40),
             DFATransition(106, 7, 40),
@@ -5793,7 +5802,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(106, 30, 40),
             DFATransition(106, 35, 40),
             DFATransition(106, 37, 40),
-            DFATransition(106, 84, 40),
+            DFATransition(106, 85, 40),
             DFATransition(107, 5, 40),
             DFATransition(107, 15, 40),
             DFATransition(107, 16, 40),
@@ -5824,7 +5833,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(108, 30, 40),
             DFATransition(108, 35, 40),
             DFATransition(108, 37, 40),
-            DFATransition(108, 84, 40),
+            DFATransition(108, 85, 40),
             DFATransition(109, 5, 40),
             DFATransition(109, 15, 40),
             DFATransition(109, 16, 40),
@@ -5904,7 +5913,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(114, 30, 40),
             DFATransition(114, 35, 40),
             DFATransition(114, 37, 40),
-            DFATransition(114, 84, 40),
+            DFATransition(114, 85, 40),
             DFATransition(115, 5, 40),
             DFATransition(115, 6, 40),
             DFATransition(115, 7, 40),
@@ -5919,7 +5928,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(115, 30, 40),
             DFATransition(115, 35, 40),
             DFATransition(115, 37, 40),
-            DFATransition(115, 84, 40),
+            DFATransition(115, 85, 40),
             DFATransition(116, 5, 40),
             DFATransition(116, 6, 40),
             DFATransition(116, 7, 40),
@@ -5934,7 +5943,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(116, 30, 40),
             DFATransition(116, 35, 40),
             DFATransition(116, 37, 40),
-            DFATransition(116, 84, 40),
+            DFATransition(116, 85, 40),
             DFATransition(117, 5, 40),
             DFATransition(117, 6, 40),
             DFATransition(117, 7, 40),
@@ -5949,7 +5958,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(117, 30, 40),
             DFATransition(117, 35, 40),
             DFATransition(117, 37, 40),
-            DFATransition(117, 84, 40),
+            DFATransition(117, 85, 40),
             DFATransition(118, 5, 40),
             DFATransition(118, 6, 40),
             DFATransition(118, 7, 40),
@@ -5964,9 +5973,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(118, 30, 40),
             DFATransition(118, 35, 40),
             DFATransition(118, 37, 40),
-            DFATransition(118, 84, 40),
+            DFATransition(118, 85, 40),
             DFATransition(119, 5, 40),
-            DFATransition(119, 84, 40),
+            DFATransition(119, 85, 40),
             DFATransition(120, 5, 40),
             DFATransition(120, 6, 40),
             DFATransition(120, 7, 40),
@@ -5981,7 +5990,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(120, 30, 40),
             DFATransition(120, 35, 40),
             DFATransition(120, 37, 40),
-            DFATransition(120, 84, 40),
+            DFATransition(120, 85, 40),
             DFATransition(121, 5, 40),
             DFATransition(121, 6, 40),
             DFATransition(121, 7, 40),
@@ -5996,7 +6005,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(121, 30, 40),
             DFATransition(121, 35, 40),
             DFATransition(121, 37, 40),
-            DFATransition(121, 84, 40),
+            DFATransition(121, 85, 40),
             DFATransition(122, 5, 40),
             DFATransition(122, 15, 40),
             DFATransition(122, 16, 40),
@@ -6027,7 +6036,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(123, 30, 40),
             DFATransition(123, 35, 40),
             DFATransition(123, 37, 40),
-            DFATransition(123, 84, 40),
+            DFATransition(123, 85, 40),
             DFATransition(124, 5, 40),
             DFATransition(124, 15, 40),
             DFATransition(124, 16, 40),
@@ -6107,7 +6116,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(129, 30, 40),
             DFATransition(129, 35, 40),
             DFATransition(129, 37, 40),
-            DFATransition(129, 84, 40),
+            DFATransition(129, 85, 40),
             DFATransition(130, 5, 40),
             DFATransition(130, 6, 40),
             DFATransition(130, 7, 40),
@@ -6122,7 +6131,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(130, 30, 40),
             DFATransition(130, 35, 40),
             DFATransition(130, 37, 40),
-            DFATransition(130, 84, 40),
+            DFATransition(130, 85, 40),
             DFATransition(131, 5, 40),
             DFATransition(131, 6, 40),
             DFATransition(131, 7, 40),
@@ -6137,7 +6146,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(131, 30, 40),
             DFATransition(131, 35, 40),
             DFATransition(131, 37, 40),
-            DFATransition(131, 84, 40),
+            DFATransition(131, 85, 40),
             DFATransition(132, 5, 40),
             DFATransition(132, 6, 40),
             DFATransition(132, 7, 40),
@@ -6152,7 +6161,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(132, 30, 40),
             DFATransition(132, 35, 40),
             DFATransition(132, 37, 40),
-            DFATransition(132, 84, 40),
+            DFATransition(132, 85, 40),
             DFATransition(133, 5, 40),
             DFATransition(133, 6, 40),
             DFATransition(133, 7, 40),
@@ -6167,9 +6176,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(133, 30, 40),
             DFATransition(133, 35, 40),
             DFATransition(133, 37, 40),
-            DFATransition(133, 84, 40),
+            DFATransition(133, 85, 40),
             DFATransition(134, 5, 40),
-            DFATransition(134, 84, 40),
+            DFATransition(134, 85, 40),
             DFATransition(135, 5, 40),
             DFATransition(135, 6, 40),
             DFATransition(135, 7, 40),
@@ -6184,7 +6193,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(135, 30, 40),
             DFATransition(135, 35, 40),
             DFATransition(135, 37, 40),
-            DFATransition(135, 84, 40),
+            DFATransition(135, 85, 40),
             DFATransition(136, 5, 40),
             DFATransition(136, 6, 40),
             DFATransition(136, 7, 40),
@@ -6199,7 +6208,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(136, 30, 40),
             DFATransition(136, 35, 40),
             DFATransition(136, 37, 40),
-            DFATransition(136, 84, 40),
+            DFATransition(136, 85, 40),
             DFATransition(137, 5, 40),
             DFATransition(137, 15, 40),
             DFATransition(137, 16, 40),
@@ -6230,7 +6239,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(138, 30, 40),
             DFATransition(138, 35, 40),
             DFATransition(138, 37, 40),
-            DFATransition(138, 84, 40),
+            DFATransition(138, 85, 40),
             DFATransition(139, 5, 40),
             DFATransition(139, 15, 40),
             DFATransition(139, 16, 40),
@@ -6310,7 +6319,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(144, 30, 40),
             DFATransition(144, 35, 40),
             DFATransition(144, 37, 40),
-            DFATransition(144, 84, 40),
+            DFATransition(144, 85, 40),
             DFATransition(145, 5, 40),
             DFATransition(145, 6, 40),
             DFATransition(145, 7, 40),
@@ -6325,7 +6334,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(145, 30, 40),
             DFATransition(145, 35, 40),
             DFATransition(145, 37, 40),
-            DFATransition(145, 84, 40),
+            DFATransition(145, 85, 40),
             DFATransition(146, 5, 40),
             DFATransition(146, 6, 40),
             DFATransition(146, 7, 40),
@@ -6340,7 +6349,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(146, 30, 40),
             DFATransition(146, 35, 40),
             DFATransition(146, 37, 40),
-            DFATransition(146, 84, 40),
+            DFATransition(146, 85, 40),
             DFATransition(147, 5, 40),
             DFATransition(147, 6, 40),
             DFATransition(147, 7, 40),
@@ -6355,7 +6364,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(147, 30, 40),
             DFATransition(147, 35, 40),
             DFATransition(147, 37, 40),
-            DFATransition(147, 84, 40),
+            DFATransition(147, 85, 40),
             DFATransition(148, 5, 40),
             DFATransition(148, 6, 40),
             DFATransition(148, 7, 40),
@@ -6370,9 +6379,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(148, 30, 40),
             DFATransition(148, 35, 40),
             DFATransition(148, 37, 40),
-            DFATransition(148, 84, 40),
+            DFATransition(148, 85, 40),
             DFATransition(149, 5, 40),
-            DFATransition(149, 84, 40),
+            DFATransition(149, 85, 40),
             DFATransition(150, 5, 40),
             DFATransition(150, 6, 40),
             DFATransition(150, 7, 40),
@@ -6387,7 +6396,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(150, 30, 40),
             DFATransition(150, 35, 40),
             DFATransition(150, 37, 40),
-            DFATransition(150, 84, 40),
+            DFATransition(150, 85, 40),
             DFATransition(151, 5, 40),
             DFATransition(151, 6, 40),
             DFATransition(151, 7, 40),
@@ -6402,7 +6411,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(151, 30, 40),
             DFATransition(151, 35, 40),
             DFATransition(151, 37, 40),
-            DFATransition(151, 84, 40),
+            DFATransition(151, 85, 40),
             DFATransition(152, 5, 40),
             DFATransition(152, 15, 40),
             DFATransition(152, 16, 40),
@@ -6433,7 +6442,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(153, 30, 40),
             DFATransition(153, 35, 40),
             DFATransition(153, 37, 40),
-            DFATransition(153, 84, 40),
+            DFATransition(153, 85, 40),
             DFATransition(154, 5, 40),
             DFATransition(154, 15, 40),
             DFATransition(154, 16, 40),
@@ -6513,7 +6522,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(159, 30, 40),
             DFATransition(159, 35, 40),
             DFATransition(159, 37, 40),
-            DFATransition(159, 84, 40),
+            DFATransition(159, 85, 40),
             DFATransition(160, 5, 40),
             DFATransition(160, 6, 40),
             DFATransition(160, 7, 40),
@@ -6528,7 +6537,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(160, 30, 40),
             DFATransition(160, 35, 40),
             DFATransition(160, 37, 40),
-            DFATransition(160, 84, 40),
+            DFATransition(160, 85, 40),
             DFATransition(161, 5, 40),
             DFATransition(161, 6, 40),
             DFATransition(161, 7, 40),
@@ -6543,7 +6552,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(161, 30, 40),
             DFATransition(161, 35, 40),
             DFATransition(161, 37, 40),
-            DFATransition(161, 84, 40),
+            DFATransition(161, 85, 40),
             DFATransition(162, 5, 40),
             DFATransition(162, 6, 40),
             DFATransition(162, 7, 40),
@@ -6558,7 +6567,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(162, 30, 40),
             DFATransition(162, 35, 40),
             DFATransition(162, 37, 40),
-            DFATransition(162, 84, 40),
+            DFATransition(162, 85, 40),
             DFATransition(163, 5, 40),
             DFATransition(163, 6, 40),
             DFATransition(163, 7, 40),
@@ -6573,9 +6582,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(163, 30, 40),
             DFATransition(163, 35, 40),
             DFATransition(163, 37, 40),
-            DFATransition(163, 84, 40),
+            DFATransition(163, 85, 40),
             DFATransition(164, 5, 40),
-            DFATransition(164, 84, 40),
+            DFATransition(164, 85, 40),
             DFATransition(165, 5, 40),
             DFATransition(165, 6, 40),
             DFATransition(165, 7, 40),
@@ -6590,7 +6599,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(165, 30, 40),
             DFATransition(165, 35, 40),
             DFATransition(165, 37, 40),
-            DFATransition(165, 84, 40),
+            DFATransition(165, 85, 40),
             DFATransition(166, 5, 40),
             DFATransition(166, 6, 40),
             DFATransition(166, 7, 40),
@@ -6605,7 +6614,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(166, 30, 40),
             DFATransition(166, 35, 40),
             DFATransition(166, 37, 40),
-            DFATransition(166, 84, 40),
+            DFATransition(166, 85, 40),
             DFATransition(167, 5, 40),
             DFATransition(167, 15, 40),
             DFATransition(167, 16, 40),
@@ -6623,7 +6632,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(167, 32, 40),
             DFATransition(167, 36, 40),
             DFATransition(167, 37, 40),
-            DFATransition(168, 84, 40),
+            DFATransition(168, 85, 40),
             DFATransition(169, 5, 40),
             DFATransition(169, 15, 40),
             DFATransition(169, 16, 40),
@@ -6654,7 +6663,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(170, 30, 40),
             DFATransition(170, 35, 40),
             DFATransition(170, 37, 40),
-            DFATransition(170, 84, 40),
+            DFATransition(170, 85, 40),
             DFATransition(171, 5, 40),
             DFATransition(171, 15, 40),
             DFATransition(171, 16, 40),
@@ -6744,7 +6753,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(176, 30, 40),
             DFATransition(176, 35, 40),
             DFATransition(176, 37, 40),
-            DFATransition(176, 84, 40),
+            DFATransition(176, 85, 40),
             DFATransition(177, 5, 40),
             DFATransition(177, 6, 40),
             DFATransition(177, 7, 40),
@@ -6759,7 +6768,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(177, 30, 40),
             DFATransition(177, 35, 40),
             DFATransition(177, 37, 40),
-            DFATransition(177, 84, 40),
+            DFATransition(177, 85, 40),
             DFATransition(178, 5, 40),
             DFATransition(178, 6, 40),
             DFATransition(178, 7, 40),
@@ -6774,7 +6783,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(178, 30, 40),
             DFATransition(178, 35, 40),
             DFATransition(178, 37, 40),
-            DFATransition(178, 84, 40),
+            DFATransition(178, 85, 40),
             DFATransition(179, 5, 40),
             DFATransition(179, 6, 40),
             DFATransition(179, 7, 40),
@@ -6789,7 +6798,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(179, 30, 40),
             DFATransition(179, 35, 40),
             DFATransition(179, 37, 40),
-            DFATransition(179, 84, 40),
+            DFATransition(179, 85, 40),
             DFATransition(180, 5, 40),
             DFATransition(180, 6, 40),
             DFATransition(180, 7, 40),
@@ -6804,9 +6813,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(180, 30, 40),
             DFATransition(180, 35, 40),
             DFATransition(180, 37, 40),
-            DFATransition(180, 84, 40),
+            DFATransition(180, 85, 40),
             DFATransition(181, 5, 40),
-            DFATransition(181, 84, 40),
+            DFATransition(181, 85, 40),
             DFATransition(182, 5, 40),
             DFATransition(182, 6, 40),
             DFATransition(182, 7, 40),
@@ -6821,7 +6830,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(182, 30, 40),
             DFATransition(182, 35, 40),
             DFATransition(182, 37, 40),
-            DFATransition(182, 84, 40),
+            DFATransition(182, 85, 40),
             DFATransition(183, 5, 40),
             DFATransition(183, 6, 40),
             DFATransition(183, 7, 40),
@@ -6836,7 +6845,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(183, 30, 40),
             DFATransition(183, 35, 40),
             DFATransition(183, 37, 40),
-            DFATransition(183, 84, 40),
+            DFATransition(183, 85, 40),
             DFATransition(184, 5, 40),
             DFATransition(184, 15, 40),
             DFATransition(184, 16, 40),
@@ -6869,7 +6878,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(185, 30, 40),
             DFATransition(185, 35, 40),
             DFATransition(185, 37, 40),
-            DFATransition(185, 84, 40),
+            DFATransition(185, 85, 40),
             DFATransition(186, 5, 40),
             DFATransition(186, 15, 40),
             DFATransition(186, 16, 40),
@@ -6949,7 +6958,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(191, 30, 40),
             DFATransition(191, 35, 40),
             DFATransition(191, 37, 40),
-            DFATransition(191, 84, 40),
+            DFATransition(191, 85, 40),
             DFATransition(192, 5, 40),
             DFATransition(192, 6, 40),
             DFATransition(192, 7, 40),
@@ -6964,7 +6973,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(192, 30, 40),
             DFATransition(192, 35, 40),
             DFATransition(192, 37, 40),
-            DFATransition(192, 84, 40),
+            DFATransition(192, 85, 40),
             DFATransition(193, 5, 40),
             DFATransition(193, 6, 40),
             DFATransition(193, 7, 40),
@@ -6979,7 +6988,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(193, 30, 40),
             DFATransition(193, 35, 40),
             DFATransition(193, 37, 40),
-            DFATransition(193, 84, 40),
+            DFATransition(193, 85, 40),
             DFATransition(194, 5, 40),
             DFATransition(194, 6, 40),
             DFATransition(194, 7, 40),
@@ -6994,7 +7003,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(194, 30, 40),
             DFATransition(194, 35, 40),
             DFATransition(194, 37, 40),
-            DFATransition(194, 84, 40),
+            DFATransition(194, 85, 40),
             DFATransition(195, 5, 40),
             DFATransition(195, 6, 40),
             DFATransition(195, 7, 40),
@@ -7009,9 +7018,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(195, 30, 40),
             DFATransition(195, 35, 40),
             DFATransition(195, 37, 40),
-            DFATransition(195, 84, 40),
+            DFATransition(195, 85, 40),
             DFATransition(196, 5, 40),
-            DFATransition(196, 84, 40),
+            DFATransition(196, 85, 40),
             DFATransition(197, 5, 40),
             DFATransition(197, 6, 40),
             DFATransition(197, 7, 40),
@@ -7026,7 +7035,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(197, 30, 40),
             DFATransition(197, 35, 40),
             DFATransition(197, 37, 40),
-            DFATransition(197, 84, 40),
+            DFATransition(197, 85, 40),
             DFATransition(198, 5, 40),
             DFATransition(198, 6, 40),
             DFATransition(198, 7, 40),
@@ -7041,7 +7050,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(198, 30, 40),
             DFATransition(198, 35, 40),
             DFATransition(198, 37, 40),
-            DFATransition(198, 84, 40),
+            DFATransition(198, 85, 40),
             DFATransition(199, 5, 40),
             DFATransition(199, 15, 40),
             DFATransition(199, 16, 40),
@@ -7090,8 +7099,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(200, 67, 40),
             DFATransition(200, 76, 40),
             DFATransition(200, 78, 40),
-            DFATransition(200, 83, 40),
             DFATransition(200, 84, 40),
+            DFATransition(200, 85, 40),
             DFATransition(201, 5, 40),
             DFATransition(201, 15, 40),
             DFATransition(201, 16, 40),
@@ -7171,7 +7180,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(206, 30, 40),
             DFATransition(206, 35, 40),
             DFATransition(206, 37, 40),
-            DFATransition(206, 84, 40),
+            DFATransition(206, 85, 40),
             DFATransition(207, 5, 40),
             DFATransition(207, 6, 40),
             DFATransition(207, 7, 40),
@@ -7186,7 +7195,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(207, 30, 40),
             DFATransition(207, 35, 40),
             DFATransition(207, 37, 40),
-            DFATransition(207, 84, 40),
+            DFATransition(207, 85, 40),
             DFATransition(208, 5, 40),
             DFATransition(208, 6, 40),
             DFATransition(208, 7, 40),
@@ -7201,7 +7210,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(208, 30, 40),
             DFATransition(208, 35, 40),
             DFATransition(208, 37, 40),
-            DFATransition(208, 84, 40),
+            DFATransition(208, 85, 40),
             DFATransition(209, 5, 40),
             DFATransition(209, 6, 40),
             DFATransition(209, 7, 40),
@@ -7216,7 +7225,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(209, 30, 40),
             DFATransition(209, 35, 40),
             DFATransition(209, 37, 40),
-            DFATransition(209, 84, 40),
+            DFATransition(209, 85, 40),
             DFATransition(210, 5, 40),
             DFATransition(210, 6, 40),
             DFATransition(210, 7, 40),
@@ -7231,11 +7240,11 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(210, 30, 40),
             DFATransition(210, 35, 40),
             DFATransition(210, 37, 40),
-            DFATransition(210, 84, 40),
+            DFATransition(210, 85, 40),
             DFATransition(211, 5, 40),
-            DFATransition(211, 84, 40),
+            DFATransition(211, 85, 40),
             DFATransition(212, 5, 40),
-            DFATransition(212, 84, 40),
+            DFATransition(212, 85, 40),
             DFATransition(213, 5, 40),
             DFATransition(213, 6, 40),
             DFATransition(213, 7, 40),
@@ -7250,7 +7259,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(213, 30, 40),
             DFATransition(213, 35, 40),
             DFATransition(213, 37, 40),
-            DFATransition(213, 84, 40),
+            DFATransition(213, 85, 40),
             DFATransition(214, 5, 40),
             DFATransition(214, 6, 40),
             DFATransition(214, 7, 40),
@@ -7265,7 +7274,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(214, 30, 40),
             DFATransition(214, 35, 40),
             DFATransition(214, 37, 40),
-            DFATransition(214, 84, 40),
+            DFATransition(214, 85, 40),
             DFATransition(215, 0, 40),
             DFATransition(215, 5, 40),
             DFATransition(215, 6, 40),
@@ -7302,14 +7311,14 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(215, 71, 40),
             DFATransition(215, 76, 40),
             DFATransition(215, 78, 40),
-            DFATransition(215, 83, 40),
             DFATransition(215, 84, 40),
+            DFATransition(215, 85, 40),
             DFATransition(216, 5, 40),
             DFATransition(216, 35, 40),
             DFATransition(217, 5, 40),
             DFATransition(217, 37, 40),
             DFATransition(218, 5, 40),
-            DFATransition(218, 84, 40),
+            DFATransition(218, 85, 40),
             DFATransition(219, 5, 40),
             DFATransition(219, 6, 40),
             DFATransition(219, 7, 40),
@@ -7324,18 +7333,18 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(219, 30, 40),
             DFATransition(219, 35, 40),
             DFATransition(219, 37, 40),
-            DFATransition(219, 84, 40),
+            DFATransition(219, 85, 40),
             DFATransition(220, 5, 40),
             DFATransition(220, 28, 40),
             DFATransition(221, 5, 40),
             DFATransition(221, 35, 40),
             DFATransition(221, 59, 40),
             DFATransition(222, 5, 40),
-            DFATransition(222, 84, 40),
+            DFATransition(222, 85, 40),
             DFATransition(223, 5, 40),
-            DFATransition(223, 84, 40),
+            DFATransition(223, 85, 40),
             DFATransition(224, 5, 40),
-            DFATransition(224, 84, 40),
+            DFATransition(224, 85, 40),
             DFATransition(225, 5, 40),
             DFATransition(225, 35, 40),
             DFATransition(226, 5, 40),
@@ -7352,13 +7361,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(226, 30, 40),
             DFATransition(226, 35, 40),
             DFATransition(226, 37, 40),
-            DFATransition(226, 84, 40),
+            DFATransition(226, 85, 40),
             DFATransition(227, 5, 40),
-            DFATransition(227, 84, 40),
+            DFATransition(227, 85, 40),
             DFATransition(228, 5, 40),
-            DFATransition(228, 84, 40),
+            DFATransition(228, 85, 40),
             DFATransition(229, 5, 40),
-            DFATransition(229, 84, 40),
+            DFATransition(229, 85, 40),
             DFATransition(230, 5, 40),
             DFATransition(230, 6, 40),
             DFATransition(230, 7, 40),
@@ -7373,11 +7382,11 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(230, 30, 40),
             DFATransition(230, 35, 40),
             DFATransition(230, 37, 40),
-            DFATransition(230, 84, 40),
+            DFATransition(230, 85, 40),
             DFATransition(231, 5, 40),
-            DFATransition(231, 84, 40),
+            DFATransition(231, 85, 40),
             DFATransition(232, 5, 40),
-            DFATransition(232, 84, 40),
+            DFATransition(232, 85, 40),
             DFATransition(233, 5, 40),
             DFATransition(233, 14, 40),
             DFATransition(233, 15, 40),
@@ -7410,7 +7419,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(234, 30, 40),
             DFATransition(234, 35, 40),
             DFATransition(234, 37, 40),
-            DFATransition(234, 84, 40),
+            DFATransition(234, 85, 40),
             DFATransition(235, 5, 40),
             DFATransition(235, 15, 40),
             DFATransition(235, 16, 40),
@@ -7490,7 +7499,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(240, 30, 40),
             DFATransition(240, 35, 40),
             DFATransition(240, 37, 40),
-            DFATransition(240, 84, 40),
+            DFATransition(240, 85, 40),
             DFATransition(241, 5, 40),
             DFATransition(241, 6, 40),
             DFATransition(241, 7, 40),
@@ -7505,7 +7514,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(241, 30, 40),
             DFATransition(241, 35, 40),
             DFATransition(241, 37, 40),
-            DFATransition(241, 84, 40),
+            DFATransition(241, 85, 40),
             DFATransition(242, 5, 40),
             DFATransition(242, 6, 40),
             DFATransition(242, 7, 40),
@@ -7520,7 +7529,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(242, 30, 40),
             DFATransition(242, 35, 40),
             DFATransition(242, 37, 40),
-            DFATransition(242, 84, 40),
+            DFATransition(242, 85, 40),
             DFATransition(243, 5, 40),
             DFATransition(243, 6, 40),
             DFATransition(243, 7, 40),
@@ -7535,7 +7544,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(243, 30, 40),
             DFATransition(243, 35, 40),
             DFATransition(243, 37, 40),
-            DFATransition(243, 84, 40),
+            DFATransition(243, 85, 40),
             DFATransition(244, 5, 40),
             DFATransition(244, 6, 40),
             DFATransition(244, 7, 40),
@@ -7550,9 +7559,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(244, 30, 40),
             DFATransition(244, 35, 40),
             DFATransition(244, 37, 40),
-            DFATransition(244, 84, 40),
+            DFATransition(244, 85, 40),
             DFATransition(245, 5, 40),
-            DFATransition(245, 84, 40),
+            DFATransition(245, 85, 40),
             DFATransition(246, 5, 40),
             DFATransition(246, 6, 40),
             DFATransition(246, 7, 40),
@@ -7567,7 +7576,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(246, 30, 40),
             DFATransition(246, 35, 40),
             DFATransition(246, 37, 40),
-            DFATransition(246, 84, 40),
+            DFATransition(246, 85, 40),
             DFATransition(247, 5, 40),
             DFATransition(247, 6, 40),
             DFATransition(247, 7, 40),
@@ -7582,7 +7591,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(247, 30, 40),
             DFATransition(247, 35, 40),
             DFATransition(247, 37, 40),
-            DFATransition(247, 84, 40),
+            DFATransition(247, 85, 40),
             DFATransition(248, 5, 40),
             DFATransition(248, 15, 40),
             DFATransition(248, 16, 40),
@@ -7608,7 +7617,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(250, 58, 40),
             DFATransition(250, 59, 40),
             DFATransition(250, 76, 40),
-            DFATransition(250, 84, 40),
+            DFATransition(250, 85, 40),
             DFATransition(251, 5, 40),
             DFATransition(251, 38, 40),
             DFATransition(251, 48, 40),
@@ -7616,8 +7625,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(251, 58, 40),
             DFATransition(251, 59, 40),
             DFATransition(251, 76, 40),
-            DFATransition(251, 84, 40),
-            DFATransition(252, 84, 40),
+            DFATransition(251, 85, 40),
+            DFATransition(252, 85, 40),
             DFATransition(253, 5, 40),
             DFATransition(253, 28, 40),
             DFATransition(254, 35, 40),
@@ -7628,7 +7637,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(255, 58, 40),
             DFATransition(255, 59, 40),
             DFATransition(255, 76, 40),
-            DFATransition(255, 84, 40),
+            DFATransition(255, 85, 40),
             DFATransition(256, 6, 40),
             DFATransition(256, 7, 40),
             DFATransition(256, 8, 40),
@@ -7642,7 +7651,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(256, 30, 40),
             DFATransition(256, 35, 40),
             DFATransition(256, 37, 40),
-            DFATransition(256, 84, 40),
+            DFATransition(256, 85, 40),
             DFATransition(257, 5, 40),
             DFATransition(257, 15, 40),
             DFATransition(257, 16, 40),
@@ -7722,7 +7731,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(262, 30, 40),
             DFATransition(262, 35, 40),
             DFATransition(262, 37, 40),
-            DFATransition(262, 84, 40),
+            DFATransition(262, 85, 40),
             DFATransition(263, 5, 40),
             DFATransition(263, 6, 40),
             DFATransition(263, 7, 40),
@@ -7737,7 +7746,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(263, 30, 40),
             DFATransition(263, 35, 40),
             DFATransition(263, 37, 40),
-            DFATransition(263, 84, 40),
+            DFATransition(263, 85, 40),
             DFATransition(264, 5, 40),
             DFATransition(264, 6, 40),
             DFATransition(264, 7, 40),
@@ -7752,7 +7761,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(264, 30, 40),
             DFATransition(264, 35, 40),
             DFATransition(264, 37, 40),
-            DFATransition(264, 84, 40),
+            DFATransition(264, 85, 40),
             DFATransition(265, 5, 40),
             DFATransition(265, 6, 40),
             DFATransition(265, 7, 40),
@@ -7767,7 +7776,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(265, 30, 40),
             DFATransition(265, 35, 40),
             DFATransition(265, 37, 40),
-            DFATransition(265, 84, 40),
+            DFATransition(265, 85, 40),
             DFATransition(266, 5, 40),
             DFATransition(266, 6, 40),
             DFATransition(266, 7, 40),
@@ -7782,9 +7791,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(266, 30, 40),
             DFATransition(266, 35, 40),
             DFATransition(266, 37, 40),
-            DFATransition(266, 84, 40),
+            DFATransition(266, 85, 40),
             DFATransition(267, 5, 40),
-            DFATransition(267, 84, 40),
+            DFATransition(267, 85, 40),
             DFATransition(268, 5, 40),
             DFATransition(268, 6, 40),
             DFATransition(268, 7, 40),
@@ -7799,7 +7808,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(268, 30, 40),
             DFATransition(268, 35, 40),
             DFATransition(268, 37, 40),
-            DFATransition(268, 84, 40),
+            DFATransition(268, 85, 40),
             DFATransition(269, 5, 40),
             DFATransition(269, 6, 40),
             DFATransition(269, 7, 40),
@@ -7814,7 +7823,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(269, 30, 40),
             DFATransition(269, 35, 40),
             DFATransition(269, 37, 40),
-            DFATransition(269, 84, 40),
+            DFATransition(269, 85, 40),
             DFATransition(270, 5, 40),
             DFATransition(270, 15, 40),
             DFATransition(270, 16, 40),
@@ -7845,7 +7854,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(271, 30, 40),
             DFATransition(271, 35, 40),
             DFATransition(271, 37, 40),
-            DFATransition(271, 84, 40),
+            DFATransition(271, 85, 40),
             DFATransition(272, 5, 40),
             DFATransition(272, 15, 40),
             DFATransition(272, 16, 40),
@@ -7925,7 +7934,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(277, 30, 40),
             DFATransition(277, 35, 40),
             DFATransition(277, 37, 40),
-            DFATransition(277, 84, 40),
+            DFATransition(277, 85, 40),
             DFATransition(278, 5, 40),
             DFATransition(278, 6, 40),
             DFATransition(278, 7, 40),
@@ -7940,7 +7949,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(278, 30, 40),
             DFATransition(278, 35, 40),
             DFATransition(278, 37, 40),
-            DFATransition(278, 84, 40),
+            DFATransition(278, 85, 40),
             DFATransition(279, 5, 40),
             DFATransition(279, 6, 40),
             DFATransition(279, 7, 40),
@@ -7955,7 +7964,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(279, 30, 40),
             DFATransition(279, 35, 40),
             DFATransition(279, 37, 40),
-            DFATransition(279, 84, 40),
+            DFATransition(279, 85, 40),
             DFATransition(280, 5, 40),
             DFATransition(280, 6, 40),
             DFATransition(280, 7, 40),
@@ -7970,7 +7979,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(280, 30, 40),
             DFATransition(280, 35, 40),
             DFATransition(280, 37, 40),
-            DFATransition(280, 84, 40),
+            DFATransition(280, 85, 40),
             DFATransition(281, 5, 40),
             DFATransition(281, 6, 40),
             DFATransition(281, 7, 40),
@@ -7985,9 +7994,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(281, 30, 40),
             DFATransition(281, 35, 40),
             DFATransition(281, 37, 40),
-            DFATransition(281, 84, 40),
+            DFATransition(281, 85, 40),
             DFATransition(282, 5, 40),
-            DFATransition(282, 84, 40),
+            DFATransition(282, 85, 40),
             DFATransition(283, 5, 40),
             DFATransition(283, 6, 40),
             DFATransition(283, 7, 40),
@@ -8002,7 +8011,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(283, 30, 40),
             DFATransition(283, 35, 40),
             DFATransition(283, 37, 40),
-            DFATransition(283, 84, 40),
+            DFATransition(283, 85, 40),
             DFATransition(284, 5, 40),
             DFATransition(284, 6, 40),
             DFATransition(284, 7, 40),
@@ -8017,7 +8026,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(284, 30, 40),
             DFATransition(284, 35, 40),
             DFATransition(284, 37, 40),
-            DFATransition(284, 84, 40),
+            DFATransition(284, 85, 40),
             DFATransition(285, 5, 40),
             DFATransition(285, 15, 40),
             DFATransition(285, 16, 40),
@@ -8035,7 +8044,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(285, 36, 40),
             DFATransition(285, 37, 40),
             DFATransition(285, 41, 40),
-            DFATransition(286, 84, 40),
+            DFATransition(286, 85, 40),
             DFATransition(287, 5, 40),
             DFATransition(287, 28, 40),
             DFATransition(288, 14, 40),
@@ -8070,7 +8079,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(289, 30, 40),
             DFATransition(289, 35, 40),
             DFATransition(289, 37, 40),
-            DFATransition(289, 84, 40),
+            DFATransition(289, 85, 40),
             DFATransition(290, 5, 40),
             DFATransition(290, 6, 40),
             DFATransition(290, 7, 40),
@@ -8085,7 +8094,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(290, 30, 40),
             DFATransition(290, 35, 40),
             DFATransition(290, 37, 40),
-            DFATransition(290, 84, 40),
+            DFATransition(290, 85, 40),
             DFATransition(291, 5, 40),
             DFATransition(291, 6, 40),
             DFATransition(291, 7, 40),
@@ -8100,7 +8109,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(291, 30, 40),
             DFATransition(291, 35, 40),
             DFATransition(291, 37, 40),
-            DFATransition(291, 84, 40),
+            DFATransition(291, 85, 40),
             DFATransition(292, 5, 40),
             DFATransition(292, 6, 40),
             DFATransition(292, 7, 40),
@@ -8115,7 +8124,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(292, 30, 40),
             DFATransition(292, 35, 40),
             DFATransition(292, 37, 40),
-            DFATransition(292, 84, 40),
+            DFATransition(292, 85, 40),
             DFATransition(293, 5, 40),
             DFATransition(293, 6, 40),
             DFATransition(293, 7, 40),
@@ -8130,7 +8139,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(293, 30, 40),
             DFATransition(293, 35, 40),
             DFATransition(293, 37, 40),
-            DFATransition(293, 84, 40),
+            DFATransition(293, 85, 40),
             DFATransition(294, 5, 40),
             DFATransition(294, 6, 40),
             DFATransition(294, 7, 40),
@@ -8145,7 +8154,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(294, 30, 40),
             DFATransition(294, 35, 40),
             DFATransition(294, 37, 40),
-            DFATransition(294, 84, 40),
+            DFATransition(294, 85, 40),
             DFATransition(295, 5, 40),
             DFATransition(295, 6, 40),
             DFATransition(295, 7, 40),
@@ -8160,7 +8169,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(295, 30, 40),
             DFATransition(295, 35, 40),
             DFATransition(295, 37, 40),
-            DFATransition(295, 84, 40),
+            DFATransition(295, 85, 40),
             DFATransition(296, 5, 40),
             DFATransition(296, 6, 40),
             DFATransition(296, 7, 40),
@@ -8175,7 +8184,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(296, 30, 40),
             DFATransition(296, 35, 40),
             DFATransition(296, 37, 40),
-            DFATransition(296, 84, 40),
+            DFATransition(296, 85, 40),
             DFATransition(297, 5, 40),
             DFATransition(297, 6, 40),
             DFATransition(297, 7, 40),
@@ -8190,7 +8199,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(297, 30, 40),
             DFATransition(297, 35, 40),
             DFATransition(297, 37, 40),
-            DFATransition(297, 84, 40),
+            DFATransition(297, 85, 40),
             DFATransition(298, 5, 40),
             DFATransition(298, 6, 40),
             DFATransition(298, 7, 40),
@@ -8205,7 +8214,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(298, 30, 40),
             DFATransition(298, 35, 40),
             DFATransition(298, 37, 40),
-            DFATransition(298, 84, 40),
+            DFATransition(298, 85, 40),
             DFATransition(299, 5, 40),
             DFATransition(299, 6, 40),
             DFATransition(299, 7, 40),
@@ -8220,7 +8229,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(299, 30, 40),
             DFATransition(299, 35, 40),
             DFATransition(299, 37, 40),
-            DFATransition(299, 84, 40),
+            DFATransition(299, 85, 40),
             DFATransition(300, 5, 40),
             DFATransition(300, 6, 40),
             DFATransition(300, 7, 40),
@@ -8235,9 +8244,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(300, 30, 40),
             DFATransition(300, 35, 40),
             DFATransition(300, 37, 40),
-            DFATransition(300, 84, 40),
+            DFATransition(300, 85, 40),
             DFATransition(301, 5, 40),
-            DFATransition(301, 84, 40),
+            DFATransition(301, 85, 40),
             DFATransition(302, 5, 40),
             DFATransition(302, 35, 40),
             DFATransition(302, 48, 40),
@@ -8245,9 +8254,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(302, 58, 40),
             DFATransition(302, 59, 40),
             DFATransition(302, 76, 40),
-            DFATransition(302, 84, 40),
+            DFATransition(302, 85, 40),
             DFATransition(303, 5, 40),
-            DFATransition(303, 84, 40),
+            DFATransition(303, 85, 40),
             DFATransition(304, 5, 40),
             DFATransition(304, 6, 40),
             DFATransition(304, 7, 40),
@@ -8262,7 +8271,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(304, 30, 40),
             DFATransition(304, 35, 40),
             DFATransition(304, 37, 40),
-            DFATransition(304, 84, 40),
+            DFATransition(304, 85, 40),
             DFATransition(305, 5, 40),
             DFATransition(305, 6, 40),
             DFATransition(305, 7, 40),
@@ -8277,7 +8286,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(305, 30, 40),
             DFATransition(305, 35, 40),
             DFATransition(305, 37, 40),
-            DFATransition(305, 84, 40),
+            DFATransition(305, 85, 40),
             DFATransition(306, 5, 40),
             DFATransition(306, 6, 40),
             DFATransition(306, 7, 40),
@@ -8293,13 +8302,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(306, 35, 40),
             DFATransition(306, 37, 40),
             DFATransition(306, 40, 40),
-            DFATransition(306, 84, 40),
+            DFATransition(306, 85, 40),
         ],
         k: 3,
     },
     /* 179 - "IfResetStatementList0List" */
     LookaheadDFA {
-        states: &[None, Some(380), Some(381)],
+        states: &[None, Some(384), Some(385)],
         transitions: &[
             DFATransition(0, 38, 2),
             DFATransition(0, 48, 1),
@@ -8307,13 +8316,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 58, 1),
             DFATransition(0, 59, 1),
             DFATransition(0, 76, 1),
-            DFATransition(0, 84, 1),
+            DFATransition(0, 85, 1),
         ],
         k: 1,
     },
     /* 180 - "IfResetStatementOpt" */
     LookaheadDFA {
-        states: &[None, Some(385), Some(388)],
+        states: &[None, Some(389), Some(392)],
         transitions: &[
             DFATransition(0, 6, 2),
             DFATransition(0, 7, 2),
@@ -8336,14 +8345,14 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 58, 2),
             DFATransition(0, 59, 2),
             DFATransition(0, 76, 2),
-            DFATransition(0, 83, 2),
             DFATransition(0, 84, 2),
+            DFATransition(0, 85, 2),
         ],
         k: 1,
     },
     /* 181 - "IfResetStatementOptList" */
     LookaheadDFA {
-        states: &[None, Some(386), Some(387)],
+        states: &[None, Some(390), Some(391)],
         transitions: &[
             DFATransition(0, 38, 2),
             DFATransition(0, 48, 1),
@@ -8351,7 +8360,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 58, 1),
             DFATransition(0, 59, 1),
             DFATransition(0, 76, 1),
-            DFATransition(0, 84, 1),
+            DFATransition(0, 85, 1),
         ],
         k: 1,
     },
@@ -8363,19 +8372,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 183 - "IfResetToken" */
     LookaheadDFA {
-        states: &[Some(136)],
+        states: &[Some(137)],
         transitions: &[],
         k: 0,
     },
     /* 184 - "IfStatement" */
     LookaheadDFA {
-        states: &[Some(367)],
+        states: &[Some(371)],
         transitions: &[],
         k: 0,
     },
     /* 185 - "IfStatementList" */
     LookaheadDFA {
-        states: &[None, Some(372), Some(373)],
+        states: &[None, Some(376), Some(377)],
         transitions: &[
             DFATransition(0, 38, 2),
             DFATransition(0, 48, 1),
@@ -8383,7 +8392,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 58, 1),
             DFATransition(0, 59, 1),
             DFATransition(0, 76, 1),
-            DFATransition(0, 84, 1),
+            DFATransition(0, 85, 1),
         ],
         k: 1,
     },
@@ -8393,7 +8402,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             None,
             None,
             None,
-            Some(368),
+            Some(372),
             None,
             None,
             None,
@@ -8430,7 +8439,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             None,
             None,
             None,
-            Some(371),
+            Some(375),
             None,
             None,
             None,
@@ -8720,8 +8729,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 58, 22),
             DFATransition(0, 59, 23),
             DFATransition(0, 76, 24),
-            DFATransition(0, 83, 25),
-            DFATransition(0, 84, 26),
+            DFATransition(0, 84, 25),
+            DFATransition(0, 85, 26),
             DFATransition(1, 5, 2),
             DFATransition(1, 35, 251),
             DFATransition(1, 59, 4),
@@ -8741,7 +8750,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(4, 30, 3),
             DFATransition(4, 35, 3),
             DFATransition(4, 37, 3),
-            DFATransition(4, 84, 3),
+            DFATransition(4, 85, 3),
             DFATransition(5, 5, 27),
             DFATransition(5, 15, 28),
             DFATransition(5, 16, 29),
@@ -8821,7 +8830,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(10, 30, 104),
             DFATransition(10, 35, 105),
             DFATransition(10, 37, 106),
-            DFATransition(10, 84, 107),
+            DFATransition(10, 85, 107),
             DFATransition(11, 5, 108),
             DFATransition(11, 6, 109),
             DFATransition(11, 7, 110),
@@ -8836,7 +8845,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(11, 30, 119),
             DFATransition(11, 35, 120),
             DFATransition(11, 37, 121),
-            DFATransition(11, 84, 122),
+            DFATransition(11, 85, 122),
             DFATransition(12, 5, 123),
             DFATransition(12, 6, 124),
             DFATransition(12, 7, 125),
@@ -8851,7 +8860,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(12, 30, 134),
             DFATransition(12, 35, 135),
             DFATransition(12, 37, 136),
-            DFATransition(12, 84, 137),
+            DFATransition(12, 85, 137),
             DFATransition(13, 5, 138),
             DFATransition(13, 6, 139),
             DFATransition(13, 7, 140),
@@ -8866,7 +8875,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(13, 30, 149),
             DFATransition(13, 35, 150),
             DFATransition(13, 37, 151),
-            DFATransition(13, 84, 152),
+            DFATransition(13, 85, 152),
             DFATransition(14, 5, 153),
             DFATransition(14, 6, 154),
             DFATransition(14, 7, 155),
@@ -8881,9 +8890,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(14, 30, 164),
             DFATransition(14, 35, 165),
             DFATransition(14, 37, 166),
-            DFATransition(14, 84, 167),
+            DFATransition(14, 85, 167),
             DFATransition(15, 5, 168),
-            DFATransition(15, 84, 169),
+            DFATransition(15, 85, 169),
             DFATransition(16, 5, 170),
             DFATransition(16, 6, 171),
             DFATransition(16, 7, 172),
@@ -8898,7 +8907,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(16, 30, 181),
             DFATransition(16, 35, 182),
             DFATransition(16, 37, 183),
-            DFATransition(16, 84, 184),
+            DFATransition(16, 85, 184),
             DFATransition(17, 5, 185),
             DFATransition(17, 6, 186),
             DFATransition(17, 7, 187),
@@ -8913,7 +8922,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(17, 30, 196),
             DFATransition(17, 35, 197),
             DFATransition(17, 37, 198),
-            DFATransition(17, 84, 199),
+            DFATransition(17, 85, 199),
             DFATransition(18, 5, 200),
             DFATransition(18, 6, 201),
             DFATransition(18, 7, 202),
@@ -8946,8 +8955,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(18, 67, 229),
             DFATransition(18, 76, 230),
             DFATransition(18, 78, 231),
-            DFATransition(18, 83, 232),
-            DFATransition(18, 84, 233),
+            DFATransition(18, 84, 232),
+            DFATransition(18, 85, 233),
             DFATransition(19, 5, 234),
             DFATransition(19, 6, 235),
             DFATransition(19, 7, 236),
@@ -8962,11 +8971,11 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(19, 30, 245),
             DFATransition(19, 35, 246),
             DFATransition(19, 37, 247),
-            DFATransition(19, 84, 248),
+            DFATransition(19, 85, 248),
             DFATransition(20, 5, 249),
             DFATransition(20, 28, 250),
             DFATransition(21, 5, 252),
-            DFATransition(21, 84, 253),
+            DFATransition(21, 85, 253),
             DFATransition(22, 5, 254),
             DFATransition(22, 35, 255),
             DFATransition(23, 5, 256),
@@ -8983,7 +8992,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(23, 30, 267),
             DFATransition(23, 35, 268),
             DFATransition(23, 37, 269),
-            DFATransition(23, 84, 270),
+            DFATransition(23, 85, 270),
             DFATransition(24, 5, 271),
             DFATransition(24, 6, 272),
             DFATransition(24, 7, 273),
@@ -8998,9 +9007,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(24, 30, 282),
             DFATransition(24, 35, 283),
             DFATransition(24, 37, 284),
-            DFATransition(24, 84, 285),
+            DFATransition(24, 85, 285),
             DFATransition(25, 5, 286),
-            DFATransition(25, 84, 287),
+            DFATransition(25, 85, 287),
             DFATransition(26, 5, 288),
             DFATransition(26, 14, 289),
             DFATransition(26, 15, 290),
@@ -9046,7 +9055,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(28, 30, 40),
             DFATransition(28, 35, 40),
             DFATransition(28, 37, 40),
-            DFATransition(28, 84, 40),
+            DFATransition(28, 85, 40),
             DFATransition(29, 5, 40),
             DFATransition(29, 6, 40),
             DFATransition(29, 7, 40),
@@ -9061,7 +9070,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(29, 30, 40),
             DFATransition(29, 35, 40),
             DFATransition(29, 37, 40),
-            DFATransition(29, 84, 40),
+            DFATransition(29, 85, 40),
             DFATransition(30, 5, 40),
             DFATransition(30, 6, 40),
             DFATransition(30, 7, 40),
@@ -9076,7 +9085,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(30, 30, 40),
             DFATransition(30, 35, 40),
             DFATransition(30, 37, 40),
-            DFATransition(30, 84, 40),
+            DFATransition(30, 85, 40),
             DFATransition(31, 5, 40),
             DFATransition(31, 6, 40),
             DFATransition(31, 7, 40),
@@ -9091,7 +9100,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(31, 30, 40),
             DFATransition(31, 35, 40),
             DFATransition(31, 37, 40),
-            DFATransition(31, 84, 40),
+            DFATransition(31, 85, 40),
             DFATransition(32, 5, 40),
             DFATransition(32, 6, 40),
             DFATransition(32, 7, 40),
@@ -9106,7 +9115,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(32, 30, 40),
             DFATransition(32, 35, 40),
             DFATransition(32, 37, 40),
-            DFATransition(32, 84, 40),
+            DFATransition(32, 85, 40),
             DFATransition(33, 5, 40),
             DFATransition(33, 6, 40),
             DFATransition(33, 7, 40),
@@ -9121,7 +9130,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(33, 30, 40),
             DFATransition(33, 35, 40),
             DFATransition(33, 37, 40),
-            DFATransition(33, 84, 40),
+            DFATransition(33, 85, 40),
             DFATransition(34, 5, 40),
             DFATransition(34, 6, 40),
             DFATransition(34, 7, 40),
@@ -9136,7 +9145,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(34, 30, 40),
             DFATransition(34, 35, 40),
             DFATransition(34, 37, 40),
-            DFATransition(34, 84, 40),
+            DFATransition(34, 85, 40),
             DFATransition(35, 5, 40),
             DFATransition(35, 6, 40),
             DFATransition(35, 7, 40),
@@ -9151,7 +9160,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(35, 30, 40),
             DFATransition(35, 35, 40),
             DFATransition(35, 37, 40),
-            DFATransition(35, 84, 40),
+            DFATransition(35, 85, 40),
             DFATransition(36, 5, 40),
             DFATransition(36, 6, 40),
             DFATransition(36, 7, 40),
@@ -9166,7 +9175,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(36, 30, 40),
             DFATransition(36, 35, 40),
             DFATransition(36, 37, 40),
-            DFATransition(36, 84, 40),
+            DFATransition(36, 85, 40),
             DFATransition(37, 5, 40),
             DFATransition(37, 6, 40),
             DFATransition(37, 7, 40),
@@ -9181,7 +9190,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(37, 30, 40),
             DFATransition(37, 35, 40),
             DFATransition(37, 37, 40),
-            DFATransition(37, 84, 40),
+            DFATransition(37, 85, 40),
             DFATransition(38, 5, 40),
             DFATransition(38, 6, 40),
             DFATransition(38, 7, 40),
@@ -9196,7 +9205,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(38, 30, 40),
             DFATransition(38, 35, 40),
             DFATransition(38, 37, 40),
-            DFATransition(38, 84, 40),
+            DFATransition(38, 85, 40),
             DFATransition(39, 5, 40),
             DFATransition(39, 35, 40),
             DFATransition(39, 48, 40),
@@ -9204,7 +9213,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(39, 58, 40),
             DFATransition(39, 59, 40),
             DFATransition(39, 76, 40),
-            DFATransition(39, 84, 40),
+            DFATransition(39, 85, 40),
             DFATransition(41, 15, 40),
             DFATransition(41, 16, 40),
             DFATransition(41, 17, 40),
@@ -9231,7 +9240,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(42, 30, 40),
             DFATransition(42, 35, 40),
             DFATransition(42, 37, 40),
-            DFATransition(42, 84, 40),
+            DFATransition(42, 85, 40),
             DFATransition(43, 5, 40),
             DFATransition(43, 6, 40),
             DFATransition(43, 7, 40),
@@ -9246,7 +9255,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(43, 30, 40),
             DFATransition(43, 35, 40),
             DFATransition(43, 37, 40),
-            DFATransition(43, 84, 40),
+            DFATransition(43, 85, 40),
             DFATransition(44, 5, 40),
             DFATransition(44, 6, 40),
             DFATransition(44, 7, 40),
@@ -9261,7 +9270,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(44, 30, 40),
             DFATransition(44, 35, 40),
             DFATransition(44, 37, 40),
-            DFATransition(44, 84, 40),
+            DFATransition(44, 85, 40),
             DFATransition(45, 5, 40),
             DFATransition(45, 6, 40),
             DFATransition(45, 7, 40),
@@ -9276,7 +9285,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(45, 30, 40),
             DFATransition(45, 35, 40),
             DFATransition(45, 37, 40),
-            DFATransition(45, 84, 40),
+            DFATransition(45, 85, 40),
             DFATransition(46, 5, 40),
             DFATransition(46, 6, 40),
             DFATransition(46, 7, 40),
@@ -9291,7 +9300,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(46, 30, 40),
             DFATransition(46, 35, 40),
             DFATransition(46, 37, 40),
-            DFATransition(46, 84, 40),
+            DFATransition(46, 85, 40),
             DFATransition(47, 5, 40),
             DFATransition(47, 6, 40),
             DFATransition(47, 7, 40),
@@ -9306,7 +9315,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(47, 30, 40),
             DFATransition(47, 35, 40),
             DFATransition(47, 37, 40),
-            DFATransition(47, 84, 40),
+            DFATransition(47, 85, 40),
             DFATransition(48, 5, 40),
             DFATransition(48, 6, 40),
             DFATransition(48, 7, 40),
@@ -9321,7 +9330,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(48, 30, 40),
             DFATransition(48, 35, 40),
             DFATransition(48, 37, 40),
-            DFATransition(48, 84, 40),
+            DFATransition(48, 85, 40),
             DFATransition(49, 5, 40),
             DFATransition(49, 6, 40),
             DFATransition(49, 7, 40),
@@ -9336,7 +9345,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(49, 30, 40),
             DFATransition(49, 35, 40),
             DFATransition(49, 37, 40),
-            DFATransition(49, 84, 40),
+            DFATransition(49, 85, 40),
             DFATransition(50, 5, 40),
             DFATransition(50, 6, 40),
             DFATransition(50, 7, 40),
@@ -9351,7 +9360,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(50, 30, 40),
             DFATransition(50, 35, 40),
             DFATransition(50, 37, 40),
-            DFATransition(50, 84, 40),
+            DFATransition(50, 85, 40),
             DFATransition(51, 5, 40),
             DFATransition(51, 6, 40),
             DFATransition(51, 7, 40),
@@ -9366,7 +9375,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(51, 30, 40),
             DFATransition(51, 35, 40),
             DFATransition(51, 37, 40),
-            DFATransition(51, 84, 40),
+            DFATransition(51, 85, 40),
             DFATransition(52, 5, 40),
             DFATransition(52, 6, 40),
             DFATransition(52, 7, 40),
@@ -9381,7 +9390,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(52, 30, 40),
             DFATransition(52, 35, 40),
             DFATransition(52, 37, 40),
-            DFATransition(52, 84, 40),
+            DFATransition(52, 85, 40),
             DFATransition(53, 5, 40),
             DFATransition(53, 35, 40),
             DFATransition(53, 48, 40),
@@ -9389,7 +9398,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(53, 58, 40),
             DFATransition(53, 59, 40),
             DFATransition(53, 76, 40),
-            DFATransition(53, 84, 40),
+            DFATransition(53, 85, 40),
             DFATransition(54, 15, 40),
             DFATransition(54, 16, 40),
             DFATransition(54, 17, 40),
@@ -9416,7 +9425,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(55, 30, 40),
             DFATransition(55, 35, 40),
             DFATransition(55, 37, 40),
-            DFATransition(55, 84, 40),
+            DFATransition(55, 85, 40),
             DFATransition(56, 5, 40),
             DFATransition(56, 6, 40),
             DFATransition(56, 7, 40),
@@ -9431,7 +9440,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(56, 30, 40),
             DFATransition(56, 35, 40),
             DFATransition(56, 37, 40),
-            DFATransition(56, 84, 40),
+            DFATransition(56, 85, 40),
             DFATransition(57, 5, 40),
             DFATransition(57, 6, 40),
             DFATransition(57, 7, 40),
@@ -9446,7 +9455,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(57, 30, 40),
             DFATransition(57, 35, 40),
             DFATransition(57, 37, 40),
-            DFATransition(57, 84, 40),
+            DFATransition(57, 85, 40),
             DFATransition(58, 5, 40),
             DFATransition(58, 6, 40),
             DFATransition(58, 7, 40),
@@ -9461,7 +9470,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(58, 30, 40),
             DFATransition(58, 35, 40),
             DFATransition(58, 37, 40),
-            DFATransition(58, 84, 40),
+            DFATransition(58, 85, 40),
             DFATransition(59, 5, 40),
             DFATransition(59, 6, 40),
             DFATransition(59, 7, 40),
@@ -9476,7 +9485,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(59, 30, 40),
             DFATransition(59, 35, 40),
             DFATransition(59, 37, 40),
-            DFATransition(59, 84, 40),
+            DFATransition(59, 85, 40),
             DFATransition(60, 5, 40),
             DFATransition(60, 6, 40),
             DFATransition(60, 7, 40),
@@ -9491,7 +9500,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(60, 30, 40),
             DFATransition(60, 35, 40),
             DFATransition(60, 37, 40),
-            DFATransition(60, 84, 40),
+            DFATransition(60, 85, 40),
             DFATransition(61, 5, 40),
             DFATransition(61, 6, 40),
             DFATransition(61, 7, 40),
@@ -9506,7 +9515,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(61, 30, 40),
             DFATransition(61, 35, 40),
             DFATransition(61, 37, 40),
-            DFATransition(61, 84, 40),
+            DFATransition(61, 85, 40),
             DFATransition(62, 5, 40),
             DFATransition(62, 6, 40),
             DFATransition(62, 7, 40),
@@ -9521,7 +9530,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(62, 30, 40),
             DFATransition(62, 35, 40),
             DFATransition(62, 37, 40),
-            DFATransition(62, 84, 40),
+            DFATransition(62, 85, 40),
             DFATransition(63, 5, 40),
             DFATransition(63, 6, 40),
             DFATransition(63, 7, 40),
@@ -9536,7 +9545,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(63, 30, 40),
             DFATransition(63, 35, 40),
             DFATransition(63, 37, 40),
-            DFATransition(63, 84, 40),
+            DFATransition(63, 85, 40),
             DFATransition(64, 5, 40),
             DFATransition(64, 6, 40),
             DFATransition(64, 7, 40),
@@ -9551,7 +9560,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(64, 30, 40),
             DFATransition(64, 35, 40),
             DFATransition(64, 37, 40),
-            DFATransition(64, 84, 40),
+            DFATransition(64, 85, 40),
             DFATransition(65, 5, 40),
             DFATransition(65, 6, 40),
             DFATransition(65, 7, 40),
@@ -9566,7 +9575,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(65, 30, 40),
             DFATransition(65, 35, 40),
             DFATransition(65, 37, 40),
-            DFATransition(65, 84, 40),
+            DFATransition(65, 85, 40),
             DFATransition(66, 5, 40),
             DFATransition(66, 35, 40),
             DFATransition(66, 48, 40),
@@ -9574,7 +9583,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(66, 58, 40),
             DFATransition(66, 59, 40),
             DFATransition(66, 76, 40),
-            DFATransition(66, 84, 40),
+            DFATransition(66, 85, 40),
             DFATransition(67, 15, 40),
             DFATransition(67, 16, 40),
             DFATransition(67, 17, 40),
@@ -9601,7 +9610,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(68, 30, 40),
             DFATransition(68, 35, 40),
             DFATransition(68, 37, 40),
-            DFATransition(68, 84, 40),
+            DFATransition(68, 85, 40),
             DFATransition(69, 5, 40),
             DFATransition(69, 6, 40),
             DFATransition(69, 7, 40),
@@ -9616,7 +9625,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(69, 30, 40),
             DFATransition(69, 35, 40),
             DFATransition(69, 37, 40),
-            DFATransition(69, 84, 40),
+            DFATransition(69, 85, 40),
             DFATransition(70, 5, 40),
             DFATransition(70, 6, 40),
             DFATransition(70, 7, 40),
@@ -9631,7 +9640,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(70, 30, 40),
             DFATransition(70, 35, 40),
             DFATransition(70, 37, 40),
-            DFATransition(70, 84, 40),
+            DFATransition(70, 85, 40),
             DFATransition(71, 5, 40),
             DFATransition(71, 6, 40),
             DFATransition(71, 7, 40),
@@ -9646,7 +9655,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(71, 30, 40),
             DFATransition(71, 35, 40),
             DFATransition(71, 37, 40),
-            DFATransition(71, 84, 40),
+            DFATransition(71, 85, 40),
             DFATransition(72, 5, 40),
             DFATransition(72, 6, 40),
             DFATransition(72, 7, 40),
@@ -9661,7 +9670,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(72, 30, 40),
             DFATransition(72, 35, 40),
             DFATransition(72, 37, 40),
-            DFATransition(72, 84, 40),
+            DFATransition(72, 85, 40),
             DFATransition(73, 5, 40),
             DFATransition(73, 6, 40),
             DFATransition(73, 7, 40),
@@ -9676,7 +9685,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(73, 30, 40),
             DFATransition(73, 35, 40),
             DFATransition(73, 37, 40),
-            DFATransition(73, 84, 40),
+            DFATransition(73, 85, 40),
             DFATransition(74, 5, 40),
             DFATransition(74, 6, 40),
             DFATransition(74, 7, 40),
@@ -9691,7 +9700,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(74, 30, 40),
             DFATransition(74, 35, 40),
             DFATransition(74, 37, 40),
-            DFATransition(74, 84, 40),
+            DFATransition(74, 85, 40),
             DFATransition(75, 5, 40),
             DFATransition(75, 6, 40),
             DFATransition(75, 7, 40),
@@ -9706,7 +9715,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(75, 30, 40),
             DFATransition(75, 35, 40),
             DFATransition(75, 37, 40),
-            DFATransition(75, 84, 40),
+            DFATransition(75, 85, 40),
             DFATransition(76, 5, 40),
             DFATransition(76, 6, 40),
             DFATransition(76, 7, 40),
@@ -9721,7 +9730,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(76, 30, 40),
             DFATransition(76, 35, 40),
             DFATransition(76, 37, 40),
-            DFATransition(76, 84, 40),
+            DFATransition(76, 85, 40),
             DFATransition(77, 5, 40),
             DFATransition(77, 6, 40),
             DFATransition(77, 7, 40),
@@ -9736,7 +9745,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(77, 30, 40),
             DFATransition(77, 35, 40),
             DFATransition(77, 37, 40),
-            DFATransition(77, 84, 40),
+            DFATransition(77, 85, 40),
             DFATransition(78, 5, 40),
             DFATransition(78, 6, 40),
             DFATransition(78, 7, 40),
@@ -9751,7 +9760,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(78, 30, 40),
             DFATransition(78, 35, 40),
             DFATransition(78, 37, 40),
-            DFATransition(78, 84, 40),
+            DFATransition(78, 85, 40),
             DFATransition(79, 5, 40),
             DFATransition(79, 35, 40),
             DFATransition(79, 48, 40),
@@ -9759,7 +9768,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(79, 58, 40),
             DFATransition(79, 59, 40),
             DFATransition(79, 76, 40),
-            DFATransition(79, 84, 40),
+            DFATransition(79, 85, 40),
             DFATransition(80, 15, 40),
             DFATransition(80, 16, 40),
             DFATransition(80, 17, 40),
@@ -9786,7 +9795,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(81, 30, 40),
             DFATransition(81, 35, 40),
             DFATransition(81, 37, 40),
-            DFATransition(81, 84, 40),
+            DFATransition(81, 85, 40),
             DFATransition(82, 5, 40),
             DFATransition(82, 6, 40),
             DFATransition(82, 7, 40),
@@ -9801,7 +9810,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(82, 30, 40),
             DFATransition(82, 35, 40),
             DFATransition(82, 37, 40),
-            DFATransition(82, 84, 40),
+            DFATransition(82, 85, 40),
             DFATransition(83, 5, 40),
             DFATransition(83, 6, 40),
             DFATransition(83, 7, 40),
@@ -9816,7 +9825,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(83, 30, 40),
             DFATransition(83, 35, 40),
             DFATransition(83, 37, 40),
-            DFATransition(83, 84, 40),
+            DFATransition(83, 85, 40),
             DFATransition(84, 5, 40),
             DFATransition(84, 6, 40),
             DFATransition(84, 7, 40),
@@ -9831,7 +9840,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(84, 30, 40),
             DFATransition(84, 35, 40),
             DFATransition(84, 37, 40),
-            DFATransition(84, 84, 40),
+            DFATransition(84, 85, 40),
             DFATransition(85, 5, 40),
             DFATransition(85, 6, 40),
             DFATransition(85, 7, 40),
@@ -9846,7 +9855,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(85, 30, 40),
             DFATransition(85, 35, 40),
             DFATransition(85, 37, 40),
-            DFATransition(85, 84, 40),
+            DFATransition(85, 85, 40),
             DFATransition(86, 5, 40),
             DFATransition(86, 6, 40),
             DFATransition(86, 7, 40),
@@ -9861,7 +9870,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(86, 30, 40),
             DFATransition(86, 35, 40),
             DFATransition(86, 37, 40),
-            DFATransition(86, 84, 40),
+            DFATransition(86, 85, 40),
             DFATransition(87, 5, 40),
             DFATransition(87, 6, 40),
             DFATransition(87, 7, 40),
@@ -9876,7 +9885,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(87, 30, 40),
             DFATransition(87, 35, 40),
             DFATransition(87, 37, 40),
-            DFATransition(87, 84, 40),
+            DFATransition(87, 85, 40),
             DFATransition(88, 5, 40),
             DFATransition(88, 6, 40),
             DFATransition(88, 7, 40),
@@ -9891,7 +9900,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(88, 30, 40),
             DFATransition(88, 35, 40),
             DFATransition(88, 37, 40),
-            DFATransition(88, 84, 40),
+            DFATransition(88, 85, 40),
             DFATransition(89, 5, 40),
             DFATransition(89, 6, 40),
             DFATransition(89, 7, 40),
@@ -9906,7 +9915,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(89, 30, 40),
             DFATransition(89, 35, 40),
             DFATransition(89, 37, 40),
-            DFATransition(89, 84, 40),
+            DFATransition(89, 85, 40),
             DFATransition(90, 5, 40),
             DFATransition(90, 6, 40),
             DFATransition(90, 7, 40),
@@ -9921,7 +9930,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(90, 30, 40),
             DFATransition(90, 35, 40),
             DFATransition(90, 37, 40),
-            DFATransition(90, 84, 40),
+            DFATransition(90, 85, 40),
             DFATransition(91, 5, 40),
             DFATransition(91, 6, 40),
             DFATransition(91, 7, 40),
@@ -9936,7 +9945,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(91, 30, 40),
             DFATransition(91, 35, 40),
             DFATransition(91, 37, 40),
-            DFATransition(91, 84, 40),
+            DFATransition(91, 85, 40),
             DFATransition(92, 5, 40),
             DFATransition(92, 35, 40),
             DFATransition(92, 48, 40),
@@ -9944,7 +9953,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(92, 58, 40),
             DFATransition(92, 59, 40),
             DFATransition(92, 76, 40),
-            DFATransition(92, 84, 40),
+            DFATransition(92, 85, 40),
             DFATransition(93, 6, 40),
             DFATransition(93, 7, 40),
             DFATransition(93, 8, 40),
@@ -9958,7 +9967,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(93, 30, 40),
             DFATransition(93, 35, 40),
             DFATransition(93, 37, 40),
-            DFATransition(93, 84, 40),
+            DFATransition(93, 85, 40),
             DFATransition(94, 5, 40),
             DFATransition(94, 15, 40),
             DFATransition(94, 16, 40),
@@ -10038,7 +10047,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(99, 30, 40),
             DFATransition(99, 35, 40),
             DFATransition(99, 37, 40),
-            DFATransition(99, 84, 40),
+            DFATransition(99, 85, 40),
             DFATransition(100, 5, 40),
             DFATransition(100, 6, 40),
             DFATransition(100, 7, 40),
@@ -10053,7 +10062,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(100, 30, 40),
             DFATransition(100, 35, 40),
             DFATransition(100, 37, 40),
-            DFATransition(100, 84, 40),
+            DFATransition(100, 85, 40),
             DFATransition(101, 5, 40),
             DFATransition(101, 6, 40),
             DFATransition(101, 7, 40),
@@ -10068,7 +10077,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(101, 30, 40),
             DFATransition(101, 35, 40),
             DFATransition(101, 37, 40),
-            DFATransition(101, 84, 40),
+            DFATransition(101, 85, 40),
             DFATransition(102, 5, 40),
             DFATransition(102, 6, 40),
             DFATransition(102, 7, 40),
@@ -10083,7 +10092,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(102, 30, 40),
             DFATransition(102, 35, 40),
             DFATransition(102, 37, 40),
-            DFATransition(102, 84, 40),
+            DFATransition(102, 85, 40),
             DFATransition(103, 5, 40),
             DFATransition(103, 6, 40),
             DFATransition(103, 7, 40),
@@ -10098,9 +10107,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(103, 30, 40),
             DFATransition(103, 35, 40),
             DFATransition(103, 37, 40),
-            DFATransition(103, 84, 40),
+            DFATransition(103, 85, 40),
             DFATransition(104, 5, 40),
-            DFATransition(104, 84, 40),
+            DFATransition(104, 85, 40),
             DFATransition(105, 5, 40),
             DFATransition(105, 6, 40),
             DFATransition(105, 7, 40),
@@ -10115,7 +10124,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(105, 30, 40),
             DFATransition(105, 35, 40),
             DFATransition(105, 37, 40),
-            DFATransition(105, 84, 40),
+            DFATransition(105, 85, 40),
             DFATransition(106, 5, 40),
             DFATransition(106, 6, 40),
             DFATransition(106, 7, 40),
@@ -10130,7 +10139,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(106, 30, 40),
             DFATransition(106, 35, 40),
             DFATransition(106, 37, 40),
-            DFATransition(106, 84, 40),
+            DFATransition(106, 85, 40),
             DFATransition(107, 5, 40),
             DFATransition(107, 15, 40),
             DFATransition(107, 16, 40),
@@ -10161,7 +10170,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(108, 30, 40),
             DFATransition(108, 35, 40),
             DFATransition(108, 37, 40),
-            DFATransition(108, 84, 40),
+            DFATransition(108, 85, 40),
             DFATransition(109, 5, 40),
             DFATransition(109, 15, 40),
             DFATransition(109, 16, 40),
@@ -10241,7 +10250,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(114, 30, 40),
             DFATransition(114, 35, 40),
             DFATransition(114, 37, 40),
-            DFATransition(114, 84, 40),
+            DFATransition(114, 85, 40),
             DFATransition(115, 5, 40),
             DFATransition(115, 6, 40),
             DFATransition(115, 7, 40),
@@ -10256,7 +10265,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(115, 30, 40),
             DFATransition(115, 35, 40),
             DFATransition(115, 37, 40),
-            DFATransition(115, 84, 40),
+            DFATransition(115, 85, 40),
             DFATransition(116, 5, 40),
             DFATransition(116, 6, 40),
             DFATransition(116, 7, 40),
@@ -10271,7 +10280,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(116, 30, 40),
             DFATransition(116, 35, 40),
             DFATransition(116, 37, 40),
-            DFATransition(116, 84, 40),
+            DFATransition(116, 85, 40),
             DFATransition(117, 5, 40),
             DFATransition(117, 6, 40),
             DFATransition(117, 7, 40),
@@ -10286,7 +10295,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(117, 30, 40),
             DFATransition(117, 35, 40),
             DFATransition(117, 37, 40),
-            DFATransition(117, 84, 40),
+            DFATransition(117, 85, 40),
             DFATransition(118, 5, 40),
             DFATransition(118, 6, 40),
             DFATransition(118, 7, 40),
@@ -10301,9 +10310,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(118, 30, 40),
             DFATransition(118, 35, 40),
             DFATransition(118, 37, 40),
-            DFATransition(118, 84, 40),
+            DFATransition(118, 85, 40),
             DFATransition(119, 5, 40),
-            DFATransition(119, 84, 40),
+            DFATransition(119, 85, 40),
             DFATransition(120, 5, 40),
             DFATransition(120, 6, 40),
             DFATransition(120, 7, 40),
@@ -10318,7 +10327,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(120, 30, 40),
             DFATransition(120, 35, 40),
             DFATransition(120, 37, 40),
-            DFATransition(120, 84, 40),
+            DFATransition(120, 85, 40),
             DFATransition(121, 5, 40),
             DFATransition(121, 6, 40),
             DFATransition(121, 7, 40),
@@ -10333,7 +10342,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(121, 30, 40),
             DFATransition(121, 35, 40),
             DFATransition(121, 37, 40),
-            DFATransition(121, 84, 40),
+            DFATransition(121, 85, 40),
             DFATransition(122, 5, 40),
             DFATransition(122, 15, 40),
             DFATransition(122, 16, 40),
@@ -10364,7 +10373,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(123, 30, 40),
             DFATransition(123, 35, 40),
             DFATransition(123, 37, 40),
-            DFATransition(123, 84, 40),
+            DFATransition(123, 85, 40),
             DFATransition(124, 5, 40),
             DFATransition(124, 15, 40),
             DFATransition(124, 16, 40),
@@ -10444,7 +10453,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(129, 30, 40),
             DFATransition(129, 35, 40),
             DFATransition(129, 37, 40),
-            DFATransition(129, 84, 40),
+            DFATransition(129, 85, 40),
             DFATransition(130, 5, 40),
             DFATransition(130, 6, 40),
             DFATransition(130, 7, 40),
@@ -10459,7 +10468,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(130, 30, 40),
             DFATransition(130, 35, 40),
             DFATransition(130, 37, 40),
-            DFATransition(130, 84, 40),
+            DFATransition(130, 85, 40),
             DFATransition(131, 5, 40),
             DFATransition(131, 6, 40),
             DFATransition(131, 7, 40),
@@ -10474,7 +10483,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(131, 30, 40),
             DFATransition(131, 35, 40),
             DFATransition(131, 37, 40),
-            DFATransition(131, 84, 40),
+            DFATransition(131, 85, 40),
             DFATransition(132, 5, 40),
             DFATransition(132, 6, 40),
             DFATransition(132, 7, 40),
@@ -10489,7 +10498,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(132, 30, 40),
             DFATransition(132, 35, 40),
             DFATransition(132, 37, 40),
-            DFATransition(132, 84, 40),
+            DFATransition(132, 85, 40),
             DFATransition(133, 5, 40),
             DFATransition(133, 6, 40),
             DFATransition(133, 7, 40),
@@ -10504,9 +10513,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(133, 30, 40),
             DFATransition(133, 35, 40),
             DFATransition(133, 37, 40),
-            DFATransition(133, 84, 40),
+            DFATransition(133, 85, 40),
             DFATransition(134, 5, 40),
-            DFATransition(134, 84, 40),
+            DFATransition(134, 85, 40),
             DFATransition(135, 5, 40),
             DFATransition(135, 6, 40),
             DFATransition(135, 7, 40),
@@ -10521,7 +10530,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(135, 30, 40),
             DFATransition(135, 35, 40),
             DFATransition(135, 37, 40),
-            DFATransition(135, 84, 40),
+            DFATransition(135, 85, 40),
             DFATransition(136, 5, 40),
             DFATransition(136, 6, 40),
             DFATransition(136, 7, 40),
@@ -10536,7 +10545,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(136, 30, 40),
             DFATransition(136, 35, 40),
             DFATransition(136, 37, 40),
-            DFATransition(136, 84, 40),
+            DFATransition(136, 85, 40),
             DFATransition(137, 5, 40),
             DFATransition(137, 15, 40),
             DFATransition(137, 16, 40),
@@ -10567,7 +10576,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(138, 30, 40),
             DFATransition(138, 35, 40),
             DFATransition(138, 37, 40),
-            DFATransition(138, 84, 40),
+            DFATransition(138, 85, 40),
             DFATransition(139, 5, 40),
             DFATransition(139, 15, 40),
             DFATransition(139, 16, 40),
@@ -10647,7 +10656,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(144, 30, 40),
             DFATransition(144, 35, 40),
             DFATransition(144, 37, 40),
-            DFATransition(144, 84, 40),
+            DFATransition(144, 85, 40),
             DFATransition(145, 5, 40),
             DFATransition(145, 6, 40),
             DFATransition(145, 7, 40),
@@ -10662,7 +10671,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(145, 30, 40),
             DFATransition(145, 35, 40),
             DFATransition(145, 37, 40),
-            DFATransition(145, 84, 40),
+            DFATransition(145, 85, 40),
             DFATransition(146, 5, 40),
             DFATransition(146, 6, 40),
             DFATransition(146, 7, 40),
@@ -10677,7 +10686,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(146, 30, 40),
             DFATransition(146, 35, 40),
             DFATransition(146, 37, 40),
-            DFATransition(146, 84, 40),
+            DFATransition(146, 85, 40),
             DFATransition(147, 5, 40),
             DFATransition(147, 6, 40),
             DFATransition(147, 7, 40),
@@ -10692,7 +10701,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(147, 30, 40),
             DFATransition(147, 35, 40),
             DFATransition(147, 37, 40),
-            DFATransition(147, 84, 40),
+            DFATransition(147, 85, 40),
             DFATransition(148, 5, 40),
             DFATransition(148, 6, 40),
             DFATransition(148, 7, 40),
@@ -10707,9 +10716,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(148, 30, 40),
             DFATransition(148, 35, 40),
             DFATransition(148, 37, 40),
-            DFATransition(148, 84, 40),
+            DFATransition(148, 85, 40),
             DFATransition(149, 5, 40),
-            DFATransition(149, 84, 40),
+            DFATransition(149, 85, 40),
             DFATransition(150, 5, 40),
             DFATransition(150, 6, 40),
             DFATransition(150, 7, 40),
@@ -10724,7 +10733,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(150, 30, 40),
             DFATransition(150, 35, 40),
             DFATransition(150, 37, 40),
-            DFATransition(150, 84, 40),
+            DFATransition(150, 85, 40),
             DFATransition(151, 5, 40),
             DFATransition(151, 6, 40),
             DFATransition(151, 7, 40),
@@ -10739,7 +10748,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(151, 30, 40),
             DFATransition(151, 35, 40),
             DFATransition(151, 37, 40),
-            DFATransition(151, 84, 40),
+            DFATransition(151, 85, 40),
             DFATransition(152, 5, 40),
             DFATransition(152, 15, 40),
             DFATransition(152, 16, 40),
@@ -10770,7 +10779,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(153, 30, 40),
             DFATransition(153, 35, 40),
             DFATransition(153, 37, 40),
-            DFATransition(153, 84, 40),
+            DFATransition(153, 85, 40),
             DFATransition(154, 5, 40),
             DFATransition(154, 15, 40),
             DFATransition(154, 16, 40),
@@ -10850,7 +10859,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(159, 30, 40),
             DFATransition(159, 35, 40),
             DFATransition(159, 37, 40),
-            DFATransition(159, 84, 40),
+            DFATransition(159, 85, 40),
             DFATransition(160, 5, 40),
             DFATransition(160, 6, 40),
             DFATransition(160, 7, 40),
@@ -10865,7 +10874,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(160, 30, 40),
             DFATransition(160, 35, 40),
             DFATransition(160, 37, 40),
-            DFATransition(160, 84, 40),
+            DFATransition(160, 85, 40),
             DFATransition(161, 5, 40),
             DFATransition(161, 6, 40),
             DFATransition(161, 7, 40),
@@ -10880,7 +10889,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(161, 30, 40),
             DFATransition(161, 35, 40),
             DFATransition(161, 37, 40),
-            DFATransition(161, 84, 40),
+            DFATransition(161, 85, 40),
             DFATransition(162, 5, 40),
             DFATransition(162, 6, 40),
             DFATransition(162, 7, 40),
@@ -10895,7 +10904,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(162, 30, 40),
             DFATransition(162, 35, 40),
             DFATransition(162, 37, 40),
-            DFATransition(162, 84, 40),
+            DFATransition(162, 85, 40),
             DFATransition(163, 5, 40),
             DFATransition(163, 6, 40),
             DFATransition(163, 7, 40),
@@ -10910,9 +10919,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(163, 30, 40),
             DFATransition(163, 35, 40),
             DFATransition(163, 37, 40),
-            DFATransition(163, 84, 40),
+            DFATransition(163, 85, 40),
             DFATransition(164, 5, 40),
-            DFATransition(164, 84, 40),
+            DFATransition(164, 85, 40),
             DFATransition(165, 5, 40),
             DFATransition(165, 6, 40),
             DFATransition(165, 7, 40),
@@ -10927,7 +10936,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(165, 30, 40),
             DFATransition(165, 35, 40),
             DFATransition(165, 37, 40),
-            DFATransition(165, 84, 40),
+            DFATransition(165, 85, 40),
             DFATransition(166, 5, 40),
             DFATransition(166, 6, 40),
             DFATransition(166, 7, 40),
@@ -10942,7 +10951,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(166, 30, 40),
             DFATransition(166, 35, 40),
             DFATransition(166, 37, 40),
-            DFATransition(166, 84, 40),
+            DFATransition(166, 85, 40),
             DFATransition(167, 5, 40),
             DFATransition(167, 15, 40),
             DFATransition(167, 16, 40),
@@ -10960,7 +10969,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(167, 32, 40),
             DFATransition(167, 36, 40),
             DFATransition(167, 37, 40),
-            DFATransition(168, 84, 40),
+            DFATransition(168, 85, 40),
             DFATransition(169, 5, 40),
             DFATransition(169, 15, 40),
             DFATransition(169, 16, 40),
@@ -10991,7 +11000,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(170, 30, 40),
             DFATransition(170, 35, 40),
             DFATransition(170, 37, 40),
-            DFATransition(170, 84, 40),
+            DFATransition(170, 85, 40),
             DFATransition(171, 5, 40),
             DFATransition(171, 15, 40),
             DFATransition(171, 16, 40),
@@ -11081,7 +11090,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(176, 30, 40),
             DFATransition(176, 35, 40),
             DFATransition(176, 37, 40),
-            DFATransition(176, 84, 40),
+            DFATransition(176, 85, 40),
             DFATransition(177, 5, 40),
             DFATransition(177, 6, 40),
             DFATransition(177, 7, 40),
@@ -11096,7 +11105,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(177, 30, 40),
             DFATransition(177, 35, 40),
             DFATransition(177, 37, 40),
-            DFATransition(177, 84, 40),
+            DFATransition(177, 85, 40),
             DFATransition(178, 5, 40),
             DFATransition(178, 6, 40),
             DFATransition(178, 7, 40),
@@ -11111,7 +11120,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(178, 30, 40),
             DFATransition(178, 35, 40),
             DFATransition(178, 37, 40),
-            DFATransition(178, 84, 40),
+            DFATransition(178, 85, 40),
             DFATransition(179, 5, 40),
             DFATransition(179, 6, 40),
             DFATransition(179, 7, 40),
@@ -11126,7 +11135,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(179, 30, 40),
             DFATransition(179, 35, 40),
             DFATransition(179, 37, 40),
-            DFATransition(179, 84, 40),
+            DFATransition(179, 85, 40),
             DFATransition(180, 5, 40),
             DFATransition(180, 6, 40),
             DFATransition(180, 7, 40),
@@ -11141,9 +11150,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(180, 30, 40),
             DFATransition(180, 35, 40),
             DFATransition(180, 37, 40),
-            DFATransition(180, 84, 40),
+            DFATransition(180, 85, 40),
             DFATransition(181, 5, 40),
-            DFATransition(181, 84, 40),
+            DFATransition(181, 85, 40),
             DFATransition(182, 5, 40),
             DFATransition(182, 6, 40),
             DFATransition(182, 7, 40),
@@ -11158,7 +11167,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(182, 30, 40),
             DFATransition(182, 35, 40),
             DFATransition(182, 37, 40),
-            DFATransition(182, 84, 40),
+            DFATransition(182, 85, 40),
             DFATransition(183, 5, 40),
             DFATransition(183, 6, 40),
             DFATransition(183, 7, 40),
@@ -11173,7 +11182,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(183, 30, 40),
             DFATransition(183, 35, 40),
             DFATransition(183, 37, 40),
-            DFATransition(183, 84, 40),
+            DFATransition(183, 85, 40),
             DFATransition(184, 5, 40),
             DFATransition(184, 15, 40),
             DFATransition(184, 16, 40),
@@ -11206,7 +11215,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(185, 30, 40),
             DFATransition(185, 35, 40),
             DFATransition(185, 37, 40),
-            DFATransition(185, 84, 40),
+            DFATransition(185, 85, 40),
             DFATransition(186, 5, 40),
             DFATransition(186, 15, 40),
             DFATransition(186, 16, 40),
@@ -11286,7 +11295,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(191, 30, 40),
             DFATransition(191, 35, 40),
             DFATransition(191, 37, 40),
-            DFATransition(191, 84, 40),
+            DFATransition(191, 85, 40),
             DFATransition(192, 5, 40),
             DFATransition(192, 6, 40),
             DFATransition(192, 7, 40),
@@ -11301,7 +11310,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(192, 30, 40),
             DFATransition(192, 35, 40),
             DFATransition(192, 37, 40),
-            DFATransition(192, 84, 40),
+            DFATransition(192, 85, 40),
             DFATransition(193, 5, 40),
             DFATransition(193, 6, 40),
             DFATransition(193, 7, 40),
@@ -11316,7 +11325,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(193, 30, 40),
             DFATransition(193, 35, 40),
             DFATransition(193, 37, 40),
-            DFATransition(193, 84, 40),
+            DFATransition(193, 85, 40),
             DFATransition(194, 5, 40),
             DFATransition(194, 6, 40),
             DFATransition(194, 7, 40),
@@ -11331,7 +11340,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(194, 30, 40),
             DFATransition(194, 35, 40),
             DFATransition(194, 37, 40),
-            DFATransition(194, 84, 40),
+            DFATransition(194, 85, 40),
             DFATransition(195, 5, 40),
             DFATransition(195, 6, 40),
             DFATransition(195, 7, 40),
@@ -11346,9 +11355,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(195, 30, 40),
             DFATransition(195, 35, 40),
             DFATransition(195, 37, 40),
-            DFATransition(195, 84, 40),
+            DFATransition(195, 85, 40),
             DFATransition(196, 5, 40),
-            DFATransition(196, 84, 40),
+            DFATransition(196, 85, 40),
             DFATransition(197, 5, 40),
             DFATransition(197, 6, 40),
             DFATransition(197, 7, 40),
@@ -11363,7 +11372,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(197, 30, 40),
             DFATransition(197, 35, 40),
             DFATransition(197, 37, 40),
-            DFATransition(197, 84, 40),
+            DFATransition(197, 85, 40),
             DFATransition(198, 5, 40),
             DFATransition(198, 6, 40),
             DFATransition(198, 7, 40),
@@ -11378,7 +11387,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(198, 30, 40),
             DFATransition(198, 35, 40),
             DFATransition(198, 37, 40),
-            DFATransition(198, 84, 40),
+            DFATransition(198, 85, 40),
             DFATransition(199, 5, 40),
             DFATransition(199, 15, 40),
             DFATransition(199, 16, 40),
@@ -11427,8 +11436,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(200, 67, 40),
             DFATransition(200, 76, 40),
             DFATransition(200, 78, 40),
-            DFATransition(200, 83, 40),
             DFATransition(200, 84, 40),
+            DFATransition(200, 85, 40),
             DFATransition(201, 5, 40),
             DFATransition(201, 15, 40),
             DFATransition(201, 16, 40),
@@ -11508,7 +11517,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(206, 30, 40),
             DFATransition(206, 35, 40),
             DFATransition(206, 37, 40),
-            DFATransition(206, 84, 40),
+            DFATransition(206, 85, 40),
             DFATransition(207, 5, 40),
             DFATransition(207, 6, 40),
             DFATransition(207, 7, 40),
@@ -11523,7 +11532,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(207, 30, 40),
             DFATransition(207, 35, 40),
             DFATransition(207, 37, 40),
-            DFATransition(207, 84, 40),
+            DFATransition(207, 85, 40),
             DFATransition(208, 5, 40),
             DFATransition(208, 6, 40),
             DFATransition(208, 7, 40),
@@ -11538,7 +11547,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(208, 30, 40),
             DFATransition(208, 35, 40),
             DFATransition(208, 37, 40),
-            DFATransition(208, 84, 40),
+            DFATransition(208, 85, 40),
             DFATransition(209, 5, 40),
             DFATransition(209, 6, 40),
             DFATransition(209, 7, 40),
@@ -11553,7 +11562,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(209, 30, 40),
             DFATransition(209, 35, 40),
             DFATransition(209, 37, 40),
-            DFATransition(209, 84, 40),
+            DFATransition(209, 85, 40),
             DFATransition(210, 5, 40),
             DFATransition(210, 6, 40),
             DFATransition(210, 7, 40),
@@ -11568,11 +11577,11 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(210, 30, 40),
             DFATransition(210, 35, 40),
             DFATransition(210, 37, 40),
-            DFATransition(210, 84, 40),
+            DFATransition(210, 85, 40),
             DFATransition(211, 5, 40),
-            DFATransition(211, 84, 40),
+            DFATransition(211, 85, 40),
             DFATransition(212, 5, 40),
-            DFATransition(212, 84, 40),
+            DFATransition(212, 85, 40),
             DFATransition(213, 5, 40),
             DFATransition(213, 6, 40),
             DFATransition(213, 7, 40),
@@ -11587,7 +11596,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(213, 30, 40),
             DFATransition(213, 35, 40),
             DFATransition(213, 37, 40),
-            DFATransition(213, 84, 40),
+            DFATransition(213, 85, 40),
             DFATransition(214, 5, 40),
             DFATransition(214, 6, 40),
             DFATransition(214, 7, 40),
@@ -11602,7 +11611,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(214, 30, 40),
             DFATransition(214, 35, 40),
             DFATransition(214, 37, 40),
-            DFATransition(214, 84, 40),
+            DFATransition(214, 85, 40),
             DFATransition(215, 0, 40),
             DFATransition(215, 5, 40),
             DFATransition(215, 6, 40),
@@ -11639,14 +11648,14 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(215, 71, 40),
             DFATransition(215, 76, 40),
             DFATransition(215, 78, 40),
-            DFATransition(215, 83, 40),
             DFATransition(215, 84, 40),
+            DFATransition(215, 85, 40),
             DFATransition(216, 5, 40),
             DFATransition(216, 35, 40),
             DFATransition(217, 5, 40),
             DFATransition(217, 37, 40),
             DFATransition(218, 5, 40),
-            DFATransition(218, 84, 40),
+            DFATransition(218, 85, 40),
             DFATransition(219, 5, 40),
             DFATransition(219, 6, 40),
             DFATransition(219, 7, 40),
@@ -11661,18 +11670,18 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(219, 30, 40),
             DFATransition(219, 35, 40),
             DFATransition(219, 37, 40),
-            DFATransition(219, 84, 40),
+            DFATransition(219, 85, 40),
             DFATransition(220, 5, 40),
             DFATransition(220, 28, 40),
             DFATransition(221, 5, 40),
             DFATransition(221, 35, 40),
             DFATransition(221, 59, 40),
             DFATransition(222, 5, 40),
-            DFATransition(222, 84, 40),
+            DFATransition(222, 85, 40),
             DFATransition(223, 5, 40),
-            DFATransition(223, 84, 40),
+            DFATransition(223, 85, 40),
             DFATransition(224, 5, 40),
-            DFATransition(224, 84, 40),
+            DFATransition(224, 85, 40),
             DFATransition(225, 5, 40),
             DFATransition(225, 35, 40),
             DFATransition(226, 5, 40),
@@ -11689,13 +11698,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(226, 30, 40),
             DFATransition(226, 35, 40),
             DFATransition(226, 37, 40),
-            DFATransition(226, 84, 40),
+            DFATransition(226, 85, 40),
             DFATransition(227, 5, 40),
-            DFATransition(227, 84, 40),
+            DFATransition(227, 85, 40),
             DFATransition(228, 5, 40),
-            DFATransition(228, 84, 40),
+            DFATransition(228, 85, 40),
             DFATransition(229, 5, 40),
-            DFATransition(229, 84, 40),
+            DFATransition(229, 85, 40),
             DFATransition(230, 5, 40),
             DFATransition(230, 6, 40),
             DFATransition(230, 7, 40),
@@ -11710,11 +11719,11 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(230, 30, 40),
             DFATransition(230, 35, 40),
             DFATransition(230, 37, 40),
-            DFATransition(230, 84, 40),
+            DFATransition(230, 85, 40),
             DFATransition(231, 5, 40),
-            DFATransition(231, 84, 40),
+            DFATransition(231, 85, 40),
             DFATransition(232, 5, 40),
-            DFATransition(232, 84, 40),
+            DFATransition(232, 85, 40),
             DFATransition(233, 5, 40),
             DFATransition(233, 14, 40),
             DFATransition(233, 15, 40),
@@ -11747,7 +11756,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(234, 30, 40),
             DFATransition(234, 35, 40),
             DFATransition(234, 37, 40),
-            DFATransition(234, 84, 40),
+            DFATransition(234, 85, 40),
             DFATransition(235, 5, 40),
             DFATransition(235, 15, 40),
             DFATransition(235, 16, 40),
@@ -11827,7 +11836,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(240, 30, 40),
             DFATransition(240, 35, 40),
             DFATransition(240, 37, 40),
-            DFATransition(240, 84, 40),
+            DFATransition(240, 85, 40),
             DFATransition(241, 5, 40),
             DFATransition(241, 6, 40),
             DFATransition(241, 7, 40),
@@ -11842,7 +11851,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(241, 30, 40),
             DFATransition(241, 35, 40),
             DFATransition(241, 37, 40),
-            DFATransition(241, 84, 40),
+            DFATransition(241, 85, 40),
             DFATransition(242, 5, 40),
             DFATransition(242, 6, 40),
             DFATransition(242, 7, 40),
@@ -11857,7 +11866,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(242, 30, 40),
             DFATransition(242, 35, 40),
             DFATransition(242, 37, 40),
-            DFATransition(242, 84, 40),
+            DFATransition(242, 85, 40),
             DFATransition(243, 5, 40),
             DFATransition(243, 6, 40),
             DFATransition(243, 7, 40),
@@ -11872,7 +11881,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(243, 30, 40),
             DFATransition(243, 35, 40),
             DFATransition(243, 37, 40),
-            DFATransition(243, 84, 40),
+            DFATransition(243, 85, 40),
             DFATransition(244, 5, 40),
             DFATransition(244, 6, 40),
             DFATransition(244, 7, 40),
@@ -11887,9 +11896,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(244, 30, 40),
             DFATransition(244, 35, 40),
             DFATransition(244, 37, 40),
-            DFATransition(244, 84, 40),
+            DFATransition(244, 85, 40),
             DFATransition(245, 5, 40),
-            DFATransition(245, 84, 40),
+            DFATransition(245, 85, 40),
             DFATransition(246, 5, 40),
             DFATransition(246, 6, 40),
             DFATransition(246, 7, 40),
@@ -11904,7 +11913,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(246, 30, 40),
             DFATransition(246, 35, 40),
             DFATransition(246, 37, 40),
-            DFATransition(246, 84, 40),
+            DFATransition(246, 85, 40),
             DFATransition(247, 5, 40),
             DFATransition(247, 6, 40),
             DFATransition(247, 7, 40),
@@ -11919,7 +11928,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(247, 30, 40),
             DFATransition(247, 35, 40),
             DFATransition(247, 37, 40),
-            DFATransition(247, 84, 40),
+            DFATransition(247, 85, 40),
             DFATransition(248, 5, 40),
             DFATransition(248, 15, 40),
             DFATransition(248, 16, 40),
@@ -11945,7 +11954,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(250, 58, 40),
             DFATransition(250, 59, 40),
             DFATransition(250, 76, 40),
-            DFATransition(250, 84, 40),
+            DFATransition(250, 85, 40),
             DFATransition(251, 5, 40),
             DFATransition(251, 38, 40),
             DFATransition(251, 48, 40),
@@ -11953,8 +11962,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(251, 58, 40),
             DFATransition(251, 59, 40),
             DFATransition(251, 76, 40),
-            DFATransition(251, 84, 40),
-            DFATransition(252, 84, 40),
+            DFATransition(251, 85, 40),
+            DFATransition(252, 85, 40),
             DFATransition(253, 5, 40),
             DFATransition(253, 28, 40),
             DFATransition(254, 35, 40),
@@ -11965,7 +11974,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(255, 58, 40),
             DFATransition(255, 59, 40),
             DFATransition(255, 76, 40),
-            DFATransition(255, 84, 40),
+            DFATransition(255, 85, 40),
             DFATransition(256, 6, 40),
             DFATransition(256, 7, 40),
             DFATransition(256, 8, 40),
@@ -11979,7 +11988,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(256, 30, 40),
             DFATransition(256, 35, 40),
             DFATransition(256, 37, 40),
-            DFATransition(256, 84, 40),
+            DFATransition(256, 85, 40),
             DFATransition(257, 5, 40),
             DFATransition(257, 15, 40),
             DFATransition(257, 16, 40),
@@ -12059,7 +12068,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(262, 30, 40),
             DFATransition(262, 35, 40),
             DFATransition(262, 37, 40),
-            DFATransition(262, 84, 40),
+            DFATransition(262, 85, 40),
             DFATransition(263, 5, 40),
             DFATransition(263, 6, 40),
             DFATransition(263, 7, 40),
@@ -12074,7 +12083,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(263, 30, 40),
             DFATransition(263, 35, 40),
             DFATransition(263, 37, 40),
-            DFATransition(263, 84, 40),
+            DFATransition(263, 85, 40),
             DFATransition(264, 5, 40),
             DFATransition(264, 6, 40),
             DFATransition(264, 7, 40),
@@ -12089,7 +12098,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(264, 30, 40),
             DFATransition(264, 35, 40),
             DFATransition(264, 37, 40),
-            DFATransition(264, 84, 40),
+            DFATransition(264, 85, 40),
             DFATransition(265, 5, 40),
             DFATransition(265, 6, 40),
             DFATransition(265, 7, 40),
@@ -12104,7 +12113,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(265, 30, 40),
             DFATransition(265, 35, 40),
             DFATransition(265, 37, 40),
-            DFATransition(265, 84, 40),
+            DFATransition(265, 85, 40),
             DFATransition(266, 5, 40),
             DFATransition(266, 6, 40),
             DFATransition(266, 7, 40),
@@ -12119,9 +12128,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(266, 30, 40),
             DFATransition(266, 35, 40),
             DFATransition(266, 37, 40),
-            DFATransition(266, 84, 40),
+            DFATransition(266, 85, 40),
             DFATransition(267, 5, 40),
-            DFATransition(267, 84, 40),
+            DFATransition(267, 85, 40),
             DFATransition(268, 5, 40),
             DFATransition(268, 6, 40),
             DFATransition(268, 7, 40),
@@ -12136,7 +12145,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(268, 30, 40),
             DFATransition(268, 35, 40),
             DFATransition(268, 37, 40),
-            DFATransition(268, 84, 40),
+            DFATransition(268, 85, 40),
             DFATransition(269, 5, 40),
             DFATransition(269, 6, 40),
             DFATransition(269, 7, 40),
@@ -12151,7 +12160,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(269, 30, 40),
             DFATransition(269, 35, 40),
             DFATransition(269, 37, 40),
-            DFATransition(269, 84, 40),
+            DFATransition(269, 85, 40),
             DFATransition(270, 5, 40),
             DFATransition(270, 15, 40),
             DFATransition(270, 16, 40),
@@ -12182,7 +12191,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(271, 30, 40),
             DFATransition(271, 35, 40),
             DFATransition(271, 37, 40),
-            DFATransition(271, 84, 40),
+            DFATransition(271, 85, 40),
             DFATransition(272, 5, 40),
             DFATransition(272, 15, 40),
             DFATransition(272, 16, 40),
@@ -12262,7 +12271,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(277, 30, 40),
             DFATransition(277, 35, 40),
             DFATransition(277, 37, 40),
-            DFATransition(277, 84, 40),
+            DFATransition(277, 85, 40),
             DFATransition(278, 5, 40),
             DFATransition(278, 6, 40),
             DFATransition(278, 7, 40),
@@ -12277,7 +12286,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(278, 30, 40),
             DFATransition(278, 35, 40),
             DFATransition(278, 37, 40),
-            DFATransition(278, 84, 40),
+            DFATransition(278, 85, 40),
             DFATransition(279, 5, 40),
             DFATransition(279, 6, 40),
             DFATransition(279, 7, 40),
@@ -12292,7 +12301,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(279, 30, 40),
             DFATransition(279, 35, 40),
             DFATransition(279, 37, 40),
-            DFATransition(279, 84, 40),
+            DFATransition(279, 85, 40),
             DFATransition(280, 5, 40),
             DFATransition(280, 6, 40),
             DFATransition(280, 7, 40),
@@ -12307,7 +12316,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(280, 30, 40),
             DFATransition(280, 35, 40),
             DFATransition(280, 37, 40),
-            DFATransition(280, 84, 40),
+            DFATransition(280, 85, 40),
             DFATransition(281, 5, 40),
             DFATransition(281, 6, 40),
             DFATransition(281, 7, 40),
@@ -12322,9 +12331,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(281, 30, 40),
             DFATransition(281, 35, 40),
             DFATransition(281, 37, 40),
-            DFATransition(281, 84, 40),
+            DFATransition(281, 85, 40),
             DFATransition(282, 5, 40),
-            DFATransition(282, 84, 40),
+            DFATransition(282, 85, 40),
             DFATransition(283, 5, 40),
             DFATransition(283, 6, 40),
             DFATransition(283, 7, 40),
@@ -12339,7 +12348,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(283, 30, 40),
             DFATransition(283, 35, 40),
             DFATransition(283, 37, 40),
-            DFATransition(283, 84, 40),
+            DFATransition(283, 85, 40),
             DFATransition(284, 5, 40),
             DFATransition(284, 6, 40),
             DFATransition(284, 7, 40),
@@ -12354,7 +12363,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(284, 30, 40),
             DFATransition(284, 35, 40),
             DFATransition(284, 37, 40),
-            DFATransition(284, 84, 40),
+            DFATransition(284, 85, 40),
             DFATransition(285, 5, 40),
             DFATransition(285, 15, 40),
             DFATransition(285, 16, 40),
@@ -12372,7 +12381,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(285, 36, 40),
             DFATransition(285, 37, 40),
             DFATransition(285, 41, 40),
-            DFATransition(286, 84, 40),
+            DFATransition(286, 85, 40),
             DFATransition(287, 5, 40),
             DFATransition(287, 28, 40),
             DFATransition(288, 14, 40),
@@ -12407,7 +12416,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(289, 30, 40),
             DFATransition(289, 35, 40),
             DFATransition(289, 37, 40),
-            DFATransition(289, 84, 40),
+            DFATransition(289, 85, 40),
             DFATransition(290, 5, 40),
             DFATransition(290, 6, 40),
             DFATransition(290, 7, 40),
@@ -12422,7 +12431,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(290, 30, 40),
             DFATransition(290, 35, 40),
             DFATransition(290, 37, 40),
-            DFATransition(290, 84, 40),
+            DFATransition(290, 85, 40),
             DFATransition(291, 5, 40),
             DFATransition(291, 6, 40),
             DFATransition(291, 7, 40),
@@ -12437,7 +12446,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(291, 30, 40),
             DFATransition(291, 35, 40),
             DFATransition(291, 37, 40),
-            DFATransition(291, 84, 40),
+            DFATransition(291, 85, 40),
             DFATransition(292, 5, 40),
             DFATransition(292, 6, 40),
             DFATransition(292, 7, 40),
@@ -12452,7 +12461,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(292, 30, 40),
             DFATransition(292, 35, 40),
             DFATransition(292, 37, 40),
-            DFATransition(292, 84, 40),
+            DFATransition(292, 85, 40),
             DFATransition(293, 5, 40),
             DFATransition(293, 6, 40),
             DFATransition(293, 7, 40),
@@ -12467,7 +12476,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(293, 30, 40),
             DFATransition(293, 35, 40),
             DFATransition(293, 37, 40),
-            DFATransition(293, 84, 40),
+            DFATransition(293, 85, 40),
             DFATransition(294, 5, 40),
             DFATransition(294, 6, 40),
             DFATransition(294, 7, 40),
@@ -12482,7 +12491,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(294, 30, 40),
             DFATransition(294, 35, 40),
             DFATransition(294, 37, 40),
-            DFATransition(294, 84, 40),
+            DFATransition(294, 85, 40),
             DFATransition(295, 5, 40),
             DFATransition(295, 6, 40),
             DFATransition(295, 7, 40),
@@ -12497,7 +12506,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(295, 30, 40),
             DFATransition(295, 35, 40),
             DFATransition(295, 37, 40),
-            DFATransition(295, 84, 40),
+            DFATransition(295, 85, 40),
             DFATransition(296, 5, 40),
             DFATransition(296, 6, 40),
             DFATransition(296, 7, 40),
@@ -12512,7 +12521,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(296, 30, 40),
             DFATransition(296, 35, 40),
             DFATransition(296, 37, 40),
-            DFATransition(296, 84, 40),
+            DFATransition(296, 85, 40),
             DFATransition(297, 5, 40),
             DFATransition(297, 6, 40),
             DFATransition(297, 7, 40),
@@ -12527,7 +12536,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(297, 30, 40),
             DFATransition(297, 35, 40),
             DFATransition(297, 37, 40),
-            DFATransition(297, 84, 40),
+            DFATransition(297, 85, 40),
             DFATransition(298, 5, 40),
             DFATransition(298, 6, 40),
             DFATransition(298, 7, 40),
@@ -12542,7 +12551,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(298, 30, 40),
             DFATransition(298, 35, 40),
             DFATransition(298, 37, 40),
-            DFATransition(298, 84, 40),
+            DFATransition(298, 85, 40),
             DFATransition(299, 5, 40),
             DFATransition(299, 6, 40),
             DFATransition(299, 7, 40),
@@ -12557,7 +12566,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(299, 30, 40),
             DFATransition(299, 35, 40),
             DFATransition(299, 37, 40),
-            DFATransition(299, 84, 40),
+            DFATransition(299, 85, 40),
             DFATransition(300, 5, 40),
             DFATransition(300, 6, 40),
             DFATransition(300, 7, 40),
@@ -12572,9 +12581,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(300, 30, 40),
             DFATransition(300, 35, 40),
             DFATransition(300, 37, 40),
-            DFATransition(300, 84, 40),
+            DFATransition(300, 85, 40),
             DFATransition(301, 5, 40),
-            DFATransition(301, 84, 40),
+            DFATransition(301, 85, 40),
             DFATransition(302, 5, 40),
             DFATransition(302, 35, 40),
             DFATransition(302, 48, 40),
@@ -12582,9 +12591,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(302, 58, 40),
             DFATransition(302, 59, 40),
             DFATransition(302, 76, 40),
-            DFATransition(302, 84, 40),
+            DFATransition(302, 85, 40),
             DFATransition(303, 5, 40),
-            DFATransition(303, 84, 40),
+            DFATransition(303, 85, 40),
             DFATransition(304, 5, 40),
             DFATransition(304, 6, 40),
             DFATransition(304, 7, 40),
@@ -12599,7 +12608,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(304, 30, 40),
             DFATransition(304, 35, 40),
             DFATransition(304, 37, 40),
-            DFATransition(304, 84, 40),
+            DFATransition(304, 85, 40),
             DFATransition(305, 5, 40),
             DFATransition(305, 6, 40),
             DFATransition(305, 7, 40),
@@ -12614,7 +12623,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(305, 30, 40),
             DFATransition(305, 35, 40),
             DFATransition(305, 37, 40),
-            DFATransition(305, 84, 40),
+            DFATransition(305, 85, 40),
             DFATransition(306, 5, 40),
             DFATransition(306, 6, 40),
             DFATransition(306, 7, 40),
@@ -12630,13 +12639,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(306, 35, 40),
             DFATransition(306, 37, 40),
             DFATransition(306, 40, 40),
-            DFATransition(306, 84, 40),
+            DFATransition(306, 85, 40),
         ],
         k: 3,
     },
     /* 187 - "IfStatementList0List" */
     LookaheadDFA {
-        states: &[None, Some(369), Some(370)],
+        states: &[None, Some(373), Some(374)],
         transitions: &[
             DFATransition(0, 38, 2),
             DFATransition(0, 48, 1),
@@ -12644,13 +12653,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 58, 1),
             DFATransition(0, 59, 1),
             DFATransition(0, 76, 1),
-            DFATransition(0, 84, 1),
+            DFATransition(0, 85, 1),
         ],
         k: 1,
     },
     /* 188 - "IfStatementOpt" */
     LookaheadDFA {
-        states: &[None, Some(374), Some(377)],
+        states: &[None, Some(378), Some(381)],
         transitions: &[
             DFATransition(0, 6, 2),
             DFATransition(0, 7, 2),
@@ -12673,14 +12682,14 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 58, 2),
             DFATransition(0, 59, 2),
             DFATransition(0, 76, 2),
-            DFATransition(0, 83, 2),
             DFATransition(0, 84, 2),
+            DFATransition(0, 85, 2),
         ],
         k: 1,
     },
     /* 189 - "IfStatementOptList" */
     LookaheadDFA {
-        states: &[None, Some(375), Some(376)],
+        states: &[None, Some(379), Some(380)],
         transitions: &[
             DFATransition(0, 38, 2),
             DFATransition(0, 48, 1),
@@ -12688,7 +12697,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 58, 1),
             DFATransition(0, 59, 1),
             DFATransition(0, 76, 1),
-            DFATransition(0, 84, 1),
+            DFATransition(0, 85, 1),
         ],
         k: 1,
     },
@@ -12700,13 +12709,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 191 - "IfToken" */
     LookaheadDFA {
-        states: &[Some(137)],
+        states: &[Some(138)],
         transitions: &[],
         k: 0,
     },
     /* 192 - "In" */
     LookaheadDFA {
-        states: &[Some(218)],
+        states: &[Some(220)],
         transitions: &[],
         k: 0,
     },
@@ -12718,13 +12727,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 194 - "InToken" */
     LookaheadDFA {
-        states: &[Some(142)],
+        states: &[Some(143)],
         transitions: &[],
         k: 0,
     },
     /* 195 - "Inout" */
     LookaheadDFA {
-        states: &[Some(219)],
+        states: &[Some(221)],
         transitions: &[],
         k: 0,
     },
@@ -12736,13 +12745,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 197 - "InoutToken" */
     LookaheadDFA {
-        states: &[Some(138)],
+        states: &[Some(139)],
         transitions: &[],
         k: 0,
     },
     /* 198 - "Input" */
     LookaheadDFA {
-        states: &[Some(220)],
+        states: &[Some(222)],
         transitions: &[],
         k: 0,
     },
@@ -12754,25 +12763,25 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 200 - "InputToken" */
     LookaheadDFA {
-        states: &[Some(139)],
+        states: &[Some(140)],
         transitions: &[],
         k: 0,
     },
     /* 201 - "Inst" */
     LookaheadDFA {
-        states: &[Some(221)],
+        states: &[Some(223)],
         transitions: &[],
         k: 0,
     },
     /* 202 - "InstDeclaration" */
     LookaheadDFA {
-        states: &[Some(453)],
+        states: &[Some(457)],
         transitions: &[],
         k: 0,
     },
     /* 203 - "InstDeclarationOpt" */
     LookaheadDFA {
-        states: &[None, Some(460), Some(461)],
+        states: &[None, Some(464), Some(465)],
         transitions: &[
             DFATransition(0, 34, 2),
             DFATransition(0, 35, 2),
@@ -12783,7 +12792,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 204 - "InstDeclarationOpt0" */
     LookaheadDFA {
-        states: &[None, Some(458), Some(459)],
+        states: &[None, Some(462), Some(463)],
         transitions: &[
             DFATransition(0, 34, 1),
             DFATransition(0, 35, 2),
@@ -12793,31 +12802,31 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 205 - "InstDeclarationOpt1" */
     LookaheadDFA {
-        states: &[None, Some(454), Some(457)],
+        states: &[None, Some(458), Some(461)],
         transitions: &[DFATransition(0, 35, 1), DFATransition(0, 41, 2)],
         k: 1,
     },
     /* 206 - "InstDeclarationOpt2" */
     LookaheadDFA {
-        states: &[None, Some(455), Some(456)],
-        transitions: &[DFATransition(0, 38, 2), DFATransition(0, 84, 1)],
+        states: &[None, Some(459), Some(460)],
+        transitions: &[DFATransition(0, 38, 2), DFATransition(0, 85, 1)],
         k: 1,
     },
     /* 207 - "InstParameter" */
     LookaheadDFA {
-        states: &[Some(462)],
+        states: &[Some(466)],
         transitions: &[],
         k: 0,
     },
     /* 208 - "InstParameterItem" */
     LookaheadDFA {
-        states: &[Some(470)],
+        states: &[Some(474)],
         transitions: &[],
         k: 0,
     },
     /* 209 - "InstParameterItemOpt" */
     LookaheadDFA {
-        states: &[None, Some(471), Some(472)],
+        states: &[None, Some(475), Some(476)],
         transitions: &[
             DFATransition(0, 28, 1),
             DFATransition(0, 29, 2),
@@ -12827,7 +12836,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 210 - "InstParameterList" */
     LookaheadDFA {
-        states: &[Some(465)],
+        states: &[Some(469)],
         transitions: &[],
         k: 0,
     },
@@ -12837,11 +12846,11 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             None,
             None,
             None,
-            Some(466),
+            Some(470),
             None,
             None,
             None,
-            Some(467),
+            Some(471),
             None,
             None,
             None,
@@ -12851,9 +12860,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 40, 5),
             DFATransition(1, 5, 2),
             DFATransition(1, 40, 6),
-            DFATransition(1, 84, 4),
+            DFATransition(1, 85, 4),
             DFATransition(2, 40, 7),
-            DFATransition(2, 84, 3),
+            DFATransition(2, 85, 3),
             DFATransition(4, 5, 3),
             DFATransition(4, 28, 3),
             DFATransition(4, 29, 3),
@@ -12868,7 +12877,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(8, 41, 7),
             DFATransition(9, 5, 7),
             DFATransition(9, 38, 7),
-            DFATransition(9, 84, 7),
+            DFATransition(9, 85, 7),
             DFATransition(10, 5, 7),
             DFATransition(10, 28, 7),
             DFATransition(10, 38, 7),
@@ -12882,31 +12891,31 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(10, 62, 7),
             DFATransition(10, 65, 7),
             DFATransition(10, 78, 7),
-            DFATransition(10, 83, 7),
+            DFATransition(10, 84, 7),
         ],
         k: 3,
     },
     /* 212 - "InstParameterListOpt" */
     LookaheadDFA {
-        states: &[None, Some(468), Some(469)],
+        states: &[None, Some(472), Some(473)],
         transitions: &[DFATransition(0, 29, 1), DFATransition(0, 40, 2)],
         k: 1,
     },
     /* 213 - "InstParameterOpt" */
     LookaheadDFA {
-        states: &[None, Some(463), Some(464)],
-        transitions: &[DFATransition(0, 40, 2), DFATransition(0, 84, 1)],
+        states: &[None, Some(467), Some(468)],
+        transitions: &[DFATransition(0, 40, 2), DFATransition(0, 85, 1)],
         k: 1,
     },
     /* 214 - "InstPortItem" */
     LookaheadDFA {
-        states: &[Some(478)],
+        states: &[Some(482)],
         transitions: &[],
         k: 0,
     },
     /* 215 - "InstPortItemOpt" */
     LookaheadDFA {
-        states: &[None, Some(479), Some(480)],
+        states: &[None, Some(483), Some(484)],
         transitions: &[
             DFATransition(0, 28, 1),
             DFATransition(0, 29, 2),
@@ -12916,7 +12925,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 216 - "InstPortList" */
     LookaheadDFA {
-        states: &[Some(473)],
+        states: &[Some(477)],
         transitions: &[],
         k: 0,
     },
@@ -12926,11 +12935,11 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             None,
             None,
             None,
-            Some(474),
+            Some(478),
             None,
             None,
             None,
-            Some(475),
+            Some(479),
             None,
             None,
         ],
@@ -12939,9 +12948,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 38, 5),
             DFATransition(1, 5, 2),
             DFATransition(1, 38, 6),
-            DFATransition(1, 84, 4),
+            DFATransition(1, 85, 4),
             DFATransition(2, 38, 7),
-            DFATransition(2, 84, 3),
+            DFATransition(2, 85, 3),
             DFATransition(4, 5, 3),
             DFATransition(4, 28, 3),
             DFATransition(4, 29, 3),
@@ -12964,13 +12973,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(9, 62, 7),
             DFATransition(9, 65, 7),
             DFATransition(9, 78, 7),
-            DFATransition(9, 83, 7),
+            DFATransition(9, 84, 7),
         ],
         k: 3,
     },
     /* 218 - "InstPortListOpt" */
     LookaheadDFA {
-        states: &[None, Some(476), Some(477)],
+        states: &[None, Some(480), Some(481)],
         transitions: &[DFATransition(0, 29, 1), DFATransition(0, 38, 2)],
         k: 1,
     },
@@ -12982,13 +12991,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 220 - "InstToken" */
     LookaheadDFA {
-        states: &[Some(140)],
+        states: &[Some(141)],
         transitions: &[],
         k: 0,
     },
     /* 221 - "IntegralNumber" */
     LookaheadDFA {
-        states: &[None, Some(245), Some(246), Some(247)],
+        states: &[None, Some(248), Some(249), Some(250)],
         transitions: &[
             DFATransition(0, 8, 1),
             DFATransition(0, 9, 2),
@@ -12998,19 +13007,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 222 - "Interface" */
     LookaheadDFA {
-        states: &[Some(222)],
+        states: &[Some(224)],
         transitions: &[],
         k: 0,
     },
     /* 223 - "InterfaceDeclaration" */
     LookaheadDFA {
-        states: &[Some(552)],
+        states: &[Some(556)],
         transitions: &[],
         k: 0,
     },
     /* 224 - "InterfaceDeclarationList" */
     LookaheadDFA {
-        states: &[None, Some(553), Some(554)],
+        states: &[None, Some(557), Some(558)],
         transitions: &[
             DFATransition(0, 28, 1),
             DFATransition(0, 38, 2),
@@ -13021,31 +13030,31 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 65, 1),
             DFATransition(0, 67, 1),
             DFATransition(0, 78, 1),
-            DFATransition(0, 83, 1),
+            DFATransition(0, 84, 1),
         ],
         k: 1,
     },
     /* 225 - "InterfaceDeclarationOpt" */
     LookaheadDFA {
-        states: &[None, Some(555), Some(556)],
+        states: &[None, Some(559), Some(560)],
         transitions: &[DFATransition(0, 34, 1), DFATransition(0, 35, 2)],
         k: 1,
     },
     /* 226 - "InterfaceForDeclaration" */
     LookaheadDFA {
-        states: &[Some(562)],
+        states: &[Some(566)],
         transitions: &[],
         k: 0,
     },
     /* 227 - "InterfaceForDeclarationOpt" */
     LookaheadDFA {
-        states: &[None, Some(563), Some(564)],
+        states: &[None, Some(567), Some(568)],
         transitions: &[DFATransition(0, 28, 2), DFATransition(0, 77, 1)],
         k: 1,
     },
     /* 228 - "InterfaceIfDeclaration" */
     LookaheadDFA {
-        states: &[Some(557)],
+        states: &[Some(561)],
         transitions: &[],
         k: 0,
     },
@@ -13055,7 +13064,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             None,
             None,
             None,
-            Some(558),
+            Some(562),
             None,
             None,
             None,
@@ -13069,7 +13078,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             None,
             None,
             None,
-            Some(559),
+            Some(563),
             None,
             None,
             None,
@@ -13128,7 +13137,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 65, 11),
             DFATransition(0, 67, 12),
             DFATransition(0, 78, 13),
-            DFATransition(0, 83, 14),
+            DFATransition(0, 84, 14),
             DFATransition(1, 5, 2),
             DFATransition(1, 28, 33),
             DFATransition(1, 35, 34),
@@ -13150,9 +13159,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(4, 30, 3),
             DFATransition(4, 35, 3),
             DFATransition(4, 37, 3),
-            DFATransition(4, 84, 3),
+            DFATransition(4, 85, 3),
             DFATransition(5, 5, 15),
-            DFATransition(5, 84, 16),
+            DFATransition(5, 85, 16),
             DFATransition(6, 0, 17),
             DFATransition(6, 5, 18),
             DFATransition(6, 28, 19),
@@ -13168,13 +13177,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(6, 68, 29),
             DFATransition(6, 71, 30),
             DFATransition(6, 78, 31),
-            DFATransition(6, 83, 32),
+            DFATransition(6, 84, 32),
             DFATransition(7, 5, 35),
-            DFATransition(7, 84, 36),
+            DFATransition(7, 85, 36),
             DFATransition(8, 5, 37),
-            DFATransition(8, 84, 38),
+            DFATransition(8, 85, 38),
             DFATransition(9, 5, 39),
-            DFATransition(9, 84, 40),
+            DFATransition(9, 85, 40),
             DFATransition(10, 5, 41),
             DFATransition(10, 6, 42),
             DFATransition(10, 7, 43),
@@ -13189,16 +13198,16 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(10, 30, 52),
             DFATransition(10, 35, 53),
             DFATransition(10, 37, 54),
-            DFATransition(10, 84, 55),
+            DFATransition(10, 85, 55),
             DFATransition(11, 5, 56),
-            DFATransition(11, 84, 57),
+            DFATransition(11, 85, 57),
             DFATransition(12, 5, 58),
-            DFATransition(12, 84, 59),
+            DFATransition(12, 85, 59),
             DFATransition(13, 5, 60),
-            DFATransition(13, 84, 61),
+            DFATransition(13, 85, 61),
             DFATransition(14, 5, 62),
-            DFATransition(14, 84, 63),
-            DFATransition(15, 84, 17),
+            DFATransition(14, 85, 63),
+            DFATransition(15, 85, 17),
             DFATransition(16, 5, 17),
             DFATransition(16, 35, 17),
             DFATransition(18, 0, 17),
@@ -13215,9 +13224,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(18, 68, 17),
             DFATransition(18, 71, 17),
             DFATransition(18, 78, 17),
-            DFATransition(18, 83, 17),
+            DFATransition(18, 84, 17),
             DFATransition(19, 5, 17),
-            DFATransition(19, 84, 17),
+            DFATransition(19, 85, 17),
             DFATransition(20, 0, 17),
             DFATransition(20, 5, 17),
             DFATransition(20, 28, 17),
@@ -13233,17 +13242,17 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(20, 68, 17),
             DFATransition(20, 71, 17),
             DFATransition(20, 78, 17),
-            DFATransition(20, 83, 17),
+            DFATransition(20, 84, 17),
             DFATransition(21, 5, 17),
             DFATransition(21, 28, 17),
             DFATransition(21, 35, 17),
             DFATransition(21, 59, 17),
             DFATransition(22, 5, 17),
-            DFATransition(22, 84, 17),
+            DFATransition(22, 85, 17),
             DFATransition(23, 5, 17),
-            DFATransition(23, 84, 17),
+            DFATransition(23, 85, 17),
             DFATransition(24, 5, 17),
-            DFATransition(24, 84, 17),
+            DFATransition(24, 85, 17),
             DFATransition(25, 5, 17),
             DFATransition(25, 6, 17),
             DFATransition(25, 7, 17),
@@ -13258,23 +13267,23 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(25, 30, 17),
             DFATransition(25, 35, 17),
             DFATransition(25, 37, 17),
-            DFATransition(25, 84, 17),
+            DFATransition(25, 85, 17),
             DFATransition(26, 5, 17),
-            DFATransition(26, 84, 17),
+            DFATransition(26, 85, 17),
             DFATransition(27, 5, 17),
-            DFATransition(27, 84, 17),
+            DFATransition(27, 85, 17),
             DFATransition(28, 5, 17),
-            DFATransition(28, 84, 17),
+            DFATransition(28, 85, 17),
             DFATransition(29, 5, 17),
-            DFATransition(29, 84, 17),
+            DFATransition(29, 85, 17),
             DFATransition(30, 5, 17),
-            DFATransition(30, 84, 17),
+            DFATransition(30, 85, 17),
             DFATransition(31, 5, 17),
-            DFATransition(31, 84, 17),
+            DFATransition(31, 85, 17),
             DFATransition(32, 5, 17),
-            DFATransition(32, 84, 17),
+            DFATransition(32, 85, 17),
             DFATransition(33, 5, 17),
-            DFATransition(33, 84, 17),
+            DFATransition(33, 85, 17),
             DFATransition(34, 5, 17),
             DFATransition(34, 28, 17),
             DFATransition(34, 38, 17),
@@ -13285,14 +13294,14 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(34, 65, 17),
             DFATransition(34, 67, 17),
             DFATransition(34, 78, 17),
-            DFATransition(34, 83, 17),
-            DFATransition(35, 84, 17),
+            DFATransition(34, 84, 17),
+            DFATransition(35, 85, 17),
             DFATransition(36, 5, 17),
             DFATransition(36, 28, 17),
-            DFATransition(37, 84, 17),
+            DFATransition(37, 85, 17),
             DFATransition(38, 5, 17),
             DFATransition(38, 64, 17),
-            DFATransition(39, 84, 17),
+            DFATransition(39, 85, 17),
             DFATransition(40, 5, 17),
             DFATransition(40, 12, 17),
             DFATransition(40, 34, 17),
@@ -13310,7 +13319,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(41, 30, 17),
             DFATransition(41, 35, 17),
             DFATransition(41, 37, 17),
-            DFATransition(41, 84, 17),
+            DFATransition(41, 85, 17),
             DFATransition(42, 5, 17),
             DFATransition(42, 15, 17),
             DFATransition(42, 16, 17),
@@ -13390,7 +13399,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(47, 30, 17),
             DFATransition(47, 35, 17),
             DFATransition(47, 37, 17),
-            DFATransition(47, 84, 17),
+            DFATransition(47, 85, 17),
             DFATransition(48, 5, 17),
             DFATransition(48, 6, 17),
             DFATransition(48, 7, 17),
@@ -13405,7 +13414,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(48, 30, 17),
             DFATransition(48, 35, 17),
             DFATransition(48, 37, 17),
-            DFATransition(48, 84, 17),
+            DFATransition(48, 85, 17),
             DFATransition(49, 5, 17),
             DFATransition(49, 6, 17),
             DFATransition(49, 7, 17),
@@ -13420,7 +13429,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(49, 30, 17),
             DFATransition(49, 35, 17),
             DFATransition(49, 37, 17),
-            DFATransition(49, 84, 17),
+            DFATransition(49, 85, 17),
             DFATransition(50, 5, 17),
             DFATransition(50, 6, 17),
             DFATransition(50, 7, 17),
@@ -13435,7 +13444,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(50, 30, 17),
             DFATransition(50, 35, 17),
             DFATransition(50, 37, 17),
-            DFATransition(50, 84, 17),
+            DFATransition(50, 85, 17),
             DFATransition(51, 5, 17),
             DFATransition(51, 6, 17),
             DFATransition(51, 7, 17),
@@ -13450,9 +13459,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(51, 30, 17),
             DFATransition(51, 35, 17),
             DFATransition(51, 37, 17),
-            DFATransition(51, 84, 17),
+            DFATransition(51, 85, 17),
             DFATransition(52, 5, 17),
-            DFATransition(52, 84, 17),
+            DFATransition(52, 85, 17),
             DFATransition(53, 5, 17),
             DFATransition(53, 6, 17),
             DFATransition(53, 7, 17),
@@ -13467,7 +13476,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(53, 30, 17),
             DFATransition(53, 35, 17),
             DFATransition(53, 37, 17),
-            DFATransition(53, 84, 17),
+            DFATransition(53, 85, 17),
             DFATransition(54, 5, 17),
             DFATransition(54, 6, 17),
             DFATransition(54, 7, 17),
@@ -13482,7 +13491,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(54, 30, 17),
             DFATransition(54, 35, 17),
             DFATransition(54, 37, 17),
-            DFATransition(54, 84, 17),
+            DFATransition(54, 85, 17),
             DFATransition(55, 5, 17),
             DFATransition(55, 15, 17),
             DFATransition(55, 16, 17),
@@ -13500,16 +13509,16 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(55, 32, 17),
             DFATransition(55, 36, 17),
             DFATransition(55, 37, 17),
-            DFATransition(56, 84, 17),
+            DFATransition(56, 85, 17),
             DFATransition(57, 5, 17),
             DFATransition(57, 28, 17),
-            DFATransition(58, 84, 17),
+            DFATransition(58, 85, 17),
             DFATransition(59, 5, 17),
             DFATransition(59, 35, 17),
-            DFATransition(60, 84, 17),
+            DFATransition(60, 85, 17),
             DFATransition(61, 5, 17),
             DFATransition(61, 35, 17),
-            DFATransition(62, 84, 17),
+            DFATransition(62, 85, 17),
             DFATransition(63, 5, 17),
             DFATransition(63, 28, 17),
         ],
@@ -13517,7 +13526,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 230 - "InterfaceIfDeclarationOpt" */
     LookaheadDFA {
-        states: &[None, Some(560), Some(561)],
+        states: &[None, Some(564), Some(565)],
         transitions: &[
             DFATransition(0, 28, 2),
             DFATransition(0, 38, 2),
@@ -13529,7 +13538,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 65, 2),
             DFATransition(0, 67, 2),
             DFATransition(0, 78, 2),
-            DFATransition(0, 83, 2),
+            DFATransition(0, 84, 2),
         ],
         k: 1,
     },
@@ -13537,15 +13546,15 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     LookaheadDFA {
         states: &[
             None,
-            Some(573),
-            Some(574),
-            Some(575),
-            Some(576),
             Some(577),
             Some(578),
             Some(579),
             Some(580),
             Some(581),
+            Some(582),
+            Some(583),
+            Some(584),
+            Some(585),
         ],
         transitions: &[
             DFATransition(0, 28, 8),
@@ -13556,19 +13565,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 65, 2),
             DFATransition(0, 67, 3),
             DFATransition(0, 78, 7),
-            DFATransition(0, 83, 1),
+            DFATransition(0, 84, 1),
         ],
         k: 1,
     },
     /* 232 - "InterfaceNamedBlock" */
     LookaheadDFA {
-        states: &[Some(565)],
+        states: &[Some(569)],
         transitions: &[],
         k: 0,
     },
     /* 233 - "InterfaceNamedBlockList" */
     LookaheadDFA {
-        states: &[None, Some(566), Some(567)],
+        states: &[None, Some(570), Some(571)],
         transitions: &[
             DFATransition(0, 28, 1),
             DFATransition(0, 38, 2),
@@ -13579,19 +13588,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 65, 1),
             DFATransition(0, 67, 1),
             DFATransition(0, 78, 1),
-            DFATransition(0, 83, 1),
+            DFATransition(0, 84, 1),
         ],
         k: 1,
     },
     /* 234 - "InterfaceOptionalNamedBlock" */
     LookaheadDFA {
-        states: &[Some(568)],
+        states: &[Some(572)],
         transitions: &[],
         k: 0,
     },
     /* 235 - "InterfaceOptionalNamedBlockList" */
     LookaheadDFA {
-        states: &[None, Some(569), Some(570)],
+        states: &[None, Some(573), Some(574)],
         transitions: &[
             DFATransition(0, 28, 1),
             DFATransition(0, 38, 2),
@@ -13602,13 +13611,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 65, 1),
             DFATransition(0, 67, 1),
             DFATransition(0, 78, 1),
-            DFATransition(0, 83, 1),
+            DFATransition(0, 84, 1),
         ],
         k: 1,
     },
     /* 236 - "InterfaceOptionalNamedBlockOpt" */
     LookaheadDFA {
-        states: &[None, Some(571), Some(572)],
+        states: &[None, Some(575), Some(576)],
         transitions: &[DFATransition(0, 28, 1), DFATransition(0, 35, 2)],
         k: 1,
     },
@@ -13620,13 +13629,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 238 - "InterfaceToken" */
     LookaheadDFA {
-        states: &[Some(141)],
+        states: &[Some(142)],
         transitions: &[],
         k: 0,
     },
     /* 239 - "LBrace" */
     LookaheadDFA {
-        states: &[Some(190)],
+        states: &[Some(192)],
         transitions: &[],
         k: 0,
     },
@@ -13638,13 +13647,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 241 - "LBraceToken" */
     LookaheadDFA {
-        states: &[Some(110)],
+        states: &[Some(111)],
         transitions: &[],
         k: 0,
     },
     /* 242 - "LBracket" */
     LookaheadDFA {
-        states: &[Some(191)],
+        states: &[Some(193)],
         transitions: &[],
         k: 0,
     },
@@ -13656,13 +13665,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 244 - "LBracketToken" */
     LookaheadDFA {
-        states: &[Some(111)],
+        states: &[Some(112)],
         transitions: &[],
         k: 0,
     },
     /* 245 - "LParen" */
     LookaheadDFA {
-        states: &[Some(192)],
+        states: &[Some(194)],
         transitions: &[],
         k: 0,
     },
@@ -13674,19 +13683,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 247 - "LParenToken" */
     LookaheadDFA {
-        states: &[Some(112)],
+        states: &[Some(113)],
         transitions: &[],
         k: 0,
     },
     /* 248 - "Localparam" */
     LookaheadDFA {
-        states: &[Some(223)],
+        states: &[Some(225)],
         transitions: &[],
         k: 0,
     },
     /* 249 - "LocalparamDeclaration" */
     LookaheadDFA {
-        states: &[Some(408)],
+        states: &[Some(412)],
         transitions: &[],
         k: 0,
     },
@@ -13698,13 +13707,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 251 - "LocalparamToken" */
     LookaheadDFA {
-        states: &[Some(143)],
+        states: &[Some(144)],
         transitions: &[],
         k: 0,
     },
     /* 252 - "Logic" */
     LookaheadDFA {
-        states: &[Some(224)],
+        states: &[Some(226)],
         transitions: &[],
         k: 0,
     },
@@ -13716,13 +13725,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 254 - "LogicToken" */
     LookaheadDFA {
-        states: &[Some(144)],
+        states: &[Some(145)],
         transitions: &[],
         k: 0,
     },
     /* 255 - "MinusColon" */
     LookaheadDFA {
-        states: &[Some(193)],
+        states: &[Some(195)],
         transitions: &[],
         k: 0,
     },
@@ -13734,13 +13743,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 257 - "MinusColonToken" */
     LookaheadDFA {
-        states: &[Some(113)],
+        states: &[Some(114)],
         transitions: &[],
         k: 0,
     },
     /* 258 - "MinusGT" */
     LookaheadDFA {
-        states: &[Some(194)],
+        states: &[Some(196)],
         transitions: &[],
         k: 0,
     },
@@ -13752,37 +13761,37 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 260 - "MinusGTToken" */
     LookaheadDFA {
-        states: &[Some(114)],
+        states: &[Some(115)],
         transitions: &[],
         k: 0,
     },
     /* 261 - "Modport" */
     LookaheadDFA {
-        states: &[Some(225)],
+        states: &[Some(227)],
         transitions: &[],
         k: 0,
     },
     /* 262 - "ModportDeclaration" */
     LookaheadDFA {
-        states: &[Some(430)],
+        states: &[Some(434)],
         transitions: &[],
         k: 0,
     },
     /* 263 - "ModportIdentifier" */
     LookaheadDFA {
-        states: &[Some(260)],
+        states: &[Some(263)],
         transitions: &[],
         k: 0,
     },
     /* 264 - "ModportItem" */
     LookaheadDFA {
-        states: &[Some(436)],
+        states: &[Some(440)],
         transitions: &[],
         k: 0,
     },
     /* 265 - "ModportList" */
     LookaheadDFA {
-        states: &[Some(431)],
+        states: &[Some(435)],
         transitions: &[],
         k: 0,
     },
@@ -13792,11 +13801,11 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             None,
             None,
             None,
-            Some(432),
+            Some(436),
             None,
             None,
             None,
-            Some(433),
+            Some(437),
             None,
             None,
             None,
@@ -13814,9 +13823,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 38, 5),
             DFATransition(1, 5, 2),
             DFATransition(1, 38, 6),
-            DFATransition(1, 84, 4),
+            DFATransition(1, 85, 4),
             DFATransition(2, 38, 7),
-            DFATransition(2, 84, 3),
+            DFATransition(2, 85, 3),
             DFATransition(4, 5, 3),
             DFATransition(4, 28, 3),
             DFATransition(5, 5, 8),
@@ -13829,7 +13838,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(5, 65, 15),
             DFATransition(5, 67, 16),
             DFATransition(5, 78, 17),
-            DFATransition(5, 83, 18),
+            DFATransition(5, 84, 18),
             DFATransition(6, 5, 7),
             DFATransition(6, 28, 7),
             DFATransition(6, 38, 7),
@@ -13840,7 +13849,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(6, 65, 7),
             DFATransition(6, 67, 7),
             DFATransition(6, 78, 7),
-            DFATransition(6, 83, 7),
+            DFATransition(6, 84, 7),
             DFATransition(8, 28, 7),
             DFATransition(8, 38, 7),
             DFATransition(8, 51, 7),
@@ -13850,9 +13859,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(8, 65, 7),
             DFATransition(8, 67, 7),
             DFATransition(8, 78, 7),
-            DFATransition(8, 83, 7),
+            DFATransition(8, 84, 7),
             DFATransition(9, 5, 7),
-            DFATransition(9, 84, 7),
+            DFATransition(9, 85, 7),
             DFATransition(10, 0, 7),
             DFATransition(10, 5, 7),
             DFATransition(10, 28, 7),
@@ -13868,13 +13877,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(10, 68, 7),
             DFATransition(10, 71, 7),
             DFATransition(10, 78, 7),
-            DFATransition(10, 83, 7),
+            DFATransition(10, 84, 7),
             DFATransition(11, 5, 7),
-            DFATransition(11, 84, 7),
+            DFATransition(11, 85, 7),
             DFATransition(12, 5, 7),
-            DFATransition(12, 84, 7),
+            DFATransition(12, 85, 7),
             DFATransition(13, 5, 7),
-            DFATransition(13, 84, 7),
+            DFATransition(13, 85, 7),
             DFATransition(14, 5, 7),
             DFATransition(14, 6, 7),
             DFATransition(14, 7, 7),
@@ -13889,21 +13898,21 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(14, 30, 7),
             DFATransition(14, 35, 7),
             DFATransition(14, 37, 7),
-            DFATransition(14, 84, 7),
+            DFATransition(14, 85, 7),
             DFATransition(15, 5, 7),
-            DFATransition(15, 84, 7),
+            DFATransition(15, 85, 7),
             DFATransition(16, 5, 7),
-            DFATransition(16, 84, 7),
+            DFATransition(16, 85, 7),
             DFATransition(17, 5, 7),
-            DFATransition(17, 84, 7),
+            DFATransition(17, 85, 7),
             DFATransition(18, 5, 7),
-            DFATransition(18, 84, 7),
+            DFATransition(18, 85, 7),
         ],
         k: 3,
     },
     /* 267 - "ModportListOpt" */
     LookaheadDFA {
-        states: &[None, Some(434), Some(435)],
+        states: &[None, Some(438), Some(439)],
         transitions: &[DFATransition(0, 29, 1), DFATransition(0, 38, 2)],
         k: 1,
     },
@@ -13915,25 +13924,25 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 269 - "ModportToken" */
     LookaheadDFA {
-        states: &[Some(145)],
+        states: &[Some(146)],
         transitions: &[],
         k: 0,
     },
     /* 270 - "Module" */
     LookaheadDFA {
-        states: &[Some(226)],
+        states: &[Some(228)],
         transitions: &[],
         k: 0,
     },
     /* 271 - "ModuleDeclaration" */
     LookaheadDFA {
-        states: &[Some(517)],
+        states: &[Some(521)],
         transitions: &[],
         k: 0,
     },
     /* 272 - "ModuleDeclarationList" */
     LookaheadDFA {
-        states: &[None, Some(518), Some(519)],
+        states: &[None, Some(522), Some(523)],
         transitions: &[
             DFATransition(0, 28, 1),
             DFATransition(0, 38, 2),
@@ -13947,13 +13956,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 62, 1),
             DFATransition(0, 65, 1),
             DFATransition(0, 78, 1),
-            DFATransition(0, 83, 1),
+            DFATransition(0, 84, 1),
         ],
         k: 1,
     },
     /* 273 - "ModuleDeclarationOpt" */
     LookaheadDFA {
-        states: &[None, Some(522), Some(523)],
+        states: &[None, Some(526), Some(527)],
         transitions: &[
             DFATransition(0, 34, 1),
             DFATransition(0, 35, 2),
@@ -13963,25 +13972,25 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 274 - "ModuleDeclarationOpt0" */
     LookaheadDFA {
-        states: &[None, Some(520), Some(521)],
+        states: &[None, Some(524), Some(525)],
         transitions: &[DFATransition(0, 35, 2), DFATransition(0, 37, 1)],
         k: 1,
     },
     /* 275 - "ModuleForDeclaration" */
     LookaheadDFA {
-        states: &[Some(529)],
+        states: &[Some(533)],
         transitions: &[],
         k: 0,
     },
     /* 276 - "ModuleForDeclarationOpt" */
     LookaheadDFA {
-        states: &[None, Some(530), Some(531)],
+        states: &[None, Some(534), Some(535)],
         transitions: &[DFATransition(0, 28, 2), DFATransition(0, 77, 1)],
         k: 1,
     },
     /* 277 - "ModuleIfDeclaration" */
     LookaheadDFA {
-        states: &[Some(524)],
+        states: &[Some(528)],
         transitions: &[],
         k: 0,
     },
@@ -13991,7 +14000,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             None,
             None,
             None,
-            Some(525),
+            Some(529),
             None,
             None,
             None,
@@ -14008,7 +14017,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             None,
             None,
             None,
-            Some(526),
+            Some(530),
             None,
             None,
             None,
@@ -14079,7 +14088,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 62, 14),
             DFATransition(0, 65, 15),
             DFATransition(0, 78, 16),
-            DFATransition(0, 83, 17),
+            DFATransition(0, 84, 17),
             DFATransition(1, 5, 2),
             DFATransition(1, 28, 45),
             DFATransition(1, 35, 46),
@@ -14101,9 +14110,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(4, 30, 3),
             DFATransition(4, 35, 3),
             DFATransition(4, 37, 3),
-            DFATransition(4, 84, 3),
+            DFATransition(4, 85, 3),
             DFATransition(5, 5, 18),
-            DFATransition(5, 84, 19),
+            DFATransition(5, 85, 19),
             DFATransition(6, 0, 20),
             DFATransition(6, 5, 21),
             DFATransition(6, 28, 22),
@@ -14122,19 +14131,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(6, 68, 35),
             DFATransition(6, 71, 36),
             DFATransition(6, 78, 37),
-            DFATransition(6, 83, 38),
+            DFATransition(6, 84, 38),
             DFATransition(7, 5, 39),
             DFATransition(7, 35, 40),
             DFATransition(8, 5, 41),
             DFATransition(8, 37, 42),
             DFATransition(9, 5, 43),
-            DFATransition(9, 84, 44),
+            DFATransition(9, 85, 44),
             DFATransition(10, 5, 47),
-            DFATransition(10, 84, 48),
+            DFATransition(10, 85, 48),
             DFATransition(11, 5, 49),
-            DFATransition(11, 84, 50),
+            DFATransition(11, 85, 50),
             DFATransition(12, 5, 51),
-            DFATransition(12, 84, 52),
+            DFATransition(12, 85, 52),
             DFATransition(13, 5, 53),
             DFATransition(13, 6, 54),
             DFATransition(13, 7, 55),
@@ -14149,16 +14158,16 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(13, 30, 64),
             DFATransition(13, 35, 65),
             DFATransition(13, 37, 66),
-            DFATransition(13, 84, 67),
+            DFATransition(13, 85, 67),
             DFATransition(14, 5, 68),
-            DFATransition(14, 84, 69),
+            DFATransition(14, 85, 69),
             DFATransition(15, 5, 70),
-            DFATransition(15, 84, 71),
+            DFATransition(15, 85, 71),
             DFATransition(16, 5, 72),
-            DFATransition(16, 84, 73),
+            DFATransition(16, 85, 73),
             DFATransition(17, 5, 74),
-            DFATransition(17, 84, 75),
-            DFATransition(18, 84, 20),
+            DFATransition(17, 85, 75),
+            DFATransition(18, 85, 20),
             DFATransition(19, 5, 20),
             DFATransition(19, 35, 20),
             DFATransition(21, 0, 20),
@@ -14178,9 +14187,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(21, 68, 20),
             DFATransition(21, 71, 20),
             DFATransition(21, 78, 20),
-            DFATransition(21, 83, 20),
+            DFATransition(21, 84, 20),
             DFATransition(22, 5, 20),
-            DFATransition(22, 84, 20),
+            DFATransition(22, 85, 20),
             DFATransition(23, 0, 20),
             DFATransition(23, 5, 20),
             DFATransition(23, 28, 20),
@@ -14199,23 +14208,23 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(23, 68, 20),
             DFATransition(23, 71, 20),
             DFATransition(23, 78, 20),
-            DFATransition(23, 83, 20),
+            DFATransition(23, 84, 20),
             DFATransition(24, 5, 20),
             DFATransition(24, 35, 20),
             DFATransition(25, 5, 20),
             DFATransition(25, 37, 20),
             DFATransition(26, 5, 20),
-            DFATransition(26, 84, 20),
+            DFATransition(26, 85, 20),
             DFATransition(27, 5, 20),
             DFATransition(27, 28, 20),
             DFATransition(27, 35, 20),
             DFATransition(27, 59, 20),
             DFATransition(28, 5, 20),
-            DFATransition(28, 84, 20),
+            DFATransition(28, 85, 20),
             DFATransition(29, 5, 20),
-            DFATransition(29, 84, 20),
+            DFATransition(29, 85, 20),
             DFATransition(30, 5, 20),
-            DFATransition(30, 84, 20),
+            DFATransition(30, 85, 20),
             DFATransition(31, 5, 20),
             DFATransition(31, 6, 20),
             DFATransition(31, 7, 20),
@@ -14230,21 +14239,21 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(31, 30, 20),
             DFATransition(31, 35, 20),
             DFATransition(31, 37, 20),
-            DFATransition(31, 84, 20),
+            DFATransition(31, 85, 20),
             DFATransition(32, 5, 20),
-            DFATransition(32, 84, 20),
+            DFATransition(32, 85, 20),
             DFATransition(33, 5, 20),
-            DFATransition(33, 84, 20),
+            DFATransition(33, 85, 20),
             DFATransition(34, 5, 20),
-            DFATransition(34, 84, 20),
+            DFATransition(34, 85, 20),
             DFATransition(35, 5, 20),
-            DFATransition(35, 84, 20),
+            DFATransition(35, 85, 20),
             DFATransition(36, 5, 20),
-            DFATransition(36, 84, 20),
+            DFATransition(36, 85, 20),
             DFATransition(37, 5, 20),
-            DFATransition(37, 84, 20),
+            DFATransition(37, 85, 20),
             DFATransition(38, 5, 20),
-            DFATransition(38, 84, 20),
+            DFATransition(38, 85, 20),
             DFATransition(39, 35, 20),
             DFATransition(40, 5, 20),
             DFATransition(40, 38, 20),
@@ -14253,19 +14262,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(40, 58, 20),
             DFATransition(40, 59, 20),
             DFATransition(40, 76, 20),
-            DFATransition(40, 84, 20),
+            DFATransition(40, 85, 20),
             DFATransition(41, 37, 20),
             DFATransition(42, 5, 20),
             DFATransition(42, 69, 20),
             DFATransition(42, 73, 20),
-            DFATransition(42, 84, 20),
-            DFATransition(43, 84, 20),
+            DFATransition(42, 85, 20),
+            DFATransition(43, 85, 20),
             DFATransition(44, 5, 20),
             DFATransition(44, 32, 20),
             DFATransition(44, 33, 20),
             DFATransition(44, 36, 20),
             DFATransition(45, 5, 20),
-            DFATransition(45, 84, 20),
+            DFATransition(45, 85, 20),
             DFATransition(46, 5, 20),
             DFATransition(46, 28, 20),
             DFATransition(46, 38, 20),
@@ -14279,14 +14288,14 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(46, 62, 20),
             DFATransition(46, 65, 20),
             DFATransition(46, 78, 20),
-            DFATransition(46, 83, 20),
-            DFATransition(47, 84, 20),
+            DFATransition(46, 84, 20),
+            DFATransition(47, 85, 20),
             DFATransition(48, 5, 20),
             DFATransition(48, 28, 20),
-            DFATransition(49, 84, 20),
+            DFATransition(49, 85, 20),
             DFATransition(50, 5, 20),
             DFATransition(50, 64, 20),
-            DFATransition(51, 84, 20),
+            DFATransition(51, 85, 20),
             DFATransition(52, 5, 20),
             DFATransition(52, 12, 20),
             DFATransition(52, 34, 20),
@@ -14304,7 +14313,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(53, 30, 20),
             DFATransition(53, 35, 20),
             DFATransition(53, 37, 20),
-            DFATransition(53, 84, 20),
+            DFATransition(53, 85, 20),
             DFATransition(54, 5, 20),
             DFATransition(54, 15, 20),
             DFATransition(54, 16, 20),
@@ -14384,7 +14393,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(59, 30, 20),
             DFATransition(59, 35, 20),
             DFATransition(59, 37, 20),
-            DFATransition(59, 84, 20),
+            DFATransition(59, 85, 20),
             DFATransition(60, 5, 20),
             DFATransition(60, 6, 20),
             DFATransition(60, 7, 20),
@@ -14399,7 +14408,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(60, 30, 20),
             DFATransition(60, 35, 20),
             DFATransition(60, 37, 20),
-            DFATransition(60, 84, 20),
+            DFATransition(60, 85, 20),
             DFATransition(61, 5, 20),
             DFATransition(61, 6, 20),
             DFATransition(61, 7, 20),
@@ -14414,7 +14423,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(61, 30, 20),
             DFATransition(61, 35, 20),
             DFATransition(61, 37, 20),
-            DFATransition(61, 84, 20),
+            DFATransition(61, 85, 20),
             DFATransition(62, 5, 20),
             DFATransition(62, 6, 20),
             DFATransition(62, 7, 20),
@@ -14429,7 +14438,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(62, 30, 20),
             DFATransition(62, 35, 20),
             DFATransition(62, 37, 20),
-            DFATransition(62, 84, 20),
+            DFATransition(62, 85, 20),
             DFATransition(63, 5, 20),
             DFATransition(63, 6, 20),
             DFATransition(63, 7, 20),
@@ -14444,9 +14453,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(63, 30, 20),
             DFATransition(63, 35, 20),
             DFATransition(63, 37, 20),
-            DFATransition(63, 84, 20),
+            DFATransition(63, 85, 20),
             DFATransition(64, 5, 20),
-            DFATransition(64, 84, 20),
+            DFATransition(64, 85, 20),
             DFATransition(65, 5, 20),
             DFATransition(65, 6, 20),
             DFATransition(65, 7, 20),
@@ -14461,7 +14470,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(65, 30, 20),
             DFATransition(65, 35, 20),
             DFATransition(65, 37, 20),
-            DFATransition(65, 84, 20),
+            DFATransition(65, 85, 20),
             DFATransition(66, 5, 20),
             DFATransition(66, 6, 20),
             DFATransition(66, 7, 20),
@@ -14476,7 +14485,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(66, 30, 20),
             DFATransition(66, 35, 20),
             DFATransition(66, 37, 20),
-            DFATransition(66, 84, 20),
+            DFATransition(66, 85, 20),
             DFATransition(67, 5, 20),
             DFATransition(67, 15, 20),
             DFATransition(67, 16, 20),
@@ -14494,16 +14503,16 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(67, 32, 20),
             DFATransition(67, 36, 20),
             DFATransition(67, 37, 20),
-            DFATransition(68, 84, 20),
+            DFATransition(68, 85, 20),
             DFATransition(69, 5, 20),
             DFATransition(69, 28, 20),
-            DFATransition(70, 84, 20),
+            DFATransition(70, 85, 20),
             DFATransition(71, 5, 20),
             DFATransition(71, 28, 20),
-            DFATransition(72, 84, 20),
+            DFATransition(72, 85, 20),
             DFATransition(73, 5, 20),
             DFATransition(73, 35, 20),
-            DFATransition(74, 84, 20),
+            DFATransition(74, 85, 20),
             DFATransition(75, 5, 20),
             DFATransition(75, 28, 20),
         ],
@@ -14511,7 +14520,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 279 - "ModuleIfDeclarationOpt" */
     LookaheadDFA {
-        states: &[None, Some(527), Some(528)],
+        states: &[None, Some(531), Some(532)],
         transitions: &[
             DFATransition(0, 28, 2),
             DFATransition(0, 38, 2),
@@ -14526,7 +14535,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 62, 2),
             DFATransition(0, 65, 2),
             DFATransition(0, 78, 2),
-            DFATransition(0, 83, 2),
+            DFATransition(0, 84, 2),
         ],
         k: 1,
     },
@@ -14534,10 +14543,6 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     LookaheadDFA {
         states: &[
             None,
-            Some(540),
-            Some(541),
-            Some(542),
-            Some(543),
             Some(544),
             Some(545),
             Some(546),
@@ -14546,6 +14551,10 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             Some(549),
             Some(550),
             Some(551),
+            Some(552),
+            Some(553),
+            Some(554),
+            Some(555),
         ],
         transitions: &[
             DFATransition(0, 28, 12),
@@ -14559,19 +14568,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 62, 2),
             DFATransition(0, 65, 3),
             DFATransition(0, 78, 11),
-            DFATransition(0, 83, 1),
+            DFATransition(0, 84, 1),
         ],
         k: 1,
     },
     /* 281 - "ModuleNamedBlock" */
     LookaheadDFA {
-        states: &[Some(532)],
+        states: &[Some(536)],
         transitions: &[],
         k: 0,
     },
     /* 282 - "ModuleNamedBlockList" */
     LookaheadDFA {
-        states: &[None, Some(533), Some(534)],
+        states: &[None, Some(537), Some(538)],
         transitions: &[
             DFATransition(0, 28, 1),
             DFATransition(0, 38, 2),
@@ -14585,19 +14594,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 62, 1),
             DFATransition(0, 65, 1),
             DFATransition(0, 78, 1),
-            DFATransition(0, 83, 1),
+            DFATransition(0, 84, 1),
         ],
         k: 1,
     },
     /* 283 - "ModuleOptionalNamedBlock" */
     LookaheadDFA {
-        states: &[Some(535)],
+        states: &[Some(539)],
         transitions: &[],
         k: 0,
     },
     /* 284 - "ModuleOptionalNamedBlockList" */
     LookaheadDFA {
-        states: &[None, Some(536), Some(537)],
+        states: &[None, Some(540), Some(541)],
         transitions: &[
             DFATransition(0, 28, 1),
             DFATransition(0, 38, 2),
@@ -14611,13 +14620,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 62, 1),
             DFATransition(0, 65, 1),
             DFATransition(0, 78, 1),
-            DFATransition(0, 83, 1),
+            DFATransition(0, 84, 1),
         ],
         k: 1,
     },
     /* 285 - "ModuleOptionalNamedBlockOpt" */
     LookaheadDFA {
-        states: &[None, Some(538), Some(539)],
+        states: &[None, Some(542), Some(543)],
         transitions: &[DFATransition(0, 28, 1), DFATransition(0, 35, 2)],
         k: 1,
     },
@@ -14629,13 +14638,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 287 - "ModuleToken" */
     LookaheadDFA {
-        states: &[Some(146)],
+        states: &[Some(147)],
         transitions: &[],
         k: 0,
     },
     /* 288 - "Negedge" */
     LookaheadDFA {
-        states: &[Some(227)],
+        states: &[Some(229)],
         transitions: &[],
         k: 0,
     },
@@ -14647,13 +14656,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 290 - "NegedgeToken" */
     LookaheadDFA {
-        states: &[Some(147)],
+        states: &[Some(148)],
         transitions: &[],
         k: 0,
     },
     /* 291 - "Number" */
     LookaheadDFA {
-        states: &[None, Some(243), Some(244)],
+        states: &[None, Some(246), Some(247)],
         transitions: &[
             DFATransition(0, 6, 2),
             DFATransition(0, 7, 2),
@@ -14665,7 +14674,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 292 - "Operator01" */
     LookaheadDFA {
-        states: &[Some(170)],
+        states: &[Some(172)],
         transitions: &[],
         k: 0,
     },
@@ -14677,13 +14686,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 294 - "Operator01Token" */
     LookaheadDFA {
-        states: &[Some(90)],
+        states: &[Some(91)],
         transitions: &[],
         k: 0,
     },
     /* 295 - "Operator02" */
     LookaheadDFA {
-        states: &[Some(171)],
+        states: &[Some(173)],
         transitions: &[],
         k: 0,
     },
@@ -14695,13 +14704,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 297 - "Operator02Token" */
     LookaheadDFA {
-        states: &[Some(91)],
+        states: &[Some(92)],
         transitions: &[],
         k: 0,
     },
     /* 298 - "Operator03" */
     LookaheadDFA {
-        states: &[Some(172)],
+        states: &[Some(174)],
         transitions: &[],
         k: 0,
     },
@@ -14713,13 +14722,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 300 - "Operator03Token" */
     LookaheadDFA {
-        states: &[Some(92)],
+        states: &[Some(93)],
         transitions: &[],
         k: 0,
     },
     /* 301 - "Operator04" */
     LookaheadDFA {
-        states: &[Some(173)],
+        states: &[Some(175)],
         transitions: &[],
         k: 0,
     },
@@ -14731,13 +14740,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 303 - "Operator04Token" */
     LookaheadDFA {
-        states: &[Some(93)],
+        states: &[Some(94)],
         transitions: &[],
         k: 0,
     },
     /* 304 - "Operator05" */
     LookaheadDFA {
-        states: &[Some(174)],
+        states: &[Some(176)],
         transitions: &[],
         k: 0,
     },
@@ -14749,13 +14758,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 306 - "Operator05Token" */
     LookaheadDFA {
-        states: &[Some(94)],
+        states: &[Some(95)],
         transitions: &[],
         k: 0,
     },
     /* 307 - "Operator06" */
     LookaheadDFA {
-        states: &[Some(175)],
+        states: &[Some(177)],
         transitions: &[],
         k: 0,
     },
@@ -14767,13 +14776,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 309 - "Operator06Token" */
     LookaheadDFA {
-        states: &[Some(95)],
+        states: &[Some(96)],
         transitions: &[],
         k: 0,
     },
     /* 310 - "Operator07" */
     LookaheadDFA {
-        states: &[Some(176)],
+        states: &[Some(178)],
         transitions: &[],
         k: 0,
     },
@@ -14785,13 +14794,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 312 - "Operator07Token" */
     LookaheadDFA {
-        states: &[Some(96)],
+        states: &[Some(97)],
         transitions: &[],
         k: 0,
     },
     /* 313 - "Operator08" */
     LookaheadDFA {
-        states: &[Some(177)],
+        states: &[Some(179)],
         transitions: &[],
         k: 0,
     },
@@ -14803,13 +14812,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 315 - "Operator08Token" */
     LookaheadDFA {
-        states: &[Some(97)],
+        states: &[Some(98)],
         transitions: &[],
         k: 0,
     },
     /* 316 - "Operator09" */
     LookaheadDFA {
-        states: &[Some(178)],
+        states: &[Some(180)],
         transitions: &[],
         k: 0,
     },
@@ -14821,13 +14830,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 318 - "Operator09Token" */
     LookaheadDFA {
-        states: &[Some(98)],
+        states: &[Some(99)],
         transitions: &[],
         k: 0,
     },
     /* 319 - "Operator10" */
     LookaheadDFA {
-        states: &[Some(179)],
+        states: &[Some(181)],
         transitions: &[],
         k: 0,
     },
@@ -14839,13 +14848,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 321 - "Operator10Token" */
     LookaheadDFA {
-        states: &[Some(99)],
+        states: &[Some(100)],
         transitions: &[],
         k: 0,
     },
     /* 322 - "Operator11" */
     LookaheadDFA {
-        states: &[Some(180)],
+        states: &[Some(182)],
         transitions: &[],
         k: 0,
     },
@@ -14857,13 +14866,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 324 - "Operator11Token" */
     LookaheadDFA {
-        states: &[Some(100)],
+        states: &[Some(101)],
         transitions: &[],
         k: 0,
     },
     /* 325 - "Output" */
     LookaheadDFA {
-        states: &[Some(228)],
+        states: &[Some(230)],
         transitions: &[],
         k: 0,
     },
@@ -14875,44 +14884,44 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 327 - "OutputToken" */
     LookaheadDFA {
-        states: &[Some(148)],
+        states: &[Some(149)],
         transitions: &[],
         k: 0,
     },
     /* 328 - "Package" */
     LookaheadDFA {
-        states: &[Some(229)],
+        states: &[Some(231)],
         transitions: &[],
         k: 0,
     },
     /* 329 - "PackageDeclaration" */
     LookaheadDFA {
-        states: &[Some(582)],
+        states: &[Some(586)],
         transitions: &[],
         k: 0,
     },
     /* 330 - "PackageDeclarationList" */
     LookaheadDFA {
-        states: &[None, Some(583), Some(584)],
+        states: &[None, Some(587), Some(588)],
         transitions: &[
             DFATransition(0, 38, 2),
             DFATransition(0, 51, 1),
             DFATransition(0, 55, 1),
             DFATransition(0, 65, 1),
             DFATransition(0, 78, 1),
-            DFATransition(0, 83, 1),
+            DFATransition(0, 84, 1),
         ],
         k: 1,
     },
     /* 331 - "PackageItem" */
     LookaheadDFA {
-        states: &[None, Some(585), Some(586), Some(587), Some(588), Some(589)],
+        states: &[None, Some(589), Some(590), Some(591), Some(592), Some(593)],
         transitions: &[
             DFATransition(0, 51, 3),
             DFATransition(0, 55, 5),
             DFATransition(0, 65, 2),
             DFATransition(0, 78, 4),
-            DFATransition(0, 83, 1),
+            DFATransition(0, 84, 1),
         ],
         k: 1,
     },
@@ -14924,13 +14933,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 333 - "PackageToken" */
     LookaheadDFA {
-        states: &[Some(149)],
+        states: &[Some(150)],
         transitions: &[],
         k: 0,
     },
     /* 334 - "Parameter" */
     LookaheadDFA {
-        states: &[Some(230)],
+        states: &[Some(232)],
         transitions: &[],
         k: 0,
     },
@@ -14942,13 +14951,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 336 - "ParameterToken" */
     LookaheadDFA {
-        states: &[Some(150)],
+        states: &[Some(151)],
         transitions: &[],
         k: 0,
     },
     /* 337 - "PlusColon" */
     LookaheadDFA {
-        states: &[Some(195)],
+        states: &[Some(197)],
         transitions: &[],
         k: 0,
     },
@@ -14960,25 +14969,25 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 339 - "PlusColonToken" */
     LookaheadDFA {
-        states: &[Some(115)],
+        states: &[Some(116)],
         transitions: &[],
         k: 0,
     },
     /* 340 - "PortDeclaration" */
     LookaheadDFA {
-        states: &[Some(492)],
+        states: &[Some(496)],
         transitions: &[],
         k: 0,
     },
     /* 341 - "PortDeclarationItem" */
     LookaheadDFA {
-        states: &[Some(500)],
+        states: &[Some(504)],
         transitions: &[],
         k: 0,
     },
     /* 342 - "PortDeclarationItemGroup" */
     LookaheadDFA {
-        states: &[None, Some(501), Some(502)],
+        states: &[None, Some(505), Some(506)],
         transitions: &[
             DFATransition(0, 60, 1),
             DFATransition(0, 61, 1),
@@ -14991,7 +15000,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 343 - "PortDeclarationList" */
     LookaheadDFA {
-        states: &[Some(495)],
+        states: &[Some(499)],
         transitions: &[],
         k: 0,
     },
@@ -15001,11 +15010,11 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             None,
             None,
             None,
-            Some(496),
+            Some(500),
             None,
             None,
             None,
-            Some(497),
+            Some(501),
             None,
             None,
             None,
@@ -15015,9 +15024,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 40, 5),
             DFATransition(1, 5, 2),
             DFATransition(1, 40, 6),
-            DFATransition(1, 84, 4),
+            DFATransition(1, 85, 4),
             DFATransition(2, 40, 7),
-            DFATransition(2, 84, 3),
+            DFATransition(2, 85, 3),
             DFATransition(4, 5, 3),
             DFATransition(4, 28, 3),
             DFATransition(5, 5, 8),
@@ -15037,7 +15046,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(9, 66, 7),
             DFATransition(9, 81, 7),
             DFATransition(9, 82, 7),
-            DFATransition(9, 84, 7),
+            DFATransition(9, 83, 7),
+            DFATransition(9, 85, 7),
             DFATransition(10, 5, 7),
             DFATransition(10, 28, 7),
             DFATransition(10, 38, 7),
@@ -15051,25 +15061,25 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(10, 62, 7),
             DFATransition(10, 65, 7),
             DFATransition(10, 78, 7),
-            DFATransition(10, 83, 7),
+            DFATransition(10, 84, 7),
         ],
         k: 3,
     },
     /* 345 - "PortDeclarationListOpt" */
     LookaheadDFA {
-        states: &[None, Some(498), Some(499)],
+        states: &[None, Some(502), Some(503)],
         transitions: &[DFATransition(0, 29, 1), DFATransition(0, 40, 2)],
         k: 1,
     },
     /* 346 - "PortDeclarationOpt" */
     LookaheadDFA {
-        states: &[None, Some(493), Some(494)],
-        transitions: &[DFATransition(0, 40, 2), DFATransition(0, 84, 1)],
+        states: &[None, Some(497), Some(498)],
+        transitions: &[DFATransition(0, 40, 2), DFATransition(0, 85, 1)],
         k: 1,
     },
     /* 347 - "Posedge" */
     LookaheadDFA {
-        states: &[Some(231)],
+        states: &[Some(233)],
         transitions: &[],
         k: 0,
     },
@@ -15081,13 +15091,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 349 - "PosedgeToken" */
     LookaheadDFA {
-        states: &[Some(151)],
+        states: &[Some(152)],
         transitions: &[],
         k: 0,
     },
     /* 350 - "RBrace" */
     LookaheadDFA {
-        states: &[Some(196)],
+        states: &[Some(198)],
         transitions: &[],
         k: 0,
     },
@@ -15099,13 +15109,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 352 - "RBraceToken" */
     LookaheadDFA {
-        states: &[Some(116)],
+        states: &[Some(117)],
         transitions: &[],
         k: 0,
     },
     /* 353 - "RBracket" */
     LookaheadDFA {
-        states: &[Some(197)],
+        states: &[Some(199)],
         transitions: &[],
         k: 0,
     },
@@ -15117,13 +15127,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 355 - "RBracketToken" */
     LookaheadDFA {
-        states: &[Some(117)],
+        states: &[Some(118)],
         transitions: &[],
         k: 0,
     },
     /* 356 - "RParen" */
     LookaheadDFA {
-        states: &[Some(198)],
+        states: &[Some(200)],
         transitions: &[],
         k: 0,
     },
@@ -15135,19 +15145,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 358 - "RParenToken" */
     LookaheadDFA {
-        states: &[Some(118)],
+        states: &[Some(119)],
         transitions: &[],
         k: 0,
     },
     /* 359 - "Range" */
     LookaheadDFA {
-        states: &[Some(336)],
+        states: &[Some(339)],
         transitions: &[],
         k: 0,
     },
     /* 360 - "RangeOperator" */
     LookaheadDFA {
-        states: &[None, Some(339), Some(340), Some(341), Some(342)],
+        states: &[None, Some(342), Some(343), Some(344), Some(345)],
         transitions: &[
             DFATransition(0, 11, 3),
             DFATransition(0, 13, 2),
@@ -15158,7 +15168,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 361 - "RangeOpt" */
     LookaheadDFA {
-        states: &[None, Some(337), Some(338)],
+        states: &[None, Some(340), Some(341)],
         transitions: &[
             DFATransition(0, 11, 1),
             DFATransition(0, 13, 1),
@@ -15170,13 +15180,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 362 - "RealNumber" */
     LookaheadDFA {
-        states: &[None, Some(248), Some(249)],
+        states: &[None, Some(251), Some(252)],
         transitions: &[DFATransition(0, 6, 2), DFATransition(0, 7, 1)],
         k: 1,
     },
     /* 363 - "Ref" */
     LookaheadDFA {
-        states: &[Some(232)],
+        states: &[Some(234)],
         transitions: &[],
         k: 0,
     },
@@ -15188,13 +15198,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 365 - "RefToken" */
     LookaheadDFA {
-        states: &[Some(152)],
+        states: &[Some(153)],
         transitions: &[],
         k: 0,
     },
     /* 366 - "Repeat" */
     LookaheadDFA {
-        states: &[Some(233)],
+        states: &[Some(235)],
         transitions: &[],
         k: 0,
     },
@@ -15206,19 +15216,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 368 - "RepeatToken" */
     LookaheadDFA {
-        states: &[Some(153)],
+        states: &[Some(154)],
         transitions: &[],
         k: 0,
     },
     /* 369 - "Return" */
     LookaheadDFA {
-        states: &[Some(234)],
+        states: &[Some(236)],
         transitions: &[],
         k: 0,
     },
     /* 370 - "ReturnStatement" */
     LookaheadDFA {
-        states: &[Some(389)],
+        states: &[Some(393)],
         transitions: &[],
         k: 0,
     },
@@ -15230,19 +15240,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 372 - "ReturnToken" */
     LookaheadDFA {
-        states: &[Some(154)],
+        states: &[Some(155)],
         transitions: &[],
         k: 0,
     },
     /* 373 - "ScopedIdentifier" */
     LookaheadDFA {
-        states: &[Some(257)],
+        states: &[Some(260)],
         transitions: &[],
         k: 0,
     },
     /* 374 - "ScopedIdentifierList" */
     LookaheadDFA {
-        states: &[None, Some(258), Some(259)],
+        states: &[None, Some(261), Some(262)],
         transitions: &[
             DFATransition(0, 27, 1),
             DFATransition(0, 29, 2),
@@ -15258,13 +15268,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 375 - "ScopedOrHierIdentifier" */
     LookaheadDFA {
-        states: &[Some(261)],
+        states: &[Some(264)],
         transitions: &[],
         k: 0,
     },
     /* 376 - "ScopedOrHierIdentifierGroup" */
     LookaheadDFA {
-        states: &[None, Some(262), Some(265)],
+        states: &[None, Some(265), Some(268)],
         transitions: &[
             DFATransition(0, 11, 2),
             DFATransition(0, 13, 2),
@@ -15298,7 +15308,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 377 - "ScopedOrHierIdentifierGroupList" */
     LookaheadDFA {
-        states: &[None, Some(263), Some(264)],
+        states: &[None, Some(266), Some(267)],
         transitions: &[
             DFATransition(0, 11, 2),
             DFATransition(0, 13, 2),
@@ -15330,7 +15340,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 378 - "ScopedOrHierIdentifierGroupList0" */
     LookaheadDFA {
-        states: &[None, Some(270), Some(271)],
+        states: &[None, Some(273), Some(274)],
         transitions: &[
             DFATransition(0, 11, 2),
             DFATransition(0, 13, 2),
@@ -15363,7 +15373,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 379 - "ScopedOrHierIdentifierGroupList1" */
     LookaheadDFA {
-        states: &[None, Some(266), Some(269)],
+        states: &[None, Some(269), Some(272)],
         transitions: &[
             DFATransition(0, 11, 2),
             DFATransition(0, 13, 2),
@@ -15395,7 +15405,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 380 - "ScopedOrHierIdentifierGroupList1List" */
     LookaheadDFA {
-        states: &[None, Some(267), Some(268)],
+        states: &[None, Some(270), Some(271)],
         transitions: &[
             DFATransition(0, 11, 2),
             DFATransition(0, 13, 2),
@@ -15428,7 +15438,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 381 - "Semicolon" */
     LookaheadDFA {
-        states: &[Some(199)],
+        states: &[Some(201)],
         transitions: &[],
         k: 0,
     },
@@ -15440,19 +15450,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 383 - "SemicolonToken" */
     LookaheadDFA {
-        states: &[Some(119)],
+        states: &[Some(120)],
         transitions: &[],
         k: 0,
     },
     /* 384 - "Start" */
     LookaheadDFA {
-        states: &[Some(163)],
+        states: &[Some(165)],
         transitions: &[],
         k: 0,
     },
     /* 385 - "StartToken" */
     LookaheadDFA {
-        states: &[Some(83)],
+        states: &[Some(84)],
         transitions: &[],
         k: 0,
     },
@@ -15460,12 +15470,12 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     LookaheadDFA {
         states: &[
             None,
-            Some(358),
-            Some(359),
-            Some(360),
-            Some(361),
             Some(362),
             Some(363),
+            Some(364),
+            Some(365),
+            Some(366),
+            Some(367),
         ],
         transitions: &[
             DFATransition(0, 48, 6),
@@ -15473,13 +15483,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 58, 3),
             DFATransition(0, 59, 2),
             DFATransition(0, 76, 4),
-            DFATransition(0, 84, 1),
+            DFATransition(0, 85, 1),
         ],
         k: 1,
     },
     /* 387 - "Step" */
     LookaheadDFA {
-        states: &[Some(235)],
+        states: &[Some(237)],
         transitions: &[],
         k: 0,
     },
@@ -15491,31 +15501,31 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 389 - "StepToken" */
     LookaheadDFA {
-        states: &[Some(155)],
+        states: &[Some(156)],
         transitions: &[],
         k: 0,
     },
     /* 390 - "Struct" */
     LookaheadDFA {
-        states: &[Some(236)],
+        states: &[Some(238)],
         transitions: &[],
         k: 0,
     },
     /* 391 - "StructDeclaration" */
     LookaheadDFA {
-        states: &[Some(446)],
+        states: &[Some(450)],
         transitions: &[],
         k: 0,
     },
     /* 392 - "StructItem" */
     LookaheadDFA {
-        states: &[Some(452)],
+        states: &[Some(456)],
         transitions: &[],
         k: 0,
     },
     /* 393 - "StructList" */
     LookaheadDFA {
-        states: &[Some(447)],
+        states: &[Some(451)],
         transitions: &[],
         k: 0,
     },
@@ -15525,11 +15535,11 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             None,
             None,
             None,
-            Some(448),
+            Some(452),
             None,
             None,
             None,
-            Some(449),
+            Some(453),
             None,
             None,
             None,
@@ -15551,9 +15561,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 38, 5),
             DFATransition(1, 5, 2),
             DFATransition(1, 38, 6),
-            DFATransition(1, 84, 4),
+            DFATransition(1, 85, 4),
             DFATransition(2, 38, 7),
-            DFATransition(2, 84, 3),
+            DFATransition(2, 85, 3),
             DFATransition(4, 5, 3),
             DFATransition(4, 28, 3),
             DFATransition(5, 5, 8),
@@ -15570,7 +15580,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(5, 65, 19),
             DFATransition(5, 67, 20),
             DFATransition(5, 78, 21),
-            DFATransition(5, 83, 22),
+            DFATransition(5, 84, 22),
             DFATransition(6, 5, 7),
             DFATransition(6, 28, 7),
             DFATransition(6, 38, 7),
@@ -15585,7 +15595,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(6, 65, 7),
             DFATransition(6, 67, 7),
             DFATransition(6, 78, 7),
-            DFATransition(6, 83, 7),
+            DFATransition(6, 84, 7),
             DFATransition(8, 28, 7),
             DFATransition(8, 38, 7),
             DFATransition(8, 42, 7),
@@ -15599,9 +15609,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(8, 65, 7),
             DFATransition(8, 67, 7),
             DFATransition(8, 78, 7),
-            DFATransition(8, 83, 7),
+            DFATransition(8, 84, 7),
             DFATransition(9, 5, 7),
-            DFATransition(9, 84, 7),
+            DFATransition(9, 85, 7),
             DFATransition(10, 0, 7),
             DFATransition(10, 5, 7),
             DFATransition(10, 28, 7),
@@ -15621,19 +15631,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(10, 68, 7),
             DFATransition(10, 71, 7),
             DFATransition(10, 78, 7),
-            DFATransition(10, 83, 7),
+            DFATransition(10, 84, 7),
             DFATransition(11, 5, 7),
             DFATransition(11, 35, 7),
             DFATransition(12, 5, 7),
             DFATransition(12, 37, 7),
             DFATransition(13, 5, 7),
-            DFATransition(13, 84, 7),
+            DFATransition(13, 85, 7),
             DFATransition(14, 5, 7),
-            DFATransition(14, 84, 7),
+            DFATransition(14, 85, 7),
             DFATransition(15, 5, 7),
-            DFATransition(15, 84, 7),
+            DFATransition(15, 85, 7),
             DFATransition(16, 5, 7),
-            DFATransition(16, 84, 7),
+            DFATransition(16, 85, 7),
             DFATransition(17, 5, 7),
             DFATransition(17, 6, 7),
             DFATransition(17, 7, 7),
@@ -15648,23 +15658,23 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(17, 30, 7),
             DFATransition(17, 35, 7),
             DFATransition(17, 37, 7),
-            DFATransition(17, 84, 7),
+            DFATransition(17, 85, 7),
             DFATransition(18, 5, 7),
-            DFATransition(18, 84, 7),
+            DFATransition(18, 85, 7),
             DFATransition(19, 5, 7),
-            DFATransition(19, 84, 7),
+            DFATransition(19, 85, 7),
             DFATransition(20, 5, 7),
-            DFATransition(20, 84, 7),
+            DFATransition(20, 85, 7),
             DFATransition(21, 5, 7),
-            DFATransition(21, 84, 7),
+            DFATransition(21, 85, 7),
             DFATransition(22, 5, 7),
-            DFATransition(22, 84, 7),
+            DFATransition(22, 85, 7),
         ],
         k: 3,
     },
     /* 395 - "StructListOpt" */
     LookaheadDFA {
-        states: &[None, Some(450), Some(451)],
+        states: &[None, Some(454), Some(455)],
         transitions: &[DFATransition(0, 29, 1), DFATransition(0, 38, 2)],
         k: 1,
     },
@@ -15676,13 +15686,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 397 - "StructToken" */
     LookaheadDFA {
-        states: &[Some(156)],
+        states: &[Some(157)],
         transitions: &[],
         k: 0,
     },
     /* 398 - "SyncHigh" */
     LookaheadDFA {
-        states: &[Some(237)],
+        states: &[Some(239)],
         transitions: &[],
         k: 0,
     },
@@ -15694,13 +15704,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 400 - "SyncHighToken" */
     LookaheadDFA {
-        states: &[Some(157)],
+        states: &[Some(158)],
         transitions: &[],
         k: 0,
     },
     /* 401 - "SyncLow" */
     LookaheadDFA {
-        states: &[Some(238)],
+        states: &[Some(240)],
         transitions: &[],
         k: 0,
     },
@@ -15712,23 +15722,41 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
     /* 403 - "SyncLowToken" */
     LookaheadDFA {
-        states: &[Some(158)],
+        states: &[Some(159)],
         transitions: &[],
         k: 0,
     },
-    /* 404 - "Type" */
+    /* 404 - "Tri" */
     LookaheadDFA {
-        states: &[Some(352)],
+        states: &[Some(241)],
         transitions: &[],
         k: 0,
     },
-    /* 405 - "TypeGroup" */
+    /* 405 - "TriTerm" */
+    LookaheadDFA {
+        states: &[Some(76)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 406 - "TriToken" */
+    LookaheadDFA {
+        states: &[Some(160)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 407 - "Type" */
+    LookaheadDFA {
+        states: &[Some(356)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 408 - "TypeGroup" */
     LookaheadDFA {
         states: &[
             None,
             None,
             None,
-            Some(353),
+            Some(357),
             None,
             None,
             None,
@@ -15818,9 +15846,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             None,
             None,
             None,
-            Some(354),
             None,
-            Some(355),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(358),
+            None,
+            Some(359),
         ],
         transitions: &[
             DFATransition(0, 47, 1),
@@ -15831,7 +15869,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(0, 66, 52),
             DFATransition(0, 81, 62),
             DFATransition(0, 82, 72),
-            DFATransition(0, 84, 82),
+            DFATransition(0, 83, 82),
+            DFATransition(0, 85, 92),
             DFATransition(1, 5, 2),
             DFATransition(1, 29, 4),
             DFATransition(1, 33, 5),
@@ -15852,7 +15891,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(4, 5, 3),
             DFATransition(4, 38, 3),
             DFATransition(4, 40, 3),
-            DFATransition(4, 84, 3),
+            DFATransition(4, 85, 3),
             DFATransition(5, 5, 3),
             DFATransition(5, 6, 3),
             DFATransition(5, 7, 3),
@@ -15867,7 +15906,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(5, 30, 3),
             DFATransition(5, 35, 3),
             DFATransition(5, 37, 3),
-            DFATransition(5, 84, 3),
+            DFATransition(5, 85, 3),
             DFATransition(6, 5, 3),
             DFATransition(6, 38, 3),
             DFATransition(6, 48, 3),
@@ -15875,8 +15914,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(6, 58, 3),
             DFATransition(6, 59, 3),
             DFATransition(6, 76, 3),
-            DFATransition(6, 83, 3),
             DFATransition(6, 84, 3),
+            DFATransition(6, 85, 3),
             DFATransition(7, 5, 3),
             DFATransition(7, 6, 3),
             DFATransition(7, 7, 3),
@@ -15891,7 +15930,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(7, 30, 3),
             DFATransition(7, 35, 3),
             DFATransition(7, 37, 3),
-            DFATransition(7, 84, 3),
+            DFATransition(7, 85, 3),
             DFATransition(8, 5, 3),
             DFATransition(8, 28, 3),
             DFATransition(8, 38, 3),
@@ -15906,7 +15945,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(8, 65, 3),
             DFATransition(8, 67, 3),
             DFATransition(8, 78, 3),
-            DFATransition(8, 83, 3),
+            DFATransition(8, 84, 3),
             DFATransition(9, 5, 3),
             DFATransition(9, 12, 3),
             DFATransition(9, 35, 3),
@@ -15927,8 +15966,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(10, 67, 3),
             DFATransition(10, 76, 3),
             DFATransition(10, 78, 3),
-            DFATransition(10, 83, 3),
             DFATransition(10, 84, 3),
+            DFATransition(10, 85, 3),
             DFATransition(11, 5, 3),
             DFATransition(11, 6, 3),
             DFATransition(11, 7, 3),
@@ -15943,7 +15982,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(11, 30, 3),
             DFATransition(11, 35, 3),
             DFATransition(11, 37, 3),
-            DFATransition(11, 84, 3),
+            DFATransition(11, 85, 3),
             DFATransition(12, 5, 13),
             DFATransition(12, 29, 14),
             DFATransition(12, 33, 15),
@@ -15964,7 +16003,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(14, 5, 3),
             DFATransition(14, 38, 3),
             DFATransition(14, 40, 3),
-            DFATransition(14, 84, 3),
+            DFATransition(14, 85, 3),
             DFATransition(15, 5, 3),
             DFATransition(15, 6, 3),
             DFATransition(15, 7, 3),
@@ -15979,7 +16018,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(15, 30, 3),
             DFATransition(15, 35, 3),
             DFATransition(15, 37, 3),
-            DFATransition(15, 84, 3),
+            DFATransition(15, 85, 3),
             DFATransition(16, 5, 3),
             DFATransition(16, 38, 3),
             DFATransition(16, 48, 3),
@@ -15987,8 +16026,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(16, 58, 3),
             DFATransition(16, 59, 3),
             DFATransition(16, 76, 3),
-            DFATransition(16, 83, 3),
             DFATransition(16, 84, 3),
+            DFATransition(16, 85, 3),
             DFATransition(17, 5, 3),
             DFATransition(17, 6, 3),
             DFATransition(17, 7, 3),
@@ -16003,7 +16042,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(17, 30, 3),
             DFATransition(17, 35, 3),
             DFATransition(17, 37, 3),
-            DFATransition(17, 84, 3),
+            DFATransition(17, 85, 3),
             DFATransition(18, 5, 3),
             DFATransition(18, 28, 3),
             DFATransition(18, 38, 3),
@@ -16018,7 +16057,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(18, 65, 3),
             DFATransition(18, 67, 3),
             DFATransition(18, 78, 3),
-            DFATransition(18, 83, 3),
+            DFATransition(18, 84, 3),
             DFATransition(19, 5, 3),
             DFATransition(19, 12, 3),
             DFATransition(19, 35, 3),
@@ -16039,8 +16078,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(20, 67, 3),
             DFATransition(20, 76, 3),
             DFATransition(20, 78, 3),
-            DFATransition(20, 83, 3),
             DFATransition(20, 84, 3),
+            DFATransition(20, 85, 3),
             DFATransition(21, 5, 3),
             DFATransition(21, 6, 3),
             DFATransition(21, 7, 3),
@@ -16055,7 +16094,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(21, 30, 3),
             DFATransition(21, 35, 3),
             DFATransition(21, 37, 3),
-            DFATransition(21, 84, 3),
+            DFATransition(21, 85, 3),
             DFATransition(22, 5, 23),
             DFATransition(22, 29, 24),
             DFATransition(22, 33, 25),
@@ -16076,7 +16115,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(24, 5, 3),
             DFATransition(24, 38, 3),
             DFATransition(24, 40, 3),
-            DFATransition(24, 84, 3),
+            DFATransition(24, 85, 3),
             DFATransition(25, 5, 3),
             DFATransition(25, 6, 3),
             DFATransition(25, 7, 3),
@@ -16091,7 +16130,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(25, 30, 3),
             DFATransition(25, 35, 3),
             DFATransition(25, 37, 3),
-            DFATransition(25, 84, 3),
+            DFATransition(25, 85, 3),
             DFATransition(26, 5, 3),
             DFATransition(26, 38, 3),
             DFATransition(26, 48, 3),
@@ -16099,8 +16138,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(26, 58, 3),
             DFATransition(26, 59, 3),
             DFATransition(26, 76, 3),
-            DFATransition(26, 83, 3),
             DFATransition(26, 84, 3),
+            DFATransition(26, 85, 3),
             DFATransition(27, 5, 3),
             DFATransition(27, 6, 3),
             DFATransition(27, 7, 3),
@@ -16115,7 +16154,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(27, 30, 3),
             DFATransition(27, 35, 3),
             DFATransition(27, 37, 3),
-            DFATransition(27, 84, 3),
+            DFATransition(27, 85, 3),
             DFATransition(28, 5, 3),
             DFATransition(28, 28, 3),
             DFATransition(28, 38, 3),
@@ -16130,7 +16169,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(28, 65, 3),
             DFATransition(28, 67, 3),
             DFATransition(28, 78, 3),
-            DFATransition(28, 83, 3),
+            DFATransition(28, 84, 3),
             DFATransition(29, 5, 3),
             DFATransition(29, 12, 3),
             DFATransition(29, 35, 3),
@@ -16151,8 +16190,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(30, 67, 3),
             DFATransition(30, 76, 3),
             DFATransition(30, 78, 3),
-            DFATransition(30, 83, 3),
             DFATransition(30, 84, 3),
+            DFATransition(30, 85, 3),
             DFATransition(31, 5, 3),
             DFATransition(31, 6, 3),
             DFATransition(31, 7, 3),
@@ -16167,7 +16206,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(31, 30, 3),
             DFATransition(31, 35, 3),
             DFATransition(31, 37, 3),
-            DFATransition(31, 84, 3),
+            DFATransition(31, 85, 3),
             DFATransition(32, 5, 33),
             DFATransition(32, 29, 34),
             DFATransition(32, 33, 35),
@@ -16188,7 +16227,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(34, 5, 3),
             DFATransition(34, 38, 3),
             DFATransition(34, 40, 3),
-            DFATransition(34, 84, 3),
+            DFATransition(34, 85, 3),
             DFATransition(35, 5, 3),
             DFATransition(35, 6, 3),
             DFATransition(35, 7, 3),
@@ -16203,7 +16242,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(35, 30, 3),
             DFATransition(35, 35, 3),
             DFATransition(35, 37, 3),
-            DFATransition(35, 84, 3),
+            DFATransition(35, 85, 3),
             DFATransition(36, 5, 3),
             DFATransition(36, 38, 3),
             DFATransition(36, 48, 3),
@@ -16211,8 +16250,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(36, 58, 3),
             DFATransition(36, 59, 3),
             DFATransition(36, 76, 3),
-            DFATransition(36, 83, 3),
             DFATransition(36, 84, 3),
+            DFATransition(36, 85, 3),
             DFATransition(37, 5, 3),
             DFATransition(37, 6, 3),
             DFATransition(37, 7, 3),
@@ -16227,7 +16266,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(37, 30, 3),
             DFATransition(37, 35, 3),
             DFATransition(37, 37, 3),
-            DFATransition(37, 84, 3),
+            DFATransition(37, 85, 3),
             DFATransition(38, 5, 3),
             DFATransition(38, 28, 3),
             DFATransition(38, 38, 3),
@@ -16242,7 +16281,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(38, 65, 3),
             DFATransition(38, 67, 3),
             DFATransition(38, 78, 3),
-            DFATransition(38, 83, 3),
+            DFATransition(38, 84, 3),
             DFATransition(39, 5, 3),
             DFATransition(39, 12, 3),
             DFATransition(39, 35, 3),
@@ -16263,8 +16302,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(40, 67, 3),
             DFATransition(40, 76, 3),
             DFATransition(40, 78, 3),
-            DFATransition(40, 83, 3),
             DFATransition(40, 84, 3),
+            DFATransition(40, 85, 3),
             DFATransition(41, 5, 3),
             DFATransition(41, 6, 3),
             DFATransition(41, 7, 3),
@@ -16279,7 +16318,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(41, 30, 3),
             DFATransition(41, 35, 3),
             DFATransition(41, 37, 3),
-            DFATransition(41, 84, 3),
+            DFATransition(41, 85, 3),
             DFATransition(42, 5, 43),
             DFATransition(42, 29, 44),
             DFATransition(42, 33, 45),
@@ -16300,7 +16339,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(44, 5, 3),
             DFATransition(44, 38, 3),
             DFATransition(44, 40, 3),
-            DFATransition(44, 84, 3),
+            DFATransition(44, 85, 3),
             DFATransition(45, 5, 3),
             DFATransition(45, 6, 3),
             DFATransition(45, 7, 3),
@@ -16315,7 +16354,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(45, 30, 3),
             DFATransition(45, 35, 3),
             DFATransition(45, 37, 3),
-            DFATransition(45, 84, 3),
+            DFATransition(45, 85, 3),
             DFATransition(46, 5, 3),
             DFATransition(46, 38, 3),
             DFATransition(46, 48, 3),
@@ -16323,8 +16362,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(46, 58, 3),
             DFATransition(46, 59, 3),
             DFATransition(46, 76, 3),
-            DFATransition(46, 83, 3),
             DFATransition(46, 84, 3),
+            DFATransition(46, 85, 3),
             DFATransition(47, 5, 3),
             DFATransition(47, 6, 3),
             DFATransition(47, 7, 3),
@@ -16339,7 +16378,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(47, 30, 3),
             DFATransition(47, 35, 3),
             DFATransition(47, 37, 3),
-            DFATransition(47, 84, 3),
+            DFATransition(47, 85, 3),
             DFATransition(48, 5, 3),
             DFATransition(48, 28, 3),
             DFATransition(48, 38, 3),
@@ -16354,7 +16393,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(48, 65, 3),
             DFATransition(48, 67, 3),
             DFATransition(48, 78, 3),
-            DFATransition(48, 83, 3),
+            DFATransition(48, 84, 3),
             DFATransition(49, 5, 3),
             DFATransition(49, 12, 3),
             DFATransition(49, 35, 3),
@@ -16375,8 +16414,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(50, 67, 3),
             DFATransition(50, 76, 3),
             DFATransition(50, 78, 3),
-            DFATransition(50, 83, 3),
             DFATransition(50, 84, 3),
+            DFATransition(50, 85, 3),
             DFATransition(51, 5, 3),
             DFATransition(51, 6, 3),
             DFATransition(51, 7, 3),
@@ -16391,7 +16430,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(51, 30, 3),
             DFATransition(51, 35, 3),
             DFATransition(51, 37, 3),
-            DFATransition(51, 84, 3),
+            DFATransition(51, 85, 3),
             DFATransition(52, 5, 53),
             DFATransition(52, 29, 54),
             DFATransition(52, 33, 55),
@@ -16412,7 +16451,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(54, 5, 3),
             DFATransition(54, 38, 3),
             DFATransition(54, 40, 3),
-            DFATransition(54, 84, 3),
+            DFATransition(54, 85, 3),
             DFATransition(55, 5, 3),
             DFATransition(55, 6, 3),
             DFATransition(55, 7, 3),
@@ -16427,7 +16466,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(55, 30, 3),
             DFATransition(55, 35, 3),
             DFATransition(55, 37, 3),
-            DFATransition(55, 84, 3),
+            DFATransition(55, 85, 3),
             DFATransition(56, 5, 3),
             DFATransition(56, 38, 3),
             DFATransition(56, 48, 3),
@@ -16435,8 +16474,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(56, 58, 3),
             DFATransition(56, 59, 3),
             DFATransition(56, 76, 3),
-            DFATransition(56, 83, 3),
             DFATransition(56, 84, 3),
+            DFATransition(56, 85, 3),
             DFATransition(57, 5, 3),
             DFATransition(57, 6, 3),
             DFATransition(57, 7, 3),
@@ -16451,7 +16490,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(57, 30, 3),
             DFATransition(57, 35, 3),
             DFATransition(57, 37, 3),
-            DFATransition(57, 84, 3),
+            DFATransition(57, 85, 3),
             DFATransition(58, 5, 3),
             DFATransition(58, 28, 3),
             DFATransition(58, 38, 3),
@@ -16466,7 +16505,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(58, 65, 3),
             DFATransition(58, 67, 3),
             DFATransition(58, 78, 3),
-            DFATransition(58, 83, 3),
+            DFATransition(58, 84, 3),
             DFATransition(59, 5, 3),
             DFATransition(59, 12, 3),
             DFATransition(59, 35, 3),
@@ -16487,8 +16526,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(60, 67, 3),
             DFATransition(60, 76, 3),
             DFATransition(60, 78, 3),
-            DFATransition(60, 83, 3),
             DFATransition(60, 84, 3),
+            DFATransition(60, 85, 3),
             DFATransition(61, 5, 3),
             DFATransition(61, 6, 3),
             DFATransition(61, 7, 3),
@@ -16503,7 +16542,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(61, 30, 3),
             DFATransition(61, 35, 3),
             DFATransition(61, 37, 3),
-            DFATransition(61, 84, 3),
+            DFATransition(61, 85, 3),
             DFATransition(62, 5, 63),
             DFATransition(62, 29, 64),
             DFATransition(62, 33, 65),
@@ -16524,7 +16563,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(64, 5, 3),
             DFATransition(64, 38, 3),
             DFATransition(64, 40, 3),
-            DFATransition(64, 84, 3),
+            DFATransition(64, 85, 3),
             DFATransition(65, 5, 3),
             DFATransition(65, 6, 3),
             DFATransition(65, 7, 3),
@@ -16539,7 +16578,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(65, 30, 3),
             DFATransition(65, 35, 3),
             DFATransition(65, 37, 3),
-            DFATransition(65, 84, 3),
+            DFATransition(65, 85, 3),
             DFATransition(66, 5, 3),
             DFATransition(66, 38, 3),
             DFATransition(66, 48, 3),
@@ -16547,8 +16586,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(66, 58, 3),
             DFATransition(66, 59, 3),
             DFATransition(66, 76, 3),
-            DFATransition(66, 83, 3),
             DFATransition(66, 84, 3),
+            DFATransition(66, 85, 3),
             DFATransition(67, 5, 3),
             DFATransition(67, 6, 3),
             DFATransition(67, 7, 3),
@@ -16563,7 +16602,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(67, 30, 3),
             DFATransition(67, 35, 3),
             DFATransition(67, 37, 3),
-            DFATransition(67, 84, 3),
+            DFATransition(67, 85, 3),
             DFATransition(68, 5, 3),
             DFATransition(68, 28, 3),
             DFATransition(68, 38, 3),
@@ -16578,7 +16617,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(68, 65, 3),
             DFATransition(68, 67, 3),
             DFATransition(68, 78, 3),
-            DFATransition(68, 83, 3),
+            DFATransition(68, 84, 3),
             DFATransition(69, 5, 3),
             DFATransition(69, 12, 3),
             DFATransition(69, 35, 3),
@@ -16599,8 +16638,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(70, 67, 3),
             DFATransition(70, 76, 3),
             DFATransition(70, 78, 3),
-            DFATransition(70, 83, 3),
             DFATransition(70, 84, 3),
+            DFATransition(70, 85, 3),
             DFATransition(71, 5, 3),
             DFATransition(71, 6, 3),
             DFATransition(71, 7, 3),
@@ -16615,7 +16654,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(71, 30, 3),
             DFATransition(71, 35, 3),
             DFATransition(71, 37, 3),
-            DFATransition(71, 84, 3),
+            DFATransition(71, 85, 3),
             DFATransition(72, 5, 73),
             DFATransition(72, 29, 74),
             DFATransition(72, 33, 75),
@@ -16636,7 +16675,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(74, 5, 3),
             DFATransition(74, 38, 3),
             DFATransition(74, 40, 3),
-            DFATransition(74, 84, 3),
+            DFATransition(74, 85, 3),
             DFATransition(75, 5, 3),
             DFATransition(75, 6, 3),
             DFATransition(75, 7, 3),
@@ -16651,7 +16690,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(75, 30, 3),
             DFATransition(75, 35, 3),
             DFATransition(75, 37, 3),
-            DFATransition(75, 84, 3),
+            DFATransition(75, 85, 3),
             DFATransition(76, 5, 3),
             DFATransition(76, 38, 3),
             DFATransition(76, 48, 3),
@@ -16659,8 +16698,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(76, 58, 3),
             DFATransition(76, 59, 3),
             DFATransition(76, 76, 3),
-            DFATransition(76, 83, 3),
             DFATransition(76, 84, 3),
+            DFATransition(76, 85, 3),
             DFATransition(77, 5, 3),
             DFATransition(77, 6, 3),
             DFATransition(77, 7, 3),
@@ -16675,7 +16714,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(77, 30, 3),
             DFATransition(77, 35, 3),
             DFATransition(77, 37, 3),
-            DFATransition(77, 84, 3),
+            DFATransition(77, 85, 3),
             DFATransition(78, 5, 3),
             DFATransition(78, 28, 3),
             DFATransition(78, 38, 3),
@@ -16690,7 +16729,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(78, 65, 3),
             DFATransition(78, 67, 3),
             DFATransition(78, 78, 3),
-            DFATransition(78, 83, 3),
+            DFATransition(78, 84, 3),
             DFATransition(79, 5, 3),
             DFATransition(79, 12, 3),
             DFATransition(79, 35, 3),
@@ -16711,8 +16750,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(80, 67, 3),
             DFATransition(80, 76, 3),
             DFATransition(80, 78, 3),
-            DFATransition(80, 83, 3),
             DFATransition(80, 84, 3),
+            DFATransition(80, 85, 3),
             DFATransition(81, 5, 3),
             DFATransition(81, 6, 3),
             DFATransition(81, 7, 3),
@@ -16727,133 +16766,245 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(81, 30, 3),
             DFATransition(81, 35, 3),
             DFATransition(81, 37, 3),
-            DFATransition(81, 84, 3),
+            DFATransition(81, 85, 3),
             DFATransition(82, 5, 83),
-            DFATransition(82, 27, 84),
-            DFATransition(82, 29, 85),
-            DFATransition(82, 32, 94),
-            DFATransition(82, 33, 86),
-            DFATransition(82, 35, 87),
-            DFATransition(82, 36, 88),
-            DFATransition(82, 38, 89),
-            DFATransition(82, 40, 90),
-            DFATransition(82, 41, 91),
-            DFATransition(82, 64, 92),
-            DFATransition(83, 27, 93),
-            DFATransition(83, 29, 93),
-            DFATransition(83, 32, 95),
-            DFATransition(83, 33, 93),
-            DFATransition(83, 35, 93),
-            DFATransition(83, 36, 93),
-            DFATransition(83, 38, 93),
-            DFATransition(83, 40, 93),
-            DFATransition(83, 41, 93),
-            DFATransition(83, 64, 93),
-            DFATransition(84, 5, 93),
-            DFATransition(84, 84, 93),
-            DFATransition(85, 5, 93),
-            DFATransition(85, 38, 93),
-            DFATransition(85, 40, 93),
-            DFATransition(85, 84, 93),
-            DFATransition(86, 5, 93),
-            DFATransition(86, 6, 93),
-            DFATransition(86, 7, 93),
-            DFATransition(86, 8, 93),
-            DFATransition(86, 9, 93),
-            DFATransition(86, 10, 93),
-            DFATransition(86, 17, 93),
-            DFATransition(86, 23, 93),
-            DFATransition(86, 24, 93),
-            DFATransition(86, 25, 93),
-            DFATransition(86, 26, 93),
-            DFATransition(86, 30, 93),
-            DFATransition(86, 35, 93),
-            DFATransition(86, 37, 93),
-            DFATransition(86, 84, 93),
-            DFATransition(87, 5, 93),
-            DFATransition(87, 38, 93),
-            DFATransition(87, 48, 93),
-            DFATransition(87, 54, 93),
-            DFATransition(87, 58, 93),
-            DFATransition(87, 59, 93),
-            DFATransition(87, 76, 93),
-            DFATransition(87, 83, 93),
-            DFATransition(87, 84, 93),
-            DFATransition(88, 5, 93),
-            DFATransition(88, 6, 93),
-            DFATransition(88, 7, 93),
-            DFATransition(88, 8, 93),
-            DFATransition(88, 9, 93),
-            DFATransition(88, 10, 93),
-            DFATransition(88, 17, 93),
-            DFATransition(88, 23, 93),
-            DFATransition(88, 24, 93),
-            DFATransition(88, 25, 93),
-            DFATransition(88, 26, 93),
-            DFATransition(88, 30, 93),
-            DFATransition(88, 35, 93),
-            DFATransition(88, 37, 93),
-            DFATransition(88, 84, 93),
-            DFATransition(89, 5, 93),
-            DFATransition(89, 28, 93),
-            DFATransition(89, 38, 93),
-            DFATransition(89, 42, 93),
-            DFATransition(89, 43, 93),
-            DFATransition(89, 44, 93),
-            DFATransition(89, 51, 93),
-            DFATransition(89, 54, 93),
-            DFATransition(89, 55, 93),
-            DFATransition(89, 59, 93),
-            DFATransition(89, 62, 93),
-            DFATransition(89, 65, 93),
-            DFATransition(89, 67, 93),
-            DFATransition(89, 78, 93),
-            DFATransition(89, 83, 93),
-            DFATransition(90, 5, 93),
-            DFATransition(90, 12, 93),
-            DFATransition(90, 35, 93),
-            DFATransition(91, 5, 93),
-            DFATransition(91, 28, 93),
-            DFATransition(91, 38, 93),
-            DFATransition(91, 42, 93),
-            DFATransition(91, 43, 93),
-            DFATransition(91, 44, 93),
-            DFATransition(91, 48, 93),
-            DFATransition(91, 51, 93),
-            DFATransition(91, 54, 93),
-            DFATransition(91, 55, 93),
-            DFATransition(91, 58, 93),
-            DFATransition(91, 59, 93),
-            DFATransition(91, 62, 93),
-            DFATransition(91, 65, 93),
-            DFATransition(91, 67, 93),
-            DFATransition(91, 76, 93),
-            DFATransition(91, 78, 93),
-            DFATransition(91, 83, 93),
-            DFATransition(91, 84, 93),
+            DFATransition(82, 29, 84),
+            DFATransition(82, 33, 85),
+            DFATransition(82, 35, 86),
+            DFATransition(82, 36, 87),
+            DFATransition(82, 38, 88),
+            DFATransition(82, 40, 89),
+            DFATransition(82, 41, 90),
+            DFATransition(82, 64, 91),
+            DFATransition(83, 29, 3),
+            DFATransition(83, 33, 3),
+            DFATransition(83, 35, 3),
+            DFATransition(83, 36, 3),
+            DFATransition(83, 38, 3),
+            DFATransition(83, 40, 3),
+            DFATransition(83, 41, 3),
+            DFATransition(83, 64, 3),
+            DFATransition(84, 5, 3),
+            DFATransition(84, 38, 3),
+            DFATransition(84, 40, 3),
+            DFATransition(84, 85, 3),
+            DFATransition(85, 5, 3),
+            DFATransition(85, 6, 3),
+            DFATransition(85, 7, 3),
+            DFATransition(85, 8, 3),
+            DFATransition(85, 9, 3),
+            DFATransition(85, 10, 3),
+            DFATransition(85, 17, 3),
+            DFATransition(85, 23, 3),
+            DFATransition(85, 24, 3),
+            DFATransition(85, 25, 3),
+            DFATransition(85, 26, 3),
+            DFATransition(85, 30, 3),
+            DFATransition(85, 35, 3),
+            DFATransition(85, 37, 3),
+            DFATransition(85, 85, 3),
+            DFATransition(86, 5, 3),
+            DFATransition(86, 38, 3),
+            DFATransition(86, 48, 3),
+            DFATransition(86, 54, 3),
+            DFATransition(86, 58, 3),
+            DFATransition(86, 59, 3),
+            DFATransition(86, 76, 3),
+            DFATransition(86, 84, 3),
+            DFATransition(86, 85, 3),
+            DFATransition(87, 5, 3),
+            DFATransition(87, 6, 3),
+            DFATransition(87, 7, 3),
+            DFATransition(87, 8, 3),
+            DFATransition(87, 9, 3),
+            DFATransition(87, 10, 3),
+            DFATransition(87, 17, 3),
+            DFATransition(87, 23, 3),
+            DFATransition(87, 24, 3),
+            DFATransition(87, 25, 3),
+            DFATransition(87, 26, 3),
+            DFATransition(87, 30, 3),
+            DFATransition(87, 35, 3),
+            DFATransition(87, 37, 3),
+            DFATransition(87, 85, 3),
+            DFATransition(88, 5, 3),
+            DFATransition(88, 28, 3),
+            DFATransition(88, 38, 3),
+            DFATransition(88, 42, 3),
+            DFATransition(88, 43, 3),
+            DFATransition(88, 44, 3),
+            DFATransition(88, 51, 3),
+            DFATransition(88, 54, 3),
+            DFATransition(88, 55, 3),
+            DFATransition(88, 59, 3),
+            DFATransition(88, 62, 3),
+            DFATransition(88, 65, 3),
+            DFATransition(88, 67, 3),
+            DFATransition(88, 78, 3),
+            DFATransition(88, 84, 3),
+            DFATransition(89, 5, 3),
+            DFATransition(89, 12, 3),
+            DFATransition(89, 35, 3),
+            DFATransition(90, 5, 3),
+            DFATransition(90, 28, 3),
+            DFATransition(90, 38, 3),
+            DFATransition(90, 42, 3),
+            DFATransition(90, 43, 3),
+            DFATransition(90, 44, 3),
+            DFATransition(90, 48, 3),
+            DFATransition(90, 51, 3),
+            DFATransition(90, 54, 3),
+            DFATransition(90, 55, 3),
+            DFATransition(90, 58, 3),
+            DFATransition(90, 59, 3),
+            DFATransition(90, 62, 3),
+            DFATransition(90, 65, 3),
+            DFATransition(90, 67, 3),
+            DFATransition(90, 76, 3),
+            DFATransition(90, 78, 3),
+            DFATransition(90, 84, 3),
+            DFATransition(90, 85, 3),
+            DFATransition(91, 5, 3),
+            DFATransition(91, 6, 3),
+            DFATransition(91, 7, 3),
+            DFATransition(91, 8, 3),
+            DFATransition(91, 9, 3),
+            DFATransition(91, 10, 3),
+            DFATransition(91, 17, 3),
+            DFATransition(91, 23, 3),
+            DFATransition(91, 24, 3),
+            DFATransition(91, 25, 3),
+            DFATransition(91, 26, 3),
+            DFATransition(91, 30, 3),
+            DFATransition(91, 35, 3),
+            DFATransition(91, 37, 3),
+            DFATransition(91, 85, 3),
             DFATransition(92, 5, 93),
-            DFATransition(92, 6, 93),
-            DFATransition(92, 7, 93),
-            DFATransition(92, 8, 93),
-            DFATransition(92, 9, 93),
-            DFATransition(92, 10, 93),
-            DFATransition(92, 17, 93),
-            DFATransition(92, 23, 93),
-            DFATransition(92, 24, 93),
-            DFATransition(92, 25, 93),
-            DFATransition(92, 26, 93),
-            DFATransition(92, 30, 93),
-            DFATransition(92, 35, 93),
-            DFATransition(92, 37, 93),
-            DFATransition(92, 84, 93),
-            DFATransition(94, 5, 95),
-            DFATransition(94, 84, 95),
+            DFATransition(92, 27, 94),
+            DFATransition(92, 29, 95),
+            DFATransition(92, 32, 104),
+            DFATransition(92, 33, 96),
+            DFATransition(92, 35, 97),
+            DFATransition(92, 36, 98),
+            DFATransition(92, 38, 99),
+            DFATransition(92, 40, 100),
+            DFATransition(92, 41, 101),
+            DFATransition(92, 64, 102),
+            DFATransition(93, 27, 103),
+            DFATransition(93, 29, 103),
+            DFATransition(93, 32, 105),
+            DFATransition(93, 33, 103),
+            DFATransition(93, 35, 103),
+            DFATransition(93, 36, 103),
+            DFATransition(93, 38, 103),
+            DFATransition(93, 40, 103),
+            DFATransition(93, 41, 103),
+            DFATransition(93, 64, 103),
+            DFATransition(94, 5, 103),
+            DFATransition(94, 85, 103),
+            DFATransition(95, 5, 103),
+            DFATransition(95, 38, 103),
+            DFATransition(95, 40, 103),
+            DFATransition(95, 85, 103),
+            DFATransition(96, 5, 103),
+            DFATransition(96, 6, 103),
+            DFATransition(96, 7, 103),
+            DFATransition(96, 8, 103),
+            DFATransition(96, 9, 103),
+            DFATransition(96, 10, 103),
+            DFATransition(96, 17, 103),
+            DFATransition(96, 23, 103),
+            DFATransition(96, 24, 103),
+            DFATransition(96, 25, 103),
+            DFATransition(96, 26, 103),
+            DFATransition(96, 30, 103),
+            DFATransition(96, 35, 103),
+            DFATransition(96, 37, 103),
+            DFATransition(96, 85, 103),
+            DFATransition(97, 5, 103),
+            DFATransition(97, 38, 103),
+            DFATransition(97, 48, 103),
+            DFATransition(97, 54, 103),
+            DFATransition(97, 58, 103),
+            DFATransition(97, 59, 103),
+            DFATransition(97, 76, 103),
+            DFATransition(97, 84, 103),
+            DFATransition(97, 85, 103),
+            DFATransition(98, 5, 103),
+            DFATransition(98, 6, 103),
+            DFATransition(98, 7, 103),
+            DFATransition(98, 8, 103),
+            DFATransition(98, 9, 103),
+            DFATransition(98, 10, 103),
+            DFATransition(98, 17, 103),
+            DFATransition(98, 23, 103),
+            DFATransition(98, 24, 103),
+            DFATransition(98, 25, 103),
+            DFATransition(98, 26, 103),
+            DFATransition(98, 30, 103),
+            DFATransition(98, 35, 103),
+            DFATransition(98, 37, 103),
+            DFATransition(98, 85, 103),
+            DFATransition(99, 5, 103),
+            DFATransition(99, 28, 103),
+            DFATransition(99, 38, 103),
+            DFATransition(99, 42, 103),
+            DFATransition(99, 43, 103),
+            DFATransition(99, 44, 103),
+            DFATransition(99, 51, 103),
+            DFATransition(99, 54, 103),
+            DFATransition(99, 55, 103),
+            DFATransition(99, 59, 103),
+            DFATransition(99, 62, 103),
+            DFATransition(99, 65, 103),
+            DFATransition(99, 67, 103),
+            DFATransition(99, 78, 103),
+            DFATransition(99, 84, 103),
+            DFATransition(100, 5, 103),
+            DFATransition(100, 12, 103),
+            DFATransition(100, 35, 103),
+            DFATransition(101, 5, 103),
+            DFATransition(101, 28, 103),
+            DFATransition(101, 38, 103),
+            DFATransition(101, 42, 103),
+            DFATransition(101, 43, 103),
+            DFATransition(101, 44, 103),
+            DFATransition(101, 48, 103),
+            DFATransition(101, 51, 103),
+            DFATransition(101, 54, 103),
+            DFATransition(101, 55, 103),
+            DFATransition(101, 58, 103),
+            DFATransition(101, 59, 103),
+            DFATransition(101, 62, 103),
+            DFATransition(101, 65, 103),
+            DFATransition(101, 67, 103),
+            DFATransition(101, 76, 103),
+            DFATransition(101, 78, 103),
+            DFATransition(101, 84, 103),
+            DFATransition(101, 85, 103),
+            DFATransition(102, 5, 103),
+            DFATransition(102, 6, 103),
+            DFATransition(102, 7, 103),
+            DFATransition(102, 8, 103),
+            DFATransition(102, 9, 103),
+            DFATransition(102, 10, 103),
+            DFATransition(102, 17, 103),
+            DFATransition(102, 23, 103),
+            DFATransition(102, 24, 103),
+            DFATransition(102, 25, 103),
+            DFATransition(102, 26, 103),
+            DFATransition(102, 30, 103),
+            DFATransition(102, 35, 103),
+            DFATransition(102, 37, 103),
+            DFATransition(102, 85, 103),
+            DFATransition(104, 5, 105),
+            DFATransition(104, 85, 105),
         ],
         k: 3,
     },
-    /* 406 - "TypeList" */
+    /* 409 - "TypeList" */
     LookaheadDFA {
-        states: &[None, Some(356), Some(357)],
+        states: &[None, Some(360), Some(361)],
         transitions: &[
             DFATransition(0, 29, 2),
             DFATransition(0, 33, 2),
@@ -16866,99 +17017,99 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
         ],
         k: 1,
     },
-    /* 407 - "U32" */
+    /* 410 - "U32" */
     LookaheadDFA {
-        states: &[Some(239)],
+        states: &[Some(242)],
         transitions: &[],
         k: 0,
     },
-    /* 408 - "U32Term" */
-    LookaheadDFA {
-        states: &[Some(76)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 409 - "U32Token" */
-    LookaheadDFA {
-        states: &[Some(159)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 410 - "U64" */
-    LookaheadDFA {
-        states: &[Some(240)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 411 - "U64Term" */
+    /* 411 - "U32Term" */
     LookaheadDFA {
         states: &[Some(77)],
         transitions: &[],
         k: 0,
     },
-    /* 412 - "U64Token" */
-    LookaheadDFA {
-        states: &[Some(160)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 413 - "UnaryOperator" */
-    LookaheadDFA {
-        states: &[Some(181)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 414 - "UnaryOperatorTerm" */
-    LookaheadDFA {
-        states: &[Some(21)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 415 - "UnaryOperatorToken" */
-    LookaheadDFA {
-        states: &[Some(101)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 416 - "Var" */
-    LookaheadDFA {
-        states: &[Some(241)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 417 - "VarDeclaration" */
-    LookaheadDFA {
-        states: &[Some(405)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 418 - "VarDeclarationOpt" */
-    LookaheadDFA {
-        states: &[None, Some(406), Some(407)],
-        transitions: &[DFATransition(0, 33, 1), DFATransition(0, 41, 2)],
-        k: 1,
-    },
-    /* 419 - "VarTerm" */
-    LookaheadDFA {
-        states: &[Some(78)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 420 - "VarToken" */
+    /* 412 - "U32Token" */
     LookaheadDFA {
         states: &[Some(161)],
         transitions: &[],
         k: 0,
     },
-    /* 421 - "Veryl" */
+    /* 413 - "U64" */
     LookaheadDFA {
-        states: &[Some(593)],
+        states: &[Some(243)],
         transitions: &[],
         k: 0,
     },
-    /* 422 - "VerylList" */
+    /* 414 - "U64Term" */
     LookaheadDFA {
-        states: &[None, Some(594), Some(595)],
+        states: &[Some(78)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 415 - "U64Token" */
+    LookaheadDFA {
+        states: &[Some(162)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 416 - "UnaryOperator" */
+    LookaheadDFA {
+        states: &[Some(183)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 417 - "UnaryOperatorTerm" */
+    LookaheadDFA {
+        states: &[Some(21)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 418 - "UnaryOperatorToken" */
+    LookaheadDFA {
+        states: &[Some(102)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 419 - "Var" */
+    LookaheadDFA {
+        states: &[Some(244)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 420 - "VarDeclaration" */
+    LookaheadDFA {
+        states: &[Some(409)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 421 - "VarDeclarationOpt" */
+    LookaheadDFA {
+        states: &[None, Some(410), Some(411)],
+        transitions: &[DFATransition(0, 33, 1), DFATransition(0, 41, 2)],
+        k: 1,
+    },
+    /* 422 - "VarTerm" */
+    LookaheadDFA {
+        states: &[Some(79)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 423 - "VarToken" */
+    LookaheadDFA {
+        states: &[Some(163)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 424 - "Veryl" */
+    LookaheadDFA {
+        states: &[Some(597)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 425 - "VerylList" */
+    LookaheadDFA {
+        states: &[None, Some(598), Some(599)],
         transitions: &[
             DFATransition(0, 0, 2),
             DFATransition(0, 63, 1),
@@ -16967,48 +17118,48 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
         ],
         k: 1,
     },
-    /* 423 - "Width" */
+    /* 426 - "Width" */
     LookaheadDFA {
-        states: &[Some(343)],
+        states: &[Some(346)],
         transitions: &[],
         k: 0,
     },
-    /* 424 - "WithParameter" */
+    /* 427 - "WithParameter" */
     LookaheadDFA {
-        states: &[Some(481)],
+        states: &[Some(485)],
         transitions: &[],
         k: 0,
     },
-    /* 425 - "WithParameterItem" */
+    /* 428 - "WithParameterItem" */
     LookaheadDFA {
-        states: &[Some(489)],
+        states: &[Some(493)],
         transitions: &[],
         k: 0,
     },
-    /* 426 - "WithParameterItemGroup" */
+    /* 429 - "WithParameterItemGroup" */
     LookaheadDFA {
-        states: &[None, Some(490), Some(491)],
+        states: &[None, Some(494), Some(495)],
         transitions: &[DFATransition(0, 65, 2), DFATransition(0, 72, 1)],
         k: 1,
     },
-    /* 427 - "WithParameterList" */
+    /* 430 - "WithParameterList" */
     LookaheadDFA {
-        states: &[Some(484)],
+        states: &[Some(488)],
         transitions: &[],
         k: 0,
     },
-    /* 428 - "WithParameterListList" */
+    /* 431 - "WithParameterListList" */
     LookaheadDFA {
         states: &[
             None,
             None,
             None,
-            Some(485),
+            Some(489),
             None,
             None,
             None,
             None,
-            Some(486),
+            Some(490),
             None,
             None,
             None,
@@ -17025,9 +17176,9 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(2, 65, 3),
             DFATransition(2, 72, 3),
             DFATransition(4, 5, 3),
-            DFATransition(4, 84, 3),
+            DFATransition(4, 85, 3),
             DFATransition(5, 5, 3),
-            DFATransition(5, 84, 3),
+            DFATransition(5, 85, 3),
             DFATransition(6, 5, 9),
             DFATransition(6, 12, 10),
             DFATransition(6, 35, 11),
@@ -17048,7 +17199,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(10, 66, 8),
             DFATransition(10, 81, 8),
             DFATransition(10, 82, 8),
-            DFATransition(10, 84, 8),
+            DFATransition(10, 83, 8),
+            DFATransition(10, 85, 8),
             DFATransition(11, 5, 8),
             DFATransition(11, 28, 8),
             DFATransition(11, 38, 8),
@@ -17063,22 +17215,22 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
             DFATransition(11, 65, 8),
             DFATransition(11, 67, 8),
             DFATransition(11, 78, 8),
-            DFATransition(11, 83, 8),
+            DFATransition(11, 84, 8),
             DFATransition(12, 5, 8),
             DFATransition(12, 40, 8),
-            DFATransition(12, 84, 8),
+            DFATransition(12, 85, 8),
         ],
         k: 3,
     },
-    /* 429 - "WithParameterListOpt" */
+    /* 432 - "WithParameterListOpt" */
     LookaheadDFA {
-        states: &[None, Some(487), Some(488)],
+        states: &[None, Some(491), Some(492)],
         transitions: &[DFATransition(0, 29, 1), DFATransition(0, 40, 2)],
         k: 1,
     },
-    /* 430 - "WithParameterOpt" */
+    /* 433 - "WithParameterOpt" */
     LookaheadDFA {
-        states: &[None, Some(482), Some(483)],
+        states: &[None, Some(486), Some(487)],
         transitions: &[
             DFATransition(0, 40, 2),
             DFATransition(0, 65, 1),
@@ -17088,7 +17240,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 431] = &[
     },
 ];
 
-pub const PRODUCTIONS: &[Production; 596] = &[
+pub const PRODUCTIONS: &[Production; 600] = &[
     // 0 - CommentsTerm: "(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+";
     Production {
         lhs: 65,
@@ -17196,7 +17348,7 @@ pub const PRODUCTIONS: &[Production; 596] = &[
     },
     // 21 - UnaryOperatorTerm: "~&|~\||!|~";
     Production {
-        lhs: 414,
+        lhs: 417,
         production: &[ParseType::T(26)],
     },
     // 22 - ColonColonTerm: '::';
@@ -17469,882 +17621,897 @@ pub const PRODUCTIONS: &[Production; 596] = &[
         lhs: 402,
         production: &[ParseType::T(80)],
     },
-    // 76 - U32Term: /\bu32\b/;
+    // 76 - TriTerm: /\btri\b/;
     Production {
-        lhs: 408,
+        lhs: 405,
         production: &[ParseType::T(81)],
     },
-    // 77 - U64Term: /\bu64\b/;
+    // 77 - U32Term: /\bu32\b/;
     Production {
         lhs: 411,
         production: &[ParseType::T(82)],
     },
-    // 78 - VarTerm: /\bvar\b/;
+    // 78 - U64Term: /\bu64\b/;
     Production {
-        lhs: 419,
+        lhs: 414,
         production: &[ParseType::T(83)],
     },
-    // 79 - IdentifierTerm: /[a-zA-Z_][0-9a-zA-Z_]*/;
+    // 79 - VarTerm: /\bvar\b/;
     Production {
-        lhs: 172,
+        lhs: 422,
         production: &[ParseType::T(84)],
     },
-    // 80 - Comments: CommentsOpt /* Option */;
+    // 80 - IdentifierTerm: /[a-zA-Z_][0-9a-zA-Z_]*/;
+    Production {
+        lhs: 172,
+        production: &[ParseType::T(85)],
+    },
+    // 81 - Comments: CommentsOpt /* Option */;
     Production {
         lhs: 63,
         production: &[ParseType::N(64)],
     },
-    // 81 - CommentsOpt: CommentsTerm;
+    // 82 - CommentsOpt: CommentsTerm;
     Production {
         lhs: 64,
         production: &[ParseType::N(65)],
     },
-    // 82 - CommentsOpt: ;
+    // 83 - CommentsOpt: ;
     Production {
         lhs: 64,
         production: &[],
     },
-    // 83 - StartToken: Comments;
+    // 84 - StartToken: Comments;
     Production {
         lhs: 385,
         production: &[ParseType::N(63)],
     },
-    // 84 - ExponentToken: ExponentTerm : crate::veryl_token::Token  Comments;
+    // 85 - ExponentToken: ExponentTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 102,
         production: &[ParseType::N(63), ParseType::N(101)],
     },
-    // 85 - FixedPointToken: FixedPointTerm : crate::veryl_token::Token  Comments;
+    // 86 - FixedPointToken: FixedPointTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 140,
         production: &[ParseType::N(63), ParseType::N(139)],
     },
-    // 86 - BasedToken: BasedTerm : crate::veryl_token::Token  Comments;
+    // 87 - BasedToken: BasedTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 40,
         production: &[ParseType::N(63), ParseType::N(39)],
     },
-    // 87 - BaseLessToken: BaseLessTerm : crate::veryl_token::Token  Comments;
+    // 88 - BaseLessToken: BaseLessTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 37,
         production: &[ParseType::N(63), ParseType::N(36)],
     },
-    // 88 - AllBitToken: AllBitTerm : crate::veryl_token::Token  Comments;
+    // 89 - AllBitToken: AllBitTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 2,
         production: &[ParseType::N(63), ParseType::N(1)],
     },
-    // 89 - AssignmentOperatorToken: AssignmentOperatorTerm : crate::veryl_token::Token  Comments;
+    // 90 - AssignmentOperatorToken: AssignmentOperatorTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 26,
         production: &[ParseType::N(63), ParseType::N(25)],
     },
-    // 90 - Operator01Token: Operator01Term : crate::veryl_token::Token  Comments;
+    // 91 - Operator01Token: Operator01Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 294,
         production: &[ParseType::N(63), ParseType::N(293)],
     },
-    // 91 - Operator02Token: Operator02Term : crate::veryl_token::Token  Comments;
+    // 92 - Operator02Token: Operator02Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 297,
         production: &[ParseType::N(63), ParseType::N(296)],
     },
-    // 92 - Operator03Token: Operator03Term : crate::veryl_token::Token  Comments;
+    // 93 - Operator03Token: Operator03Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 300,
         production: &[ParseType::N(63), ParseType::N(299)],
     },
-    // 93 - Operator04Token: Operator04Term : crate::veryl_token::Token  Comments;
+    // 94 - Operator04Token: Operator04Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 303,
         production: &[ParseType::N(63), ParseType::N(302)],
     },
-    // 94 - Operator05Token: Operator05Term : crate::veryl_token::Token  Comments;
+    // 95 - Operator05Token: Operator05Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 306,
         production: &[ParseType::N(63), ParseType::N(305)],
     },
-    // 95 - Operator06Token: Operator06Term : crate::veryl_token::Token  Comments;
+    // 96 - Operator06Token: Operator06Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 309,
         production: &[ParseType::N(63), ParseType::N(308)],
     },
-    // 96 - Operator07Token: Operator07Term : crate::veryl_token::Token  Comments;
+    // 97 - Operator07Token: Operator07Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 312,
         production: &[ParseType::N(63), ParseType::N(311)],
     },
-    // 97 - Operator08Token: Operator08Term : crate::veryl_token::Token  Comments;
+    // 98 - Operator08Token: Operator08Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 315,
         production: &[ParseType::N(63), ParseType::N(314)],
     },
-    // 98 - Operator09Token: Operator09Term : crate::veryl_token::Token  Comments;
+    // 99 - Operator09Token: Operator09Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 318,
         production: &[ParseType::N(63), ParseType::N(317)],
     },
-    // 99 - Operator10Token: Operator10Term : crate::veryl_token::Token  Comments;
+    // 100 - Operator10Token: Operator10Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 321,
         production: &[ParseType::N(63), ParseType::N(320)],
     },
-    // 100 - Operator11Token: Operator11Term : crate::veryl_token::Token  Comments;
+    // 101 - Operator11Token: Operator11Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 324,
         production: &[ParseType::N(63), ParseType::N(323)],
     },
-    // 101 - UnaryOperatorToken: UnaryOperatorTerm : crate::veryl_token::Token  Comments;
+    // 102 - UnaryOperatorToken: UnaryOperatorTerm : crate::veryl_token::Token  Comments;
     Production {
-        lhs: 415,
-        production: &[ParseType::N(63), ParseType::N(414)],
+        lhs: 418,
+        production: &[ParseType::N(63), ParseType::N(417)],
     },
-    // 102 - ColonToken: ColonTerm : crate::veryl_token::Token  Comments;
+    // 103 - ColonToken: ColonTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 59,
         production: &[ParseType::N(63), ParseType::N(58)],
     },
-    // 103 - ColonColonToken: ColonColonTerm : crate::veryl_token::Token  Comments;
+    // 104 - ColonColonToken: ColonColonTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 57,
         production: &[ParseType::N(63), ParseType::N(56)],
     },
-    // 104 - CommaToken: CommaTerm : crate::veryl_token::Token  Comments;
+    // 105 - CommaToken: CommaTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 62,
         production: &[ParseType::N(63), ParseType::N(61)],
     },
-    // 105 - DollarToken: DollarTerm : crate::veryl_token::Token  Comments;
+    // 106 - DollarToken: DollarTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 78,
         production: &[ParseType::N(63), ParseType::N(77)],
     },
-    // 106 - DotDotToken: DotDotTerm : crate::veryl_token::Token  Comments;
+    // 107 - DotDotToken: DotDotTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 82,
         production: &[ParseType::N(63), ParseType::N(81)],
     },
-    // 107 - DotToken: DotTerm : crate::veryl_token::Token  Comments;
+    // 108 - DotToken: DotTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 84,
         production: &[ParseType::N(63), ParseType::N(83)],
     },
-    // 108 - EquToken: EquTerm : crate::veryl_token::Token  Comments;
+    // 109 - EquToken: EquTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 99,
         production: &[ParseType::N(63), ParseType::N(98)],
     },
-    // 109 - HashToken: HashTerm : crate::veryl_token::Token  Comments;
+    // 110 - HashToken: HashTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 160,
         production: &[ParseType::N(63), ParseType::N(159)],
     },
-    // 110 - LBraceToken: LBraceTerm : crate::veryl_token::Token  Comments;
+    // 111 - LBraceToken: LBraceTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 241,
         production: &[ParseType::N(63), ParseType::N(240)],
     },
-    // 111 - LBracketToken: LBracketTerm : crate::veryl_token::Token  Comments;
+    // 112 - LBracketToken: LBracketTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 244,
         production: &[ParseType::N(63), ParseType::N(243)],
     },
-    // 112 - LParenToken: LParenTerm : crate::veryl_token::Token  Comments;
+    // 113 - LParenToken: LParenTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 247,
         production: &[ParseType::N(63), ParseType::N(246)],
     },
-    // 113 - MinusColonToken: MinusColonTerm : crate::veryl_token::Token  Comments;
+    // 114 - MinusColonToken: MinusColonTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 257,
         production: &[ParseType::N(63), ParseType::N(256)],
     },
-    // 114 - MinusGTToken: MinusGTTerm : crate::veryl_token::Token  Comments;
+    // 115 - MinusGTToken: MinusGTTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 260,
         production: &[ParseType::N(63), ParseType::N(259)],
     },
-    // 115 - PlusColonToken: PlusColonTerm : crate::veryl_token::Token  Comments;
+    // 116 - PlusColonToken: PlusColonTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 339,
         production: &[ParseType::N(63), ParseType::N(338)],
     },
-    // 116 - RBraceToken: RBraceTerm : crate::veryl_token::Token  Comments;
+    // 117 - RBraceToken: RBraceTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 352,
         production: &[ParseType::N(63), ParseType::N(351)],
     },
-    // 117 - RBracketToken: RBracketTerm : crate::veryl_token::Token  Comments;
+    // 118 - RBracketToken: RBracketTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 355,
         production: &[ParseType::N(63), ParseType::N(354)],
     },
-    // 118 - RParenToken: RParenTerm : crate::veryl_token::Token  Comments;
+    // 119 - RParenToken: RParenTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 358,
         production: &[ParseType::N(63), ParseType::N(357)],
     },
-    // 119 - SemicolonToken: SemicolonTerm : crate::veryl_token::Token  Comments;
+    // 120 - SemicolonToken: SemicolonTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 383,
         production: &[ParseType::N(63), ParseType::N(382)],
     },
-    // 120 - AlwaysCombToken: AlwaysCombTerm : crate::veryl_token::Token  Comments;
+    // 121 - AlwaysCombToken: AlwaysCombTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 7,
         production: &[ParseType::N(63), ParseType::N(6)],
     },
-    // 121 - AlwaysFfToken: AlwaysFfTerm : crate::veryl_token::Token  Comments;
+    // 122 - AlwaysFfToken: AlwaysFfTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 19,
         production: &[ParseType::N(63), ParseType::N(18)],
     },
-    // 122 - AssignToken: AssignTerm : crate::veryl_token::Token  Comments;
+    // 123 - AssignToken: AssignTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 23,
         production: &[ParseType::N(63), ParseType::N(22)],
     },
-    // 123 - AsyncHighToken: AsyncHighTerm : crate::veryl_token::Token  Comments;
+    // 124 - AsyncHighToken: AsyncHighTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 31,
         production: &[ParseType::N(63), ParseType::N(30)],
     },
-    // 124 - AsyncLowToken: AsyncLowTerm : crate::veryl_token::Token  Comments;
+    // 125 - AsyncLowToken: AsyncLowTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 34,
         production: &[ParseType::N(63), ParseType::N(33)],
     },
-    // 125 - BitToken: BitTerm : crate::veryl_token::Token  Comments;
+    // 126 - BitToken: BitTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 43,
         production: &[ParseType::N(63), ParseType::N(42)],
     },
-    // 126 - CaseToken: CaseTerm : crate::veryl_token::Token  Comments;
+    // 127 - CaseToken: CaseTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 53,
         production: &[ParseType::N(63), ParseType::N(52)],
     },
-    // 127 - DefaultToken: DefaultTerm : crate::veryl_token::Token  Comments;
+    // 128 - DefaultToken: DefaultTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 73,
         production: &[ParseType::N(63), ParseType::N(72)],
     },
-    // 128 - ElseToken: ElseTerm : crate::veryl_token::Token  Comments;
+    // 129 - ElseToken: ElseTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 87,
         production: &[ParseType::N(63), ParseType::N(86)],
     },
-    // 129 - EnumToken: EnumTerm : crate::veryl_token::Token  Comments;
+    // 130 - EnumToken: EnumTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 96,
         production: &[ParseType::N(63), ParseType::N(95)],
     },
-    // 130 - F32Token: F32Term : crate::veryl_token::Token  Comments;
+    // 131 - F32Token: F32Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 130,
         production: &[ParseType::N(63), ParseType::N(129)],
     },
-    // 131 - F64Token: F64Term : crate::veryl_token::Token  Comments;
+    // 132 - F64Token: F64Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 133,
         production: &[ParseType::N(63), ParseType::N(132)],
     },
-    // 132 - ForToken: ForTerm : crate::veryl_token::Token  Comments;
+    // 133 - ForToken: ForTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 146,
         production: &[ParseType::N(63), ParseType::N(145)],
     },
-    // 133 - FunctionToken: FunctionTerm : crate::veryl_token::Token  Comments;
+    // 134 - FunctionToken: FunctionTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 157,
         production: &[ParseType::N(63), ParseType::N(156)],
     },
-    // 134 - I32Token: I32Term : crate::veryl_token::Token  Comments;
+    // 135 - I32Token: I32Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 167,
         production: &[ParseType::N(63), ParseType::N(166)],
     },
-    // 135 - I64Token: I64Term : crate::veryl_token::Token  Comments;
+    // 136 - I64Token: I64Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 170,
         production: &[ParseType::N(63), ParseType::N(169)],
     },
-    // 136 - IfResetToken: IfResetTerm : crate::veryl_token::Token  Comments;
+    // 137 - IfResetToken: IfResetTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 183,
         production: &[ParseType::N(63), ParseType::N(182)],
     },
-    // 137 - IfToken: IfTerm : crate::veryl_token::Token  Comments;
+    // 138 - IfToken: IfTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 191,
         production: &[ParseType::N(63), ParseType::N(190)],
     },
-    // 138 - InoutToken: InoutTerm : crate::veryl_token::Token  Comments;
+    // 139 - InoutToken: InoutTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 197,
         production: &[ParseType::N(63), ParseType::N(196)],
     },
-    // 139 - InputToken: InputTerm : crate::veryl_token::Token  Comments;
+    // 140 - InputToken: InputTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 200,
         production: &[ParseType::N(63), ParseType::N(199)],
     },
-    // 140 - InstToken: InstTerm : crate::veryl_token::Token  Comments;
+    // 141 - InstToken: InstTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 220,
         production: &[ParseType::N(63), ParseType::N(219)],
     },
-    // 141 - InterfaceToken: InterfaceTerm : crate::veryl_token::Token  Comments;
+    // 142 - InterfaceToken: InterfaceTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 238,
         production: &[ParseType::N(63), ParseType::N(237)],
     },
-    // 142 - InToken: InTerm : crate::veryl_token::Token  Comments;
+    // 143 - InToken: InTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 194,
         production: &[ParseType::N(63), ParseType::N(193)],
     },
-    // 143 - LocalparamToken: LocalparamTerm : crate::veryl_token::Token  Comments;
+    // 144 - LocalparamToken: LocalparamTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 251,
         production: &[ParseType::N(63), ParseType::N(250)],
     },
-    // 144 - LogicToken: LogicTerm : crate::veryl_token::Token  Comments;
+    // 145 - LogicToken: LogicTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 254,
         production: &[ParseType::N(63), ParseType::N(253)],
     },
-    // 145 - ModportToken: ModportTerm : crate::veryl_token::Token  Comments;
+    // 146 - ModportToken: ModportTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 269,
         production: &[ParseType::N(63), ParseType::N(268)],
     },
-    // 146 - ModuleToken: ModuleTerm : crate::veryl_token::Token  Comments;
+    // 147 - ModuleToken: ModuleTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 287,
         production: &[ParseType::N(63), ParseType::N(286)],
     },
-    // 147 - NegedgeToken: NegedgeTerm : crate::veryl_token::Token  Comments;
+    // 148 - NegedgeToken: NegedgeTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 290,
         production: &[ParseType::N(63), ParseType::N(289)],
     },
-    // 148 - OutputToken: OutputTerm : crate::veryl_token::Token  Comments;
+    // 149 - OutputToken: OutputTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 327,
         production: &[ParseType::N(63), ParseType::N(326)],
     },
-    // 149 - PackageToken: PackageTerm : crate::veryl_token::Token  Comments;
+    // 150 - PackageToken: PackageTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 333,
         production: &[ParseType::N(63), ParseType::N(332)],
     },
-    // 150 - ParameterToken: ParameterTerm : crate::veryl_token::Token  Comments;
+    // 151 - ParameterToken: ParameterTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 336,
         production: &[ParseType::N(63), ParseType::N(335)],
     },
-    // 151 - PosedgeToken: PosedgeTerm : crate::veryl_token::Token  Comments;
+    // 152 - PosedgeToken: PosedgeTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 349,
         production: &[ParseType::N(63), ParseType::N(348)],
     },
-    // 152 - RefToken: RefTerm : crate::veryl_token::Token  Comments;
+    // 153 - RefToken: RefTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 365,
         production: &[ParseType::N(63), ParseType::N(364)],
     },
-    // 153 - RepeatToken: RepeatTerm : crate::veryl_token::Token  Comments;
+    // 154 - RepeatToken: RepeatTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 368,
         production: &[ParseType::N(63), ParseType::N(367)],
     },
-    // 154 - ReturnToken: ReturnTerm : crate::veryl_token::Token  Comments;
+    // 155 - ReturnToken: ReturnTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 372,
         production: &[ParseType::N(63), ParseType::N(371)],
     },
-    // 155 - StepToken: StepTerm : crate::veryl_token::Token  Comments;
+    // 156 - StepToken: StepTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 389,
         production: &[ParseType::N(63), ParseType::N(388)],
     },
-    // 156 - StructToken: StructTerm : crate::veryl_token::Token  Comments;
+    // 157 - StructToken: StructTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 397,
         production: &[ParseType::N(63), ParseType::N(396)],
     },
-    // 157 - SyncHighToken: SyncHighTerm : crate::veryl_token::Token  Comments;
+    // 158 - SyncHighToken: SyncHighTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 400,
         production: &[ParseType::N(63), ParseType::N(399)],
     },
-    // 158 - SyncLowToken: SyncLowTerm : crate::veryl_token::Token  Comments;
+    // 159 - SyncLowToken: SyncLowTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 403,
         production: &[ParseType::N(63), ParseType::N(402)],
     },
-    // 159 - U32Token: U32Term : crate::veryl_token::Token  Comments;
+    // 160 - TriToken: TriTerm : crate::veryl_token::Token  Comments;
     Production {
-        lhs: 409,
-        production: &[ParseType::N(63), ParseType::N(408)],
+        lhs: 406,
+        production: &[ParseType::N(63), ParseType::N(405)],
     },
-    // 160 - U64Token: U64Term : crate::veryl_token::Token  Comments;
+    // 161 - U32Token: U32Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 412,
         production: &[ParseType::N(63), ParseType::N(411)],
     },
-    // 161 - VarToken: VarTerm : crate::veryl_token::Token  Comments;
+    // 162 - U64Token: U64Term : crate::veryl_token::Token  Comments;
     Production {
-        lhs: 420,
-        production: &[ParseType::N(63), ParseType::N(419)],
+        lhs: 415,
+        production: &[ParseType::N(63), ParseType::N(414)],
     },
-    // 162 - IdentifierToken: IdentifierTerm : crate::veryl_token::Token  Comments;
+    // 163 - VarToken: VarTerm : crate::veryl_token::Token  Comments;
+    Production {
+        lhs: 423,
+        production: &[ParseType::N(63), ParseType::N(422)],
+    },
+    // 164 - IdentifierToken: IdentifierTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 173,
         production: &[ParseType::N(63), ParseType::N(172)],
     },
-    // 163 - Start: StartToken : crate::veryl_token::VerylToken ;
+    // 165 - Start: StartToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 384,
         production: &[ParseType::N(385)],
     },
-    // 164 - Exponent: ExponentToken : crate::veryl_token::VerylToken ;
+    // 166 - Exponent: ExponentToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 100,
         production: &[ParseType::N(102)],
     },
-    // 165 - FixedPoint: FixedPointToken : crate::veryl_token::VerylToken ;
+    // 167 - FixedPoint: FixedPointToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 138,
         production: &[ParseType::N(140)],
     },
-    // 166 - Based: BasedToken : crate::veryl_token::VerylToken ;
+    // 168 - Based: BasedToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 38,
         production: &[ParseType::N(40)],
     },
-    // 167 - BaseLess: BaseLessToken : crate::veryl_token::VerylToken ;
+    // 169 - BaseLess: BaseLessToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 35,
         production: &[ParseType::N(37)],
     },
-    // 168 - AllBit: AllBitToken : crate::veryl_token::VerylToken ;
+    // 170 - AllBit: AllBitToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 0,
         production: &[ParseType::N(2)],
     },
-    // 169 - AssignmentOperator: AssignmentOperatorToken : crate::veryl_token::VerylToken ;
+    // 171 - AssignmentOperator: AssignmentOperatorToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 24,
         production: &[ParseType::N(26)],
     },
-    // 170 - Operator01: Operator01Token : crate::veryl_token::VerylToken ;
+    // 172 - Operator01: Operator01Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 292,
         production: &[ParseType::N(294)],
     },
-    // 171 - Operator02: Operator02Token : crate::veryl_token::VerylToken ;
+    // 173 - Operator02: Operator02Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 295,
         production: &[ParseType::N(297)],
     },
-    // 172 - Operator03: Operator03Token : crate::veryl_token::VerylToken ;
+    // 174 - Operator03: Operator03Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 298,
         production: &[ParseType::N(300)],
     },
-    // 173 - Operator04: Operator04Token : crate::veryl_token::VerylToken ;
+    // 175 - Operator04: Operator04Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 301,
         production: &[ParseType::N(303)],
     },
-    // 174 - Operator05: Operator05Token : crate::veryl_token::VerylToken ;
+    // 176 - Operator05: Operator05Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 304,
         production: &[ParseType::N(306)],
     },
-    // 175 - Operator06: Operator06Token : crate::veryl_token::VerylToken ;
+    // 177 - Operator06: Operator06Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 307,
         production: &[ParseType::N(309)],
     },
-    // 176 - Operator07: Operator07Token : crate::veryl_token::VerylToken ;
+    // 178 - Operator07: Operator07Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 310,
         production: &[ParseType::N(312)],
     },
-    // 177 - Operator08: Operator08Token : crate::veryl_token::VerylToken ;
+    // 179 - Operator08: Operator08Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 313,
         production: &[ParseType::N(315)],
     },
-    // 178 - Operator09: Operator09Token : crate::veryl_token::VerylToken ;
+    // 180 - Operator09: Operator09Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 316,
         production: &[ParseType::N(318)],
     },
-    // 179 - Operator10: Operator10Token : crate::veryl_token::VerylToken ;
+    // 181 - Operator10: Operator10Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 319,
         production: &[ParseType::N(321)],
     },
-    // 180 - Operator11: Operator11Token : crate::veryl_token::VerylToken ;
+    // 182 - Operator11: Operator11Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 322,
         production: &[ParseType::N(324)],
     },
-    // 181 - UnaryOperator: UnaryOperatorToken : crate::veryl_token::VerylToken ;
+    // 183 - UnaryOperator: UnaryOperatorToken : crate::veryl_token::VerylToken ;
     Production {
-        lhs: 413,
-        production: &[ParseType::N(415)],
+        lhs: 416,
+        production: &[ParseType::N(418)],
     },
-    // 182 - Colon: ColonToken : crate::veryl_token::VerylToken ;
+    // 184 - Colon: ColonToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 54,
         production: &[ParseType::N(59)],
     },
-    // 183 - ColonColon: ColonColonToken : crate::veryl_token::VerylToken ;
+    // 185 - ColonColon: ColonColonToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 55,
         production: &[ParseType::N(57)],
     },
-    // 184 - Comma: CommaToken : crate::veryl_token::VerylToken ;
+    // 186 - Comma: CommaToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 60,
         production: &[ParseType::N(62)],
     },
-    // 185 - Dollar: DollarToken : crate::veryl_token::VerylToken ;
+    // 187 - Dollar: DollarToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 76,
         production: &[ParseType::N(78)],
     },
-    // 186 - DotDot: DotDotToken : crate::veryl_token::VerylToken ;
+    // 188 - DotDot: DotDotToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 80,
         production: &[ParseType::N(82)],
     },
-    // 187 - Dot: DotToken : crate::veryl_token::VerylToken ;
+    // 189 - Dot: DotToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 79,
         production: &[ParseType::N(84)],
     },
-    // 188 - Equ: EquToken : crate::veryl_token::VerylToken ;
+    // 190 - Equ: EquToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 97,
         production: &[ParseType::N(99)],
     },
-    // 189 - Hash: HashToken : crate::veryl_token::VerylToken ;
+    // 191 - Hash: HashToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 158,
         production: &[ParseType::N(160)],
     },
-    // 190 - LBrace: LBraceToken : crate::veryl_token::VerylToken ;
+    // 192 - LBrace: LBraceToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 239,
         production: &[ParseType::N(241)],
     },
-    // 191 - LBracket: LBracketToken : crate::veryl_token::VerylToken ;
+    // 193 - LBracket: LBracketToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 242,
         production: &[ParseType::N(244)],
     },
-    // 192 - LParen: LParenToken : crate::veryl_token::VerylToken ;
+    // 194 - LParen: LParenToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 245,
         production: &[ParseType::N(247)],
     },
-    // 193 - MinusColon: MinusColonToken : crate::veryl_token::VerylToken ;
+    // 195 - MinusColon: MinusColonToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 255,
         production: &[ParseType::N(257)],
     },
-    // 194 - MinusGT: MinusGTToken : crate::veryl_token::VerylToken ;
+    // 196 - MinusGT: MinusGTToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 258,
         production: &[ParseType::N(260)],
     },
-    // 195 - PlusColon: PlusColonToken : crate::veryl_token::VerylToken ;
+    // 197 - PlusColon: PlusColonToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 337,
         production: &[ParseType::N(339)],
     },
-    // 196 - RBrace: RBraceToken : crate::veryl_token::VerylToken ;
+    // 198 - RBrace: RBraceToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 350,
         production: &[ParseType::N(352)],
     },
-    // 197 - RBracket: RBracketToken : crate::veryl_token::VerylToken ;
+    // 199 - RBracket: RBracketToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 353,
         production: &[ParseType::N(355)],
     },
-    // 198 - RParen: RParenToken : crate::veryl_token::VerylToken ;
+    // 200 - RParen: RParenToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 356,
         production: &[ParseType::N(358)],
     },
-    // 199 - Semicolon: SemicolonToken : crate::veryl_token::VerylToken ;
+    // 201 - Semicolon: SemicolonToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 381,
         production: &[ParseType::N(383)],
     },
-    // 200 - AlwaysComb: AlwaysCombToken : crate::veryl_token::VerylToken ;
+    // 202 - AlwaysComb: AlwaysCombToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 3,
         production: &[ParseType::N(7)],
     },
-    // 201 - AlwaysFf: AlwaysFfToken : crate::veryl_token::VerylToken ;
+    // 203 - AlwaysFf: AlwaysFfToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 8,
         production: &[ParseType::N(19)],
     },
-    // 202 - Assign: AssignToken : crate::veryl_token::VerylToken ;
+    // 204 - Assign: AssignToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 20,
         production: &[ParseType::N(23)],
     },
-    // 203 - AsyncHigh: AsyncHighToken : crate::veryl_token::VerylToken ;
+    // 205 - AsyncHigh: AsyncHighToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 29,
         production: &[ParseType::N(31)],
     },
-    // 204 - AsyncLow: AsyncLowToken : crate::veryl_token::VerylToken ;
+    // 206 - AsyncLow: AsyncLowToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 32,
         production: &[ParseType::N(34)],
     },
-    // 205 - Bit: BitToken : crate::veryl_token::VerylToken ;
+    // 207 - Bit: BitToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 41,
         production: &[ParseType::N(43)],
     },
-    // 206 - Case: CaseToken : crate::veryl_token::VerylToken ;
+    // 208 - Case: CaseToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 45,
         production: &[ParseType::N(53)],
     },
-    // 207 - Defaul: DefaultToken : crate::veryl_token::VerylToken ;
+    // 209 - Defaul: DefaultToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 71,
         production: &[ParseType::N(73)],
     },
-    // 208 - Else: ElseToken : crate::veryl_token::VerylToken ;
+    // 210 - Else: ElseToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 85,
         production: &[ParseType::N(87)],
     },
-    // 209 - Enum: EnumToken : crate::veryl_token::VerylToken ;
+    // 211 - Enum: EnumToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 88,
         production: &[ParseType::N(96)],
     },
-    // 210 - F32: F32Token : crate::veryl_token::VerylToken ;
+    // 212 - F32: F32Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 128,
         production: &[ParseType::N(130)],
     },
-    // 211 - F64: F64Token : crate::veryl_token::VerylToken ;
+    // 213 - F64: F64Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 131,
         production: &[ParseType::N(133)],
     },
-    // 212 - For: ForToken : crate::veryl_token::VerylToken ;
+    // 214 - For: ForToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 141,
         production: &[ParseType::N(146)],
     },
-    // 213 - Function: FunctionToken : crate::veryl_token::VerylToken ;
+    // 215 - Function: FunctionToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 147,
         production: &[ParseType::N(157)],
     },
-    // 214 - I32: I32Token : crate::veryl_token::VerylToken ;
+    // 216 - I32: I32Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 165,
         production: &[ParseType::N(167)],
     },
-    // 215 - I64: I64Token : crate::veryl_token::VerylToken ;
+    // 217 - I64: I64Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 168,
         production: &[ParseType::N(170)],
     },
-    // 216 - If: IfToken : crate::veryl_token::VerylToken ;
+    // 218 - If: IfToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 174,
         production: &[ParseType::N(191)],
     },
-    // 217 - IfReset: IfResetToken : crate::veryl_token::VerylToken ;
+    // 219 - IfReset: IfResetToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 175,
         production: &[ParseType::N(183)],
     },
-    // 218 - In: InToken : crate::veryl_token::VerylToken ;
+    // 220 - In: InToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 192,
         production: &[ParseType::N(194)],
     },
-    // 219 - Inout: InoutToken : crate::veryl_token::VerylToken ;
+    // 221 - Inout: InoutToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 195,
         production: &[ParseType::N(197)],
     },
-    // 220 - Input: InputToken : crate::veryl_token::VerylToken ;
+    // 222 - Input: InputToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 198,
         production: &[ParseType::N(200)],
     },
-    // 221 - Inst: InstToken : crate::veryl_token::VerylToken ;
+    // 223 - Inst: InstToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 201,
         production: &[ParseType::N(220)],
     },
-    // 222 - Interface: InterfaceToken : crate::veryl_token::VerylToken ;
+    // 224 - Interface: InterfaceToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 222,
         production: &[ParseType::N(238)],
     },
-    // 223 - Localparam: LocalparamToken : crate::veryl_token::VerylToken ;
+    // 225 - Localparam: LocalparamToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 248,
         production: &[ParseType::N(251)],
     },
-    // 224 - Logic: LogicToken : crate::veryl_token::VerylToken ;
+    // 226 - Logic: LogicToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 252,
         production: &[ParseType::N(254)],
     },
-    // 225 - Modport: ModportToken : crate::veryl_token::VerylToken ;
+    // 227 - Modport: ModportToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 261,
         production: &[ParseType::N(269)],
     },
-    // 226 - Module: ModuleToken : crate::veryl_token::VerylToken ;
+    // 228 - Module: ModuleToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 270,
         production: &[ParseType::N(287)],
     },
-    // 227 - Negedge: NegedgeToken : crate::veryl_token::VerylToken ;
+    // 229 - Negedge: NegedgeToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 288,
         production: &[ParseType::N(290)],
     },
-    // 228 - Output: OutputToken : crate::veryl_token::VerylToken ;
+    // 230 - Output: OutputToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 325,
         production: &[ParseType::N(327)],
     },
-    // 229 - Package: PackageToken : crate::veryl_token::VerylToken ;
+    // 231 - Package: PackageToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 328,
         production: &[ParseType::N(333)],
     },
-    // 230 - Parameter: ParameterToken : crate::veryl_token::VerylToken ;
+    // 232 - Parameter: ParameterToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 334,
         production: &[ParseType::N(336)],
     },
-    // 231 - Posedge: PosedgeToken : crate::veryl_token::VerylToken ;
+    // 233 - Posedge: PosedgeToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 347,
         production: &[ParseType::N(349)],
     },
-    // 232 - Ref: RefToken : crate::veryl_token::VerylToken ;
+    // 234 - Ref: RefToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 363,
         production: &[ParseType::N(365)],
     },
-    // 233 - Repeat: RepeatToken : crate::veryl_token::VerylToken ;
+    // 235 - Repeat: RepeatToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 366,
         production: &[ParseType::N(368)],
     },
-    // 234 - Return: ReturnToken : crate::veryl_token::VerylToken ;
+    // 236 - Return: ReturnToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 369,
         production: &[ParseType::N(372)],
     },
-    // 235 - Step: StepToken : crate::veryl_token::VerylToken ;
+    // 237 - Step: StepToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 387,
         production: &[ParseType::N(389)],
     },
-    // 236 - Struct: StructToken : crate::veryl_token::VerylToken ;
+    // 238 - Struct: StructToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 390,
         production: &[ParseType::N(397)],
     },
-    // 237 - SyncHigh: SyncHighToken : crate::veryl_token::VerylToken ;
+    // 239 - SyncHigh: SyncHighToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 398,
         production: &[ParseType::N(400)],
     },
-    // 238 - SyncLow: SyncLowToken : crate::veryl_token::VerylToken ;
+    // 240 - SyncLow: SyncLowToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 401,
         production: &[ParseType::N(403)],
     },
-    // 239 - U32: U32Token : crate::veryl_token::VerylToken ;
+    // 241 - Tri: TriToken : crate::veryl_token::VerylToken ;
     Production {
-        lhs: 407,
-        production: &[ParseType::N(409)],
+        lhs: 404,
+        production: &[ParseType::N(406)],
     },
-    // 240 - U64: U64Token : crate::veryl_token::VerylToken ;
+    // 242 - U32: U32Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 410,
         production: &[ParseType::N(412)],
     },
-    // 241 - Var: VarToken : crate::veryl_token::VerylToken ;
+    // 243 - U64: U64Token : crate::veryl_token::VerylToken ;
     Production {
-        lhs: 416,
-        production: &[ParseType::N(420)],
+        lhs: 413,
+        production: &[ParseType::N(415)],
     },
-    // 242 - Identifier: IdentifierToken : crate::veryl_token::VerylToken ;
+    // 244 - Var: VarToken : crate::veryl_token::VerylToken ;
+    Production {
+        lhs: 419,
+        production: &[ParseType::N(423)],
+    },
+    // 245 - Identifier: IdentifierToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 171,
         production: &[ParseType::N(173)],
     },
-    // 243 - Number: IntegralNumber;
+    // 246 - Number: IntegralNumber;
     Production {
         lhs: 291,
         production: &[ParseType::N(221)],
     },
-    // 244 - Number: RealNumber;
+    // 247 - Number: RealNumber;
     Production {
         lhs: 291,
         production: &[ParseType::N(362)],
     },
-    // 245 - IntegralNumber: Based;
+    // 248 - IntegralNumber: Based;
     Production {
         lhs: 221,
         production: &[ParseType::N(38)],
     },
-    // 246 - IntegralNumber: BaseLess;
+    // 249 - IntegralNumber: BaseLess;
     Production {
         lhs: 221,
         production: &[ParseType::N(35)],
     },
-    // 247 - IntegralNumber: AllBit;
+    // 250 - IntegralNumber: AllBit;
     Production {
         lhs: 221,
         production: &[ParseType::N(0)],
     },
-    // 248 - RealNumber: FixedPoint;
+    // 251 - RealNumber: FixedPoint;
     Production {
         lhs: 362,
         production: &[ParseType::N(138)],
     },
-    // 249 - RealNumber: Exponent;
+    // 252 - RealNumber: Exponent;
     Production {
         lhs: 362,
         production: &[ParseType::N(100)],
     },
-    // 250 - HierarchicalIdentifier: Identifier HierarchicalIdentifierList /* Vec */ HierarchicalIdentifierList0 /* Vec */;
+    // 253 - HierarchicalIdentifier: Identifier HierarchicalIdentifierList /* Vec */ HierarchicalIdentifierList0 /* Vec */;
     Production {
         lhs: 161,
         production: &[ParseType::N(163), ParseType::N(162), ParseType::N(171)],
     },
-    // 251 - HierarchicalIdentifierList0: Dot Identifier HierarchicalIdentifierList0List /* Vec */ HierarchicalIdentifierList0;
+    // 254 - HierarchicalIdentifierList0: Dot Identifier HierarchicalIdentifierList0List /* Vec */ HierarchicalIdentifierList0;
     Production {
         lhs: 163,
         production: &[
@@ -18354,77 +18521,77 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(79),
         ],
     },
-    // 252 - HierarchicalIdentifierList0List: Range HierarchicalIdentifierList0List;
+    // 255 - HierarchicalIdentifierList0List: Range HierarchicalIdentifierList0List;
     Production {
         lhs: 164,
         production: &[ParseType::N(164), ParseType::N(359)],
     },
-    // 253 - HierarchicalIdentifierList0List: ;
+    // 256 - HierarchicalIdentifierList0List: ;
     Production {
         lhs: 164,
         production: &[],
     },
-    // 254 - HierarchicalIdentifierList0: ;
+    // 257 - HierarchicalIdentifierList0: ;
     Production {
         lhs: 163,
         production: &[],
     },
-    // 255 - HierarchicalIdentifierList: Range HierarchicalIdentifierList;
+    // 258 - HierarchicalIdentifierList: Range HierarchicalIdentifierList;
     Production {
         lhs: 162,
         production: &[ParseType::N(162), ParseType::N(359)],
     },
-    // 256 - HierarchicalIdentifierList: ;
+    // 259 - HierarchicalIdentifierList: ;
     Production {
         lhs: 162,
         production: &[],
     },
-    // 257 - ScopedIdentifier: Identifier ScopedIdentifierList /* Vec */;
+    // 260 - ScopedIdentifier: Identifier ScopedIdentifierList /* Vec */;
     Production {
         lhs: 373,
         production: &[ParseType::N(374), ParseType::N(171)],
     },
-    // 258 - ScopedIdentifierList: ColonColon Identifier ScopedIdentifierList;
+    // 261 - ScopedIdentifierList: ColonColon Identifier ScopedIdentifierList;
     Production {
         lhs: 374,
         production: &[ParseType::N(374), ParseType::N(171), ParseType::N(55)],
     },
-    // 259 - ScopedIdentifierList: ;
+    // 262 - ScopedIdentifierList: ;
     Production {
         lhs: 374,
         production: &[],
     },
-    // 260 - ModportIdentifier: Identifier Dot Identifier;
+    // 263 - ModportIdentifier: Identifier Dot Identifier;
     Production {
         lhs: 263,
         production: &[ParseType::N(171), ParseType::N(79), ParseType::N(171)],
     },
-    // 261 - ScopedOrHierIdentifier: Identifier ScopedOrHierIdentifierGroup;
+    // 264 - ScopedOrHierIdentifier: Identifier ScopedOrHierIdentifierGroup;
     Production {
         lhs: 375,
         production: &[ParseType::N(376), ParseType::N(171)],
     },
-    // 262 - ScopedOrHierIdentifierGroup: ColonColon Identifier ScopedOrHierIdentifierGroupList /* Vec */;
+    // 265 - ScopedOrHierIdentifierGroup: ColonColon Identifier ScopedOrHierIdentifierGroupList /* Vec */;
     Production {
         lhs: 376,
         production: &[ParseType::N(377), ParseType::N(171), ParseType::N(55)],
     },
-    // 263 - ScopedOrHierIdentifierGroupList: ColonColon Identifier ScopedOrHierIdentifierGroupList;
+    // 266 - ScopedOrHierIdentifierGroupList: ColonColon Identifier ScopedOrHierIdentifierGroupList;
     Production {
         lhs: 377,
         production: &[ParseType::N(377), ParseType::N(171), ParseType::N(55)],
     },
-    // 264 - ScopedOrHierIdentifierGroupList: ;
+    // 267 - ScopedOrHierIdentifierGroupList: ;
     Production {
         lhs: 377,
         production: &[],
     },
-    // 265 - ScopedOrHierIdentifierGroup: ScopedOrHierIdentifierGroupList0 /* Vec */ ScopedOrHierIdentifierGroupList1 /* Vec */;
+    // 268 - ScopedOrHierIdentifierGroup: ScopedOrHierIdentifierGroupList0 /* Vec */ ScopedOrHierIdentifierGroupList1 /* Vec */;
     Production {
         lhs: 376,
         production: &[ParseType::N(379), ParseType::N(378)],
     },
-    // 266 - ScopedOrHierIdentifierGroupList1: Dot Identifier ScopedOrHierIdentifierGroupList1List /* Vec */ ScopedOrHierIdentifierGroupList1;
+    // 269 - ScopedOrHierIdentifierGroupList1: Dot Identifier ScopedOrHierIdentifierGroupList1List /* Vec */ ScopedOrHierIdentifierGroupList1;
     Production {
         lhs: 379,
         production: &[
@@ -18434,352 +18601,352 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(79),
         ],
     },
-    // 267 - ScopedOrHierIdentifierGroupList1List: Range ScopedOrHierIdentifierGroupList1List;
+    // 270 - ScopedOrHierIdentifierGroupList1List: Range ScopedOrHierIdentifierGroupList1List;
     Production {
         lhs: 380,
         production: &[ParseType::N(380), ParseType::N(359)],
     },
-    // 268 - ScopedOrHierIdentifierGroupList1List: ;
+    // 271 - ScopedOrHierIdentifierGroupList1List: ;
     Production {
         lhs: 380,
         production: &[],
     },
-    // 269 - ScopedOrHierIdentifierGroupList1: ;
+    // 272 - ScopedOrHierIdentifierGroupList1: ;
     Production {
         lhs: 379,
         production: &[],
     },
-    // 270 - ScopedOrHierIdentifierGroupList0: Range ScopedOrHierIdentifierGroupList0;
+    // 273 - ScopedOrHierIdentifierGroupList0: Range ScopedOrHierIdentifierGroupList0;
     Production {
         lhs: 378,
         production: &[ParseType::N(378), ParseType::N(359)],
     },
-    // 271 - ScopedOrHierIdentifierGroupList0: ;
+    // 274 - ScopedOrHierIdentifierGroupList0: ;
     Production {
         lhs: 378,
         production: &[],
     },
-    // 272 - Expression: Expression01 ExpressionList /* Vec */;
+    // 275 - Expression: Expression01 ExpressionList /* Vec */;
     Production {
         lhs: 103,
         production: &[ParseType::N(127), ParseType::N(104)],
     },
-    // 273 - ExpressionList: Operator01 Expression01 ExpressionList;
+    // 276 - ExpressionList: Operator01 Expression01 ExpressionList;
     Production {
         lhs: 127,
         production: &[ParseType::N(127), ParseType::N(104), ParseType::N(292)],
     },
-    // 274 - ExpressionList: ;
+    // 277 - ExpressionList: ;
     Production {
         lhs: 127,
         production: &[],
     },
-    // 275 - Expression01: Expression02 Expression01List /* Vec */;
+    // 278 - Expression01: Expression02 Expression01List /* Vec */;
     Production {
         lhs: 104,
         production: &[ParseType::N(105), ParseType::N(106)],
     },
-    // 276 - Expression01List: Operator02 Expression02 Expression01List;
+    // 279 - Expression01List: Operator02 Expression02 Expression01List;
     Production {
         lhs: 105,
         production: &[ParseType::N(105), ParseType::N(106), ParseType::N(295)],
     },
-    // 277 - Expression01List: ;
+    // 280 - Expression01List: ;
     Production {
         lhs: 105,
         production: &[],
     },
-    // 278 - Expression02: Expression03 Expression02List /* Vec */;
+    // 281 - Expression02: Expression03 Expression02List /* Vec */;
     Production {
         lhs: 106,
         production: &[ParseType::N(107), ParseType::N(108)],
     },
-    // 279 - Expression02List: Operator03 Expression03 Expression02List;
+    // 282 - Expression02List: Operator03 Expression03 Expression02List;
     Production {
         lhs: 107,
         production: &[ParseType::N(107), ParseType::N(108), ParseType::N(298)],
     },
-    // 280 - Expression02List: ;
+    // 283 - Expression02List: ;
     Production {
         lhs: 107,
         production: &[],
     },
-    // 281 - Expression03: Expression04 Expression03List /* Vec */;
+    // 284 - Expression03: Expression04 Expression03List /* Vec */;
     Production {
         lhs: 108,
         production: &[ParseType::N(109), ParseType::N(110)],
     },
-    // 282 - Expression03List: Operator04 Expression04 Expression03List;
+    // 285 - Expression03List: Operator04 Expression04 Expression03List;
     Production {
         lhs: 109,
         production: &[ParseType::N(109), ParseType::N(110), ParseType::N(301)],
     },
-    // 283 - Expression03List: ;
+    // 286 - Expression03List: ;
     Production {
         lhs: 109,
         production: &[],
     },
-    // 284 - Expression04: Expression05 Expression04List /* Vec */;
+    // 287 - Expression04: Expression05 Expression04List /* Vec */;
     Production {
         lhs: 110,
         production: &[ParseType::N(111), ParseType::N(112)],
     },
-    // 285 - Expression04List: Operator05 Expression05 Expression04List;
+    // 288 - Expression04List: Operator05 Expression05 Expression04List;
     Production {
         lhs: 111,
         production: &[ParseType::N(111), ParseType::N(112), ParseType::N(304)],
     },
-    // 286 - Expression04List: ;
+    // 289 - Expression04List: ;
     Production {
         lhs: 111,
         production: &[],
     },
-    // 287 - Expression05: Expression06 Expression05List /* Vec */;
+    // 290 - Expression05: Expression06 Expression05List /* Vec */;
     Production {
         lhs: 112,
         production: &[ParseType::N(113), ParseType::N(114)],
     },
-    // 288 - Expression05List: Operator06 Expression06 Expression05List;
+    // 291 - Expression05List: Operator06 Expression06 Expression05List;
     Production {
         lhs: 113,
         production: &[ParseType::N(113), ParseType::N(114), ParseType::N(307)],
     },
-    // 289 - Expression05List: ;
+    // 292 - Expression05List: ;
     Production {
         lhs: 113,
         production: &[],
     },
-    // 290 - Expression06: Expression07 Expression06List /* Vec */;
+    // 293 - Expression06: Expression07 Expression06List /* Vec */;
     Production {
         lhs: 114,
         production: &[ParseType::N(115), ParseType::N(116)],
     },
-    // 291 - Expression06List: Operator07 Expression07 Expression06List;
+    // 294 - Expression06List: Operator07 Expression07 Expression06List;
     Production {
         lhs: 115,
         production: &[ParseType::N(115), ParseType::N(116), ParseType::N(310)],
     },
-    // 292 - Expression06List: ;
+    // 295 - Expression06List: ;
     Production {
         lhs: 115,
         production: &[],
     },
-    // 293 - Expression07: Expression08 Expression07List /* Vec */;
+    // 296 - Expression07: Expression08 Expression07List /* Vec */;
     Production {
         lhs: 116,
         production: &[ParseType::N(117), ParseType::N(118)],
     },
-    // 294 - Expression07List: Operator08 Expression08 Expression07List;
+    // 297 - Expression07List: Operator08 Expression08 Expression07List;
     Production {
         lhs: 117,
         production: &[ParseType::N(117), ParseType::N(118), ParseType::N(313)],
     },
-    // 295 - Expression07List: ;
+    // 298 - Expression07List: ;
     Production {
         lhs: 117,
         production: &[],
     },
-    // 296 - Expression08: Expression09 Expression08List /* Vec */;
+    // 299 - Expression08: Expression09 Expression08List /* Vec */;
     Production {
         lhs: 118,
         production: &[ParseType::N(119), ParseType::N(120)],
     },
-    // 297 - Expression08List: Operator09 Expression09 Expression08List;
+    // 300 - Expression08List: Operator09 Expression09 Expression08List;
     Production {
         lhs: 119,
         production: &[ParseType::N(119), ParseType::N(120), ParseType::N(316)],
     },
-    // 298 - Expression08List: ;
+    // 301 - Expression08List: ;
     Production {
         lhs: 119,
         production: &[],
     },
-    // 299 - Expression09: Expression10 Expression09List /* Vec */;
+    // 302 - Expression09: Expression10 Expression09List /* Vec */;
     Production {
         lhs: 120,
         production: &[ParseType::N(121), ParseType::N(122)],
     },
-    // 300 - Expression09List: Operator10 Expression10 Expression09List;
+    // 303 - Expression09List: Operator10 Expression10 Expression09List;
     Production {
         lhs: 121,
         production: &[ParseType::N(121), ParseType::N(122), ParseType::N(319)],
     },
-    // 301 - Expression09List: ;
+    // 304 - Expression09List: ;
     Production {
         lhs: 121,
         production: &[],
     },
-    // 302 - Expression10: Expression11 Expression10List /* Vec */;
+    // 305 - Expression10: Expression11 Expression10List /* Vec */;
     Production {
         lhs: 122,
         production: &[ParseType::N(123), ParseType::N(124)],
     },
-    // 303 - Expression10List: Operator11 Expression11 Expression10List;
+    // 306 - Expression10List: Operator11 Expression11 Expression10List;
     Production {
         lhs: 123,
         production: &[ParseType::N(123), ParseType::N(124), ParseType::N(322)],
     },
-    // 304 - Expression10List: ;
+    // 307 - Expression10List: ;
     Production {
         lhs: 123,
         production: &[],
     },
-    // 305 - Expression11: Expression11List /* Vec */ Factor;
+    // 308 - Expression11: Expression11List /* Vec */ Factor;
     Production {
         lhs: 124,
         production: &[ParseType::N(134), ParseType::N(125)],
     },
-    // 306 - Expression11List: Expression11ListGroup Expression11List;
+    // 309 - Expression11List: Expression11ListGroup Expression11List;
     Production {
         lhs: 125,
         production: &[ParseType::N(125), ParseType::N(126)],
     },
-    // 307 - Expression11ListGroup: UnaryOperator;
+    // 310 - Expression11ListGroup: UnaryOperator;
     Production {
         lhs: 126,
-        production: &[ParseType::N(413)],
+        production: &[ParseType::N(416)],
     },
-    // 308 - Expression11ListGroup: Operator09;
+    // 311 - Expression11ListGroup: Operator09;
     Production {
         lhs: 126,
         production: &[ParseType::N(316)],
     },
-    // 309 - Expression11ListGroup: Operator05;
+    // 312 - Expression11ListGroup: Operator05;
     Production {
         lhs: 126,
         production: &[ParseType::N(304)],
     },
-    // 310 - Expression11ListGroup: Operator03;
+    // 313 - Expression11ListGroup: Operator03;
     Production {
         lhs: 126,
         production: &[ParseType::N(298)],
     },
-    // 311 - Expression11ListGroup: Operator04;
+    // 314 - Expression11ListGroup: Operator04;
     Production {
         lhs: 126,
         production: &[ParseType::N(301)],
     },
-    // 312 - Expression11List: ;
+    // 315 - Expression11List: ;
     Production {
         lhs: 125,
         production: &[],
     },
-    // 313 - Factor: Number;
+    // 316 - Factor: Number;
     Production {
         lhs: 134,
         production: &[ParseType::N(291)],
     },
-    // 314 - Factor: FactorOpt /* Option */ ScopedOrHierIdentifier FactorOpt0 /* Option */;
+    // 317 - Factor: FactorOpt /* Option */ ScopedOrHierIdentifier FactorOpt0 /* Option */;
     Production {
         lhs: 134,
         production: &[ParseType::N(136), ParseType::N(375), ParseType::N(135)],
     },
-    // 315 - Factor: LParen Expression RParen;
+    // 318 - Factor: LParen Expression RParen;
     Production {
         lhs: 134,
         production: &[ParseType::N(356), ParseType::N(103), ParseType::N(245)],
     },
-    // 316 - Factor: LBrace ConcatenationList RBrace;
+    // 319 - Factor: LBrace ConcatenationList RBrace;
     Production {
         lhs: 134,
         production: &[ParseType::N(350), ParseType::N(68), ParseType::N(239)],
     },
-    // 317 - FactorOpt0: LParen FactorOpt1 /* Option */ RParen;
+    // 320 - FactorOpt0: LParen FactorOpt1 /* Option */ RParen;
     Production {
         lhs: 136,
         production: &[ParseType::N(356), ParseType::N(137), ParseType::N(245)],
     },
-    // 318 - FactorOpt1: FunctionCallArg;
+    // 321 - FactorOpt1: FunctionCallArg;
     Production {
         lhs: 137,
         production: &[ParseType::N(148)],
     },
-    // 319 - FactorOpt1: ;
+    // 322 - FactorOpt1: ;
     Production {
         lhs: 137,
         production: &[],
     },
-    // 320 - FactorOpt0: ;
+    // 323 - FactorOpt0: ;
     Production {
         lhs: 136,
         production: &[],
     },
-    // 321 - FactorOpt: Dollar;
+    // 324 - FactorOpt: Dollar;
     Production {
         lhs: 135,
         production: &[ParseType::N(76)],
     },
-    // 322 - FactorOpt: ;
+    // 325 - FactorOpt: ;
     Production {
         lhs: 135,
         production: &[],
     },
-    // 323 - FunctionCallArg: Expression FunctionCallArgList /* Vec */ FunctionCallArgOpt /* Option */;
+    // 326 - FunctionCallArg: Expression FunctionCallArgList /* Vec */ FunctionCallArgOpt /* Option */;
     Production {
         lhs: 148,
         production: &[ParseType::N(150), ParseType::N(149), ParseType::N(103)],
     },
-    // 324 - FunctionCallArgList: Comma Expression FunctionCallArgList;
+    // 327 - FunctionCallArgList: Comma Expression FunctionCallArgList;
     Production {
         lhs: 149,
         production: &[ParseType::N(149), ParseType::N(103), ParseType::N(60)],
     },
-    // 325 - FunctionCallArgList: ;
+    // 328 - FunctionCallArgList: ;
     Production {
         lhs: 149,
         production: &[],
     },
-    // 326 - FunctionCallArgOpt: Comma;
+    // 329 - FunctionCallArgOpt: Comma;
     Production {
         lhs: 150,
         production: &[ParseType::N(60)],
     },
-    // 327 - FunctionCallArgOpt: ;
+    // 330 - FunctionCallArgOpt: ;
     Production {
         lhs: 150,
         production: &[],
     },
-    // 328 - ConcatenationList: ConcatenationItem ConcatenationListList /* Vec */ ConcatenationListOpt /* Option */;
+    // 331 - ConcatenationList: ConcatenationItem ConcatenationListList /* Vec */ ConcatenationListOpt /* Option */;
     Production {
         lhs: 68,
         production: &[ParseType::N(70), ParseType::N(69), ParseType::N(66)],
     },
-    // 329 - ConcatenationListList: Comma ConcatenationItem ConcatenationListList;
+    // 332 - ConcatenationListList: Comma ConcatenationItem ConcatenationListList;
     Production {
         lhs: 69,
         production: &[ParseType::N(69), ParseType::N(66), ParseType::N(60)],
     },
-    // 330 - ConcatenationListList: ;
+    // 333 - ConcatenationListList: ;
     Production {
         lhs: 69,
         production: &[],
     },
-    // 331 - ConcatenationListOpt: Comma;
+    // 334 - ConcatenationListOpt: Comma;
     Production {
         lhs: 70,
         production: &[ParseType::N(60)],
     },
-    // 332 - ConcatenationListOpt: ;
+    // 335 - ConcatenationListOpt: ;
     Production {
         lhs: 70,
         production: &[],
     },
-    // 333 - ConcatenationItem: Expression ConcatenationItemOpt /* Option */;
+    // 336 - ConcatenationItem: Expression ConcatenationItemOpt /* Option */;
     Production {
         lhs: 66,
         production: &[ParseType::N(67), ParseType::N(103)],
     },
-    // 334 - ConcatenationItemOpt: Repeat Expression;
+    // 337 - ConcatenationItemOpt: Repeat Expression;
     Production {
         lhs: 67,
         production: &[ParseType::N(103), ParseType::N(366)],
     },
-    // 335 - ConcatenationItemOpt: ;
+    // 338 - ConcatenationItemOpt: ;
     Production {
         lhs: 67,
         production: &[],
     },
-    // 336 - Range: LBracket Expression RangeOpt /* Option */ RBracket;
+    // 339 - Range: LBracket Expression RangeOpt /* Option */ RBracket;
     Production {
         lhs: 359,
         production: &[
@@ -18789,142 +18956,147 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(242),
         ],
     },
-    // 337 - RangeOpt: RangeOperator Expression;
+    // 340 - RangeOpt: RangeOperator Expression;
     Production {
         lhs: 361,
         production: &[ParseType::N(103), ParseType::N(360)],
     },
-    // 338 - RangeOpt: ;
+    // 341 - RangeOpt: ;
     Production {
         lhs: 361,
         production: &[],
     },
-    // 339 - RangeOperator: Colon;
+    // 342 - RangeOperator: Colon;
     Production {
         lhs: 360,
         production: &[ParseType::N(54)],
     },
-    // 340 - RangeOperator: PlusColon;
+    // 343 - RangeOperator: PlusColon;
     Production {
         lhs: 360,
         production: &[ParseType::N(337)],
     },
-    // 341 - RangeOperator: MinusColon;
+    // 344 - RangeOperator: MinusColon;
     Production {
         lhs: 360,
         production: &[ParseType::N(255)],
     },
-    // 342 - RangeOperator: Step;
+    // 345 - RangeOperator: Step;
     Production {
         lhs: 360,
         production: &[ParseType::N(387)],
     },
-    // 343 - Width: LBracket Expression RBracket;
+    // 346 - Width: LBracket Expression RBracket;
     Production {
-        lhs: 423,
+        lhs: 426,
         production: &[ParseType::N(353), ParseType::N(103), ParseType::N(242)],
     },
-    // 344 - BuiltinType: Logic;
+    // 347 - BuiltinType: Logic;
     Production {
         lhs: 44,
         production: &[ParseType::N(252)],
     },
-    // 345 - BuiltinType: Bit;
+    // 348 - BuiltinType: Tri;
+    Production {
+        lhs: 44,
+        production: &[ParseType::N(404)],
+    },
+    // 349 - BuiltinType: Bit;
     Production {
         lhs: 44,
         production: &[ParseType::N(41)],
     },
-    // 346 - BuiltinType: U32;
-    Production {
-        lhs: 44,
-        production: &[ParseType::N(407)],
-    },
-    // 347 - BuiltinType: U64;
+    // 350 - BuiltinType: U32;
     Production {
         lhs: 44,
         production: &[ParseType::N(410)],
     },
-    // 348 - BuiltinType: I32;
+    // 351 - BuiltinType: U64;
+    Production {
+        lhs: 44,
+        production: &[ParseType::N(413)],
+    },
+    // 352 - BuiltinType: I32;
     Production {
         lhs: 44,
         production: &[ParseType::N(165)],
     },
-    // 349 - BuiltinType: I64;
+    // 353 - BuiltinType: I64;
     Production {
         lhs: 44,
         production: &[ParseType::N(168)],
     },
-    // 350 - BuiltinType: F32;
+    // 354 - BuiltinType: F32;
     Production {
         lhs: 44,
         production: &[ParseType::N(128)],
     },
-    // 351 - BuiltinType: F64;
+    // 355 - BuiltinType: F64;
     Production {
         lhs: 44,
         production: &[ParseType::N(131)],
     },
-    // 352 - Type: TypeGroup TypeList /* Vec */;
+    // 356 - Type: TypeGroup TypeList /* Vec */;
     Production {
-        lhs: 404,
-        production: &[ParseType::N(406), ParseType::N(405)],
+        lhs: 407,
+        production: &[ParseType::N(409), ParseType::N(408)],
     },
-    // 353 - TypeGroup: BuiltinType;
+    // 357 - TypeGroup: BuiltinType;
     Production {
-        lhs: 405,
+        lhs: 408,
         production: &[ParseType::N(44)],
     },
-    // 354 - TypeGroup: ScopedIdentifier;
+    // 358 - TypeGroup: ScopedIdentifier;
     Production {
-        lhs: 405,
+        lhs: 408,
         production: &[ParseType::N(373)],
     },
-    // 355 - TypeGroup: ModportIdentifier;
+    // 359 - TypeGroup: ModportIdentifier;
     Production {
-        lhs: 405,
+        lhs: 408,
         production: &[ParseType::N(263)],
     },
-    // 356 - TypeList: Width TypeList;
+    // 360 - TypeList: Width TypeList;
     Production {
-        lhs: 406,
-        production: &[ParseType::N(406), ParseType::N(423)],
+        lhs: 409,
+        production: &[ParseType::N(409), ParseType::N(426)],
     },
-    // 357 - TypeList: ;
+    // 361 - TypeList: ;
     Production {
-        lhs: 406,
+        lhs: 409,
         production: &[],
     },
-    // 358 - Statement: AssignmentStatement;
+    // 362 - Statement: AssignmentStatement;
     Production {
         lhs: 386,
         production: &[ParseType::N(27)],
     },
-    // 359 - Statement: IfStatement;
+    // 363 - Statement: IfStatement;
     Production {
         lhs: 386,
         production: &[ParseType::N(184)],
     },
-    // 360 - Statement: IfResetStatement;
+    // 364 - Statement: IfResetStatement;
     Production {
         lhs: 386,
         production: &[ParseType::N(176)],
     },
-    // 361 - Statement: ReturnStatement;
+    // 365 - Statement: ReturnStatement;
     Production {
         lhs: 386,
         production: &[ParseType::N(370)],
     },
-    // 362 - Statement: ForStatement;
+    // 366 - Statement: ForStatement;
     Production {
         lhs: 386,
         production: &[ParseType::N(142)],
     },
-    // 363 - Statement: CaseStatement;
+    // 367 - Statement: CaseStatement;
     Production {
         lhs: 386,
         production: &[ParseType::N(50)],
     },
-    // 364 - AssignmentStatement: HierarchicalIdentifier AssignmentStatementGroup Expression Semicolon;
+    // 368 - AssignmentStatement: HierarchicalIdentifier AssignmentStatementGroup Expression Semicolon;
     Production {
         lhs: 27,
         production: &[
@@ -18934,17 +19106,17 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(161),
         ],
     },
-    // 365 - AssignmentStatementGroup: Equ;
+    // 369 - AssignmentStatementGroup: Equ;
     Production {
         lhs: 28,
         production: &[ParseType::N(97)],
     },
-    // 366 - AssignmentStatementGroup: AssignmentOperator;
+    // 370 - AssignmentStatementGroup: AssignmentOperator;
     Production {
         lhs: 28,
         production: &[ParseType::N(24)],
     },
-    // 367 - IfStatement: If Expression LBrace IfStatementList /* Vec */ RBrace IfStatementList0 /* Vec */ IfStatementOpt /* Option */;
+    // 371 - IfStatement: If Expression LBrace IfStatementList /* Vec */ RBrace IfStatementList0 /* Vec */ IfStatementOpt /* Option */;
     Production {
         lhs: 184,
         production: &[
@@ -18957,7 +19129,7 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(174),
         ],
     },
-    // 368 - IfStatementList0: Else If Expression LBrace IfStatementList0List /* Vec */ RBrace IfStatementList0;
+    // 372 - IfStatementList0: Else If Expression LBrace IfStatementList0List /* Vec */ RBrace IfStatementList0;
     Production {
         lhs: 186,
         production: &[
@@ -18970,32 +19142,32 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(85),
         ],
     },
-    // 369 - IfStatementList0List: Statement IfStatementList0List;
+    // 373 - IfStatementList0List: Statement IfStatementList0List;
     Production {
         lhs: 187,
         production: &[ParseType::N(187), ParseType::N(386)],
     },
-    // 370 - IfStatementList0List: ;
+    // 374 - IfStatementList0List: ;
     Production {
         lhs: 187,
         production: &[],
     },
-    // 371 - IfStatementList0: ;
+    // 375 - IfStatementList0: ;
     Production {
         lhs: 186,
         production: &[],
     },
-    // 372 - IfStatementList: Statement IfStatementList;
+    // 376 - IfStatementList: Statement IfStatementList;
     Production {
         lhs: 185,
         production: &[ParseType::N(185), ParseType::N(386)],
     },
-    // 373 - IfStatementList: ;
+    // 377 - IfStatementList: ;
     Production {
         lhs: 185,
         production: &[],
     },
-    // 374 - IfStatementOpt: Else LBrace IfStatementOptList /* Vec */ RBrace;
+    // 378 - IfStatementOpt: Else LBrace IfStatementOptList /* Vec */ RBrace;
     Production {
         lhs: 188,
         production: &[
@@ -19005,22 +19177,22 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(85),
         ],
     },
-    // 375 - IfStatementOptList: Statement IfStatementOptList;
+    // 379 - IfStatementOptList: Statement IfStatementOptList;
     Production {
         lhs: 189,
         production: &[ParseType::N(189), ParseType::N(386)],
     },
-    // 376 - IfStatementOptList: ;
+    // 380 - IfStatementOptList: ;
     Production {
         lhs: 189,
         production: &[],
     },
-    // 377 - IfStatementOpt: ;
+    // 381 - IfStatementOpt: ;
     Production {
         lhs: 188,
         production: &[],
     },
-    // 378 - IfResetStatement: IfReset LBrace IfResetStatementList /* Vec */ RBrace IfResetStatementList0 /* Vec */ IfResetStatementOpt /* Option */;
+    // 382 - IfResetStatement: IfReset LBrace IfResetStatementList /* Vec */ RBrace IfResetStatementList0 /* Vec */ IfResetStatementOpt /* Option */;
     Production {
         lhs: 176,
         production: &[
@@ -19032,7 +19204,7 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(175),
         ],
     },
-    // 379 - IfResetStatementList0: Else If Expression LBrace IfResetStatementList0List /* Vec */ RBrace IfResetStatementList0;
+    // 383 - IfResetStatementList0: Else If Expression LBrace IfResetStatementList0List /* Vec */ RBrace IfResetStatementList0;
     Production {
         lhs: 178,
         production: &[
@@ -19045,32 +19217,32 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(85),
         ],
     },
-    // 380 - IfResetStatementList0List: Statement IfResetStatementList0List;
+    // 384 - IfResetStatementList0List: Statement IfResetStatementList0List;
     Production {
         lhs: 179,
         production: &[ParseType::N(179), ParseType::N(386)],
     },
-    // 381 - IfResetStatementList0List: ;
+    // 385 - IfResetStatementList0List: ;
     Production {
         lhs: 179,
         production: &[],
     },
-    // 382 - IfResetStatementList0: ;
+    // 386 - IfResetStatementList0: ;
     Production {
         lhs: 178,
         production: &[],
     },
-    // 383 - IfResetStatementList: Statement IfResetStatementList;
+    // 387 - IfResetStatementList: Statement IfResetStatementList;
     Production {
         lhs: 177,
         production: &[ParseType::N(177), ParseType::N(386)],
     },
-    // 384 - IfResetStatementList: ;
+    // 388 - IfResetStatementList: ;
     Production {
         lhs: 177,
         production: &[],
     },
-    // 385 - IfResetStatementOpt: Else LBrace IfResetStatementOptList /* Vec */ RBrace;
+    // 389 - IfResetStatementOpt: Else LBrace IfResetStatementOptList /* Vec */ RBrace;
     Production {
         lhs: 180,
         production: &[
@@ -19080,27 +19252,27 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(85),
         ],
     },
-    // 386 - IfResetStatementOptList: Statement IfResetStatementOptList;
+    // 390 - IfResetStatementOptList: Statement IfResetStatementOptList;
     Production {
         lhs: 181,
         production: &[ParseType::N(181), ParseType::N(386)],
     },
-    // 387 - IfResetStatementOptList: ;
+    // 391 - IfResetStatementOptList: ;
     Production {
         lhs: 181,
         production: &[],
     },
-    // 388 - IfResetStatementOpt: ;
+    // 392 - IfResetStatementOpt: ;
     Production {
         lhs: 180,
         production: &[],
     },
-    // 389 - ReturnStatement: Return Expression Semicolon;
+    // 393 - ReturnStatement: Return Expression Semicolon;
     Production {
         lhs: 370,
         production: &[ParseType::N(381), ParseType::N(103), ParseType::N(369)],
     },
-    // 390 - ForStatement: For Identifier Colon Type In Expression DotDot Expression ForStatementOpt /* Option */ LBrace ForStatementList /* Vec */ RBrace;
+    // 394 - ForStatement: For Identifier Colon Type In Expression DotDot Expression ForStatementOpt /* Option */ LBrace ForStatementList /* Vec */ RBrace;
     Production {
         lhs: 142,
         production: &[
@@ -19112,33 +19284,33 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(80),
             ParseType::N(103),
             ParseType::N(192),
-            ParseType::N(404),
+            ParseType::N(407),
             ParseType::N(54),
             ParseType::N(171),
             ParseType::N(141),
         ],
     },
-    // 391 - ForStatementList: Statement ForStatementList;
+    // 395 - ForStatementList: Statement ForStatementList;
     Production {
         lhs: 143,
         production: &[ParseType::N(143), ParseType::N(386)],
     },
-    // 392 - ForStatementList: ;
+    // 396 - ForStatementList: ;
     Production {
         lhs: 143,
         production: &[],
     },
-    // 393 - ForStatementOpt: Step AssignmentOperator Expression;
+    // 397 - ForStatementOpt: Step AssignmentOperator Expression;
     Production {
         lhs: 144,
         production: &[ParseType::N(103), ParseType::N(24), ParseType::N(387)],
     },
-    // 394 - ForStatementOpt: ;
+    // 398 - ForStatementOpt: ;
     Production {
         lhs: 144,
         production: &[],
     },
-    // 395 - CaseStatement: Case Expression LBrace CaseStatementList /* Vec */ RBrace;
+    // 399 - CaseStatement: Case Expression LBrace CaseStatementList /* Vec */ RBrace;
     Production {
         lhs: 50,
         production: &[
@@ -19149,87 +19321,87 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(45),
         ],
     },
-    // 396 - CaseStatementList: CaseItem CaseStatementList;
+    // 400 - CaseStatementList: CaseItem CaseStatementList;
     Production {
         lhs: 51,
         production: &[ParseType::N(51), ParseType::N(46)],
     },
-    // 397 - CaseStatementList: ;
+    // 401 - CaseStatementList: ;
     Production {
         lhs: 51,
         production: &[],
     },
-    // 398 - CaseItem: CaseItemGroup Colon CaseItemGroup0;
+    // 402 - CaseItem: CaseItemGroup Colon CaseItemGroup0;
     Production {
         lhs: 46,
         production: &[ParseType::N(48), ParseType::N(54), ParseType::N(47)],
     },
-    // 399 - CaseItemGroup0: Statement;
+    // 403 - CaseItemGroup0: Statement;
     Production {
         lhs: 48,
         production: &[ParseType::N(386)],
     },
-    // 400 - CaseItemGroup0: LBrace CaseItemGroup0List /* Vec */ RBrace;
+    // 404 - CaseItemGroup0: LBrace CaseItemGroup0List /* Vec */ RBrace;
     Production {
         lhs: 48,
         production: &[ParseType::N(350), ParseType::N(49), ParseType::N(239)],
     },
-    // 401 - CaseItemGroup0List: Statement CaseItemGroup0List;
+    // 405 - CaseItemGroup0List: Statement CaseItemGroup0List;
     Production {
         lhs: 49,
         production: &[ParseType::N(49), ParseType::N(386)],
     },
-    // 402 - CaseItemGroup0List: ;
+    // 406 - CaseItemGroup0List: ;
     Production {
         lhs: 49,
         production: &[],
     },
-    // 403 - CaseItemGroup: Expression;
+    // 407 - CaseItemGroup: Expression;
     Production {
         lhs: 47,
         production: &[ParseType::N(103)],
     },
-    // 404 - CaseItemGroup: Defaul;
+    // 408 - CaseItemGroup: Defaul;
     Production {
         lhs: 47,
         production: &[ParseType::N(71)],
     },
-    // 405 - VarDeclaration: Var Identifier Colon Type VarDeclarationOpt /* Option */ Semicolon;
+    // 409 - VarDeclaration: Var Identifier Colon Type VarDeclarationOpt /* Option */ Semicolon;
     Production {
-        lhs: 417,
+        lhs: 420,
         production: &[
             ParseType::N(381),
-            ParseType::N(418),
-            ParseType::N(404),
+            ParseType::N(421),
+            ParseType::N(407),
             ParseType::N(54),
             ParseType::N(171),
-            ParseType::N(416),
+            ParseType::N(419),
         ],
     },
-    // 406 - VarDeclarationOpt: Equ Expression;
+    // 410 - VarDeclarationOpt: Equ Expression;
     Production {
-        lhs: 418,
+        lhs: 421,
         production: &[ParseType::N(103), ParseType::N(97)],
     },
-    // 407 - VarDeclarationOpt: ;
+    // 411 - VarDeclarationOpt: ;
     Production {
-        lhs: 418,
+        lhs: 421,
         production: &[],
     },
-    // 408 - LocalparamDeclaration: Localparam Identifier Colon Type Equ Expression Semicolon;
+    // 412 - LocalparamDeclaration: Localparam Identifier Colon Type Equ Expression Semicolon;
     Production {
         lhs: 249,
         production: &[
             ParseType::N(381),
             ParseType::N(103),
             ParseType::N(97),
-            ParseType::N(404),
+            ParseType::N(407),
             ParseType::N(54),
             ParseType::N(171),
             ParseType::N(248),
         ],
     },
-    // 409 - AlwaysFfDeclaration: AlwaysFf LParen AlwaysFfClock AlwaysFfDeclarationOpt /* Option */ RParen LBrace AlwaysFfDeclarationList /* Vec */ RBrace;
+    // 413 - AlwaysFfDeclaration: AlwaysFf LParen AlwaysFfClock AlwaysFfDeclarationOpt /* Option */ RParen LBrace AlwaysFfDeclarationList /* Vec */ RBrace;
     Production {
         lhs: 12,
         production: &[
@@ -19243,87 +19415,87 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(8),
         ],
     },
-    // 410 - AlwaysFfDeclarationList: Statement AlwaysFfDeclarationList;
+    // 414 - AlwaysFfDeclarationList: Statement AlwaysFfDeclarationList;
     Production {
         lhs: 13,
         production: &[ParseType::N(13), ParseType::N(386)],
     },
-    // 411 - AlwaysFfDeclarationList: ;
+    // 415 - AlwaysFfDeclarationList: ;
     Production {
         lhs: 13,
         production: &[],
     },
-    // 412 - AlwaysFfDeclarationOpt: Comma AlwaysFfReset;
+    // 416 - AlwaysFfDeclarationOpt: Comma AlwaysFfReset;
     Production {
         lhs: 14,
         production: &[ParseType::N(15), ParseType::N(60)],
     },
-    // 413 - AlwaysFfDeclarationOpt: ;
+    // 417 - AlwaysFfDeclarationOpt: ;
     Production {
         lhs: 14,
         production: &[],
     },
-    // 414 - AlwaysFfClock: AlwaysFfClockOpt /* Option */ HierarchicalIdentifier;
+    // 418 - AlwaysFfClock: AlwaysFfClockOpt /* Option */ HierarchicalIdentifier;
     Production {
         lhs: 9,
         production: &[ParseType::N(161), ParseType::N(10)],
     },
-    // 415 - AlwaysFfClockOpt: AlwaysFfClockOptGroup;
+    // 419 - AlwaysFfClockOpt: AlwaysFfClockOptGroup;
     Production {
         lhs: 10,
         production: &[ParseType::N(11)],
     },
-    // 416 - AlwaysFfClockOptGroup: Posedge;
+    // 420 - AlwaysFfClockOptGroup: Posedge;
     Production {
         lhs: 11,
         production: &[ParseType::N(347)],
     },
-    // 417 - AlwaysFfClockOptGroup: Negedge;
+    // 421 - AlwaysFfClockOptGroup: Negedge;
     Production {
         lhs: 11,
         production: &[ParseType::N(288)],
     },
-    // 418 - AlwaysFfClockOpt: ;
+    // 422 - AlwaysFfClockOpt: ;
     Production {
         lhs: 10,
         production: &[],
     },
-    // 419 - AlwaysFfReset: AlwaysFfResetOpt /* Option */ HierarchicalIdentifier;
+    // 423 - AlwaysFfReset: AlwaysFfResetOpt /* Option */ HierarchicalIdentifier;
     Production {
         lhs: 15,
         production: &[ParseType::N(161), ParseType::N(16)],
     },
-    // 420 - AlwaysFfResetOpt: AlwaysFfResetOptGroup;
+    // 424 - AlwaysFfResetOpt: AlwaysFfResetOptGroup;
     Production {
         lhs: 16,
         production: &[ParseType::N(17)],
     },
-    // 421 - AlwaysFfResetOptGroup: AsyncLow;
+    // 425 - AlwaysFfResetOptGroup: AsyncLow;
     Production {
         lhs: 17,
         production: &[ParseType::N(32)],
     },
-    // 422 - AlwaysFfResetOptGroup: AsyncHigh;
+    // 426 - AlwaysFfResetOptGroup: AsyncHigh;
     Production {
         lhs: 17,
         production: &[ParseType::N(29)],
     },
-    // 423 - AlwaysFfResetOptGroup: SyncLow;
+    // 427 - AlwaysFfResetOptGroup: SyncLow;
     Production {
         lhs: 17,
         production: &[ParseType::N(401)],
     },
-    // 424 - AlwaysFfResetOptGroup: SyncHigh;
+    // 428 - AlwaysFfResetOptGroup: SyncHigh;
     Production {
         lhs: 17,
         production: &[ParseType::N(398)],
     },
-    // 425 - AlwaysFfResetOpt: ;
+    // 429 - AlwaysFfResetOpt: ;
     Production {
         lhs: 16,
         production: &[],
     },
-    // 426 - AlwaysCombDeclaration: AlwaysComb LBrace AlwaysCombDeclarationList /* Vec */ RBrace;
+    // 430 - AlwaysCombDeclaration: AlwaysComb LBrace AlwaysCombDeclarationList /* Vec */ RBrace;
     Production {
         lhs: 4,
         production: &[
@@ -19333,17 +19505,17 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(3),
         ],
     },
-    // 427 - AlwaysCombDeclarationList: Statement AlwaysCombDeclarationList;
+    // 431 - AlwaysCombDeclarationList: Statement AlwaysCombDeclarationList;
     Production {
         lhs: 5,
         production: &[ParseType::N(5), ParseType::N(386)],
     },
-    // 428 - AlwaysCombDeclarationList: ;
+    // 432 - AlwaysCombDeclarationList: ;
     Production {
         lhs: 5,
         production: &[],
     },
-    // 429 - AssignDeclaration: Assign HierarchicalIdentifier Equ Expression Semicolon;
+    // 433 - AssignDeclaration: Assign HierarchicalIdentifier Equ Expression Semicolon;
     Production {
         lhs: 21,
         production: &[
@@ -19354,7 +19526,7 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(20),
         ],
     },
-    // 430 - ModportDeclaration: Modport Identifier LBrace ModportList RBrace;
+    // 434 - ModportDeclaration: Modport Identifier LBrace ModportList RBrace;
     Production {
         lhs: 262,
         production: &[
@@ -19365,90 +19537,90 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(261),
         ],
     },
-    // 431 - ModportList: ModportItem ModportListList /* Vec */ ModportListOpt /* Option */;
+    // 435 - ModportList: ModportItem ModportListList /* Vec */ ModportListOpt /* Option */;
     Production {
         lhs: 265,
         production: &[ParseType::N(267), ParseType::N(266), ParseType::N(264)],
     },
-    // 432 - ModportListList: Comma ModportItem ModportListList;
+    // 436 - ModportListList: Comma ModportItem ModportListList;
     Production {
         lhs: 266,
         production: &[ParseType::N(266), ParseType::N(264), ParseType::N(60)],
     },
-    // 433 - ModportListList: ;
+    // 437 - ModportListList: ;
     Production {
         lhs: 266,
         production: &[],
     },
-    // 434 - ModportListOpt: Comma;
+    // 438 - ModportListOpt: Comma;
     Production {
         lhs: 267,
         production: &[ParseType::N(60)],
     },
-    // 435 - ModportListOpt: ;
+    // 439 - ModportListOpt: ;
     Production {
         lhs: 267,
         production: &[],
     },
-    // 436 - ModportItem: Identifier Colon Direction;
+    // 440 - ModportItem: Identifier Colon Direction;
     Production {
         lhs: 264,
         production: &[ParseType::N(75), ParseType::N(54), ParseType::N(171)],
     },
-    // 437 - EnumDeclaration: Enum Identifier Colon Type LBrace EnumList RBrace;
+    // 441 - EnumDeclaration: Enum Identifier Colon Type LBrace EnumList RBrace;
     Production {
         lhs: 89,
         production: &[
             ParseType::N(350),
             ParseType::N(92),
             ParseType::N(239),
-            ParseType::N(404),
+            ParseType::N(407),
             ParseType::N(54),
             ParseType::N(171),
             ParseType::N(88),
         ],
     },
-    // 438 - EnumList: EnumItem EnumListList /* Vec */ EnumListOpt /* Option */;
+    // 442 - EnumList: EnumItem EnumListList /* Vec */ EnumListOpt /* Option */;
     Production {
         lhs: 92,
         production: &[ParseType::N(94), ParseType::N(93), ParseType::N(90)],
     },
-    // 439 - EnumListList: Comma EnumItem EnumListList;
+    // 443 - EnumListList: Comma EnumItem EnumListList;
     Production {
         lhs: 93,
         production: &[ParseType::N(93), ParseType::N(90), ParseType::N(60)],
     },
-    // 440 - EnumListList: ;
+    // 444 - EnumListList: ;
     Production {
         lhs: 93,
         production: &[],
     },
-    // 441 - EnumListOpt: Comma;
+    // 445 - EnumListOpt: Comma;
     Production {
         lhs: 94,
         production: &[ParseType::N(60)],
     },
-    // 442 - EnumListOpt: ;
+    // 446 - EnumListOpt: ;
     Production {
         lhs: 94,
         production: &[],
     },
-    // 443 - EnumItem: Identifier EnumItemOpt /* Option */;
+    // 447 - EnumItem: Identifier EnumItemOpt /* Option */;
     Production {
         lhs: 90,
         production: &[ParseType::N(91), ParseType::N(171)],
     },
-    // 444 - EnumItemOpt: Equ Expression;
+    // 448 - EnumItemOpt: Equ Expression;
     Production {
         lhs: 91,
         production: &[ParseType::N(103), ParseType::N(97)],
     },
-    // 445 - EnumItemOpt: ;
+    // 449 - EnumItemOpt: ;
     Production {
         lhs: 91,
         production: &[],
     },
-    // 446 - StructDeclaration: Struct Identifier LBrace StructList RBrace;
+    // 450 - StructDeclaration: Struct Identifier LBrace StructList RBrace;
     Production {
         lhs: 391,
         production: &[
@@ -19459,37 +19631,37 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(390),
         ],
     },
-    // 447 - StructList: StructItem StructListList /* Vec */ StructListOpt /* Option */;
+    // 451 - StructList: StructItem StructListList /* Vec */ StructListOpt /* Option */;
     Production {
         lhs: 393,
         production: &[ParseType::N(395), ParseType::N(394), ParseType::N(392)],
     },
-    // 448 - StructListList: Comma StructItem StructListList;
+    // 452 - StructListList: Comma StructItem StructListList;
     Production {
         lhs: 394,
         production: &[ParseType::N(394), ParseType::N(392), ParseType::N(60)],
     },
-    // 449 - StructListList: ;
+    // 453 - StructListList: ;
     Production {
         lhs: 394,
         production: &[],
     },
-    // 450 - StructListOpt: Comma;
+    // 454 - StructListOpt: Comma;
     Production {
         lhs: 395,
         production: &[ParseType::N(60)],
     },
-    // 451 - StructListOpt: ;
+    // 455 - StructListOpt: ;
     Production {
         lhs: 395,
         production: &[],
     },
-    // 452 - StructItem: Identifier Colon Type;
+    // 456 - StructItem: Identifier Colon Type;
     Production {
         lhs: 392,
-        production: &[ParseType::N(404), ParseType::N(54), ParseType::N(171)],
+        production: &[ParseType::N(407), ParseType::N(54), ParseType::N(171)],
     },
-    // 453 - InstDeclaration: Inst Identifier Colon Identifier InstDeclarationOpt /* Option */ InstDeclarationOpt0 /* Option */ InstDeclarationOpt1 /* Option */ Semicolon;
+    // 457 - InstDeclaration: Inst Identifier Colon Identifier InstDeclarationOpt /* Option */ InstDeclarationOpt0 /* Option */ InstDeclarationOpt1 /* Option */ Semicolon;
     Production {
         lhs: 202,
         production: &[
@@ -19503,47 +19675,47 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(201),
         ],
     },
-    // 454 - InstDeclarationOpt1: LBrace InstDeclarationOpt2 /* Option */ RBrace;
+    // 458 - InstDeclarationOpt1: LBrace InstDeclarationOpt2 /* Option */ RBrace;
     Production {
         lhs: 205,
         production: &[ParseType::N(350), ParseType::N(206), ParseType::N(239)],
     },
-    // 455 - InstDeclarationOpt2: InstPortList;
+    // 459 - InstDeclarationOpt2: InstPortList;
     Production {
         lhs: 206,
         production: &[ParseType::N(216)],
     },
-    // 456 - InstDeclarationOpt2: ;
+    // 460 - InstDeclarationOpt2: ;
     Production {
         lhs: 206,
         production: &[],
     },
-    // 457 - InstDeclarationOpt1: ;
+    // 461 - InstDeclarationOpt1: ;
     Production {
         lhs: 205,
         production: &[],
     },
-    // 458 - InstDeclarationOpt0: InstParameter;
+    // 462 - InstDeclarationOpt0: InstParameter;
     Production {
         lhs: 204,
         production: &[ParseType::N(207)],
     },
-    // 459 - InstDeclarationOpt0: ;
+    // 463 - InstDeclarationOpt0: ;
     Production {
         lhs: 204,
         production: &[],
     },
-    // 460 - InstDeclarationOpt: Width;
+    // 464 - InstDeclarationOpt: Width;
     Production {
         lhs: 203,
-        production: &[ParseType::N(423)],
+        production: &[ParseType::N(426)],
     },
-    // 461 - InstDeclarationOpt: ;
+    // 465 - InstDeclarationOpt: ;
     Production {
         lhs: 203,
         production: &[],
     },
-    // 462 - InstParameter: Hash LParen InstParameterOpt /* Option */ RParen;
+    // 466 - InstParameter: Hash LParen InstParameterOpt /* Option */ RParen;
     Production {
         lhs: 207,
         production: &[
@@ -19553,251 +19725,251 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(158),
         ],
     },
-    // 463 - InstParameterOpt: InstParameterList;
+    // 467 - InstParameterOpt: InstParameterList;
     Production {
         lhs: 213,
         production: &[ParseType::N(210)],
     },
-    // 464 - InstParameterOpt: ;
+    // 468 - InstParameterOpt: ;
     Production {
         lhs: 213,
         production: &[],
     },
-    // 465 - InstParameterList: InstParameterItem InstParameterListList /* Vec */ InstParameterListOpt /* Option */;
+    // 469 - InstParameterList: InstParameterItem InstParameterListList /* Vec */ InstParameterListOpt /* Option */;
     Production {
         lhs: 210,
         production: &[ParseType::N(212), ParseType::N(211), ParseType::N(208)],
     },
-    // 466 - InstParameterListList: Comma InstParameterItem InstParameterListList;
+    // 470 - InstParameterListList: Comma InstParameterItem InstParameterListList;
     Production {
         lhs: 211,
         production: &[ParseType::N(211), ParseType::N(208), ParseType::N(60)],
     },
-    // 467 - InstParameterListList: ;
+    // 471 - InstParameterListList: ;
     Production {
         lhs: 211,
         production: &[],
     },
-    // 468 - InstParameterListOpt: Comma;
+    // 472 - InstParameterListOpt: Comma;
     Production {
         lhs: 212,
         production: &[ParseType::N(60)],
     },
-    // 469 - InstParameterListOpt: ;
+    // 473 - InstParameterListOpt: ;
     Production {
         lhs: 212,
         production: &[],
     },
-    // 470 - InstParameterItem: Identifier InstParameterItemOpt /* Option */;
+    // 474 - InstParameterItem: Identifier InstParameterItemOpt /* Option */;
     Production {
         lhs: 208,
         production: &[ParseType::N(209), ParseType::N(171)],
     },
-    // 471 - InstParameterItemOpt: Colon Expression;
+    // 475 - InstParameterItemOpt: Colon Expression;
     Production {
         lhs: 209,
         production: &[ParseType::N(103), ParseType::N(54)],
     },
-    // 472 - InstParameterItemOpt: ;
+    // 476 - InstParameterItemOpt: ;
     Production {
         lhs: 209,
         production: &[],
     },
-    // 473 - InstPortList: InstPortItem InstPortListList /* Vec */ InstPortListOpt /* Option */;
+    // 477 - InstPortList: InstPortItem InstPortListList /* Vec */ InstPortListOpt /* Option */;
     Production {
         lhs: 216,
         production: &[ParseType::N(218), ParseType::N(217), ParseType::N(214)],
     },
-    // 474 - InstPortListList: Comma InstPortItem InstPortListList;
+    // 478 - InstPortListList: Comma InstPortItem InstPortListList;
     Production {
         lhs: 217,
         production: &[ParseType::N(217), ParseType::N(214), ParseType::N(60)],
     },
-    // 475 - InstPortListList: ;
+    // 479 - InstPortListList: ;
     Production {
         lhs: 217,
         production: &[],
     },
-    // 476 - InstPortListOpt: Comma;
+    // 480 - InstPortListOpt: Comma;
     Production {
         lhs: 218,
         production: &[ParseType::N(60)],
     },
-    // 477 - InstPortListOpt: ;
+    // 481 - InstPortListOpt: ;
     Production {
         lhs: 218,
         production: &[],
     },
-    // 478 - InstPortItem: Identifier InstPortItemOpt /* Option */;
+    // 482 - InstPortItem: Identifier InstPortItemOpt /* Option */;
     Production {
         lhs: 214,
         production: &[ParseType::N(215), ParseType::N(171)],
     },
-    // 479 - InstPortItemOpt: Colon Expression;
+    // 483 - InstPortItemOpt: Colon Expression;
     Production {
         lhs: 215,
         production: &[ParseType::N(103), ParseType::N(54)],
     },
-    // 480 - InstPortItemOpt: ;
+    // 484 - InstPortItemOpt: ;
     Production {
         lhs: 215,
         production: &[],
     },
-    // 481 - WithParameter: Hash LParen WithParameterOpt /* Option */ RParen;
+    // 485 - WithParameter: Hash LParen WithParameterOpt /* Option */ RParen;
     Production {
-        lhs: 424,
+        lhs: 427,
         production: &[
             ParseType::N(356),
-            ParseType::N(430),
+            ParseType::N(433),
             ParseType::N(245),
             ParseType::N(158),
         ],
     },
-    // 482 - WithParameterOpt: WithParameterList;
+    // 486 - WithParameterOpt: WithParameterList;
     Production {
-        lhs: 430,
-        production: &[ParseType::N(427)],
+        lhs: 433,
+        production: &[ParseType::N(430)],
     },
-    // 483 - WithParameterOpt: ;
+    // 487 - WithParameterOpt: ;
     Production {
-        lhs: 430,
+        lhs: 433,
         production: &[],
     },
-    // 484 - WithParameterList: WithParameterItem WithParameterListList /* Vec */ WithParameterListOpt /* Option */;
+    // 488 - WithParameterList: WithParameterItem WithParameterListList /* Vec */ WithParameterListOpt /* Option */;
     Production {
-        lhs: 427,
-        production: &[ParseType::N(429), ParseType::N(428), ParseType::N(425)],
+        lhs: 430,
+        production: &[ParseType::N(432), ParseType::N(431), ParseType::N(428)],
     },
-    // 485 - WithParameterListList: Comma WithParameterItem WithParameterListList;
+    // 489 - WithParameterListList: Comma WithParameterItem WithParameterListList;
     Production {
-        lhs: 428,
-        production: &[ParseType::N(428), ParseType::N(425), ParseType::N(60)],
+        lhs: 431,
+        production: &[ParseType::N(431), ParseType::N(428), ParseType::N(60)],
     },
-    // 486 - WithParameterListList: ;
+    // 490 - WithParameterListList: ;
     Production {
-        lhs: 428,
+        lhs: 431,
         production: &[],
     },
-    // 487 - WithParameterListOpt: Comma;
+    // 491 - WithParameterListOpt: Comma;
     Production {
-        lhs: 429,
+        lhs: 432,
         production: &[ParseType::N(60)],
     },
-    // 488 - WithParameterListOpt: ;
+    // 492 - WithParameterListOpt: ;
     Production {
-        lhs: 429,
+        lhs: 432,
         production: &[],
     },
-    // 489 - WithParameterItem: WithParameterItemGroup Identifier Colon Type Equ Expression;
+    // 493 - WithParameterItem: WithParameterItemGroup Identifier Colon Type Equ Expression;
     Production {
-        lhs: 425,
+        lhs: 428,
         production: &[
             ParseType::N(103),
             ParseType::N(97),
-            ParseType::N(404),
+            ParseType::N(407),
             ParseType::N(54),
             ParseType::N(171),
-            ParseType::N(426),
+            ParseType::N(429),
         ],
     },
-    // 490 - WithParameterItemGroup: Parameter;
+    // 494 - WithParameterItemGroup: Parameter;
     Production {
-        lhs: 426,
+        lhs: 429,
         production: &[ParseType::N(334)],
     },
-    // 491 - WithParameterItemGroup: Localparam;
+    // 495 - WithParameterItemGroup: Localparam;
     Production {
-        lhs: 426,
+        lhs: 429,
         production: &[ParseType::N(248)],
     },
-    // 492 - PortDeclaration: LParen PortDeclarationOpt /* Option */ RParen;
+    // 496 - PortDeclaration: LParen PortDeclarationOpt /* Option */ RParen;
     Production {
         lhs: 340,
         production: &[ParseType::N(356), ParseType::N(346), ParseType::N(245)],
     },
-    // 493 - PortDeclarationOpt: PortDeclarationList;
+    // 497 - PortDeclarationOpt: PortDeclarationList;
     Production {
         lhs: 346,
         production: &[ParseType::N(343)],
     },
-    // 494 - PortDeclarationOpt: ;
+    // 498 - PortDeclarationOpt: ;
     Production {
         lhs: 346,
         production: &[],
     },
-    // 495 - PortDeclarationList: PortDeclarationItem PortDeclarationListList /* Vec */ PortDeclarationListOpt /* Option */;
+    // 499 - PortDeclarationList: PortDeclarationItem PortDeclarationListList /* Vec */ PortDeclarationListOpt /* Option */;
     Production {
         lhs: 343,
         production: &[ParseType::N(345), ParseType::N(344), ParseType::N(341)],
     },
-    // 496 - PortDeclarationListList: Comma PortDeclarationItem PortDeclarationListList;
+    // 500 - PortDeclarationListList: Comma PortDeclarationItem PortDeclarationListList;
     Production {
         lhs: 344,
         production: &[ParseType::N(344), ParseType::N(341), ParseType::N(60)],
     },
-    // 497 - PortDeclarationListList: ;
+    // 501 - PortDeclarationListList: ;
     Production {
         lhs: 344,
         production: &[],
     },
-    // 498 - PortDeclarationListOpt: Comma;
+    // 502 - PortDeclarationListOpt: Comma;
     Production {
         lhs: 345,
         production: &[ParseType::N(60)],
     },
-    // 499 - PortDeclarationListOpt: ;
+    // 503 - PortDeclarationListOpt: ;
     Production {
         lhs: 345,
         production: &[],
     },
-    // 500 - PortDeclarationItem: Identifier Colon PortDeclarationItemGroup;
+    // 504 - PortDeclarationItem: Identifier Colon PortDeclarationItemGroup;
     Production {
         lhs: 341,
         production: &[ParseType::N(342), ParseType::N(54), ParseType::N(171)],
     },
-    // 501 - PortDeclarationItemGroup: Direction Type;
+    // 505 - PortDeclarationItemGroup: Direction Type;
     Production {
         lhs: 342,
-        production: &[ParseType::N(404), ParseType::N(75)],
+        production: &[ParseType::N(407), ParseType::N(75)],
     },
-    // 502 - PortDeclarationItemGroup: Interface;
+    // 506 - PortDeclarationItemGroup: Interface;
     Production {
         lhs: 342,
         production: &[ParseType::N(222)],
     },
-    // 503 - Direction: Input;
+    // 507 - Direction: Input;
     Production {
         lhs: 75,
         production: &[ParseType::N(198)],
     },
-    // 504 - Direction: Output;
+    // 508 - Direction: Output;
     Production {
         lhs: 75,
         production: &[ParseType::N(325)],
     },
-    // 505 - Direction: Inout;
+    // 509 - Direction: Inout;
     Production {
         lhs: 75,
         production: &[ParseType::N(195)],
     },
-    // 506 - Direction: Ref;
+    // 510 - Direction: Ref;
     Production {
         lhs: 75,
         production: &[ParseType::N(363)],
     },
-    // 507 - Direction: Modport;
+    // 511 - Direction: Modport;
     Production {
         lhs: 75,
         production: &[ParseType::N(261)],
     },
-    // 508 - FunctionDeclaration: Function Identifier FunctionDeclarationOpt /* Option */ FunctionDeclarationOpt0 /* Option */ MinusGT Type LBrace FunctionDeclarationList /* Vec */ RBrace;
+    // 512 - FunctionDeclaration: Function Identifier FunctionDeclarationOpt /* Option */ FunctionDeclarationOpt0 /* Option */ MinusGT Type LBrace FunctionDeclarationList /* Vec */ RBrace;
     Production {
         lhs: 151,
         production: &[
             ParseType::N(350),
             ParseType::N(152),
             ParseType::N(239),
-            ParseType::N(404),
+            ParseType::N(407),
             ParseType::N(258),
             ParseType::N(154),
             ParseType::N(153),
@@ -19805,47 +19977,47 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(147),
         ],
     },
-    // 509 - FunctionDeclarationList: FunctionItem FunctionDeclarationList;
+    // 513 - FunctionDeclarationList: FunctionItem FunctionDeclarationList;
     Production {
         lhs: 152,
         production: &[ParseType::N(152), ParseType::N(155)],
     },
-    // 510 - FunctionDeclarationList: ;
+    // 514 - FunctionDeclarationList: ;
     Production {
         lhs: 152,
         production: &[],
     },
-    // 511 - FunctionDeclarationOpt0: PortDeclaration;
+    // 515 - FunctionDeclarationOpt0: PortDeclaration;
     Production {
         lhs: 154,
         production: &[ParseType::N(340)],
     },
-    // 512 - FunctionDeclarationOpt0: ;
+    // 516 - FunctionDeclarationOpt0: ;
     Production {
         lhs: 154,
         production: &[],
     },
-    // 513 - FunctionDeclarationOpt: WithParameter;
+    // 517 - FunctionDeclarationOpt: WithParameter;
     Production {
         lhs: 153,
-        production: &[ParseType::N(424)],
+        production: &[ParseType::N(427)],
     },
-    // 514 - FunctionDeclarationOpt: ;
+    // 518 - FunctionDeclarationOpt: ;
     Production {
         lhs: 153,
         production: &[],
     },
-    // 515 - FunctionItem: VarDeclaration;
+    // 519 - FunctionItem: VarDeclaration;
     Production {
         lhs: 155,
-        production: &[ParseType::N(417)],
+        production: &[ParseType::N(420)],
     },
-    // 516 - FunctionItem: Statement;
+    // 520 - FunctionItem: Statement;
     Production {
         lhs: 155,
         production: &[ParseType::N(386)],
     },
-    // 517 - ModuleDeclaration: Module Identifier ModuleDeclarationOpt /* Option */ ModuleDeclarationOpt0 /* Option */ LBrace ModuleDeclarationList /* Vec */ RBrace;
+    // 521 - ModuleDeclaration: Module Identifier ModuleDeclarationOpt /* Option */ ModuleDeclarationOpt0 /* Option */ LBrace ModuleDeclarationList /* Vec */ RBrace;
     Production {
         lhs: 271,
         production: &[
@@ -19858,37 +20030,37 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(270),
         ],
     },
-    // 518 - ModuleDeclarationList: ModuleItem ModuleDeclarationList;
+    // 522 - ModuleDeclarationList: ModuleItem ModuleDeclarationList;
     Production {
         lhs: 272,
         production: &[ParseType::N(272), ParseType::N(280)],
     },
-    // 519 - ModuleDeclarationList: ;
+    // 523 - ModuleDeclarationList: ;
     Production {
         lhs: 272,
         production: &[],
     },
-    // 520 - ModuleDeclarationOpt0: PortDeclaration;
+    // 524 - ModuleDeclarationOpt0: PortDeclaration;
     Production {
         lhs: 274,
         production: &[ParseType::N(340)],
     },
-    // 521 - ModuleDeclarationOpt0: ;
+    // 525 - ModuleDeclarationOpt0: ;
     Production {
         lhs: 274,
         production: &[],
     },
-    // 522 - ModuleDeclarationOpt: WithParameter;
+    // 526 - ModuleDeclarationOpt: WithParameter;
     Production {
         lhs: 273,
-        production: &[ParseType::N(424)],
+        production: &[ParseType::N(427)],
     },
-    // 523 - ModuleDeclarationOpt: ;
+    // 527 - ModuleDeclarationOpt: ;
     Production {
         lhs: 273,
         production: &[],
     },
-    // 524 - ModuleIfDeclaration: If Expression ModuleNamedBlock ModuleIfDeclarationList /* Vec */ ModuleIfDeclarationOpt /* Option */;
+    // 528 - ModuleIfDeclaration: If Expression ModuleNamedBlock ModuleIfDeclarationList /* Vec */ ModuleIfDeclarationOpt /* Option */;
     Production {
         lhs: 277,
         production: &[
@@ -19899,7 +20071,7 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(174),
         ],
     },
-    // 525 - ModuleIfDeclarationList: Else If Expression ModuleOptionalNamedBlock ModuleIfDeclarationList;
+    // 529 - ModuleIfDeclarationList: Else If Expression ModuleOptionalNamedBlock ModuleIfDeclarationList;
     Production {
         lhs: 278,
         production: &[
@@ -19910,22 +20082,22 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(85),
         ],
     },
-    // 526 - ModuleIfDeclarationList: ;
+    // 530 - ModuleIfDeclarationList: ;
     Production {
         lhs: 278,
         production: &[],
     },
-    // 527 - ModuleIfDeclarationOpt: Else ModuleOptionalNamedBlock;
+    // 531 - ModuleIfDeclarationOpt: Else ModuleOptionalNamedBlock;
     Production {
         lhs: 279,
         production: &[ParseType::N(283), ParseType::N(85)],
     },
-    // 528 - ModuleIfDeclarationOpt: ;
+    // 532 - ModuleIfDeclarationOpt: ;
     Production {
         lhs: 279,
         production: &[],
     },
-    // 529 - ModuleForDeclaration: For Identifier In Expression DotDot Expression ModuleForDeclarationOpt /* Option */ ModuleNamedBlock;
+    // 533 - ModuleForDeclaration: For Identifier In Expression DotDot Expression ModuleForDeclarationOpt /* Option */ ModuleNamedBlock;
     Production {
         lhs: 275,
         production: &[
@@ -19939,17 +20111,17 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(141),
         ],
     },
-    // 530 - ModuleForDeclarationOpt: Step AssignmentOperator Expression;
+    // 534 - ModuleForDeclarationOpt: Step AssignmentOperator Expression;
     Production {
         lhs: 276,
         production: &[ParseType::N(103), ParseType::N(24), ParseType::N(387)],
     },
-    // 531 - ModuleForDeclarationOpt: ;
+    // 535 - ModuleForDeclarationOpt: ;
     Production {
         lhs: 276,
         production: &[],
     },
-    // 532 - ModuleNamedBlock: Colon Identifier LBrace ModuleNamedBlockList /* Vec */ RBrace;
+    // 536 - ModuleNamedBlock: Colon Identifier LBrace ModuleNamedBlockList /* Vec */ RBrace;
     Production {
         lhs: 281,
         production: &[
@@ -19960,17 +20132,17 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(54),
         ],
     },
-    // 533 - ModuleNamedBlockList: ModuleItem ModuleNamedBlockList;
+    // 537 - ModuleNamedBlockList: ModuleItem ModuleNamedBlockList;
     Production {
         lhs: 282,
         production: &[ParseType::N(282), ParseType::N(280)],
     },
-    // 534 - ModuleNamedBlockList: ;
+    // 538 - ModuleNamedBlockList: ;
     Production {
         lhs: 282,
         production: &[],
     },
-    // 535 - ModuleOptionalNamedBlock: ModuleOptionalNamedBlockOpt /* Option */ LBrace ModuleOptionalNamedBlockList /* Vec */ RBrace;
+    // 539 - ModuleOptionalNamedBlock: ModuleOptionalNamedBlockOpt /* Option */ LBrace ModuleOptionalNamedBlockList /* Vec */ RBrace;
     Production {
         lhs: 283,
         production: &[
@@ -19980,87 +20152,87 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(285),
         ],
     },
-    // 536 - ModuleOptionalNamedBlockList: ModuleItem ModuleOptionalNamedBlockList;
+    // 540 - ModuleOptionalNamedBlockList: ModuleItem ModuleOptionalNamedBlockList;
     Production {
         lhs: 284,
         production: &[ParseType::N(284), ParseType::N(280)],
     },
-    // 537 - ModuleOptionalNamedBlockList: ;
+    // 541 - ModuleOptionalNamedBlockList: ;
     Production {
         lhs: 284,
         production: &[],
     },
-    // 538 - ModuleOptionalNamedBlockOpt: Colon Identifier;
+    // 542 - ModuleOptionalNamedBlockOpt: Colon Identifier;
     Production {
         lhs: 285,
         production: &[ParseType::N(171), ParseType::N(54)],
     },
-    // 539 - ModuleOptionalNamedBlockOpt: ;
+    // 543 - ModuleOptionalNamedBlockOpt: ;
     Production {
         lhs: 285,
         production: &[],
     },
-    // 540 - ModuleItem: VarDeclaration;
+    // 544 - ModuleItem: VarDeclaration;
     Production {
         lhs: 280,
-        production: &[ParseType::N(417)],
+        production: &[ParseType::N(420)],
     },
-    // 541 - ModuleItem: InstDeclaration;
+    // 545 - ModuleItem: InstDeclaration;
     Production {
         lhs: 280,
         production: &[ParseType::N(202)],
     },
-    // 542 - ModuleItem: LocalparamDeclaration;
+    // 546 - ModuleItem: LocalparamDeclaration;
     Production {
         lhs: 280,
         production: &[ParseType::N(249)],
     },
-    // 543 - ModuleItem: AlwaysFfDeclaration;
+    // 547 - ModuleItem: AlwaysFfDeclaration;
     Production {
         lhs: 280,
         production: &[ParseType::N(12)],
     },
-    // 544 - ModuleItem: AlwaysCombDeclaration;
+    // 548 - ModuleItem: AlwaysCombDeclaration;
     Production {
         lhs: 280,
         production: &[ParseType::N(4)],
     },
-    // 545 - ModuleItem: AssignDeclaration;
+    // 549 - ModuleItem: AssignDeclaration;
     Production {
         lhs: 280,
         production: &[ParseType::N(21)],
     },
-    // 546 - ModuleItem: FunctionDeclaration;
+    // 550 - ModuleItem: FunctionDeclaration;
     Production {
         lhs: 280,
         production: &[ParseType::N(151)],
     },
-    // 547 - ModuleItem: ModuleIfDeclaration;
+    // 551 - ModuleItem: ModuleIfDeclaration;
     Production {
         lhs: 280,
         production: &[ParseType::N(277)],
     },
-    // 548 - ModuleItem: ModuleForDeclaration;
+    // 552 - ModuleItem: ModuleForDeclaration;
     Production {
         lhs: 280,
         production: &[ParseType::N(275)],
     },
-    // 549 - ModuleItem: EnumDeclaration;
+    // 553 - ModuleItem: EnumDeclaration;
     Production {
         lhs: 280,
         production: &[ParseType::N(89)],
     },
-    // 550 - ModuleItem: StructDeclaration;
+    // 554 - ModuleItem: StructDeclaration;
     Production {
         lhs: 280,
         production: &[ParseType::N(391)],
     },
-    // 551 - ModuleItem: ModuleNamedBlock;
+    // 555 - ModuleItem: ModuleNamedBlock;
     Production {
         lhs: 280,
         production: &[ParseType::N(281)],
     },
-    // 552 - InterfaceDeclaration: Interface Identifier InterfaceDeclarationOpt /* Option */ LBrace InterfaceDeclarationList /* Vec */ RBrace;
+    // 556 - InterfaceDeclaration: Interface Identifier InterfaceDeclarationOpt /* Option */ LBrace InterfaceDeclarationList /* Vec */ RBrace;
     Production {
         lhs: 223,
         production: &[
@@ -20072,27 +20244,27 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(222),
         ],
     },
-    // 553 - InterfaceDeclarationList: InterfaceItem InterfaceDeclarationList;
+    // 557 - InterfaceDeclarationList: InterfaceItem InterfaceDeclarationList;
     Production {
         lhs: 224,
         production: &[ParseType::N(224), ParseType::N(231)],
     },
-    // 554 - InterfaceDeclarationList: ;
+    // 558 - InterfaceDeclarationList: ;
     Production {
         lhs: 224,
         production: &[],
     },
-    // 555 - InterfaceDeclarationOpt: WithParameter;
+    // 559 - InterfaceDeclarationOpt: WithParameter;
     Production {
         lhs: 225,
-        production: &[ParseType::N(424)],
+        production: &[ParseType::N(427)],
     },
-    // 556 - InterfaceDeclarationOpt: ;
+    // 560 - InterfaceDeclarationOpt: ;
     Production {
         lhs: 225,
         production: &[],
     },
-    // 557 - InterfaceIfDeclaration: If Expression InterfaceNamedBlock InterfaceIfDeclarationList /* Vec */ InterfaceIfDeclarationOpt /* Option */;
+    // 561 - InterfaceIfDeclaration: If Expression InterfaceNamedBlock InterfaceIfDeclarationList /* Vec */ InterfaceIfDeclarationOpt /* Option */;
     Production {
         lhs: 228,
         production: &[
@@ -20103,7 +20275,7 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(174),
         ],
     },
-    // 558 - InterfaceIfDeclarationList: Else If Expression InterfaceOptionalNamedBlock InterfaceIfDeclarationList;
+    // 562 - InterfaceIfDeclarationList: Else If Expression InterfaceOptionalNamedBlock InterfaceIfDeclarationList;
     Production {
         lhs: 229,
         production: &[
@@ -20114,22 +20286,22 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(85),
         ],
     },
-    // 559 - InterfaceIfDeclarationList: ;
+    // 563 - InterfaceIfDeclarationList: ;
     Production {
         lhs: 229,
         production: &[],
     },
-    // 560 - InterfaceIfDeclarationOpt: Else InterfaceOptionalNamedBlock;
+    // 564 - InterfaceIfDeclarationOpt: Else InterfaceOptionalNamedBlock;
     Production {
         lhs: 230,
         production: &[ParseType::N(234), ParseType::N(85)],
     },
-    // 561 - InterfaceIfDeclarationOpt: ;
+    // 565 - InterfaceIfDeclarationOpt: ;
     Production {
         lhs: 230,
         production: &[],
     },
-    // 562 - InterfaceForDeclaration: For Identifier In Expression DotDot Expression InterfaceForDeclarationOpt /* Option */ InterfaceNamedBlock;
+    // 566 - InterfaceForDeclaration: For Identifier In Expression DotDot Expression InterfaceForDeclarationOpt /* Option */ InterfaceNamedBlock;
     Production {
         lhs: 226,
         production: &[
@@ -20143,17 +20315,17 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(141),
         ],
     },
-    // 563 - InterfaceForDeclarationOpt: Step AssignmentOperator Expression;
+    // 567 - InterfaceForDeclarationOpt: Step AssignmentOperator Expression;
     Production {
         lhs: 227,
         production: &[ParseType::N(103), ParseType::N(24), ParseType::N(387)],
     },
-    // 564 - InterfaceForDeclarationOpt: ;
+    // 568 - InterfaceForDeclarationOpt: ;
     Production {
         lhs: 227,
         production: &[],
     },
-    // 565 - InterfaceNamedBlock: Colon Identifier LBrace InterfaceNamedBlockList /* Vec */ RBrace;
+    // 569 - InterfaceNamedBlock: Colon Identifier LBrace InterfaceNamedBlockList /* Vec */ RBrace;
     Production {
         lhs: 232,
         production: &[
@@ -20164,17 +20336,17 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(54),
         ],
     },
-    // 566 - InterfaceNamedBlockList: InterfaceItem InterfaceNamedBlockList;
+    // 570 - InterfaceNamedBlockList: InterfaceItem InterfaceNamedBlockList;
     Production {
         lhs: 233,
         production: &[ParseType::N(233), ParseType::N(231)],
     },
-    // 567 - InterfaceNamedBlockList: ;
+    // 571 - InterfaceNamedBlockList: ;
     Production {
         lhs: 233,
         production: &[],
     },
-    // 568 - InterfaceOptionalNamedBlock: InterfaceOptionalNamedBlockOpt /* Option */ LBrace InterfaceOptionalNamedBlockList /* Vec */ RBrace;
+    // 572 - InterfaceOptionalNamedBlock: InterfaceOptionalNamedBlockOpt /* Option */ LBrace InterfaceOptionalNamedBlockList /* Vec */ RBrace;
     Production {
         lhs: 234,
         production: &[
@@ -20184,72 +20356,72 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(236),
         ],
     },
-    // 569 - InterfaceOptionalNamedBlockList: InterfaceItem InterfaceOptionalNamedBlockList;
+    // 573 - InterfaceOptionalNamedBlockList: InterfaceItem InterfaceOptionalNamedBlockList;
     Production {
         lhs: 235,
         production: &[ParseType::N(235), ParseType::N(231)],
     },
-    // 570 - InterfaceOptionalNamedBlockList: ;
+    // 574 - InterfaceOptionalNamedBlockList: ;
     Production {
         lhs: 235,
         production: &[],
     },
-    // 571 - InterfaceOptionalNamedBlockOpt: Colon Identifier;
+    // 575 - InterfaceOptionalNamedBlockOpt: Colon Identifier;
     Production {
         lhs: 236,
         production: &[ParseType::N(171), ParseType::N(54)],
     },
-    // 572 - InterfaceOptionalNamedBlockOpt: ;
+    // 576 - InterfaceOptionalNamedBlockOpt: ;
     Production {
         lhs: 236,
         production: &[],
     },
-    // 573 - InterfaceItem: VarDeclaration;
+    // 577 - InterfaceItem: VarDeclaration;
     Production {
         lhs: 231,
-        production: &[ParseType::N(417)],
+        production: &[ParseType::N(420)],
     },
-    // 574 - InterfaceItem: LocalparamDeclaration;
+    // 578 - InterfaceItem: LocalparamDeclaration;
     Production {
         lhs: 231,
         production: &[ParseType::N(249)],
     },
-    // 575 - InterfaceItem: ModportDeclaration;
+    // 579 - InterfaceItem: ModportDeclaration;
     Production {
         lhs: 231,
         production: &[ParseType::N(262)],
     },
-    // 576 - InterfaceItem: InterfaceIfDeclaration;
+    // 580 - InterfaceItem: InterfaceIfDeclaration;
     Production {
         lhs: 231,
         production: &[ParseType::N(228)],
     },
-    // 577 - InterfaceItem: InterfaceForDeclaration;
+    // 581 - InterfaceItem: InterfaceForDeclaration;
     Production {
         lhs: 231,
         production: &[ParseType::N(226)],
     },
-    // 578 - InterfaceItem: EnumDeclaration;
+    // 582 - InterfaceItem: EnumDeclaration;
     Production {
         lhs: 231,
         production: &[ParseType::N(89)],
     },
-    // 579 - InterfaceItem: StructDeclaration;
+    // 583 - InterfaceItem: StructDeclaration;
     Production {
         lhs: 231,
         production: &[ParseType::N(391)],
     },
-    // 580 - InterfaceItem: InterfaceNamedBlock;
+    // 584 - InterfaceItem: InterfaceNamedBlock;
     Production {
         lhs: 231,
         production: &[ParseType::N(232)],
     },
-    // 581 - InterfaceItem: FunctionDeclaration;
+    // 585 - InterfaceItem: FunctionDeclaration;
     Production {
         lhs: 231,
         production: &[ParseType::N(151)],
     },
-    // 582 - PackageDeclaration: Package Identifier LBrace PackageDeclarationList /* Vec */ RBrace;
+    // 586 - PackageDeclaration: Package Identifier LBrace PackageDeclarationList /* Vec */ RBrace;
     Production {
         lhs: 329,
         production: &[
@@ -20260,69 +20432,69 @@ pub const PRODUCTIONS: &[Production; 596] = &[
             ParseType::N(328),
         ],
     },
-    // 583 - PackageDeclarationList: PackageItem PackageDeclarationList;
+    // 587 - PackageDeclarationList: PackageItem PackageDeclarationList;
     Production {
         lhs: 330,
         production: &[ParseType::N(330), ParseType::N(331)],
     },
-    // 584 - PackageDeclarationList: ;
+    // 588 - PackageDeclarationList: ;
     Production {
         lhs: 330,
         production: &[],
     },
-    // 585 - PackageItem: VarDeclaration;
+    // 589 - PackageItem: VarDeclaration;
     Production {
         lhs: 331,
-        production: &[ParseType::N(417)],
+        production: &[ParseType::N(420)],
     },
-    // 586 - PackageItem: LocalparamDeclaration;
+    // 590 - PackageItem: LocalparamDeclaration;
     Production {
         lhs: 331,
         production: &[ParseType::N(249)],
     },
-    // 587 - PackageItem: EnumDeclaration;
+    // 591 - PackageItem: EnumDeclaration;
     Production {
         lhs: 331,
         production: &[ParseType::N(89)],
     },
-    // 588 - PackageItem: StructDeclaration;
+    // 592 - PackageItem: StructDeclaration;
     Production {
         lhs: 331,
         production: &[ParseType::N(391)],
     },
-    // 589 - PackageItem: FunctionDeclaration;
+    // 593 - PackageItem: FunctionDeclaration;
     Production {
         lhs: 331,
         production: &[ParseType::N(151)],
     },
-    // 590 - Description: ModuleDeclaration;
+    // 594 - Description: ModuleDeclaration;
     Production {
         lhs: 74,
         production: &[ParseType::N(271)],
     },
-    // 591 - Description: InterfaceDeclaration;
+    // 595 - Description: InterfaceDeclaration;
     Production {
         lhs: 74,
         production: &[ParseType::N(223)],
     },
-    // 592 - Description: PackageDeclaration;
+    // 596 - Description: PackageDeclaration;
     Production {
         lhs: 74,
         production: &[ParseType::N(329)],
     },
-    // 593 - Veryl: Start VerylList /* Vec */;
+    // 597 - Veryl: Start VerylList /* Vec */;
     Production {
-        lhs: 421,
-        production: &[ParseType::N(422), ParseType::N(384)],
+        lhs: 424,
+        production: &[ParseType::N(425), ParseType::N(384)],
     },
-    // 594 - VerylList: Description VerylList;
+    // 598 - VerylList: Description VerylList;
     Production {
-        lhs: 422,
-        production: &[ParseType::N(422), ParseType::N(74)],
+        lhs: 425,
+        production: &[ParseType::N(425), ParseType::N(74)],
     },
-    // 595 - VerylList: ;
+    // 599 - VerylList: ;
     Production {
-        lhs: 422,
+        lhs: 425,
         production: &[],
     },
 ];
@@ -20343,7 +20515,7 @@ where
     T: AsRef<Path>,
 {
     let mut llk_parser = LLKParser::new(
-        421,
+        424,
         LOOKAHEAD_AUTOMATA,
         PRODUCTIONS,
         TERMINAL_NAMES,

@@ -7,7 +7,7 @@ module Module04 #(
     // module port
     input  logic [10-1:0] b    ,
     output logic [10-1:0] bb   ,
-    inout  logic [10-1:0] bbb  ,
+    inout  tri   [10-1:0] bbb  ,
     interface bbbb ,
     Interface05.d bbbbb 
 ) ;

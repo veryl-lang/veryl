@@ -559,6 +559,13 @@ pub trait VerylWalker {
         after!(self, sync_low, arg);
     }
 
+    /// Semantic action for non-terminal 'Tri'
+    fn tri(&mut self, arg: &Tri) {
+        before!(self, tri, arg);
+        self.veryl_token(&arg.tri_token);
+        after!(self, tri, arg);
+    }
+
     /// Semantic action for non-terminal 'U32'
     fn u32(&mut self, arg: &U32) {
         before!(self, u32, arg);
@@ -931,6 +938,7 @@ pub trait VerylWalker {
         before!(self, builtin_type, arg);
         match arg {
             BuiltinType::Logic(x) => self.logic(&x.logic),
+            BuiltinType::Tri(x) => self.tri(&x.tri),
             BuiltinType::Bit(x) => self.bit(&x.bit),
             BuiltinType::U32(x) => self.u32(&x.u32),
             BuiltinType::U64(x) => self.u64(&x.u64),

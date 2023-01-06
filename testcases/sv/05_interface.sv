@@ -12,7 +12,7 @@ interface Interface05 #(
     // variable declaration
     logic                  c  ;
     logic [10-1:0]         cc ;
-    bit   [10-1:0][10-1:0] ccc;
+    tri   [10-1:0][10-1:0] ccc;
 
     // modport declaration
     modport d (

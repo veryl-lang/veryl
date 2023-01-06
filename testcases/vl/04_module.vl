@@ -7,7 +7,7 @@ module Module04 #(
     // module port
     b    : input  logic [10],
     bb   : output logic [10],
-    bbb  : inout  logic [10],
+    bbb  : inout  tri   [10],
     bbbb : interface,
     bbbbb: modport Interface05.d ,
 ) {

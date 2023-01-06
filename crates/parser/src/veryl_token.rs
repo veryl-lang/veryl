@@ -232,6 +232,7 @@ token_with_comments!(StepToken, StepTerm, step_term);
 token_with_comments!(StructToken, StructTerm, struct_term);
 token_with_comments!(SyncHighToken, SyncHighTerm, sync_high_term);
 token_with_comments!(SyncLowToken, SyncLowTerm, sync_low_term);
+token_with_comments!(TriToken, TriTerm, tri_term);
 token_with_comments!(U32Token, U32Term, u32_term);
 token_with_comments!(U64Token, U64Term, u64_term);
 token_with_comments!(VarToken, VarTerm, var_term);
