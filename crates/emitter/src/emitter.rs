@@ -982,13 +982,13 @@ impl VerylWalker for Emitter {
         }
         self.space(1);
         if let Some(ref x) = arg.inst_declaration_opt1 {
-            self.token_will_push(&x.l_brace.l_brace_token.replace("("));
+            self.token_will_push(&x.l_paren.l_paren_token.replace("("));
             self.newline_push();
             if let Some(ref x) = x.inst_declaration_opt2 {
                 self.inst_port_list(&x.inst_port_list);
             }
             self.newline_pop();
-            self.token(&x.r_brace.r_brace_token.replace(")"));
+            self.token(&x.r_paren.r_paren_token.replace(")"));
         } else {
             self.str("()");
         }

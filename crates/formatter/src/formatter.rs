@@ -809,13 +809,13 @@ impl VerylWalker for Formatter {
         }
         if let Some(ref x) = arg.inst_declaration_opt1 {
             self.space(1);
-            self.token_will_push(&x.l_brace.l_brace_token);
+            self.token_will_push(&x.l_paren.l_paren_token);
             self.newline_push();
             if let Some(ref x) = x.inst_declaration_opt2 {
                 self.inst_port_list(&x.inst_port_list);
             }
             self.newline_pop();
-            self.r_brace(&x.r_brace);
+            self.r_paren(&x.r_paren);
         }
         self.semicolon(&arg.semicolon);
         self.single_line = false;

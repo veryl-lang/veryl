@@ -12784,8 +12784,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 436] = &[
         states: &[None, Some(466), Some(467)],
         transitions: &[
             DFATransition(0, 34, 2),
-            DFATransition(0, 35, 2),
             DFATransition(0, 36, 1),
+            DFATransition(0, 37, 2),
             DFATransition(0, 41, 2),
         ],
         k: 1,
@@ -12795,7 +12795,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 436] = &[
         states: &[None, Some(464), Some(465)],
         transitions: &[
             DFATransition(0, 34, 1),
-            DFATransition(0, 35, 2),
+            DFATransition(0, 37, 2),
             DFATransition(0, 41, 2),
         ],
         k: 1,
@@ -12803,13 +12803,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 436] = &[
     /* 205 - "InstDeclarationOpt1" */
     LookaheadDFA {
         states: &[None, Some(460), Some(463)],
-        transitions: &[DFATransition(0, 35, 1), DFATransition(0, 41, 2)],
+        transitions: &[DFATransition(0, 37, 1), DFATransition(0, 41, 2)],
         k: 1,
     },
     /* 206 - "InstDeclarationOpt2" */
     LookaheadDFA {
         states: &[None, Some(461), Some(462)],
-        transitions: &[DFATransition(0, 38, 2), DFATransition(0, 85, 1)],
+        transitions: &[DFATransition(0, 40, 2), DFATransition(0, 85, 1)],
         k: 1,
     },
     /* 207 - "InstParameter" */
@@ -12868,15 +12868,15 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 436] = &[
             DFATransition(4, 29, 3),
             DFATransition(4, 40, 3),
             DFATransition(5, 5, 8),
-            DFATransition(5, 35, 9),
+            DFATransition(5, 37, 9),
             DFATransition(5, 41, 10),
             DFATransition(6, 5, 7),
-            DFATransition(6, 35, 7),
+            DFATransition(6, 37, 7),
             DFATransition(6, 41, 7),
-            DFATransition(8, 35, 7),
+            DFATransition(8, 37, 7),
             DFATransition(8, 41, 7),
             DFATransition(9, 5, 7),
-            DFATransition(9, 38, 7),
+            DFATransition(9, 40, 7),
             DFATransition(9, 85, 7),
             DFATransition(10, 5, 7),
             DFATransition(10, 28, 7),
@@ -12919,7 +12919,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 436] = &[
         transitions: &[
             DFATransition(0, 28, 1),
             DFATransition(0, 29, 2),
-            DFATransition(0, 38, 2),
+            DFATransition(0, 40, 2),
         ],
         k: 1,
     },
@@ -12945,16 +12945,16 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 436] = &[
         ],
         transitions: &[
             DFATransition(0, 29, 1),
-            DFATransition(0, 38, 5),
+            DFATransition(0, 40, 5),
             DFATransition(1, 5, 2),
-            DFATransition(1, 38, 6),
+            DFATransition(1, 40, 6),
             DFATransition(1, 85, 4),
-            DFATransition(2, 38, 7),
+            DFATransition(2, 40, 7),
             DFATransition(2, 85, 3),
             DFATransition(4, 5, 3),
             DFATransition(4, 28, 3),
             DFATransition(4, 29, 3),
-            DFATransition(4, 38, 3),
+            DFATransition(4, 40, 3),
             DFATransition(5, 5, 8),
             DFATransition(5, 41, 9),
             DFATransition(6, 5, 7),
@@ -12980,7 +12980,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 436] = &[
     /* 218 - "InstPortListOpt" */
     LookaheadDFA {
         states: &[None, Some(482), Some(483)],
-        transitions: &[DFATransition(0, 29, 1), DFATransition(0, 38, 2)],
+        transitions: &[DFATransition(0, 29, 1), DFATransition(0, 40, 2)],
         k: 1,
     },
     /* 219 - "InstTerm" */
@@ -19585,10 +19585,10 @@ pub const PRODUCTIONS: &[Production; 602] = &[
             ParseType::N(201),
         ],
     },
-    // 460 - InstDeclarationOpt1: LBrace InstDeclarationOpt2 /* Option */ RBrace;
+    // 460 - InstDeclarationOpt1: LParen InstDeclarationOpt2 /* Option */ RParen;
     Production {
         lhs: 205,
-        production: &[ParseType::N(350), ParseType::N(206), ParseType::N(239)],
+        production: &[ParseType::N(356), ParseType::N(206), ParseType::N(245)],
     },
     // 461 - InstDeclarationOpt2: InstPortList;
     Production {

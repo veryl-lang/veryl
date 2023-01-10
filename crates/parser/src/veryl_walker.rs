@@ -1348,11 +1348,11 @@ pub trait VerylWalker {
             self.inst_parameter(&x.inst_parameter);
         }
         if let Some(ref x) = arg.inst_declaration_opt1 {
-            self.l_brace(&x.l_brace);
+            self.l_paren(&x.l_paren);
             if let Some(ref x) = x.inst_declaration_opt2 {
                 self.inst_port_list(&x.inst_port_list);
             }
-            self.r_brace(&x.r_brace);
+            self.r_paren(&x.r_paren);
         }
         self.semicolon(&arg.semicolon);
         after!(self, inst_declaration, arg);

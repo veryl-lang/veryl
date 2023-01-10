@@ -42,8 +42,8 @@ module ModuleA #(
 
     // module instantiation
     inst u_module_b: ModuleB #(
-    ) {
-    };
+    ) (
+    );
 
     // interface instantiation
     inst u_interface_a: InterfaceA;

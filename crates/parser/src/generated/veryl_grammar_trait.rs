@@ -5017,9 +5017,9 @@ pub struct InstDeclarationOpt0 {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct InstDeclarationOpt1 {
-    pub l_brace: Box<LBrace>,
+    pub l_paren: Box<LParen>,
     pub inst_declaration_opt2: Option<Box<InstDeclarationOpt2>>,
-    pub r_brace: Box<RBrace>,
+    pub r_paren: Box<RParen>,
 }
 
 ///
@@ -19668,26 +19668,26 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 460:
     ///
-    /// InstDeclarationOpt1 /* Option<T>::Some */: LBrace InstDeclarationOpt2 /* Option */ RBrace;
+    /// InstDeclarationOpt1 /* Option<T>::Some */: LParen InstDeclarationOpt2 /* Option */ RParen;
     ///
     #[parol_runtime::function_name::named]
     fn inst_declaration_opt1_0(
         &mut self,
-        _l_brace: &ParseTreeStackEntry<'t>,
+        _l_paren: &ParseTreeStackEntry<'t>,
         _inst_declaration_opt2: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
+        _r_paren: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let r_brace = pop_item!(self, r_brace, RBrace, context);
+        let r_paren = pop_item!(self, r_paren, RParen, context);
         let inst_declaration_opt2 =
             pop_item!(self, inst_declaration_opt2, InstDeclarationOpt2, context);
-        let l_brace = pop_item!(self, l_brace, LBrace, context);
+        let l_paren = pop_item!(self, l_paren, LParen, context);
         let inst_declaration_opt1_0_built = InstDeclarationOpt1Builder::default()
-            .l_brace(Box::new(l_brace))
+            .l_paren(Box::new(l_paren))
             .inst_declaration_opt2(inst_declaration_opt2)
-            .r_brace(Box::new(r_brace))
+            .r_paren(Box::new(r_paren))
             .build()
             .into_diagnostic()?;
         self.push(

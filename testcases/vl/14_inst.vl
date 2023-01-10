@@ -7,11 +7,11 @@ module Module14 {
         a      ,
         aa: 10 ,
         aa: 100,
-    ) {
+    ) (
         a        ,
         bb  : aa ,
         bbbb: bbb,
-    };
+    );
 
     // interface instantiation
     inst y: InterfaceA;
