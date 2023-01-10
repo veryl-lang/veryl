@@ -57,14 +57,7 @@ jobs:
       uses: actions/setup-node@v3
       with:
         node-version: 16.x
-    - name: Install NPM
     - run: npm install
-    - run: npm run deploy:linux-x64
-      env:
-        VSCE_PAT: ${{ secrets.VSCE_PAT }}
-    - run: npm run deploy:win32-x64
-      env:
-        VSCE_PAT: ${{ secrets.VSCE_PAT }}
-    - run: npm run deploy:darwin-x64
+    - run: make publish
       env:
         VSCE_PAT: ${{ secrets.VSCE_PAT }}
