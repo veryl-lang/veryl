@@ -72,9 +72,9 @@
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
     "test": "node ./out/test/runTest.js",
-    "deploy:linux-x64": "vsce publish --target linux-x64 --yarn",
-    "deploy:win32-x64": "vsce publish --target win32-x64 --yarn",
-    "deploy:darwin-x64": "vsce publish --target darwin-x64 --yarn"
+    "deploy:linux-x64": "vsce publish --target linux-x64",
+    "deploy:win32-x64": "vsce publish --target win32-x64",
+    "deploy:darwin-x64": "vsce publish --target darwin-x64"
   },
   "devDependencies": {
     "@types/glob": "^8.0.0",
