@@ -7,7 +7,7 @@ If you have any idea, please open [Issue](https://github.com/dalance/veryl/issue
 
 [![Actions Status](https://github.com/dalance/veryl/workflows/Regression/badge.svg)](https://github.com/dalance/veryl/actions)
 [![Crates.io](https://img.shields.io/crates/v/veryl.svg)](https://crates.io/crates/veryl)
-[![Changelog](https://img.shields.io/badge/changelog-v0.1.10-green.svg)](https://github.com/dalance/veryl/blob/master/CHANGELOG.md)
+[![Changelog](https://img.shields.io/badge/changelog-v0.1.11-green.svg)](https://github.com/dalance/veryl/blob/master/CHANGELOG.md)
 
 [PlayGround](https://dalance.github.io/veryl/playground)
 
