@@ -1,6 +1,4 @@
-# vscode-veryl
-
-[Veryl](https://github.com/dalance/veryl) extension for Visual Studio Code
+# [Veryl](https://github.com/dalance/veryl) extension for Visual Studio Code
 
 ## Features
 

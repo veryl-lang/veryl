@@ -174,6 +174,7 @@ token_with_comments!(RBraceToken, RBraceTerm, r_brace_term);
 token_with_comments!(RBracketToken, RBracketTerm, r_bracket_term);
 token_with_comments!(RParenToken, RParenTerm, r_paren_term);
 token_with_comments!(SemicolonToken, SemicolonTerm, semicolon_term);
+token_with_comments!(StarToken, StarTerm, star_term);
 
 token_with_comments!(
     AssignmentOperatorToken,
@@ -203,6 +204,7 @@ token_with_comments!(CaseToken, CaseTerm, case_term);
 token_with_comments!(DefaultToken, DefaultTerm, default_term);
 token_with_comments!(ElseToken, ElseTerm, else_term);
 token_with_comments!(EnumToken, EnumTerm, enum_term);
+token_with_comments!(ExportToken, ExportTerm, export_term);
 token_with_comments!(F32Token, F32Term, f32_term);
 token_with_comments!(F64Token, F64Term, f64_term);
 token_with_comments!(FunctionToken, FunctionTerm, function_term);
@@ -211,6 +213,7 @@ token_with_comments!(I32Token, I32Term, i32_term);
 token_with_comments!(I64Token, I64Term, i64_term);
 token_with_comments!(IfToken, IfTerm, if_term);
 token_with_comments!(IfResetToken, IfResetTerm, if_reset_term);
+token_with_comments!(ImportToken, ImportTerm, import_term);
 token_with_comments!(InoutToken, InoutTerm, inout_term);
 token_with_comments!(InputToken, InputTerm, input_term);
 token_with_comments!(InstToken, InstTerm, inst_term);

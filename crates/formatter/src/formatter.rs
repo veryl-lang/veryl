@@ -275,7 +275,10 @@ impl VerylWalker for Formatter {
         self.expression10(&arg.expression10);
         for x in &arg.expression09_list {
             self.space(1);
-            self.operator10(&x.operator10);
+            match &*x.expression09_list_group {
+                Expression09ListGroup::Operator10(x) => self.operator10(&x.operator10),
+                Expression09ListGroup::Star(x) => self.star(&x.star),
+            }
             self.space(1);
             self.expression10(&x.expression10);
         }
@@ -1013,6 +1016,35 @@ impl VerylWalker for Formatter {
         }
         self.newline_pop();
         self.r_brace(&arg.r_brace);
+    }
+
+    /// Semantic action for non-terminal 'ImportDeclaration'
+    fn import_declaration(&mut self, arg: &ImportDeclaration) {
+        self.import(&arg.import);
+        self.space(1);
+        self.identifier(&arg.identifier);
+        self.colon_colon(&arg.colon_colon);
+        match &*arg.import_declaration_group {
+            ImportDeclarationGroup::Identifier(x) => self.identifier(&x.identifier),
+            ImportDeclarationGroup::Star(x) => self.star(&x.star),
+        }
+        self.semicolon(&arg.semicolon);
+    }
+
+    /// Semantic action for non-terminal 'ExportDeclaration'
+    fn export_declaration(&mut self, arg: &ExportDeclaration) {
+        self.export(&arg.export);
+        self.space(1);
+        match &*arg.export_declaration_group {
+            ExportDeclarationGroup::Identifier(x) => self.identifier(&x.identifier),
+            ExportDeclarationGroup::Star(x) => self.star(&x.star),
+        }
+        self.colon_colon(&arg.colon_colon);
+        match &*arg.export_declaration_group0 {
+            ExportDeclarationGroup0::Identifier(x) => self.identifier(&x.identifier),
+            ExportDeclarationGroup0::Star(x) => self.star(&x.star),
+        }
+        self.semicolon(&arg.semicolon);
     }
 
     /// Semantic action for non-terminal 'ModuleDeclaration'

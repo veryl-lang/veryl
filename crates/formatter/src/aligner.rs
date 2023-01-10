@@ -258,7 +258,10 @@ impl VerylWalker for Aligner {
         self.expression10(&arg.expression10);
         for x in &arg.expression09_list {
             self.space(1);
-            self.operator10(&x.operator10);
+            match &*x.expression09_list_group {
+                Expression09ListGroup::Operator10(x) => self.operator10(&x.operator10),
+                Expression09ListGroup::Star(x) => self.star(&x.star),
+            }
             self.space(1);
             self.expression10(&x.expression10);
         }

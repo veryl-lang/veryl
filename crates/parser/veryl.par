@@ -24,7 +24,7 @@ MinusGTTerm           : '->'                                                    
 PlusColonTerm         : '+:'                                                                 : Token;
 AssignmentOperatorTerm: "\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<=|>>=|<<<=|>>>="                      : Token;
 Operator11Term        : "\*\*"                                                               : Token;
-Operator10Term        : "\*|/|%"                                                             : Token;
+Operator10Term        : "/|%"                                                                : Token;
 Operator09Term        : "\+|-"                                                               : Token;
 Operator08Term        : "<<<|>>>|<<|>>"                                                      : Token;
 Operator07Term        : "<=|>=|<|>"                                                          : Token;
@@ -50,6 +50,7 @@ RBraceTerm            : '}'                                                     
 RBracketTerm          : ']'                                                                  : Token;
 RParenTerm            : ')'                                                                  : Token;
 SemicolonTerm         : ';'                                                                  : Token;
+StarTerm              : '*'                                                                  : Token;
 AlwaysCombTerm        : /\balways_comb\b/                                                    : Token;
 AlwaysFfTerm          : /\balways_ff\b/                                                      : Token;
 AssignTerm            : /\bassign\b/                                                         : Token;
@@ -60,6 +61,7 @@ CaseTerm              : /\bcase\b/                                              
 DefaultTerm           : /\bdefault\b/                                                        : Token;
 ElseTerm              : /\belse\b/                                                           : Token;
 EnumTerm              : /\benum\b/                                                           : Token;
+ExportTerm            : /\bexport\b/                                                         : Token;
 F32Term               : /\bf32\b/                                                            : Token;
 F64Term               : /\bf64\b/                                                            : Token;
 ForTerm               : /\bfor\b/                                                            : Token;
@@ -68,6 +70,7 @@ I32Term               : /\bi32\b/                                               
 I64Term               : /\bi64\b/                                                            : Token;
 IfResetTerm           : /\bif_reset\b/                                                       : Token;
 IfTerm                : /\bif\b/                                                             : Token;
+ImportTerm            : /\bimport\b/                                                         : Token;
 InoutTerm             : /\binout\b/                                                          : Token;
 InputTerm             : /\binput\b/                                                          : Token;
 InstTerm              : /\binst\b/                                                           : Token;
@@ -141,6 +144,7 @@ RBraceToken    : RBraceTerm    : Token Comments;
 RBracketToken  : RBracketTerm  : Token Comments;
 RParenToken    : RParenTerm    : Token Comments;
 SemicolonToken : SemicolonTerm : Token Comments;
+StarToken      : StarTerm      : Token Comments;
 
 AlwaysCombToken: AlwaysCombTerm: Token Comments;
 AlwaysFfToken  : AlwaysFfTerm  : Token Comments;
@@ -152,6 +156,7 @@ CaseToken      : CaseTerm      : Token Comments;
 DefaultToken   : DefaultTerm   : Token Comments;
 ElseToken      : ElseTerm      : Token Comments;
 EnumToken      : EnumTerm      : Token Comments;
+ExportToken    : ExportTerm    : Token Comments;
 F32Token       : F32Term       : Token Comments;
 F64Token       : F64Term       : Token Comments;
 ForToken       : ForTerm       : Token Comments;
@@ -160,6 +165,7 @@ I32Token       : I32Term       : Token Comments;
 I64Token       : I64Term       : Token Comments;
 IfResetToken   : IfResetTerm   : Token Comments;
 IfToken        : IfTerm        : Token Comments;
+ImportToken    : ImportTerm    : Token Comments;
 InoutToken     : InoutTerm     : Token Comments;
 InputToken     : InputTerm     : Token Comments;
 InstToken      : InstTerm      : Token Comments;
@@ -236,6 +242,7 @@ RBrace    : RBraceToken    : VerylToken;
 RBracket  : RBracketToken  : VerylToken;
 RParen    : RParenToken    : VerylToken;
 Semicolon : SemicolonToken : VerylToken;
+Star      : StarToken      : VerylToken;
 
 // Keyword
 AlwaysComb: AlwaysCombToken: VerylToken;
@@ -248,6 +255,7 @@ Case      : CaseToken      : VerylToken;
 Defaul    : DefaultToken   : VerylToken; // avoid to conflict with Rust's Default trait
 Else      : ElseToken      : VerylToken;
 Enum      : EnumToken      : VerylToken;
+Export    : ExportToken    : VerylToken;
 F32       : F32Token       : VerylToken;
 F64       : F64Token       : VerylToken;
 For       : ForToken       : VerylToken;
@@ -256,6 +264,7 @@ I32       : I32Token       : VerylToken;
 I64       : I64Token       : VerylToken;
 If        : IfToken        : VerylToken;
 IfReset   : IfResetToken   : VerylToken;
+Import    : ImportToken    : VerylToken;
 In        : InToken        : VerylToken;
 Inout     : InoutToken     : VerylToken;
 Input     : InputToken     : VerylToken;
@@ -324,7 +333,7 @@ Expression05: Expression06 { Operator06 Expression06 };
 Expression06: Expression07 { Operator07 Expression07 };
 Expression07: Expression08 { Operator08 Expression08 };
 Expression08: Expression09 { Operator09 Expression09 };
-Expression09: Expression10 { Operator10 Expression10 };
+Expression09: Expression10 { ( Operator10 | Star ) Expression10 };
 Expression10: Expression11 { Operator11 Expression11 };
 Expression11: { ( UnaryOperator | Operator09 | Operator05 | Operator03 | Operator04 ) } Factor;
 
@@ -483,6 +492,14 @@ FunctionItem: VarDeclaration
             ;
 
 // ----------------------------------------------------------------------------
+// Import / Export
+// ----------------------------------------------------------------------------
+
+ImportDeclaration: Import Identifier ColonColon ( Identifier | Star ) Semicolon;
+
+ExportDeclaration: Export ( Identifier | Star ) ColonColon ( Identifier | Star ) Semicolon;
+
+// ----------------------------------------------------------------------------
 // Module
 // ----------------------------------------------------------------------------
 
@@ -508,6 +525,7 @@ ModuleItem: VarDeclaration
           | EnumDeclaration
           | StructDeclaration
           | ModuleNamedBlock
+          | ImportDeclaration
           ;
 
 // ----------------------------------------------------------------------------
@@ -533,6 +551,7 @@ InterfaceItem: VarDeclaration
              | StructDeclaration
              | InterfaceNamedBlock
              | FunctionDeclaration
+             | ImportDeclaration
              ;
 
 // ----------------------------------------------------------------------------
@@ -546,6 +565,8 @@ PackageItem: VarDeclaration
            | EnumDeclaration
            | StructDeclaration
            | FunctionDeclaration
+           | ImportDeclaration
+           | ExportDeclaration
            ;
 
 // ----------------------------------------------------------------------------
@@ -555,6 +576,7 @@ PackageItem: VarDeclaration
 Description: ModuleDeclaration
            | InterfaceDeclaration
            | PackageDeclaration
+           | ImportDeclaration
            ;
 
 // ----------------------------------------------------------------------------

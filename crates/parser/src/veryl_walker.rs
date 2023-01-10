@@ -286,6 +286,13 @@ pub trait VerylWalker {
         after!(self, semicolon, arg);
     }
 
+    /// Semantic action for non-terminal 'Star'
+    fn star(&mut self, arg: &Star) {
+        before!(self, star, arg);
+        self.veryl_token(&arg.star_token);
+        after!(self, star, arg);
+    }
+
     /// Semantic action for non-terminal 'AlwaysComb'
     fn always_comb(&mut self, arg: &AlwaysComb) {
         before!(self, always_comb, arg);
@@ -356,6 +363,13 @@ pub trait VerylWalker {
         after!(self, r#enum, arg);
     }
 
+    /// Semantic action for non-terminal 'Export'
+    fn export(&mut self, arg: &Export) {
+        before!(self, export, arg);
+        self.veryl_token(&arg.export_token);
+        after!(self, export, arg);
+    }
+
     /// Semantic action for non-terminal 'F32'
     fn f32(&mut self, arg: &F32) {
         before!(self, f32, arg);
@@ -410,6 +424,13 @@ pub trait VerylWalker {
         before!(self, if_reset, arg);
         self.veryl_token(&arg.if_reset_token);
         after!(self, if_reset, arg);
+    }
+
+    /// Semantic action for non-terminal 'Import'
+    fn import(&mut self, arg: &Import) {
+        before!(self, import, arg);
+        self.veryl_token(&arg.import_token);
+        after!(self, import, arg);
     }
 
     /// Semantic action for non-terminal 'In'
@@ -795,7 +816,10 @@ pub trait VerylWalker {
         before!(self, expression09, arg);
         self.expression10(&arg.expression10);
         for x in &arg.expression09_list {
-            self.operator10(&x.operator10);
+            match &*x.expression09_list_group {
+                Expression09ListGroup::Operator10(x) => self.operator10(&x.operator10),
+                Expression09ListGroup::Star(x) => self.star(&x.star),
+            }
             self.expression10(&x.expression10);
         }
         after!(self, expression09, arg);
@@ -1545,6 +1569,37 @@ pub trait VerylWalker {
         after!(self, function_item, arg);
     }
 
+    /// Semantic action for non-terminal 'ImportDeclaration'
+    fn import_declaration(&mut self, arg: &ImportDeclaration) {
+        before!(self, import_declaration, arg);
+        self.import(&arg.import);
+        self.identifier(&arg.identifier);
+        self.colon_colon(&arg.colon_colon);
+        match &*arg.import_declaration_group {
+            ImportDeclarationGroup::Identifier(x) => self.identifier(&x.identifier),
+            ImportDeclarationGroup::Star(x) => self.star(&x.star),
+        }
+        self.semicolon(&arg.semicolon);
+        after!(self, import_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'ExportDeclaration'
+    fn export_declaration(&mut self, arg: &ExportDeclaration) {
+        before!(self, export_declaration, arg);
+        self.export(&arg.export);
+        match &*arg.export_declaration_group {
+            ExportDeclarationGroup::Identifier(x) => self.identifier(&x.identifier),
+            ExportDeclarationGroup::Star(x) => self.star(&x.star),
+        }
+        self.colon_colon(&arg.colon_colon);
+        match &*arg.export_declaration_group0 {
+            ExportDeclarationGroup0::Identifier(x) => self.identifier(&x.identifier),
+            ExportDeclarationGroup0::Star(x) => self.star(&x.star),
+        }
+        self.semicolon(&arg.semicolon);
+        after!(self, export_declaration, arg);
+    }
+
     /// Semantic action for non-terminal 'ModuleDeclaration'
     fn module_declaration(&mut self, arg: &ModuleDeclaration) {
         before!(self, module_declaration, arg);
@@ -1657,6 +1712,7 @@ pub trait VerylWalker {
             ModuleItem::EnumDeclaration(x) => self.enum_declaration(&x.enum_declaration),
             ModuleItem::StructDeclaration(x) => self.struct_declaration(&x.struct_declaration),
             ModuleItem::ModuleNamedBlock(x) => self.module_named_block(&x.module_named_block),
+            ModuleItem::ImportDeclaration(x) => self.import_declaration(&x.import_declaration),
         };
         after!(self, module_item, arg);
     }
@@ -1767,6 +1823,7 @@ pub trait VerylWalker {
             InterfaceItem::FunctionDeclaration(x) => {
                 self.function_declaration(&x.function_declaration)
             }
+            InterfaceItem::ImportDeclaration(x) => self.import_declaration(&x.import_declaration),
         };
         after!(self, interface_item, arg);
     }
@@ -1797,6 +1854,8 @@ pub trait VerylWalker {
             PackageItem::FunctionDeclaration(x) => {
                 self.function_declaration(&x.function_declaration)
             }
+            PackageItem::ImportDeclaration(x) => self.import_declaration(&x.import_declaration),
+            PackageItem::ExportDeclaration(x) => self.export_declaration(&x.export_declaration),
         }
         after!(self, package_item, arg);
     }
@@ -1810,6 +1869,7 @@ pub trait VerylWalker {
                 self.interface_declaration(&x.interface_declaration)
             }
             Description::PackageDeclaration(x) => self.package_declaration(&x.package_declaration),
+            Description::ImportDeclaration(x) => self.import_declaration(&x.import_declaration),
         };
         after!(self, description, arg);
     }

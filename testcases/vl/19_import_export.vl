@@ -1,0 +1,19 @@
+import PackageA::A;
+import PackageA::*;
+
+module Module19 {
+    import PackageA::A;
+    import PackageA::*;
+}
+
+interface Interface19 {
+    import PackageA::A;
+    import PackageA::*;
+}
+
+package Package19 {
+    import PackageA::A;
+    import PackageA::*;
+    export PackageA::A;
+    export *::*;
+}
