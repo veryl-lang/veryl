@@ -69,9 +69,9 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(
 		commands.registerCommand("vscode-veryl.restartVerylLs", () => {
-			stopServer().then(function () {startServer(context)}, startServer);
+			stopServer().then(function () {startServer(context);}, startServer);
 		})
-	)
+	);
 
 	startServer(context);
 }

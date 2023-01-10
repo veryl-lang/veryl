@@ -17,6 +17,7 @@ pre-release-replacements = [
     {file="../../CHANGELOG.md", search="ReleaseDate", replace="{{date}}"},
     {file="../../CHANGELOG.md", search="Change Log", replace="Change Log\n\n## [Unreleased](https://github.com/dalance/veryl/compare/v{{version}}...Unreleased) - ReleaseDate"},
     {file="../../README.md", search = "changelog-v[0-9\\.]+", replace = "changelog-v{{version}}" },
+    {file="../../support/vscode/package.json", search = "\"version\": \"[0-9\\.]+\",", replace = "\"version\": \"{{version}}\"" },
 ]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
