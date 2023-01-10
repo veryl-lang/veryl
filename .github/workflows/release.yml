@@ -21,7 +21,7 @@ jobs:
       with:
         rust-version: ${{ matrix.rust }}
     - name: Checkout
-      uses: actions/checkout@v1
+      uses: actions/checkout@v3
     - name: Setup MUSL
       if: matrix.os == 'ubuntu-latest'
       run: |
@@ -44,3 +44,27 @@ jobs:
         files: "*.zip\n*.rpm"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  vsce:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: support/vscode
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Install Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: 16.x
+    - name: Install NPM
+    - run: npm install
+    - run: npm run deploy:linux-x64
+      env:
+        VSCE_PAT: ${{ secrets.VSCE_PAT }}
+    - run: npm run deploy:win32-x64
+      env:
+        VSCE_PAT: ${{ secrets.VSCE_PAT }}
+    - run: npm run deploy:darwin-x64
+      env:
+        VSCE_PAT: ${{ secrets.VSCE_PAT }}
