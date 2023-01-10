@@ -1,7 +1,11 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
+import { cpSync } from 'fs';
+import { type } from 'os';
+import { format } from 'path';
 import * as vscode from 'vscode';
 import { commands, workspace, ExtensionContext, window, Uri } from 'vscode';
+import * as path from 'path';
 
 import {
 	LanguageClient,
@@ -9,17 +13,25 @@ import {
 	ServerOptions,
 	TransportKind
 } from 'vscode-languageclient/node';
+import { start } from 'repl';
 
 let client: LanguageClient;
 
-function startServer() {
-	let veryl_ls_binary_path: string | undefined = workspace.getConfiguration("vscode-veryl").get("verylLsBinary.path");
-	if (typeof veryl_ls_binary_path === "undefined")	veryl_ls_binary_path = "veryl-ls";
+function startServer(context: vscode.ExtensionContext) {
+	let verylLsIntegrated = context.asAbsolutePath(path.join('bin', 'veryl-ls'));
+
+	let verylLsBinaryPath: string | undefined = workspace.getConfiguration("vscode-veryl").get("verylLsBinary.path");
+	if (typeof verylLsBinaryPath === "undefined") {
+		verylLsBinaryPath = verylLsIntegrated;
+	} else if (verylLsBinaryPath === null) {
+		verylLsBinaryPath = verylLsIntegrated;
+	}
+
 	// If the extension is launched in debug mode then the debug server options are used
 	// Otherwise the run options are used
 	let serverOptions: ServerOptions = {
-		run: {command: veryl_ls_binary_path},
-		debug: {command: veryl_ls_binary_path},
+		run: {command: verylLsBinaryPath},
+		debug: {command: verylLsBinaryPath},
 	};
 
 	// Options to control the language client
@@ -57,11 +69,11 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(
 		commands.registerCommand("vscode-veryl.restartVerylLs", () => {
-			stopServer().then(startServer, startServer);
+			stopServer().then(function () {startServer(context)}, startServer);
 		})
 	)
 
-	startServer();
+	startServer(context);
 }
 
 // This method is called when your extension is deactivated

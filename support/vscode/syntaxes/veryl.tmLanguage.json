@@ -1,12 +1,15 @@
 {
 	"$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
 	"name": "Veryl",
-    "fileTypes" : [
-        "vl"
-    ],
+	"fileTypes" : [
+		"vl"
+	],
 	"patterns": [
 		{
 			"include": "#keywords"
+		},
+		{
+			"include": "#storages"
 		},
 		{
 			"include": "#strings"
@@ -23,13 +26,25 @@
 			"patterns": [
 				{
 					"name": "keyword.control.veryl",
-                	"match": "\\b(if|if_reset|else|for|in)\\b"
-			    },
+					"match": "\\b(if|if_reset|else|for|in|step|repeat)\\b"
+				},
 				{
-					"name": "keyword.veryl",
-					"match": "\\b(module|interface|function|modport|enum|struct|parameter|localparam|posedge|negedge|async_high|async_low|sync_high|sync_low|always_ff|always_comb|assign|return)\\b"
-			    }
-            ]
+					"name": "keyword.other.veryl",
+					"match": "\\b(module|interface|function|modport|package|parameter|localparam|posedge|negedge|async_high|async_low|sync_high|sync_low|always_ff|always_comb|assign|return|var|inst)\\b"
+				}
+			]
+		},
+		"storages": {
+			"patterns": [
+				{
+					"name": "storage.type.veryl",
+					"match": "\\b(enum|struct|logic|bit|u32|u64|i32|i64|f32|f64)\\b"
+				},
+				{
+					"name": "storage.modifier.veryl",
+					"match": "\\b(tri|input|output|inout|ref)\\b"
+				}
+			]
 		},
 		"strings": {
 			"name": "string.quoted.double.veryl",

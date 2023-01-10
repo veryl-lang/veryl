@@ -288,11 +288,12 @@ impl LanguageServer for Backend {
             finder.column = params.text_document_position_params.position.character as usize + 1;
             finder.veryl(&parser.veryl);
             if let Some(token) = finder.token {
-                let namespace = namespace_table::get(token.id).unwrap();
-                let name = Name::Hierarchical(vec![token.text]);
-                if let Some(symbol) = symbol_table::get(&name, &namespace) {
-                    let location = Backend::to_location(&symbol.token);
-                    return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+                if let Some(namespace) = namespace_table::get(token.id) {
+                    let name = Name::Hierarchical(vec![token.text]);
+                    if let Some(symbol) = symbol_table::get(&name, &namespace) {
+                        let location = Backend::to_location(&symbol.token);
+                        return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+                    }
                 }
             }
         }
@@ -343,15 +344,16 @@ impl LanguageServer for Backend {
             finder.column = params.text_document_position_params.position.character as usize + 1;
             finder.veryl(&parser.veryl);
             if let Some(token) = finder.token {
-                let namespace = namespace_table::get(token.id).unwrap();
-                let name = Name::Hierarchical(vec![token.text]);
-                if let Some(symbol) = symbol_table::get(&name, &namespace) {
-                    let text = symbol.kind.to_string();
-                    let hover = Hover {
-                        contents: HoverContents::Scalar(MarkedString::String(text)),
-                        range: None,
-                    };
-                    return Ok(Some(hover));
+                if let Some(namespace) = namespace_table::get(token.id) {
+                    let name = Name::Hierarchical(vec![token.text]);
+                    if let Some(symbol) = symbol_table::get(&name, &namespace) {
+                        let text = symbol.kind.to_string();
+                        let hover = Hover {
+                            contents: HoverContents::Scalar(MarkedString::String(text)),
+                            range: None,
+                        };
+                        return Ok(Some(hover));
+                    }
                 }
             }
         }

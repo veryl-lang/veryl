@@ -15,7 +15,8 @@
     "Programming Languages"
   ],
   "activationEvents": [
-    "onLanguage:veryl"
+    "onLanguage:veryl",
+    "workspaceContains:*/Veryl.toml"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -32,8 +33,8 @@
         "properties": {
           "vscode-veryl.verylLsBinary.path": {
             "scope": "window",
-            "type": "string",
-            "default": "veryl-ls",
+            "type": ["string", "null"],
+            "default": null,
             "markdownDescription": "Specify veryl-ls binary path."
           }
         }
