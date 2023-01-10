@@ -938,7 +938,6 @@ pub trait VerylWalker {
         before!(self, builtin_type, arg);
         match arg {
             BuiltinType::Logic(x) => self.logic(&x.logic),
-            BuiltinType::Tri(x) => self.tri(&x.tri),
             BuiltinType::Bit(x) => self.bit(&x.bit),
             BuiltinType::U32(x) => self.u32(&x.u32),
             BuiltinType::U64(x) => self.u64(&x.u64),
@@ -950,9 +949,19 @@ pub trait VerylWalker {
         after!(self, builtin_type, arg);
     }
 
+    /// Semantic action for non-terminal 'TypeModifier'
+    fn type_modifier(&mut self, arg: &TypeModifier) {
+        before!(self, type_modifier, arg);
+        self.tri(&arg.tri);
+        after!(self, type_modifier, arg);
+    }
+
     /// Semantic action for non-terminal 'Type'
     fn r#type(&mut self, arg: &Type) {
         before!(self, r#type, arg);
+        if let Some(ref x) = arg.type_opt {
+            self.type_modifier(&x.type_modifier);
+        }
         match &*arg.type_group {
             TypeGroup::BuiltinType(x) => self.builtin_type(&x.builtin_type),
             TypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),

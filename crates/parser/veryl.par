@@ -359,12 +359,13 @@ Width: LBracket Expression RBracket;
 // ----------------------------------------------------------------------------
 
 BuiltinType: Logic
-           | Tri
            | Bit
            | U32 | U64 | I32 | I64 | F32 | F64
            ;
 
-Type: ( BuiltinType | ScopedIdentifier | ModportIdentifier ) { Width };
+TypeModifier: Tri;
+
+Type: [ TypeModifier ] ( BuiltinType | ScopedIdentifier | ModportIdentifier ) { Width };
 
 // ----------------------------------------------------------------------------
 // Statement

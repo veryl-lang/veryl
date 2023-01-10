@@ -188,11 +188,14 @@ impl Emitter {
     }
 
     fn type_left(&mut self, input: &Type) {
+        if let Some(ref x) = input.type_opt {
+            self.type_modifier(&x.type_modifier);
+            self.space(1);
+        }
         match &*input.type_group {
             TypeGroup::BuiltinType(x) => {
                 let (width, token) = match &*x.builtin_type {
                     BuiltinType::Logic(x) => (true, x.logic.logic_token.clone()),
-                    BuiltinType::Tri(x) => (true, x.tri.tri_token.clone()),
                     BuiltinType::Bit(x) => (true, x.bit.bit_token.clone()),
                     BuiltinType::U32(x) => (false, x.u32.u32_token.replace("int unsigned")),
                     BuiltinType::U64(x) => (false, x.u64.u64_token.replace("longint unsigned")),
@@ -218,7 +221,6 @@ impl Emitter {
         let width = match &*input.type_group {
             TypeGroup::BuiltinType(x) => match &*x.builtin_type {
                 BuiltinType::Logic(_) => false,
-                BuiltinType::Tri(_) => false,
                 BuiltinType::Bit(_) => false,
                 BuiltinType::U32(_) => true,
                 BuiltinType::U64(_) => true,

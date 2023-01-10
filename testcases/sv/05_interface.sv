@@ -10,9 +10,9 @@ interface Interface05 #(
     localparam longint unsigned bb  = 1;
 
     // variable declaration
-    logic                  c  ;
-    logic [10-1:0]         cc ;
-    tri   [10-1:0][10-1:0] ccc;
+    logic                      c  ;
+    logic     [10-1:0]         cc ;
+    tri logic [10-1:0][10-1:0] ccc;
 
     // modport declaration
     modport d (

@@ -156,10 +156,15 @@ impl From<&veryl_parser::veryl_grammar_trait::Direction> for Direction {
 }
 
 #[derive(Debug, Clone)]
-pub enum Type {
+pub struct Type {
+    kind: TypeKind,
+    modifier: Option<TypeModifier>,
+}
+
+#[derive(Debug, Clone)]
+pub enum TypeKind {
     Bit,
     Logic,
-    Tri,
     U32,
     U64,
     I32,
@@ -170,46 +175,59 @@ pub enum Type {
     Modport(StrId, StrId),
 }
 
+#[derive(Debug, Clone)]
+pub enum TypeModifier {
+    Tri,
+}
+
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let text = match self {
-            Type::Bit => "bit".to_string(),
-            Type::Logic => "logic".to_string(),
-            Type::Tri => "tri".to_string(),
-            Type::U32 => "u32".to_string(),
-            Type::U64 => "u64".to_string(),
-            Type::I32 => "i32".to_string(),
-            Type::I64 => "i64".to_string(),
-            Type::F32 => "f32".to_string(),
-            Type::F64 => "f64".to_string(),
-            Type::UserDefined(paths) => {
-                let mut text = format!("{}", paths.first().unwrap());
+        let mut text = String::new();
+        if let Some(x) = &self.modifier {
+            match x {
+                TypeModifier::Tri => text.push_str("tri "),
+            }
+        }
+        match &self.kind {
+            TypeKind::Bit => text.push_str("bit"),
+            TypeKind::Logic => text.push_str("logic"),
+            TypeKind::U32 => text.push_str("u32"),
+            TypeKind::U64 => text.push_str("u64"),
+            TypeKind::I32 => text.push_str("i32"),
+            TypeKind::I64 => text.push_str("i64"),
+            TypeKind::F32 => text.push_str("f32"),
+            TypeKind::F64 => text.push_str("f64"),
+            TypeKind::UserDefined(paths) => {
+                text.push_str(&format!("{}", paths.first().unwrap()));
                 for path in &paths[1..] {
                     text.push_str(&format!("::{}", path));
                 }
-                text
             }
-            Type::Modport(interface, modport) => {
-                format!("{}.{}", interface, modport)
+            TypeKind::Modport(interface, modport) => {
+                text.push_str(&format!("{}.{}", interface, modport));
             }
-        };
+        }
         text.fmt(f)
     }
 }
 
 impl From<&veryl_parser::veryl_grammar_trait::Type> for Type {
     fn from(value: &veryl_parser::veryl_grammar_trait::Type) -> Self {
-        match &*value.type_group {
+        let modifier = if value.type_opt.is_some() {
+            Some(TypeModifier::Tri)
+        } else {
+            None
+        };
+        let kind = match &*value.type_group {
             TypeGroup::BuiltinType(x) => match &*x.builtin_type {
-                BuiltinType::Logic(_) => Type::Logic,
-                BuiltinType::Tri(_) => Type::Tri,
-                BuiltinType::Bit(_) => Type::Bit,
-                BuiltinType::U32(_) => Type::U32,
-                BuiltinType::U64(_) => Type::U64,
-                BuiltinType::I32(_) => Type::I32,
-                BuiltinType::I64(_) => Type::I64,
-                BuiltinType::F32(_) => Type::F32,
-                BuiltinType::F64(_) => Type::F64,
+                BuiltinType::Logic(_) => TypeKind::Logic,
+                BuiltinType::Bit(_) => TypeKind::Bit,
+                BuiltinType::U32(_) => TypeKind::U32,
+                BuiltinType::U64(_) => TypeKind::U64,
+                BuiltinType::I32(_) => TypeKind::I32,
+                BuiltinType::I64(_) => TypeKind::I64,
+                BuiltinType::F32(_) => TypeKind::F32,
+                BuiltinType::F64(_) => TypeKind::F64,
             },
             TypeGroup::ScopedIdentifier(x) => {
                 let x = &x.scoped_identifier;
@@ -218,15 +236,16 @@ impl From<&veryl_parser::veryl_grammar_trait::Type> for Type {
                 for x in &x.scoped_identifier_list {
                     name.push(x.identifier.identifier_token.token.text);
                 }
-                Type::UserDefined(name)
+                TypeKind::UserDefined(name)
             }
             TypeGroup::ModportIdentifier(x) => {
                 let x = &x.modport_identifier;
                 let interface = x.identifier.identifier_token.token.text;
                 let modport = x.identifier0.identifier_token.token.text;
-                Type::Modport(interface, modport)
+                TypeKind::Modport(interface, modport)
             }
-        }
+        };
+        Type { kind, modifier }
     }
 }
 

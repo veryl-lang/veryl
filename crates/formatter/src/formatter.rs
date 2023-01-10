@@ -345,6 +345,10 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'Type'
     fn r#type(&mut self, arg: &Type) {
+        if let Some(ref x) = arg.type_opt {
+            self.type_modifier(&x.type_modifier);
+            self.space(1);
+        }
         match &*arg.type_group {
             TypeGroup::BuiltinType(x) => self.builtin_type(&x.builtin_type),
             TypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),

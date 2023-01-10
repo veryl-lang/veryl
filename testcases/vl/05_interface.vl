@@ -10,9 +10,9 @@ interface Interface05 #(
     localparam bb: u64  = 1;
 
     // variable declaration
-    var c  : logic         ;
-    var cc : logic [10]    ;
-    var ccc: tri   [10][10];
+    var c  : logic             ;
+    var cc : logic     [10]    ;
+    var ccc: tri logic [10][10];
 
     // modport declaration
     modport d {

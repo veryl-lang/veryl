@@ -5,9 +5,9 @@ module Module04 #(
     localparam aa: u32  = 1,
 ) (
     // module port
-    b    : input  logic [10],
-    bb   : output logic [10],
-    bbb  : inout  tri   [10],
+    b    : input  logic     [10],
+    bb   : output logic     [10],
+    bbb  : inout  tri logic [10],
     bbbb : interface,
     bbbbb: modport Interface05.d ,
 ) {
