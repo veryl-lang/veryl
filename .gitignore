@@ -6,3 +6,4 @@ support/vscode/node_modules
 support/vscode/.vscode-test/
 support/vscode/*.vsix
 support/vscode/bin
+support/highlightjs/dist/

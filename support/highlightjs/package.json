@@ -1,0 +1,25 @@
+{
+  "name": "highlightjs-veryl",
+  "version": "0.0.1",
+  "description": "Veryl syntax highlighting plugin for highlight.js",
+  "main": "src/lauguages/veryl.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dalance/veryl.git"
+  },
+  "keywords": [
+    "veryl",
+    "hljs",
+    "highlightjs",
+    "highlight.js"
+  ],
+  "author": "Naoya Hatta",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/dalance/veryl/issues"
+  },
+  "homepage": "https://github.com/dalance/veryl"
+}
