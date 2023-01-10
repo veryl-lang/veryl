@@ -18,6 +18,7 @@ pub struct Emitter {
     in_start_token: bool,
     consumed_next_newline: bool,
     single_line: bool,
+    adjust_line: bool,
     in_always_ff: bool,
     in_function: bool,
     in_generate: bool,
@@ -39,6 +40,7 @@ impl Default for Emitter {
             in_start_token: false,
             consumed_next_newline: false,
             single_line: false,
+            adjust_line: false,
             in_always_ff: false,
             in_function: false,
             in_generate: false,
@@ -94,6 +96,7 @@ impl Emitter {
         }
         self.indent += 1;
         self.indent();
+        self.adjust_line = true;
     }
 
     fn newline_pop(&mut self) {
@@ -105,6 +108,7 @@ impl Emitter {
         }
         self.indent -= 1;
         self.indent();
+        self.adjust_line = true;
     }
 
     fn newline(&mut self) {
@@ -115,6 +119,7 @@ impl Emitter {
             self.consumed_next_newline = false;
         }
         self.indent();
+        self.adjust_line = true;
     }
 
     fn space(&mut self, repeat: usize) {
@@ -122,6 +127,10 @@ impl Emitter {
     }
 
     fn push_token(&mut self, x: &Token) {
+        if self.adjust_line && x.line > self.line + 1 {
+            self.newline();
+        }
+        self.adjust_line = false;
         let text = resource_table::get_str_value(x.text).unwrap();
         let text = if text.ends_with('\n') {
             self.consumed_next_newline = true;

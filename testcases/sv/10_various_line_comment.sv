@@ -1,15 +1,18 @@
 module //a
  Module10 //a
  (
+
     input //a
      logic //a
       i_clk // a
     ,
     input logic  i_rst_n,
     input logic  i_up   ,
+
     input  logic         i_down ,
     output logic [8-1:0] o_count
 ) ;
+
     logic //a
      [ // a
     8 //a
@@ -17,6 +20,7 @@ module //a
      count //a
     ;
     logic [2-1:0] up_down;
+
     always_comb // a
      begin
         up_down = // a
@@ -25,6 +29,7 @@ module //a
          1) // a
          | i_down;
     end
+
     always_ff // a
      @ (posedge i_clk // a
     , // a
