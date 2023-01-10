@@ -7,7 +7,7 @@ publish_lnx:
 	curl -L -o veryl.zip ${RELEASE_URL}/veryl-x86_64-linux.zip
 	unzip -o -d bin veryl.zip
 	rm bin/veryl veryl.zip
-	vsce publish --target linux-x64
+	npm run deploy:linux-x64
 	rm -rf bin
 
 publish_win:
@@ -15,7 +15,7 @@ publish_win:
 	curl -L -o veryl.zip ${RELEASE_URL}/veryl-x86_64-windows.zip
 	unzip -o -d bin veryl.zip
 	rm bin/veryl.exe veryl.zip
-	vsce publish --target win32-x64
+	npm run deploy:win32-x64
 	rm -rf bin
 
 publish_mac:
@@ -23,5 +23,5 @@ publish_mac:
 	curl -L -o veryl.zip ${RELEASE_URL}/veryl-x86_64-mac.zip
 	unzip -o -d bin veryl.zip
 	rm bin/veryl veryl.zip
-	vsce publish --target darwin-x64
+	npm run deploy:darwin-x64
 	rm -rf bin
