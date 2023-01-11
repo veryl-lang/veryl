@@ -34,6 +34,11 @@ pub enum SymbolKind {
     Instance(InstanceProperty),
     Block,
     Package,
+    Struct,
+    StructMember(StructMemberProperty),
+    Enum(EnumProperty),
+    EnumMember(EnumMemberProperty),
+    Modport(ModportProperty),
 }
 
 impl SymbolKind {
@@ -48,6 +53,11 @@ impl SymbolKind {
             SymbolKind::Instance(_) => "instance".to_string(),
             SymbolKind::Block => "block".to_string(),
             SymbolKind::Package => "package".to_string(),
+            SymbolKind::Struct => "struct".to_string(),
+            SymbolKind::StructMember(_) => "struct member".to_string(),
+            SymbolKind::Enum(_) => "enum".to_string(),
+            SymbolKind::EnumMember(_) => "enum member".to_string(),
+            SymbolKind::Modport(_) => "modport".to_string(),
         }
     }
 }
@@ -57,63 +67,67 @@ impl fmt::Display for SymbolKind {
         let text = match self {
             SymbolKind::Port(x) => {
                 if let Some(ref r#type) = x.r#type {
-                    format!("port [{} {}]", x.direction, r#type)
+                    format!("port ({} {})", x.direction, r#type)
                 } else {
-                    format!("port [{}]", x.direction)
+                    format!("port ({})", x.direction)
                 }
             }
             SymbolKind::Variable(x) => {
-                format!("variable [{}]", x.r#type)
+                format!("variable ({})", x.r#type)
             }
             SymbolKind::Module(x) => {
-                let mut text = "module [".to_string();
-                for parameter in &x.parameters {
-                    text.push_str(&format!("{}, ", parameter));
-                }
-                text.push_str("] [");
-                for port in &x.ports {
-                    text.push_str(&format!("{}, ", port));
-                }
-                text.push(']');
-                text
+                format!(
+                    "module ({} params, {} ports)",
+                    x.parameters.len(),
+                    x.ports.len()
+                )
             }
             SymbolKind::Interface(x) => {
-                let mut text = "interface [".to_string();
-                for parameter in &x.parameters {
-                    text.push_str(&format!("{}, ", parameter));
-                }
-                text.push(']');
-                text
+                format!("interface ({} params)", x.parameters.len())
             }
             SymbolKind::Function(x) => {
-                let mut text = "function [".to_string();
-                for parameter in &x.parameters {
-                    text.push_str(&format!("{}, ", parameter));
-                }
-                text.push_str("] [");
-                for port in &x.ports {
-                    text.push_str(&format!("{}, ", port));
-                }
-                text.push(']');
-                text
+                format!(
+                    "function ({} params, {} args)",
+                    x.parameters.len(),
+                    x.ports.len()
+                )
             }
             SymbolKind::Parameter(x) => {
                 let mut stringifier = Stringifier::new();
                 stringifier.expression(&x.value);
                 match x.scope {
                     ParameterScope::Global => {
-                        format!("parameter [{}] ({})", x.r#type, stringifier.as_str())
+                        format!("parameter ({}) = {}", x.r#type, stringifier.as_str())
                     }
                     ParameterScope::Local => {
-                        format!("localparam [{}] ({})", x.r#type, stringifier.as_str())
+                        format!("localparam ({}) = {}", x.r#type, stringifier.as_str())
                     }
                 }
             }
             SymbolKind::Instance(x) => {
-                format!("instance [{}]", x.type_name)
+                format!("instance ({})", x.type_name)
             }
             SymbolKind::Block => "block".to_string(),
             SymbolKind::Package => "package".to_string(),
+            SymbolKind::Struct => "struct".to_string(),
+            SymbolKind::StructMember(x) => {
+                format!("struct member ({})", x.r#type)
+            }
+            SymbolKind::Enum(x) => {
+                format!("enum ({})", x.r#type)
+            }
+            SymbolKind::EnumMember(x) => {
+                if let Some(ref x) = x.value {
+                    let mut stringifier = Stringifier::new();
+                    stringifier.expression(x);
+                    format!("enum member = {}", stringifier.as_str())
+                } else {
+                    format!("enum member")
+                }
+            }
+            SymbolKind::Modport(x) => {
+                format!("modport ({} ports)", x.members.len())
+            }
         };
         text.fmt(f)
     }
@@ -157,8 +171,9 @@ impl From<&syntax_tree::Direction> for Direction {
 
 #[derive(Debug, Clone)]
 pub struct Type {
-    kind: TypeKind,
     modifier: Option<TypeModifier>,
+    kind: TypeKind,
+    width: Vec<syntax_tree::Expression>,
 }
 
 #[derive(Debug, Clone)]
@@ -207,6 +222,14 @@ impl fmt::Display for Type {
                 text.push_str(&format!("{}.{}", interface, modport));
             }
         }
+        if !self.width.is_empty() {
+            text.push(' ');
+        }
+        for x in &self.width {
+            let mut stringifier = Stringifier::new();
+            stringifier.expression(x);
+            text.push_str(&format!("[{}]", stringifier.as_str()));
+        }
         text.fmt(f)
     }
 }
@@ -245,7 +268,15 @@ impl From<&syntax_tree::Type> for Type {
                 TypeKind::Modport(interface, modport)
             }
         };
-        Type { kind, modifier }
+        let mut width = Vec::new();
+        for x in &value.type_list {
+            width.push(*x.width.expression.clone());
+        }
+        Type {
+            kind,
+            modifier,
+            width,
+        }
     }
 }
 
@@ -277,8 +308,8 @@ impl From<&syntax_tree::PortDeclarationItem> for Port {
     fn from(value: &syntax_tree::PortDeclarationItem) -> Self {
         let property = match &*value.port_declaration_item_group {
             syntax_tree::PortDeclarationItemGroup::DirectionType(x) => {
-                let r#type: Type = (&*x.r#type).into();
-                let direction: Direction = (&*x.direction).into();
+                let r#type: Type = x.r#type.as_ref().into();
+                let direction: Direction = x.direction.as_ref().into();
                 PortProperty {
                     r#type: Some(r#type),
                     direction,
@@ -328,7 +359,7 @@ impl From<&syntax_tree::WithParameterItem> for Parameter {
             syntax_tree::WithParameterItemGroup::Parameter(_) => ParameterScope::Global,
             syntax_tree::WithParameterItemGroup::Localparam(_) => ParameterScope::Local,
         };
-        let r#type: Type = (&*value.r#type).into();
+        let r#type: Type = value.r#type.as_ref().into();
         let property = ParameterProperty {
             r#type,
             scope,
@@ -361,4 +392,30 @@ pub struct FunctionProperty {
 #[derive(Debug, Clone)]
 pub struct InstanceProperty {
     pub type_name: StrId,
+}
+
+#[derive(Debug, Clone)]
+pub struct StructMemberProperty {
+    pub r#type: Type,
+}
+
+#[derive(Debug, Clone)]
+pub struct EnumProperty {
+    pub r#type: Type,
+}
+
+#[derive(Debug, Clone)]
+pub struct EnumMemberProperty {
+    pub value: Option<syntax_tree::Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModportProperty {
+    pub members: Vec<ModportMember>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModportMember {
+    pub name: StrId,
+    pub direction: Direction,
 }

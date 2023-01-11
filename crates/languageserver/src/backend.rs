@@ -7,7 +7,7 @@ use std::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
-use veryl_analyzer::symbol_table::Name;
+use veryl_analyzer::symbol_table::SymbolPath;
 use veryl_analyzer::{namespace_table, symbol_table, Analyzer};
 use veryl_formatter::Formatter;
 use veryl_metadata::Metadata;
@@ -289,8 +289,8 @@ impl LanguageServer for Backend {
             finder.veryl(&parser.veryl);
             if let Some(token) = finder.token {
                 if let Some(namespace) = namespace_table::get(token.id) {
-                    let name = Name::Hierarchical(vec![token.text]);
-                    if let Some(symbol) = symbol_table::get(&name, &namespace) {
+                    let path = SymbolPath::new(&vec![token.text]);
+                    if let Some(symbol) = symbol_table::get(&path, &namespace) {
                         let location = Backend::to_location(&symbol.token);
                         return Ok(Some(GotoDefinitionResponse::Scalar(location)));
                     }
@@ -318,6 +318,11 @@ impl LanguageServer for Backend {
                     veryl_analyzer::symbol::SymbolKind::Instance(_) => SymbolKind::OBJECT,
                     veryl_analyzer::symbol::SymbolKind::Block => SymbolKind::NAMESPACE,
                     veryl_analyzer::symbol::SymbolKind::Package => SymbolKind::PACKAGE,
+                    veryl_analyzer::symbol::SymbolKind::Struct => SymbolKind::STRUCT,
+                    veryl_analyzer::symbol::SymbolKind::StructMember(_) => SymbolKind::VARIABLE,
+                    veryl_analyzer::symbol::SymbolKind::Enum(_) => SymbolKind::ENUM,
+                    veryl_analyzer::symbol::SymbolKind::EnumMember(_) => SymbolKind::ENUM_MEMBER,
+                    veryl_analyzer::symbol::SymbolKind::Modport(_) => SymbolKind::INTERFACE,
                 };
                 let location = Backend::to_location(&symbol.token);
                 #[allow(deprecated)]
@@ -345,8 +350,8 @@ impl LanguageServer for Backend {
             finder.veryl(&parser.veryl);
             if let Some(token) = finder.token {
                 if let Some(namespace) = namespace_table::get(token.id) {
-                    let name = Name::Hierarchical(vec![token.text]);
-                    if let Some(symbol) = symbol_table::get(&name, &namespace) {
+                    let path = SymbolPath::new(&vec![token.text]);
+                    if let Some(symbol) = symbol_table::get(&path, &namespace) {
                         let text = symbol.kind.to_string();
                         let hover = Hover {
                             contents: HoverContents::Scalar(MarkedString::String(text)),

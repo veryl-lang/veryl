@@ -7,68 +7,63 @@ use veryl_parser::resource_table::{PathId, StrId};
 use veryl_parser::veryl_grammar_trait as syntax_tree;
 use veryl_parser::veryl_token::Token;
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Name {
-    Hierarchical(Vec<StrId>),
-    Scoped(Vec<StrId>),
-}
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct SymbolPath(Vec<StrId>);
 
-impl Name {
+impl SymbolPath {
+    pub fn new(x: &[StrId]) -> Self {
+        Self(x.to_vec())
+    }
+
+    pub fn push(&mut self, x: StrId) {
+        self.0.push(x)
+    }
+
     pub fn as_slice(&self) -> &[StrId] {
-        match self {
-            Name::Hierarchical(x) => x.as_slice(),
-            Name::Scoped(x) => x.as_slice(),
-        }
+        self.0.as_slice()
     }
 }
 
-impl Default for Name {
-    fn default() -> Self {
-        Name::Hierarchical(vec![])
-    }
-}
-
-impl From<&syntax_tree::HierarchicalIdentifier> for Name {
+impl From<&syntax_tree::HierarchicalIdentifier> for SymbolPath {
     fn from(value: &syntax_tree::HierarchicalIdentifier) -> Self {
-        let mut paths = Vec::new();
-        paths.push(value.identifier.identifier_token.token.text);
+        let mut path = Vec::new();
+        path.push(value.identifier.identifier_token.token.text);
         for x in &value.hierarchical_identifier_list0 {
-            paths.push(x.identifier.identifier_token.token.text);
+            path.push(x.identifier.identifier_token.token.text);
         }
-        Name::Hierarchical(paths)
+        SymbolPath(path)
     }
 }
 
-impl From<&syntax_tree::ScopedIdentifier> for Name {
+impl From<&syntax_tree::ScopedIdentifier> for SymbolPath {
     fn from(value: &syntax_tree::ScopedIdentifier) -> Self {
-        let mut paths = Vec::new();
-        paths.push(value.identifier.identifier_token.token.text);
+        let mut path = Vec::new();
+        path.push(value.identifier.identifier_token.token.text);
         for x in &value.scoped_identifier_list {
-            paths.push(x.identifier.identifier_token.token.text);
+            path.push(x.identifier.identifier_token.token.text);
         }
-        Name::Scoped(paths)
+        SymbolPath(path)
     }
 }
 
-impl From<&syntax_tree::ScopedOrHierIdentifier> for Name {
+impl From<&syntax_tree::ScopedOrHierIdentifier> for SymbolPath {
     fn from(value: &syntax_tree::ScopedOrHierIdentifier) -> Self {
-        let mut paths = Vec::new();
-        paths.push(value.identifier.identifier_token.token.text);
+        let mut path = Vec::new();
+        path.push(value.identifier.identifier_token.token.text);
         match &*value.scoped_or_hier_identifier_group {
             syntax_tree::ScopedOrHierIdentifierGroup::ColonColonIdentifierScopedOrHierIdentifierGroupList(x) => {
-                paths.push(x.identifier.identifier_token.token.text);
+                path.push(x.identifier.identifier_token.token.text);
                 for x in &x.scoped_or_hier_identifier_group_list {
-                    paths.push(x.identifier.identifier_token.token.text);
+                    path.push(x.identifier.identifier_token.token.text);
                 }
-                Name::Scoped(paths)
             },
             syntax_tree::ScopedOrHierIdentifierGroup::ScopedOrHierIdentifierGroupList0ScopedOrHierIdentifierGroupList1(x) => {
                 for x in &x.scoped_or_hier_identifier_group_list1 {
-                    paths.push(x.identifier.identifier_token.token.text);
+                    path.push(x.identifier.identifier_token.token.text);
                 }
-                Name::Hierarchical(paths)
             },
         }
+        SymbolPath(path)
     }
 }
 
@@ -89,26 +84,10 @@ impl SymbolTable {
         true
     }
 
-    pub fn get(&self, name: &Name, namespace: &Namespace) -> Option<&Symbol> {
-        match name {
-            Name::Hierarchical(x) => self.get_hierarchical(x, namespace),
-            Name::Scoped(_) => todo!(),
-        }
-    }
-
-    pub fn get_all(&self) -> Vec<Symbol> {
-        let mut ret = Vec::new();
-        for value in self.table.values() {
-            let mut value = value.clone();
-            ret.append(&mut value);
-        }
-        ret
-    }
-
-    fn get_hierarchical(&self, paths: &[StrId], namespace: &Namespace) -> Option<&Symbol> {
+    pub fn get(&self, path: &SymbolPath, namespace: &Namespace) -> Option<&Symbol> {
         let mut ret = None;
         let mut namespace = namespace.clone();
-        for name in paths {
+        for name in path.as_slice() {
             let mut max_depth = 0;
             ret = None;
             if let Some(symbols) = self.table.get(name) {
@@ -132,6 +111,15 @@ impl SymbolTable {
             } else {
                 return None;
             }
+        }
+        ret
+    }
+
+    pub fn get_all(&self) -> Vec<Symbol> {
+        let mut ret = Vec::new();
+        for value in self.table.values() {
+            let mut value = value.clone();
+            ret.append(&mut value);
         }
         ret
     }
@@ -184,8 +172,8 @@ pub fn insert(token: &Token, symbol: Symbol) -> bool {
     SYMBOL_TABLE.with(|f| f.borrow_mut().insert(token, symbol))
 }
 
-pub fn get(name: &Name, namespace: &Namespace) -> Option<Symbol> {
-    SYMBOL_TABLE.with(|f| f.borrow().get(name, namespace).cloned())
+pub fn get(path: &SymbolPath, namespace: &Namespace) -> Option<Symbol> {
+    SYMBOL_TABLE.with(|f| f.borrow().get(path, namespace).cloned())
 }
 
 pub fn get_all() -> Vec<Symbol> {
@@ -198,4 +186,347 @@ pub fn dump() -> String {
 
 pub fn drop(file_path: PathId) {
     SYMBOL_TABLE.with(|f| f.borrow_mut().drop(file_path))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::namespace::Namespace;
+    use crate::symbol_table::SymbolPath;
+    use crate::{symbol_table, Analyzer};
+    use veryl_parser::{resource_table, Parser};
+
+    const CODE: &str = r##"
+    module ModuleA #(
+        parameter paramA: u32 = 1,
+    ) (
+        portA: input logic [10],
+    ) {
+        localparam paramB: u32 = 1;
+
+        var memberA: logic;
+        var memberB: PackageA::StructA;
+    }
+
+    interface InterfaceA #(
+        parameter paramA: u32 = 1,
+    ) {
+        localparam paramB: u32 = 1;
+
+        var memberA: logic;
+
+        modport modportA {
+            memberA: input,
+        }
+    }
+
+    package PackageA {
+        localparam paramB: u32 = 1;
+
+        struct StructA {
+            memberA: logic,
+        }
+
+        enum EnumA: logic [2] {
+            memberA,
+        }
+    }
+    "##;
+
+    fn parse() {
+        let parser = Parser::parse(&CODE, &"").unwrap();
+        let mut analyzer = Analyzer::new(&CODE);
+        analyzer.analyze(&parser.veryl);
+    }
+
+    #[test]
+    fn module() {
+        parse();
+
+        let mut symbol_path = SymbolPath::default();
+        symbol_path.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
+
+        let namespace = Namespace::default();
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+    }
+
+    #[test]
+    fn interface() {
+        parse();
+
+        let mut symbol_path = SymbolPath::default();
+        symbol_path.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
+
+        let namespace = Namespace::default();
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+    }
+
+    #[test]
+    fn package() {
+        parse();
+
+        let mut symbol_path = SymbolPath::default();
+        symbol_path.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
+
+        let namespace = Namespace::default();
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+    }
+
+    #[test]
+    fn parameter() {
+        parse();
+
+        let mut symbol_path = SymbolPath::default();
+        symbol_path.push(resource_table::get_str_id("paramA".to_string()).unwrap());
+
+        let namespace = Namespace::default();
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_none());
+
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "ModuleA");
+
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "InterfaceA");
+    }
+
+    #[test]
+    fn localparam() {
+        parse();
+
+        let mut symbol_path = SymbolPath::default();
+        symbol_path.push(resource_table::get_str_id("paramB".to_string()).unwrap());
+
+        let namespace = Namespace::default();
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_none());
+
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "ModuleA");
+
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "InterfaceA");
+
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "PackageA");
+    }
+
+    #[test]
+    fn port() {
+        parse();
+
+        let mut symbol_path = SymbolPath::default();
+        symbol_path.push(resource_table::get_str_id("portA".to_string()).unwrap());
+
+        let namespace = Namespace::default();
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_none());
+
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "ModuleA");
+
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_none());
+
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_none());
+    }
+
+    #[test]
+    fn variable() {
+        parse();
+
+        let mut symbol_path = SymbolPath::default();
+        symbol_path.push(resource_table::get_str_id("memberA".to_string()).unwrap());
+
+        let namespace = Namespace::default();
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_none());
+
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "ModuleA");
+
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "InterfaceA");
+    }
+
+    #[test]
+    fn r#struct() {
+        parse();
+
+        let mut symbol_path = SymbolPath::default();
+        symbol_path.push(resource_table::get_str_id("StructA".to_string()).unwrap());
+
+        let namespace = Namespace::default();
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_none());
+
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_none());
+
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_none());
+
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "PackageA");
+    }
+
+    #[test]
+    fn struct_member() {
+        parse();
+
+        let mut symbol_path = SymbolPath::default();
+        symbol_path.push(resource_table::get_str_id("memberA".to_string()).unwrap());
+
+        let namespace = Namespace::default();
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_none());
+
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
+        namespace.push(resource_table::get_str_id("StructA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_some());
+        assert_eq!(
+            format!("{}", symbol.unwrap().namespace),
+            "PackageA::StructA"
+        );
+
+        let mut symbol_path = SymbolPath::default();
+        symbol_path.push(resource_table::get_str_id("memberB".to_string()).unwrap());
+        symbol_path.push(resource_table::get_str_id("memberA".to_string()).unwrap());
+
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "ModuleA");
+    }
 }

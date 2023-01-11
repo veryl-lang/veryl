@@ -1,7 +1,7 @@
 use crate::analyze_error::AnalyzeError;
 use crate::namespace_table;
 use crate::symbol::SymbolKind;
-use crate::symbol_table::{self, Name};
+use crate::symbol_table::{self, SymbolPath};
 use veryl_parser::miette::Result;
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
@@ -32,7 +32,7 @@ impl<'a> Handler for CheckModuleInstance<'a> {
 impl<'a> VerylGrammarTrait for CheckModuleInstance<'a> {
     fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<()> {
         if let HandlerPoint::Before = self.point {
-            let name = &Name::Hierarchical(vec![arg.identifier0.identifier_token.token.text]);
+            let path = &SymbolPath::new(&vec![arg.identifier0.identifier_token.token.text]);
 
             let mut connected_ports = Vec::new();
             if let Some(ref x) = arg.inst_declaration_opt1 {
@@ -47,13 +47,13 @@ impl<'a> VerylGrammarTrait for CheckModuleInstance<'a> {
             }
 
             let namespace = namespace_table::get(arg.identifier.identifier_token.token.id).unwrap();
-            let symbol = symbol_table::get(name, &namespace);
+            let symbol = symbol_table::get(path, &namespace);
             if let Some(symbol) = symbol {
                 if let SymbolKind::Module(x) = symbol.kind {
                     for port in &x.ports {
                         if !connected_ports.contains(&port.name) {
                             let name =
-                                resource_table::get_str_value(*name.as_slice().last().unwrap())
+                                resource_table::get_str_value(*path.as_slice().last().unwrap())
                                     .unwrap();
                             let port = resource_table::get_str_value(port.name).unwrap();
                             self.errors.push(AnalyzeError::missing_port(
@@ -67,7 +67,7 @@ impl<'a> VerylGrammarTrait for CheckModuleInstance<'a> {
                     for port in &connected_ports {
                         if !x.ports.iter().any(|x| &x.name == port) {
                             let name =
-                                resource_table::get_str_value(*name.as_slice().last().unwrap())
+                                resource_table::get_str_value(*path.as_slice().last().unwrap())
                                     .unwrap();
                             let port = resource_table::get_str_value(*port).unwrap();
                             self.errors.push(AnalyzeError::unknown_port(
@@ -80,7 +80,7 @@ impl<'a> VerylGrammarTrait for CheckModuleInstance<'a> {
                     }
                 } else {
                     let name =
-                        resource_table::get_str_value(*name.as_slice().last().unwrap()).unwrap();
+                        resource_table::get_str_value(*path.as_slice().last().unwrap()).unwrap();
                     self.errors.push(AnalyzeError::mismatch_type(
                         &name,
                         "module",

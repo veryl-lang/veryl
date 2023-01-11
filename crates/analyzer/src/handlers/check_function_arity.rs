@@ -1,7 +1,7 @@
 use crate::analyze_error::AnalyzeError;
 use crate::namespace_table;
 use crate::symbol::SymbolKind;
-use crate::symbol_table::{self, Name};
+use crate::symbol_table::{self, SymbolPath};
 use veryl_parser::miette::Result;
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
@@ -38,7 +38,7 @@ impl<'a> VerylGrammarTrait for CheckFunctionArity<'a> {
                     return Ok(());
                 }
 
-                let name: Name = (&*x.scoped_or_hier_identifier).into();
+                let path: SymbolPath = x.scoped_or_hier_identifier.as_ref().into();
                 let namespace = namespace_table::get(
                     x.scoped_or_hier_identifier
                         .identifier
@@ -47,7 +47,7 @@ impl<'a> VerylGrammarTrait for CheckFunctionArity<'a> {
                         .id,
                 )
                 .unwrap();
-                let symbol = symbol_table::get(&name, &namespace);
+                let symbol = symbol_table::get(&path, &namespace);
 
                 let arity = if let Some(symbol) = symbol {
                     if let SymbolKind::Function(x) = symbol.kind {
@@ -69,7 +69,7 @@ impl<'a> VerylGrammarTrait for CheckFunctionArity<'a> {
 
                 if let Some(arity) = arity {
                     if arity != args {
-                        let name = resource_table::get_str_value(*name.as_slice().last().unwrap())
+                        let name = resource_table::get_str_value(*path.as_slice().last().unwrap())
                             .unwrap();
                         self.errors.push(AnalyzeError::mismatch_arity(
                             &name,

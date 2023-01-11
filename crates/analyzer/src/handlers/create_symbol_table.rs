@@ -4,8 +4,9 @@ use crate::namespace_table;
 use crate::symbol::Direction as SymDirection;
 use crate::symbol::Type as SymType;
 use crate::symbol::{
-    FunctionProperty, InstanceProperty, InterfaceProperty, ModuleProperty, ParameterProperty,
-    ParameterScope, PortProperty, Symbol, SymbolKind, VariableProperty,
+    EnumMemberProperty, EnumProperty, FunctionProperty, InstanceProperty, InterfaceProperty,
+    ModportMember, ModportProperty, ModuleProperty, ParameterProperty, ParameterScope,
+    PortProperty, StructMemberProperty, Symbol, SymbolKind, VariableProperty,
 };
 use crate::symbol_table;
 use veryl_parser::miette::Result;
@@ -59,7 +60,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
     fn var_declaration(&mut self, arg: &VarDeclaration) -> Result<()> {
         if let HandlerPoint::Before = self.point {
-            let r#type: SymType = (&*arg.r#type).into();
+            let r#type: SymType = arg.r#type.as_ref().into();
             let property = VariableProperty { r#type };
             let kind = SymbolKind::Variable(property);
             self.insert_symbol(&arg.identifier.identifier_token, kind);
@@ -69,13 +70,84 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
     fn localparam_declaration(&mut self, arg: &LocalparamDeclaration) -> Result<()> {
         if let HandlerPoint::Before = self.point {
-            let r#type: SymType = (&*arg.r#type).into();
+            let r#type: SymType = arg.r#type.as_ref().into();
             let value = *arg.expression.clone();
             let kind = SymbolKind::Parameter(ParameterProperty {
                 r#type,
                 scope: ParameterScope::Local,
                 value,
             });
+            self.insert_symbol(&arg.identifier.identifier_token, kind);
+        }
+        Ok(())
+    }
+
+    fn modport_declaration(&mut self, arg: &ModportDeclaration) -> Result<()> {
+        if let HandlerPoint::Before = self.point {
+            let member = ModportMember {
+                name: arg
+                    .modport_list
+                    .modport_item
+                    .identifier
+                    .identifier_token
+                    .token
+                    .text,
+                direction: arg.modport_list.modport_item.direction.as_ref().into(),
+            };
+            let mut members = vec![member];
+            for x in &arg.modport_list.modport_list_list {
+                let member = ModportMember {
+                    name: x.modport_item.identifier.identifier_token.token.text,
+                    direction: x.modport_item.direction.as_ref().into(),
+                };
+                members.push(member);
+            }
+            let property = ModportProperty { members };
+            let kind = SymbolKind::Modport(property);
+            self.insert_symbol(&arg.identifier.identifier_token, kind);
+        }
+        Ok(())
+    }
+
+    fn enum_declaration(&mut self, arg: &EnumDeclaration) -> Result<()> {
+        if let HandlerPoint::Before = self.point {
+            let r#type = arg.r#type.as_ref().into();
+            let property = EnumProperty { r#type };
+            let kind = SymbolKind::Enum(property);
+            self.insert_symbol(&arg.identifier.identifier_token, kind);
+        }
+        Ok(())
+    }
+
+    fn enum_item(&mut self, arg: &EnumItem) -> Result<()> {
+        if let HandlerPoint::Before = self.point {
+            let value = arg.enum_item_opt.as_ref().map(|x| *x.expression.clone());
+            let property = EnumMemberProperty { value };
+            let kind = SymbolKind::EnumMember(property);
+            self.insert_symbol(&arg.identifier.identifier_token, kind);
+        }
+        Ok(())
+    }
+
+    fn struct_declaration(&mut self, arg: &StructDeclaration) -> Result<()> {
+        match self.point {
+            HandlerPoint::Before => {
+                let kind = SymbolKind::Struct;
+                self.insert_symbol(&arg.identifier.identifier_token, kind);
+
+                let name = arg.identifier.identifier_token.token.text;
+                self.namespace.push(name)
+            }
+            HandlerPoint::After => self.namespace.pop(),
+        }
+        Ok(())
+    }
+
+    fn struct_item(&mut self, arg: &StructItem) -> Result<()> {
+        if let HandlerPoint::Before = self.point {
+            let r#type = arg.r#type.as_ref().into();
+            let property = StructMemberProperty { r#type };
+            let kind = SymbolKind::StructMember(property);
             self.insert_symbol(&arg.identifier.identifier_token, kind);
         }
         Ok(())
@@ -97,7 +169,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 WithParameterItemGroup::Parameter(_) => ParameterScope::Global,
                 WithParameterItemGroup::Localparam(_) => ParameterScope::Local,
             };
-            let r#type: SymType = (&*arg.r#type).into();
+            let r#type: SymType = arg.r#type.as_ref().into();
             let value = *arg.expression.clone();
             let property = ParameterProperty {
                 r#type,
@@ -114,8 +186,8 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         if let HandlerPoint::Before = self.point {
             let property = match &*arg.port_declaration_item_group {
                 PortDeclarationItemGroup::DirectionType(x) => {
-                    let r#type: SymType = (&*x.r#type).into();
-                    let direction: SymDirection = (&*x.direction).into();
+                    let r#type: SymType = x.r#type.as_ref().into();
+                    let direction: SymDirection = x.direction.as_ref().into();
                     PortProperty {
                         r#type: Some(r#type),
                         direction,
@@ -139,9 +211,9 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 if let Some(ref x) = arg.function_declaration_opt {
                     if let Some(ref x) = x.with_parameter.with_parameter_opt {
                         let x = &x.with_parameter_list;
-                        parameters.push((&*x.with_parameter_item).into());
+                        parameters.push(x.with_parameter_item.as_ref().into());
                         for x in &x.with_parameter_list_list {
-                            parameters.push((&*x.with_parameter_item).into());
+                            parameters.push(x.with_parameter_item.as_ref().into());
                         }
                     }
                 }
@@ -149,9 +221,9 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 if let Some(ref x) = arg.function_declaration_opt0 {
                     if let Some(ref x) = x.port_declaration.port_declaration_opt {
                         let x = &x.port_declaration_list;
-                        ports.push((&*x.port_declaration_item).into());
+                        ports.push(x.port_declaration_item.as_ref().into());
                         for x in &x.port_declaration_list_list {
-                            ports.push((&*x.port_declaration_item).into());
+                            ports.push(x.port_declaration_item.as_ref().into());
                         }
                     }
                 }
@@ -176,9 +248,9 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 if let Some(ref x) = arg.module_declaration_opt {
                     if let Some(ref x) = x.with_parameter.with_parameter_opt {
                         let x = &x.with_parameter_list;
-                        parameters.push((&*x.with_parameter_item).into());
+                        parameters.push(x.with_parameter_item.as_ref().into());
                         for x in &x.with_parameter_list_list {
-                            parameters.push((&*x.with_parameter_item).into());
+                            parameters.push(x.with_parameter_item.as_ref().into());
                         }
                     }
                 }
@@ -186,9 +258,9 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 if let Some(ref x) = arg.module_declaration_opt0 {
                     if let Some(ref x) = x.port_declaration.port_declaration_opt {
                         let x = &x.port_declaration_list;
-                        ports.push((&*x.port_declaration_item).into());
+                        ports.push(x.port_declaration_item.as_ref().into());
                         for x in &x.port_declaration_list_list {
-                            ports.push((&*x.port_declaration_item).into());
+                            ports.push(x.port_declaration_item.as_ref().into());
                         }
                     }
                 }
@@ -244,9 +316,9 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 if let Some(ref x) = arg.interface_declaration_opt {
                     if let Some(ref x) = x.with_parameter.with_parameter_opt {
                         let x = &x.with_parameter_list;
-                        parameters.push((&*x.with_parameter_item).into());
+                        parameters.push(x.with_parameter_item.as_ref().into());
                         for x in &x.with_parameter_list_list {
-                            parameters.push((&*x.with_parameter_item).into());
+                            parameters.push(x.with_parameter_item.as_ref().into());
                         }
                     }
                 }
