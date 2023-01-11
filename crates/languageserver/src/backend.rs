@@ -289,7 +289,11 @@ impl LanguageServer for Backend {
             finder.veryl(&parser.veryl);
             if let Some(token) = finder.token {
                 if let Some(namespace) = namespace_table::get(token.id) {
-                    let path = SymbolPath::new(&vec![token.text]);
+                    let path = if finder.token_group.is_empty() {
+                        SymbolPath::new(&vec![token.text])
+                    } else {
+                        SymbolPath::from(finder.token_group.as_slice())
+                    };
                     if let Some(symbol) = symbol_table::get(&path, &namespace) {
                         let location = Backend::to_location(&symbol.token);
                         return Ok(Some(GotoDefinitionResponse::Scalar(location)));
@@ -350,7 +354,11 @@ impl LanguageServer for Backend {
             finder.veryl(&parser.veryl);
             if let Some(token) = finder.token {
                 if let Some(namespace) = namespace_table::get(token.id) {
-                    let path = SymbolPath::new(&vec![token.text]);
+                    let path = if finder.token_group.is_empty() {
+                        SymbolPath::new(&vec![token.text])
+                    } else {
+                        SymbolPath::from(finder.token_group.as_slice())
+                    };
                     if let Some(symbol) = symbol_table::get(&path, &namespace) {
                         let text = symbol.kind.to_string();
                         let hover = Hover {

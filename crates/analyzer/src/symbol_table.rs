@@ -24,6 +24,16 @@ impl SymbolPath {
     }
 }
 
+impl From<&[Token]> for SymbolPath {
+    fn from(value: &[Token]) -> Self {
+        let mut path = Vec::new();
+        for x in value {
+            path.push(x.text);
+        }
+        SymbolPath(path)
+    }
+}
+
 impl From<&syntax_tree::HierarchicalIdentifier> for SymbolPath {
     fn from(value: &syntax_tree::HierarchicalIdentifier) -> Self {
         let mut path = Vec::new();
@@ -101,9 +111,20 @@ impl SymbolTable {
                 }
 
                 if let Some(ret) = ret {
-                    if let SymbolKind::Instance(ref x) = ret.kind {
-                        namespace = Namespace::default();
-                        namespace.push(x.type_name);
+                    match ret.kind {
+                        SymbolKind::Interface(_) => {
+                            namespace = Namespace::default();
+                            namespace.push(ret.token.text);
+                        }
+                        SymbolKind::Package => {
+                            namespace = Namespace::default();
+                            namespace.push(ret.token.text);
+                        }
+                        SymbolKind::Instance(ref x) => {
+                            namespace = Namespace::default();
+                            namespace.push(x.type_name);
+                        }
+                        _ => (),
                     }
                 } else {
                     return None;
