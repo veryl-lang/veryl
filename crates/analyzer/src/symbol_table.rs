@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
 use veryl_parser::resource_table::{PathId, StrId};
+use veryl_parser::veryl_grammar_trait as syntax_tree;
 use veryl_parser::veryl_token::Token;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -27,8 +28,8 @@ impl Default for Name {
     }
 }
 
-impl From<&veryl_parser::veryl_grammar_trait::HierarchicalIdentifier> for Name {
-    fn from(value: &veryl_parser::veryl_grammar_trait::HierarchicalIdentifier) -> Self {
+impl From<&syntax_tree::HierarchicalIdentifier> for Name {
+    fn from(value: &syntax_tree::HierarchicalIdentifier) -> Self {
         let mut paths = Vec::new();
         paths.push(value.identifier.identifier_token.token.text);
         for x in &value.hierarchical_identifier_list0 {
@@ -38,8 +39,8 @@ impl From<&veryl_parser::veryl_grammar_trait::HierarchicalIdentifier> for Name {
     }
 }
 
-impl From<&veryl_parser::veryl_grammar_trait::ScopedIdentifier> for Name {
-    fn from(value: &veryl_parser::veryl_grammar_trait::ScopedIdentifier) -> Self {
+impl From<&syntax_tree::ScopedIdentifier> for Name {
+    fn from(value: &syntax_tree::ScopedIdentifier) -> Self {
         let mut paths = Vec::new();
         paths.push(value.identifier.identifier_token.token.text);
         for x in &value.scoped_identifier_list {
@@ -49,19 +50,19 @@ impl From<&veryl_parser::veryl_grammar_trait::ScopedIdentifier> for Name {
     }
 }
 
-impl From<&veryl_parser::veryl_grammar_trait::ScopedOrHierIdentifier> for Name {
-    fn from(value: &veryl_parser::veryl_grammar_trait::ScopedOrHierIdentifier) -> Self {
+impl From<&syntax_tree::ScopedOrHierIdentifier> for Name {
+    fn from(value: &syntax_tree::ScopedOrHierIdentifier) -> Self {
         let mut paths = Vec::new();
         paths.push(value.identifier.identifier_token.token.text);
         match &*value.scoped_or_hier_identifier_group {
-            veryl_parser::veryl_grammar_trait::ScopedOrHierIdentifierGroup::ColonColonIdentifierScopedOrHierIdentifierGroupList(x) => {
+            syntax_tree::ScopedOrHierIdentifierGroup::ColonColonIdentifierScopedOrHierIdentifierGroupList(x) => {
                 paths.push(x.identifier.identifier_token.token.text);
                 for x in &x.scoped_or_hier_identifier_group_list {
                     paths.push(x.identifier.identifier_token.token.text);
                 }
                 Name::Scoped(paths)
             },
-            veryl_parser::veryl_grammar_trait::ScopedOrHierIdentifierGroup::ScopedOrHierIdentifierGroupList0ScopedOrHierIdentifierGroupList1(x) => {
+            syntax_tree::ScopedOrHierIdentifierGroup::ScopedOrHierIdentifierGroupList0ScopedOrHierIdentifierGroupList1(x) => {
                 for x in &x.scoped_or_hier_identifier_group_list1 {
                     paths.push(x.identifier.identifier_token.token.text);
                 }

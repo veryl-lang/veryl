@@ -1,7 +1,7 @@
 use crate::namespace::Namespace;
 use std::fmt;
 use veryl_parser::resource_table::StrId;
-use veryl_parser::veryl_grammar_trait::{BuiltinType, Expression, TypeGroup};
+use veryl_parser::veryl_grammar_trait as syntax_tree;
 use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::VerylWalker;
 use veryl_parser::Stringifier;
@@ -143,14 +143,14 @@ impl fmt::Display for Direction {
     }
 }
 
-impl From<&veryl_parser::veryl_grammar_trait::Direction> for Direction {
-    fn from(value: &veryl_parser::veryl_grammar_trait::Direction) -> Self {
+impl From<&syntax_tree::Direction> for Direction {
+    fn from(value: &syntax_tree::Direction) -> Self {
         match value {
-            veryl_parser::veryl_grammar_trait::Direction::Input(_) => Direction::Input,
-            veryl_parser::veryl_grammar_trait::Direction::Output(_) => Direction::Output,
-            veryl_parser::veryl_grammar_trait::Direction::Inout(_) => Direction::Inout,
-            veryl_parser::veryl_grammar_trait::Direction::Ref(_) => Direction::Ref,
-            veryl_parser::veryl_grammar_trait::Direction::Modport(_) => Direction::Modport,
+            syntax_tree::Direction::Input(_) => Direction::Input,
+            syntax_tree::Direction::Output(_) => Direction::Output,
+            syntax_tree::Direction::Inout(_) => Direction::Inout,
+            syntax_tree::Direction::Ref(_) => Direction::Ref,
+            syntax_tree::Direction::Modport(_) => Direction::Modport,
         }
     }
 }
@@ -211,25 +211,25 @@ impl fmt::Display for Type {
     }
 }
 
-impl From<&veryl_parser::veryl_grammar_trait::Type> for Type {
-    fn from(value: &veryl_parser::veryl_grammar_trait::Type) -> Self {
+impl From<&syntax_tree::Type> for Type {
+    fn from(value: &syntax_tree::Type) -> Self {
         let modifier = if value.type_opt.is_some() {
             Some(TypeModifier::Tri)
         } else {
             None
         };
         let kind = match &*value.type_group {
-            TypeGroup::BuiltinType(x) => match &*x.builtin_type {
-                BuiltinType::Logic(_) => TypeKind::Logic,
-                BuiltinType::Bit(_) => TypeKind::Bit,
-                BuiltinType::U32(_) => TypeKind::U32,
-                BuiltinType::U64(_) => TypeKind::U64,
-                BuiltinType::I32(_) => TypeKind::I32,
-                BuiltinType::I64(_) => TypeKind::I64,
-                BuiltinType::F32(_) => TypeKind::F32,
-                BuiltinType::F64(_) => TypeKind::F64,
+            syntax_tree::TypeGroup::BuiltinType(x) => match &*x.builtin_type {
+                syntax_tree::BuiltinType::Logic(_) => TypeKind::Logic,
+                syntax_tree::BuiltinType::Bit(_) => TypeKind::Bit,
+                syntax_tree::BuiltinType::U32(_) => TypeKind::U32,
+                syntax_tree::BuiltinType::U64(_) => TypeKind::U64,
+                syntax_tree::BuiltinType::I32(_) => TypeKind::I32,
+                syntax_tree::BuiltinType::I64(_) => TypeKind::I64,
+                syntax_tree::BuiltinType::F32(_) => TypeKind::F32,
+                syntax_tree::BuiltinType::F64(_) => TypeKind::F64,
             },
-            TypeGroup::ScopedIdentifier(x) => {
+            syntax_tree::TypeGroup::ScopedIdentifier(x) => {
                 let x = &x.scoped_identifier;
                 let mut name = Vec::new();
                 name.push(x.identifier.identifier_token.token.text);
@@ -238,7 +238,7 @@ impl From<&veryl_parser::veryl_grammar_trait::Type> for Type {
                 }
                 TypeKind::UserDefined(name)
             }
-            TypeGroup::ModportIdentifier(x) => {
+            syntax_tree::TypeGroup::ModportIdentifier(x) => {
                 let x = &x.modport_identifier;
                 let interface = x.identifier.identifier_token.token.text;
                 let modport = x.identifier0.identifier_token.token.text;
@@ -273,10 +273,10 @@ impl fmt::Display for Port {
     }
 }
 
-impl From<&veryl_parser::veryl_grammar_trait::PortDeclarationItem> for Port {
-    fn from(value: &veryl_parser::veryl_grammar_trait::PortDeclarationItem) -> Self {
+impl From<&syntax_tree::PortDeclarationItem> for Port {
+    fn from(value: &syntax_tree::PortDeclarationItem) -> Self {
         let property = match &*value.port_declaration_item_group {
-            veryl_parser::veryl_grammar_trait::PortDeclarationItemGroup::DirectionType(x) => {
+            syntax_tree::PortDeclarationItemGroup::DirectionType(x) => {
                 let r#type: Type = (&*x.r#type).into();
                 let direction: Direction = (&*x.direction).into();
                 PortProperty {
@@ -284,12 +284,10 @@ impl From<&veryl_parser::veryl_grammar_trait::PortDeclarationItem> for Port {
                     direction,
                 }
             }
-            veryl_parser::veryl_grammar_trait::PortDeclarationItemGroup::Interface(_) => {
-                PortProperty {
-                    r#type: None,
-                    direction: Direction::Interface,
-                }
-            }
+            syntax_tree::PortDeclarationItemGroup::Interface(_) => PortProperty {
+                r#type: None,
+                direction: Direction::Interface,
+            },
         };
         Port {
             name: value.identifier.identifier_token.token.text,
@@ -308,7 +306,7 @@ pub enum ParameterScope {
 pub struct ParameterProperty {
     pub r#type: Type,
     pub scope: ParameterScope,
-    pub value: Expression,
+    pub value: syntax_tree::Expression,
 }
 
 #[derive(Debug, Clone)]
@@ -324,15 +322,11 @@ impl fmt::Display for Parameter {
     }
 }
 
-impl From<&veryl_parser::veryl_grammar_trait::WithParameterItem> for Parameter {
-    fn from(value: &veryl_parser::veryl_grammar_trait::WithParameterItem) -> Self {
+impl From<&syntax_tree::WithParameterItem> for Parameter {
+    fn from(value: &syntax_tree::WithParameterItem) -> Self {
         let scope = match &*value.with_parameter_item_group {
-            veryl_parser::veryl_grammar_trait::WithParameterItemGroup::Parameter(_) => {
-                ParameterScope::Global
-            }
-            veryl_parser::veryl_grammar_trait::WithParameterItemGroup::Localparam(_) => {
-                ParameterScope::Local
-            }
+            syntax_tree::WithParameterItemGroup::Parameter(_) => ParameterScope::Global,
+            syntax_tree::WithParameterItemGroup::Localparam(_) => ParameterScope::Local,
         };
         let r#type: Type = (&*value.r#type).into();
         let property = ParameterProperty {
