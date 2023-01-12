@@ -290,7 +290,7 @@ impl LanguageServer for Backend {
             if let Some(token) = finder.token {
                 if let Some(namespace) = namespace_table::get(token.id) {
                     let path = if finder.token_group.is_empty() {
-                        SymbolPath::new(&vec![token.text])
+                        SymbolPath::new(&[token.text])
                     } else {
                         SymbolPath::from(finder.token_group.as_slice())
                     };
@@ -355,7 +355,7 @@ impl LanguageServer for Backend {
             if let Some(token) = finder.token {
                 if let Some(namespace) = namespace_table::get(token.id) {
                     let path = if finder.token_group.is_empty() {
-                        SymbolPath::new(&vec![token.text])
+                        SymbolPath::new(&[token.text])
                     } else {
                         SymbolPath::from(finder.token_group.as_slice())
                     };

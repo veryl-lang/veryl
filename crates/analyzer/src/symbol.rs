@@ -122,7 +122,7 @@ impl fmt::Display for SymbolKind {
                     stringifier.expression(x);
                     format!("enum member = {}", stringifier.as_str())
                 } else {
-                    format!("enum member")
+                    "enum member".to_string()
                 }
             }
             SymbolKind::Modport(x) => {

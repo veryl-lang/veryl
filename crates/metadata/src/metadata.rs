@@ -45,7 +45,7 @@ impl FromStr for Metadata {
     type Err = MetadataError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let metadata: Metadata = toml::from_str(&s)?;
+        let metadata: Metadata = toml::from_str(s)?;
         Ok(metadata)
     }
 }

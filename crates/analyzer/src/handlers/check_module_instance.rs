@@ -32,7 +32,7 @@ impl<'a> Handler for CheckModuleInstance<'a> {
 impl<'a> VerylGrammarTrait for CheckModuleInstance<'a> {
     fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<()> {
         if let HandlerPoint::Before = self.point {
-            let path = &SymbolPath::new(&vec![arg.identifier0.identifier_token.token.text]);
+            let path = &SymbolPath::new(&[arg.identifier0.identifier_token.token.text]);
 
             let mut connected_ports = Vec::new();
             if let Some(ref x) = arg.inst_declaration_opt1 {
