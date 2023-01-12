@@ -1,6 +1,7 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::str::FromStr;
 use veryl_metadata::Metadata;
 use veryl_parser::miette::Result;
 
@@ -172,12 +173,21 @@ fn main() -> Result<ExitCode> {
     env_logger::init();
     let opt = Opt::parse();
 
-    let metadata_path = Metadata::search_from_current()?;
-    let metadata = Metadata::load(metadata_path)?;
+    let metadata = match opt.command {
+        Commands::New(_) | Commands::Init(_) => {
+            // dummy metadata
+            let metadata = utils::create_default_toml("");
+            Metadata::from_str(&metadata)?
+        }
+        _ => {
+            let metadata_path = Metadata::search_from_current()?;
+            Metadata::load(metadata_path)?
+        }
+    };
 
     let ret = match opt.command {
-        Commands::New(x) => cmd_new::CmdNew::new(x).exec(&metadata)?,
-        Commands::Init(x) => cmd_init::CmdInit::new(x).exec(&metadata)?,
+        Commands::New(x) => cmd_new::CmdNew::new(x).exec()?,
+        Commands::Init(x) => cmd_init::CmdInit::new(x).exec()?,
         Commands::Fmt(x) => cmd_fmt::CmdFmt::new(x).exec(&metadata)?,
         Commands::Check(x) => cmd_check::CmdCheck::new(x).exec(&metadata)?,
         Commands::Build(x) => {

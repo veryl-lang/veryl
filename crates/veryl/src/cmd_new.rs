@@ -2,7 +2,6 @@ use crate::utils;
 use crate::OptNew;
 use std::fs::{self, File};
 use std::io::Write;
-use veryl_metadata::Metadata;
 use veryl_parser::miette::{bail, IntoDiagnostic, Result};
 
 pub struct CmdNew {
@@ -14,7 +13,7 @@ impl CmdNew {
         Self { opt }
     }
 
-    pub fn exec(&self, _metadata: &Metadata) -> Result<bool> {
+    pub fn exec(&self) -> Result<bool> {
         if self.opt.path.exists() {
             bail!("path \"{}\" exists", self.opt.path.to_string_lossy());
         }

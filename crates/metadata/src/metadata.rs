@@ -3,6 +3,7 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Metadata {
@@ -34,8 +35,17 @@ impl Metadata {
     pub fn load<T: AsRef<Path>>(path: T) -> Result<Self, MetadataError> {
         let path = path.as_ref().canonicalize()?;
         let text = std::fs::read_to_string(&path)?;
-        let mut metadata: Metadata = toml::from_str(&text)?;
+        let mut metadata: Metadata = Self::from_str(&text)?;
         metadata.metadata_path = path;
+        Ok(metadata)
+    }
+}
+
+impl FromStr for Metadata {
+    type Err = MetadataError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let metadata: Metadata = toml::from_str(&s)?;
         Ok(metadata)
     }
 }

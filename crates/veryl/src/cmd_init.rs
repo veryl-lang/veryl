@@ -2,7 +2,6 @@ use crate::utils;
 use crate::OptInit;
 use std::fs::File;
 use std::io::Write;
-use veryl_metadata::Metadata;
 use veryl_parser::miette::{bail, IntoDiagnostic, Result};
 
 pub struct CmdInit {
@@ -14,7 +13,7 @@ impl CmdInit {
         Self { opt }
     }
 
-    pub fn exec(&self, _metadata: &Metadata) -> Result<bool> {
+    pub fn exec(&self) -> Result<bool> {
         if !self.opt.path.exists() {
             bail!(
                 "path \"{}\" does not exist",
