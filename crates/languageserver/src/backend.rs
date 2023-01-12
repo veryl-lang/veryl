@@ -168,6 +168,20 @@ impl Backend {
     }
 }
 
+mod semantic_legend {
+    use super::*;
+
+    pub const PROPERTY: u32 = 0;
+
+    pub fn get_token_types() -> Vec<SemanticTokenType> {
+        vec![SemanticTokenType::PROPERTY]
+    }
+
+    pub fn get_token_modifiers() -> Vec<SemanticTokenModifier> {
+        vec![]
+    }
+}
+
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
@@ -194,6 +208,21 @@ impl LanguageServer for Backend {
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 references_provider: Some(OneOf::Left(true)),
+                semantic_tokens_provider: Some(
+                    SemanticTokensServerCapabilities::SemanticTokensOptions(
+                        SemanticTokensOptions {
+                            work_done_progress_options: WorkDoneProgressOptions {
+                                work_done_progress: Some(false),
+                            },
+                            legend: SemanticTokensLegend {
+                                token_types: semantic_legend::get_token_types(),
+                                token_modifiers: semantic_legend::get_token_modifiers(),
+                            },
+                            range: Some(false),
+                            full: Some(SemanticTokensFullOptions::Delta { delta: Some(false) }),
+                        },
+                    ),
+                ),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -401,6 +430,71 @@ impl LanguageServer for Backend {
             }
         }
         Ok(Some(ret))
+    }
+
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>> {
+        let path = params.text_document.uri.to_string();
+        if let Some(path) = resource_table::get_path_id(Path::new(&path).to_path_buf()) {
+            let mut tokens = Vec::new();
+            for symbol in &symbol_table::get_all() {
+                if symbol.token.file_path == path {
+                    if let veryl_analyzer::symbol::SymbolKind::Port(_) = symbol.kind {
+                        let token_type = semantic_legend::PROPERTY;
+                        tokens.push((symbol.token, token_type));
+                        for reference in &symbol.references {
+                            if reference.file_path == path {
+                                tokens.push((*reference, token_type));
+                            }
+                        }
+                    }
+                }
+            }
+
+            tokens.sort_by(|a, b| {
+                a.0.line
+                    .partial_cmp(&b.0.line)
+                    .unwrap()
+                    .then(a.0.column.partial_cmp(&b.0.column).unwrap())
+            });
+
+            let mut line = 0;
+            let mut column = 0;
+            let mut data = Vec::new();
+            for (token, token_type) in tokens {
+                let token_line = token.line - 1;
+                let token_column = token.column - 1;
+
+                let delta_line = (token_line - line) as u32;
+                let delta_start = if delta_line == 0 {
+                    token_column - column
+                } else {
+                    token_column
+                } as u32;
+
+                let semantic_token = SemanticToken {
+                    delta_line,
+                    delta_start,
+                    length: token.length as u32,
+                    token_type,
+                    token_modifiers_bitset: 0,
+                };
+                data.push(semantic_token);
+
+                line = token_line;
+                column = token_column;
+            }
+
+            let tokens = SemanticTokens {
+                result_id: None,
+                data,
+            };
+            Ok(Some(SemanticTokensResult::Tokens(tokens)))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
