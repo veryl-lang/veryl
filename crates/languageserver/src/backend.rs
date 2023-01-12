@@ -193,6 +193,7 @@ impl LanguageServer for Backend {
                 document_formatting_provider: Some(OneOf::Left(true)),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                references_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -372,6 +373,34 @@ impl LanguageServer for Backend {
             }
         }
         Ok(None)
+    }
+
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        let uri = params.text_document_position.text_document.uri;
+        let path = uri.to_string();
+        let mut ret = Vec::new();
+        if let Some(parser) = self.parser_map.get(&path) {
+            let mut finder = Finder::new();
+            finder.line = params.text_document_position.position.line as usize + 1;
+            finder.column = params.text_document_position.position.character as usize + 1;
+            finder.veryl(&parser.veryl);
+            if let Some(token) = finder.token {
+                if let Some(namespace) = namespace_table::get(token.id) {
+                    let path = if finder.token_group.is_empty() {
+                        SymbolPath::new(&[token.text])
+                    } else {
+                        SymbolPath::from(finder.token_group.as_slice())
+                    };
+                    if let Some(symbol) = symbol_table::get(&path, &namespace) {
+                        for reference in &symbol.references {
+                            let location = Backend::to_location(reference);
+                            ret.push(location);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(Some(ret))
     }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
