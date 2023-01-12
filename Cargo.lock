@@ -1658,7 +1658,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 
 [[package]]
 name = "veryl"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "clap 4.0.32",
  "console",
@@ -1676,7 +1676,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-analyzer"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "thiserror",
  "veryl-parser",
@@ -1684,7 +1684,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-emitter"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "serde",
  "veryl-metadata",
@@ -1693,7 +1693,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-formatter"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "veryl-metadata",
  "veryl-parser",
@@ -1701,7 +1701,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-ls"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "dashmap",
  "glob",
@@ -1717,7 +1717,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-metadata"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "semver",
  "serde",
@@ -1728,7 +1728,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-parser"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "bimap",
  "parol",

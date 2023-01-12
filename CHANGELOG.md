@@ -1,6 +1,8 @@
 # Change Log
 
-## [Unreleased](https://github.com/dalance/veryl/compare/v0.1.13...Unreleased) - ReleaseDate
+## [Unreleased](https://github.com/dalance/veryl/compare/v0.1.14...Unreleased) - ReleaseDate
+
+## [v0.1.14](https://github.com/dalance/veryl/compare/v0.1.13...v0.1.14) - 2023-01-12
 
 ## [v0.1.13](https://github.com/dalance/veryl/compare/v0.1.12...v0.1.13) - 2023-01-10
 

@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl"
-version               = "0.1.13"
+version               = "0.1.14"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -29,9 +29,9 @@ env_logger      = "0.10.0"
 serde_json      = "1.0"
 similar         = {version = "2.2.1", features = ["text", "inline"]}
 thiserror       = {workspace = true}
-veryl-analyzer  = {version = "0.1.13", path = "../analyzer"}
-veryl-emitter   = {version = "0.1.13", path = "../emitter"}
-veryl-formatter = {version = "0.1.13", path = "../formatter"}
-veryl-metadata  = {version = "0.1.13", path = "../metadata"}
-veryl-parser    = {version = "0.1.13", path = "../parser"}
+veryl-analyzer  = {version = "0.1.14", path = "../analyzer"}
+veryl-emitter   = {version = "0.1.14", path = "../emitter"}
+veryl-formatter = {version = "0.1.14", path = "../formatter"}
+veryl-metadata  = {version = "0.1.14", path = "../metadata"}
+veryl-parser    = {version = "0.1.14", path = "../parser"}
 walkdir         = "2.3.2"

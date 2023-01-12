@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl-parser"
-version               = "0.1.13"
+version               = "0.1.14"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
