@@ -52,6 +52,7 @@ impl Backend {
                 }
                 let mut analyzer = Analyzer::new(&text);
                 let mut errors = analyzer.analyze(&x.veryl);
+                errors.append(&mut Analyzer::analyze_post(Path::new(&path), &text));
                 let ret: Vec<_> = errors
                     .drain(0..)
                     .map(|x| {

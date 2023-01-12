@@ -19,6 +19,7 @@ mod parser {
 #[cfg(test)]
 mod analyzer {
     use std::fs;
+    use std::path::Path;
     use veryl_analyzer::Analyzer;
     use veryl_parser::Parser;
 
@@ -29,7 +30,9 @@ mod analyzer {
         let ret = Parser::parse(&input, &file).unwrap();
         let mut analyzer = Analyzer::new(&input);
         let errors = analyzer.analyze(&ret.veryl);
+        assert!(errors.is_empty());
 
+        let errors = Analyzer::analyze_post(&Path::new(&file), &input);
         assert!(errors.is_empty());
     }
 

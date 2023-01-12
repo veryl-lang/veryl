@@ -3,7 +3,7 @@ use crate::symbol::{Symbol, SymbolKind};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
-use veryl_parser::resource_table::{PathId, StrId};
+use veryl_parser::resource_table::{PathId, StrId, TokenId};
 use veryl_parser::veryl_grammar_trait as syntax_tree;
 use veryl_parser::veryl_token::Token;
 
@@ -30,6 +30,13 @@ impl From<&[Token]> for SymbolPath {
         for x in value {
             path.push(x.text);
         }
+        SymbolPath(path)
+    }
+}
+
+impl From<&syntax_tree::Identifier> for SymbolPath {
+    fn from(value: &syntax_tree::Identifier) -> Self {
+        let path = vec![value.identifier_token.token.text];
         SymbolPath(path)
     }
 }
@@ -152,6 +159,19 @@ impl SymbolTable {
     pub fn drop(&mut self, file_path: PathId) {
         for (_, symbols) in self.table.iter_mut() {
             symbols.retain(|x| x.token.file_path != file_path);
+            for symbol in symbols.iter_mut() {
+                symbol.references.retain(|x| x.file_path != file_path);
+            }
+        }
+    }
+
+    pub fn add_reference(&mut self, target: TokenId, token: &Token) {
+        for (_, symbols) in self.table.iter_mut() {
+            for symbol in symbols.iter_mut() {
+                if symbol.token.id == target {
+                    symbol.references.push(token.to_owned());
+                }
+            }
         }
     }
 }
@@ -161,24 +181,28 @@ impl fmt::Display for SymbolTable {
         writeln!(f, "SymbolTable [")?;
         let mut symbol_width = 0;
         let mut namespace_width = 0;
+        let mut reference_width = 0;
         let mut vec: Vec<_> = self.table.iter().collect();
         vec.sort_by(|x, y| x.0.cmp(y.0));
         for (k, v) in &vec {
             symbol_width = symbol_width.max(format!("{}", k).len());
             for symbol in *v {
                 namespace_width = namespace_width.max(format!("{}", symbol.namespace).len());
+                reference_width = reference_width.max(format!("{}", symbol.references.len()).len());
             }
         }
         for (k, v) in &vec {
             for symbol in *v {
                 writeln!(
                     f,
-                    "    {:symbol_width$} @ {:namespace_width$}: {},",
+                    "    {:symbol_width$} @ {:namespace_width$} {{ refs: {:reference_width$} }}: {},",
                     k,
                     symbol.namespace,
+                    symbol.references.len(),
                     symbol.kind,
                     symbol_width = symbol_width,
-                    namespace_width = namespace_width
+                    namespace_width = namespace_width,
+                    reference_width = reference_width
                 )?;
             }
         }
@@ -207,6 +231,10 @@ pub fn dump() -> String {
 
 pub fn drop(file_path: PathId) {
     SYMBOL_TABLE.with(|f| f.borrow_mut().drop(file_path))
+}
+
+pub fn add_reference(target: TokenId, token: &Token) {
+    SYMBOL_TABLE.with(|f| f.borrow_mut().add_reference(target, token))
 }
 
 #[cfg(test)]

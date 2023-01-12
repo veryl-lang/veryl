@@ -1,12 +1,12 @@
 module Module11 ;
     // variable declaration
-    logic                  b  ;
-    logic [10-1:0]         bb ;
-    bit   [10-1:0][10-1:0] bbb;
+    logic                  _b  ;
+    logic [10-1:0]         _bb ;
+    bit   [10-1:0][10-1:0] _bbb;
 
     // variable declaration with assignment
-    logic [10-1:0] c;
-    assign c = 1;
+    logic [10-1:0] _c;
+    assign _c = 1;
 
     // assign declaration
     assign a    = 1;

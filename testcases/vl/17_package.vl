@@ -3,7 +3,7 @@ package Package17 {
     localparam a: u32  = 1;
 
     // variable declaration
-    var b: logic ;
+    var _b: logic ;
 
     // struct declaration
     struct A {

@@ -1,6 +1,11 @@
 use crate::analyze_error::AnalyzeError;
 use crate::handlers::*;
+use crate::symbol::SymbolKind;
+use crate::symbol_table;
+use std::path::Path;
+use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
+use veryl_parser::veryl_token::VerylToken;
 use veryl_parser::veryl_walker::{Handler, VerylWalker};
 
 pub struct AnalyzerPass1<'a> {
@@ -59,6 +64,41 @@ impl<'a> Analyzer<'a> {
         pass2.veryl(input);
         ret.append(&mut pass2.handlers.get_errors());
 
+        ret
+    }
+
+    pub fn analyze_post(path: &Path, text: &str) -> Vec<AnalyzeError> {
+        let mut ret = Vec::new();
+        ret.append(&mut Analyzer::check_symbol_table(path, text));
+        ret
+    }
+
+    fn check_symbol_table(path: &Path, text: &str) -> Vec<AnalyzeError> {
+        let path = resource_table::get_path_id(path.to_path_buf()).unwrap();
+        let mut ret = Vec::new();
+        let symbols = symbol_table::get_all();
+        for symbol in symbols {
+            if symbol.token.file_path == path {
+                if let SymbolKind::Variable(_) = symbol.kind {
+                    if symbol.references.is_empty() {
+                        let name = format!("{}", symbol.token.text);
+                        if name.starts_with('_') {
+                            continue;
+                        }
+
+                        let token = VerylToken {
+                            token: symbol.token,
+                            comments: Vec::new(),
+                        };
+                        ret.push(AnalyzeError::unused_variable(
+                            &format!("{}", symbol.token.text),
+                            text,
+                            &token,
+                        ));
+                    }
+                }
+            }
+        }
         ret
     }
 }

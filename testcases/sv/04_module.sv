@@ -16,7 +16,7 @@ module Module04 #(
     localparam longint unsigned cc  = 1;
 
     // variable declaration
-    logic                  d  ;
-    logic [10-1:0]         dd ;
-    bit   [10-1:0][10-1:0] ddd;
+    logic                  _d  ;
+    logic [10-1:0]         _dd ;
+    bit   [10-1:0][10-1:0] _ddd;
 endmodule

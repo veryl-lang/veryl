@@ -1,11 +1,11 @@
 module Module15 ;
-    logic  a;
+    logic  _a;
     if (1) begin 
     :label
-        logic  a;
+        logic  _a;
     end
     if (1) begin 
     :label1
-        logic  a;
+        logic  _a;
     end
 endmodule

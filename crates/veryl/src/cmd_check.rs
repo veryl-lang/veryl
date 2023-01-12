@@ -55,6 +55,17 @@ impl CmdCheck {
                 }
             }
         }
+        for file in &files {
+            let input = fs::read_to_string(file).into_diagnostic().wrap_err("")?;
+            let errors = Analyzer::analyze_post(file, &input);
+            if !errors.is_empty() {
+                all_pass = false;
+
+                for error in errors {
+                    check_error.related.push(error);
+                }
+            }
+        }
 
         let elapsed_time = now.elapsed();
         self.print(&format!(

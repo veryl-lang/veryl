@@ -132,6 +132,19 @@ pub enum AnalyzeError {
         #[label("Error location")]
         error_location: SourceSpan,
     },
+
+    #[diagnostic(
+        code(AnalyzeError::UnusedVariable),
+        help("add prefix `_` to unused variable name")
+    )]
+    #[error("{identifier} is unused")]
+    UnusedVariable {
+        identifier: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
 }
 
 impl AnalyzeError {
@@ -256,6 +269,14 @@ impl AnalyzeError {
 
     pub fn duplicated_identifier(identifier: &str, source: &str, token: &VerylToken) -> Self {
         AnalyzeError::DuplicatedIdentifier {
+            identifier: identifier.to_string(),
+            input: AnalyzeError::named_source(source, token),
+            error_location: token.token.into(),
+        }
+    }
+
+    pub fn unused_variable(identifier: &str, source: &str, token: &VerylToken) -> Self {
+        AnalyzeError::UnusedVariable {
             identifier: identifier.to_string(),
             input: AnalyzeError::named_source(source, token),
             error_location: token.token.into(),

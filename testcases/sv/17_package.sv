@@ -3,7 +3,7 @@ package Package17;
     localparam int unsigned a  = 1;
 
     // variable declaration
-    logic  b;
+    logic  _b;
 
     // struct declaration
     typedef struct {

@@ -6,6 +6,7 @@ pub mod check_invalid_statement;
 pub mod check_module_instance;
 pub mod check_number_overflow;
 pub mod check_system_function;
+pub mod create_reference;
 pub mod create_symbol_table;
 use check_function_arity::*;
 use check_invalid_direction::*;
@@ -15,6 +16,7 @@ use check_invalid_statement::*;
 use check_module_instance::*;
 use check_number_overflow::*;
 use check_system_function::*;
+use create_reference::*;
 use create_symbol_table::*;
 
 use crate::analyze_error::AnalyzeError;
@@ -71,6 +73,7 @@ impl<'a> Pass1Handlers<'a> {
 pub struct Pass2Handlers<'a> {
     check_function_arity: CheckFunctionArity<'a>,
     check_module_instance: CheckModuleInstance<'a>,
+    create_reference: CreateReference<'a>,
 }
 
 impl<'a> Pass2Handlers<'a> {
@@ -78,6 +81,7 @@ impl<'a> Pass2Handlers<'a> {
         Self {
             check_function_arity: CheckFunctionArity::new(text),
             check_module_instance: CheckModuleInstance::new(text),
+            create_reference: CreateReference::new(text),
         }
     }
 
@@ -85,6 +89,7 @@ impl<'a> Pass2Handlers<'a> {
         vec![
             &mut self.check_function_arity as &mut dyn Handler,
             &mut self.check_module_instance as &mut dyn Handler,
+            &mut self.create_reference as &mut dyn Handler,
         ]
     }
 
@@ -92,6 +97,7 @@ impl<'a> Pass2Handlers<'a> {
         let mut ret = Vec::new();
         ret.append(&mut self.check_function_arity.errors);
         ret.append(&mut self.check_module_instance.errors);
+        ret.append(&mut self.create_reference.errors);
         ret
     }
 }

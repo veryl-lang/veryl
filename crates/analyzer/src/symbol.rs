@@ -11,6 +11,7 @@ pub struct Symbol {
     pub token: Token,
     pub kind: SymbolKind,
     pub namespace: Namespace,
+    pub references: Vec<Token>,
 }
 
 impl Symbol {
@@ -19,6 +20,7 @@ impl Symbol {
             token: *token,
             kind,
             namespace: namespace.to_owned(),
+            references: Vec::new(),
         }
     }
 }
