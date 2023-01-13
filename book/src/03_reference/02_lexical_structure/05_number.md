@@ -1,6 +1,6 @@
-# Literal
+# Number
 
-## Integer literal
+## Integer
 
 ```veryl
 # module A {
@@ -66,7 +66,7 @@
 # }
 ```
 
-## Floating point literal
+## Floating point
 
 ```veryl
 # module A {
