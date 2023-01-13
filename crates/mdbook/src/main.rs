@@ -107,8 +107,7 @@ impl Preprocessor for Veryl {
                         }
                         Event::Text(x) => {
                             if in_code {
-                                let replaced_code =
-                                    re_hiding_code_line.replace_all(&x.as_ref(), "");
+                                let replaced_code = re_hiding_code_line.replace_all(x.as_ref(), "");
                                 code_blocks.push((x.to_string(), replaced_code.to_string()));
 
                                 chapter_skip = false;
