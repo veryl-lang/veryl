@@ -25,7 +25,7 @@ readme      = "README.md"
 description = "A modern hardware description language"
 
 [workspace.dependencies]
-clap       = {version = "4.0.32", features = ["derive"]}
+clap       = {version = "4.1.0", features = ["derive"]}
 regex      = "1.7.1"
 semver     = {version = "1.0", features = ["serde"]}
 serde      = {version = "1.0", features = ["derive"]}
