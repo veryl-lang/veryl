@@ -543,29 +543,40 @@ impl VerylWalker for Emitter {
         self.space(1);
         if self.in_always_ff {
             self.str("<");
-        }
-        match &*arg.assignment_statement_group {
-            AssignmentStatementGroup::Equ(x) => self.equ(&x.equ),
-            AssignmentStatementGroup::AssignmentOperator(x) => {
-                let token = format!(
-                    "{}",
-                    x.assignment_operator.assignment_operator_token.token.text
-                );
-                // remove trailing `=` from assignment operator
-                let token = &token[0..token.len() - 1];
-                self.str("=");
-                self.space(1);
-                self.hierarchical_identifier(&arg.hierarchical_identifier);
-                self.space(1);
-                self.str(token);
+            match &*arg.assignment_statement_group {
+                AssignmentStatementGroup::Equ(x) => self.equ(&x.equ),
+                AssignmentStatementGroup::AssignmentOperator(x) => {
+                    let token = format!(
+                        "{}",
+                        x.assignment_operator.assignment_operator_token.token.text
+                    );
+                    // remove trailing `=` from assignment operator
+                    let token = &token[0..token.len() - 1];
+                    self.str("=");
+                    self.space(1);
+                    self.hierarchical_identifier(&arg.hierarchical_identifier);
+                    self.space(1);
+                    self.str(token);
+                }
             }
-        }
-        self.space(1);
-        if let AssignmentStatementGroup::AssignmentOperator(_) = &*arg.assignment_statement_group {
-            self.str("(");
-            self.expression(&arg.expression);
-            self.str(")");
+            self.space(1);
+            if let AssignmentStatementGroup::AssignmentOperator(_) =
+                &*arg.assignment_statement_group
+            {
+                self.str("(");
+                self.expression(&arg.expression);
+                self.str(")");
+            } else {
+                self.expression(&arg.expression);
+            }
         } else {
+            match &*arg.assignment_statement_group {
+                AssignmentStatementGroup::Equ(x) => self.equ(&x.equ),
+                AssignmentStatementGroup::AssignmentOperator(x) => {
+                    self.assignment_operator(&x.assignment_operator)
+                }
+            }
+            self.space(1);
             self.expression(&arg.expression);
         }
         self.semicolon(&arg.semicolon);

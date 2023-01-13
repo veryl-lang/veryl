@@ -2,18 +2,18 @@ module Module07 ;
     always_comb begin
         // assignment statement
         a =    1;
-        a = a + (1);
-        a = a - (1);
-        a = a * (1);
-        a = a / (1);
-        a = a % (1);
-        a = a & (1);
-        a = a | (1);
-        a = a ^ (1);
-        a = a << (1);
-        a = a >> (1);
-        a = a <<< (1);
-        a = a >>> (1);
+        a +=   1;
+        a -=   1;
+        a *=   1;
+        a /=   1;
+        a %=   1;
+        a &=   1;
+        a |=   1;
+        a ^=   1;
+        a <<=  1;
+        a >>=  1;
+        a <<<= 1;
+        a >>>= 1;
 
         // if statement
         if (a) begin
