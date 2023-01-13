@@ -1,5 +1,7 @@
 # Literal
 
+## Integer literal
+
 ```veryl
 # module A {
 # always_comb {
@@ -63,6 +65,8 @@
 # }
 # }
 ```
+
+## Floating point literal
 
 ```veryl
 # module A {

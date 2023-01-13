@@ -6,3 +6,8 @@ src = "src"
 title = "The Veryl Hardware Description Language"
 
 [preprocessor.veryl]
+
+[output.html]
+
+[output.playground]
+command = "./playground.sh"

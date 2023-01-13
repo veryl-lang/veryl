@@ -9,7 +9,7 @@
     - [Parameter](./03_reference/04_parameter.md)
     - [Variable](./03_reference/05_variable.md)
     - [Expression](./03_reference/06_expression.md)
-        - [Operator](./03_reference/06_expression/01_expression.md)
+        - [Operator](./03_reference/06_expression/01_operator.md)
         - [Function Call](./03_reference/06_expression/02_function_call.md)
         - [Concatenation](./03_reference/06_expression/03_concatenation.md)
     - [Statement](./03_reference/07_statement.md)

@@ -5,7 +5,7 @@ If you are used to SystemVerilog, you will guess Veryl semantics with a small ex
 
 In the following example, `[!]` shows the difference with SystemVerilog syntax.
 
-```veryl
+```veryl,playground
 import PackageX::*;
 
 // module definition

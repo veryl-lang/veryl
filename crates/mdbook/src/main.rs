@@ -92,20 +92,25 @@ impl Preprocessor for Veryl {
                 let lookup = LineColLookup::new(&chapter.content);
                 let mut chapter_skip = true;
                 let mut chapter_success = true;
+                let mut code_blocks = Vec::new();
                 for (event, range) in Parser::new(&chapter.content).into_offset_iter() {
                     match event {
                         Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(x))) => {
-                            if x.as_ref() == "veryl" {
+                            if x.as_ref().starts_with("veryl") {
                                 in_code = true;
                             }
                         }
                         Event::End(Tag::CodeBlock(CodeBlockKind::Fenced(x))) => {
-                            if x.as_ref() == "veryl" {
+                            if x.as_ref().starts_with("veryl") {
                                 in_code = false;
                             }
                         }
                         Event::Text(x) => {
                             if in_code {
+                                let replaced_code =
+                                    re_hiding_code_line.replace_all(&x.as_ref(), "");
+                                code_blocks.push((x.to_string(), replaced_code.to_string()));
+
                                 chapter_skip = false;
                                 let x = re_hiding_code_indicator.replace_all(x.as_ref(), "");
                                 let ret = veryl_parser::Parser::parse(&x, &"");
@@ -125,9 +130,9 @@ impl Preprocessor for Veryl {
                 } else if chapter_success {
                     eprintln!("veryl parse success: {}", path);
                 }
-                chapter.content = re_hiding_code_line
-                    .replace_all(&chapter.content, "")
-                    .to_string();
+                for (code_block, replaced_code) in code_blocks {
+                    chapter.content = chapter.content.replace(&code_block, &replaced_code);
+                }
             }
         });
 
