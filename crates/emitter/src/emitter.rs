@@ -561,7 +561,13 @@ impl VerylWalker for Emitter {
             }
         }
         self.space(1);
-        self.expression(&arg.expression);
+        if let AssignmentStatementGroup::AssignmentOperator(_) = &*arg.assignment_statement_group {
+            self.str("(");
+            self.expression(&arg.expression);
+            self.str(")");
+        } else {
+            self.expression(&arg.expression);
+        }
         self.semicolon(&arg.semicolon);
     }
 
