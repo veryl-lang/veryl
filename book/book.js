@@ -43,7 +43,7 @@ function playground_text(playground, hidden = true) {
     }
 
     function handle_crate_list_update(playground_block, playground_crates) {
-        // update the play buttons after receiving the response
+        // uvpdate the play buttons after receiving the response
         update_play_button(playground_block, playground_crates);
 
         // and install on change listener to dynamically update ACE editors
@@ -103,51 +103,22 @@ function playground_text(playground, hidden = true) {
         var result_block = code_block.querySelector(".result");
         if (!result_block) {
             result_block = document.createElement('code');
-            result_block.className = 'result hljs language-bash';
+            result_block.className = 'result hljs language-verilog';
 
             code_block.append(result_block);
         }
 
-        let text = playground_text(code_block);
-        let classes = code_block.querySelector('code').classList;
-        let edition = "2015";
-        if(classes.contains("edition2018")) {
-            edition = "2018";
-        } else if(classes.contains("edition2021")) {
-            edition = "2021";
+        let text = playground_text(code_block).replace('# ', '');
+
+        let result = parse(text);
+        let err = result.err();
+        let code = result.code();
+        if (err !== '') {
+            result_block.innerHTML = err;
+        } else {
+            result_block.innerHTML = code;
+            hljs.highlightBlock(result_block);
         }
-        var params = {
-            version: "stable",
-            optimize: "0",
-            code: text,
-            edition: edition
-        };
-
-        if (text.indexOf("#![feature") !== -1) {
-            params.version = "nightly";
-        }
-
-        result_block.innerText = "Running...";
-
-        fetch_with_timeout("https://play.rust-lang.org/evaluate.json", {
-            headers: {
-                'Content-Type': "application/json",
-            },
-            method: 'POST',
-            mode: 'cors',
-            body: JSON.stringify(params)
-        })
-        .then(response => response.json())
-        .then(response => {
-            if (response.result.trim() === '') {
-                result_block.innerText = "No output";
-                result_block.classList.add("result-no-output");
-            } else {
-                result_block.innerText = response.result;
-                result_block.classList.remove("result-no-output");
-            }
-        })
-        .catch(error => result_block.innerText = "Playground Communication: " + error.message);
     }
 
     // Syntax highlighting Configuration

@@ -81,7 +81,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded "><a href="01_introduction.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="02_quick_start.html"><strong aria-hidden="true">2.</strong> Quick Start</a></li><li class="chapter-item expanded "><a href="03_reference.html"><strong aria-hidden="true">3.</strong> Reference</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="03_reference/01_literal.html"><strong aria-hidden="true">3.1.</strong> Literal</a></li><li class="chapter-item expanded "><a href="03_reference/02_builtin_type.html"><strong aria-hidden="true">3.2.</strong> Builtin Type</a></li><li class="chapter-item expanded "><a href="03_reference/03_user_defined_type.html"><strong aria-hidden="true">3.3.</strong> User Defined Type</a></li><li class="chapter-item expanded "><a href="03_reference/04_parameter.html"><strong aria-hidden="true">3.4.</strong> Parameter</a></li><li class="chapter-item expanded "><a href="03_reference/05_variable.html"><strong aria-hidden="true">3.5.</strong> Variable</a></li><li class="chapter-item expanded "><a href="03_reference/06_expression.html"><strong aria-hidden="true">3.6.</strong> Expression</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="03_reference/06_expression/01_expression.html"><strong aria-hidden="true">3.6.1.</strong> Operator</a></li><li class="chapter-item expanded "><a href="03_reference/06_expression/02_function_call.html"><strong aria-hidden="true">3.6.2.</strong> Function Call</a></li><li class="chapter-item expanded "><a href="03_reference/06_expression/03_concatenation.html"><strong aria-hidden="true">3.6.3.</strong> Concatenation</a></li></ol></li><li class="chapter-item expanded "><a href="03_reference/07_statement.html"><strong aria-hidden="true">3.7.</strong> Statement</a></li><li class="chapter-item expanded "><a href="03_reference/08_function.html"><strong aria-hidden="true">3.8.</strong> Function</a></li><li class="chapter-item expanded "><a href="03_reference/09_module.html"><strong aria-hidden="true">3.9.</strong> Module</a></li><li class="chapter-item expanded "><a href="03_reference/10_interface.html"><strong aria-hidden="true">3.10.</strong> Interface</a></li><li class="chapter-item expanded "><a href="03_reference/11_package.html"><strong aria-hidden="true">3.11.</strong> Package</a></li></ol></li></ol>
+                <ol class="chapter"><li class="chapter-item expanded "><a href="01_introduction.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="02_quick_start.html"><strong aria-hidden="true">2.</strong> Quick Start</a></li><li class="chapter-item expanded "><a href="03_reference.html"><strong aria-hidden="true">3.</strong> Reference</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="03_reference/01_literal.html"><strong aria-hidden="true">3.1.</strong> Literal</a></li><li class="chapter-item expanded "><a href="03_reference/02_builtin_type.html"><strong aria-hidden="true">3.2.</strong> Builtin Type</a></li><li class="chapter-item expanded "><a href="03_reference/03_user_defined_type.html"><strong aria-hidden="true">3.3.</strong> User Defined Type</a></li><li class="chapter-item expanded "><a href="03_reference/04_parameter.html"><strong aria-hidden="true">3.4.</strong> Parameter</a></li><li class="chapter-item expanded "><a href="03_reference/05_variable.html"><strong aria-hidden="true">3.5.</strong> Variable</a></li><li class="chapter-item expanded "><a href="03_reference/06_expression.html"><strong aria-hidden="true">3.6.</strong> Expression</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="03_reference/06_expression/01_operator.html"><strong aria-hidden="true">3.6.1.</strong> Operator</a></li><li class="chapter-item expanded "><a href="03_reference/06_expression/02_function_call.html"><strong aria-hidden="true">3.6.2.</strong> Function Call</a></li><li class="chapter-item expanded "><a href="03_reference/06_expression/03_concatenation.html"><strong aria-hidden="true">3.6.3.</strong> Concatenation</a></li></ol></li><li class="chapter-item expanded "><a href="03_reference/07_statement.html"><strong aria-hidden="true">3.7.</strong> Statement</a></li><li class="chapter-item expanded "><a href="03_reference/08_function.html"><strong aria-hidden="true">3.8.</strong> Function</a></li><li class="chapter-item expanded "><a href="03_reference/09_module.html"><strong aria-hidden="true">3.9.</strong> Module</a></li><li class="chapter-item expanded "><a href="03_reference/10_interface.html"><strong aria-hidden="true">3.10.</strong> Interface</a></li><li class="chapter-item expanded "><a href="03_reference/11_package.html"><strong aria-hidden="true">3.11.</strong> Package</a></li></ol></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
@@ -142,7 +142,8 @@
 
                 <div id="content" class="content">
                     <main>
-                        <p>Veryl is a modern hardware description language.</p>
+                        <h1 id="the-veryl-hardware-description-language"><a class="header" href="#the-veryl-hardware-description-language">The Veryl Hardware Description Language</a></h1>
+<p>Veryl is a modern hardware description language.</p>
 <h2 id="concepts"><a class="header" href="#concepts">Concepts</a></h2>
 <p>Veryl is designed as a &quot;SystemVerilog Alternative&quot;.
 There are some design concepts.</p>
@@ -178,10 +179,11 @@ Veryl will have them too from the beginning of development.</p>
 <li>Language server</li>
 <li>Package manager</li>
 </ul>
-<div style="break-before: page; page-break-before: always;"></div><p>Veryl has the almost same semantics as SystemVerilog.
+<div style="break-before: page; page-break-before: always;"></div><h1 id="quick-start"><a class="header" href="#quick-start">Quick Start</a></h1>
+<p>Veryl has the almost same semantics as SystemVerilog.
 If you are used to SystemVerilog, you will guess Veryl semantics with a small example source code.</p>
 <p>In the following example, <code>[!]</code> shows the difference with SystemVerilog syntax.</p>
-<pre><code class="language-veryl">import PackageX::*;
+<pre class="playground"><code class="language-veryl">import PackageX::*;
 
 // module definition
 module ModuleA #(
@@ -235,7 +237,10 @@ interface InterfaceA #(
 package PackageA {
 }
 </code></pre>
-<div style="break-before: page; page-break-before: always;"></div><div style="break-before: page; page-break-before: always;"></div><pre><code class="language-veryl">// integer
+<div style="break-before: page; page-break-before: always;"></div><h1 id="reference"><a class="header" href="#reference">Reference</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="literal"><a class="header" href="#literal">Literal</a></h1>
+<h2 id="integer-literal"><a class="header" href="#integer-literal">Integer literal</a></h2>
+<pre><code class="language-veryl">// integer
 0123456789
 01_23_45_67_89
 
@@ -269,6 +274,7 @@ package PackageA {
 'z
 'Z
 </code></pre>
+<h2 id="floating-point-literal"><a class="header" href="#floating-point-literal">Floating point literal</a></h2>
 <pre><code class="language-veryl">// floating point
 0123456789.0123456789
 01_23_45_67_89.01_23_45_67_89
@@ -277,7 +283,101 @@ package PackageA {
 0123456789.0123456789e+0123456789
 01_23_45_67_89.01_23_45_67_89E-01_23_45_67_89
 </code></pre>
-<div style="break-before: page; page-break-before: always;"></div><div style="break-before: page; page-break-before: always;"></div><div style="break-before: page; page-break-before: always;"></div><div style="break-before: page; page-break-before: always;"></div><div style="break-before: page; page-break-before: always;"></div><div style="break-before: page; page-break-before: always;"></div><div style="break-before: page; page-break-before: always;"></div><div style="break-before: page; page-break-before: always;"></div><div style="break-before: page; page-break-before: always;"></div><div style="break-before: page; page-break-before: always;"></div><div style="break-before: page; page-break-before: always;"></div><div style="break-before: page; page-break-before: always;"></div><div style="break-before: page; page-break-before: always;"></div>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="builtin-type"><a class="header" href="#builtin-type">Builtin Type</a></h1>
+<pre><code class="language-veryl"></code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="user-defined-type"><a class="header" href="#user-defined-type">User Defined Type</a></h1>
+<h2 id="struct"><a class="header" href="#struct">Struct</a></h2>
+<pre><code class="language-veryl">struct StructA {
+    member_a: logic    ,
+    member_b: logic[10],
+}
+</code></pre>
+<h2 id="enum"><a class="header" href="#enum">Enum</a></h2>
+<pre><code class="language-veryl">enum EnumA: logic [2] {
+    member_a,
+    member_b,
+    member_c = 3,
+}
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="parameter"><a class="header" href="#parameter">Parameter</a></h1>
+<pre><code class="language-veryl">localparam param_a: u32 = 1;
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="variable"><a class="header" href="#variable">Variable</a></h1>
+<pre><code class="language-veryl">var var_a: logic;
+var var_b: logic [10];
+var var_c: logic [10][10];
+var var_d: u32;
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="expression"><a class="header" href="#expression">Expression</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="operator"><a class="header" href="#operator">Operator</a></h1>
+<pre><code class="language-veryl">// unary arithmetic
+a = +1;
+a = -1;
+
+// unary logical
+a = !1;
+a = ~1;
+
+// unary reduce
+a = &amp;1;
+a = |1;
+a = ^1;
+a = ~&amp;1;
+a = ~|1;
+a = ~^1;
+a = ^~1;
+
+// binary arithmetic
+a = 1 ** 1;
+a = 1 * 1;
+a = 1 / 1;
+a = 1 % 1;
+a = 1 + 1;
+a = 1 - 1;
+
+// binary shift
+a = 1 &lt;&lt; 1;
+a = 1 &gt;&gt; 1;
+a = 1 &lt;&lt;&lt; 1;
+a = 1 &gt;&gt;&gt; 1;
+
+// binary compare
+a = 1 &lt; 1;
+a = 1 &lt;= 1;
+a = 1 &gt; 1;
+a = 1 &gt;= 1;
+a = 1 == 1;
+a = 1 != 1;
+a = 1 === 1;
+a = 1 !== 1;
+a = 1 ==? 1;
+a = 1 !=? 1;
+
+// binary bitwise
+a = 1 &amp; 1;
+a = 1 ^ 1;
+a = 1 ~^ 1;
+a = 1 ^~ 1;
+a = 1 | 1;
+
+// binary logical
+a = 1 &amp;&amp; 1;
+a = 1 || 1;
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="function-call"><a class="header" href="#function-call">Function Call</a></h1>
+<pre><code class="language-veryl">a = FunctionA (1, 1);
+a = $clog2 (10);
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="concatenation"><a class="header" href="#concatenation">Concatenation</a></h1>
+<pre><code class="language-veryl">a = {b[10:0], c[4:3]};
+a = {b[10:0] repeat 10, c repeat 4};
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="statement"><a class="header" href="#statement">Statement</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="function"><a class="header" href="#function">Function</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="module"><a class="header" href="#module">Module</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="interface"><a class="header" href="#interface">Interface</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="package"><a class="header" href="#package">Package</a></h1>
+
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
@@ -310,6 +410,11 @@ package PackageA {
         <script src="clipboard.min.js"></script>
         <script src="highlight.js"></script>
         <script src="book.js"></script>
+        <script type="module">
+            import init, {parse, format} from "https://dalance.github.io/veryl/playground/pkg/veryl_wasm.js";
+            init().then(() => {});
+            window.parse = parse;
+        </script>
 
         <!-- Custom JS scripts -->
 
