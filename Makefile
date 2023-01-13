@@ -43,6 +43,7 @@ watch:
 install:
 	cargo install --path crates/languageserver
 	cargo install --path crates/veryl
+	cargo install --path crates/mdbook
 
 gen_sv:
 	cargo run --bin veryl -- build

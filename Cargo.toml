@@ -4,6 +4,7 @@ members = [
     "crates/emitter",
     "crates/formatter",
     "crates/languageserver",
+    "crates/mdbook",
     "crates/metadata",
     "crates/parser",
     "crates/tests",
@@ -24,8 +25,12 @@ readme      = "README.md"
 description = "A modern hardware description language"
 
 [workspace.dependencies]
-serde     = {version = "1.0", features = ["derive"]}
-thiserror = "1.0"
+clap       = {version = "4.0.32", features = ["derive"]}
+regex      = "1.7.1"
+semver     = {version = "1.0", features = ["serde"]}
+serde      = {version = "1.0", features = ["derive"]}
+serde_json = "1.0"
+thiserror  = "1.0"
 
 [workspace.metadata.release]
 tag = false

@@ -51,8 +51,8 @@ module ModuleA #(
 
 // interface definition
 interface InterfaceA #(
-    ParamA: parameter  u32,
-    ParamB: localparam u32,
+    parameter ParamA: u32 = 1,
+    parameter ParamB: u32 = 1,
 ) {
 }
 
