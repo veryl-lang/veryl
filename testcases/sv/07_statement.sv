@@ -2,18 +2,18 @@ module Module07 ;
     always_comb begin
         // assignment statement
         a =    1;
-        a +=   1;
-        a -=   1;
-        a *=   1;
-        a /=   1;
-        a %=   1;
-        a &=   1;
-        a |=   1;
-        a ^=   1;
-        a <<=  1;
-        a >>=  1;
-        a <<<= 1;
-        a >>>= 1;
+        a = a + 1;
+        a = a - 1;
+        a = a * 1;
+        a = a / 1;
+        a = a % 1;
+        a = a & 1;
+        a = a | 1;
+        a = a ^ 1;
+        a = a << 1;
+        a = a >> 1;
+        a = a <<< 1;
+        a = a >>> 1;
 
         // if statement
         if (a) begin
@@ -42,5 +42,20 @@ module Module07 ;
             a  = 1;
             aa = 1;
         end
+    end
+
+    always_ff @ (posedge clk) begin
+        a <= a + 1;
+        a <= a - 1;
+        a <= a * 1;
+        a <= a / 1;
+        a <= a % 1;
+        a <= a & 1;
+        a <= a | 1;
+        a <= a ^ 1;
+        a <= a << 1;
+        a <= a >> 1;
+        a <= a <<< 1;
+        a <= a >>> 1;
     end
 endmodule

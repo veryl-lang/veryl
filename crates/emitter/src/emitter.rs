@@ -547,7 +547,17 @@ impl VerylWalker for Emitter {
         match &*arg.assignment_statement_group {
             AssignmentStatementGroup::Equ(x) => self.equ(&x.equ),
             AssignmentStatementGroup::AssignmentOperator(x) => {
-                self.assignment_operator(&x.assignment_operator)
+                let token = format!(
+                    "{}",
+                    x.assignment_operator.assignment_operator_token.token.text
+                );
+                // remove trailing `=` from assignment operator
+                let token = &token[0..token.len() - 1];
+                self.str("=");
+                self.space(1);
+                self.hierarchical_identifier(&arg.hierarchical_identifier);
+                self.space(1);
+                self.str(token);
             }
         }
         self.space(1);
