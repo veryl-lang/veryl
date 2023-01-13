@@ -88,7 +88,7 @@ impl Preprocessor for Veryl {
                     .source_path
                     .as_ref()
                     .map(|x| x.to_string_lossy())
-                    .unwrap_or("".into());
+                    .unwrap_or_else(|| "".into());
                 let lookup = LineColLookup::new(&chapter.content);
                 let mut chapter_skip = true;
                 let mut chapter_success = true;
@@ -110,7 +110,7 @@ impl Preprocessor for Veryl {
                                 let x = re_hiding_code_indicator.replace_all(x.as_ref(), "");
                                 let ret = veryl_parser::Parser::parse(&x, &"");
                                 let (line, col) = lookup.get(range.start);
-                                if let Err(_) = ret {
+                                if ret.is_err() {
                                     eprintln!("veryl parse failed : {}:{}:{}", path, line, col);
                                     total_success = false;
                                     chapter_success = false;
