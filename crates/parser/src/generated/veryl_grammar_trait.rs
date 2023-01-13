@@ -3040,7 +3040,7 @@ pub struct AllBit {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct AllBitTerm {
-    pub all_bit_term: crate::veryl_token::Token, /* '[01] */
+    pub all_bit_term: crate::veryl_token::Token, /* '[01xzXZ] */
 }
 
 ///
@@ -8697,7 +8697,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 5:
     ///
-    /// AllBitTerm: /'[01]/ : Token;
+    /// AllBitTerm: /'[01xzXZ]/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn all_bit_term(

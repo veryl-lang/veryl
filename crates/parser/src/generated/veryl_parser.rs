@@ -33,7 +33,7 @@ pub const TERMINALS: &[&str; 90] = &[
     /*  7 */ r###"[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*"###,
     /*  8 */ r###"[0-9]+(?:_[0-9]+)*'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*"###,
     /*  9 */ r###"[0-9]+(?:_[0-9]+)*"###,
-    /* 10 */ r###"'[01]"###,
+    /* 10 */ r###"'[01xzXZ]"###,
     /* 11 */ r###"\-:"###,
     /* 12 */ r###"\->"###,
     /* 13 */ r###"\+:"###,
@@ -19779,7 +19779,7 @@ pub const PRODUCTIONS: &[Production; 636] = &[
         lhs: 36,
         production: &[ParseType::T(9)],
     },
-    // 5 - AllBitTerm: /'[01]/;
+    // 5 - AllBitTerm: /'[01xzXZ]/;
     Production {
         lhs: 1,
         production: &[ParseType::T(10)],

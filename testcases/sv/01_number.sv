@@ -19,9 +19,13 @@ module Module01 ;
     localparam int unsigned e   = 128'h0123456789abcdefxzABCDEFXZ;
     localparam int unsigned ee  = 128'h01234_5678_9abc_defxz_ABCD_EFXZ;
 
-    // all0, all1
-    localparam int unsigned f   = '0;
-    localparam int unsigned ff  = '1;
+    // all0, all1, allx, allz
+    localparam int unsigned f       = '0;
+    localparam int unsigned ff      = '1;
+    localparam int unsigned fff     = 'x;
+    localparam int unsigned ffff    = 'X;
+    localparam int unsigned fffff   = 'z;
+    localparam int unsigned ffffff  = 'Z;
 
     // floating point
     localparam int unsigned g      = 0123456789.0123456789;
