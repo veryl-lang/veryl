@@ -1545,8 +1545,8 @@ dependencies = [
  "miette",
  "once_cell",
  "owo-colors",
- "parol-macros",
- "parol_runtime",
+ "parol-macros 0.1.0",
+ "parol_runtime 0.11.2",
  "rand",
  "rand_regex",
  "regex",
@@ -1563,6 +1563,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e050a66a0efd1a8a62f51ec99383cbabf00f7c557747591383c5f02c16cdce5b"
 
 [[package]]
+name = "parol-macros"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bdd646301a99589f85ed580e3807ee2f7aa6529b900fd703f5a14716b7426b28"
+
+[[package]]
 name = "parol_runtime"
 version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1575,7 +1581,26 @@ dependencies = [
  "log",
  "miette",
  "once_cell",
- "parol-macros",
+ "parol-macros 0.1.0",
+ "regex",
+ "thiserror",
+]
+
+[[package]]
+name = "parol_runtime"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ec1d77d5f6701ee9247bb5b820961ed018879179d278c56be56cce5e47a2c05"
+dependencies = [
+ "anyhow",
+ "codespan-reporting",
+ "derive_builder",
+ "function_name",
+ "id_tree",
+ "id_tree_layout",
+ "log",
+ "once_cell",
+ "parol-macros 0.2.0",
  "regex",
  "thiserror",
 ]
@@ -2690,7 +2715,7 @@ version = "0.1.14"
 dependencies = [
  "bimap",
  "parol",
- "parol_runtime",
+ "parol_runtime 0.12.1",
  "regex",
  "thiserror",
  "walkdir",

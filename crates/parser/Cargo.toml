@@ -15,7 +15,7 @@ exclude               = ["build.rs"]
 
 [dependencies]
 bimap         = "0.6.2"
-parol_runtime = {version = "0.11.2", features = ["auto_generation"]}
+parol_runtime = {version = "0.12.1", features = ["auto_generation"]}
 regex         = {workspace = true}
 thiserror     = {workspace = true}
 
