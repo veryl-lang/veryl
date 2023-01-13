@@ -20,5 +20,5 @@ regex         = {workspace = true}
 thiserror     = {workspace = true}
 
 [build-dependencies]
-parol   = "0.15.1"
+parol   = "0.16.0"
 walkdir = "2.3.2"
