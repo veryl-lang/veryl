@@ -141,8 +141,7 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="quick-start"><a class="header" href="#quick-start">Quick Start</a></h1>
-<p>Veryl has the almost same semantics as SystemVerilog.
+                        <p>Veryl has the almost same semantics as SystemVerilog.
 If you are used to SystemVerilog, you will guess Veryl semantics with a small example source code.</p>
 <p>In the following example, <code>[!]</code> shows the difference with SystemVerilog syntax.</p>
 <pre><code class="language-veryl">import PackageX::*;
@@ -190,8 +189,8 @@ module ModuleA #(
 
 // interface definition
 interface InterfaceA #(
-    ParamA: parameter  u32,
-    ParamB: localparam u32,
+    parameter ParamA: u32 = 1,
+    parameter ParamB: u32 = 1,
 ) {
 }
 

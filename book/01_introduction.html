@@ -141,7 +141,42 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="the-veryl-hardware-description-language"><a class="header" href="#the-veryl-hardware-description-language">The Veryl Hardware Description Language</a></h1>
+                        <p>Veryl is a modern hardware description language.</p>
+<h2 id="concepts"><a class="header" href="#concepts">Concepts</a></h2>
+<p>Veryl is designed as a &quot;SystemVerilog Alternative&quot;.
+There are some design concepts.</p>
+<h3 id="symplified-syntax"><a class="header" href="#symplified-syntax">Symplified Syntax</a></h3>
+<p>Veryl has symplified syntax based on SystemVerilog / Rust.
+&quot;Symplified&quot; has two meanings. One is for parser, and another is for human.</p>
+<p>SystemVerilog has very complicated syntax (see IEEE Std 1800-2017 Annex A).
+This causes difficulty of SystemVerilog tool implementation.
+So Veryl should have simple syntax to parse.
+For example, &quot;off-side rule&quot; like Python, &quot;automatic semicolon insertion&quot; like ECMAScript / Go will not be supported.</p>
+<p>SystemVerilog has various syntax. Some syntaxes are inherited from Verilog, and some syntaxes are added from SystemVerilog.
+Additionally some syntaxes can be written, but cannot be used actually because major EDA tools don't support them.
+So user should learn many syntaxes and whether each syntax can be used or not.
+Veryl will not support old Verilog style, unrecommended description, and so on.</p>
+<h3 id="transpiler-to-systemverilog"><a class="header" href="#transpiler-to-systemverilog">Transpiler to SystemVerilog</a></h3>
+<p>HDL alternative languages should be transpiler to the tradisional HDLs like Verilog / VHDL because major EDA tools support them.
+Veryl is a transpiler to SystemVerilog.</p>
+<p>Transpiler to Verilog has wide EDA tool support including OSS EDA tools.
+But even if there are rich data strucuture like <code>struct</code> / <code>interface</code> in HDL alternatives, transpiled Verilog can't have it.
+If HDL alternatives have rich code generateion mechanism, transpiled Verilog will be expanded to the very long code.
+For these reason, debugging the transpiled code becomes difficult.</p>
+<p>Veryl will has almost all the same semantics as SystemVerilog.
+So transpiled code will be human readable SystemVerilog.</p>
+<p>Additionally Veryl have interoperability with SystemVerilog.
+Veryl can use SystemVerilog's module / interface / struct / enum in the code, and vice versa.</p>
+<h3 id="integrated-tools"><a class="header" href="#integrated-tools">Integrated Tools</a></h3>
+<p>Modern programming languages have development support tools like linter, formatter, and language server by default.
+Veryl will have them too from the beginning of development.</p>
+<p>The following tools are planed to support.</p>
+<ul>
+<li>Semantic checker</li>
+<li>Source code formatter</li>
+<li>Language server</li>
+<li>Package manager</li>
+</ul>
 
                     </main>
 
