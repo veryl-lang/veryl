@@ -338,6 +338,76 @@ impl VerylWalker for Formatter {
         }
     }
 
+    /// Semantic action for non-terminal 'IfExpression'
+    fn if_expression(&mut self, arg: &IfExpression) {
+        self.r#if(&arg.r#if);
+        self.space(1);
+        self.expression(&arg.expression);
+        self.space(1);
+        self.token_will_push(&arg.l_brace.l_brace_token);
+        self.newline_push();
+        self.expression(&arg.expression0);
+        self.newline_pop();
+        self.r_brace(&arg.r_brace);
+        for x in &arg.if_expression_list {
+            self.space(1);
+            self.r#else(&x.r#else);
+            self.space(1);
+            self.r#if(&x.r#if);
+            self.space(1);
+            self.expression(&x.expression);
+            self.space(1);
+            self.token_will_push(&x.l_brace.l_brace_token);
+            self.newline_push();
+            self.expression(&x.expression0);
+            self.newline_pop();
+            self.r_brace(&x.r_brace);
+        }
+        self.space(1);
+        self.r#else(&arg.r#else);
+        self.space(1);
+        self.token_will_push(&arg.l_brace0.l_brace_token);
+        self.newline_push();
+        self.expression(&arg.expression1);
+        self.newline_pop();
+        self.r_brace(&arg.r_brace0);
+    }
+
+    /// Semantic action for non-terminal 'CaseExpression'
+    fn case_expression(&mut self, arg: &CaseExpression) {
+        self.case(&arg.case);
+        self.space(1);
+        self.expression(&arg.expression);
+        self.space(1);
+        self.token_will_push(&arg.l_brace.l_brace_token);
+        self.newline_push();
+        self.expression(&arg.expression0);
+        self.colon(&arg.colon);
+        self.space(1);
+        self.expression(&arg.expression1);
+        self.comma(&arg.comma);
+        self.newline();
+        for x in &arg.case_expression_list {
+            self.expression(&x.expression);
+            self.colon(&x.colon);
+            self.space(1);
+            self.expression(&x.expression0);
+            self.comma(&x.comma);
+            self.newline();
+        }
+        self.defaul(&arg.defaul);
+        self.colon(&arg.colon0);
+        self.space(1);
+        self.expression(&arg.expression2);
+        if let Some(ref x) = arg.case_expression_opt {
+            self.comma(&x.comma);
+        } else {
+            self.str(",");
+        }
+        self.newline_pop();
+        self.r_brace(&arg.r_brace);
+    }
+
     /// Semantic action for non-terminal 'RangeOperator'
     fn range_operator(&mut self, arg: &RangeOperator) {
         match arg {

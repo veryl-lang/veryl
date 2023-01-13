@@ -880,6 +880,12 @@ pub trait VerylWalker {
                 self.concatenation_list(&x.concatenation_list);
                 self.r_brace(&x.r_brace);
             }
+            Factor::IfExpression(x) => {
+                self.if_expression(&x.if_expression);
+            }
+            Factor::CaseExpression(x) => {
+                self.case_expression(&x.case_expression);
+            }
         }
         after!(self, factor, arg);
     }
@@ -921,6 +927,55 @@ pub trait VerylWalker {
             self.expression(&x.expression);
         }
         after!(self, concatenation_item, arg);
+    }
+
+    /// Semantic action for non-terminal 'IfExpression'
+    fn if_expression(&mut self, arg: &IfExpression) {
+        before!(self, if_expression, arg);
+        self.r#if(&arg.r#if);
+        self.expression(&arg.expression);
+        self.l_brace(&arg.l_brace);
+        self.expression(&arg.expression0);
+        self.r_brace(&arg.r_brace);
+        for x in &arg.if_expression_list {
+            self.r#else(&x.r#else);
+            self.r#if(&x.r#if);
+            self.expression(&x.expression);
+            self.l_brace(&x.l_brace);
+            self.expression(&x.expression0);
+            self.r_brace(&x.r_brace);
+        }
+        self.r#else(&arg.r#else);
+        self.l_brace(&arg.l_brace0);
+        self.expression(&arg.expression1);
+        self.r_brace(&arg.r_brace0);
+        after!(self, if_expression, arg);
+    }
+
+    /// Semantic action for non-terminal 'CaseExpression'
+    fn case_expression(&mut self, arg: &CaseExpression) {
+        before!(self, case_expression, arg);
+        self.case(&arg.case);
+        self.expression(&arg.expression);
+        self.l_brace(&arg.l_brace);
+        self.expression(&arg.expression0);
+        self.colon(&arg.colon);
+        self.expression(&arg.expression1);
+        self.comma(&arg.comma);
+        for x in &arg.case_expression_list {
+            self.expression(&x.expression);
+            self.colon(&x.colon);
+            self.expression(&x.expression0);
+            self.comma(&x.comma);
+        }
+        self.defaul(&arg.defaul);
+        self.colon(&arg.colon0);
+        self.expression(&arg.expression2);
+        if let Some(ref x) = arg.case_expression_opt {
+            self.comma(&x.comma);
+        }
+        self.r_brace(&arg.r_brace);
+        after!(self, case_expression, arg);
     }
 
     /// Semantic action for non-terminal 'Range'

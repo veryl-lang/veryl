@@ -291,6 +291,36 @@ impl VerylWalker for Aligner {
         }
     }
 
+    /// Semantic action for non-terminal 'CaseExpression'
+    fn case_expression(&mut self, arg: &CaseExpression) {
+        self.case(&arg.case);
+        self.expression(&arg.expression);
+        self.l_brace(&arg.l_brace);
+        self.aligns[align_kind::EXPRESSION].start_item();
+        self.expression(&arg.expression0);
+        self.aligns[align_kind::EXPRESSION].finish_item();
+        self.colon(&arg.colon);
+        self.expression(&arg.expression1);
+        self.comma(&arg.comma);
+        for x in &arg.case_expression_list {
+            self.aligns[align_kind::EXPRESSION].start_item();
+            self.expression(&x.expression);
+            self.aligns[align_kind::EXPRESSION].finish_item();
+            self.colon(&x.colon);
+            self.expression(&x.expression0);
+            self.comma(&x.comma);
+        }
+        self.aligns[align_kind::EXPRESSION].start_item();
+        self.defaul(&arg.defaul);
+        self.aligns[align_kind::EXPRESSION].finish_item();
+        self.colon(&arg.colon0);
+        self.expression(&arg.expression2);
+        if let Some(ref x) = arg.case_expression_opt {
+            self.comma(&x.comma);
+        }
+        self.r_brace(&arg.r_brace);
+    }
+
     /// Semantic action for non-terminal 'RangeOperator'
     fn range_operator(&mut self, arg: &RangeOperator) {
         match arg {

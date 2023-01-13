@@ -438,6 +438,72 @@ impl VerylWalker for Emitter {
         }
     }
 
+    /// Semantic action for non-terminal 'IfExpression'
+    fn if_expression(&mut self, arg: &IfExpression) {
+        self.token(&arg.r#if.if_token.replace("(("));
+        self.expression(&arg.expression);
+        self.token_will_push(&arg.l_brace.l_brace_token.replace(") ? ("));
+        self.newline_push();
+        self.expression(&arg.expression0);
+        self.newline_pop();
+        self.token(&arg.r_brace.r_brace_token.replace(")"));
+        self.space(1);
+        for x in &arg.if_expression_list {
+            self.token(&x.r#else.else_token.replace(":"));
+            self.space(1);
+            self.token(&x.r#if.if_token.replace("("));
+            self.expression(&x.expression);
+            self.token_will_push(&x.l_brace.l_brace_token.replace(") ? ("));
+            self.newline_push();
+            self.expression(&x.expression0);
+            self.newline_pop();
+            self.token(&x.r_brace.r_brace_token.replace(")"));
+            self.space(1);
+        }
+        self.token(&arg.r#else.else_token.replace(":"));
+        self.space(1);
+        self.token_will_push(&arg.l_brace0.l_brace_token.replace("("));
+        self.newline_push();
+        self.expression(&arg.expression1);
+        self.newline_pop();
+        self.token(&arg.r_brace0.r_brace_token.replace("))"));
+    }
+
+    /// Semantic action for non-terminal 'CaseExpression'
+    fn case_expression(&mut self, arg: &CaseExpression) {
+        self.token(&arg.case.case_token.replace("(("));
+        self.expression(&arg.expression);
+        self.space(1);
+        self.str("==");
+        self.space(1);
+        self.expression(&arg.expression0);
+        self.str(") ? (");
+        self.newline_push();
+        self.expression(&arg.expression1);
+        self.newline_pop();
+        self.str(")");
+        self.space(1);
+        for x in &arg.case_expression_list {
+            self.str(": (");
+            self.expression(&arg.expression);
+            self.space(1);
+            self.str("==");
+            self.space(1);
+            self.expression(&x.expression);
+            self.str(") ? (");
+            self.newline_push();
+            self.expression(&x.expression0);
+            self.newline_pop();
+            self.token(&x.comma.comma_token.replace(")"));
+            self.space(1);
+        }
+        self.str(": (");
+        self.newline_push();
+        self.expression(&arg.expression2);
+        self.newline_pop();
+        self.token(&arg.r_brace.r_brace_token.replace("))"));
+    }
+
     /// Semantic action for non-terminal 'Range'
     fn range(&mut self, arg: &Range) {
         self.l_bracket(&arg.l_bracket);
