@@ -37,3 +37,11 @@ module Module14C (
 
 
 endmodule
+
+interface InterfaceA #(
+    parameter int unsigned a  = 1,
+    parameter int unsigned b  = 1
+) ;
+
+
+endinterface

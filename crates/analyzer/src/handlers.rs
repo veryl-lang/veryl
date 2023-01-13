@@ -1,19 +1,19 @@
 pub mod check_function_arity;
+pub mod check_instance;
 pub mod check_invalid_direction;
 pub mod check_invalid_number_character;
 pub mod check_invalid_reset;
 pub mod check_invalid_statement;
-pub mod check_module_instance;
 pub mod check_number_overflow;
 pub mod check_system_function;
 pub mod create_reference;
 pub mod create_symbol_table;
 use check_function_arity::*;
+use check_instance::*;
 use check_invalid_direction::*;
 use check_invalid_number_character::*;
 use check_invalid_reset::*;
 use check_invalid_statement::*;
-use check_module_instance::*;
 use check_number_overflow::*;
 use check_system_function::*;
 use create_reference::*;
@@ -72,7 +72,7 @@ impl<'a> Pass1Handlers<'a> {
 
 pub struct Pass2Handlers<'a> {
     check_function_arity: CheckFunctionArity<'a>,
-    check_module_instance: CheckModuleInstance<'a>,
+    check_instance: CheckInstance<'a>,
     create_reference: CreateReference<'a>,
 }
 
@@ -80,7 +80,7 @@ impl<'a> Pass2Handlers<'a> {
     pub fn new(text: &'a str) -> Self {
         Self {
             check_function_arity: CheckFunctionArity::new(text),
-            check_module_instance: CheckModuleInstance::new(text),
+            check_instance: CheckInstance::new(text),
             create_reference: CreateReference::new(text),
         }
     }
@@ -88,7 +88,7 @@ impl<'a> Pass2Handlers<'a> {
     pub fn get_handlers(&mut self) -> Vec<&mut dyn Handler> {
         vec![
             &mut self.check_function_arity as &mut dyn Handler,
-            &mut self.check_module_instance as &mut dyn Handler,
+            &mut self.check_instance as &mut dyn Handler,
             &mut self.create_reference as &mut dyn Handler,
         ]
     }
@@ -96,7 +96,7 @@ impl<'a> Pass2Handlers<'a> {
     pub fn get_errors(&mut self) -> Vec<AnalyzeError> {
         let mut ret = Vec::new();
         ret.append(&mut self.check_function_arity.errors);
-        ret.append(&mut self.check_module_instance.errors);
+        ret.append(&mut self.check_instance.errors);
         ret.append(&mut self.create_reference.errors);
         ret
     }

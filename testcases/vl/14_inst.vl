@@ -37,3 +37,11 @@ module Module14C (
 
 
 }
+
+interface InterfaceA #(
+    parameter a: u32  = 1,
+    parameter b: u32  = 1,
+) {
+
+
+}
