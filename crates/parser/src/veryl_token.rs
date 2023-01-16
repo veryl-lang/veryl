@@ -202,6 +202,7 @@ token_with_comments!(UnaryOperatorToken, UnaryOperatorTerm, unary_operator_term)
 
 token_with_comments!(AlwaysCombToken, AlwaysCombTerm, always_comb_term);
 token_with_comments!(AlwaysFfToken, AlwaysFfTerm, always_ff_term);
+token_with_comments!(AsToken, AsTerm, as_term);
 token_with_comments!(AssignToken, AssignTerm, assign_term);
 token_with_comments!(AsyncHighToken, AsyncHighTerm, async_high_term);
 token_with_comments!(AsyncLowToken, AsyncLowTerm, async_low_term);

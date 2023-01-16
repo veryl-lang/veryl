@@ -56,6 +56,7 @@ AlwaysFfTerm          : /\balways_ff\b/                                         
 AssignTerm            : /\bassign\b/                                                         : Token;
 AsyncHighTerm         : /\basync_high\b/                                                     : Token;
 AsyncLowTerm          : /\basync_low\b/                                                      : Token;
+AsTerm                : /\bas\b/                                                             : Token;
 BitTerm               : /\bbit\b/                                                            : Token;
 CaseTerm              : /\bcase\b/                                                           : Token;
 DefaultTerm           : /\bdefault\b/                                                        : Token;
@@ -148,6 +149,7 @@ StarToken      : StarTerm      : Token Comments;
 
 AlwaysCombToken: AlwaysCombTerm: Token Comments;
 AlwaysFfToken  : AlwaysFfTerm  : Token Comments;
+AsToken        : AsTerm        : Token Comments;
 AssignToken    : AssignTerm    : Token Comments;
 AsyncHighToken : AsyncHighTerm : Token Comments;
 AsyncLowToken  : AsyncLowTerm  : Token Comments;
@@ -247,6 +249,7 @@ Star      : StarToken      : VerylToken;
 // Keyword
 AlwaysComb: AlwaysCombToken: VerylToken;
 AlwaysFf  : AlwaysFfToken  : VerylToken;
+As        : AsToken        : VerylToken;
 Assign    : AssignToken    : VerylToken;
 AsyncHigh : AsyncHighToken : VerylToken;
 AsyncLow  : AsyncLowToken  : VerylToken;
@@ -334,7 +337,8 @@ Expression07: Expression08 { Operator08 Expression08 };
 Expression08: Expression09 { Operator09 Expression09 };
 Expression09: Expression10 { ( Operator10 | Star ) Expression10 };
 Expression10: Expression11 { Operator11 Expression11 };
-Expression11: { ( UnaryOperator | Operator09 | Operator05 | Operator03 | Operator04 ) } Factor;
+Expression11: Expression12 { As ScopedIdentifier };
+Expression12: { ( UnaryOperator | Operator09 | Operator05 | Operator03 | Operator04 ) } Factor;
 
 Factor: Number
       | ExpressionIdentifier [ LParen [ FunctionCallArg ] RParen ]

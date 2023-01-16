@@ -307,6 +307,13 @@ pub trait VerylWalker {
         after!(self, always_ff, arg);
     }
 
+    /// Semantic action for non-terminal 'As'
+    fn r#as(&mut self, arg: &As) {
+        before!(self, r#as, arg);
+        self.veryl_token(&arg.as_token);
+        after!(self, r#as, arg);
+    }
+
     /// Semantic action for non-terminal 'Assign'
     fn assign(&mut self, arg: &Assign) {
         before!(self, assign, arg);
@@ -833,17 +840,28 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'Expression11'
     fn expression11(&mut self, arg: &Expression11) {
         before!(self, expression11, arg);
+        self.expression12(&arg.expression12);
         for x in &arg.expression11_list {
-            match &*x.expression11_list_group {
-                Expression11ListGroup::UnaryOperator(x) => self.unary_operator(&x.unary_operator),
-                Expression11ListGroup::Operator03(x) => self.operator03(&x.operator03),
-                Expression11ListGroup::Operator04(x) => self.operator04(&x.operator04),
-                Expression11ListGroup::Operator05(x) => self.operator05(&x.operator05),
-                Expression11ListGroup::Operator09(x) => self.operator09(&x.operator09),
+            self.r#as(&x.r#as);
+            self.scoped_identifier(&x.scoped_identifier);
+        }
+        after!(self, expression11, arg);
+    }
+
+    /// Semantic action for non-terminal 'Expression12'
+    fn expression12(&mut self, arg: &Expression12) {
+        before!(self, expression12, arg);
+        for x in &arg.expression12_list {
+            match &*x.expression12_list_group {
+                Expression12ListGroup::UnaryOperator(x) => self.unary_operator(&x.unary_operator),
+                Expression12ListGroup::Operator03(x) => self.operator03(&x.operator03),
+                Expression12ListGroup::Operator04(x) => self.operator04(&x.operator04),
+                Expression12ListGroup::Operator05(x) => self.operator05(&x.operator05),
+                Expression12ListGroup::Operator09(x) => self.operator09(&x.operator09),
             }
         }
         self.factor(&arg.factor);
-        after!(self, expression11, arg);
+        after!(self, expression12, arg);
     }
 
     /// Semantic action for non-terminal 'Factor'

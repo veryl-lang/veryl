@@ -1,0 +1,16 @@
+module Module21 {
+    var a: logic ;
+    var b: logic ;
+
+    enum EnumA: logic  {
+        A,
+        B,
+    }
+
+    enum EnumB: logic  {
+        C,
+        D,
+    }
+
+    assign a = b as EnumA as EnumB;
+}

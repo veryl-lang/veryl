@@ -411,6 +411,18 @@ impl VerylWalker for Emitter {
         }
     }
 
+    /// Semantic action for non-terminal 'Expression11'
+    fn expression11(&mut self, arg: &Expression11) {
+        for x in &arg.expression11_list {
+            self.scoped_identifier(&x.scoped_identifier);
+            self.str("'(");
+        }
+        self.expression12(&arg.expression12);
+        for _ in &arg.expression11_list {
+            self.str(")");
+        }
+    }
+
     /// Semantic action for non-terminal 'FunctionCallArg'
     fn function_call_arg(&mut self, arg: &FunctionCallArg) {
         self.expression(&arg.expression);
