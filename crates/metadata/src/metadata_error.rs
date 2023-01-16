@@ -1,5 +1,5 @@
+use miette::{self, Diagnostic};
 use thiserror::Error;
-use veryl_parser::miette::{self, Diagnostic};
 
 #[derive(Error, Diagnostic, Debug)]
 pub enum MetadataError {

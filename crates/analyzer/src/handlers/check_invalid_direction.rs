@@ -1,11 +1,11 @@
-use crate::analyze_error::AnalyzeError;
-use veryl_parser::miette::Result;
+use crate::analyzer_error::AnalyzerError;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
+use veryl_parser::ParolError;
 
 #[derive(Default)]
 pub struct CheckInvalidDirection<'a> {
-    pub errors: Vec<AnalyzeError>,
+    pub errors: Vec<AnalyzerError>,
     text: &'a str,
     point: HandlerPoint,
     in_function: bool,
@@ -28,12 +28,12 @@ impl<'a> Handler for CheckInvalidDirection<'a> {
 }
 
 impl<'a> VerylGrammarTrait for CheckInvalidDirection<'a> {
-    fn direction(&mut self, arg: &Direction) -> Result<()> {
+    fn direction(&mut self, arg: &Direction) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             match arg {
                 Direction::Ref(x) => {
                     if !self.in_function {
-                        self.errors.push(AnalyzeError::invalid_direction(
+                        self.errors.push(AnalyzerError::invalid_direction(
                             "ref",
                             self.text,
                             &x.r#ref.ref_token,
@@ -42,7 +42,7 @@ impl<'a> VerylGrammarTrait for CheckInvalidDirection<'a> {
                 }
                 Direction::Modport(x) => {
                     if !self.in_module {
-                        self.errors.push(AnalyzeError::invalid_direction(
+                        self.errors.push(AnalyzerError::invalid_direction(
                             "modport",
                             self.text,
                             &x.modport.modport_token,
@@ -55,7 +55,7 @@ impl<'a> VerylGrammarTrait for CheckInvalidDirection<'a> {
         Ok(())
     }
 
-    fn function_declaration(&mut self, _arg: &FunctionDeclaration) -> Result<()> {
+    fn function_declaration(&mut self, _arg: &FunctionDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => self.in_function = true,
             HandlerPoint::After => self.in_function = false,
@@ -63,7 +63,7 @@ impl<'a> VerylGrammarTrait for CheckInvalidDirection<'a> {
         Ok(())
     }
 
-    fn module_declaration(&mut self, _arg: &ModuleDeclaration) -> Result<()> {
+    fn module_declaration(&mut self, _arg: &ModuleDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => self.in_module = true,
             HandlerPoint::After => self.in_module = false,

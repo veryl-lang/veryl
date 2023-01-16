@@ -1,10 +1,10 @@
 use crate::utils;
 use crate::OptDump;
+use miette::{IntoDiagnostic, Result, WrapErr};
 use std::fs;
 use std::time::Instant;
 use veryl_analyzer::Analyzer;
 use veryl_metadata::Metadata;
-use veryl_parser::miette::{IntoDiagnostic, Result, WrapErr};
 use veryl_parser::Parser;
 
 pub struct CmdDump {

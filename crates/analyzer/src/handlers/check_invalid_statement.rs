@@ -1,11 +1,11 @@
-use crate::analyze_error::AnalyzeError;
-use veryl_parser::miette::Result;
+use crate::analyzer_error::AnalyzerError;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
+use veryl_parser::ParolError;
 
 #[derive(Default)]
 pub struct CheckInvalidStatement<'a> {
-    pub errors: Vec<AnalyzeError>,
+    pub errors: Vec<AnalyzerError>,
     text: &'a str,
     point: HandlerPoint,
     in_always_ff: bool,
@@ -30,17 +30,17 @@ impl<'a> Handler for CheckInvalidStatement<'a> {
 }
 
 impl<'a> VerylGrammarTrait for CheckInvalidStatement<'a> {
-    fn statement(&mut self, _arg: &Statement) -> Result<()> {
+    fn statement(&mut self, _arg: &Statement) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             self.statement_depth_in_always_ff += 1;
         }
         Ok(())
     }
 
-    fn if_reset_statement(&mut self, arg: &IfResetStatement) -> Result<()> {
+    fn if_reset_statement(&mut self, arg: &IfResetStatement) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if self.in_always_comb || self.in_function {
-                self.errors.push(AnalyzeError::invalid_statement(
+                self.errors.push(AnalyzerError::invalid_statement(
                     "if_reset",
                     self.text,
                     &arg.if_reset.if_reset_token,
@@ -48,7 +48,7 @@ impl<'a> VerylGrammarTrait for CheckInvalidStatement<'a> {
             }
 
             if self.in_always_ff && self.statement_depth_in_always_ff != 1 {
-                self.errors.push(AnalyzeError::invalid_statement(
+                self.errors.push(AnalyzerError::invalid_statement(
                     "if_reset",
                     self.text,
                     &arg.if_reset.if_reset_token,
@@ -58,10 +58,10 @@ impl<'a> VerylGrammarTrait for CheckInvalidStatement<'a> {
         Ok(())
     }
 
-    fn return_statement(&mut self, arg: &ReturnStatement) -> Result<()> {
+    fn return_statement(&mut self, arg: &ReturnStatement) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if self.in_always_ff || self.in_always_comb {
-                self.errors.push(AnalyzeError::invalid_statement(
+                self.errors.push(AnalyzerError::invalid_statement(
                     "return",
                     self.text,
                     &arg.r#return.return_token,
@@ -71,7 +71,7 @@ impl<'a> VerylGrammarTrait for CheckInvalidStatement<'a> {
         Ok(())
     }
 
-    fn always_ff_declaration(&mut self, _arg: &AlwaysFfDeclaration) -> Result<()> {
+    fn always_ff_declaration(&mut self, _arg: &AlwaysFfDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
                 self.in_always_ff = true;
@@ -82,7 +82,7 @@ impl<'a> VerylGrammarTrait for CheckInvalidStatement<'a> {
         Ok(())
     }
 
-    fn always_comb_declaration(&mut self, _arg: &AlwaysCombDeclaration) -> Result<()> {
+    fn always_comb_declaration(&mut self, _arg: &AlwaysCombDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => self.in_always_comb = true,
             HandlerPoint::After => self.in_always_comb = false,
@@ -90,7 +90,7 @@ impl<'a> VerylGrammarTrait for CheckInvalidStatement<'a> {
         Ok(())
     }
 
-    fn function_declaration(&mut self, _arg: &FunctionDeclaration) -> Result<()> {
+    fn function_declaration(&mut self, _arg: &FunctionDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => self.in_function = true,
             HandlerPoint::After => self.in_function = false,

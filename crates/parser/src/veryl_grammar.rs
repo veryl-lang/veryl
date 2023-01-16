@@ -1,5 +1,5 @@
 use crate::veryl_grammar_trait::*;
-use parol_runtime::miette::Result;
+use parol_runtime::ParolError;
 use std::fmt::{Debug, Display, Error, Formatter};
 
 #[derive(Debug, Default)]
@@ -30,7 +30,7 @@ impl Display for VerylGrammar {
 
 impl VerylGrammarTrait for VerylGrammar {
     /// Semantic action for non-terminal 'Veryl'
-    fn veryl(&mut self, arg: &Veryl) -> Result<()> {
+    fn veryl(&mut self, arg: &Veryl) -> Result<(), ParolError> {
         self.veryl = Some(arg.clone());
         Ok(())
     }

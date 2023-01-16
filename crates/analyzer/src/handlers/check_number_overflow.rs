@@ -1,11 +1,11 @@
-use crate::analyze_error::AnalyzeError;
-use veryl_parser::miette::Result;
+use crate::analyzer_error::AnalyzerError;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
+use veryl_parser::ParolError;
 
 #[derive(Default)]
 pub struct CheckNumberOverflow<'a> {
-    pub errors: Vec<AnalyzeError>,
+    pub errors: Vec<AnalyzerError>,
     text: &'a str,
     point: HandlerPoint,
 }
@@ -26,7 +26,7 @@ impl<'a> Handler for CheckNumberOverflow<'a> {
 }
 
 impl<'a> VerylGrammarTrait for CheckNumberOverflow<'a> {
-    fn based(&mut self, arg: &Based) -> Result<()> {
+    fn based(&mut self, arg: &Based) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let token = &arg.based_token;
             let text = token.text();
@@ -43,7 +43,7 @@ impl<'a> VerylGrammarTrait for CheckNumberOverflow<'a> {
                     let actual_width = number.chars().count();
                     if actual_width > width {
                         self.errors
-                            .push(AnalyzeError::number_overflow(width, self.text, token));
+                            .push(AnalyzerError::number_overflow(width, self.text, token));
                     }
                 }
                 "o" => {
@@ -56,7 +56,7 @@ impl<'a> VerylGrammarTrait for CheckNumberOverflow<'a> {
                     }
                     if actual_width > width {
                         self.errors
-                            .push(AnalyzeError::number_overflow(width, self.text, token));
+                            .push(AnalyzerError::number_overflow(width, self.text, token));
                     }
                 }
                 "d" => {}
@@ -74,7 +74,7 @@ impl<'a> VerylGrammarTrait for CheckNumberOverflow<'a> {
                     }
                     if actual_width > width {
                         self.errors
-                            .push(AnalyzeError::number_overflow(width, self.text, token));
+                            .push(AnalyzerError::number_overflow(width, self.text, token));
                     }
                 }
                 _ => unreachable!(),

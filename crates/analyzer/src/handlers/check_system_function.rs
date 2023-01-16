@@ -1,12 +1,12 @@
-use crate::analyze_error::AnalyzeError;
-use veryl_parser::miette::Result;
+use crate::analyzer_error::AnalyzerError;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint, VerylWalker};
+use veryl_parser::ParolError;
 use veryl_parser::Stringifier;
 
 #[derive(Default)]
 pub struct CheckSystemFunction<'a> {
-    pub errors: Vec<AnalyzeError>,
+    pub errors: Vec<AnalyzerError>,
     text: &'a str,
     point: HandlerPoint,
 }
@@ -27,7 +27,7 @@ impl<'a> Handler for CheckSystemFunction<'a> {
 }
 
 impl<'a> VerylGrammarTrait for CheckSystemFunction<'a> {
-    fn factor(&mut self, arg: &Factor) -> Result<()> {
+    fn factor(&mut self, arg: &Factor) -> Result<(), ParolError> {
         if let Factor::FactorOptScopedOrHierIdentifierFactorOpt0(x) = arg {
             if x.factor_opt.is_some() {
                 let mut stringifier = Stringifier::new();
@@ -35,7 +35,7 @@ impl<'a> VerylGrammarTrait for CheckSystemFunction<'a> {
                 match stringifier.as_str() {
                     name if DEFINED_SYSTEM_FUNCTIONS.contains(&name) => (),
                     name => {
-                        self.errors.push(AnalyzeError::invalid_system_function(
+                        self.errors.push(AnalyzerError::invalid_system_function(
                             name,
                             self.text,
                             &x.scoped_or_hier_identifier.identifier.identifier_token,

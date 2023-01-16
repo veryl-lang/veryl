@@ -1,11 +1,11 @@
 use crate::utils;
 use crate::OptCheck;
+use miette::{self, Diagnostic, IntoDiagnostic, Result, WrapErr};
 use std::fs;
 use std::time::Instant;
 use thiserror::Error;
-use veryl_analyzer::{AnalyzeError, Analyzer};
+use veryl_analyzer::{Analyzer, AnalyzerError};
 use veryl_metadata::Metadata;
-use veryl_parser::miette::{self, Diagnostic, IntoDiagnostic, Result, WrapErr};
 use veryl_parser::Parser;
 
 pub struct CmdCheck {
@@ -16,7 +16,7 @@ pub struct CmdCheck {
 #[error("Check error")]
 pub struct CheckError {
     #[related]
-    related: Vec<AnalyzeError>,
+    related: Vec<AnalyzerError>,
 }
 
 impl CmdCheck {

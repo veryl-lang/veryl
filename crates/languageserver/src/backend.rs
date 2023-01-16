@@ -13,7 +13,7 @@ use veryl_formatter::Formatter;
 use veryl_metadata::Metadata;
 use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::VerylWalker;
-use veryl_parser::{miette, resource_table, Finder, Parser, ParserError};
+use veryl_parser::{resource_table, Finder, Parser, ParserError};
 
 #[derive(Debug)]
 pub struct Backend {
@@ -65,7 +65,7 @@ impl Backend {
             }
             Err(x) => {
                 self.parser_map.remove(&path);
-                vec![Backend::to_diag(x, &rope)]
+                vec![Backend::to_diag(x.into(), &rope)]
             }
         };
         self.client
@@ -120,7 +120,7 @@ impl Backend {
 
         let message = if let Some(x) = err.downcast_ref::<ParserError>() {
             match x {
-                ParserError::PredictionErrorWithExpectations {
+                ParserError::UnexpectedToken {
                     unexpected_tokens, ..
                 } => {
                     format!(
@@ -128,7 +128,15 @@ impl Backend {
                         Backend::demangle_unexpected_token(&unexpected_tokens[0].to_string())
                     )
                 }
-                _ => format!("Syntax Error: {}", x),
+                ParserError::ParserError(x) => {
+                    format!("Syntax Error: {}", x)
+                }
+                ParserError::LexerError(x) => {
+                    format!("Syntax Error: {}", x)
+                }
+                ParserError::UserError(x) => {
+                    format!("Syntax Error: {}", x)
+                }
             }
         } else {
             format!("Semantic Error: {}", err)
@@ -146,13 +154,9 @@ impl Backend {
     }
 
     fn demangle_unexpected_token(text: &str) -> String {
-        if text.contains("LBracketAMinusZ") {
-            String::from("Unexpected token: Identifier")
-        } else if text.contains("LBracket0Minus") {
-            String::from("Unexpected token: Number")
-        } else {
-            text.replace("LA(1) (", "").replace(')', "")
-        }
+        text.replace("LA(1) (", "")
+            .replace(')', "")
+            .replace("Term", "")
     }
 
     fn to_location(token: &Token) -> Location {

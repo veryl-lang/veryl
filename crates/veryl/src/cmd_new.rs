@@ -1,8 +1,8 @@
 use crate::utils;
 use crate::OptNew;
+use miette::{bail, IntoDiagnostic, Result};
 use std::fs::{self, File};
 use std::io::Write;
-use veryl_parser::miette::{bail, IntoDiagnostic, Result};
 
 pub struct CmdNew {
     opt: OptNew,

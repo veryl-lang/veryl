@@ -1,11 +1,11 @@
-use crate::analyze_error::AnalyzeError;
-use veryl_parser::miette::Result;
+use crate::analyzer_error::AnalyzerError;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
+use veryl_parser::ParolError;
 
 #[derive(Default)]
 pub struct CheckInvalidReset<'a> {
-    pub errors: Vec<AnalyzeError>,
+    pub errors: Vec<AnalyzerError>,
     text: &'a str,
     point: HandlerPoint,
 }
@@ -26,7 +26,7 @@ impl<'a> Handler for CheckInvalidReset<'a> {
 }
 
 impl<'a> VerylGrammarTrait for CheckInvalidReset<'a> {
-    fn always_ff_declaration(&mut self, arg: &AlwaysFfDeclaration) -> Result<()> {
+    fn always_ff_declaration(&mut self, arg: &AlwaysFfDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             // Chcek first if_reset when reset signel exists
             let if_reset_required = if arg.always_ff_declaration_opt.is_some() {
@@ -39,7 +39,7 @@ impl<'a> VerylGrammarTrait for CheckInvalidReset<'a> {
                 false
             };
             if if_reset_required {
-                self.errors.push(AnalyzeError::if_reset_required(
+                self.errors.push(AnalyzerError::if_reset_required(
                     self.text,
                     &arg.always_ff.always_ff_token,
                 ));
@@ -53,7 +53,7 @@ impl<'a> VerylGrammarTrait for CheckInvalidReset<'a> {
                 }
             }
             if if_reset_exist && arg.always_ff_declaration_opt.is_none() {
-                self.errors.push(AnalyzeError::reset_signal_missing(
+                self.errors.push(AnalyzerError::reset_signal_missing(
                     self.text,
                     &arg.always_ff.always_ff_token,
                 ));

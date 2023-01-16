@@ -1,4 +1,4 @@
-use crate::analyze_error::AnalyzeError;
+use crate::analyzer_error::AnalyzerError;
 use crate::handlers::*;
 use crate::symbol::SymbolKind;
 use crate::symbol_table;
@@ -53,7 +53,7 @@ impl<'a> Analyzer<'a> {
         Analyzer { text }
     }
 
-    pub fn analyze(&'a mut self, input: &Veryl) -> Vec<AnalyzeError> {
+    pub fn analyze(&'a mut self, input: &Veryl) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
 
         let mut pass1 = AnalyzerPass1::new(self.text);
@@ -67,13 +67,13 @@ impl<'a> Analyzer<'a> {
         ret
     }
 
-    pub fn analyze_post(path: &Path, text: &str) -> Vec<AnalyzeError> {
+    pub fn analyze_post(path: &Path, text: &str) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
         ret.append(&mut Analyzer::check_symbol_table(path, text));
         ret
     }
 
-    fn check_symbol_table(path: &Path, text: &str) -> Vec<AnalyzeError> {
+    fn check_symbol_table(path: &Path, text: &str) -> Vec<AnalyzerError> {
         let path = resource_table::get_path_id(path.to_path_buf()).unwrap();
         let mut ret = Vec::new();
         let symbols = symbol_table::get_all();
@@ -90,7 +90,7 @@ impl<'a> Analyzer<'a> {
                             token: symbol.token,
                             comments: Vec::new(),
                         };
-                        ret.push(AnalyzeError::unused_variable(
+                        ret.push(AnalyzerError::unused_variable(
                             &format!("{}", symbol.token.text),
                             text,
                             &token,

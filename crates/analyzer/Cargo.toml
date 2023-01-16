@@ -13,5 +13,6 @@ edition               = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+miette        = {workspace = true}
 thiserror     = {workspace = true}
 veryl-parser  = {version = "0.1.14", path = "../parser"}

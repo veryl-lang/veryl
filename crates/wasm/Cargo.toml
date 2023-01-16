@@ -9,6 +9,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
+miette          = {workspace = true}
 semver          = {version = "1.0", features = ["serde"]}
 veryl-analyzer  = {version = "0.1.14", path = "../analyzer"}
 veryl-emitter   = {version = "0.1.14", path = "../emitter"}

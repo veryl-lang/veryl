@@ -1,8 +1,8 @@
 use crate::utils;
 use crate::OptInit;
+use miette::{bail, IntoDiagnostic, Result};
 use std::fs::File;
 use std::io::Write;
-use veryl_parser::miette::{bail, IntoDiagnostic, Result};
 
 pub struct CmdInit {
     opt: OptInit,

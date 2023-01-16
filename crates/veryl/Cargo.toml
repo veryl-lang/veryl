@@ -26,6 +26,7 @@ pre-release-replacements = [
 clap            = {workspace = true}
 console         = "0.15.4"
 env_logger      = "0.10.0"
+miette          = {workspace = true}
 serde_json      = {workspace = true}
 similar         = {version = "2.2.1", features = ["text", "inline"]}
 thiserror       = {workspace = true}

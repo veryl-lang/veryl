@@ -1,6 +1,5 @@
 use crate::resource_table::{self, PathId, StrId, TokenId};
 use crate::veryl_grammar_trait::*;
-use parol_runtime::miette;
 use regex::Regex;
 
 #[derive(Debug, Clone, Copy)]
@@ -14,31 +13,32 @@ pub struct Token {
     pub file_path: PathId,
 }
 
-impl<'t> From<&parol_runtime::lexer::Token<'t>> for Token {
-    fn from(x: &parol_runtime::lexer::Token<'t>) -> Self {
+impl<'t> TryFrom<&parol_runtime::lexer::Token<'t>> for Token {
+    type Error = anyhow::Error;
+    fn try_from(x: &parol_runtime::lexer::Token<'t>) -> Result<Self, anyhow::Error> {
         let id = resource_table::new_token_id();
         let text = resource_table::insert_str(x.text());
+        let pos = x.location.scanner_switch_pos + x.location.offset - x.location.length;
         let file_path = resource_table::insert_path(&x.location.file_name);
-        let source_span: miette::SourceSpan = (&x.location).into();
-        Token {
+        Ok(Token {
             id,
             text,
-            line: x.location.line,
-            column: x.location.column,
+            line: x.location.start_line,
+            column: x.location.start_column,
             length: x.location.length,
-            pos: source_span.offset(),
+            pos,
             file_path,
-        }
+        })
     }
 }
 
-impl From<&Token> for parol_runtime::miette::SourceSpan {
+impl From<&Token> for miette::SourceSpan {
     fn from(x: &Token) -> Self {
         (x.pos, x.length).into()
     }
 }
 
-impl From<Token> for parol_runtime::miette::SourceSpan {
+impl From<Token> for miette::SourceSpan {
     fn from(x: Token) -> Self {
         (x.pos, x.length).into()
     }
@@ -67,22 +67,26 @@ impl VerylToken {
 
 macro_rules! token_with_comments {
     ($x:ident, $y:ident, $z:ident) => {
-        impl From<&$x> for VerylToken {
-            fn from(x: &$x) -> Self {
+        impl TryFrom<&$x> for VerylToken {
+            type Error = anyhow::Error;
+
+            fn try_from(x: &$x) -> Result<Self, anyhow::Error> {
                 let mut comments = Vec::new();
                 if let Some(ref x) = x.comments.comments_opt {
                     let mut tokens = split_comment_token(x.comments_term.comments_term);
                     comments.append(&mut tokens)
                 }
-                VerylToken {
+                Ok(VerylToken {
                     token: x.$z.clone(),
                     comments,
-                }
+                })
             }
         }
-        impl From<&$y> for Token {
-            fn from(x: &$y) -> Self {
-                Token {
+        impl TryFrom<&$y> for Token {
+            type Error = anyhow::Error;
+
+            fn try_from(x: &$y) -> Result<Self, anyhow::Error> {
+                Ok(Token {
                     id: x.$z.id,
                     text: x.$z.text,
                     line: x.$z.line,
@@ -90,7 +94,7 @@ macro_rules! token_with_comments {
                     length: x.$z.length,
                     pos: x.$z.pos,
                     file_path: x.$z.file_path,
-                }
+                })
             }
         }
     };
@@ -127,8 +131,10 @@ fn split_comment_token(token: Token) -> Vec<Token> {
     ret
 }
 
-impl From<&StartToken> for VerylToken {
-    fn from(x: &StartToken) -> Self {
+impl TryFrom<&StartToken> for VerylToken {
+    type Error = anyhow::Error;
+
+    fn try_from(x: &StartToken) -> Result<Self, anyhow::Error> {
         let mut comments = Vec::new();
         if let Some(ref x) = x.comments.comments_opt {
             let mut tokens = split_comment_token(x.comments_term.comments_term);
@@ -146,7 +152,7 @@ impl From<&StartToken> for VerylToken {
             pos: 0,
             file_path,
         };
-        VerylToken { token, comments }
+        Ok(VerylToken { token, comments })
     }
 }
 

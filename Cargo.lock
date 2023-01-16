@@ -1464,9 +1464,9 @@ dependencies = [
 
 [[package]]
 name = "object"
-version = "0.30.1"
+version = "0.30.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d864c91689fdc196779b98dba0aceac6118594c2df6ee5d943eb6a8df4d107a"
+checksum = "2b8c786513eb403643f2a88c244c2aaa270ef2153f55094587d0c48a3cf22a83"
 dependencies = [
  "memchr",
 ]
@@ -1530,10 +1530,11 @@ dependencies = [
 
 [[package]]
 name = "parol"
-version = "0.15.1"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af19bd3825aae8a43ddb7b73e26b3c62ae4ad5034d3bb0b3daa8a7f79ea52bca"
+checksum = "793e537884119dda7c8ec2ea8c099ad26965c022d8719bded3f40165b6180ec3"
 dependencies = [
+ "anyhow",
  "cfg-if",
  "clap 4.0.32",
  "derive_builder",
@@ -1541,9 +1542,6 @@ dependencies = [
  "function_name",
  "id_tree",
  "id_tree_layout",
- "log",
- "miette",
- "once_cell",
  "owo-colors",
  "parol-macros",
  "parol_runtime",
@@ -1558,22 +1556,23 @@ dependencies = [
 
 [[package]]
 name = "parol-macros"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e050a66a0efd1a8a62f51ec99383cbabf00f7c557747591383c5f02c16cdce5b"
+checksum = "bdd646301a99589f85ed580e3807ee2f7aa6529b900fd703f5a14716b7426b28"
 
 [[package]]
 name = "parol_runtime"
-version = "0.11.2"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36c17d6e5835ef2460a4bc1023ee58fec5cde7880b9c99792e2d71abd2d0059e"
+checksum = "1ec1d77d5f6701ee9247bb5b820961ed018879179d278c56be56cce5e47a2c05"
 dependencies = [
+ "anyhow",
+ "codespan-reporting",
  "derive_builder",
  "function_name",
  "id_tree",
  "id_tree_layout",
  "log",
- "miette",
  "once_cell",
  "parol-macros",
  "regex",
@@ -2621,6 +2620,7 @@ dependencies = [
  "clap 4.0.32",
  "console",
  "env_logger",
+ "miette",
  "serde_json",
  "similar",
  "thiserror",
@@ -2636,6 +2636,7 @@ dependencies = [
 name = "veryl-analyzer"
 version = "0.1.14"
 dependencies = [
+ "miette",
  "thiserror",
  "veryl-parser",
 ]
@@ -2663,6 +2664,7 @@ version = "0.1.14"
 dependencies = [
  "dashmap",
  "glob",
+ "miette",
  "ropey",
  "serde_json",
  "tokio",
@@ -2677,6 +2679,7 @@ dependencies = [
 name = "veryl-metadata"
 version = "0.1.14"
 dependencies = [
+ "miette",
  "semver",
  "serde",
  "thiserror",
@@ -2688,7 +2691,9 @@ dependencies = [
 name = "veryl-parser"
 version = "0.1.14"
 dependencies = [
+ "anyhow",
  "bimap",
+ "miette",
  "parol",
  "parol_runtime",
  "regex",
@@ -2713,6 +2718,7 @@ dependencies = [
 name = "veryl-wasm"
 version = "0.1.0"
 dependencies = [
+ "miette",
  "semver",
  "veryl-analyzer",
  "veryl-emitter",

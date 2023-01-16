@@ -1,10 +1,8 @@
+use miette::{ErrReport, GraphicalReportHandler, GraphicalTheme, ThemeCharacters, ThemeStyles};
 use semver::Version;
 use veryl_emitter::Emitter;
 use veryl_formatter::Formatter;
 use veryl_metadata::{Build, Format, Metadata, Package};
-use veryl_parser::miette::{
-    ErrReport, GraphicalReportHandler, GraphicalTheme, ThemeCharacters, ThemeStyles,
-};
 use veryl_parser::Parser;
 use wasm_bindgen::prelude::*;
 
@@ -74,7 +72,7 @@ pub fn parse(source: &str) -> ParseResult {
         }
         Err(e) => ParseResult {
             code: "".to_owned(),
-            err: render_err(e),
+            err: render_err(e.into()),
         },
     }
 }
@@ -93,7 +91,7 @@ pub fn format(source: &str) -> ParseResult {
         }
         Err(e) => ParseResult {
             code: "".to_owned(),
-            err: render_err(e),
+            err: render_err(e.into()),
         },
     }
 }

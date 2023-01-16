@@ -1,14 +1,14 @@
-use crate::analyze_error::AnalyzeError;
+use crate::analyzer_error::AnalyzerError;
 use crate::namespace_table;
 use crate::symbol::SymbolKind;
 use crate::symbol_table::{self, SymbolPath};
-use veryl_parser::miette::Result;
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
+use veryl_parser::ParolError;
 
 pub struct CheckInstance<'a> {
-    pub errors: Vec<AnalyzeError>,
+    pub errors: Vec<AnalyzerError>,
     text: &'a str,
     point: HandlerPoint,
 }
@@ -30,7 +30,7 @@ impl<'a> Handler for CheckInstance<'a> {
 }
 
 impl<'a> VerylGrammarTrait for CheckInstance<'a> {
-    fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<()> {
+    fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let path = &SymbolPath::new(&[arg.identifier0.identifier_token.token.text]);
 
@@ -57,7 +57,7 @@ impl<'a> VerylGrammarTrait for CheckInstance<'a> {
                                     resource_table::get_str_value(*path.as_slice().last().unwrap())
                                         .unwrap();
                                 let port = resource_table::get_str_value(port.name).unwrap();
-                                self.errors.push(AnalyzeError::missing_port(
+                                self.errors.push(AnalyzerError::missing_port(
                                     &name,
                                     &port,
                                     self.text,
@@ -71,7 +71,7 @@ impl<'a> VerylGrammarTrait for CheckInstance<'a> {
                                     resource_table::get_str_value(*path.as_slice().last().unwrap())
                                         .unwrap();
                                 let port = resource_table::get_str_value(*port).unwrap();
-                                self.errors.push(AnalyzeError::unknown_port(
+                                self.errors.push(AnalyzerError::unknown_port(
                                     &name,
                                     &port,
                                     self.text,
@@ -84,7 +84,7 @@ impl<'a> VerylGrammarTrait for CheckInstance<'a> {
                     _ => {
                         let name = resource_table::get_str_value(*path.as_slice().last().unwrap())
                             .unwrap();
-                        self.errors.push(AnalyzeError::mismatch_type(
+                        self.errors.push(AnalyzerError::mismatch_type(
                             &name,
                             "module or interface",
                             &symbol.kind.to_kind_name(),

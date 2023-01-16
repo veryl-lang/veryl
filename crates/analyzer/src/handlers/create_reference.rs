@@ -1,13 +1,13 @@
-use crate::analyze_error::AnalyzeError;
+use crate::analyzer_error::AnalyzerError;
 use crate::namespace_table;
 use crate::symbol_table::{self, SymbolPath};
-use veryl_parser::miette::Result;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
+use veryl_parser::ParolError;
 
 #[derive(Default)]
 pub struct CreateReference<'a> {
-    pub errors: Vec<AnalyzeError>,
+    pub errors: Vec<AnalyzerError>,
     _text: &'a str,
     point: HandlerPoint,
 }
@@ -28,7 +28,7 @@ impl<'a> Handler for CreateReference<'a> {
 }
 
 impl<'a> VerylGrammarTrait for CreateReference<'a> {
-    fn hierarchical_identifier(&mut self, arg: &HierarchicalIdentifier) -> Result<()> {
+    fn hierarchical_identifier(&mut self, arg: &HierarchicalIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let namespace = namespace_table::get(arg.identifier.identifier_token.token.id).unwrap();
             let path = SymbolPath::from(arg);
@@ -43,7 +43,10 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
         Ok(())
     }
 
-    fn scoped_or_hier_identifier(&mut self, arg: &ScopedOrHierIdentifier) -> Result<()> {
+    fn scoped_or_hier_identifier(
+        &mut self,
+        arg: &ScopedOrHierIdentifier,
+    ) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let namespace = namespace_table::get(arg.identifier.identifier_token.token.id).unwrap();
             let path = SymbolPath::from(arg);
@@ -58,7 +61,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
         Ok(())
     }
 
-    fn modport_item(&mut self, arg: &ModportItem) -> Result<()> {
+    fn modport_item(&mut self, arg: &ModportItem) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let namespace = namespace_table::get(arg.identifier.identifier_token.token.id).unwrap();
             let path = SymbolPath::from(arg.identifier.as_ref());
@@ -73,7 +76,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
         Ok(())
     }
 
-    fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<()> {
+    fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let namespace =
                 namespace_table::get(arg.identifier0.identifier_token.token.id).unwrap();

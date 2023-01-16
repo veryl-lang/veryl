@@ -1,6 +1,6 @@
 use crate::{Format, OptMetadata};
+use miette::{IntoDiagnostic, Result};
 use veryl_metadata::Metadata;
-use veryl_parser::miette::{IntoDiagnostic, Result};
 
 pub struct CmdMetadata {
     opt: OptMetadata,

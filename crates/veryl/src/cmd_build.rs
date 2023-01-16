@@ -1,12 +1,12 @@
 use crate::utils;
 use crate::OptBuild;
+use miette::{IntoDiagnostic, Result, WrapErr};
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::time::Instant;
 use veryl_emitter::Emitter;
 use veryl_metadata::{Metadata, Target};
-use veryl_parser::miette::{IntoDiagnostic, Result, WrapErr};
 use veryl_parser::Parser;
 
 pub struct CmdBuild {

@@ -1,14 +1,14 @@
-use crate::analyze_error::AnalyzeError;
+use crate::analyzer_error::AnalyzerError;
 use crate::namespace_table;
 use crate::symbol::SymbolKind;
 use crate::symbol_table::{self, SymbolPath};
-use veryl_parser::miette::Result;
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
+use veryl_parser::ParolError;
 
 pub struct CheckFunctionArity<'a> {
-    pub errors: Vec<AnalyzeError>,
+    pub errors: Vec<AnalyzerError>,
     text: &'a str,
     point: HandlerPoint,
 }
@@ -30,7 +30,7 @@ impl<'a> Handler for CheckFunctionArity<'a> {
 }
 
 impl<'a> VerylGrammarTrait for CheckFunctionArity<'a> {
-    fn factor(&mut self, arg: &Factor) -> Result<()> {
+    fn factor(&mut self, arg: &Factor) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if let Factor::FactorOptScopedOrHierIdentifierFactorOpt0(x) = arg {
                 // skip system function
@@ -71,7 +71,7 @@ impl<'a> VerylGrammarTrait for CheckFunctionArity<'a> {
                     if arity != args {
                         let name = resource_table::get_str_value(*path.as_slice().last().unwrap())
                             .unwrap();
-                        self.errors.push(AnalyzeError::mismatch_arity(
+                        self.errors.push(AnalyzerError::mismatch_arity(
                             &name,
                             arity,
                             args,

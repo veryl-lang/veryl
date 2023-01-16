@@ -1,11 +1,11 @@
+use miette::{self, Diagnostic, NamedSource, SourceSpan};
 use thiserror::Error;
-use veryl_parser::miette::{self, Diagnostic, NamedSource, SourceSpan};
 use veryl_parser::resource_table;
 use veryl_parser::veryl_token::VerylToken;
 
 #[derive(Error, Diagnostic, Debug)]
-pub enum AnalyzeError {
-    #[diagnostic(code(AnalyzeError::InvalidNumberCharacter), help(""))]
+pub enum AnalyzerError {
+    #[diagnostic(code(AnalyzerError::InvalidNumberCharacter), help(""))]
     #[error("{kind} number can't contain {cause}")]
     InvalidNumberCharacter {
         cause: char,
@@ -16,7 +16,7 @@ pub enum AnalyzeError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(code(AnalyzeError::NumberOverflow), help("increase bit width"))]
+    #[diagnostic(code(AnalyzerError::NumberOverflow), help("increase bit width"))]
     #[error("number is over the maximum size of {width} bits")]
     NumberOverflow {
         width: usize,
@@ -26,7 +26,7 @@ pub enum AnalyzeError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(code(AnalyzeError::IfResetRequired), help("add if_reset statement"))]
+    #[diagnostic(code(AnalyzerError::IfResetRequired), help("add if_reset statement"))]
     #[error("if_reset statement is required for always_ff with reset signal")]
     IfResetRequired {
         #[source_code]
@@ -35,7 +35,7 @@ pub enum AnalyzeError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(code(AnalyzeError::ResetSignalMissing), help("add reset port"))]
+    #[diagnostic(code(AnalyzerError::ResetSignalMissing), help("add reset port"))]
     #[error("reset signal is required for always_ff with if_reset statement")]
     ResetSignalMissing {
         #[source_code]
@@ -44,7 +44,7 @@ pub enum AnalyzeError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(code(AnalyzeError::InvalidStatement), help("remove {kind} statement"))]
+    #[diagnostic(code(AnalyzerError::InvalidStatement), help("remove {kind} statement"))]
     #[error("{kind} statement can't be placed at here")]
     InvalidStatement {
         kind: String,
@@ -54,7 +54,7 @@ pub enum AnalyzeError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(code(AnalyzeError::InvalidDirection), help("remove {kind} direction"))]
+    #[diagnostic(code(AnalyzerError::InvalidDirection), help("remove {kind} direction"))]
     #[error("{kind} direction can't be placed at here")]
     InvalidDirection {
         kind: String,
@@ -65,7 +65,7 @@ pub enum AnalyzeError {
     },
 
     #[diagnostic(
-        code(AnalyzeError::InvalidSystemFunction),
+        code(AnalyzerError::InvalidSystemFunction),
         help("fix system function name")
     )]
     #[error("system function \"{name}\" is not defined")]
@@ -77,7 +77,7 @@ pub enum AnalyzeError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(code(AnalyzeError::MismatchArity), help("fix function arguments"))]
+    #[diagnostic(code(AnalyzerError::MismatchArity), help("fix function arguments"))]
     #[error("function \"{name}\" has {arity} arguments, but {args} arguments are supplied")]
     MismatchArity {
         name: String,
@@ -89,7 +89,7 @@ pub enum AnalyzeError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(code(AnalyzeError::MitmatchType), help(""))]
+    #[diagnostic(code(AnalyzerError::MitmatchType), help(""))]
     #[error("\"{name}\" is expected to \"{expected}\", but it is \"{actual}\"")]
     MismatchType {
         name: String,
@@ -101,7 +101,7 @@ pub enum AnalyzeError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(code(AnalyzeError::MissingPort), help("add \"{port}\" port"))]
+    #[diagnostic(code(AnalyzerError::MissingPort), help("add \"{port}\" port"))]
     #[error("module \"{name}\" has \"{port}\", but it is not connected")]
     MissingPort {
         name: String,
@@ -112,7 +112,7 @@ pub enum AnalyzeError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(code(AnalyzeError::UnknownPort), help("remove \"{port}\" port"))]
+    #[diagnostic(code(AnalyzerError::UnknownPort), help("remove \"{port}\" port"))]
     #[error("module \"{name}\" doesn't has \"{port}\", but it is connected")]
     UnknownPort {
         name: String,
@@ -123,7 +123,7 @@ pub enum AnalyzeError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(code(AnalyzeError::DuplicatedIdentifier), help(""))]
+    #[diagnostic(code(AnalyzerError::DuplicatedIdentifier), help(""))]
     #[error("{identifier} is duplicated")]
     DuplicatedIdentifier {
         identifier: String,
@@ -134,7 +134,7 @@ pub enum AnalyzeError {
     },
 
     #[diagnostic(
-        code(AnalyzeError::UnusedVariable),
+        code(AnalyzerError::UnusedVariable),
         help("add prefix `_` to unused variable name")
     )]
     #[error("{identifier} is unused")]
@@ -147,7 +147,7 @@ pub enum AnalyzeError {
     },
 }
 
-impl AnalyzeError {
+impl AnalyzerError {
     fn named_source(source: &str, token: &VerylToken) -> NamedSource {
         NamedSource::new(
             resource_table::get_path_value(token.token.file_path)
@@ -163,56 +163,56 @@ impl AnalyzeError {
         source: &str,
         token: &VerylToken,
     ) -> Self {
-        AnalyzeError::InvalidNumberCharacter {
+        AnalyzerError::InvalidNumberCharacter {
             cause,
             kind: kind.to_string(),
-            input: AnalyzeError::named_source(source, token),
+            input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),
         }
     }
 
     pub fn number_overflow(width: usize, source: &str, token: &VerylToken) -> Self {
-        AnalyzeError::NumberOverflow {
+        AnalyzerError::NumberOverflow {
             width,
-            input: AnalyzeError::named_source(source, token),
+            input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),
         }
     }
 
     pub fn if_reset_required(source: &str, token: &VerylToken) -> Self {
-        AnalyzeError::IfResetRequired {
-            input: AnalyzeError::named_source(source, token),
+        AnalyzerError::IfResetRequired {
+            input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),
         }
     }
 
     pub fn reset_signal_missing(source: &str, token: &VerylToken) -> Self {
-        AnalyzeError::ResetSignalMissing {
-            input: AnalyzeError::named_source(source, token),
+        AnalyzerError::ResetSignalMissing {
+            input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),
         }
     }
 
     pub fn invalid_statement(kind: &str, source: &str, token: &VerylToken) -> Self {
-        AnalyzeError::InvalidStatement {
+        AnalyzerError::InvalidStatement {
             kind: kind.to_string(),
-            input: AnalyzeError::named_source(source, token),
+            input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),
         }
     }
 
     pub fn invalid_direction(kind: &str, source: &str, token: &VerylToken) -> Self {
-        AnalyzeError::InvalidDirection {
+        AnalyzerError::InvalidDirection {
             kind: kind.to_string(),
-            input: AnalyzeError::named_source(source, token),
+            input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),
         }
     }
 
     pub fn invalid_system_function(name: &str, source: &str, token: &VerylToken) -> Self {
-        AnalyzeError::InvalidSystemFunction {
+        AnalyzerError::InvalidSystemFunction {
             name: name.to_string(),
-            input: AnalyzeError::named_source(source, token),
+            input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),
         }
     }
@@ -224,11 +224,11 @@ impl AnalyzeError {
         source: &str,
         token: &VerylToken,
     ) -> Self {
-        AnalyzeError::MismatchArity {
+        AnalyzerError::MismatchArity {
             name: name.to_string(),
             arity,
             args,
-            input: AnalyzeError::named_source(source, token),
+            input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),
         }
     }
@@ -240,45 +240,45 @@ impl AnalyzeError {
         source: &str,
         token: &VerylToken,
     ) -> Self {
-        AnalyzeError::MismatchType {
+        AnalyzerError::MismatchType {
             name: name.to_string(),
             expected: expected.to_string(),
             actual: actual.to_string(),
-            input: AnalyzeError::named_source(source, token),
+            input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),
         }
     }
 
     pub fn missing_port(name: &str, port: &str, source: &str, token: &VerylToken) -> Self {
-        AnalyzeError::MissingPort {
+        AnalyzerError::MissingPort {
             name: name.to_string(),
             port: port.to_string(),
-            input: AnalyzeError::named_source(source, token),
+            input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),
         }
     }
 
     pub fn unknown_port(name: &str, port: &str, source: &str, token: &VerylToken) -> Self {
-        AnalyzeError::UnknownPort {
+        AnalyzerError::UnknownPort {
             name: name.to_string(),
             port: port.to_string(),
-            input: AnalyzeError::named_source(source, token),
+            input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),
         }
     }
 
     pub fn duplicated_identifier(identifier: &str, source: &str, token: &VerylToken) -> Self {
-        AnalyzeError::DuplicatedIdentifier {
+        AnalyzerError::DuplicatedIdentifier {
             identifier: identifier.to_string(),
-            input: AnalyzeError::named_source(source, token),
+            input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),
         }
     }
 
     pub fn unused_variable(identifier: &str, source: &str, token: &VerylToken) -> Self {
-        AnalyzeError::UnusedVariable {
+        AnalyzerError::UnusedVariable {
             identifier: identifier.to_string(),
-            input: AnalyzeError::named_source(source, token),
+            input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),
         }
     }

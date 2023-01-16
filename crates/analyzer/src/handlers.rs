@@ -19,7 +19,7 @@ use check_system_function::*;
 use create_reference::*;
 use create_symbol_table::*;
 
-use crate::analyze_error::AnalyzeError;
+use crate::analyzer_error::AnalyzerError;
 use veryl_parser::veryl_walker::Handler;
 
 pub struct Pass1Handlers<'a> {
@@ -57,7 +57,7 @@ impl<'a> Pass1Handlers<'a> {
         ]
     }
 
-    pub fn get_errors(&mut self) -> Vec<AnalyzeError> {
+    pub fn get_errors(&mut self) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
         ret.append(&mut self.check_invalid_direction.errors);
         ret.append(&mut self.check_invalid_number_character.errors);
@@ -93,7 +93,7 @@ impl<'a> Pass2Handlers<'a> {
         ]
     }
 
-    pub fn get_errors(&mut self) -> Vec<AnalyzeError> {
+    pub fn get_errors(&mut self) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
         ret.append(&mut self.check_function_arity.errors);
         ret.append(&mut self.check_instance.errors);

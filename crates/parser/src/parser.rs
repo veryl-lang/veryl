@@ -1,7 +1,7 @@
+use crate::parser_error::ParserError;
 use crate::veryl_grammar::VerylGrammar;
 use crate::veryl_grammar_trait::Veryl;
 use crate::veryl_parser::parse;
-use parol_runtime::miette::{Result, WrapErr};
 use std::path::Path;
 
 #[derive(Debug)]
@@ -10,12 +10,9 @@ pub struct Parser {
 }
 
 impl Parser {
-    pub fn parse<T: AsRef<Path>>(input: &str, file: &T) -> Result<Self> {
+    pub fn parse<T: AsRef<Path>>(input: &str, file: &T) -> Result<Self, ParserError> {
         let mut grammar = VerylGrammar::new();
-        parse(input, file, &mut grammar).wrap_err(format!(
-            "Failed parsing file {}",
-            file.as_ref().to_string_lossy()
-        ))?;
+        parse(input, file, &mut grammar)?;
 
         let veryl = grammar.veryl.unwrap();
 

@@ -1,9 +1,9 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use miette::Result;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::str::FromStr;
 use veryl_metadata::Metadata;
-use veryl_parser::miette::Result;
 
 mod cmd_build;
 mod cmd_check;

@@ -13,10 +13,9 @@ use parol_runtime::derive_builder::Builder;
 use parol_runtime::id_tree::Tree;
 use parol_runtime::log::trace;
 #[allow(unused_imports)]
-use parol_runtime::miette::{bail, miette, IntoDiagnostic, Result};
-#[allow(unused_imports)]
 use parol_runtime::parol_macros::{pop_and_reverse_item, pop_item};
 use parol_runtime::parser::{ParseTreeStackEntry, ParseTreeType, UserActionsTrait};
+use parol_runtime::{ParserError, Result};
 use std::marker::PhantomData;
 
 /// Semantic actions trait generated for the user grammar
@@ -8582,11 +8581,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let comments_term = comments_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let comments_term_built = CommentsTermBuilder::default()
-            .comments_term(comments_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let comments_term_built = CommentsTerm { comments_term };
         // Calling user action here
         self.user_grammar.comments_term(&comments_term_built)?;
         self.push(ASTType::CommentsTerm(comments_term_built), context);
@@ -8608,11 +8604,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let exponent_term = exponent_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let exponent_term_built = ExponentTermBuilder::default()
-            .exponent_term(exponent_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let exponent_term_built = ExponentTerm { exponent_term };
         // Calling user action here
         self.user_grammar.exponent_term(&exponent_term_built)?;
         self.push(ASTType::ExponentTerm(exponent_term_built), context);
@@ -8634,11 +8627,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let fixed_point_term = fixed_point_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let fixed_point_term_built = FixedPointTermBuilder::default()
-            .fixed_point_term(fixed_point_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let fixed_point_term_built = FixedPointTerm { fixed_point_term };
         // Calling user action here
         self.user_grammar
             .fixed_point_term(&fixed_point_term_built)?;
@@ -8658,11 +8648,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let based_term = based_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let based_term_built = BasedTermBuilder::default()
-            .based_term(based_term)
-            .build()
-            .into_diagnostic()?;
+        let based_term = based_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let based_term_built = BasedTerm { based_term };
         // Calling user action here
         self.user_grammar.based_term(&based_term_built)?;
         self.push(ASTType::BasedTerm(based_term_built), context);
@@ -8684,11 +8674,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let base_less_term = base_less_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let base_less_term_built = BaseLessTermBuilder::default()
-            .base_less_term(base_less_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let base_less_term_built = BaseLessTerm { base_less_term };
         // Calling user action here
         self.user_grammar.base_less_term(&base_less_term_built)?;
         self.push(ASTType::BaseLessTerm(base_less_term_built), context);
@@ -8710,11 +8697,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let all_bit_term = all_bit_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let all_bit_term_built = AllBitTermBuilder::default()
-            .all_bit_term(all_bit_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let all_bit_term_built = AllBitTerm { all_bit_term };
         // Calling user action here
         self.user_grammar.all_bit_term(&all_bit_term_built)?;
         self.push(ASTType::AllBitTerm(all_bit_term_built), context);
@@ -8736,11 +8720,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let minus_colon_term = minus_colon_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let minus_colon_term_built = MinusColonTermBuilder::default()
-            .minus_colon_term(minus_colon_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let minus_colon_term_built = MinusColonTerm { minus_colon_term };
         // Calling user action here
         self.user_grammar
             .minus_colon_term(&minus_colon_term_built)?;
@@ -8763,11 +8744,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let minus_g_t_term = minus_g_t_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let minus_g_t_term_built = MinusGTTermBuilder::default()
-            .minus_g_t_term(minus_g_t_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let minus_g_t_term_built = MinusGTTerm { minus_g_t_term };
         // Calling user action here
         self.user_grammar.minus_g_t_term(&minus_g_t_term_built)?;
         self.push(ASTType::MinusGTTerm(minus_g_t_term_built), context);
@@ -8789,11 +8767,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let plus_colon_term = plus_colon_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let plus_colon_term_built = PlusColonTermBuilder::default()
-            .plus_colon_term(plus_colon_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let plus_colon_term_built = PlusColonTerm { plus_colon_term };
         // Calling user action here
         self.user_grammar.plus_colon_term(&plus_colon_term_built)?;
         self.push(ASTType::PlusColonTerm(plus_colon_term_built), context);
@@ -8815,11 +8790,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let assignment_operator_term = assignment_operator_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let assignment_operator_term_built = AssignmentOperatorTermBuilder::default()
-            .assignment_operator_term(assignment_operator_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let assignment_operator_term_built = AssignmentOperatorTerm {
+            assignment_operator_term,
+        };
         // Calling user action here
         self.user_grammar
             .assignment_operator_term(&assignment_operator_term_built)?;
@@ -8845,11 +8819,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let operator11_term = operator11_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let operator11_term_built = Operator11TermBuilder::default()
-            .operator11_term(operator11_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let operator11_term_built = Operator11Term { operator11_term };
         // Calling user action here
         self.user_grammar.operator11_term(&operator11_term_built)?;
         self.push(ASTType::Operator11Term(operator11_term_built), context);
@@ -8871,11 +8842,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let operator10_term = operator10_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let operator10_term_built = Operator10TermBuilder::default()
-            .operator10_term(operator10_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let operator10_term_built = Operator10Term { operator10_term };
         // Calling user action here
         self.user_grammar.operator10_term(&operator10_term_built)?;
         self.push(ASTType::Operator10Term(operator10_term_built), context);
@@ -8897,11 +8865,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let operator09_term = operator09_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let operator09_term_built = Operator09TermBuilder::default()
-            .operator09_term(operator09_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let operator09_term_built = Operator09Term { operator09_term };
         // Calling user action here
         self.user_grammar.operator09_term(&operator09_term_built)?;
         self.push(ASTType::Operator09Term(operator09_term_built), context);
@@ -8923,11 +8888,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let operator08_term = operator08_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let operator08_term_built = Operator08TermBuilder::default()
-            .operator08_term(operator08_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let operator08_term_built = Operator08Term { operator08_term };
         // Calling user action here
         self.user_grammar.operator08_term(&operator08_term_built)?;
         self.push(ASTType::Operator08Term(operator08_term_built), context);
@@ -8949,11 +8911,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let operator07_term = operator07_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let operator07_term_built = Operator07TermBuilder::default()
-            .operator07_term(operator07_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let operator07_term_built = Operator07Term { operator07_term };
         // Calling user action here
         self.user_grammar.operator07_term(&operator07_term_built)?;
         self.push(ASTType::Operator07Term(operator07_term_built), context);
@@ -8975,11 +8934,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let operator06_term = operator06_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let operator06_term_built = Operator06TermBuilder::default()
-            .operator06_term(operator06_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let operator06_term_built = Operator06Term { operator06_term };
         // Calling user action here
         self.user_grammar.operator06_term(&operator06_term_built)?;
         self.push(ASTType::Operator06Term(operator06_term_built), context);
@@ -9001,11 +8957,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let operator02_term = operator02_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let operator02_term_built = Operator02TermBuilder::default()
-            .operator02_term(operator02_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let operator02_term_built = Operator02Term { operator02_term };
         // Calling user action here
         self.user_grammar.operator02_term(&operator02_term_built)?;
         self.push(ASTType::Operator02Term(operator02_term_built), context);
@@ -9027,11 +8980,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let operator01_term = operator01_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let operator01_term_built = Operator01TermBuilder::default()
-            .operator01_term(operator01_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let operator01_term_built = Operator01Term { operator01_term };
         // Calling user action here
         self.user_grammar.operator01_term(&operator01_term_built)?;
         self.push(ASTType::Operator01Term(operator01_term_built), context);
@@ -9053,11 +9003,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let operator05_term = operator05_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let operator05_term_built = Operator05TermBuilder::default()
-            .operator05_term(operator05_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let operator05_term_built = Operator05Term { operator05_term };
         // Calling user action here
         self.user_grammar.operator05_term(&operator05_term_built)?;
         self.push(ASTType::Operator05Term(operator05_term_built), context);
@@ -9079,11 +9026,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let operator04_term = operator04_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let operator04_term_built = Operator04TermBuilder::default()
-            .operator04_term(operator04_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let operator04_term_built = Operator04Term { operator04_term };
         // Calling user action here
         self.user_grammar.operator04_term(&operator04_term_built)?;
         self.push(ASTType::Operator04Term(operator04_term_built), context);
@@ -9105,11 +9049,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let operator03_term = operator03_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let operator03_term_built = Operator03TermBuilder::default()
-            .operator03_term(operator03_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let operator03_term_built = Operator03Term { operator03_term };
         // Calling user action here
         self.user_grammar.operator03_term(&operator03_term_built)?;
         self.push(ASTType::Operator03Term(operator03_term_built), context);
@@ -9131,11 +9072,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let unary_operator_term = unary_operator_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let unary_operator_term_built = UnaryOperatorTermBuilder::default()
-            .unary_operator_term(unary_operator_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let unary_operator_term_built = UnaryOperatorTerm {
+            unary_operator_term,
+        };
         // Calling user action here
         self.user_grammar
             .unary_operator_term(&unary_operator_term_built)?;
@@ -9161,11 +9101,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let colon_colon_term = colon_colon_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let colon_colon_term_built = ColonColonTermBuilder::default()
-            .colon_colon_term(colon_colon_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let colon_colon_term_built = ColonColonTerm { colon_colon_term };
         // Calling user action here
         self.user_grammar
             .colon_colon_term(&colon_colon_term_built)?;
@@ -9185,11 +9122,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let colon_term = colon_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let colon_term_built = ColonTermBuilder::default()
-            .colon_term(colon_term)
-            .build()
-            .into_diagnostic()?;
+        let colon_term = colon_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let colon_term_built = ColonTerm { colon_term };
         // Calling user action here
         self.user_grammar.colon_term(&colon_term_built)?;
         self.push(ASTType::ColonTerm(colon_term_built), context);
@@ -9208,11 +9145,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let comma_term = comma_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let comma_term_built = CommaTermBuilder::default()
-            .comma_term(comma_term)
-            .build()
-            .into_diagnostic()?;
+        let comma_term = comma_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let comma_term_built = CommaTerm { comma_term };
         // Calling user action here
         self.user_grammar.comma_term(&comma_term_built)?;
         self.push(ASTType::CommaTerm(comma_term_built), context);
@@ -9234,11 +9171,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let dollar_term = dollar_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let dollar_term_built = DollarTermBuilder::default()
-            .dollar_term(dollar_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let dollar_term_built = DollarTerm { dollar_term };
         // Calling user action here
         self.user_grammar.dollar_term(&dollar_term_built)?;
         self.push(ASTType::DollarTerm(dollar_term_built), context);
@@ -9260,11 +9194,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let dot_dot_term = dot_dot_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let dot_dot_term_built = DotDotTermBuilder::default()
-            .dot_dot_term(dot_dot_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let dot_dot_term_built = DotDotTerm { dot_dot_term };
         // Calling user action here
         self.user_grammar.dot_dot_term(&dot_dot_term_built)?;
         self.push(ASTType::DotDotTerm(dot_dot_term_built), context);
@@ -9283,11 +9214,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let dot_term = dot_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let dot_term_built = DotTermBuilder::default()
-            .dot_term(dot_term)
-            .build()
-            .into_diagnostic()?;
+        let dot_term = dot_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let dot_term_built = DotTerm { dot_term };
         // Calling user action here
         self.user_grammar.dot_term(&dot_term_built)?;
         self.push(ASTType::DotTerm(dot_term_built), context);
@@ -9306,11 +9237,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let equ_term = equ_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let equ_term_built = EquTermBuilder::default()
-            .equ_term(equ_term)
-            .build()
-            .into_diagnostic()?;
+        let equ_term = equ_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let equ_term_built = EquTerm { equ_term };
         // Calling user action here
         self.user_grammar.equ_term(&equ_term_built)?;
         self.push(ASTType::EquTerm(equ_term_built), context);
@@ -9329,11 +9260,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let hash_term = hash_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let hash_term_built = HashTermBuilder::default()
-            .hash_term(hash_term)
-            .build()
-            .into_diagnostic()?;
+        let hash_term = hash_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let hash_term_built = HashTerm { hash_term };
         // Calling user action here
         self.user_grammar.hash_term(&hash_term_built)?;
         self.push(ASTType::HashTerm(hash_term_built), context);
@@ -9355,11 +9286,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let l_brace_term = l_brace_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let l_brace_term_built = LBraceTermBuilder::default()
-            .l_brace_term(l_brace_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let l_brace_term_built = LBraceTerm { l_brace_term };
         // Calling user action here
         self.user_grammar.l_brace_term(&l_brace_term_built)?;
         self.push(ASTType::LBraceTerm(l_brace_term_built), context);
@@ -9381,11 +9309,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let l_bracket_term = l_bracket_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let l_bracket_term_built = LBracketTermBuilder::default()
-            .l_bracket_term(l_bracket_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let l_bracket_term_built = LBracketTerm { l_bracket_term };
         // Calling user action here
         self.user_grammar.l_bracket_term(&l_bracket_term_built)?;
         self.push(ASTType::LBracketTerm(l_bracket_term_built), context);
@@ -9407,11 +9332,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let l_paren_term = l_paren_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let l_paren_term_built = LParenTermBuilder::default()
-            .l_paren_term(l_paren_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let l_paren_term_built = LParenTerm { l_paren_term };
         // Calling user action here
         self.user_grammar.l_paren_term(&l_paren_term_built)?;
         self.push(ASTType::LParenTerm(l_paren_term_built), context);
@@ -9433,11 +9355,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let r_brace_term = r_brace_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let r_brace_term_built = RBraceTermBuilder::default()
-            .r_brace_term(r_brace_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let r_brace_term_built = RBraceTerm { r_brace_term };
         // Calling user action here
         self.user_grammar.r_brace_term(&r_brace_term_built)?;
         self.push(ASTType::RBraceTerm(r_brace_term_built), context);
@@ -9459,11 +9378,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let r_bracket_term = r_bracket_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let r_bracket_term_built = RBracketTermBuilder::default()
-            .r_bracket_term(r_bracket_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let r_bracket_term_built = RBracketTerm { r_bracket_term };
         // Calling user action here
         self.user_grammar.r_bracket_term(&r_bracket_term_built)?;
         self.push(ASTType::RBracketTerm(r_bracket_term_built), context);
@@ -9485,11 +9401,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let r_paren_term = r_paren_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let r_paren_term_built = RParenTermBuilder::default()
-            .r_paren_term(r_paren_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let r_paren_term_built = RParenTerm { r_paren_term };
         // Calling user action here
         self.user_grammar.r_paren_term(&r_paren_term_built)?;
         self.push(ASTType::RParenTerm(r_paren_term_built), context);
@@ -9511,11 +9424,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let semicolon_term = semicolon_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let semicolon_term_built = SemicolonTermBuilder::default()
-            .semicolon_term(semicolon_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let semicolon_term_built = SemicolonTerm { semicolon_term };
         // Calling user action here
         self.user_grammar.semicolon_term(&semicolon_term_built)?;
         self.push(ASTType::SemicolonTerm(semicolon_term_built), context);
@@ -9534,11 +9444,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let star_term = star_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let star_term_built = StarTermBuilder::default()
-            .star_term(star_term)
-            .build()
-            .into_diagnostic()?;
+        let star_term = star_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let star_term_built = StarTerm { star_term };
         // Calling user action here
         self.user_grammar.star_term(&star_term_built)?;
         self.push(ASTType::StarTerm(star_term_built), context);
@@ -9560,11 +9470,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let always_comb_term = always_comb_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let always_comb_term_built = AlwaysCombTermBuilder::default()
-            .always_comb_term(always_comb_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let always_comb_term_built = AlwaysCombTerm { always_comb_term };
         // Calling user action here
         self.user_grammar
             .always_comb_term(&always_comb_term_built)?;
@@ -9587,11 +9494,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let always_ff_term = always_ff_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let always_ff_term_built = AlwaysFfTermBuilder::default()
-            .always_ff_term(always_ff_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let always_ff_term_built = AlwaysFfTerm { always_ff_term };
         // Calling user action here
         self.user_grammar.always_ff_term(&always_ff_term_built)?;
         self.push(ASTType::AlwaysFfTerm(always_ff_term_built), context);
@@ -9613,11 +9517,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let assign_term = assign_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let assign_term_built = AssignTermBuilder::default()
-            .assign_term(assign_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let assign_term_built = AssignTerm { assign_term };
         // Calling user action here
         self.user_grammar.assign_term(&assign_term_built)?;
         self.push(ASTType::AssignTerm(assign_term_built), context);
@@ -9639,11 +9540,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let async_high_term = async_high_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let async_high_term_built = AsyncHighTermBuilder::default()
-            .async_high_term(async_high_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let async_high_term_built = AsyncHighTerm { async_high_term };
         // Calling user action here
         self.user_grammar.async_high_term(&async_high_term_built)?;
         self.push(ASTType::AsyncHighTerm(async_high_term_built), context);
@@ -9665,11 +9563,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let async_low_term = async_low_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let async_low_term_built = AsyncLowTermBuilder::default()
-            .async_low_term(async_low_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let async_low_term_built = AsyncLowTerm { async_low_term };
         // Calling user action here
         self.user_grammar.async_low_term(&async_low_term_built)?;
         self.push(ASTType::AsyncLowTerm(async_low_term_built), context);
@@ -9688,11 +9583,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let bit_term = bit_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let bit_term_built = BitTermBuilder::default()
-            .bit_term(bit_term)
-            .build()
-            .into_diagnostic()?;
+        let bit_term = bit_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let bit_term_built = BitTerm { bit_term };
         // Calling user action here
         self.user_grammar.bit_term(&bit_term_built)?;
         self.push(ASTType::BitTerm(bit_term_built), context);
@@ -9711,11 +9606,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let case_term = case_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let case_term_built = CaseTermBuilder::default()
-            .case_term(case_term)
-            .build()
-            .into_diagnostic()?;
+        let case_term = case_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let case_term_built = CaseTerm { case_term };
         // Calling user action here
         self.user_grammar.case_term(&case_term_built)?;
         self.push(ASTType::CaseTerm(case_term_built), context);
@@ -9737,11 +9632,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let default_term = default_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let default_term_built = DefaultTermBuilder::default()
-            .default_term(default_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let default_term_built = DefaultTerm { default_term };
         // Calling user action here
         self.user_grammar.default_term(&default_term_built)?;
         self.push(ASTType::DefaultTerm(default_term_built), context);
@@ -9760,11 +9652,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let else_term = else_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let else_term_built = ElseTermBuilder::default()
-            .else_term(else_term)
-            .build()
-            .into_diagnostic()?;
+        let else_term = else_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let else_term_built = ElseTerm { else_term };
         // Calling user action here
         self.user_grammar.else_term(&else_term_built)?;
         self.push(ASTType::ElseTerm(else_term_built), context);
@@ -9783,11 +9675,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let enum_term = enum_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let enum_term_built = EnumTermBuilder::default()
-            .enum_term(enum_term)
-            .build()
-            .into_diagnostic()?;
+        let enum_term = enum_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let enum_term_built = EnumTerm { enum_term };
         // Calling user action here
         self.user_grammar.enum_term(&enum_term_built)?;
         self.push(ASTType::EnumTerm(enum_term_built), context);
@@ -9809,11 +9701,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let export_term = export_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let export_term_built = ExportTermBuilder::default()
-            .export_term(export_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let export_term_built = ExportTerm { export_term };
         // Calling user action here
         self.user_grammar.export_term(&export_term_built)?;
         self.push(ASTType::ExportTerm(export_term_built), context);
@@ -9832,11 +9721,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let f32_term = f32_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let f32_term_built = F32TermBuilder::default()
-            .f32_term(f32_term)
-            .build()
-            .into_diagnostic()?;
+        let f32_term = f32_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let f32_term_built = F32Term { f32_term };
         // Calling user action here
         self.user_grammar.f32_term(&f32_term_built)?;
         self.push(ASTType::F32Term(f32_term_built), context);
@@ -9855,11 +9744,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let f64_term = f64_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let f64_term_built = F64TermBuilder::default()
-            .f64_term(f64_term)
-            .build()
-            .into_diagnostic()?;
+        let f64_term = f64_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let f64_term_built = F64Term { f64_term };
         // Calling user action here
         self.user_grammar.f64_term(&f64_term_built)?;
         self.push(ASTType::F64Term(f64_term_built), context);
@@ -9878,11 +9767,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let for_term = for_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let for_term_built = ForTermBuilder::default()
-            .for_term(for_term)
-            .build()
-            .into_diagnostic()?;
+        let for_term = for_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let for_term_built = ForTerm { for_term };
         // Calling user action here
         self.user_grammar.for_term(&for_term_built)?;
         self.push(ASTType::ForTerm(for_term_built), context);
@@ -9904,11 +9793,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let function_term = function_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let function_term_built = FunctionTermBuilder::default()
-            .function_term(function_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let function_term_built = FunctionTerm { function_term };
         // Calling user action here
         self.user_grammar.function_term(&function_term_built)?;
         self.push(ASTType::FunctionTerm(function_term_built), context);
@@ -9927,11 +9813,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let i32_term = i32_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let i32_term_built = I32TermBuilder::default()
-            .i32_term(i32_term)
-            .build()
-            .into_diagnostic()?;
+        let i32_term = i32_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let i32_term_built = I32Term { i32_term };
         // Calling user action here
         self.user_grammar.i32_term(&i32_term_built)?;
         self.push(ASTType::I32Term(i32_term_built), context);
@@ -9950,11 +9836,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let i64_term = i64_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let i64_term_built = I64TermBuilder::default()
-            .i64_term(i64_term)
-            .build()
-            .into_diagnostic()?;
+        let i64_term = i64_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let i64_term_built = I64Term { i64_term };
         // Calling user action here
         self.user_grammar.i64_term(&i64_term_built)?;
         self.push(ASTType::I64Term(i64_term_built), context);
@@ -9976,11 +9862,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let if_reset_term = if_reset_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let if_reset_term_built = IfResetTermBuilder::default()
-            .if_reset_term(if_reset_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let if_reset_term_built = IfResetTerm { if_reset_term };
         // Calling user action here
         self.user_grammar.if_reset_term(&if_reset_term_built)?;
         self.push(ASTType::IfResetTerm(if_reset_term_built), context);
@@ -9999,11 +9882,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let if_term = if_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let if_term_built = IfTermBuilder::default()
-            .if_term(if_term)
-            .build()
-            .into_diagnostic()?;
+        let if_term = if_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let if_term_built = IfTerm { if_term };
         // Calling user action here
         self.user_grammar.if_term(&if_term_built)?;
         self.push(ASTType::IfTerm(if_term_built), context);
@@ -10025,11 +9908,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let import_term = import_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let import_term_built = ImportTermBuilder::default()
-            .import_term(import_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let import_term_built = ImportTerm { import_term };
         // Calling user action here
         self.user_grammar.import_term(&import_term_built)?;
         self.push(ASTType::ImportTerm(import_term_built), context);
@@ -10048,11 +9928,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let inout_term = inout_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let inout_term_built = InoutTermBuilder::default()
-            .inout_term(inout_term)
-            .build()
-            .into_diagnostic()?;
+        let inout_term = inout_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let inout_term_built = InoutTerm { inout_term };
         // Calling user action here
         self.user_grammar.inout_term(&inout_term_built)?;
         self.push(ASTType::InoutTerm(inout_term_built), context);
@@ -10071,11 +9951,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let input_term = input_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let input_term_built = InputTermBuilder::default()
-            .input_term(input_term)
-            .build()
-            .into_diagnostic()?;
+        let input_term = input_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let input_term_built = InputTerm { input_term };
         // Calling user action here
         self.user_grammar.input_term(&input_term_built)?;
         self.push(ASTType::InputTerm(input_term_built), context);
@@ -10094,11 +9974,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let inst_term = inst_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let inst_term_built = InstTermBuilder::default()
-            .inst_term(inst_term)
-            .build()
-            .into_diagnostic()?;
+        let inst_term = inst_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let inst_term_built = InstTerm { inst_term };
         // Calling user action here
         self.user_grammar.inst_term(&inst_term_built)?;
         self.push(ASTType::InstTerm(inst_term_built), context);
@@ -10120,11 +10000,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let interface_term = interface_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let interface_term_built = InterfaceTermBuilder::default()
-            .interface_term(interface_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let interface_term_built = InterfaceTerm { interface_term };
         // Calling user action here
         self.user_grammar.interface_term(&interface_term_built)?;
         self.push(ASTType::InterfaceTerm(interface_term_built), context);
@@ -10143,11 +10020,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let in_term = in_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let in_term_built = InTermBuilder::default()
-            .in_term(in_term)
-            .build()
-            .into_diagnostic()?;
+        let in_term = in_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let in_term_built = InTerm { in_term };
         // Calling user action here
         self.user_grammar.in_term(&in_term_built)?;
         self.push(ASTType::InTerm(in_term_built), context);
@@ -10169,11 +10046,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let localparam_term = localparam_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let localparam_term_built = LocalparamTermBuilder::default()
-            .localparam_term(localparam_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let localparam_term_built = LocalparamTerm { localparam_term };
         // Calling user action here
         self.user_grammar.localparam_term(&localparam_term_built)?;
         self.push(ASTType::LocalparamTerm(localparam_term_built), context);
@@ -10192,11 +10066,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let logic_term = logic_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let logic_term_built = LogicTermBuilder::default()
-            .logic_term(logic_term)
-            .build()
-            .into_diagnostic()?;
+        let logic_term = logic_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let logic_term_built = LogicTerm { logic_term };
         // Calling user action here
         self.user_grammar.logic_term(&logic_term_built)?;
         self.push(ASTType::LogicTerm(logic_term_built), context);
@@ -10218,11 +10092,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let modport_term = modport_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let modport_term_built = ModportTermBuilder::default()
-            .modport_term(modport_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let modport_term_built = ModportTerm { modport_term };
         // Calling user action here
         self.user_grammar.modport_term(&modport_term_built)?;
         self.push(ASTType::ModportTerm(modport_term_built), context);
@@ -10244,11 +10115,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let module_term = module_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let module_term_built = ModuleTermBuilder::default()
-            .module_term(module_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let module_term_built = ModuleTerm { module_term };
         // Calling user action here
         self.user_grammar.module_term(&module_term_built)?;
         self.push(ASTType::ModuleTerm(module_term_built), context);
@@ -10270,11 +10138,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let negedge_term = negedge_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let negedge_term_built = NegedgeTermBuilder::default()
-            .negedge_term(negedge_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let negedge_term_built = NegedgeTerm { negedge_term };
         // Calling user action here
         self.user_grammar.negedge_term(&negedge_term_built)?;
         self.push(ASTType::NegedgeTerm(negedge_term_built), context);
@@ -10296,11 +10161,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let output_term = output_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let output_term_built = OutputTermBuilder::default()
-            .output_term(output_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let output_term_built = OutputTerm { output_term };
         // Calling user action here
         self.user_grammar.output_term(&output_term_built)?;
         self.push(ASTType::OutputTerm(output_term_built), context);
@@ -10322,11 +10184,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let package_term = package_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let package_term_built = PackageTermBuilder::default()
-            .package_term(package_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let package_term_built = PackageTerm { package_term };
         // Calling user action here
         self.user_grammar.package_term(&package_term_built)?;
         self.push(ASTType::PackageTerm(package_term_built), context);
@@ -10348,11 +10207,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let parameter_term = parameter_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let parameter_term_built = ParameterTermBuilder::default()
-            .parameter_term(parameter_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let parameter_term_built = ParameterTerm { parameter_term };
         // Calling user action here
         self.user_grammar.parameter_term(&parameter_term_built)?;
         self.push(ASTType::ParameterTerm(parameter_term_built), context);
@@ -10374,11 +10230,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let posedge_term = posedge_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let posedge_term_built = PosedgeTermBuilder::default()
-            .posedge_term(posedge_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let posedge_term_built = PosedgeTerm { posedge_term };
         // Calling user action here
         self.user_grammar.posedge_term(&posedge_term_built)?;
         self.push(ASTType::PosedgeTerm(posedge_term_built), context);
@@ -10397,11 +10250,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let ref_term = ref_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let ref_term_built = RefTermBuilder::default()
-            .ref_term(ref_term)
-            .build()
-            .into_diagnostic()?;
+        let ref_term = ref_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let ref_term_built = RefTerm { ref_term };
         // Calling user action here
         self.user_grammar.ref_term(&ref_term_built)?;
         self.push(ASTType::RefTerm(ref_term_built), context);
@@ -10423,11 +10276,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let repeat_term = repeat_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let repeat_term_built = RepeatTermBuilder::default()
-            .repeat_term(repeat_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let repeat_term_built = RepeatTerm { repeat_term };
         // Calling user action here
         self.user_grammar.repeat_term(&repeat_term_built)?;
         self.push(ASTType::RepeatTerm(repeat_term_built), context);
@@ -10449,11 +10299,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let return_term = return_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let return_term_built = ReturnTermBuilder::default()
-            .return_term(return_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let return_term_built = ReturnTerm { return_term };
         // Calling user action here
         self.user_grammar.return_term(&return_term_built)?;
         self.push(ASTType::ReturnTerm(return_term_built), context);
@@ -10472,11 +10319,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let step_term = step_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let step_term_built = StepTermBuilder::default()
-            .step_term(step_term)
-            .build()
-            .into_diagnostic()?;
+        let step_term = step_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let step_term_built = StepTerm { step_term };
         // Calling user action here
         self.user_grammar.step_term(&step_term_built)?;
         self.push(ASTType::StepTerm(step_term_built), context);
@@ -10498,11 +10345,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let struct_term = struct_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let struct_term_built = StructTermBuilder::default()
-            .struct_term(struct_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let struct_term_built = StructTerm { struct_term };
         // Calling user action here
         self.user_grammar.struct_term(&struct_term_built)?;
         self.push(ASTType::StructTerm(struct_term_built), context);
@@ -10524,11 +10368,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let sync_high_term = sync_high_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let sync_high_term_built = SyncHighTermBuilder::default()
-            .sync_high_term(sync_high_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let sync_high_term_built = SyncHighTerm { sync_high_term };
         // Calling user action here
         self.user_grammar.sync_high_term(&sync_high_term_built)?;
         self.push(ASTType::SyncHighTerm(sync_high_term_built), context);
@@ -10550,11 +10391,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let sync_low_term = sync_low_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let sync_low_term_built = SyncLowTermBuilder::default()
-            .sync_low_term(sync_low_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let sync_low_term_built = SyncLowTerm { sync_low_term };
         // Calling user action here
         self.user_grammar.sync_low_term(&sync_low_term_built)?;
         self.push(ASTType::SyncLowTerm(sync_low_term_built), context);
@@ -10573,11 +10411,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let tri_term = tri_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let tri_term_built = TriTermBuilder::default()
-            .tri_term(tri_term)
-            .build()
-            .into_diagnostic()?;
+        let tri_term = tri_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let tri_term_built = TriTerm { tri_term };
         // Calling user action here
         self.user_grammar.tri_term(&tri_term_built)?;
         self.push(ASTType::TriTerm(tri_term_built), context);
@@ -10596,11 +10434,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let u32_term = u32_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let u32_term_built = U32TermBuilder::default()
-            .u32_term(u32_term)
-            .build()
-            .into_diagnostic()?;
+        let u32_term = u32_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let u32_term_built = U32Term { u32_term };
         // Calling user action here
         self.user_grammar.u32_term(&u32_term_built)?;
         self.push(ASTType::U32Term(u32_term_built), context);
@@ -10619,11 +10457,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let u64_term = u64_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let u64_term_built = U64TermBuilder::default()
-            .u64_term(u64_term)
-            .build()
-            .into_diagnostic()?;
+        let u64_term = u64_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let u64_term_built = U64Term { u64_term };
         // Calling user action here
         self.user_grammar.u64_term(&u64_term_built)?;
         self.push(ASTType::U64Term(u64_term_built), context);
@@ -10642,11 +10480,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let var_term = var_term.token(parse_tree)?.try_into().into_diagnostic()?;
-        let var_term_built = VarTermBuilder::default()
-            .var_term(var_term)
-            .build()
-            .into_diagnostic()?;
+        let var_term = var_term
+            .token(parse_tree)?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let var_term_built = VarTerm { var_term };
         // Calling user action here
         self.user_grammar.var_term(&var_term_built)?;
         self.push(ASTType::VarTerm(var_term_built), context);
@@ -10668,11 +10506,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let identifier_term = identifier_term
             .token(parse_tree)?
             .try_into()
-            .into_diagnostic()?;
-        let identifier_term_built = IdentifierTermBuilder::default()
-            .identifier_term(identifier_term)
-            .build()
-            .into_diagnostic()?;
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let identifier_term_built = IdentifierTerm { identifier_term };
         // Calling user action here
         self.user_grammar.identifier_term(&identifier_term_built)?;
         self.push(ASTType::IdentifierTerm(identifier_term_built), context);
@@ -10692,10 +10527,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comments_opt = pop_item!(self, comments_opt, CommentsOpt, context);
-        let comments_built = CommentsBuilder::default()
-            .comments_opt(comments_opt)
-            .build()
-            .into_diagnostic()?;
+        let comments_built = Comments { comments_opt };
         // Calling user action here
         self.user_grammar.comments(&comments_built)?;
         self.push(ASTType::Comments(comments_built), context);
@@ -10715,10 +10547,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comments_term = pop_item!(self, comments_term, CommentsTerm, context);
-        let comments_opt_0_built = CommentsOptBuilder::default()
-            .comments_term(Box::new(comments_term))
-            .build()
-            .into_diagnostic()?;
+        let comments_opt_0_built = CommentsOpt {
+            comments_term: Box::new(comments_term),
+        };
         self.push(
             ASTType::CommentsOpt(Some(Box::new(comments_opt_0_built))),
             context,
@@ -10751,10 +10582,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
-        let start_token_built = StartTokenBuilder::default()
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let start_token_built = StartToken {
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.start_token(&start_token_built)?;
         self.push(ASTType::StartToken(start_token_built), context);
@@ -10776,11 +10606,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let exponent_term = pop_item!(self, exponent_term, ExponentTerm, context);
-        let exponent_token_built = ExponentTokenBuilder::default()
-            .exponent_term((&exponent_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let exponent_token_built = ExponentToken {
+            exponent_term: (&exponent_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.exponent_token(&exponent_token_built)?;
         self.push(ASTType::ExponentToken(exponent_token_built), context);
@@ -10802,11 +10633,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let fixed_point_term = pop_item!(self, fixed_point_term, FixedPointTerm, context);
-        let fixed_point_token_built = FixedPointTokenBuilder::default()
-            .fixed_point_term((&fixed_point_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let fixed_point_token_built = FixedPointToken {
+            fixed_point_term: (&fixed_point_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar
             .fixed_point_token(&fixed_point_token_built)?;
@@ -10829,11 +10661,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let based_term = pop_item!(self, based_term, BasedTerm, context);
-        let based_token_built = BasedTokenBuilder::default()
-            .based_term((&based_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let based_token_built = BasedToken {
+            based_term: (&based_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.based_token(&based_token_built)?;
         self.push(ASTType::BasedToken(based_token_built), context);
@@ -10855,11 +10688,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let base_less_term = pop_item!(self, base_less_term, BaseLessTerm, context);
-        let base_less_token_built = BaseLessTokenBuilder::default()
-            .base_less_term((&base_less_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let base_less_token_built = BaseLessToken {
+            base_less_term: (&base_less_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.base_less_token(&base_less_token_built)?;
         self.push(ASTType::BaseLessToken(base_less_token_built), context);
@@ -10881,11 +10715,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let all_bit_term = pop_item!(self, all_bit_term, AllBitTerm, context);
-        let all_bit_token_built = AllBitTokenBuilder::default()
-            .all_bit_term((&all_bit_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let all_bit_token_built = AllBitToken {
+            all_bit_term: (&all_bit_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.all_bit_token(&all_bit_token_built)?;
         self.push(ASTType::AllBitToken(all_bit_token_built), context);
@@ -10912,11 +10747,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             AssignmentOperatorTerm,
             context
         );
-        let assignment_operator_token_built = AssignmentOperatorTokenBuilder::default()
-            .assignment_operator_term((&assignment_operator_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let assignment_operator_token_built = AssignmentOperatorToken {
+            assignment_operator_term: (&assignment_operator_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar
             .assignment_operator_token(&assignment_operator_token_built)?;
@@ -10942,11 +10778,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let operator01_term = pop_item!(self, operator01_term, Operator01Term, context);
-        let operator01_token_built = Operator01TokenBuilder::default()
-            .operator01_term((&operator01_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let operator01_token_built = Operator01Token {
+            operator01_term: (&operator01_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar
             .operator01_token(&operator01_token_built)?;
@@ -10969,11 +10806,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let operator02_term = pop_item!(self, operator02_term, Operator02Term, context);
-        let operator02_token_built = Operator02TokenBuilder::default()
-            .operator02_term((&operator02_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let operator02_token_built = Operator02Token {
+            operator02_term: (&operator02_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar
             .operator02_token(&operator02_token_built)?;
@@ -10996,11 +10834,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let operator03_term = pop_item!(self, operator03_term, Operator03Term, context);
-        let operator03_token_built = Operator03TokenBuilder::default()
-            .operator03_term((&operator03_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let operator03_token_built = Operator03Token {
+            operator03_term: (&operator03_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar
             .operator03_token(&operator03_token_built)?;
@@ -11023,11 +10862,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let operator04_term = pop_item!(self, operator04_term, Operator04Term, context);
-        let operator04_token_built = Operator04TokenBuilder::default()
-            .operator04_term((&operator04_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let operator04_token_built = Operator04Token {
+            operator04_term: (&operator04_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar
             .operator04_token(&operator04_token_built)?;
@@ -11050,11 +10890,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let operator05_term = pop_item!(self, operator05_term, Operator05Term, context);
-        let operator05_token_built = Operator05TokenBuilder::default()
-            .operator05_term((&operator05_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let operator05_token_built = Operator05Token {
+            operator05_term: (&operator05_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar
             .operator05_token(&operator05_token_built)?;
@@ -11077,11 +10918,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let operator06_term = pop_item!(self, operator06_term, Operator06Term, context);
-        let operator06_token_built = Operator06TokenBuilder::default()
-            .operator06_term((&operator06_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let operator06_token_built = Operator06Token {
+            operator06_term: (&operator06_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar
             .operator06_token(&operator06_token_built)?;
@@ -11104,11 +10946,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let operator07_term = pop_item!(self, operator07_term, Operator07Term, context);
-        let operator07_token_built = Operator07TokenBuilder::default()
-            .operator07_term((&operator07_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let operator07_token_built = Operator07Token {
+            operator07_term: (&operator07_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar
             .operator07_token(&operator07_token_built)?;
@@ -11131,11 +10974,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let operator08_term = pop_item!(self, operator08_term, Operator08Term, context);
-        let operator08_token_built = Operator08TokenBuilder::default()
-            .operator08_term((&operator08_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let operator08_token_built = Operator08Token {
+            operator08_term: (&operator08_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar
             .operator08_token(&operator08_token_built)?;
@@ -11158,11 +11002,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let operator09_term = pop_item!(self, operator09_term, Operator09Term, context);
-        let operator09_token_built = Operator09TokenBuilder::default()
-            .operator09_term((&operator09_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let operator09_token_built = Operator09Token {
+            operator09_term: (&operator09_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar
             .operator09_token(&operator09_token_built)?;
@@ -11185,11 +11030,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let operator10_term = pop_item!(self, operator10_term, Operator10Term, context);
-        let operator10_token_built = Operator10TokenBuilder::default()
-            .operator10_term((&operator10_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let operator10_token_built = Operator10Token {
+            operator10_term: (&operator10_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar
             .operator10_token(&operator10_token_built)?;
@@ -11212,11 +11058,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let operator11_term = pop_item!(self, operator11_term, Operator11Term, context);
-        let operator11_token_built = Operator11TokenBuilder::default()
-            .operator11_term((&operator11_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let operator11_token_built = Operator11Token {
+            operator11_term: (&operator11_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar
             .operator11_token(&operator11_token_built)?;
@@ -11239,11 +11086,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let unary_operator_term = pop_item!(self, unary_operator_term, UnaryOperatorTerm, context);
-        let unary_operator_token_built = UnaryOperatorTokenBuilder::default()
-            .unary_operator_term((&unary_operator_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let unary_operator_token_built = UnaryOperatorToken {
+            unary_operator_term: (&unary_operator_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar
             .unary_operator_token(&unary_operator_token_built)?;
@@ -11269,11 +11117,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let colon_term = pop_item!(self, colon_term, ColonTerm, context);
-        let colon_token_built = ColonTokenBuilder::default()
-            .colon_term((&colon_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let colon_token_built = ColonToken {
+            colon_term: (&colon_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.colon_token(&colon_token_built)?;
         self.push(ASTType::ColonToken(colon_token_built), context);
@@ -11295,11 +11144,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let colon_colon_term = pop_item!(self, colon_colon_term, ColonColonTerm, context);
-        let colon_colon_token_built = ColonColonTokenBuilder::default()
-            .colon_colon_term((&colon_colon_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let colon_colon_token_built = ColonColonToken {
+            colon_colon_term: (&colon_colon_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar
             .colon_colon_token(&colon_colon_token_built)?;
@@ -11322,11 +11172,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let comma_term = pop_item!(self, comma_term, CommaTerm, context);
-        let comma_token_built = CommaTokenBuilder::default()
-            .comma_term((&comma_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let comma_token_built = CommaToken {
+            comma_term: (&comma_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.comma_token(&comma_token_built)?;
         self.push(ASTType::CommaToken(comma_token_built), context);
@@ -11348,11 +11199,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let dollar_term = pop_item!(self, dollar_term, DollarTerm, context);
-        let dollar_token_built = DollarTokenBuilder::default()
-            .dollar_term((&dollar_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let dollar_token_built = DollarToken {
+            dollar_term: (&dollar_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.dollar_token(&dollar_token_built)?;
         self.push(ASTType::DollarToken(dollar_token_built), context);
@@ -11374,11 +11226,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let dot_dot_term = pop_item!(self, dot_dot_term, DotDotTerm, context);
-        let dot_dot_token_built = DotDotTokenBuilder::default()
-            .dot_dot_term((&dot_dot_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let dot_dot_token_built = DotDotToken {
+            dot_dot_term: (&dot_dot_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.dot_dot_token(&dot_dot_token_built)?;
         self.push(ASTType::DotDotToken(dot_dot_token_built), context);
@@ -11400,11 +11253,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let dot_term = pop_item!(self, dot_term, DotTerm, context);
-        let dot_token_built = DotTokenBuilder::default()
-            .dot_term((&dot_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let dot_token_built = DotToken {
+            dot_term: (&dot_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.dot_token(&dot_token_built)?;
         self.push(ASTType::DotToken(dot_token_built), context);
@@ -11426,11 +11280,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let equ_term = pop_item!(self, equ_term, EquTerm, context);
-        let equ_token_built = EquTokenBuilder::default()
-            .equ_term((&equ_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let equ_token_built = EquToken {
+            equ_term: (&equ_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.equ_token(&equ_token_built)?;
         self.push(ASTType::EquToken(equ_token_built), context);
@@ -11452,11 +11307,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let hash_term = pop_item!(self, hash_term, HashTerm, context);
-        let hash_token_built = HashTokenBuilder::default()
-            .hash_term((&hash_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let hash_token_built = HashToken {
+            hash_term: (&hash_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.hash_token(&hash_token_built)?;
         self.push(ASTType::HashToken(hash_token_built), context);
@@ -11478,11 +11334,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let l_brace_term = pop_item!(self, l_brace_term, LBraceTerm, context);
-        let l_brace_token_built = LBraceTokenBuilder::default()
-            .l_brace_term((&l_brace_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let l_brace_token_built = LBraceToken {
+            l_brace_term: (&l_brace_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.l_brace_token(&l_brace_token_built)?;
         self.push(ASTType::LBraceToken(l_brace_token_built), context);
@@ -11504,11 +11361,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let l_bracket_term = pop_item!(self, l_bracket_term, LBracketTerm, context);
-        let l_bracket_token_built = LBracketTokenBuilder::default()
-            .l_bracket_term((&l_bracket_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let l_bracket_token_built = LBracketToken {
+            l_bracket_term: (&l_bracket_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.l_bracket_token(&l_bracket_token_built)?;
         self.push(ASTType::LBracketToken(l_bracket_token_built), context);
@@ -11530,11 +11388,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let l_paren_term = pop_item!(self, l_paren_term, LParenTerm, context);
-        let l_paren_token_built = LParenTokenBuilder::default()
-            .l_paren_term((&l_paren_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let l_paren_token_built = LParenToken {
+            l_paren_term: (&l_paren_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.l_paren_token(&l_paren_token_built)?;
         self.push(ASTType::LParenToken(l_paren_token_built), context);
@@ -11556,11 +11415,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let minus_colon_term = pop_item!(self, minus_colon_term, MinusColonTerm, context);
-        let minus_colon_token_built = MinusColonTokenBuilder::default()
-            .minus_colon_term((&minus_colon_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let minus_colon_token_built = MinusColonToken {
+            minus_colon_term: (&minus_colon_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar
             .minus_colon_token(&minus_colon_token_built)?;
@@ -11583,11 +11443,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let minus_g_t_term = pop_item!(self, minus_g_t_term, MinusGTTerm, context);
-        let minus_g_t_token_built = MinusGTTokenBuilder::default()
-            .minus_g_t_term((&minus_g_t_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let minus_g_t_token_built = MinusGTToken {
+            minus_g_t_term: (&minus_g_t_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.minus_g_t_token(&minus_g_t_token_built)?;
         self.push(ASTType::MinusGTToken(minus_g_t_token_built), context);
@@ -11609,11 +11470,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let plus_colon_term = pop_item!(self, plus_colon_term, PlusColonTerm, context);
-        let plus_colon_token_built = PlusColonTokenBuilder::default()
-            .plus_colon_term((&plus_colon_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let plus_colon_token_built = PlusColonToken {
+            plus_colon_term: (&plus_colon_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar
             .plus_colon_token(&plus_colon_token_built)?;
@@ -11636,11 +11498,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let r_brace_term = pop_item!(self, r_brace_term, RBraceTerm, context);
-        let r_brace_token_built = RBraceTokenBuilder::default()
-            .r_brace_term((&r_brace_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let r_brace_token_built = RBraceToken {
+            r_brace_term: (&r_brace_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.r_brace_token(&r_brace_token_built)?;
         self.push(ASTType::RBraceToken(r_brace_token_built), context);
@@ -11662,11 +11525,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let r_bracket_term = pop_item!(self, r_bracket_term, RBracketTerm, context);
-        let r_bracket_token_built = RBracketTokenBuilder::default()
-            .r_bracket_term((&r_bracket_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let r_bracket_token_built = RBracketToken {
+            r_bracket_term: (&r_bracket_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.r_bracket_token(&r_bracket_token_built)?;
         self.push(ASTType::RBracketToken(r_bracket_token_built), context);
@@ -11688,11 +11552,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let r_paren_term = pop_item!(self, r_paren_term, RParenTerm, context);
-        let r_paren_token_built = RParenTokenBuilder::default()
-            .r_paren_term((&r_paren_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let r_paren_token_built = RParenToken {
+            r_paren_term: (&r_paren_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.r_paren_token(&r_paren_token_built)?;
         self.push(ASTType::RParenToken(r_paren_token_built), context);
@@ -11714,11 +11579,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let semicolon_term = pop_item!(self, semicolon_term, SemicolonTerm, context);
-        let semicolon_token_built = SemicolonTokenBuilder::default()
-            .semicolon_term((&semicolon_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let semicolon_token_built = SemicolonToken {
+            semicolon_term: (&semicolon_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.semicolon_token(&semicolon_token_built)?;
         self.push(ASTType::SemicolonToken(semicolon_token_built), context);
@@ -11740,11 +11606,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let star_term = pop_item!(self, star_term, StarTerm, context);
-        let star_token_built = StarTokenBuilder::default()
-            .star_term((&star_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let star_token_built = StarToken {
+            star_term: (&star_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.star_token(&star_token_built)?;
         self.push(ASTType::StarToken(star_token_built), context);
@@ -11766,11 +11633,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let always_comb_term = pop_item!(self, always_comb_term, AlwaysCombTerm, context);
-        let always_comb_token_built = AlwaysCombTokenBuilder::default()
-            .always_comb_term((&always_comb_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let always_comb_token_built = AlwaysCombToken {
+            always_comb_term: (&always_comb_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar
             .always_comb_token(&always_comb_token_built)?;
@@ -11793,11 +11661,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let always_ff_term = pop_item!(self, always_ff_term, AlwaysFfTerm, context);
-        let always_ff_token_built = AlwaysFfTokenBuilder::default()
-            .always_ff_term((&always_ff_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let always_ff_token_built = AlwaysFfToken {
+            always_ff_term: (&always_ff_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.always_ff_token(&always_ff_token_built)?;
         self.push(ASTType::AlwaysFfToken(always_ff_token_built), context);
@@ -11819,11 +11688,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let assign_term = pop_item!(self, assign_term, AssignTerm, context);
-        let assign_token_built = AssignTokenBuilder::default()
-            .assign_term((&assign_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let assign_token_built = AssignToken {
+            assign_term: (&assign_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.assign_token(&assign_token_built)?;
         self.push(ASTType::AssignToken(assign_token_built), context);
@@ -11845,11 +11715,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let async_high_term = pop_item!(self, async_high_term, AsyncHighTerm, context);
-        let async_high_token_built = AsyncHighTokenBuilder::default()
-            .async_high_term((&async_high_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let async_high_token_built = AsyncHighToken {
+            async_high_term: (&async_high_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar
             .async_high_token(&async_high_token_built)?;
@@ -11872,11 +11743,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let async_low_term = pop_item!(self, async_low_term, AsyncLowTerm, context);
-        let async_low_token_built = AsyncLowTokenBuilder::default()
-            .async_low_term((&async_low_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let async_low_token_built = AsyncLowToken {
+            async_low_term: (&async_low_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.async_low_token(&async_low_token_built)?;
         self.push(ASTType::AsyncLowToken(async_low_token_built), context);
@@ -11898,11 +11770,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let bit_term = pop_item!(self, bit_term, BitTerm, context);
-        let bit_token_built = BitTokenBuilder::default()
-            .bit_term((&bit_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let bit_token_built = BitToken {
+            bit_term: (&bit_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.bit_token(&bit_token_built)?;
         self.push(ASTType::BitToken(bit_token_built), context);
@@ -11924,11 +11797,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let case_term = pop_item!(self, case_term, CaseTerm, context);
-        let case_token_built = CaseTokenBuilder::default()
-            .case_term((&case_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let case_token_built = CaseToken {
+            case_term: (&case_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.case_token(&case_token_built)?;
         self.push(ASTType::CaseToken(case_token_built), context);
@@ -11950,11 +11824,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let default_term = pop_item!(self, default_term, DefaultTerm, context);
-        let default_token_built = DefaultTokenBuilder::default()
-            .default_term((&default_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let default_token_built = DefaultToken {
+            default_term: (&default_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.default_token(&default_token_built)?;
         self.push(ASTType::DefaultToken(default_token_built), context);
@@ -11976,11 +11851,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let else_term = pop_item!(self, else_term, ElseTerm, context);
-        let else_token_built = ElseTokenBuilder::default()
-            .else_term((&else_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let else_token_built = ElseToken {
+            else_term: (&else_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.else_token(&else_token_built)?;
         self.push(ASTType::ElseToken(else_token_built), context);
@@ -12002,11 +11878,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let enum_term = pop_item!(self, enum_term, EnumTerm, context);
-        let enum_token_built = EnumTokenBuilder::default()
-            .enum_term((&enum_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let enum_token_built = EnumToken {
+            enum_term: (&enum_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.enum_token(&enum_token_built)?;
         self.push(ASTType::EnumToken(enum_token_built), context);
@@ -12028,11 +11905,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let export_term = pop_item!(self, export_term, ExportTerm, context);
-        let export_token_built = ExportTokenBuilder::default()
-            .export_term((&export_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let export_token_built = ExportToken {
+            export_term: (&export_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.export_token(&export_token_built)?;
         self.push(ASTType::ExportToken(export_token_built), context);
@@ -12054,11 +11932,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let f32_term = pop_item!(self, f32_term, F32Term, context);
-        let f32_token_built = F32TokenBuilder::default()
-            .f32_term((&f32_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let f32_token_built = F32Token {
+            f32_term: (&f32_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.f32_token(&f32_token_built)?;
         self.push(ASTType::F32Token(f32_token_built), context);
@@ -12080,11 +11959,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let f64_term = pop_item!(self, f64_term, F64Term, context);
-        let f64_token_built = F64TokenBuilder::default()
-            .f64_term((&f64_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let f64_token_built = F64Token {
+            f64_term: (&f64_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.f64_token(&f64_token_built)?;
         self.push(ASTType::F64Token(f64_token_built), context);
@@ -12106,11 +11986,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let for_term = pop_item!(self, for_term, ForTerm, context);
-        let for_token_built = ForTokenBuilder::default()
-            .for_term((&for_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let for_token_built = ForToken {
+            for_term: (&for_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.for_token(&for_token_built)?;
         self.push(ASTType::ForToken(for_token_built), context);
@@ -12132,11 +12013,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let function_term = pop_item!(self, function_term, FunctionTerm, context);
-        let function_token_built = FunctionTokenBuilder::default()
-            .function_term((&function_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let function_token_built = FunctionToken {
+            function_term: (&function_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.function_token(&function_token_built)?;
         self.push(ASTType::FunctionToken(function_token_built), context);
@@ -12158,11 +12040,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let i32_term = pop_item!(self, i32_term, I32Term, context);
-        let i32_token_built = I32TokenBuilder::default()
-            .i32_term((&i32_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let i32_token_built = I32Token {
+            i32_term: (&i32_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.i32_token(&i32_token_built)?;
         self.push(ASTType::I32Token(i32_token_built), context);
@@ -12184,11 +12067,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let i64_term = pop_item!(self, i64_term, I64Term, context);
-        let i64_token_built = I64TokenBuilder::default()
-            .i64_term((&i64_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let i64_token_built = I64Token {
+            i64_term: (&i64_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.i64_token(&i64_token_built)?;
         self.push(ASTType::I64Token(i64_token_built), context);
@@ -12210,11 +12094,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let if_reset_term = pop_item!(self, if_reset_term, IfResetTerm, context);
-        let if_reset_token_built = IfResetTokenBuilder::default()
-            .if_reset_term((&if_reset_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let if_reset_token_built = IfResetToken {
+            if_reset_term: (&if_reset_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.if_reset_token(&if_reset_token_built)?;
         self.push(ASTType::IfResetToken(if_reset_token_built), context);
@@ -12236,11 +12121,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let if_term = pop_item!(self, if_term, IfTerm, context);
-        let if_token_built = IfTokenBuilder::default()
-            .if_term((&if_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let if_token_built = IfToken {
+            if_term: (&if_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.if_token(&if_token_built)?;
         self.push(ASTType::IfToken(if_token_built), context);
@@ -12262,11 +12148,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let import_term = pop_item!(self, import_term, ImportTerm, context);
-        let import_token_built = ImportTokenBuilder::default()
-            .import_term((&import_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let import_token_built = ImportToken {
+            import_term: (&import_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.import_token(&import_token_built)?;
         self.push(ASTType::ImportToken(import_token_built), context);
@@ -12288,11 +12175,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let inout_term = pop_item!(self, inout_term, InoutTerm, context);
-        let inout_token_built = InoutTokenBuilder::default()
-            .inout_term((&inout_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let inout_token_built = InoutToken {
+            inout_term: (&inout_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.inout_token(&inout_token_built)?;
         self.push(ASTType::InoutToken(inout_token_built), context);
@@ -12314,11 +12202,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let input_term = pop_item!(self, input_term, InputTerm, context);
-        let input_token_built = InputTokenBuilder::default()
-            .input_term((&input_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let input_token_built = InputToken {
+            input_term: (&input_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.input_token(&input_token_built)?;
         self.push(ASTType::InputToken(input_token_built), context);
@@ -12340,11 +12229,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let inst_term = pop_item!(self, inst_term, InstTerm, context);
-        let inst_token_built = InstTokenBuilder::default()
-            .inst_term((&inst_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let inst_token_built = InstToken {
+            inst_term: (&inst_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.inst_token(&inst_token_built)?;
         self.push(ASTType::InstToken(inst_token_built), context);
@@ -12366,11 +12256,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let interface_term = pop_item!(self, interface_term, InterfaceTerm, context);
-        let interface_token_built = InterfaceTokenBuilder::default()
-            .interface_term((&interface_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let interface_token_built = InterfaceToken {
+            interface_term: (&interface_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.interface_token(&interface_token_built)?;
         self.push(ASTType::InterfaceToken(interface_token_built), context);
@@ -12392,11 +12283,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let in_term = pop_item!(self, in_term, InTerm, context);
-        let in_token_built = InTokenBuilder::default()
-            .in_term((&in_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let in_token_built = InToken {
+            in_term: (&in_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.in_token(&in_token_built)?;
         self.push(ASTType::InToken(in_token_built), context);
@@ -12418,11 +12310,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let localparam_term = pop_item!(self, localparam_term, LocalparamTerm, context);
-        let localparam_token_built = LocalparamTokenBuilder::default()
-            .localparam_term((&localparam_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let localparam_token_built = LocalparamToken {
+            localparam_term: (&localparam_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar
             .localparam_token(&localparam_token_built)?;
@@ -12445,11 +12338,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let logic_term = pop_item!(self, logic_term, LogicTerm, context);
-        let logic_token_built = LogicTokenBuilder::default()
-            .logic_term((&logic_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let logic_token_built = LogicToken {
+            logic_term: (&logic_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.logic_token(&logic_token_built)?;
         self.push(ASTType::LogicToken(logic_token_built), context);
@@ -12471,11 +12365,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let modport_term = pop_item!(self, modport_term, ModportTerm, context);
-        let modport_token_built = ModportTokenBuilder::default()
-            .modport_term((&modport_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let modport_token_built = ModportToken {
+            modport_term: (&modport_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.modport_token(&modport_token_built)?;
         self.push(ASTType::ModportToken(modport_token_built), context);
@@ -12497,11 +12392,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let module_term = pop_item!(self, module_term, ModuleTerm, context);
-        let module_token_built = ModuleTokenBuilder::default()
-            .module_term((&module_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let module_token_built = ModuleToken {
+            module_term: (&module_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.module_token(&module_token_built)?;
         self.push(ASTType::ModuleToken(module_token_built), context);
@@ -12523,11 +12419,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let negedge_term = pop_item!(self, negedge_term, NegedgeTerm, context);
-        let negedge_token_built = NegedgeTokenBuilder::default()
-            .negedge_term((&negedge_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let negedge_token_built = NegedgeToken {
+            negedge_term: (&negedge_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.negedge_token(&negedge_token_built)?;
         self.push(ASTType::NegedgeToken(negedge_token_built), context);
@@ -12549,11 +12446,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let output_term = pop_item!(self, output_term, OutputTerm, context);
-        let output_token_built = OutputTokenBuilder::default()
-            .output_term((&output_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let output_token_built = OutputToken {
+            output_term: (&output_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.output_token(&output_token_built)?;
         self.push(ASTType::OutputToken(output_token_built), context);
@@ -12575,11 +12473,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let package_term = pop_item!(self, package_term, PackageTerm, context);
-        let package_token_built = PackageTokenBuilder::default()
-            .package_term((&package_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let package_token_built = PackageToken {
+            package_term: (&package_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.package_token(&package_token_built)?;
         self.push(ASTType::PackageToken(package_token_built), context);
@@ -12601,11 +12500,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let parameter_term = pop_item!(self, parameter_term, ParameterTerm, context);
-        let parameter_token_built = ParameterTokenBuilder::default()
-            .parameter_term((&parameter_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let parameter_token_built = ParameterToken {
+            parameter_term: (&parameter_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.parameter_token(&parameter_token_built)?;
         self.push(ASTType::ParameterToken(parameter_token_built), context);
@@ -12627,11 +12527,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let posedge_term = pop_item!(self, posedge_term, PosedgeTerm, context);
-        let posedge_token_built = PosedgeTokenBuilder::default()
-            .posedge_term((&posedge_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let posedge_token_built = PosedgeToken {
+            posedge_term: (&posedge_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.posedge_token(&posedge_token_built)?;
         self.push(ASTType::PosedgeToken(posedge_token_built), context);
@@ -12653,11 +12554,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let ref_term = pop_item!(self, ref_term, RefTerm, context);
-        let ref_token_built = RefTokenBuilder::default()
-            .ref_term((&ref_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let ref_token_built = RefToken {
+            ref_term: (&ref_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.ref_token(&ref_token_built)?;
         self.push(ASTType::RefToken(ref_token_built), context);
@@ -12679,11 +12581,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let repeat_term = pop_item!(self, repeat_term, RepeatTerm, context);
-        let repeat_token_built = RepeatTokenBuilder::default()
-            .repeat_term((&repeat_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let repeat_token_built = RepeatToken {
+            repeat_term: (&repeat_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.repeat_token(&repeat_token_built)?;
         self.push(ASTType::RepeatToken(repeat_token_built), context);
@@ -12705,11 +12608,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let return_term = pop_item!(self, return_term, ReturnTerm, context);
-        let return_token_built = ReturnTokenBuilder::default()
-            .return_term((&return_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let return_token_built = ReturnToken {
+            return_term: (&return_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.return_token(&return_token_built)?;
         self.push(ASTType::ReturnToken(return_token_built), context);
@@ -12731,11 +12635,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let step_term = pop_item!(self, step_term, StepTerm, context);
-        let step_token_built = StepTokenBuilder::default()
-            .step_term((&step_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let step_token_built = StepToken {
+            step_term: (&step_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.step_token(&step_token_built)?;
         self.push(ASTType::StepToken(step_token_built), context);
@@ -12757,11 +12662,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let struct_term = pop_item!(self, struct_term, StructTerm, context);
-        let struct_token_built = StructTokenBuilder::default()
-            .struct_term((&struct_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let struct_token_built = StructToken {
+            struct_term: (&struct_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.struct_token(&struct_token_built)?;
         self.push(ASTType::StructToken(struct_token_built), context);
@@ -12783,11 +12689,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let sync_high_term = pop_item!(self, sync_high_term, SyncHighTerm, context);
-        let sync_high_token_built = SyncHighTokenBuilder::default()
-            .sync_high_term((&sync_high_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let sync_high_token_built = SyncHighToken {
+            sync_high_term: (&sync_high_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.sync_high_token(&sync_high_token_built)?;
         self.push(ASTType::SyncHighToken(sync_high_token_built), context);
@@ -12809,11 +12716,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let sync_low_term = pop_item!(self, sync_low_term, SyncLowTerm, context);
-        let sync_low_token_built = SyncLowTokenBuilder::default()
-            .sync_low_term((&sync_low_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let sync_low_token_built = SyncLowToken {
+            sync_low_term: (&sync_low_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.sync_low_token(&sync_low_token_built)?;
         self.push(ASTType::SyncLowToken(sync_low_token_built), context);
@@ -12835,11 +12743,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let tri_term = pop_item!(self, tri_term, TriTerm, context);
-        let tri_token_built = TriTokenBuilder::default()
-            .tri_term((&tri_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let tri_token_built = TriToken {
+            tri_term: (&tri_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.tri_token(&tri_token_built)?;
         self.push(ASTType::TriToken(tri_token_built), context);
@@ -12861,11 +12770,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let u32_term = pop_item!(self, u32_term, U32Term, context);
-        let u32_token_built = U32TokenBuilder::default()
-            .u32_term((&u32_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let u32_token_built = U32Token {
+            u32_term: (&u32_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.u32_token(&u32_token_built)?;
         self.push(ASTType::U32Token(u32_token_built), context);
@@ -12887,11 +12797,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let u64_term = pop_item!(self, u64_term, U64Term, context);
-        let u64_token_built = U64TokenBuilder::default()
-            .u64_term((&u64_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let u64_token_built = U64Token {
+            u64_term: (&u64_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.u64_token(&u64_token_built)?;
         self.push(ASTType::U64Token(u64_token_built), context);
@@ -12913,11 +12824,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let var_term = pop_item!(self, var_term, VarTerm, context);
-        let var_token_built = VarTokenBuilder::default()
-            .var_term((&var_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let var_token_built = VarToken {
+            var_term: (&var_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar.var_token(&var_token_built)?;
         self.push(ASTType::VarToken(var_token_built), context);
@@ -12939,11 +12851,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
         let identifier_term = pop_item!(self, identifier_term, IdentifierTerm, context);
-        let identifier_token_built = IdentifierTokenBuilder::default()
-            .identifier_term((&identifier_term).try_into().into_diagnostic()?)
-            .comments(Box::new(comments))
-            .build()
-            .into_diagnostic()?;
+        let identifier_token_built = IdentifierToken {
+            identifier_term: (&identifier_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
         // Calling user action here
         self.user_grammar
             .identifier_token(&identifier_token_built)?;
@@ -12964,10 +12877,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let start_token = pop_item!(self, start_token, StartToken, context);
-        let start_built = StartBuilder::default()
-            .start_token((&start_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let start_built = Start {
+            start_token: (&start_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.start(&start_built)?;
         self.push(ASTType::Start(start_built), context);
@@ -12987,10 +12901,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let exponent_token = pop_item!(self, exponent_token, ExponentToken, context);
-        let exponent_built = ExponentBuilder::default()
-            .exponent_token((&exponent_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let exponent_built = Exponent {
+            exponent_token: (&exponent_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.exponent(&exponent_built)?;
         self.push(ASTType::Exponent(exponent_built), context);
@@ -13010,10 +12925,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let fixed_point_token = pop_item!(self, fixed_point_token, FixedPointToken, context);
-        let fixed_point_built = FixedPointBuilder::default()
-            .fixed_point_token((&fixed_point_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let fixed_point_built = FixedPoint {
+            fixed_point_token: (&fixed_point_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.fixed_point(&fixed_point_built)?;
         self.push(ASTType::FixedPoint(fixed_point_built), context);
@@ -13033,10 +12949,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let based_token = pop_item!(self, based_token, BasedToken, context);
-        let based_built = BasedBuilder::default()
-            .based_token((&based_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let based_built = Based {
+            based_token: (&based_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.based(&based_built)?;
         self.push(ASTType::Based(based_built), context);
@@ -13056,10 +12973,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let base_less_token = pop_item!(self, base_less_token, BaseLessToken, context);
-        let base_less_built = BaseLessBuilder::default()
-            .base_less_token((&base_less_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let base_less_built = BaseLess {
+            base_less_token: (&base_less_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.base_less(&base_less_built)?;
         self.push(ASTType::BaseLess(base_less_built), context);
@@ -13079,10 +12997,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let all_bit_token = pop_item!(self, all_bit_token, AllBitToken, context);
-        let all_bit_built = AllBitBuilder::default()
-            .all_bit_token((&all_bit_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let all_bit_built = AllBit {
+            all_bit_token: (&all_bit_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.all_bit(&all_bit_built)?;
         self.push(ASTType::AllBit(all_bit_built), context);
@@ -13107,10 +13026,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             AssignmentOperatorToken,
             context
         );
-        let assignment_operator_built = AssignmentOperatorBuilder::default()
-            .assignment_operator_token((&assignment_operator_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let assignment_operator_built = AssignmentOperator {
+            assignment_operator_token: (&assignment_operator_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar
             .assignment_operator(&assignment_operator_built)?;
@@ -13134,10 +13054,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator01_token = pop_item!(self, operator01_token, Operator01Token, context);
-        let operator01_built = Operator01Builder::default()
-            .operator01_token((&operator01_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let operator01_built = Operator01 {
+            operator01_token: (&operator01_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.operator01(&operator01_built)?;
         self.push(ASTType::Operator01(operator01_built), context);
@@ -13157,10 +13078,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator02_token = pop_item!(self, operator02_token, Operator02Token, context);
-        let operator02_built = Operator02Builder::default()
-            .operator02_token((&operator02_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let operator02_built = Operator02 {
+            operator02_token: (&operator02_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.operator02(&operator02_built)?;
         self.push(ASTType::Operator02(operator02_built), context);
@@ -13180,10 +13102,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator03_token = pop_item!(self, operator03_token, Operator03Token, context);
-        let operator03_built = Operator03Builder::default()
-            .operator03_token((&operator03_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let operator03_built = Operator03 {
+            operator03_token: (&operator03_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.operator03(&operator03_built)?;
         self.push(ASTType::Operator03(operator03_built), context);
@@ -13203,10 +13126,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator04_token = pop_item!(self, operator04_token, Operator04Token, context);
-        let operator04_built = Operator04Builder::default()
-            .operator04_token((&operator04_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let operator04_built = Operator04 {
+            operator04_token: (&operator04_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.operator04(&operator04_built)?;
         self.push(ASTType::Operator04(operator04_built), context);
@@ -13226,10 +13150,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator05_token = pop_item!(self, operator05_token, Operator05Token, context);
-        let operator05_built = Operator05Builder::default()
-            .operator05_token((&operator05_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let operator05_built = Operator05 {
+            operator05_token: (&operator05_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.operator05(&operator05_built)?;
         self.push(ASTType::Operator05(operator05_built), context);
@@ -13249,10 +13174,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator06_token = pop_item!(self, operator06_token, Operator06Token, context);
-        let operator06_built = Operator06Builder::default()
-            .operator06_token((&operator06_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let operator06_built = Operator06 {
+            operator06_token: (&operator06_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.operator06(&operator06_built)?;
         self.push(ASTType::Operator06(operator06_built), context);
@@ -13272,10 +13198,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator07_token = pop_item!(self, operator07_token, Operator07Token, context);
-        let operator07_built = Operator07Builder::default()
-            .operator07_token((&operator07_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let operator07_built = Operator07 {
+            operator07_token: (&operator07_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.operator07(&operator07_built)?;
         self.push(ASTType::Operator07(operator07_built), context);
@@ -13295,10 +13222,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator08_token = pop_item!(self, operator08_token, Operator08Token, context);
-        let operator08_built = Operator08Builder::default()
-            .operator08_token((&operator08_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let operator08_built = Operator08 {
+            operator08_token: (&operator08_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.operator08(&operator08_built)?;
         self.push(ASTType::Operator08(operator08_built), context);
@@ -13318,10 +13246,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator09_token = pop_item!(self, operator09_token, Operator09Token, context);
-        let operator09_built = Operator09Builder::default()
-            .operator09_token((&operator09_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let operator09_built = Operator09 {
+            operator09_token: (&operator09_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.operator09(&operator09_built)?;
         self.push(ASTType::Operator09(operator09_built), context);
@@ -13341,10 +13270,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator10_token = pop_item!(self, operator10_token, Operator10Token, context);
-        let operator10_built = Operator10Builder::default()
-            .operator10_token((&operator10_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let operator10_built = Operator10 {
+            operator10_token: (&operator10_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.operator10(&operator10_built)?;
         self.push(ASTType::Operator10(operator10_built), context);
@@ -13364,10 +13294,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator11_token = pop_item!(self, operator11_token, Operator11Token, context);
-        let operator11_built = Operator11Builder::default()
-            .operator11_token((&operator11_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let operator11_built = Operator11 {
+            operator11_token: (&operator11_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.operator11(&operator11_built)?;
         self.push(ASTType::Operator11(operator11_built), context);
@@ -13388,10 +13319,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let unary_operator_token =
             pop_item!(self, unary_operator_token, UnaryOperatorToken, context);
-        let unary_operator_built = UnaryOperatorBuilder::default()
-            .unary_operator_token((&unary_operator_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let unary_operator_built = UnaryOperator {
+            unary_operator_token: (&unary_operator_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.unary_operator(&unary_operator_built)?;
         self.push(ASTType::UnaryOperator(unary_operator_built), context);
@@ -13411,10 +13343,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let colon_token = pop_item!(self, colon_token, ColonToken, context);
-        let colon_built = ColonBuilder::default()
-            .colon_token((&colon_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let colon_built = Colon {
+            colon_token: (&colon_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.colon(&colon_built)?;
         self.push(ASTType::Colon(colon_built), context);
@@ -13434,10 +13367,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let colon_colon_token = pop_item!(self, colon_colon_token, ColonColonToken, context);
-        let colon_colon_built = ColonColonBuilder::default()
-            .colon_colon_token((&colon_colon_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let colon_colon_built = ColonColon {
+            colon_colon_token: (&colon_colon_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.colon_colon(&colon_colon_built)?;
         self.push(ASTType::ColonColon(colon_colon_built), context);
@@ -13457,10 +13391,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comma_token = pop_item!(self, comma_token, CommaToken, context);
-        let comma_built = CommaBuilder::default()
-            .comma_token((&comma_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let comma_built = Comma {
+            comma_token: (&comma_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.comma(&comma_built)?;
         self.push(ASTType::Comma(comma_built), context);
@@ -13480,10 +13415,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let dollar_token = pop_item!(self, dollar_token, DollarToken, context);
-        let dollar_built = DollarBuilder::default()
-            .dollar_token((&dollar_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let dollar_built = Dollar {
+            dollar_token: (&dollar_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.dollar(&dollar_built)?;
         self.push(ASTType::Dollar(dollar_built), context);
@@ -13503,10 +13439,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let dot_dot_token = pop_item!(self, dot_dot_token, DotDotToken, context);
-        let dot_dot_built = DotDotBuilder::default()
-            .dot_dot_token((&dot_dot_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let dot_dot_built = DotDot {
+            dot_dot_token: (&dot_dot_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.dot_dot(&dot_dot_built)?;
         self.push(ASTType::DotDot(dot_dot_built), context);
@@ -13526,10 +13463,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let dot_token = pop_item!(self, dot_token, DotToken, context);
-        let dot_built = DotBuilder::default()
-            .dot_token((&dot_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let dot_built = Dot {
+            dot_token: (&dot_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.dot(&dot_built)?;
         self.push(ASTType::Dot(dot_built), context);
@@ -13549,10 +13487,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let equ_token = pop_item!(self, equ_token, EquToken, context);
-        let equ_built = EquBuilder::default()
-            .equ_token((&equ_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let equ_built = Equ {
+            equ_token: (&equ_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.equ(&equ_built)?;
         self.push(ASTType::Equ(equ_built), context);
@@ -13572,10 +13511,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let hash_token = pop_item!(self, hash_token, HashToken, context);
-        let hash_built = HashBuilder::default()
-            .hash_token((&hash_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let hash_built = Hash {
+            hash_token: (&hash_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.hash(&hash_built)?;
         self.push(ASTType::Hash(hash_built), context);
@@ -13595,10 +13535,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let l_brace_token = pop_item!(self, l_brace_token, LBraceToken, context);
-        let l_brace_built = LBraceBuilder::default()
-            .l_brace_token((&l_brace_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let l_brace_built = LBrace {
+            l_brace_token: (&l_brace_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.l_brace(&l_brace_built)?;
         self.push(ASTType::LBrace(l_brace_built), context);
@@ -13618,10 +13559,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let l_bracket_token = pop_item!(self, l_bracket_token, LBracketToken, context);
-        let l_bracket_built = LBracketBuilder::default()
-            .l_bracket_token((&l_bracket_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let l_bracket_built = LBracket {
+            l_bracket_token: (&l_bracket_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.l_bracket(&l_bracket_built)?;
         self.push(ASTType::LBracket(l_bracket_built), context);
@@ -13641,10 +13583,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let l_paren_token = pop_item!(self, l_paren_token, LParenToken, context);
-        let l_paren_built = LParenBuilder::default()
-            .l_paren_token((&l_paren_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let l_paren_built = LParen {
+            l_paren_token: (&l_paren_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.l_paren(&l_paren_built)?;
         self.push(ASTType::LParen(l_paren_built), context);
@@ -13664,10 +13607,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let minus_colon_token = pop_item!(self, minus_colon_token, MinusColonToken, context);
-        let minus_colon_built = MinusColonBuilder::default()
-            .minus_colon_token((&minus_colon_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let minus_colon_built = MinusColon {
+            minus_colon_token: (&minus_colon_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.minus_colon(&minus_colon_built)?;
         self.push(ASTType::MinusColon(minus_colon_built), context);
@@ -13687,10 +13631,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let minus_g_t_token = pop_item!(self, minus_g_t_token, MinusGTToken, context);
-        let minus_g_t_built = MinusGTBuilder::default()
-            .minus_g_t_token((&minus_g_t_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let minus_g_t_built = MinusGT {
+            minus_g_t_token: (&minus_g_t_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.minus_g_t(&minus_g_t_built)?;
         self.push(ASTType::MinusGT(minus_g_t_built), context);
@@ -13710,10 +13655,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let plus_colon_token = pop_item!(self, plus_colon_token, PlusColonToken, context);
-        let plus_colon_built = PlusColonBuilder::default()
-            .plus_colon_token((&plus_colon_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let plus_colon_built = PlusColon {
+            plus_colon_token: (&plus_colon_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.plus_colon(&plus_colon_built)?;
         self.push(ASTType::PlusColon(plus_colon_built), context);
@@ -13733,10 +13679,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let r_brace_token = pop_item!(self, r_brace_token, RBraceToken, context);
-        let r_brace_built = RBraceBuilder::default()
-            .r_brace_token((&r_brace_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let r_brace_built = RBrace {
+            r_brace_token: (&r_brace_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.r_brace(&r_brace_built)?;
         self.push(ASTType::RBrace(r_brace_built), context);
@@ -13756,10 +13703,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let r_bracket_token = pop_item!(self, r_bracket_token, RBracketToken, context);
-        let r_bracket_built = RBracketBuilder::default()
-            .r_bracket_token((&r_bracket_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let r_bracket_built = RBracket {
+            r_bracket_token: (&r_bracket_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.r_bracket(&r_bracket_built)?;
         self.push(ASTType::RBracket(r_bracket_built), context);
@@ -13779,10 +13727,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let r_paren_token = pop_item!(self, r_paren_token, RParenToken, context);
-        let r_paren_built = RParenBuilder::default()
-            .r_paren_token((&r_paren_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let r_paren_built = RParen {
+            r_paren_token: (&r_paren_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.r_paren(&r_paren_built)?;
         self.push(ASTType::RParen(r_paren_built), context);
@@ -13802,10 +13751,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let semicolon_token = pop_item!(self, semicolon_token, SemicolonToken, context);
-        let semicolon_built = SemicolonBuilder::default()
-            .semicolon_token((&semicolon_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let semicolon_built = Semicolon {
+            semicolon_token: (&semicolon_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.semicolon(&semicolon_built)?;
         self.push(ASTType::Semicolon(semicolon_built), context);
@@ -13825,10 +13775,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let star_token = pop_item!(self, star_token, StarToken, context);
-        let star_built = StarBuilder::default()
-            .star_token((&star_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let star_built = Star {
+            star_token: (&star_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.star(&star_built)?;
         self.push(ASTType::Star(star_built), context);
@@ -13848,10 +13799,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let always_comb_token = pop_item!(self, always_comb_token, AlwaysCombToken, context);
-        let always_comb_built = AlwaysCombBuilder::default()
-            .always_comb_token((&always_comb_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let always_comb_built = AlwaysComb {
+            always_comb_token: (&always_comb_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.always_comb(&always_comb_built)?;
         self.push(ASTType::AlwaysComb(always_comb_built), context);
@@ -13871,10 +13823,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let always_ff_token = pop_item!(self, always_ff_token, AlwaysFfToken, context);
-        let always_ff_built = AlwaysFfBuilder::default()
-            .always_ff_token((&always_ff_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let always_ff_built = AlwaysFf {
+            always_ff_token: (&always_ff_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.always_ff(&always_ff_built)?;
         self.push(ASTType::AlwaysFf(always_ff_built), context);
@@ -13894,10 +13847,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let assign_token = pop_item!(self, assign_token, AssignToken, context);
-        let assign_built = AssignBuilder::default()
-            .assign_token((&assign_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let assign_built = Assign {
+            assign_token: (&assign_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.assign(&assign_built)?;
         self.push(ASTType::Assign(assign_built), context);
@@ -13917,10 +13871,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let async_high_token = pop_item!(self, async_high_token, AsyncHighToken, context);
-        let async_high_built = AsyncHighBuilder::default()
-            .async_high_token((&async_high_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let async_high_built = AsyncHigh {
+            async_high_token: (&async_high_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.async_high(&async_high_built)?;
         self.push(ASTType::AsyncHigh(async_high_built), context);
@@ -13940,10 +13895,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let async_low_token = pop_item!(self, async_low_token, AsyncLowToken, context);
-        let async_low_built = AsyncLowBuilder::default()
-            .async_low_token((&async_low_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let async_low_built = AsyncLow {
+            async_low_token: (&async_low_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.async_low(&async_low_built)?;
         self.push(ASTType::AsyncLow(async_low_built), context);
@@ -13963,10 +13919,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let bit_token = pop_item!(self, bit_token, BitToken, context);
-        let bit_built = BitBuilder::default()
-            .bit_token((&bit_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let bit_built = Bit {
+            bit_token: (&bit_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.bit(&bit_built)?;
         self.push(ASTType::Bit(bit_built), context);
@@ -13986,10 +13943,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let case_token = pop_item!(self, case_token, CaseToken, context);
-        let case_built = CaseBuilder::default()
-            .case_token((&case_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let case_built = Case {
+            case_token: (&case_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.case(&case_built)?;
         self.push(ASTType::Case(case_built), context);
@@ -14009,10 +13967,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let default_token = pop_item!(self, default_token, DefaultToken, context);
-        let defaul_built = DefaulBuilder::default()
-            .default_token((&default_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let defaul_built = Defaul {
+            default_token: (&default_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.defaul(&defaul_built)?;
         self.push(ASTType::Defaul(defaul_built), context);
@@ -14032,10 +13991,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let else_token = pop_item!(self, else_token, ElseToken, context);
-        let r#else_built = ElseBuilder::default()
-            .else_token((&else_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let r#else_built = Else {
+            else_token: (&else_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.r#else(&r#else_built)?;
         self.push(ASTType::Else(r#else_built), context);
@@ -14055,10 +14015,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let enum_token = pop_item!(self, enum_token, EnumToken, context);
-        let r#enum_built = EnumBuilder::default()
-            .enum_token((&enum_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let r#enum_built = Enum {
+            enum_token: (&enum_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.r#enum(&r#enum_built)?;
         self.push(ASTType::Enum(r#enum_built), context);
@@ -14078,10 +14039,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let export_token = pop_item!(self, export_token, ExportToken, context);
-        let export_built = ExportBuilder::default()
-            .export_token((&export_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let export_built = Export {
+            export_token: (&export_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.export(&export_built)?;
         self.push(ASTType::Export(export_built), context);
@@ -14101,10 +14063,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let f32_token = pop_item!(self, f32_token, F32Token, context);
-        let f32_built = F32Builder::default()
-            .f32_token((&f32_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let f32_built = F32 {
+            f32_token: (&f32_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.f32(&f32_built)?;
         self.push(ASTType::F32(f32_built), context);
@@ -14124,10 +14087,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let f64_token = pop_item!(self, f64_token, F64Token, context);
-        let f64_built = F64Builder::default()
-            .f64_token((&f64_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let f64_built = F64 {
+            f64_token: (&f64_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.f64(&f64_built)?;
         self.push(ASTType::F64(f64_built), context);
@@ -14147,10 +14111,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let for_token = pop_item!(self, for_token, ForToken, context);
-        let r#for_built = ForBuilder::default()
-            .for_token((&for_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let r#for_built = For {
+            for_token: (&for_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.r#for(&r#for_built)?;
         self.push(ASTType::For(r#for_built), context);
@@ -14170,10 +14135,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let function_token = pop_item!(self, function_token, FunctionToken, context);
-        let function_built = FunctionBuilder::default()
-            .function_token((&function_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let function_built = Function {
+            function_token: (&function_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.function(&function_built)?;
         self.push(ASTType::Function(function_built), context);
@@ -14193,10 +14159,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let i32_token = pop_item!(self, i32_token, I32Token, context);
-        let i32_built = I32Builder::default()
-            .i32_token((&i32_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let i32_built = I32 {
+            i32_token: (&i32_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.i32(&i32_built)?;
         self.push(ASTType::I32(i32_built), context);
@@ -14216,10 +14183,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let i64_token = pop_item!(self, i64_token, I64Token, context);
-        let i64_built = I64Builder::default()
-            .i64_token((&i64_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let i64_built = I64 {
+            i64_token: (&i64_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.i64(&i64_built)?;
         self.push(ASTType::I64(i64_built), context);
@@ -14239,10 +14207,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let if_token = pop_item!(self, if_token, IfToken, context);
-        let r#if_built = IfBuilder::default()
-            .if_token((&if_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let r#if_built = If {
+            if_token: (&if_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.r#if(&r#if_built)?;
         self.push(ASTType::If(r#if_built), context);
@@ -14262,10 +14231,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let if_reset_token = pop_item!(self, if_reset_token, IfResetToken, context);
-        let if_reset_built = IfResetBuilder::default()
-            .if_reset_token((&if_reset_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let if_reset_built = IfReset {
+            if_reset_token: (&if_reset_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.if_reset(&if_reset_built)?;
         self.push(ASTType::IfReset(if_reset_built), context);
@@ -14285,10 +14255,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let import_token = pop_item!(self, import_token, ImportToken, context);
-        let import_built = ImportBuilder::default()
-            .import_token((&import_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let import_built = Import {
+            import_token: (&import_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.import(&import_built)?;
         self.push(ASTType::Import(import_built), context);
@@ -14308,10 +14279,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let in_token = pop_item!(self, in_token, InToken, context);
-        let r#in_built = InBuilder::default()
-            .in_token((&in_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let r#in_built = In {
+            in_token: (&in_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.r#in(&r#in_built)?;
         self.push(ASTType::In(r#in_built), context);
@@ -14331,10 +14303,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let inout_token = pop_item!(self, inout_token, InoutToken, context);
-        let inout_built = InoutBuilder::default()
-            .inout_token((&inout_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let inout_built = Inout {
+            inout_token: (&inout_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.inout(&inout_built)?;
         self.push(ASTType::Inout(inout_built), context);
@@ -14354,10 +14327,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let input_token = pop_item!(self, input_token, InputToken, context);
-        let input_built = InputBuilder::default()
-            .input_token((&input_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let input_built = Input {
+            input_token: (&input_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.input(&input_built)?;
         self.push(ASTType::Input(input_built), context);
@@ -14377,10 +14351,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let inst_token = pop_item!(self, inst_token, InstToken, context);
-        let inst_built = InstBuilder::default()
-            .inst_token((&inst_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let inst_built = Inst {
+            inst_token: (&inst_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.inst(&inst_built)?;
         self.push(ASTType::Inst(inst_built), context);
@@ -14400,10 +14375,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let interface_token = pop_item!(self, interface_token, InterfaceToken, context);
-        let interface_built = InterfaceBuilder::default()
-            .interface_token((&interface_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let interface_built = Interface {
+            interface_token: (&interface_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.interface(&interface_built)?;
         self.push(ASTType::Interface(interface_built), context);
@@ -14423,10 +14399,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let localparam_token = pop_item!(self, localparam_token, LocalparamToken, context);
-        let localparam_built = LocalparamBuilder::default()
-            .localparam_token((&localparam_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let localparam_built = Localparam {
+            localparam_token: (&localparam_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.localparam(&localparam_built)?;
         self.push(ASTType::Localparam(localparam_built), context);
@@ -14446,10 +14423,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let logic_token = pop_item!(self, logic_token, LogicToken, context);
-        let logic_built = LogicBuilder::default()
-            .logic_token((&logic_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let logic_built = Logic {
+            logic_token: (&logic_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.logic(&logic_built)?;
         self.push(ASTType::Logic(logic_built), context);
@@ -14469,10 +14447,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let modport_token = pop_item!(self, modport_token, ModportToken, context);
-        let modport_built = ModportBuilder::default()
-            .modport_token((&modport_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let modport_built = Modport {
+            modport_token: (&modport_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.modport(&modport_built)?;
         self.push(ASTType::Modport(modport_built), context);
@@ -14492,10 +14471,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let module_token = pop_item!(self, module_token, ModuleToken, context);
-        let module_built = ModuleBuilder::default()
-            .module_token((&module_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let module_built = Module {
+            module_token: (&module_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.module(&module_built)?;
         self.push(ASTType::Module(module_built), context);
@@ -14515,10 +14495,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let negedge_token = pop_item!(self, negedge_token, NegedgeToken, context);
-        let negedge_built = NegedgeBuilder::default()
-            .negedge_token((&negedge_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let negedge_built = Negedge {
+            negedge_token: (&negedge_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.negedge(&negedge_built)?;
         self.push(ASTType::Negedge(negedge_built), context);
@@ -14538,10 +14519,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let output_token = pop_item!(self, output_token, OutputToken, context);
-        let output_built = OutputBuilder::default()
-            .output_token((&output_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let output_built = Output {
+            output_token: (&output_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.output(&output_built)?;
         self.push(ASTType::Output(output_built), context);
@@ -14561,10 +14543,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let package_token = pop_item!(self, package_token, PackageToken, context);
-        let package_built = PackageBuilder::default()
-            .package_token((&package_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let package_built = Package {
+            package_token: (&package_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.package(&package_built)?;
         self.push(ASTType::Package(package_built), context);
@@ -14584,10 +14567,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let parameter_token = pop_item!(self, parameter_token, ParameterToken, context);
-        let parameter_built = ParameterBuilder::default()
-            .parameter_token((&parameter_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let parameter_built = Parameter {
+            parameter_token: (&parameter_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.parameter(&parameter_built)?;
         self.push(ASTType::Parameter(parameter_built), context);
@@ -14607,10 +14591,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let posedge_token = pop_item!(self, posedge_token, PosedgeToken, context);
-        let posedge_built = PosedgeBuilder::default()
-            .posedge_token((&posedge_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let posedge_built = Posedge {
+            posedge_token: (&posedge_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.posedge(&posedge_built)?;
         self.push(ASTType::Posedge(posedge_built), context);
@@ -14630,10 +14615,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let ref_token = pop_item!(self, ref_token, RefToken, context);
-        let r#ref_built = RefBuilder::default()
-            .ref_token((&ref_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let r#ref_built = Ref {
+            ref_token: (&ref_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.r#ref(&r#ref_built)?;
         self.push(ASTType::Ref(r#ref_built), context);
@@ -14653,10 +14639,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let repeat_token = pop_item!(self, repeat_token, RepeatToken, context);
-        let repeat_built = RepeatBuilder::default()
-            .repeat_token((&repeat_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let repeat_built = Repeat {
+            repeat_token: (&repeat_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.repeat(&repeat_built)?;
         self.push(ASTType::Repeat(repeat_built), context);
@@ -14676,10 +14663,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let return_token = pop_item!(self, return_token, ReturnToken, context);
-        let r#return_built = ReturnBuilder::default()
-            .return_token((&return_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let r#return_built = Return {
+            return_token: (&return_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.r#return(&r#return_built)?;
         self.push(ASTType::Return(r#return_built), context);
@@ -14699,10 +14687,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let step_token = pop_item!(self, step_token, StepToken, context);
-        let step_built = StepBuilder::default()
-            .step_token((&step_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let step_built = Step {
+            step_token: (&step_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.step(&step_built)?;
         self.push(ASTType::Step(step_built), context);
@@ -14722,10 +14711,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let struct_token = pop_item!(self, struct_token, StructToken, context);
-        let r#struct_built = StructBuilder::default()
-            .struct_token((&struct_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let r#struct_built = Struct {
+            struct_token: (&struct_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.r#struct(&r#struct_built)?;
         self.push(ASTType::Struct(r#struct_built), context);
@@ -14745,10 +14735,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let sync_high_token = pop_item!(self, sync_high_token, SyncHighToken, context);
-        let sync_high_built = SyncHighBuilder::default()
-            .sync_high_token((&sync_high_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let sync_high_built = SyncHigh {
+            sync_high_token: (&sync_high_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.sync_high(&sync_high_built)?;
         self.push(ASTType::SyncHigh(sync_high_built), context);
@@ -14768,10 +14759,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let sync_low_token = pop_item!(self, sync_low_token, SyncLowToken, context);
-        let sync_low_built = SyncLowBuilder::default()
-            .sync_low_token((&sync_low_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let sync_low_built = SyncLow {
+            sync_low_token: (&sync_low_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.sync_low(&sync_low_built)?;
         self.push(ASTType::SyncLow(sync_low_built), context);
@@ -14791,10 +14783,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let tri_token = pop_item!(self, tri_token, TriToken, context);
-        let tri_built = TriBuilder::default()
-            .tri_token((&tri_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let tri_built = Tri {
+            tri_token: (&tri_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.tri(&tri_built)?;
         self.push(ASTType::Tri(tri_built), context);
@@ -14814,10 +14807,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let u32_token = pop_item!(self, u32_token, U32Token, context);
-        let u32_built = U32Builder::default()
-            .u32_token((&u32_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let u32_built = U32 {
+            u32_token: (&u32_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.u32(&u32_built)?;
         self.push(ASTType::U32(u32_built), context);
@@ -14837,10 +14831,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let u64_token = pop_item!(self, u64_token, U64Token, context);
-        let u64_built = U64Builder::default()
-            .u64_token((&u64_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let u64_built = U64 {
+            u64_token: (&u64_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.u64(&u64_built)?;
         self.push(ASTType::U64(u64_built), context);
@@ -14860,10 +14855,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let var_token = pop_item!(self, var_token, VarToken, context);
-        let var_built = VarBuilder::default()
-            .var_token((&var_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let var_built = Var {
+            var_token: (&var_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.var(&var_built)?;
         self.push(ASTType::Var(var_built), context);
@@ -14883,10 +14879,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let identifier_token = pop_item!(self, identifier_token, IdentifierToken, context);
-        let identifier_built = IdentifierBuilder::default()
-            .identifier_token((&identifier_token).try_into().into_diagnostic()?)
-            .build()
-            .into_diagnostic()?;
+        let identifier_built = Identifier {
+            identifier_token: (&identifier_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
         // Calling user action here
         self.user_grammar.identifier(&identifier_built)?;
         self.push(ASTType::Identifier(identifier_built), context);
@@ -14906,10 +14903,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let integral_number = pop_item!(self, integral_number, IntegralNumber, context);
-        let number_0_built = NumberIntegralNumberBuilder::default()
-            .integral_number(Box::new(integral_number))
-            .build()
-            .into_diagnostic()?;
+        let number_0_built = NumberIntegralNumber {
+            integral_number: Box::new(integral_number),
+        };
         let number_0_built = Number::IntegralNumber(number_0_built);
         // Calling user action here
         self.user_grammar.number(&number_0_built)?;
@@ -14930,10 +14926,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let real_number = pop_item!(self, real_number, RealNumber, context);
-        let number_1_built = NumberRealNumberBuilder::default()
-            .real_number(Box::new(real_number))
-            .build()
-            .into_diagnostic()?;
+        let number_1_built = NumberRealNumber {
+            real_number: Box::new(real_number),
+        };
         let number_1_built = Number::RealNumber(number_1_built);
         // Calling user action here
         self.user_grammar.number(&number_1_built)?;
@@ -14954,10 +14949,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let based = pop_item!(self, based, Based, context);
-        let integral_number_0_built = IntegralNumberBasedBuilder::default()
-            .based(Box::new(based))
-            .build()
-            .into_diagnostic()?;
+        let integral_number_0_built = IntegralNumberBased {
+            based: Box::new(based),
+        };
         let integral_number_0_built = IntegralNumber::Based(integral_number_0_built);
         // Calling user action here
         self.user_grammar
@@ -14979,10 +14973,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let base_less = pop_item!(self, base_less, BaseLess, context);
-        let integral_number_1_built = IntegralNumberBaseLessBuilder::default()
-            .base_less(Box::new(base_less))
-            .build()
-            .into_diagnostic()?;
+        let integral_number_1_built = IntegralNumberBaseLess {
+            base_less: Box::new(base_less),
+        };
         let integral_number_1_built = IntegralNumber::BaseLess(integral_number_1_built);
         // Calling user action here
         self.user_grammar
@@ -15004,10 +14997,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let all_bit = pop_item!(self, all_bit, AllBit, context);
-        let integral_number_2_built = IntegralNumberAllBitBuilder::default()
-            .all_bit(Box::new(all_bit))
-            .build()
-            .into_diagnostic()?;
+        let integral_number_2_built = IntegralNumberAllBit {
+            all_bit: Box::new(all_bit),
+        };
         let integral_number_2_built = IntegralNumber::AllBit(integral_number_2_built);
         // Calling user action here
         self.user_grammar
@@ -15029,10 +15021,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let fixed_point = pop_item!(self, fixed_point, FixedPoint, context);
-        let real_number_0_built = RealNumberFixedPointBuilder::default()
-            .fixed_point(Box::new(fixed_point))
-            .build()
-            .into_diagnostic()?;
+        let real_number_0_built = RealNumberFixedPoint {
+            fixed_point: Box::new(fixed_point),
+        };
         let real_number_0_built = RealNumber::FixedPoint(real_number_0_built);
         // Calling user action here
         self.user_grammar.real_number(&real_number_0_built)?;
@@ -15053,10 +15044,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let exponent = pop_item!(self, exponent, Exponent, context);
-        let real_number_1_built = RealNumberExponentBuilder::default()
-            .exponent(Box::new(exponent))
-            .build()
-            .into_diagnostic()?;
+        let real_number_1_built = RealNumberExponent {
+            exponent: Box::new(exponent),
+        };
         let real_number_1_built = RealNumber::Exponent(real_number_1_built);
         // Calling user action here
         self.user_grammar.real_number(&real_number_1_built)?;
@@ -15091,12 +15081,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let identifier = pop_item!(self, identifier, Identifier, context);
-        let hierarchical_identifier_built = HierarchicalIdentifierBuilder::default()
-            .identifier(Box::new(identifier))
-            .hierarchical_identifier_list(hierarchical_identifier_list)
-            .hierarchical_identifier_list0(hierarchical_identifier_list0)
-            .build()
-            .into_diagnostic()?;
+        let hierarchical_identifier_built = HierarchicalIdentifier {
+            identifier: Box::new(identifier),
+            hierarchical_identifier_list,
+            hierarchical_identifier_list0,
+        };
         // Calling user action here
         self.user_grammar
             .hierarchical_identifier(&hierarchical_identifier_built)?;
@@ -15136,12 +15125,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         );
         let identifier = pop_item!(self, identifier, Identifier, context);
         let dot = pop_item!(self, dot, Dot, context);
-        let hierarchical_identifier_list0_0_built = HierarchicalIdentifierList0Builder::default()
-            .hierarchical_identifier_list0_list(hierarchical_identifier_list0_list)
-            .identifier(Box::new(identifier))
-            .dot(Box::new(dot))
-            .build()
-            .into_diagnostic()?;
+        let hierarchical_identifier_list0_0_built = HierarchicalIdentifierList0 {
+            hierarchical_identifier_list0_list,
+            identifier: Box::new(identifier),
+            dot: Box::new(dot),
+        };
         // Add an element to the vector
         hierarchical_identifier_list0.push(hierarchical_identifier_list0_0_built);
         self.push(
@@ -15171,11 +15159,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let range = pop_item!(self, range, Range, context);
-        let hierarchical_identifier_list0_list_0_built =
-            HierarchicalIdentifierList0ListBuilder::default()
-                .range(Box::new(range))
-                .build()
-                .into_diagnostic()?;
+        let hierarchical_identifier_list0_list_0_built = HierarchicalIdentifierList0List {
+            range: Box::new(range),
+        };
         // Add an element to the vector
         hierarchical_identifier_list0_list.push(hierarchical_identifier_list0_list_0_built);
         self.push(
@@ -15243,10 +15229,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let range = pop_item!(self, range, Range, context);
-        let hierarchical_identifier_list_0_built = HierarchicalIdentifierListBuilder::default()
-            .range(Box::new(range))
-            .build()
-            .into_diagnostic()?;
+        let hierarchical_identifier_list_0_built = HierarchicalIdentifierList {
+            range: Box::new(range),
+        };
         // Add an element to the vector
         hierarchical_identifier_list.push(hierarchical_identifier_list_0_built);
         self.push(
@@ -15291,11 +15276,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let scoped_identifier_list =
             pop_and_reverse_item!(self, scoped_identifier_list, ScopedIdentifierList, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
-        let scoped_identifier_built = ScopedIdentifierBuilder::default()
-            .identifier(Box::new(identifier))
-            .scoped_identifier_list(scoped_identifier_list)
-            .build()
-            .into_diagnostic()?;
+        let scoped_identifier_built = ScopedIdentifier {
+            identifier: Box::new(identifier),
+            scoped_identifier_list,
+        };
         // Calling user action here
         self.user_grammar
             .scoped_identifier(&scoped_identifier_built)?;
@@ -15321,11 +15305,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             pop_item!(self, scoped_identifier_list, ScopedIdentifierList, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
         let colon_colon = pop_item!(self, colon_colon, ColonColon, context);
-        let scoped_identifier_list_0_built = ScopedIdentifierListBuilder::default()
-            .identifier(Box::new(identifier))
-            .colon_colon(Box::new(colon_colon))
-            .build()
-            .into_diagnostic()?;
+        let scoped_identifier_list_0_built = ScopedIdentifierList {
+            identifier: Box::new(identifier),
+            colon_colon: Box::new(colon_colon),
+        };
         // Add an element to the vector
         scoped_identifier_list.push(scoped_identifier_list_0_built);
         self.push(
@@ -15368,12 +15351,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let identifier0 = pop_item!(self, identifier0, Identifier, context);
         let dot = pop_item!(self, dot, Dot, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
-        let modport_identifier_built = ModportIdentifierBuilder::default()
-            .identifier(Box::new(identifier))
-            .dot(Box::new(dot))
-            .identifier0(Box::new(identifier0))
-            .build()
-            .into_diagnostic()?;
+        let modport_identifier_built = ModportIdentifier {
+            identifier: Box::new(identifier),
+            dot: Box::new(dot),
+            identifier0: Box::new(identifier0),
+        };
         // Calling user action here
         self.user_grammar
             .modport_identifier(&modport_identifier_built)?;
@@ -15404,11 +15386,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let identifier = pop_item!(self, identifier, Identifier, context);
-        let scoped_or_hier_identifier_built = ScopedOrHierIdentifierBuilder::default()
-            .identifier(Box::new(identifier))
-            .scoped_or_hier_identifier_group(Box::new(scoped_or_hier_identifier_group))
-            .build()
-            .into_diagnostic()?;
+        let scoped_or_hier_identifier_built = ScopedOrHierIdentifier {
+            identifier: Box::new(identifier),
+            scoped_or_hier_identifier_group: Box::new(scoped_or_hier_identifier_group),
+        };
         // Calling user action here
         self.user_grammar
             .scoped_or_hier_identifier(&scoped_or_hier_identifier_built)?;
@@ -15441,12 +15422,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         );
         let identifier = pop_item!(self, identifier, Identifier, context);
         let colon_colon = pop_item!(self, colon_colon, ColonColon, context);
-        let scoped_or_hier_identifier_group_0_built = ScopedOrHierIdentifierGroupColonColonIdentifierScopedOrHierIdentifierGroupListBuilder::default()
-            .colon_colon(Box::new(colon_colon))
-            .identifier(Box::new(identifier))
-            .scoped_or_hier_identifier_group_list(scoped_or_hier_identifier_group_list)
-            .build()
-            .into_diagnostic()?;
+        let scoped_or_hier_identifier_group_0_built =
+            ScopedOrHierIdentifierGroupColonColonIdentifierScopedOrHierIdentifierGroupList {
+                colon_colon: Box::new(colon_colon),
+                identifier: Box::new(identifier),
+                scoped_or_hier_identifier_group_list,
+            };
         let scoped_or_hier_identifier_group_0_built =
             ScopedOrHierIdentifierGroup::ColonColonIdentifierScopedOrHierIdentifierGroupList(
                 scoped_or_hier_identifier_group_0_built,
@@ -15480,12 +15461,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         );
         let identifier = pop_item!(self, identifier, Identifier, context);
         let colon_colon = pop_item!(self, colon_colon, ColonColon, context);
-        let scoped_or_hier_identifier_group_list_0_built =
-            ScopedOrHierIdentifierGroupListBuilder::default()
-                .identifier(Box::new(identifier))
-                .colon_colon(Box::new(colon_colon))
-                .build()
-                .into_diagnostic()?;
+        let scoped_or_hier_identifier_group_list_0_built = ScopedOrHierIdentifierGroupList {
+            identifier: Box::new(identifier),
+            colon_colon: Box::new(colon_colon),
+        };
         // Add an element to the vector
         scoped_or_hier_identifier_group_list.push(scoped_or_hier_identifier_group_list_0_built);
         self.push(
@@ -15539,11 +15518,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             ScopedOrHierIdentifierGroupList0,
             context
         );
-        let scoped_or_hier_identifier_group_1_built = ScopedOrHierIdentifierGroupScopedOrHierIdentifierGroupList0ScopedOrHierIdentifierGroupList1Builder::default()
-            .scoped_or_hier_identifier_group_list0(scoped_or_hier_identifier_group_list0)
-            .scoped_or_hier_identifier_group_list1(scoped_or_hier_identifier_group_list1)
-            .build()
-            .into_diagnostic()?;
+        let scoped_or_hier_identifier_group_1_built = ScopedOrHierIdentifierGroupScopedOrHierIdentifierGroupList0ScopedOrHierIdentifierGroupList1 {
+            scoped_or_hier_identifier_group_list0,
+            scoped_or_hier_identifier_group_list1,
+        };
         let scoped_or_hier_identifier_group_1_built = ScopedOrHierIdentifierGroup::ScopedOrHierIdentifierGroupList0ScopedOrHierIdentifierGroupList1(scoped_or_hier_identifier_group_1_built);
         self.push(
             ASTType::ScopedOrHierIdentifierGroup(scoped_or_hier_identifier_group_1_built),
@@ -15581,15 +15559,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         );
         let identifier = pop_item!(self, identifier, Identifier, context);
         let dot = pop_item!(self, dot, Dot, context);
-        let scoped_or_hier_identifier_group_list1_0_built =
-            ScopedOrHierIdentifierGroupList1Builder::default()
-                .scoped_or_hier_identifier_group_list1_list(
-                    scoped_or_hier_identifier_group_list1_list,
-                )
-                .identifier(Box::new(identifier))
-                .dot(Box::new(dot))
-                .build()
-                .into_diagnostic()?;
+        let scoped_or_hier_identifier_group_list1_0_built = ScopedOrHierIdentifierGroupList1 {
+            scoped_or_hier_identifier_group_list1_list,
+            identifier: Box::new(identifier),
+            dot: Box::new(dot),
+        };
         // Add an element to the vector
         scoped_or_hier_identifier_group_list1.push(scoped_or_hier_identifier_group_list1_0_built);
         self.push(
@@ -15620,10 +15594,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         );
         let range = pop_item!(self, range, Range, context);
         let scoped_or_hier_identifier_group_list1_list_0_built =
-            ScopedOrHierIdentifierGroupList1ListBuilder::default()
-                .range(Box::new(range))
-                .build()
-                .into_diagnostic()?;
+            ScopedOrHierIdentifierGroupList1List {
+                range: Box::new(range),
+            };
         // Add an element to the vector
         scoped_or_hier_identifier_group_list1_list
             .push(scoped_or_hier_identifier_group_list1_list_0_built);
@@ -15698,11 +15671,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let range = pop_item!(self, range, Range, context);
-        let scoped_or_hier_identifier_group_list0_0_built =
-            ScopedOrHierIdentifierGroupList0Builder::default()
-                .range(Box::new(range))
-                .build()
-                .into_diagnostic()?;
+        let scoped_or_hier_identifier_group_list0_0_built = ScopedOrHierIdentifierGroupList0 {
+            range: Box::new(range),
+        };
         // Add an element to the vector
         scoped_or_hier_identifier_group_list0.push(scoped_or_hier_identifier_group_list0_0_built);
         self.push(
@@ -15748,11 +15719,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let expression_list = pop_and_reverse_item!(self, expression_list, ExpressionList, context);
         let expression01 = pop_item!(self, expression01, Expression01, context);
-        let expression_built = ExpressionBuilder::default()
-            .expression01(Box::new(expression01))
-            .expression_list(expression_list)
-            .build()
-            .into_diagnostic()?;
+        let expression_built = Expression {
+            expression01: Box::new(expression01),
+            expression_list,
+        };
         // Calling user action here
         self.user_grammar.expression(&expression_built)?;
         self.push(ASTType::Expression(expression_built), context);
@@ -15776,11 +15746,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let mut expression_list = pop_item!(self, expression_list, ExpressionList, context);
         let expression01 = pop_item!(self, expression01, Expression01, context);
         let operator01 = pop_item!(self, operator01, Operator01, context);
-        let expression_list_0_built = ExpressionListBuilder::default()
-            .expression01(Box::new(expression01))
-            .operator01(Box::new(operator01))
-            .build()
-            .into_diagnostic()?;
+        let expression_list_0_built = ExpressionList {
+            expression01: Box::new(expression01),
+            operator01: Box::new(operator01),
+        };
         // Add an element to the vector
         expression_list.push(expression_list_0_built);
         self.push(ASTType::ExpressionList(expression_list), context);
@@ -15816,11 +15785,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let expression01_list =
             pop_and_reverse_item!(self, expression01_list, Expression01List, context);
         let expression02 = pop_item!(self, expression02, Expression02, context);
-        let expression01_built = Expression01Builder::default()
-            .expression02(Box::new(expression02))
-            .expression01_list(expression01_list)
-            .build()
-            .into_diagnostic()?;
+        let expression01_built = Expression01 {
+            expression02: Box::new(expression02),
+            expression01_list,
+        };
         // Calling user action here
         self.user_grammar.expression01(&expression01_built)?;
         self.push(ASTType::Expression01(expression01_built), context);
@@ -15844,11 +15812,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let mut expression01_list = pop_item!(self, expression01_list, Expression01List, context);
         let expression02 = pop_item!(self, expression02, Expression02, context);
         let operator02 = pop_item!(self, operator02, Operator02, context);
-        let expression01_list_0_built = Expression01ListBuilder::default()
-            .expression02(Box::new(expression02))
-            .operator02(Box::new(operator02))
-            .build()
-            .into_diagnostic()?;
+        let expression01_list_0_built = Expression01List {
+            expression02: Box::new(expression02),
+            operator02: Box::new(operator02),
+        };
         // Add an element to the vector
         expression01_list.push(expression01_list_0_built);
         self.push(ASTType::Expression01List(expression01_list), context);
@@ -15887,11 +15854,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let expression02_list =
             pop_and_reverse_item!(self, expression02_list, Expression02List, context);
         let expression03 = pop_item!(self, expression03, Expression03, context);
-        let expression02_built = Expression02Builder::default()
-            .expression03(Box::new(expression03))
-            .expression02_list(expression02_list)
-            .build()
-            .into_diagnostic()?;
+        let expression02_built = Expression02 {
+            expression03: Box::new(expression03),
+            expression02_list,
+        };
         // Calling user action here
         self.user_grammar.expression02(&expression02_built)?;
         self.push(ASTType::Expression02(expression02_built), context);
@@ -15915,11 +15881,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let mut expression02_list = pop_item!(self, expression02_list, Expression02List, context);
         let expression03 = pop_item!(self, expression03, Expression03, context);
         let operator03 = pop_item!(self, operator03, Operator03, context);
-        let expression02_list_0_built = Expression02ListBuilder::default()
-            .expression03(Box::new(expression03))
-            .operator03(Box::new(operator03))
-            .build()
-            .into_diagnostic()?;
+        let expression02_list_0_built = Expression02List {
+            expression03: Box::new(expression03),
+            operator03: Box::new(operator03),
+        };
         // Add an element to the vector
         expression02_list.push(expression02_list_0_built);
         self.push(ASTType::Expression02List(expression02_list), context);
@@ -15958,11 +15923,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let expression03_list =
             pop_and_reverse_item!(self, expression03_list, Expression03List, context);
         let expression04 = pop_item!(self, expression04, Expression04, context);
-        let expression03_built = Expression03Builder::default()
-            .expression04(Box::new(expression04))
-            .expression03_list(expression03_list)
-            .build()
-            .into_diagnostic()?;
+        let expression03_built = Expression03 {
+            expression04: Box::new(expression04),
+            expression03_list,
+        };
         // Calling user action here
         self.user_grammar.expression03(&expression03_built)?;
         self.push(ASTType::Expression03(expression03_built), context);
@@ -15986,11 +15950,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let mut expression03_list = pop_item!(self, expression03_list, Expression03List, context);
         let expression04 = pop_item!(self, expression04, Expression04, context);
         let operator04 = pop_item!(self, operator04, Operator04, context);
-        let expression03_list_0_built = Expression03ListBuilder::default()
-            .expression04(Box::new(expression04))
-            .operator04(Box::new(operator04))
-            .build()
-            .into_diagnostic()?;
+        let expression03_list_0_built = Expression03List {
+            expression04: Box::new(expression04),
+            operator04: Box::new(operator04),
+        };
         // Add an element to the vector
         expression03_list.push(expression03_list_0_built);
         self.push(ASTType::Expression03List(expression03_list), context);
@@ -16029,11 +15992,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let expression04_list =
             pop_and_reverse_item!(self, expression04_list, Expression04List, context);
         let expression05 = pop_item!(self, expression05, Expression05, context);
-        let expression04_built = Expression04Builder::default()
-            .expression05(Box::new(expression05))
-            .expression04_list(expression04_list)
-            .build()
-            .into_diagnostic()?;
+        let expression04_built = Expression04 {
+            expression05: Box::new(expression05),
+            expression04_list,
+        };
         // Calling user action here
         self.user_grammar.expression04(&expression04_built)?;
         self.push(ASTType::Expression04(expression04_built), context);
@@ -16057,11 +16019,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let mut expression04_list = pop_item!(self, expression04_list, Expression04List, context);
         let expression05 = pop_item!(self, expression05, Expression05, context);
         let operator05 = pop_item!(self, operator05, Operator05, context);
-        let expression04_list_0_built = Expression04ListBuilder::default()
-            .expression05(Box::new(expression05))
-            .operator05(Box::new(operator05))
-            .build()
-            .into_diagnostic()?;
+        let expression04_list_0_built = Expression04List {
+            expression05: Box::new(expression05),
+            operator05: Box::new(operator05),
+        };
         // Add an element to the vector
         expression04_list.push(expression04_list_0_built);
         self.push(ASTType::Expression04List(expression04_list), context);
@@ -16100,11 +16061,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let expression05_list =
             pop_and_reverse_item!(self, expression05_list, Expression05List, context);
         let expression06 = pop_item!(self, expression06, Expression06, context);
-        let expression05_built = Expression05Builder::default()
-            .expression06(Box::new(expression06))
-            .expression05_list(expression05_list)
-            .build()
-            .into_diagnostic()?;
+        let expression05_built = Expression05 {
+            expression06: Box::new(expression06),
+            expression05_list,
+        };
         // Calling user action here
         self.user_grammar.expression05(&expression05_built)?;
         self.push(ASTType::Expression05(expression05_built), context);
@@ -16128,11 +16088,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let mut expression05_list = pop_item!(self, expression05_list, Expression05List, context);
         let expression06 = pop_item!(self, expression06, Expression06, context);
         let operator06 = pop_item!(self, operator06, Operator06, context);
-        let expression05_list_0_built = Expression05ListBuilder::default()
-            .expression06(Box::new(expression06))
-            .operator06(Box::new(operator06))
-            .build()
-            .into_diagnostic()?;
+        let expression05_list_0_built = Expression05List {
+            expression06: Box::new(expression06),
+            operator06: Box::new(operator06),
+        };
         // Add an element to the vector
         expression05_list.push(expression05_list_0_built);
         self.push(ASTType::Expression05List(expression05_list), context);
@@ -16171,11 +16130,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let expression06_list =
             pop_and_reverse_item!(self, expression06_list, Expression06List, context);
         let expression07 = pop_item!(self, expression07, Expression07, context);
-        let expression06_built = Expression06Builder::default()
-            .expression07(Box::new(expression07))
-            .expression06_list(expression06_list)
-            .build()
-            .into_diagnostic()?;
+        let expression06_built = Expression06 {
+            expression07: Box::new(expression07),
+            expression06_list,
+        };
         // Calling user action here
         self.user_grammar.expression06(&expression06_built)?;
         self.push(ASTType::Expression06(expression06_built), context);
@@ -16199,11 +16157,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let mut expression06_list = pop_item!(self, expression06_list, Expression06List, context);
         let expression07 = pop_item!(self, expression07, Expression07, context);
         let operator07 = pop_item!(self, operator07, Operator07, context);
-        let expression06_list_0_built = Expression06ListBuilder::default()
-            .expression07(Box::new(expression07))
-            .operator07(Box::new(operator07))
-            .build()
-            .into_diagnostic()?;
+        let expression06_list_0_built = Expression06List {
+            expression07: Box::new(expression07),
+            operator07: Box::new(operator07),
+        };
         // Add an element to the vector
         expression06_list.push(expression06_list_0_built);
         self.push(ASTType::Expression06List(expression06_list), context);
@@ -16242,11 +16199,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let expression07_list =
             pop_and_reverse_item!(self, expression07_list, Expression07List, context);
         let expression08 = pop_item!(self, expression08, Expression08, context);
-        let expression07_built = Expression07Builder::default()
-            .expression08(Box::new(expression08))
-            .expression07_list(expression07_list)
-            .build()
-            .into_diagnostic()?;
+        let expression07_built = Expression07 {
+            expression08: Box::new(expression08),
+            expression07_list,
+        };
         // Calling user action here
         self.user_grammar.expression07(&expression07_built)?;
         self.push(ASTType::Expression07(expression07_built), context);
@@ -16270,11 +16226,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let mut expression07_list = pop_item!(self, expression07_list, Expression07List, context);
         let expression08 = pop_item!(self, expression08, Expression08, context);
         let operator08 = pop_item!(self, operator08, Operator08, context);
-        let expression07_list_0_built = Expression07ListBuilder::default()
-            .expression08(Box::new(expression08))
-            .operator08(Box::new(operator08))
-            .build()
-            .into_diagnostic()?;
+        let expression07_list_0_built = Expression07List {
+            expression08: Box::new(expression08),
+            operator08: Box::new(operator08),
+        };
         // Add an element to the vector
         expression07_list.push(expression07_list_0_built);
         self.push(ASTType::Expression07List(expression07_list), context);
@@ -16313,11 +16268,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let expression08_list =
             pop_and_reverse_item!(self, expression08_list, Expression08List, context);
         let expression09 = pop_item!(self, expression09, Expression09, context);
-        let expression08_built = Expression08Builder::default()
-            .expression09(Box::new(expression09))
-            .expression08_list(expression08_list)
-            .build()
-            .into_diagnostic()?;
+        let expression08_built = Expression08 {
+            expression09: Box::new(expression09),
+            expression08_list,
+        };
         // Calling user action here
         self.user_grammar.expression08(&expression08_built)?;
         self.push(ASTType::Expression08(expression08_built), context);
@@ -16341,11 +16295,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let mut expression08_list = pop_item!(self, expression08_list, Expression08List, context);
         let expression09 = pop_item!(self, expression09, Expression09, context);
         let operator09 = pop_item!(self, operator09, Operator09, context);
-        let expression08_list_0_built = Expression08ListBuilder::default()
-            .expression09(Box::new(expression09))
-            .operator09(Box::new(operator09))
-            .build()
-            .into_diagnostic()?;
+        let expression08_list_0_built = Expression08List {
+            expression09: Box::new(expression09),
+            operator09: Box::new(operator09),
+        };
         // Add an element to the vector
         expression08_list.push(expression08_list_0_built);
         self.push(ASTType::Expression08List(expression08_list), context);
@@ -16384,11 +16337,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let expression09_list =
             pop_and_reverse_item!(self, expression09_list, Expression09List, context);
         let expression10 = pop_item!(self, expression10, Expression10, context);
-        let expression09_built = Expression09Builder::default()
-            .expression10(Box::new(expression10))
-            .expression09_list(expression09_list)
-            .build()
-            .into_diagnostic()?;
+        let expression09_built = Expression09 {
+            expression10: Box::new(expression10),
+            expression09_list,
+        };
         // Calling user action here
         self.user_grammar.expression09(&expression09_built)?;
         self.push(ASTType::Expression09(expression09_built), context);
@@ -16417,11 +16369,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             Expression09ListGroup,
             context
         );
-        let expression09_list_0_built = Expression09ListBuilder::default()
-            .expression10(Box::new(expression10))
-            .expression09_list_group(Box::new(expression09_list_group))
-            .build()
-            .into_diagnostic()?;
+        let expression09_list_0_built = Expression09List {
+            expression10: Box::new(expression10),
+            expression09_list_group: Box::new(expression09_list_group),
+        };
         // Add an element to the vector
         expression09_list.push(expression09_list_0_built);
         self.push(ASTType::Expression09List(expression09_list), context);
@@ -16441,10 +16392,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator10 = pop_item!(self, operator10, Operator10, context);
-        let expression09_list_group_0_built = Expression09ListGroupOperator10Builder::default()
-            .operator10(Box::new(operator10))
-            .build()
-            .into_diagnostic()?;
+        let expression09_list_group_0_built = Expression09ListGroupOperator10 {
+            operator10: Box::new(operator10),
+        };
         let expression09_list_group_0_built =
             Expression09ListGroup::Operator10(expression09_list_group_0_built);
         self.push(
@@ -16467,10 +16417,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let star = pop_item!(self, star, Star, context);
-        let expression09_list_group_1_built = Expression09ListGroupStarBuilder::default()
-            .star(Box::new(star))
-            .build()
-            .into_diagnostic()?;
+        let expression09_list_group_1_built = Expression09ListGroupStar {
+            star: Box::new(star),
+        };
         let expression09_list_group_1_built =
             Expression09ListGroup::Star(expression09_list_group_1_built);
         self.push(
@@ -16512,11 +16461,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let expression10_list =
             pop_and_reverse_item!(self, expression10_list, Expression10List, context);
         let expression11 = pop_item!(self, expression11, Expression11, context);
-        let expression10_built = Expression10Builder::default()
-            .expression11(Box::new(expression11))
-            .expression10_list(expression10_list)
-            .build()
-            .into_diagnostic()?;
+        let expression10_built = Expression10 {
+            expression11: Box::new(expression11),
+            expression10_list,
+        };
         // Calling user action here
         self.user_grammar.expression10(&expression10_built)?;
         self.push(ASTType::Expression10(expression10_built), context);
@@ -16540,11 +16488,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let mut expression10_list = pop_item!(self, expression10_list, Expression10List, context);
         let expression11 = pop_item!(self, expression11, Expression11, context);
         let operator11 = pop_item!(self, operator11, Operator11, context);
-        let expression10_list_0_built = Expression10ListBuilder::default()
-            .expression11(Box::new(expression11))
-            .operator11(Box::new(operator11))
-            .build()
-            .into_diagnostic()?;
+        let expression10_list_0_built = Expression10List {
+            expression11: Box::new(expression11),
+            operator11: Box::new(operator11),
+        };
         // Add an element to the vector
         expression10_list.push(expression10_list_0_built);
         self.push(ASTType::Expression10List(expression10_list), context);
@@ -16583,11 +16530,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let factor = pop_item!(self, factor, Factor, context);
         let expression11_list =
             pop_and_reverse_item!(self, expression11_list, Expression11List, context);
-        let expression11_built = Expression11Builder::default()
-            .expression11_list(expression11_list)
-            .factor(Box::new(factor))
-            .build()
-            .into_diagnostic()?;
+        let expression11_built = Expression11 {
+            expression11_list,
+            factor: Box::new(factor),
+        };
         // Calling user action here
         self.user_grammar.expression11(&expression11_built)?;
         self.push(ASTType::Expression11(expression11_built), context);
@@ -16614,10 +16560,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             Expression11ListGroup,
             context
         );
-        let expression11_list_0_built = Expression11ListBuilder::default()
-            .expression11_list_group(Box::new(expression11_list_group))
-            .build()
-            .into_diagnostic()?;
+        let expression11_list_0_built = Expression11List {
+            expression11_list_group: Box::new(expression11_list_group),
+        };
         // Add an element to the vector
         expression11_list.push(expression11_list_0_built);
         self.push(ASTType::Expression11List(expression11_list), context);
@@ -16637,10 +16582,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let unary_operator = pop_item!(self, unary_operator, UnaryOperator, context);
-        let expression11_list_group_0_built = Expression11ListGroupUnaryOperatorBuilder::default()
-            .unary_operator(Box::new(unary_operator))
-            .build()
-            .into_diagnostic()?;
+        let expression11_list_group_0_built = Expression11ListGroupUnaryOperator {
+            unary_operator: Box::new(unary_operator),
+        };
         let expression11_list_group_0_built =
             Expression11ListGroup::UnaryOperator(expression11_list_group_0_built);
         self.push(
@@ -16663,10 +16607,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator09 = pop_item!(self, operator09, Operator09, context);
-        let expression11_list_group_1_built = Expression11ListGroupOperator09Builder::default()
-            .operator09(Box::new(operator09))
-            .build()
-            .into_diagnostic()?;
+        let expression11_list_group_1_built = Expression11ListGroupOperator09 {
+            operator09: Box::new(operator09),
+        };
         let expression11_list_group_1_built =
             Expression11ListGroup::Operator09(expression11_list_group_1_built);
         self.push(
@@ -16689,10 +16632,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator05 = pop_item!(self, operator05, Operator05, context);
-        let expression11_list_group_2_built = Expression11ListGroupOperator05Builder::default()
-            .operator05(Box::new(operator05))
-            .build()
-            .into_diagnostic()?;
+        let expression11_list_group_2_built = Expression11ListGroupOperator05 {
+            operator05: Box::new(operator05),
+        };
         let expression11_list_group_2_built =
             Expression11ListGroup::Operator05(expression11_list_group_2_built);
         self.push(
@@ -16715,10 +16657,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator03 = pop_item!(self, operator03, Operator03, context);
-        let expression11_list_group_3_built = Expression11ListGroupOperator03Builder::default()
-            .operator03(Box::new(operator03))
-            .build()
-            .into_diagnostic()?;
+        let expression11_list_group_3_built = Expression11ListGroupOperator03 {
+            operator03: Box::new(operator03),
+        };
         let expression11_list_group_3_built =
             Expression11ListGroup::Operator03(expression11_list_group_3_built);
         self.push(
@@ -16741,10 +16682,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator04 = pop_item!(self, operator04, Operator04, context);
-        let expression11_list_group_4_built = Expression11ListGroupOperator04Builder::default()
-            .operator04(Box::new(operator04))
-            .build()
-            .into_diagnostic()?;
+        let expression11_list_group_4_built = Expression11ListGroupOperator04 {
+            operator04: Box::new(operator04),
+        };
         let expression11_list_group_4_built =
             Expression11ListGroup::Operator04(expression11_list_group_4_built);
         self.push(
@@ -16783,10 +16723,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let number = pop_item!(self, number, Number, context);
-        let factor_0_built = FactorNumberBuilder::default()
-            .number(Box::new(number))
-            .build()
-            .into_diagnostic()?;
+        let factor_0_built = FactorNumber {
+            number: Box::new(number),
+        };
         let factor_0_built = Factor::Number(factor_0_built);
         // Calling user action here
         self.user_grammar.factor(&factor_0_built)?;
@@ -16816,12 +16755,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let factor_opt = pop_item!(self, factor_opt, FactorOpt, context);
-        let factor_1_built = FactorFactorOptScopedOrHierIdentifierFactorOpt0Builder::default()
-            .factor_opt(factor_opt)
-            .scoped_or_hier_identifier(Box::new(scoped_or_hier_identifier))
-            .factor_opt0(factor_opt0)
-            .build()
-            .into_diagnostic()?;
+        let factor_1_built = FactorFactorOptScopedOrHierIdentifierFactorOpt0 {
+            factor_opt,
+            scoped_or_hier_identifier: Box::new(scoped_or_hier_identifier),
+            factor_opt0,
+        };
         let factor_1_built = Factor::FactorOptScopedOrHierIdentifierFactorOpt0(factor_1_built);
         // Calling user action here
         self.user_grammar.factor(&factor_1_built)?;
@@ -16846,12 +16784,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let r_paren = pop_item!(self, r_paren, RParen, context);
         let expression = pop_item!(self, expression, Expression, context);
         let l_paren = pop_item!(self, l_paren, LParen, context);
-        let factor_2_built = FactorLParenExpressionRParenBuilder::default()
-            .l_paren(Box::new(l_paren))
-            .expression(Box::new(expression))
-            .r_paren(Box::new(r_paren))
-            .build()
-            .into_diagnostic()?;
+        let factor_2_built = FactorLParenExpressionRParen {
+            l_paren: Box::new(l_paren),
+            expression: Box::new(expression),
+            r_paren: Box::new(r_paren),
+        };
         let factor_2_built = Factor::LParenExpressionRParen(factor_2_built);
         // Calling user action here
         self.user_grammar.factor(&factor_2_built)?;
@@ -16876,12 +16813,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let r_brace = pop_item!(self, r_brace, RBrace, context);
         let concatenation_list = pop_item!(self, concatenation_list, ConcatenationList, context);
         let l_brace = pop_item!(self, l_brace, LBrace, context);
-        let factor_3_built = FactorLBraceConcatenationListRBraceBuilder::default()
-            .l_brace(Box::new(l_brace))
-            .concatenation_list(Box::new(concatenation_list))
-            .r_brace(Box::new(r_brace))
-            .build()
-            .into_diagnostic()?;
+        let factor_3_built = FactorLBraceConcatenationListRBrace {
+            l_brace: Box::new(l_brace),
+            concatenation_list: Box::new(concatenation_list),
+            r_brace: Box::new(r_brace),
+        };
         let factor_3_built = Factor::LBraceConcatenationListRBrace(factor_3_built);
         // Calling user action here
         self.user_grammar.factor(&factor_3_built)?;
@@ -16902,10 +16838,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let if_expression = pop_item!(self, if_expression, IfExpression, context);
-        let factor_4_built = FactorIfExpressionBuilder::default()
-            .if_expression(Box::new(if_expression))
-            .build()
-            .into_diagnostic()?;
+        let factor_4_built = FactorIfExpression {
+            if_expression: Box::new(if_expression),
+        };
         let factor_4_built = Factor::IfExpression(factor_4_built);
         // Calling user action here
         self.user_grammar.factor(&factor_4_built)?;
@@ -16926,10 +16861,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let case_expression = pop_item!(self, case_expression, CaseExpression, context);
-        let factor_5_built = FactorCaseExpressionBuilder::default()
-            .case_expression(Box::new(case_expression))
-            .build()
-            .into_diagnostic()?;
+        let factor_5_built = FactorCaseExpression {
+            case_expression: Box::new(case_expression),
+        };
         let factor_5_built = Factor::CaseExpression(factor_5_built);
         // Calling user action here
         self.user_grammar.factor(&factor_5_built)?;
@@ -16954,12 +16888,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let r_paren = pop_item!(self, r_paren, RParen, context);
         let factor_opt1 = pop_item!(self, factor_opt1, FactorOpt1, context);
         let l_paren = pop_item!(self, l_paren, LParen, context);
-        let factor_opt0_0_built = FactorOpt0Builder::default()
-            .l_paren(Box::new(l_paren))
-            .factor_opt1(factor_opt1)
-            .r_paren(Box::new(r_paren))
-            .build()
-            .into_diagnostic()?;
+        let factor_opt0_0_built = FactorOpt0 {
+            l_paren: Box::new(l_paren),
+            factor_opt1,
+            r_paren: Box::new(r_paren),
+        };
         self.push(
             ASTType::FactorOpt0(Some(Box::new(factor_opt0_0_built))),
             context,
@@ -16980,10 +16913,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let function_call_arg = pop_item!(self, function_call_arg, FunctionCallArg, context);
-        let factor_opt1_0_built = FactorOpt1Builder::default()
-            .function_call_arg(Box::new(function_call_arg))
-            .build()
-            .into_diagnostic()?;
+        let factor_opt1_0_built = FactorOpt1 {
+            function_call_arg: Box::new(function_call_arg),
+        };
         self.push(
             ASTType::FactorOpt1(Some(Box::new(factor_opt1_0_built))),
             context,
@@ -17028,10 +16960,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let dollar = pop_item!(self, dollar, Dollar, context);
-        let factor_opt_0_built = FactorOptBuilder::default()
-            .dollar(Box::new(dollar))
-            .build()
-            .into_diagnostic()?;
+        let factor_opt_0_built = FactorOpt {
+            dollar: Box::new(dollar),
+        };
         self.push(
             ASTType::FactorOpt(Some(Box::new(factor_opt_0_built))),
             context,
@@ -17070,12 +17001,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let function_call_arg_list =
             pop_and_reverse_item!(self, function_call_arg_list, FunctionCallArgList, context);
         let expression = pop_item!(self, expression, Expression, context);
-        let function_call_arg_built = FunctionCallArgBuilder::default()
-            .expression(Box::new(expression))
-            .function_call_arg_list(function_call_arg_list)
-            .function_call_arg_opt(function_call_arg_opt)
-            .build()
-            .into_diagnostic()?;
+        let function_call_arg_built = FunctionCallArg {
+            expression: Box::new(expression),
+            function_call_arg_list,
+            function_call_arg_opt,
+        };
         // Calling user action here
         self.user_grammar
             .function_call_arg(&function_call_arg_built)?;
@@ -17101,11 +17031,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             pop_item!(self, function_call_arg_list, FunctionCallArgList, context);
         let expression = pop_item!(self, expression, Expression, context);
         let comma = pop_item!(self, comma, Comma, context);
-        let function_call_arg_list_0_built = FunctionCallArgListBuilder::default()
-            .expression(Box::new(expression))
-            .comma(Box::new(comma))
-            .build()
-            .into_diagnostic()?;
+        let function_call_arg_list_0_built = FunctionCallArgList {
+            expression: Box::new(expression),
+            comma: Box::new(comma),
+        };
         // Add an element to the vector
         function_call_arg_list.push(function_call_arg_list_0_built);
         self.push(
@@ -17144,10 +17073,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comma = pop_item!(self, comma, Comma, context);
-        let function_call_arg_opt_0_built = FunctionCallArgOptBuilder::default()
-            .comma(Box::new(comma))
-            .build()
-            .into_diagnostic()?;
+        let function_call_arg_opt_0_built = FunctionCallArgOpt {
+            comma: Box::new(comma),
+        };
         self.push(
             ASTType::FunctionCallArgOpt(Some(Box::new(function_call_arg_opt_0_built))),
             context,
@@ -17190,12 +17118,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let concatenation_item = pop_item!(self, concatenation_item, ConcatenationItem, context);
-        let concatenation_list_built = ConcatenationListBuilder::default()
-            .concatenation_item(Box::new(concatenation_item))
-            .concatenation_list_list(concatenation_list_list)
-            .concatenation_list_opt(concatenation_list_opt)
-            .build()
-            .into_diagnostic()?;
+        let concatenation_list_built = ConcatenationList {
+            concatenation_item: Box::new(concatenation_item),
+            concatenation_list_list,
+            concatenation_list_opt,
+        };
         // Calling user action here
         self.user_grammar
             .concatenation_list(&concatenation_list_built)?;
@@ -17228,11 +17155,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         );
         let concatenation_item = pop_item!(self, concatenation_item, ConcatenationItem, context);
         let comma = pop_item!(self, comma, Comma, context);
-        let concatenation_list_list_0_built = ConcatenationListListBuilder::default()
-            .concatenation_item(Box::new(concatenation_item))
-            .comma(Box::new(comma))
-            .build()
-            .into_diagnostic()?;
+        let concatenation_list_list_0_built = ConcatenationListList {
+            concatenation_item: Box::new(concatenation_item),
+            comma: Box::new(comma),
+        };
         // Add an element to the vector
         concatenation_list_list.push(concatenation_list_list_0_built);
         self.push(
@@ -17271,10 +17197,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comma = pop_item!(self, comma, Comma, context);
-        let concatenation_list_opt_0_built = ConcatenationListOptBuilder::default()
-            .comma(Box::new(comma))
-            .build()
-            .into_diagnostic()?;
+        let concatenation_list_opt_0_built = ConcatenationListOpt {
+            comma: Box::new(comma),
+        };
         self.push(
             ASTType::ConcatenationListOpt(Some(Box::new(concatenation_list_opt_0_built))),
             context,
@@ -17310,11 +17235,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let concatenation_item_opt =
             pop_item!(self, concatenation_item_opt, ConcatenationItemOpt, context);
         let expression = pop_item!(self, expression, Expression, context);
-        let concatenation_item_built = ConcatenationItemBuilder::default()
-            .expression(Box::new(expression))
-            .concatenation_item_opt(concatenation_item_opt)
-            .build()
-            .into_diagnostic()?;
+        let concatenation_item_built = ConcatenationItem {
+            expression: Box::new(expression),
+            concatenation_item_opt,
+        };
         // Calling user action here
         self.user_grammar
             .concatenation_item(&concatenation_item_built)?;
@@ -17340,11 +17264,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let expression = pop_item!(self, expression, Expression, context);
         let repeat = pop_item!(self, repeat, Repeat, context);
-        let concatenation_item_opt_0_built = ConcatenationItemOptBuilder::default()
-            .repeat(Box::new(repeat))
-            .expression(Box::new(expression))
-            .build()
-            .into_diagnostic()?;
+        let concatenation_item_opt_0_built = ConcatenationItemOpt {
+            repeat: Box::new(repeat),
+            expression: Box::new(expression),
+        };
         self.push(
             ASTType::ConcatenationItemOpt(Some(Box::new(concatenation_item_opt_0_built))),
             context,
@@ -17396,19 +17319,18 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let l_brace = pop_item!(self, l_brace, LBrace, context);
         let expression = pop_item!(self, expression, Expression, context);
         let r#if = pop_item!(self, r#if, If, context);
-        let if_expression_built = IfExpressionBuilder::default()
-            .r#if(Box::new(r#if))
-            .expression(Box::new(expression))
-            .l_brace(Box::new(l_brace))
-            .expression0(Box::new(expression0))
-            .r_brace(Box::new(r_brace))
-            .if_expression_list(if_expression_list)
-            .r#else(Box::new(r#else))
-            .l_brace0(Box::new(l_brace0))
-            .expression1(Box::new(expression1))
-            .r_brace0(Box::new(r_brace0))
-            .build()
-            .into_diagnostic()?;
+        let if_expression_built = IfExpression {
+            r#if: Box::new(r#if),
+            expression: Box::new(expression),
+            l_brace: Box::new(l_brace),
+            expression0: Box::new(expression0),
+            r_brace: Box::new(r_brace),
+            if_expression_list,
+            r#else: Box::new(r#else),
+            l_brace0: Box::new(l_brace0),
+            expression1: Box::new(expression1),
+            r_brace0: Box::new(r_brace0),
+        };
         // Calling user action here
         self.user_grammar.if_expression(&if_expression_built)?;
         self.push(ASTType::IfExpression(if_expression_built), context);
@@ -17440,15 +17362,14 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let expression = pop_item!(self, expression, Expression, context);
         let r#if = pop_item!(self, r#if, If, context);
         let r#else = pop_item!(self, r#else, Else, context);
-        let if_expression_list_0_built = IfExpressionListBuilder::default()
-            .r_brace(Box::new(r_brace))
-            .expression0(Box::new(expression0))
-            .l_brace(Box::new(l_brace))
-            .expression(Box::new(expression))
-            .r#if(Box::new(r#if))
-            .r#else(Box::new(r#else))
-            .build()
-            .into_diagnostic()?;
+        let if_expression_list_0_built = IfExpressionList {
+            r_brace: Box::new(r_brace),
+            expression0: Box::new(expression0),
+            l_brace: Box::new(l_brace),
+            expression: Box::new(expression),
+            r#if: Box::new(r#if),
+            r#else: Box::new(r#else),
+        };
         // Add an element to the vector
         if_expression_list.push(if_expression_list_0_built);
         self.push(ASTType::IfExpressionList(if_expression_list), context);
@@ -17509,22 +17430,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let l_brace = pop_item!(self, l_brace, LBrace, context);
         let expression = pop_item!(self, expression, Expression, context);
         let case = pop_item!(self, case, Case, context);
-        let case_expression_built = CaseExpressionBuilder::default()
-            .case(Box::new(case))
-            .expression(Box::new(expression))
-            .l_brace(Box::new(l_brace))
-            .expression0(Box::new(expression0))
-            .colon(Box::new(colon))
-            .expression1(Box::new(expression1))
-            .comma(Box::new(comma))
-            .case_expression_list(case_expression_list)
-            .defaul(Box::new(defaul))
-            .colon0(Box::new(colon0))
-            .expression2(Box::new(expression2))
-            .case_expression_opt(case_expression_opt)
-            .r_brace(Box::new(r_brace))
-            .build()
-            .into_diagnostic()?;
+        let case_expression_built = CaseExpression {
+            case: Box::new(case),
+            expression: Box::new(expression),
+            l_brace: Box::new(l_brace),
+            expression0: Box::new(expression0),
+            colon: Box::new(colon),
+            expression1: Box::new(expression1),
+            comma: Box::new(comma),
+            case_expression_list,
+            defaul: Box::new(defaul),
+            colon0: Box::new(colon0),
+            expression2: Box::new(expression2),
+            case_expression_opt,
+            r_brace: Box::new(r_brace),
+        };
         // Calling user action here
         self.user_grammar.case_expression(&case_expression_built)?;
         self.push(ASTType::CaseExpression(case_expression_built), context);
@@ -17553,13 +17473,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let expression0 = pop_item!(self, expression0, Expression, context);
         let colon = pop_item!(self, colon, Colon, context);
         let expression = pop_item!(self, expression, Expression, context);
-        let case_expression_list_0_built = CaseExpressionListBuilder::default()
-            .comma(Box::new(comma))
-            .expression0(Box::new(expression0))
-            .colon(Box::new(colon))
-            .expression(Box::new(expression))
-            .build()
-            .into_diagnostic()?;
+        let case_expression_list_0_built = CaseExpressionList {
+            comma: Box::new(comma),
+            expression0: Box::new(expression0),
+            colon: Box::new(colon),
+            expression: Box::new(expression),
+        };
         // Add an element to the vector
         case_expression_list.push(case_expression_list_0_built);
         self.push(ASTType::CaseExpressionList(case_expression_list), context);
@@ -17595,10 +17514,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comma = pop_item!(self, comma, Comma, context);
-        let case_expression_opt_0_built = CaseExpressionOptBuilder::default()
-            .comma(Box::new(comma))
-            .build()
-            .into_diagnostic()?;
+        let case_expression_opt_0_built = CaseExpressionOpt {
+            comma: Box::new(comma),
+        };
         self.push(
             ASTType::CaseExpressionOpt(Some(Box::new(case_expression_opt_0_built))),
             context,
@@ -17637,13 +17555,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let range_opt = pop_item!(self, range_opt, RangeOpt, context);
         let expression = pop_item!(self, expression, Expression, context);
         let l_bracket = pop_item!(self, l_bracket, LBracket, context);
-        let range_built = RangeBuilder::default()
-            .l_bracket(Box::new(l_bracket))
-            .expression(Box::new(expression))
-            .range_opt(range_opt)
-            .r_bracket(Box::new(r_bracket))
-            .build()
-            .into_diagnostic()?;
+        let range_built = Range {
+            l_bracket: Box::new(l_bracket),
+            expression: Box::new(expression),
+            range_opt,
+            r_bracket: Box::new(r_bracket),
+        };
         // Calling user action here
         self.user_grammar.range(&range_built)?;
         self.push(ASTType::Range(range_built), context);
@@ -17665,11 +17582,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let expression = pop_item!(self, expression, Expression, context);
         let range_operator = pop_item!(self, range_operator, RangeOperator, context);
-        let range_opt_0_built = RangeOptBuilder::default()
-            .range_operator(Box::new(range_operator))
-            .expression(Box::new(expression))
-            .build()
-            .into_diagnostic()?;
+        let range_opt_0_built = RangeOpt {
+            range_operator: Box::new(range_operator),
+            expression: Box::new(expression),
+        };
         self.push(
             ASTType::RangeOpt(Some(Box::new(range_opt_0_built))),
             context,
@@ -17702,10 +17618,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let colon = pop_item!(self, colon, Colon, context);
-        let range_operator_0_built = RangeOperatorColonBuilder::default()
-            .colon(Box::new(colon))
-            .build()
-            .into_diagnostic()?;
+        let range_operator_0_built = RangeOperatorColon {
+            colon: Box::new(colon),
+        };
         let range_operator_0_built = RangeOperator::Colon(range_operator_0_built);
         // Calling user action here
         self.user_grammar.range_operator(&range_operator_0_built)?;
@@ -17726,10 +17641,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let plus_colon = pop_item!(self, plus_colon, PlusColon, context);
-        let range_operator_1_built = RangeOperatorPlusColonBuilder::default()
-            .plus_colon(Box::new(plus_colon))
-            .build()
-            .into_diagnostic()?;
+        let range_operator_1_built = RangeOperatorPlusColon {
+            plus_colon: Box::new(plus_colon),
+        };
         let range_operator_1_built = RangeOperator::PlusColon(range_operator_1_built);
         // Calling user action here
         self.user_grammar.range_operator(&range_operator_1_built)?;
@@ -17750,10 +17664,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let minus_colon = pop_item!(self, minus_colon, MinusColon, context);
-        let range_operator_2_built = RangeOperatorMinusColonBuilder::default()
-            .minus_colon(Box::new(minus_colon))
-            .build()
-            .into_diagnostic()?;
+        let range_operator_2_built = RangeOperatorMinusColon {
+            minus_colon: Box::new(minus_colon),
+        };
         let range_operator_2_built = RangeOperator::MinusColon(range_operator_2_built);
         // Calling user action here
         self.user_grammar.range_operator(&range_operator_2_built)?;
@@ -17774,10 +17687,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let step = pop_item!(self, step, Step, context);
-        let range_operator_3_built = RangeOperatorStepBuilder::default()
-            .step(Box::new(step))
-            .build()
-            .into_diagnostic()?;
+        let range_operator_3_built = RangeOperatorStep {
+            step: Box::new(step),
+        };
         let range_operator_3_built = RangeOperator::Step(range_operator_3_built);
         // Calling user action here
         self.user_grammar.range_operator(&range_operator_3_built)?;
@@ -17802,12 +17714,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let r_bracket = pop_item!(self, r_bracket, RBracket, context);
         let expression = pop_item!(self, expression, Expression, context);
         let l_bracket = pop_item!(self, l_bracket, LBracket, context);
-        let width_built = WidthBuilder::default()
-            .l_bracket(Box::new(l_bracket))
-            .expression(Box::new(expression))
-            .r_bracket(Box::new(r_bracket))
-            .build()
-            .into_diagnostic()?;
+        let width_built = Width {
+            l_bracket: Box::new(l_bracket),
+            expression: Box::new(expression),
+            r_bracket: Box::new(r_bracket),
+        };
         // Calling user action here
         self.user_grammar.width(&width_built)?;
         self.push(ASTType::Width(width_built), context);
@@ -17827,10 +17738,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let logic = pop_item!(self, logic, Logic, context);
-        let builtin_type_0_built = BuiltinTypeLogicBuilder::default()
-            .logic(Box::new(logic))
-            .build()
-            .into_diagnostic()?;
+        let builtin_type_0_built = BuiltinTypeLogic {
+            logic: Box::new(logic),
+        };
         let builtin_type_0_built = BuiltinType::Logic(builtin_type_0_built);
         // Calling user action here
         self.user_grammar.builtin_type(&builtin_type_0_built)?;
@@ -17851,10 +17761,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let bit = pop_item!(self, bit, Bit, context);
-        let builtin_type_1_built = BuiltinTypeBitBuilder::default()
-            .bit(Box::new(bit))
-            .build()
-            .into_diagnostic()?;
+        let builtin_type_1_built = BuiltinTypeBit { bit: Box::new(bit) };
         let builtin_type_1_built = BuiltinType::Bit(builtin_type_1_built);
         // Calling user action here
         self.user_grammar.builtin_type(&builtin_type_1_built)?;
@@ -17875,10 +17782,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let u32 = pop_item!(self, u32, U32, context);
-        let builtin_type_2_built = BuiltinTypeU32Builder::default()
-            .u32(Box::new(u32))
-            .build()
-            .into_diagnostic()?;
+        let builtin_type_2_built = BuiltinTypeU32 { u32: Box::new(u32) };
         let builtin_type_2_built = BuiltinType::U32(builtin_type_2_built);
         // Calling user action here
         self.user_grammar.builtin_type(&builtin_type_2_built)?;
@@ -17899,10 +17803,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let u64 = pop_item!(self, u64, U64, context);
-        let builtin_type_3_built = BuiltinTypeU64Builder::default()
-            .u64(Box::new(u64))
-            .build()
-            .into_diagnostic()?;
+        let builtin_type_3_built = BuiltinTypeU64 { u64: Box::new(u64) };
         let builtin_type_3_built = BuiltinType::U64(builtin_type_3_built);
         // Calling user action here
         self.user_grammar.builtin_type(&builtin_type_3_built)?;
@@ -17923,10 +17824,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let i32 = pop_item!(self, i32, I32, context);
-        let builtin_type_4_built = BuiltinTypeI32Builder::default()
-            .i32(Box::new(i32))
-            .build()
-            .into_diagnostic()?;
+        let builtin_type_4_built = BuiltinTypeI32 { i32: Box::new(i32) };
         let builtin_type_4_built = BuiltinType::I32(builtin_type_4_built);
         // Calling user action here
         self.user_grammar.builtin_type(&builtin_type_4_built)?;
@@ -17947,10 +17845,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let i64 = pop_item!(self, i64, I64, context);
-        let builtin_type_5_built = BuiltinTypeI64Builder::default()
-            .i64(Box::new(i64))
-            .build()
-            .into_diagnostic()?;
+        let builtin_type_5_built = BuiltinTypeI64 { i64: Box::new(i64) };
         let builtin_type_5_built = BuiltinType::I64(builtin_type_5_built);
         // Calling user action here
         self.user_grammar.builtin_type(&builtin_type_5_built)?;
@@ -17971,10 +17866,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let f32 = pop_item!(self, f32, F32, context);
-        let builtin_type_6_built = BuiltinTypeF32Builder::default()
-            .f32(Box::new(f32))
-            .build()
-            .into_diagnostic()?;
+        let builtin_type_6_built = BuiltinTypeF32 { f32: Box::new(f32) };
         let builtin_type_6_built = BuiltinType::F32(builtin_type_6_built);
         // Calling user action here
         self.user_grammar.builtin_type(&builtin_type_6_built)?;
@@ -17995,10 +17887,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let f64 = pop_item!(self, f64, F64, context);
-        let builtin_type_7_built = BuiltinTypeF64Builder::default()
-            .f64(Box::new(f64))
-            .build()
-            .into_diagnostic()?;
+        let builtin_type_7_built = BuiltinTypeF64 { f64: Box::new(f64) };
         let builtin_type_7_built = BuiltinType::F64(builtin_type_7_built);
         // Calling user action here
         self.user_grammar.builtin_type(&builtin_type_7_built)?;
@@ -18019,10 +17908,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let tri = pop_item!(self, tri, Tri, context);
-        let type_modifier_built = TypeModifierBuilder::default()
-            .tri(Box::new(tri))
-            .build()
-            .into_diagnostic()?;
+        let type_modifier_built = TypeModifier { tri: Box::new(tri) };
         // Calling user action here
         self.user_grammar.type_modifier(&type_modifier_built)?;
         self.push(ASTType::TypeModifier(type_modifier_built), context);
@@ -18046,12 +17932,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let type_list = pop_and_reverse_item!(self, type_list, TypeList, context);
         let type_group = pop_item!(self, type_group, TypeGroup, context);
         let type_opt = pop_item!(self, type_opt, TypeOpt, context);
-        let r#type_built = TypeBuilder::default()
-            .type_opt(type_opt)
-            .type_group(Box::new(type_group))
-            .type_list(type_list)
-            .build()
-            .into_diagnostic()?;
+        let r#type_built = Type {
+            type_opt,
+            type_group: Box::new(type_group),
+            type_list,
+        };
         // Calling user action here
         self.user_grammar.r#type(&r#type_built)?;
         self.push(ASTType::Type(r#type_built), context);
@@ -18071,10 +17956,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let builtin_type = pop_item!(self, builtin_type, BuiltinType, context);
-        let type_group_0_built = TypeGroupBuiltinTypeBuilder::default()
-            .builtin_type(Box::new(builtin_type))
-            .build()
-            .into_diagnostic()?;
+        let type_group_0_built = TypeGroupBuiltinType {
+            builtin_type: Box::new(builtin_type),
+        };
         let type_group_0_built = TypeGroup::BuiltinType(type_group_0_built);
         self.push(ASTType::TypeGroup(type_group_0_built), context);
         Ok(())
@@ -18093,10 +17977,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let scoped_identifier = pop_item!(self, scoped_identifier, ScopedIdentifier, context);
-        let type_group_1_built = TypeGroupScopedIdentifierBuilder::default()
-            .scoped_identifier(Box::new(scoped_identifier))
-            .build()
-            .into_diagnostic()?;
+        let type_group_1_built = TypeGroupScopedIdentifier {
+            scoped_identifier: Box::new(scoped_identifier),
+        };
         let type_group_1_built = TypeGroup::ScopedIdentifier(type_group_1_built);
         self.push(ASTType::TypeGroup(type_group_1_built), context);
         Ok(())
@@ -18115,10 +17998,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let modport_identifier = pop_item!(self, modport_identifier, ModportIdentifier, context);
-        let type_group_2_built = TypeGroupModportIdentifierBuilder::default()
-            .modport_identifier(Box::new(modport_identifier))
-            .build()
-            .into_diagnostic()?;
+        let type_group_2_built = TypeGroupModportIdentifier {
+            modport_identifier: Box::new(modport_identifier),
+        };
         let type_group_2_built = TypeGroup::ModportIdentifier(type_group_2_built);
         self.push(ASTType::TypeGroup(type_group_2_built), context);
         Ok(())
@@ -18139,10 +18021,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let mut type_list = pop_item!(self, type_list, TypeList, context);
         let width = pop_item!(self, width, Width, context);
-        let type_list_0_built = TypeListBuilder::default()
-            .width(Box::new(width))
-            .build()
-            .into_diagnostic()?;
+        let type_list_0_built = TypeList {
+            width: Box::new(width),
+        };
         // Add an element to the vector
         type_list.push(type_list_0_built);
         self.push(ASTType::TypeList(type_list), context);
@@ -18175,10 +18056,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let type_modifier = pop_item!(self, type_modifier, TypeModifier, context);
-        let type_opt_0_built = TypeOptBuilder::default()
-            .type_modifier(Box::new(type_modifier))
-            .build()
-            .into_diagnostic()?;
+        let type_opt_0_built = TypeOpt {
+            type_modifier: Box::new(type_modifier),
+        };
         self.push(ASTType::TypeOpt(Some(Box::new(type_opt_0_built))), context);
         Ok(())
     }
@@ -18209,10 +18089,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let assignment_statement =
             pop_item!(self, assignment_statement, AssignmentStatement, context);
-        let statement_0_built = StatementAssignmentStatementBuilder::default()
-            .assignment_statement(Box::new(assignment_statement))
-            .build()
-            .into_diagnostic()?;
+        let statement_0_built = StatementAssignmentStatement {
+            assignment_statement: Box::new(assignment_statement),
+        };
         let statement_0_built = Statement::AssignmentStatement(statement_0_built);
         // Calling user action here
         self.user_grammar.statement(&statement_0_built)?;
@@ -18233,10 +18112,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let if_statement = pop_item!(self, if_statement, IfStatement, context);
-        let statement_1_built = StatementIfStatementBuilder::default()
-            .if_statement(Box::new(if_statement))
-            .build()
-            .into_diagnostic()?;
+        let statement_1_built = StatementIfStatement {
+            if_statement: Box::new(if_statement),
+        };
         let statement_1_built = Statement::IfStatement(statement_1_built);
         // Calling user action here
         self.user_grammar.statement(&statement_1_built)?;
@@ -18257,10 +18135,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let if_reset_statement = pop_item!(self, if_reset_statement, IfResetStatement, context);
-        let statement_2_built = StatementIfResetStatementBuilder::default()
-            .if_reset_statement(Box::new(if_reset_statement))
-            .build()
-            .into_diagnostic()?;
+        let statement_2_built = StatementIfResetStatement {
+            if_reset_statement: Box::new(if_reset_statement),
+        };
         let statement_2_built = Statement::IfResetStatement(statement_2_built);
         // Calling user action here
         self.user_grammar.statement(&statement_2_built)?;
@@ -18281,10 +18158,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let return_statement = pop_item!(self, return_statement, ReturnStatement, context);
-        let statement_3_built = StatementReturnStatementBuilder::default()
-            .return_statement(Box::new(return_statement))
-            .build()
-            .into_diagnostic()?;
+        let statement_3_built = StatementReturnStatement {
+            return_statement: Box::new(return_statement),
+        };
         let statement_3_built = Statement::ReturnStatement(statement_3_built);
         // Calling user action here
         self.user_grammar.statement(&statement_3_built)?;
@@ -18305,10 +18181,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let for_statement = pop_item!(self, for_statement, ForStatement, context);
-        let statement_4_built = StatementForStatementBuilder::default()
-            .for_statement(Box::new(for_statement))
-            .build()
-            .into_diagnostic()?;
+        let statement_4_built = StatementForStatement {
+            for_statement: Box::new(for_statement),
+        };
         let statement_4_built = Statement::ForStatement(statement_4_built);
         // Calling user action here
         self.user_grammar.statement(&statement_4_built)?;
@@ -18329,10 +18204,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let case_statement = pop_item!(self, case_statement, CaseStatement, context);
-        let statement_5_built = StatementCaseStatementBuilder::default()
-            .case_statement(Box::new(case_statement))
-            .build()
-            .into_diagnostic()?;
+        let statement_5_built = StatementCaseStatement {
+            case_statement: Box::new(case_statement),
+        };
         let statement_5_built = Statement::CaseStatement(statement_5_built);
         // Calling user action here
         self.user_grammar.statement(&statement_5_built)?;
@@ -18369,13 +18243,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             HierarchicalIdentifier,
             context
         );
-        let assignment_statement_built = AssignmentStatementBuilder::default()
-            .hierarchical_identifier(Box::new(hierarchical_identifier))
-            .assignment_statement_group(Box::new(assignment_statement_group))
-            .expression(Box::new(expression))
-            .semicolon(Box::new(semicolon))
-            .build()
-            .into_diagnostic()?;
+        let assignment_statement_built = AssignmentStatement {
+            hierarchical_identifier: Box::new(hierarchical_identifier),
+            assignment_statement_group: Box::new(assignment_statement_group),
+            expression: Box::new(expression),
+            semicolon: Box::new(semicolon),
+        };
         // Calling user action here
         self.user_grammar
             .assignment_statement(&assignment_statement_built)?;
@@ -18399,10 +18272,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let equ = pop_item!(self, equ, Equ, context);
-        let assignment_statement_group_0_built = AssignmentStatementGroupEquBuilder::default()
-            .equ(Box::new(equ))
-            .build()
-            .into_diagnostic()?;
+        let assignment_statement_group_0_built = AssignmentStatementGroupEqu { equ: Box::new(equ) };
         let assignment_statement_group_0_built =
             AssignmentStatementGroup::Equ(assignment_statement_group_0_built);
         self.push(
@@ -18425,11 +18295,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let assignment_operator = pop_item!(self, assignment_operator, AssignmentOperator, context);
-        let assignment_statement_group_1_built =
-            AssignmentStatementGroupAssignmentOperatorBuilder::default()
-                .assignment_operator(Box::new(assignment_operator))
-                .build()
-                .into_diagnostic()?;
+        let assignment_statement_group_1_built = AssignmentStatementGroupAssignmentOperator {
+            assignment_operator: Box::new(assignment_operator),
+        };
         let assignment_statement_group_1_built =
             AssignmentStatementGroup::AssignmentOperator(assignment_statement_group_1_built);
         self.push(
@@ -18466,16 +18334,15 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let l_brace = pop_item!(self, l_brace, LBrace, context);
         let expression = pop_item!(self, expression, Expression, context);
         let r#if = pop_item!(self, r#if, If, context);
-        let if_statement_built = IfStatementBuilder::default()
-            .r#if(Box::new(r#if))
-            .expression(Box::new(expression))
-            .l_brace(Box::new(l_brace))
-            .if_statement_list(if_statement_list)
-            .r_brace(Box::new(r_brace))
-            .if_statement_list0(if_statement_list0)
-            .if_statement_opt(if_statement_opt)
-            .build()
-            .into_diagnostic()?;
+        let if_statement_built = IfStatement {
+            r#if: Box::new(r#if),
+            expression: Box::new(expression),
+            l_brace: Box::new(l_brace),
+            if_statement_list,
+            r_brace: Box::new(r_brace),
+            if_statement_list0,
+            if_statement_opt,
+        };
         // Calling user action here
         self.user_grammar.if_statement(&if_statement_built)?;
         self.push(ASTType::IfStatement(if_statement_built), context);
@@ -18508,15 +18375,14 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let expression = pop_item!(self, expression, Expression, context);
         let r#if = pop_item!(self, r#if, If, context);
         let r#else = pop_item!(self, r#else, Else, context);
-        let if_statement_list0_0_built = IfStatementList0Builder::default()
-            .r_brace(Box::new(r_brace))
-            .if_statement_list0_list(if_statement_list0_list)
-            .l_brace(Box::new(l_brace))
-            .expression(Box::new(expression))
-            .r#if(Box::new(r#if))
-            .r#else(Box::new(r#else))
-            .build()
-            .into_diagnostic()?;
+        let if_statement_list0_0_built = IfStatementList0 {
+            r_brace: Box::new(r_brace),
+            if_statement_list0_list,
+            l_brace: Box::new(l_brace),
+            expression: Box::new(expression),
+            r#if: Box::new(r#if),
+            r#else: Box::new(r#else),
+        };
         // Add an element to the vector
         if_statement_list0.push(if_statement_list0_0_built);
         self.push(ASTType::IfStatementList0(if_statement_list0), context);
@@ -18539,10 +18405,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let mut if_statement_list0_list =
             pop_item!(self, if_statement_list0_list, IfStatementList0List, context);
         let statement = pop_item!(self, statement, Statement, context);
-        let if_statement_list0_list_0_built = IfStatementList0ListBuilder::default()
-            .statement(Box::new(statement))
-            .build()
-            .into_diagnostic()?;
+        let if_statement_list0_list_0_built = IfStatementList0List {
+            statement: Box::new(statement),
+        };
         // Add an element to the vector
         if_statement_list0_list.push(if_statement_list0_list_0_built);
         self.push(
@@ -18599,10 +18464,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let mut if_statement_list = pop_item!(self, if_statement_list, IfStatementList, context);
         let statement = pop_item!(self, statement, Statement, context);
-        let if_statement_list_0_built = IfStatementListBuilder::default()
-            .statement(Box::new(statement))
-            .build()
-            .into_diagnostic()?;
+        let if_statement_list_0_built = IfStatementList {
+            statement: Box::new(statement),
+        };
         // Add an element to the vector
         if_statement_list.push(if_statement_list_0_built);
         self.push(ASTType::IfStatementList(if_statement_list), context);
@@ -18642,13 +18506,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             pop_and_reverse_item!(self, if_statement_opt_list, IfStatementOptList, context);
         let l_brace = pop_item!(self, l_brace, LBrace, context);
         let r#else = pop_item!(self, r#else, Else, context);
-        let if_statement_opt_0_built = IfStatementOptBuilder::default()
-            .r#else(Box::new(r#else))
-            .l_brace(Box::new(l_brace))
-            .if_statement_opt_list(if_statement_opt_list)
-            .r_brace(Box::new(r_brace))
-            .build()
-            .into_diagnostic()?;
+        let if_statement_opt_0_built = IfStatementOpt {
+            r#else: Box::new(r#else),
+            l_brace: Box::new(l_brace),
+            if_statement_opt_list,
+            r_brace: Box::new(r_brace),
+        };
         self.push(
             ASTType::IfStatementOpt(Some(Box::new(if_statement_opt_0_built))),
             context,
@@ -18672,10 +18535,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let mut if_statement_opt_list =
             pop_item!(self, if_statement_opt_list, IfStatementOptList, context);
         let statement = pop_item!(self, statement, Statement, context);
-        let if_statement_opt_list_0_built = IfStatementOptListBuilder::default()
-            .statement(Box::new(statement))
-            .build()
-            .into_diagnostic()?;
+        let if_statement_opt_list_0_built = IfStatementOptList {
+            statement: Box::new(statement),
+        };
         // Add an element to the vector
         if_statement_opt_list.push(if_statement_opt_list_0_built);
         self.push(ASTType::IfStatementOptList(if_statement_opt_list), context);
@@ -18740,15 +18602,14 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             pop_and_reverse_item!(self, if_reset_statement_list, IfResetStatementList, context);
         let l_brace = pop_item!(self, l_brace, LBrace, context);
         let if_reset = pop_item!(self, if_reset, IfReset, context);
-        let if_reset_statement_built = IfResetStatementBuilder::default()
-            .if_reset(Box::new(if_reset))
-            .l_brace(Box::new(l_brace))
-            .if_reset_statement_list(if_reset_statement_list)
-            .r_brace(Box::new(r_brace))
-            .if_reset_statement_list0(if_reset_statement_list0)
-            .if_reset_statement_opt(if_reset_statement_opt)
-            .build()
-            .into_diagnostic()?;
+        let if_reset_statement_built = IfResetStatement {
+            if_reset: Box::new(if_reset),
+            l_brace: Box::new(l_brace),
+            if_reset_statement_list,
+            r_brace: Box::new(r_brace),
+            if_reset_statement_list0,
+            if_reset_statement_opt,
+        };
         // Calling user action here
         self.user_grammar
             .if_reset_statement(&if_reset_statement_built)?;
@@ -18791,15 +18652,14 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let expression = pop_item!(self, expression, Expression, context);
         let r#if = pop_item!(self, r#if, If, context);
         let r#else = pop_item!(self, r#else, Else, context);
-        let if_reset_statement_list0_0_built = IfResetStatementList0Builder::default()
-            .r_brace(Box::new(r_brace))
-            .if_reset_statement_list0_list(if_reset_statement_list0_list)
-            .l_brace(Box::new(l_brace))
-            .expression(Box::new(expression))
-            .r#if(Box::new(r#if))
-            .r#else(Box::new(r#else))
-            .build()
-            .into_diagnostic()?;
+        let if_reset_statement_list0_0_built = IfResetStatementList0 {
+            r_brace: Box::new(r_brace),
+            if_reset_statement_list0_list,
+            l_brace: Box::new(l_brace),
+            expression: Box::new(expression),
+            r#if: Box::new(r#if),
+            r#else: Box::new(r#else),
+        };
         // Add an element to the vector
         if_reset_statement_list0.push(if_reset_statement_list0_0_built);
         self.push(
@@ -18829,10 +18689,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let statement = pop_item!(self, statement, Statement, context);
-        let if_reset_statement_list0_list_0_built = IfResetStatementList0ListBuilder::default()
-            .statement(Box::new(statement))
-            .build()
-            .into_diagnostic()?;
+        let if_reset_statement_list0_list_0_built = IfResetStatementList0List {
+            statement: Box::new(statement),
+        };
         // Add an element to the vector
         if_reset_statement_list0_list.push(if_reset_statement_list0_list_0_built);
         self.push(
@@ -18893,10 +18752,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let mut if_reset_statement_list =
             pop_item!(self, if_reset_statement_list, IfResetStatementList, context);
         let statement = pop_item!(self, statement, Statement, context);
-        let if_reset_statement_list_0_built = IfResetStatementListBuilder::default()
-            .statement(Box::new(statement))
-            .build()
-            .into_diagnostic()?;
+        let if_reset_statement_list_0_built = IfResetStatementList {
+            statement: Box::new(statement),
+        };
         // Add an element to the vector
         if_reset_statement_list.push(if_reset_statement_list_0_built);
         self.push(
@@ -18946,13 +18804,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         );
         let l_brace = pop_item!(self, l_brace, LBrace, context);
         let r#else = pop_item!(self, r#else, Else, context);
-        let if_reset_statement_opt_0_built = IfResetStatementOptBuilder::default()
-            .r#else(Box::new(r#else))
-            .l_brace(Box::new(l_brace))
-            .if_reset_statement_opt_list(if_reset_statement_opt_list)
-            .r_brace(Box::new(r_brace))
-            .build()
-            .into_diagnostic()?;
+        let if_reset_statement_opt_0_built = IfResetStatementOpt {
+            r#else: Box::new(r#else),
+            l_brace: Box::new(l_brace),
+            if_reset_statement_opt_list,
+            r_brace: Box::new(r_brace),
+        };
         self.push(
             ASTType::IfResetStatementOpt(Some(Box::new(if_reset_statement_opt_0_built))),
             context,
@@ -18980,10 +18837,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let statement = pop_item!(self, statement, Statement, context);
-        let if_reset_statement_opt_list_0_built = IfResetStatementOptListBuilder::default()
-            .statement(Box::new(statement))
-            .build()
-            .into_diagnostic()?;
+        let if_reset_statement_opt_list_0_built = IfResetStatementOptList {
+            statement: Box::new(statement),
+        };
         // Add an element to the vector
         if_reset_statement_opt_list.push(if_reset_statement_opt_list_0_built);
         self.push(
@@ -19041,12 +18897,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let semicolon = pop_item!(self, semicolon, Semicolon, context);
         let expression = pop_item!(self, expression, Expression, context);
         let r#return = pop_item!(self, r#return, Return, context);
-        let return_statement_built = ReturnStatementBuilder::default()
-            .r#return(Box::new(r#return))
-            .expression(Box::new(expression))
-            .semicolon(Box::new(semicolon))
-            .build()
-            .into_diagnostic()?;
+        let return_statement_built = ReturnStatement {
+            r#return: Box::new(r#return),
+            expression: Box::new(expression),
+            semicolon: Box::new(semicolon),
+        };
         // Calling user action here
         self.user_grammar
             .return_statement(&return_statement_built)?;
@@ -19090,21 +18945,20 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let colon = pop_item!(self, colon, Colon, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
         let r#for = pop_item!(self, r#for, For, context);
-        let for_statement_built = ForStatementBuilder::default()
-            .r#for(Box::new(r#for))
-            .identifier(Box::new(identifier))
-            .colon(Box::new(colon))
-            .r#type(Box::new(r#type))
-            .r#in(Box::new(r#in))
-            .expression(Box::new(expression))
-            .dot_dot(Box::new(dot_dot))
-            .expression0(Box::new(expression0))
-            .for_statement_opt(for_statement_opt)
-            .l_brace(Box::new(l_brace))
-            .for_statement_list(for_statement_list)
-            .r_brace(Box::new(r_brace))
-            .build()
-            .into_diagnostic()?;
+        let for_statement_built = ForStatement {
+            r#for: Box::new(r#for),
+            identifier: Box::new(identifier),
+            colon: Box::new(colon),
+            r#type: Box::new(r#type),
+            r#in: Box::new(r#in),
+            expression: Box::new(expression),
+            dot_dot: Box::new(dot_dot),
+            expression0: Box::new(expression0),
+            for_statement_opt,
+            l_brace: Box::new(l_brace),
+            for_statement_list,
+            r_brace: Box::new(r_brace),
+        };
         // Calling user action here
         self.user_grammar.for_statement(&for_statement_built)?;
         self.push(ASTType::ForStatement(for_statement_built), context);
@@ -19126,10 +18980,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let mut for_statement_list = pop_item!(self, for_statement_list, ForStatementList, context);
         let statement = pop_item!(self, statement, Statement, context);
-        let for_statement_list_0_built = ForStatementListBuilder::default()
-            .statement(Box::new(statement))
-            .build()
-            .into_diagnostic()?;
+        let for_statement_list_0_built = ForStatementList {
+            statement: Box::new(statement),
+        };
         // Add an element to the vector
         for_statement_list.push(for_statement_list_0_built);
         self.push(ASTType::ForStatementList(for_statement_list), context);
@@ -19169,12 +19022,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let expression = pop_item!(self, expression, Expression, context);
         let assignment_operator = pop_item!(self, assignment_operator, AssignmentOperator, context);
         let step = pop_item!(self, step, Step, context);
-        let for_statement_opt_0_built = ForStatementOptBuilder::default()
-            .step(Box::new(step))
-            .assignment_operator(Box::new(assignment_operator))
-            .expression(Box::new(expression))
-            .build()
-            .into_diagnostic()?;
+        let for_statement_opt_0_built = ForStatementOpt {
+            step: Box::new(step),
+            assignment_operator: Box::new(assignment_operator),
+            expression: Box::new(expression),
+        };
         self.push(
             ASTType::ForStatementOpt(Some(Box::new(for_statement_opt_0_built))),
             context,
@@ -19216,14 +19068,13 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let l_brace = pop_item!(self, l_brace, LBrace, context);
         let expression = pop_item!(self, expression, Expression, context);
         let case = pop_item!(self, case, Case, context);
-        let case_statement_built = CaseStatementBuilder::default()
-            .case(Box::new(case))
-            .expression(Box::new(expression))
-            .l_brace(Box::new(l_brace))
-            .case_statement_list(case_statement_list)
-            .r_brace(Box::new(r_brace))
-            .build()
-            .into_diagnostic()?;
+        let case_statement_built = CaseStatement {
+            case: Box::new(case),
+            expression: Box::new(expression),
+            l_brace: Box::new(l_brace),
+            case_statement_list,
+            r_brace: Box::new(r_brace),
+        };
         // Calling user action here
         self.user_grammar.case_statement(&case_statement_built)?;
         self.push(ASTType::CaseStatement(case_statement_built), context);
@@ -19246,10 +19097,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let mut case_statement_list =
             pop_item!(self, case_statement_list, CaseStatementList, context);
         let case_item = pop_item!(self, case_item, CaseItem, context);
-        let case_statement_list_0_built = CaseStatementListBuilder::default()
-            .case_item(Box::new(case_item))
-            .build()
-            .into_diagnostic()?;
+        let case_statement_list_0_built = CaseStatementList {
+            case_item: Box::new(case_item),
+        };
         // Add an element to the vector
         case_statement_list.push(case_statement_list_0_built);
         self.push(ASTType::CaseStatementList(case_statement_list), context);
@@ -19289,12 +19139,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let case_item_group0 = pop_item!(self, case_item_group0, CaseItemGroup0, context);
         let colon = pop_item!(self, colon, Colon, context);
         let case_item_group = pop_item!(self, case_item_group, CaseItemGroup, context);
-        let case_item_built = CaseItemBuilder::default()
-            .case_item_group(Box::new(case_item_group))
-            .colon(Box::new(colon))
-            .case_item_group0(Box::new(case_item_group0))
-            .build()
-            .into_diagnostic()?;
+        let case_item_built = CaseItem {
+            case_item_group: Box::new(case_item_group),
+            colon: Box::new(colon),
+            case_item_group0: Box::new(case_item_group0),
+        };
         // Calling user action here
         self.user_grammar.case_item(&case_item_built)?;
         self.push(ASTType::CaseItem(case_item_built), context);
@@ -19314,10 +19163,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let statement = pop_item!(self, statement, Statement, context);
-        let case_item_group0_0_built = CaseItemGroup0StatementBuilder::default()
-            .statement(Box::new(statement))
-            .build()
-            .into_diagnostic()?;
+        let case_item_group0_0_built = CaseItemGroup0Statement {
+            statement: Box::new(statement),
+        };
         let case_item_group0_0_built = CaseItemGroup0::Statement(case_item_group0_0_built);
         self.push(ASTType::CaseItemGroup0(case_item_group0_0_built), context);
         Ok(())
@@ -19341,13 +19189,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let case_item_group0_list =
             pop_and_reverse_item!(self, case_item_group0_list, CaseItemGroup0List, context);
         let l_brace = pop_item!(self, l_brace, LBrace, context);
-        let case_item_group0_1_built =
-            CaseItemGroup0LBraceCaseItemGroup0ListRBraceBuilder::default()
-                .l_brace(Box::new(l_brace))
-                .case_item_group0_list(case_item_group0_list)
-                .r_brace(Box::new(r_brace))
-                .build()
-                .into_diagnostic()?;
+        let case_item_group0_1_built = CaseItemGroup0LBraceCaseItemGroup0ListRBrace {
+            l_brace: Box::new(l_brace),
+            case_item_group0_list,
+            r_brace: Box::new(r_brace),
+        };
         let case_item_group0_1_built =
             CaseItemGroup0::LBraceCaseItemGroup0ListRBrace(case_item_group0_1_built);
         self.push(ASTType::CaseItemGroup0(case_item_group0_1_built), context);
@@ -19370,10 +19216,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let mut case_item_group0_list =
             pop_item!(self, case_item_group0_list, CaseItemGroup0List, context);
         let statement = pop_item!(self, statement, Statement, context);
-        let case_item_group0_list_0_built = CaseItemGroup0ListBuilder::default()
-            .statement(Box::new(statement))
-            .build()
-            .into_diagnostic()?;
+        let case_item_group0_list_0_built = CaseItemGroup0List {
+            statement: Box::new(statement),
+        };
         // Add an element to the vector
         case_item_group0_list.push(case_item_group0_list_0_built);
         self.push(ASTType::CaseItemGroup0List(case_item_group0_list), context);
@@ -19409,10 +19254,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let expression = pop_item!(self, expression, Expression, context);
-        let case_item_group_0_built = CaseItemGroupExpressionBuilder::default()
-            .expression(Box::new(expression))
-            .build()
-            .into_diagnostic()?;
+        let case_item_group_0_built = CaseItemGroupExpression {
+            expression: Box::new(expression),
+        };
         let case_item_group_0_built = CaseItemGroup::Expression(case_item_group_0_built);
         self.push(ASTType::CaseItemGroup(case_item_group_0_built), context);
         Ok(())
@@ -19431,10 +19275,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let defaul = pop_item!(self, defaul, Defaul, context);
-        let case_item_group_1_built = CaseItemGroupDefaulBuilder::default()
-            .defaul(Box::new(defaul))
-            .build()
-            .into_diagnostic()?;
+        let case_item_group_1_built = CaseItemGroupDefaul {
+            defaul: Box::new(defaul),
+        };
         let case_item_group_1_built = CaseItemGroup::Defaul(case_item_group_1_built);
         self.push(ASTType::CaseItemGroup(case_item_group_1_built), context);
         Ok(())
@@ -19463,15 +19306,14 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let colon = pop_item!(self, colon, Colon, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
         let var = pop_item!(self, var, Var, context);
-        let var_declaration_built = VarDeclarationBuilder::default()
-            .var(Box::new(var))
-            .identifier(Box::new(identifier))
-            .colon(Box::new(colon))
-            .r#type(Box::new(r#type))
-            .var_declaration_opt(var_declaration_opt)
-            .semicolon(Box::new(semicolon))
-            .build()
-            .into_diagnostic()?;
+        let var_declaration_built = VarDeclaration {
+            var: Box::new(var),
+            identifier: Box::new(identifier),
+            colon: Box::new(colon),
+            r#type: Box::new(r#type),
+            var_declaration_opt,
+            semicolon: Box::new(semicolon),
+        };
         // Calling user action here
         self.user_grammar.var_declaration(&var_declaration_built)?;
         self.push(ASTType::VarDeclaration(var_declaration_built), context);
@@ -19493,11 +19335,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let expression = pop_item!(self, expression, Expression, context);
         let equ = pop_item!(self, equ, Equ, context);
-        let var_declaration_opt_0_built = VarDeclarationOptBuilder::default()
-            .equ(Box::new(equ))
-            .expression(Box::new(expression))
-            .build()
-            .into_diagnostic()?;
+        let var_declaration_opt_0_built = VarDeclarationOpt {
+            equ: Box::new(equ),
+            expression: Box::new(expression),
+        };
         self.push(
             ASTType::VarDeclarationOpt(Some(Box::new(var_declaration_opt_0_built))),
             context,
@@ -19542,16 +19383,15 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let colon = pop_item!(self, colon, Colon, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
         let localparam = pop_item!(self, localparam, Localparam, context);
-        let localparam_declaration_built = LocalparamDeclarationBuilder::default()
-            .localparam(Box::new(localparam))
-            .identifier(Box::new(identifier))
-            .colon(Box::new(colon))
-            .r#type(Box::new(r#type))
-            .equ(Box::new(equ))
-            .expression(Box::new(expression))
-            .semicolon(Box::new(semicolon))
-            .build()
-            .into_diagnostic()?;
+        let localparam_declaration_built = LocalparamDeclaration {
+            localparam: Box::new(localparam),
+            identifier: Box::new(identifier),
+            colon: Box::new(colon),
+            r#type: Box::new(r#type),
+            equ: Box::new(equ),
+            expression: Box::new(expression),
+            semicolon: Box::new(semicolon),
+        };
         // Calling user action here
         self.user_grammar
             .localparam_declaration(&localparam_declaration_built)?;
@@ -19599,17 +19439,16 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let always_ff_clock = pop_item!(self, always_ff_clock, AlwaysFfClock, context);
         let l_paren = pop_item!(self, l_paren, LParen, context);
         let always_ff = pop_item!(self, always_ff, AlwaysFf, context);
-        let always_ff_declaration_built = AlwaysFfDeclarationBuilder::default()
-            .always_ff(Box::new(always_ff))
-            .l_paren(Box::new(l_paren))
-            .always_ff_clock(Box::new(always_ff_clock))
-            .always_ff_declaration_opt(always_ff_declaration_opt)
-            .r_paren(Box::new(r_paren))
-            .l_brace(Box::new(l_brace))
-            .always_ff_declaration_list(always_ff_declaration_list)
-            .r_brace(Box::new(r_brace))
-            .build()
-            .into_diagnostic()?;
+        let always_ff_declaration_built = AlwaysFfDeclaration {
+            always_ff: Box::new(always_ff),
+            l_paren: Box::new(l_paren),
+            always_ff_clock: Box::new(always_ff_clock),
+            always_ff_declaration_opt,
+            r_paren: Box::new(r_paren),
+            l_brace: Box::new(l_brace),
+            always_ff_declaration_list,
+            r_brace: Box::new(r_brace),
+        };
         // Calling user action here
         self.user_grammar
             .always_ff_declaration(&always_ff_declaration_built)?;
@@ -19640,10 +19479,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let statement = pop_item!(self, statement, Statement, context);
-        let always_ff_declaration_list_0_built = AlwaysFfDeclarationListBuilder::default()
-            .statement(Box::new(statement))
-            .build()
-            .into_diagnostic()?;
+        let always_ff_declaration_list_0_built = AlwaysFfDeclarationList {
+            statement: Box::new(statement),
+        };
         // Add an element to the vector
         always_ff_declaration_list.push(always_ff_declaration_list_0_built);
         self.push(
@@ -19687,11 +19525,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let always_ff_reset = pop_item!(self, always_ff_reset, AlwaysFfReset, context);
         let comma = pop_item!(self, comma, Comma, context);
-        let always_ff_declaration_opt_0_built = AlwaysFfDeclarationOptBuilder::default()
-            .comma(Box::new(comma))
-            .always_ff_reset(Box::new(always_ff_reset))
-            .build()
-            .into_diagnostic()?;
+        let always_ff_declaration_opt_0_built = AlwaysFfDeclarationOpt {
+            comma: Box::new(comma),
+            always_ff_reset: Box::new(always_ff_reset),
+        };
         self.push(
             ASTType::AlwaysFfDeclarationOpt(Some(Box::new(always_ff_declaration_opt_0_built))),
             context,
@@ -19731,11 +19568,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let always_ff_clock_opt = pop_item!(self, always_ff_clock_opt, AlwaysFfClockOpt, context);
-        let always_ff_clock_built = AlwaysFfClockBuilder::default()
-            .always_ff_clock_opt(always_ff_clock_opt)
-            .hierarchical_identifier(Box::new(hierarchical_identifier))
-            .build()
-            .into_diagnostic()?;
+        let always_ff_clock_built = AlwaysFfClock {
+            always_ff_clock_opt,
+            hierarchical_identifier: Box::new(hierarchical_identifier),
+        };
         // Calling user action here
         self.user_grammar.always_ff_clock(&always_ff_clock_built)?;
         self.push(ASTType::AlwaysFfClock(always_ff_clock_built), context);
@@ -19760,10 +19596,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             AlwaysFfClockOptGroup,
             context
         );
-        let always_ff_clock_opt_0_built = AlwaysFfClockOptBuilder::default()
-            .always_ff_clock_opt_group(Box::new(always_ff_clock_opt_group))
-            .build()
-            .into_diagnostic()?;
+        let always_ff_clock_opt_0_built = AlwaysFfClockOpt {
+            always_ff_clock_opt_group: Box::new(always_ff_clock_opt_group),
+        };
         self.push(
             ASTType::AlwaysFfClockOpt(Some(Box::new(always_ff_clock_opt_0_built))),
             context,
@@ -19784,10 +19619,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let posedge = pop_item!(self, posedge, Posedge, context);
-        let always_ff_clock_opt_group_0_built = AlwaysFfClockOptGroupPosedgeBuilder::default()
-            .posedge(Box::new(posedge))
-            .build()
-            .into_diagnostic()?;
+        let always_ff_clock_opt_group_0_built = AlwaysFfClockOptGroupPosedge {
+            posedge: Box::new(posedge),
+        };
         let always_ff_clock_opt_group_0_built =
             AlwaysFfClockOptGroup::Posedge(always_ff_clock_opt_group_0_built);
         self.push(
@@ -19810,10 +19644,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let negedge = pop_item!(self, negedge, Negedge, context);
-        let always_ff_clock_opt_group_1_built = AlwaysFfClockOptGroupNegedgeBuilder::default()
-            .negedge(Box::new(negedge))
-            .build()
-            .into_diagnostic()?;
+        let always_ff_clock_opt_group_1_built = AlwaysFfClockOptGroupNegedge {
+            negedge: Box::new(negedge),
+        };
         let always_ff_clock_opt_group_1_built =
             AlwaysFfClockOptGroup::Negedge(always_ff_clock_opt_group_1_built);
         self.push(
@@ -19855,11 +19688,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let always_ff_reset_opt = pop_item!(self, always_ff_reset_opt, AlwaysFfResetOpt, context);
-        let always_ff_reset_built = AlwaysFfResetBuilder::default()
-            .always_ff_reset_opt(always_ff_reset_opt)
-            .hierarchical_identifier(Box::new(hierarchical_identifier))
-            .build()
-            .into_diagnostic()?;
+        let always_ff_reset_built = AlwaysFfReset {
+            always_ff_reset_opt,
+            hierarchical_identifier: Box::new(hierarchical_identifier),
+        };
         // Calling user action here
         self.user_grammar.always_ff_reset(&always_ff_reset_built)?;
         self.push(ASTType::AlwaysFfReset(always_ff_reset_built), context);
@@ -19884,10 +19716,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             AlwaysFfResetOptGroup,
             context
         );
-        let always_ff_reset_opt_0_built = AlwaysFfResetOptBuilder::default()
-            .always_ff_reset_opt_group(Box::new(always_ff_reset_opt_group))
-            .build()
-            .into_diagnostic()?;
+        let always_ff_reset_opt_0_built = AlwaysFfResetOpt {
+            always_ff_reset_opt_group: Box::new(always_ff_reset_opt_group),
+        };
         self.push(
             ASTType::AlwaysFfResetOpt(Some(Box::new(always_ff_reset_opt_0_built))),
             context,
@@ -19908,10 +19739,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let async_low = pop_item!(self, async_low, AsyncLow, context);
-        let always_ff_reset_opt_group_0_built = AlwaysFfResetOptGroupAsyncLowBuilder::default()
-            .async_low(Box::new(async_low))
-            .build()
-            .into_diagnostic()?;
+        let always_ff_reset_opt_group_0_built = AlwaysFfResetOptGroupAsyncLow {
+            async_low: Box::new(async_low),
+        };
         let always_ff_reset_opt_group_0_built =
             AlwaysFfResetOptGroup::AsyncLow(always_ff_reset_opt_group_0_built);
         self.push(
@@ -19934,10 +19764,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let async_high = pop_item!(self, async_high, AsyncHigh, context);
-        let always_ff_reset_opt_group_1_built = AlwaysFfResetOptGroupAsyncHighBuilder::default()
-            .async_high(Box::new(async_high))
-            .build()
-            .into_diagnostic()?;
+        let always_ff_reset_opt_group_1_built = AlwaysFfResetOptGroupAsyncHigh {
+            async_high: Box::new(async_high),
+        };
         let always_ff_reset_opt_group_1_built =
             AlwaysFfResetOptGroup::AsyncHigh(always_ff_reset_opt_group_1_built);
         self.push(
@@ -19960,10 +19789,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let sync_low = pop_item!(self, sync_low, SyncLow, context);
-        let always_ff_reset_opt_group_2_built = AlwaysFfResetOptGroupSyncLowBuilder::default()
-            .sync_low(Box::new(sync_low))
-            .build()
-            .into_diagnostic()?;
+        let always_ff_reset_opt_group_2_built = AlwaysFfResetOptGroupSyncLow {
+            sync_low: Box::new(sync_low),
+        };
         let always_ff_reset_opt_group_2_built =
             AlwaysFfResetOptGroup::SyncLow(always_ff_reset_opt_group_2_built);
         self.push(
@@ -19986,10 +19814,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let sync_high = pop_item!(self, sync_high, SyncHigh, context);
-        let always_ff_reset_opt_group_3_built = AlwaysFfResetOptGroupSyncHighBuilder::default()
-            .sync_high(Box::new(sync_high))
-            .build()
-            .into_diagnostic()?;
+        let always_ff_reset_opt_group_3_built = AlwaysFfResetOptGroupSyncHigh {
+            sync_high: Box::new(sync_high),
+        };
         let always_ff_reset_opt_group_3_built =
             AlwaysFfResetOptGroup::SyncHigh(always_ff_reset_opt_group_3_built);
         self.push(
@@ -20035,13 +19862,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         );
         let l_brace = pop_item!(self, l_brace, LBrace, context);
         let always_comb = pop_item!(self, always_comb, AlwaysComb, context);
-        let always_comb_declaration_built = AlwaysCombDeclarationBuilder::default()
-            .always_comb(Box::new(always_comb))
-            .l_brace(Box::new(l_brace))
-            .always_comb_declaration_list(always_comb_declaration_list)
-            .r_brace(Box::new(r_brace))
-            .build()
-            .into_diagnostic()?;
+        let always_comb_declaration_built = AlwaysCombDeclaration {
+            always_comb: Box::new(always_comb),
+            l_brace: Box::new(l_brace),
+            always_comb_declaration_list,
+            r_brace: Box::new(r_brace),
+        };
         // Calling user action here
         self.user_grammar
             .always_comb_declaration(&always_comb_declaration_built)?;
@@ -20072,10 +19898,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let statement = pop_item!(self, statement, Statement, context);
-        let always_comb_declaration_list_0_built = AlwaysCombDeclarationListBuilder::default()
-            .statement(Box::new(statement))
-            .build()
-            .into_diagnostic()?;
+        let always_comb_declaration_list_0_built = AlwaysCombDeclarationList {
+            statement: Box::new(statement),
+        };
         // Add an element to the vector
         always_comb_declaration_list.push(always_comb_declaration_list_0_built);
         self.push(
@@ -20130,14 +19955,13 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let assign = pop_item!(self, assign, Assign, context);
-        let assign_declaration_built = AssignDeclarationBuilder::default()
-            .assign(Box::new(assign))
-            .hierarchical_identifier(Box::new(hierarchical_identifier))
-            .equ(Box::new(equ))
-            .expression(Box::new(expression))
-            .semicolon(Box::new(semicolon))
-            .build()
-            .into_diagnostic()?;
+        let assign_declaration_built = AssignDeclaration {
+            assign: Box::new(assign),
+            hierarchical_identifier: Box::new(hierarchical_identifier),
+            equ: Box::new(equ),
+            expression: Box::new(expression),
+            semicolon: Box::new(semicolon),
+        };
         // Calling user action here
         self.user_grammar
             .assign_declaration(&assign_declaration_built)?;
@@ -20169,14 +19993,13 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let l_brace = pop_item!(self, l_brace, LBrace, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
         let modport = pop_item!(self, modport, Modport, context);
-        let modport_declaration_built = ModportDeclarationBuilder::default()
-            .modport(Box::new(modport))
-            .identifier(Box::new(identifier))
-            .l_brace(Box::new(l_brace))
-            .modport_list(Box::new(modport_list))
-            .r_brace(Box::new(r_brace))
-            .build()
-            .into_diagnostic()?;
+        let modport_declaration_built = ModportDeclaration {
+            modport: Box::new(modport),
+            identifier: Box::new(identifier),
+            l_brace: Box::new(l_brace),
+            modport_list: Box::new(modport_list),
+            r_brace: Box::new(r_brace),
+        };
         // Calling user action here
         self.user_grammar
             .modport_declaration(&modport_declaration_built)?;
@@ -20205,12 +20028,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let modport_list_list =
             pop_and_reverse_item!(self, modport_list_list, ModportListList, context);
         let modport_item = pop_item!(self, modport_item, ModportItem, context);
-        let modport_list_built = ModportListBuilder::default()
-            .modport_item(Box::new(modport_item))
-            .modport_list_list(modport_list_list)
-            .modport_list_opt(modport_list_opt)
-            .build()
-            .into_diagnostic()?;
+        let modport_list_built = ModportList {
+            modport_item: Box::new(modport_item),
+            modport_list_list,
+            modport_list_opt,
+        };
         // Calling user action here
         self.user_grammar.modport_list(&modport_list_built)?;
         self.push(ASTType::ModportList(modport_list_built), context);
@@ -20234,11 +20056,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let mut modport_list_list = pop_item!(self, modport_list_list, ModportListList, context);
         let modport_item = pop_item!(self, modport_item, ModportItem, context);
         let comma = pop_item!(self, comma, Comma, context);
-        let modport_list_list_0_built = ModportListListBuilder::default()
-            .modport_item(Box::new(modport_item))
-            .comma(Box::new(comma))
-            .build()
-            .into_diagnostic()?;
+        let modport_list_list_0_built = ModportListList {
+            modport_item: Box::new(modport_item),
+            comma: Box::new(comma),
+        };
         // Add an element to the vector
         modport_list_list.push(modport_list_list_0_built);
         self.push(ASTType::ModportListList(modport_list_list), context);
@@ -20271,10 +20092,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comma = pop_item!(self, comma, Comma, context);
-        let modport_list_opt_0_built = ModportListOptBuilder::default()
-            .comma(Box::new(comma))
-            .build()
-            .into_diagnostic()?;
+        let modport_list_opt_0_built = ModportListOpt {
+            comma: Box::new(comma),
+        };
         self.push(
             ASTType::ModportListOpt(Some(Box::new(modport_list_opt_0_built))),
             context,
@@ -20311,12 +20131,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let direction = pop_item!(self, direction, Direction, context);
         let colon = pop_item!(self, colon, Colon, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
-        let modport_item_built = ModportItemBuilder::default()
-            .identifier(Box::new(identifier))
-            .colon(Box::new(colon))
-            .direction(Box::new(direction))
-            .build()
-            .into_diagnostic()?;
+        let modport_item_built = ModportItem {
+            identifier: Box::new(identifier),
+            colon: Box::new(colon),
+            direction: Box::new(direction),
+        };
         // Calling user action here
         self.user_grammar.modport_item(&modport_item_built)?;
         self.push(ASTType::ModportItem(modport_item_built), context);
@@ -20348,16 +20167,15 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let colon = pop_item!(self, colon, Colon, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
         let r#enum = pop_item!(self, r#enum, Enum, context);
-        let enum_declaration_built = EnumDeclarationBuilder::default()
-            .r#enum(Box::new(r#enum))
-            .identifier(Box::new(identifier))
-            .colon(Box::new(colon))
-            .r#type(Box::new(r#type))
-            .l_brace(Box::new(l_brace))
-            .enum_list(Box::new(enum_list))
-            .r_brace(Box::new(r_brace))
-            .build()
-            .into_diagnostic()?;
+        let enum_declaration_built = EnumDeclaration {
+            r#enum: Box::new(r#enum),
+            identifier: Box::new(identifier),
+            colon: Box::new(colon),
+            r#type: Box::new(r#type),
+            l_brace: Box::new(l_brace),
+            enum_list: Box::new(enum_list),
+            r_brace: Box::new(r_brace),
+        };
         // Calling user action here
         self.user_grammar
             .enum_declaration(&enum_declaration_built)?;
@@ -20382,12 +20200,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let enum_list_opt = pop_item!(self, enum_list_opt, EnumListOpt, context);
         let enum_list_list = pop_and_reverse_item!(self, enum_list_list, EnumListList, context);
         let enum_item = pop_item!(self, enum_item, EnumItem, context);
-        let enum_list_built = EnumListBuilder::default()
-            .enum_item(Box::new(enum_item))
-            .enum_list_list(enum_list_list)
-            .enum_list_opt(enum_list_opt)
-            .build()
-            .into_diagnostic()?;
+        let enum_list_built = EnumList {
+            enum_item: Box::new(enum_item),
+            enum_list_list,
+            enum_list_opt,
+        };
         // Calling user action here
         self.user_grammar.enum_list(&enum_list_built)?;
         self.push(ASTType::EnumList(enum_list_built), context);
@@ -20411,11 +20228,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let mut enum_list_list = pop_item!(self, enum_list_list, EnumListList, context);
         let enum_item = pop_item!(self, enum_item, EnumItem, context);
         let comma = pop_item!(self, comma, Comma, context);
-        let enum_list_list_0_built = EnumListListBuilder::default()
-            .enum_item(Box::new(enum_item))
-            .comma(Box::new(comma))
-            .build()
-            .into_diagnostic()?;
+        let enum_list_list_0_built = EnumListList {
+            enum_item: Box::new(enum_item),
+            comma: Box::new(comma),
+        };
         // Add an element to the vector
         enum_list_list.push(enum_list_list_0_built);
         self.push(ASTType::EnumListList(enum_list_list), context);
@@ -20448,10 +20264,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comma = pop_item!(self, comma, Comma, context);
-        let enum_list_opt_0_built = EnumListOptBuilder::default()
-            .comma(Box::new(comma))
-            .build()
-            .into_diagnostic()?;
+        let enum_list_opt_0_built = EnumListOpt {
+            comma: Box::new(comma),
+        };
         self.push(
             ASTType::EnumListOpt(Some(Box::new(enum_list_opt_0_built))),
             context,
@@ -20486,11 +20301,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let enum_item_opt = pop_item!(self, enum_item_opt, EnumItemOpt, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
-        let enum_item_built = EnumItemBuilder::default()
-            .identifier(Box::new(identifier))
-            .enum_item_opt(enum_item_opt)
-            .build()
-            .into_diagnostic()?;
+        let enum_item_built = EnumItem {
+            identifier: Box::new(identifier),
+            enum_item_opt,
+        };
         // Calling user action here
         self.user_grammar.enum_item(&enum_item_built)?;
         self.push(ASTType::EnumItem(enum_item_built), context);
@@ -20512,11 +20326,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let expression = pop_item!(self, expression, Expression, context);
         let equ = pop_item!(self, equ, Equ, context);
-        let enum_item_opt_0_built = EnumItemOptBuilder::default()
-            .equ(Box::new(equ))
-            .expression(Box::new(expression))
-            .build()
-            .into_diagnostic()?;
+        let enum_item_opt_0_built = EnumItemOpt {
+            equ: Box::new(equ),
+            expression: Box::new(expression),
+        };
         self.push(
             ASTType::EnumItemOpt(Some(Box::new(enum_item_opt_0_built))),
             context,
@@ -20557,14 +20370,13 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let l_brace = pop_item!(self, l_brace, LBrace, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
         let r#struct = pop_item!(self, r#struct, Struct, context);
-        let struct_declaration_built = StructDeclarationBuilder::default()
-            .r#struct(Box::new(r#struct))
-            .identifier(Box::new(identifier))
-            .l_brace(Box::new(l_brace))
-            .struct_list(Box::new(struct_list))
-            .r_brace(Box::new(r_brace))
-            .build()
-            .into_diagnostic()?;
+        let struct_declaration_built = StructDeclaration {
+            r#struct: Box::new(r#struct),
+            identifier: Box::new(identifier),
+            l_brace: Box::new(l_brace),
+            struct_list: Box::new(struct_list),
+            r_brace: Box::new(r_brace),
+        };
         // Calling user action here
         self.user_grammar
             .struct_declaration(&struct_declaration_built)?;
@@ -20593,12 +20405,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let struct_list_list =
             pop_and_reverse_item!(self, struct_list_list, StructListList, context);
         let struct_item = pop_item!(self, struct_item, StructItem, context);
-        let struct_list_built = StructListBuilder::default()
-            .struct_item(Box::new(struct_item))
-            .struct_list_list(struct_list_list)
-            .struct_list_opt(struct_list_opt)
-            .build()
-            .into_diagnostic()?;
+        let struct_list_built = StructList {
+            struct_item: Box::new(struct_item),
+            struct_list_list,
+            struct_list_opt,
+        };
         // Calling user action here
         self.user_grammar.struct_list(&struct_list_built)?;
         self.push(ASTType::StructList(struct_list_built), context);
@@ -20622,11 +20433,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let mut struct_list_list = pop_item!(self, struct_list_list, StructListList, context);
         let struct_item = pop_item!(self, struct_item, StructItem, context);
         let comma = pop_item!(self, comma, Comma, context);
-        let struct_list_list_0_built = StructListListBuilder::default()
-            .struct_item(Box::new(struct_item))
-            .comma(Box::new(comma))
-            .build()
-            .into_diagnostic()?;
+        let struct_list_list_0_built = StructListList {
+            struct_item: Box::new(struct_item),
+            comma: Box::new(comma),
+        };
         // Add an element to the vector
         struct_list_list.push(struct_list_list_0_built);
         self.push(ASTType::StructListList(struct_list_list), context);
@@ -20659,10 +20469,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comma = pop_item!(self, comma, Comma, context);
-        let struct_list_opt_0_built = StructListOptBuilder::default()
-            .comma(Box::new(comma))
-            .build()
-            .into_diagnostic()?;
+        let struct_list_opt_0_built = StructListOpt {
+            comma: Box::new(comma),
+        };
         self.push(
             ASTType::StructListOpt(Some(Box::new(struct_list_opt_0_built))),
             context,
@@ -20699,12 +20508,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let r#type = pop_item!(self, r#type, Type, context);
         let colon = pop_item!(self, colon, Colon, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
-        let struct_item_built = StructItemBuilder::default()
-            .identifier(Box::new(identifier))
-            .colon(Box::new(colon))
-            .r#type(Box::new(r#type))
-            .build()
-            .into_diagnostic()?;
+        let struct_item_built = StructItem {
+            identifier: Box::new(identifier),
+            colon: Box::new(colon),
+            r#type: Box::new(r#type),
+        };
         // Calling user action here
         self.user_grammar.struct_item(&struct_item_built)?;
         self.push(ASTType::StructItem(struct_item_built), context);
@@ -20741,17 +20549,16 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let colon = pop_item!(self, colon, Colon, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
         let inst = pop_item!(self, inst, Inst, context);
-        let inst_declaration_built = InstDeclarationBuilder::default()
-            .inst(Box::new(inst))
-            .identifier(Box::new(identifier))
-            .colon(Box::new(colon))
-            .identifier0(Box::new(identifier0))
-            .inst_declaration_opt(inst_declaration_opt)
-            .inst_declaration_opt0(inst_declaration_opt0)
-            .inst_declaration_opt1(inst_declaration_opt1)
-            .semicolon(Box::new(semicolon))
-            .build()
-            .into_diagnostic()?;
+        let inst_declaration_built = InstDeclaration {
+            inst: Box::new(inst),
+            identifier: Box::new(identifier),
+            colon: Box::new(colon),
+            identifier0: Box::new(identifier0),
+            inst_declaration_opt,
+            inst_declaration_opt0,
+            inst_declaration_opt1,
+            semicolon: Box::new(semicolon),
+        };
         // Calling user action here
         self.user_grammar
             .inst_declaration(&inst_declaration_built)?;
@@ -20777,12 +20584,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let inst_declaration_opt2 =
             pop_item!(self, inst_declaration_opt2, InstDeclarationOpt2, context);
         let l_paren = pop_item!(self, l_paren, LParen, context);
-        let inst_declaration_opt1_0_built = InstDeclarationOpt1Builder::default()
-            .l_paren(Box::new(l_paren))
-            .inst_declaration_opt2(inst_declaration_opt2)
-            .r_paren(Box::new(r_paren))
-            .build()
-            .into_diagnostic()?;
+        let inst_declaration_opt1_0_built = InstDeclarationOpt1 {
+            l_paren: Box::new(l_paren),
+            inst_declaration_opt2,
+            r_paren: Box::new(r_paren),
+        };
         self.push(
             ASTType::InstDeclarationOpt1(Some(Box::new(inst_declaration_opt1_0_built))),
             context,
@@ -20803,10 +20609,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let inst_port_list = pop_item!(self, inst_port_list, InstPortList, context);
-        let inst_declaration_opt2_0_built = InstDeclarationOpt2Builder::default()
-            .inst_port_list(Box::new(inst_port_list))
-            .build()
-            .into_diagnostic()?;
+        let inst_declaration_opt2_0_built = InstDeclarationOpt2 {
+            inst_port_list: Box::new(inst_port_list),
+        };
         self.push(
             ASTType::InstDeclarationOpt2(Some(Box::new(inst_declaration_opt2_0_built))),
             context,
@@ -20851,10 +20656,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let inst_parameter = pop_item!(self, inst_parameter, InstParameter, context);
-        let inst_declaration_opt0_0_built = InstDeclarationOpt0Builder::default()
-            .inst_parameter(Box::new(inst_parameter))
-            .build()
-            .into_diagnostic()?;
+        let inst_declaration_opt0_0_built = InstDeclarationOpt0 {
+            inst_parameter: Box::new(inst_parameter),
+        };
         self.push(
             ASTType::InstDeclarationOpt0(Some(Box::new(inst_declaration_opt0_0_built))),
             context,
@@ -20887,10 +20691,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let width = pop_item!(self, width, Width, context);
-        let inst_declaration_opt_0_built = InstDeclarationOptBuilder::default()
-            .width(Box::new(width))
-            .build()
-            .into_diagnostic()?;
+        let inst_declaration_opt_0_built = InstDeclarationOpt {
+            width: Box::new(width),
+        };
         self.push(
             ASTType::InstDeclarationOpt(Some(Box::new(inst_declaration_opt_0_built))),
             context,
@@ -20929,13 +20732,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let inst_parameter_opt = pop_item!(self, inst_parameter_opt, InstParameterOpt, context);
         let l_paren = pop_item!(self, l_paren, LParen, context);
         let hash = pop_item!(self, hash, Hash, context);
-        let inst_parameter_built = InstParameterBuilder::default()
-            .hash(Box::new(hash))
-            .l_paren(Box::new(l_paren))
-            .inst_parameter_opt(inst_parameter_opt)
-            .r_paren(Box::new(r_paren))
-            .build()
-            .into_diagnostic()?;
+        let inst_parameter_built = InstParameter {
+            hash: Box::new(hash),
+            l_paren: Box::new(l_paren),
+            inst_parameter_opt,
+            r_paren: Box::new(r_paren),
+        };
         // Calling user action here
         self.user_grammar.inst_parameter(&inst_parameter_built)?;
         self.push(ASTType::InstParameter(inst_parameter_built), context);
@@ -20955,10 +20757,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let inst_parameter_list = pop_item!(self, inst_parameter_list, InstParameterList, context);
-        let inst_parameter_opt_0_built = InstParameterOptBuilder::default()
-            .inst_parameter_list(Box::new(inst_parameter_list))
-            .build()
-            .into_diagnostic()?;
+        let inst_parameter_opt_0_built = InstParameterOpt {
+            inst_parameter_list: Box::new(inst_parameter_list),
+        };
         self.push(
             ASTType::InstParameterOpt(Some(Box::new(inst_parameter_opt_0_built))),
             context,
@@ -21001,12 +20802,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let inst_parameter_item = pop_item!(self, inst_parameter_item, InstParameterItem, context);
-        let inst_parameter_list_built = InstParameterListBuilder::default()
-            .inst_parameter_item(Box::new(inst_parameter_item))
-            .inst_parameter_list_list(inst_parameter_list_list)
-            .inst_parameter_list_opt(inst_parameter_list_opt)
-            .build()
-            .into_diagnostic()?;
+        let inst_parameter_list_built = InstParameterList {
+            inst_parameter_item: Box::new(inst_parameter_item),
+            inst_parameter_list_list,
+            inst_parameter_list_opt,
+        };
         // Calling user action here
         self.user_grammar
             .inst_parameter_list(&inst_parameter_list_built)?;
@@ -21039,11 +20839,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         );
         let inst_parameter_item = pop_item!(self, inst_parameter_item, InstParameterItem, context);
         let comma = pop_item!(self, comma, Comma, context);
-        let inst_parameter_list_list_0_built = InstParameterListListBuilder::default()
-            .inst_parameter_item(Box::new(inst_parameter_item))
-            .comma(Box::new(comma))
-            .build()
-            .into_diagnostic()?;
+        let inst_parameter_list_list_0_built = InstParameterListList {
+            inst_parameter_item: Box::new(inst_parameter_item),
+            comma: Box::new(comma),
+        };
         // Add an element to the vector
         inst_parameter_list_list.push(inst_parameter_list_list_0_built);
         self.push(
@@ -21082,10 +20881,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comma = pop_item!(self, comma, Comma, context);
-        let inst_parameter_list_opt_0_built = InstParameterListOptBuilder::default()
-            .comma(Box::new(comma))
-            .build()
-            .into_diagnostic()?;
+        let inst_parameter_list_opt_0_built = InstParameterListOpt {
+            comma: Box::new(comma),
+        };
         self.push(
             ASTType::InstParameterListOpt(Some(Box::new(inst_parameter_list_opt_0_built))),
             context,
@@ -21121,11 +20919,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let inst_parameter_item_opt =
             pop_item!(self, inst_parameter_item_opt, InstParameterItemOpt, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
-        let inst_parameter_item_built = InstParameterItemBuilder::default()
-            .identifier(Box::new(identifier))
-            .inst_parameter_item_opt(inst_parameter_item_opt)
-            .build()
-            .into_diagnostic()?;
+        let inst_parameter_item_built = InstParameterItem {
+            identifier: Box::new(identifier),
+            inst_parameter_item_opt,
+        };
         // Calling user action here
         self.user_grammar
             .inst_parameter_item(&inst_parameter_item_built)?;
@@ -21151,11 +20948,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let expression = pop_item!(self, expression, Expression, context);
         let colon = pop_item!(self, colon, Colon, context);
-        let inst_parameter_item_opt_0_built = InstParameterItemOptBuilder::default()
-            .colon(Box::new(colon))
-            .expression(Box::new(expression))
-            .build()
-            .into_diagnostic()?;
+        let inst_parameter_item_opt_0_built = InstParameterItemOpt {
+            colon: Box::new(colon),
+            expression: Box::new(expression),
+        };
         self.push(
             ASTType::InstParameterItemOpt(Some(Box::new(inst_parameter_item_opt_0_built))),
             context,
@@ -21193,12 +20989,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let inst_port_list_list =
             pop_and_reverse_item!(self, inst_port_list_list, InstPortListList, context);
         let inst_port_item = pop_item!(self, inst_port_item, InstPortItem, context);
-        let inst_port_list_built = InstPortListBuilder::default()
-            .inst_port_item(Box::new(inst_port_item))
-            .inst_port_list_list(inst_port_list_list)
-            .inst_port_list_opt(inst_port_list_opt)
-            .build()
-            .into_diagnostic()?;
+        let inst_port_list_built = InstPortList {
+            inst_port_item: Box::new(inst_port_item),
+            inst_port_list_list,
+            inst_port_list_opt,
+        };
         // Calling user action here
         self.user_grammar.inst_port_list(&inst_port_list_built)?;
         self.push(ASTType::InstPortList(inst_port_list_built), context);
@@ -21223,11 +21018,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             pop_item!(self, inst_port_list_list, InstPortListList, context);
         let inst_port_item = pop_item!(self, inst_port_item, InstPortItem, context);
         let comma = pop_item!(self, comma, Comma, context);
-        let inst_port_list_list_0_built = InstPortListListBuilder::default()
-            .inst_port_item(Box::new(inst_port_item))
-            .comma(Box::new(comma))
-            .build()
-            .into_diagnostic()?;
+        let inst_port_list_list_0_built = InstPortListList {
+            inst_port_item: Box::new(inst_port_item),
+            comma: Box::new(comma),
+        };
         // Add an element to the vector
         inst_port_list_list.push(inst_port_list_list_0_built);
         self.push(ASTType::InstPortListList(inst_port_list_list), context);
@@ -21263,10 +21057,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comma = pop_item!(self, comma, Comma, context);
-        let inst_port_list_opt_0_built = InstPortListOptBuilder::default()
-            .comma(Box::new(comma))
-            .build()
-            .into_diagnostic()?;
+        let inst_port_list_opt_0_built = InstPortListOpt {
+            comma: Box::new(comma),
+        };
         self.push(
             ASTType::InstPortListOpt(Some(Box::new(inst_port_list_opt_0_built))),
             context,
@@ -21301,11 +21094,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let inst_port_item_opt = pop_item!(self, inst_port_item_opt, InstPortItemOpt, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
-        let inst_port_item_built = InstPortItemBuilder::default()
-            .identifier(Box::new(identifier))
-            .inst_port_item_opt(inst_port_item_opt)
-            .build()
-            .into_diagnostic()?;
+        let inst_port_item_built = InstPortItem {
+            identifier: Box::new(identifier),
+            inst_port_item_opt,
+        };
         // Calling user action here
         self.user_grammar.inst_port_item(&inst_port_item_built)?;
         self.push(ASTType::InstPortItem(inst_port_item_built), context);
@@ -21327,11 +21119,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let expression = pop_item!(self, expression, Expression, context);
         let colon = pop_item!(self, colon, Colon, context);
-        let inst_port_item_opt_0_built = InstPortItemOptBuilder::default()
-            .colon(Box::new(colon))
-            .expression(Box::new(expression))
-            .build()
-            .into_diagnostic()?;
+        let inst_port_item_opt_0_built = InstPortItemOpt {
+            colon: Box::new(colon),
+            expression: Box::new(expression),
+        };
         self.push(
             ASTType::InstPortItemOpt(Some(Box::new(inst_port_item_opt_0_built))),
             context,
@@ -21370,13 +21161,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let with_parameter_opt = pop_item!(self, with_parameter_opt, WithParameterOpt, context);
         let l_paren = pop_item!(self, l_paren, LParen, context);
         let hash = pop_item!(self, hash, Hash, context);
-        let with_parameter_built = WithParameterBuilder::default()
-            .hash(Box::new(hash))
-            .l_paren(Box::new(l_paren))
-            .with_parameter_opt(with_parameter_opt)
-            .r_paren(Box::new(r_paren))
-            .build()
-            .into_diagnostic()?;
+        let with_parameter_built = WithParameter {
+            hash: Box::new(hash),
+            l_paren: Box::new(l_paren),
+            with_parameter_opt,
+            r_paren: Box::new(r_paren),
+        };
         // Calling user action here
         self.user_grammar.with_parameter(&with_parameter_built)?;
         self.push(ASTType::WithParameter(with_parameter_built), context);
@@ -21396,10 +21186,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let with_parameter_list = pop_item!(self, with_parameter_list, WithParameterList, context);
-        let with_parameter_opt_0_built = WithParameterOptBuilder::default()
-            .with_parameter_list(Box::new(with_parameter_list))
-            .build()
-            .into_diagnostic()?;
+        let with_parameter_opt_0_built = WithParameterOpt {
+            with_parameter_list: Box::new(with_parameter_list),
+        };
         self.push(
             ASTType::WithParameterOpt(Some(Box::new(with_parameter_opt_0_built))),
             context,
@@ -21442,12 +21231,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let with_parameter_item = pop_item!(self, with_parameter_item, WithParameterItem, context);
-        let with_parameter_list_built = WithParameterListBuilder::default()
-            .with_parameter_item(Box::new(with_parameter_item))
-            .with_parameter_list_list(with_parameter_list_list)
-            .with_parameter_list_opt(with_parameter_list_opt)
-            .build()
-            .into_diagnostic()?;
+        let with_parameter_list_built = WithParameterList {
+            with_parameter_item: Box::new(with_parameter_item),
+            with_parameter_list_list,
+            with_parameter_list_opt,
+        };
         // Calling user action here
         self.user_grammar
             .with_parameter_list(&with_parameter_list_built)?;
@@ -21480,11 +21268,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         );
         let with_parameter_item = pop_item!(self, with_parameter_item, WithParameterItem, context);
         let comma = pop_item!(self, comma, Comma, context);
-        let with_parameter_list_list_0_built = WithParameterListListBuilder::default()
-            .with_parameter_item(Box::new(with_parameter_item))
-            .comma(Box::new(comma))
-            .build()
-            .into_diagnostic()?;
+        let with_parameter_list_list_0_built = WithParameterListList {
+            with_parameter_item: Box::new(with_parameter_item),
+            comma: Box::new(comma),
+        };
         // Add an element to the vector
         with_parameter_list_list.push(with_parameter_list_list_0_built);
         self.push(
@@ -21523,10 +21310,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comma = pop_item!(self, comma, Comma, context);
-        let with_parameter_list_opt_0_built = WithParameterListOptBuilder::default()
-            .comma(Box::new(comma))
-            .build()
-            .into_diagnostic()?;
+        let with_parameter_list_opt_0_built = WithParameterListOpt {
+            comma: Box::new(comma),
+        };
         self.push(
             ASTType::WithParameterListOpt(Some(Box::new(with_parameter_list_opt_0_built))),
             context,
@@ -21574,15 +21360,14 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             WithParameterItemGroup,
             context
         );
-        let with_parameter_item_built = WithParameterItemBuilder::default()
-            .with_parameter_item_group(Box::new(with_parameter_item_group))
-            .identifier(Box::new(identifier))
-            .colon(Box::new(colon))
-            .r#type(Box::new(r#type))
-            .equ(Box::new(equ))
-            .expression(Box::new(expression))
-            .build()
-            .into_diagnostic()?;
+        let with_parameter_item_built = WithParameterItem {
+            with_parameter_item_group: Box::new(with_parameter_item_group),
+            identifier: Box::new(identifier),
+            colon: Box::new(colon),
+            r#type: Box::new(r#type),
+            equ: Box::new(equ),
+            expression: Box::new(expression),
+        };
         // Calling user action here
         self.user_grammar
             .with_parameter_item(&with_parameter_item_built)?;
@@ -21606,10 +21391,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let parameter = pop_item!(self, parameter, Parameter, context);
-        let with_parameter_item_group_0_built = WithParameterItemGroupParameterBuilder::default()
-            .parameter(Box::new(parameter))
-            .build()
-            .into_diagnostic()?;
+        let with_parameter_item_group_0_built = WithParameterItemGroupParameter {
+            parameter: Box::new(parameter),
+        };
         let with_parameter_item_group_0_built =
             WithParameterItemGroup::Parameter(with_parameter_item_group_0_built);
         self.push(
@@ -21632,10 +21416,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let localparam = pop_item!(self, localparam, Localparam, context);
-        let with_parameter_item_group_1_built = WithParameterItemGroupLocalparamBuilder::default()
-            .localparam(Box::new(localparam))
-            .build()
-            .into_diagnostic()?;
+        let with_parameter_item_group_1_built = WithParameterItemGroupLocalparam {
+            localparam: Box::new(localparam),
+        };
         let with_parameter_item_group_1_built =
             WithParameterItemGroup::Localparam(with_parameter_item_group_1_built);
         self.push(
@@ -21663,12 +21446,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let port_declaration_opt =
             pop_item!(self, port_declaration_opt, PortDeclarationOpt, context);
         let l_paren = pop_item!(self, l_paren, LParen, context);
-        let port_declaration_built = PortDeclarationBuilder::default()
-            .l_paren(Box::new(l_paren))
-            .port_declaration_opt(port_declaration_opt)
-            .r_paren(Box::new(r_paren))
-            .build()
-            .into_diagnostic()?;
+        let port_declaration_built = PortDeclaration {
+            l_paren: Box::new(l_paren),
+            port_declaration_opt,
+            r_paren: Box::new(r_paren),
+        };
         // Calling user action here
         self.user_grammar
             .port_declaration(&port_declaration_built)?;
@@ -21690,10 +21472,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let port_declaration_list =
             pop_item!(self, port_declaration_list, PortDeclarationList, context);
-        let port_declaration_opt_0_built = PortDeclarationOptBuilder::default()
-            .port_declaration_list(Box::new(port_declaration_list))
-            .build()
-            .into_diagnostic()?;
+        let port_declaration_opt_0_built = PortDeclarationOpt {
+            port_declaration_list: Box::new(port_declaration_list),
+        };
         self.push(
             ASTType::PortDeclarationOpt(Some(Box::new(port_declaration_opt_0_built))),
             context,
@@ -21741,12 +21522,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         );
         let port_declaration_item =
             pop_item!(self, port_declaration_item, PortDeclarationItem, context);
-        let port_declaration_list_built = PortDeclarationListBuilder::default()
-            .port_declaration_item(Box::new(port_declaration_item))
-            .port_declaration_list_list(port_declaration_list_list)
-            .port_declaration_list_opt(port_declaration_list_opt)
-            .build()
-            .into_diagnostic()?;
+        let port_declaration_list_built = PortDeclarationList {
+            port_declaration_item: Box::new(port_declaration_item),
+            port_declaration_list_list,
+            port_declaration_list_opt,
+        };
         // Calling user action here
         self.user_grammar
             .port_declaration_list(&port_declaration_list_built)?;
@@ -21780,11 +21560,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let port_declaration_item =
             pop_item!(self, port_declaration_item, PortDeclarationItem, context);
         let comma = pop_item!(self, comma, Comma, context);
-        let port_declaration_list_list_0_built = PortDeclarationListListBuilder::default()
-            .port_declaration_item(Box::new(port_declaration_item))
-            .comma(Box::new(comma))
-            .build()
-            .into_diagnostic()?;
+        let port_declaration_list_list_0_built = PortDeclarationListList {
+            port_declaration_item: Box::new(port_declaration_item),
+            comma: Box::new(comma),
+        };
         // Add an element to the vector
         port_declaration_list_list.push(port_declaration_list_list_0_built);
         self.push(
@@ -21826,10 +21605,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comma = pop_item!(self, comma, Comma, context);
-        let port_declaration_list_opt_0_built = PortDeclarationListOptBuilder::default()
-            .comma(Box::new(comma))
-            .build()
-            .into_diagnostic()?;
+        let port_declaration_list_opt_0_built = PortDeclarationListOpt {
+            comma: Box::new(comma),
+        };
         self.push(
             ASTType::PortDeclarationListOpt(Some(Box::new(port_declaration_list_opt_0_built))),
             context,
@@ -21871,12 +21649,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         );
         let colon = pop_item!(self, colon, Colon, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
-        let port_declaration_item_built = PortDeclarationItemBuilder::default()
-            .identifier(Box::new(identifier))
-            .colon(Box::new(colon))
-            .port_declaration_item_group(Box::new(port_declaration_item_group))
-            .build()
-            .into_diagnostic()?;
+        let port_declaration_item_built = PortDeclarationItem {
+            identifier: Box::new(identifier),
+            colon: Box::new(colon),
+            port_declaration_item_group: Box::new(port_declaration_item_group),
+        };
         // Calling user action here
         self.user_grammar
             .port_declaration_item(&port_declaration_item_built)?;
@@ -21902,12 +21679,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let r#type = pop_item!(self, r#type, Type, context);
         let direction = pop_item!(self, direction, Direction, context);
-        let port_declaration_item_group_0_built =
-            PortDeclarationItemGroupDirectionTypeBuilder::default()
-                .direction(Box::new(direction))
-                .r#type(Box::new(r#type))
-                .build()
-                .into_diagnostic()?;
+        let port_declaration_item_group_0_built = PortDeclarationItemGroupDirectionType {
+            direction: Box::new(direction),
+            r#type: Box::new(r#type),
+        };
         let port_declaration_item_group_0_built =
             PortDeclarationItemGroup::DirectionType(port_declaration_item_group_0_built);
         self.push(
@@ -21930,11 +21705,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let interface = pop_item!(self, interface, Interface, context);
-        let port_declaration_item_group_1_built =
-            PortDeclarationItemGroupInterfaceBuilder::default()
-                .interface(Box::new(interface))
-                .build()
-                .into_diagnostic()?;
+        let port_declaration_item_group_1_built = PortDeclarationItemGroupInterface {
+            interface: Box::new(interface),
+        };
         let port_declaration_item_group_1_built =
             PortDeclarationItemGroup::Interface(port_declaration_item_group_1_built);
         self.push(
@@ -21957,10 +21730,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let input = pop_item!(self, input, Input, context);
-        let direction_0_built = DirectionInputBuilder::default()
-            .input(Box::new(input))
-            .build()
-            .into_diagnostic()?;
+        let direction_0_built = DirectionInput {
+            input: Box::new(input),
+        };
         let direction_0_built = Direction::Input(direction_0_built);
         // Calling user action here
         self.user_grammar.direction(&direction_0_built)?;
@@ -21981,10 +21753,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let output = pop_item!(self, output, Output, context);
-        let direction_1_built = DirectionOutputBuilder::default()
-            .output(Box::new(output))
-            .build()
-            .into_diagnostic()?;
+        let direction_1_built = DirectionOutput {
+            output: Box::new(output),
+        };
         let direction_1_built = Direction::Output(direction_1_built);
         // Calling user action here
         self.user_grammar.direction(&direction_1_built)?;
@@ -22005,10 +21776,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let inout = pop_item!(self, inout, Inout, context);
-        let direction_2_built = DirectionInoutBuilder::default()
-            .inout(Box::new(inout))
-            .build()
-            .into_diagnostic()?;
+        let direction_2_built = DirectionInout {
+            inout: Box::new(inout),
+        };
         let direction_2_built = Direction::Inout(direction_2_built);
         // Calling user action here
         self.user_grammar.direction(&direction_2_built)?;
@@ -22029,10 +21799,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let r#ref = pop_item!(self, r#ref, Ref, context);
-        let direction_3_built = DirectionRefBuilder::default()
-            .r#ref(Box::new(r#ref))
-            .build()
-            .into_diagnostic()?;
+        let direction_3_built = DirectionRef {
+            r#ref: Box::new(r#ref),
+        };
         let direction_3_built = Direction::Ref(direction_3_built);
         // Calling user action here
         self.user_grammar.direction(&direction_3_built)?;
@@ -22053,10 +21822,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let modport = pop_item!(self, modport, Modport, context);
-        let direction_4_built = DirectionModportBuilder::default()
-            .modport(Box::new(modport))
-            .build()
-            .into_diagnostic()?;
+        let direction_4_built = DirectionModport {
+            modport: Box::new(modport),
+        };
         let direction_4_built = Direction::Modport(direction_4_built);
         // Calling user action here
         self.user_grammar.direction(&direction_4_built)?;
@@ -22108,18 +21876,17 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         );
         let identifier = pop_item!(self, identifier, Identifier, context);
         let function = pop_item!(self, function, Function, context);
-        let function_declaration_built = FunctionDeclarationBuilder::default()
-            .function(Box::new(function))
-            .identifier(Box::new(identifier))
-            .function_declaration_opt(function_declaration_opt)
-            .function_declaration_opt0(function_declaration_opt0)
-            .minus_g_t(Box::new(minus_g_t))
-            .r#type(Box::new(r#type))
-            .l_brace(Box::new(l_brace))
-            .function_declaration_list(function_declaration_list)
-            .r_brace(Box::new(r_brace))
-            .build()
-            .into_diagnostic()?;
+        let function_declaration_built = FunctionDeclaration {
+            function: Box::new(function),
+            identifier: Box::new(identifier),
+            function_declaration_opt,
+            function_declaration_opt0,
+            minus_g_t: Box::new(minus_g_t),
+            r#type: Box::new(r#type),
+            l_brace: Box::new(l_brace),
+            function_declaration_list,
+            r_brace: Box::new(r_brace),
+        };
         // Calling user action here
         self.user_grammar
             .function_declaration(&function_declaration_built)?;
@@ -22150,10 +21917,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let function_item = pop_item!(self, function_item, FunctionItem, context);
-        let function_declaration_list_0_built = FunctionDeclarationListBuilder::default()
-            .function_item(Box::new(function_item))
-            .build()
-            .into_diagnostic()?;
+        let function_declaration_list_0_built = FunctionDeclarationList {
+            function_item: Box::new(function_item),
+        };
         // Add an element to the vector
         function_declaration_list.push(function_declaration_list_0_built);
         self.push(
@@ -22192,10 +21958,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let port_declaration = pop_item!(self, port_declaration, PortDeclaration, context);
-        let function_declaration_opt0_0_built = FunctionDeclarationOpt0Builder::default()
-            .port_declaration(Box::new(port_declaration))
-            .build()
-            .into_diagnostic()?;
+        let function_declaration_opt0_0_built = FunctionDeclarationOpt0 {
+            port_declaration: Box::new(port_declaration),
+        };
         self.push(
             ASTType::FunctionDeclarationOpt0(Some(Box::new(function_declaration_opt0_0_built))),
             context,
@@ -22228,10 +21993,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let with_parameter = pop_item!(self, with_parameter, WithParameter, context);
-        let function_declaration_opt_0_built = FunctionDeclarationOptBuilder::default()
-            .with_parameter(Box::new(with_parameter))
-            .build()
-            .into_diagnostic()?;
+        let function_declaration_opt_0_built = FunctionDeclarationOpt {
+            with_parameter: Box::new(with_parameter),
+        };
         self.push(
             ASTType::FunctionDeclarationOpt(Some(Box::new(function_declaration_opt_0_built))),
             context,
@@ -22264,10 +22028,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let var_declaration = pop_item!(self, var_declaration, VarDeclaration, context);
-        let function_item_0_built = FunctionItemVarDeclarationBuilder::default()
-            .var_declaration(Box::new(var_declaration))
-            .build()
-            .into_diagnostic()?;
+        let function_item_0_built = FunctionItemVarDeclaration {
+            var_declaration: Box::new(var_declaration),
+        };
         let function_item_0_built = FunctionItem::VarDeclaration(function_item_0_built);
         // Calling user action here
         self.user_grammar.function_item(&function_item_0_built)?;
@@ -22288,10 +22051,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let statement = pop_item!(self, statement, Statement, context);
-        let function_item_1_built = FunctionItemStatementBuilder::default()
-            .statement(Box::new(statement))
-            .build()
-            .into_diagnostic()?;
+        let function_item_1_built = FunctionItemStatement {
+            statement: Box::new(statement),
+        };
         let function_item_1_built = FunctionItem::Statement(function_item_1_built);
         // Calling user action here
         self.user_grammar.function_item(&function_item_1_built)?;
@@ -22325,14 +22087,13 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let colon_colon = pop_item!(self, colon_colon, ColonColon, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
         let import = pop_item!(self, import, Import, context);
-        let import_declaration_built = ImportDeclarationBuilder::default()
-            .import(Box::new(import))
-            .identifier(Box::new(identifier))
-            .colon_colon(Box::new(colon_colon))
-            .import_declaration_group(Box::new(import_declaration_group))
-            .semicolon(Box::new(semicolon))
-            .build()
-            .into_diagnostic()?;
+        let import_declaration_built = ImportDeclaration {
+            import: Box::new(import),
+            identifier: Box::new(identifier),
+            colon_colon: Box::new(colon_colon),
+            import_declaration_group: Box::new(import_declaration_group),
+            semicolon: Box::new(semicolon),
+        };
         // Calling user action here
         self.user_grammar
             .import_declaration(&import_declaration_built)?;
@@ -22356,10 +22117,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let identifier = pop_item!(self, identifier, Identifier, context);
-        let import_declaration_group_0_built = ImportDeclarationGroupIdentifierBuilder::default()
-            .identifier(Box::new(identifier))
-            .build()
-            .into_diagnostic()?;
+        let import_declaration_group_0_built = ImportDeclarationGroupIdentifier {
+            identifier: Box::new(identifier),
+        };
         let import_declaration_group_0_built =
             ImportDeclarationGroup::Identifier(import_declaration_group_0_built);
         self.push(
@@ -22382,10 +22142,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let star = pop_item!(self, star, Star, context);
-        let import_declaration_group_1_built = ImportDeclarationGroupStarBuilder::default()
-            .star(Box::new(star))
-            .build()
-            .into_diagnostic()?;
+        let import_declaration_group_1_built = ImportDeclarationGroupStar {
+            star: Box::new(star),
+        };
         let import_declaration_group_1_built =
             ImportDeclarationGroup::Star(import_declaration_group_1_built);
         self.push(
@@ -22426,14 +22185,13 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let export = pop_item!(self, export, Export, context);
-        let export_declaration_built = ExportDeclarationBuilder::default()
-            .export(Box::new(export))
-            .export_declaration_group(Box::new(export_declaration_group))
-            .colon_colon(Box::new(colon_colon))
-            .export_declaration_group0(Box::new(export_declaration_group0))
-            .semicolon(Box::new(semicolon))
-            .build()
-            .into_diagnostic()?;
+        let export_declaration_built = ExportDeclaration {
+            export: Box::new(export),
+            export_declaration_group: Box::new(export_declaration_group),
+            colon_colon: Box::new(colon_colon),
+            export_declaration_group0: Box::new(export_declaration_group0),
+            semicolon: Box::new(semicolon),
+        };
         // Calling user action here
         self.user_grammar
             .export_declaration(&export_declaration_built)?;
@@ -22457,10 +22215,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let identifier = pop_item!(self, identifier, Identifier, context);
-        let export_declaration_group0_0_built = ExportDeclarationGroup0IdentifierBuilder::default()
-            .identifier(Box::new(identifier))
-            .build()
-            .into_diagnostic()?;
+        let export_declaration_group0_0_built = ExportDeclarationGroup0Identifier {
+            identifier: Box::new(identifier),
+        };
         let export_declaration_group0_0_built =
             ExportDeclarationGroup0::Identifier(export_declaration_group0_0_built);
         self.push(
@@ -22483,10 +22240,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let star = pop_item!(self, star, Star, context);
-        let export_declaration_group0_1_built = ExportDeclarationGroup0StarBuilder::default()
-            .star(Box::new(star))
-            .build()
-            .into_diagnostic()?;
+        let export_declaration_group0_1_built = ExportDeclarationGroup0Star {
+            star: Box::new(star),
+        };
         let export_declaration_group0_1_built =
             ExportDeclarationGroup0::Star(export_declaration_group0_1_built);
         self.push(
@@ -22509,10 +22265,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let identifier = pop_item!(self, identifier, Identifier, context);
-        let export_declaration_group_0_built = ExportDeclarationGroupIdentifierBuilder::default()
-            .identifier(Box::new(identifier))
-            .build()
-            .into_diagnostic()?;
+        let export_declaration_group_0_built = ExportDeclarationGroupIdentifier {
+            identifier: Box::new(identifier),
+        };
         let export_declaration_group_0_built =
             ExportDeclarationGroup::Identifier(export_declaration_group_0_built);
         self.push(
@@ -22535,10 +22290,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let star = pop_item!(self, star, Star, context);
-        let export_declaration_group_1_built = ExportDeclarationGroupStarBuilder::default()
-            .star(Box::new(star))
-            .build()
-            .into_diagnostic()?;
+        let export_declaration_group_1_built = ExportDeclarationGroupStar {
+            star: Box::new(star),
+        };
         let export_declaration_group_1_built =
             ExportDeclarationGroup::Star(export_declaration_group_1_built);
         self.push(
@@ -22584,16 +22338,15 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             pop_item!(self, module_declaration_opt, ModuleDeclarationOpt, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
         let module = pop_item!(self, module, Module, context);
-        let module_declaration_built = ModuleDeclarationBuilder::default()
-            .module(Box::new(module))
-            .identifier(Box::new(identifier))
-            .module_declaration_opt(module_declaration_opt)
-            .module_declaration_opt0(module_declaration_opt0)
-            .l_brace(Box::new(l_brace))
-            .module_declaration_list(module_declaration_list)
-            .r_brace(Box::new(r_brace))
-            .build()
-            .into_diagnostic()?;
+        let module_declaration_built = ModuleDeclaration {
+            module: Box::new(module),
+            identifier: Box::new(identifier),
+            module_declaration_opt,
+            module_declaration_opt0,
+            l_brace: Box::new(l_brace),
+            module_declaration_list,
+            r_brace: Box::new(r_brace),
+        };
         // Calling user action here
         self.user_grammar
             .module_declaration(&module_declaration_built)?;
@@ -22624,10 +22377,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let module_item = pop_item!(self, module_item, ModuleItem, context);
-        let module_declaration_list_0_built = ModuleDeclarationListBuilder::default()
-            .module_item(Box::new(module_item))
-            .build()
-            .into_diagnostic()?;
+        let module_declaration_list_0_built = ModuleDeclarationList {
+            module_item: Box::new(module_item),
+        };
         // Add an element to the vector
         module_declaration_list.push(module_declaration_list_0_built);
         self.push(
@@ -22666,10 +22418,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let port_declaration = pop_item!(self, port_declaration, PortDeclaration, context);
-        let module_declaration_opt0_0_built = ModuleDeclarationOpt0Builder::default()
-            .port_declaration(Box::new(port_declaration))
-            .build()
-            .into_diagnostic()?;
+        let module_declaration_opt0_0_built = ModuleDeclarationOpt0 {
+            port_declaration: Box::new(port_declaration),
+        };
         self.push(
             ASTType::ModuleDeclarationOpt0(Some(Box::new(module_declaration_opt0_0_built))),
             context,
@@ -22702,10 +22453,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let with_parameter = pop_item!(self, with_parameter, WithParameter, context);
-        let module_declaration_opt_0_built = ModuleDeclarationOptBuilder::default()
-            .with_parameter(Box::new(with_parameter))
-            .build()
-            .into_diagnostic()?;
+        let module_declaration_opt_0_built = ModuleDeclarationOpt {
+            with_parameter: Box::new(with_parameter),
+        };
         self.push(
             ASTType::ModuleDeclarationOpt(Some(Box::new(module_declaration_opt_0_built))),
             context,
@@ -22756,14 +22506,13 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let module_named_block = pop_item!(self, module_named_block, ModuleNamedBlock, context);
         let expression = pop_item!(self, expression, Expression, context);
         let r#if = pop_item!(self, r#if, If, context);
-        let module_if_declaration_built = ModuleIfDeclarationBuilder::default()
-            .r#if(Box::new(r#if))
-            .expression(Box::new(expression))
-            .module_named_block(Box::new(module_named_block))
-            .module_if_declaration_list(module_if_declaration_list)
-            .module_if_declaration_opt(module_if_declaration_opt)
-            .build()
-            .into_diagnostic()?;
+        let module_if_declaration_built = ModuleIfDeclaration {
+            r#if: Box::new(r#if),
+            expression: Box::new(expression),
+            module_named_block: Box::new(module_named_block),
+            module_if_declaration_list,
+            module_if_declaration_opt,
+        };
         // Calling user action here
         self.user_grammar
             .module_if_declaration(&module_if_declaration_built)?;
@@ -22805,13 +22554,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let expression = pop_item!(self, expression, Expression, context);
         let r#if = pop_item!(self, r#if, If, context);
         let r#else = pop_item!(self, r#else, Else, context);
-        let module_if_declaration_list_0_built = ModuleIfDeclarationListBuilder::default()
-            .module_optional_named_block(Box::new(module_optional_named_block))
-            .expression(Box::new(expression))
-            .r#if(Box::new(r#if))
-            .r#else(Box::new(r#else))
-            .build()
-            .into_diagnostic()?;
+        let module_if_declaration_list_0_built = ModuleIfDeclarationList {
+            module_optional_named_block: Box::new(module_optional_named_block),
+            expression: Box::new(expression),
+            r#if: Box::new(r#if),
+            r#else: Box::new(r#else),
+        };
         // Add an element to the vector
         module_if_declaration_list.push(module_if_declaration_list_0_built);
         self.push(
@@ -22860,11 +22608,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let r#else = pop_item!(self, r#else, Else, context);
-        let module_if_declaration_opt_0_built = ModuleIfDeclarationOptBuilder::default()
-            .r#else(Box::new(r#else))
-            .module_optional_named_block(Box::new(module_optional_named_block))
-            .build()
-            .into_diagnostic()?;
+        let module_if_declaration_opt_0_built = ModuleIfDeclarationOpt {
+            r#else: Box::new(r#else),
+            module_optional_named_block: Box::new(module_optional_named_block),
+        };
         self.push(
             ASTType::ModuleIfDeclarationOpt(Some(Box::new(module_if_declaration_opt_0_built))),
             context,
@@ -22916,17 +22663,16 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let r#in = pop_item!(self, r#in, In, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
         let r#for = pop_item!(self, r#for, For, context);
-        let module_for_declaration_built = ModuleForDeclarationBuilder::default()
-            .r#for(Box::new(r#for))
-            .identifier(Box::new(identifier))
-            .r#in(Box::new(r#in))
-            .expression(Box::new(expression))
-            .dot_dot(Box::new(dot_dot))
-            .expression0(Box::new(expression0))
-            .module_for_declaration_opt(module_for_declaration_opt)
-            .module_named_block(Box::new(module_named_block))
-            .build()
-            .into_diagnostic()?;
+        let module_for_declaration_built = ModuleForDeclaration {
+            r#for: Box::new(r#for),
+            identifier: Box::new(identifier),
+            r#in: Box::new(r#in),
+            expression: Box::new(expression),
+            dot_dot: Box::new(dot_dot),
+            expression0: Box::new(expression0),
+            module_for_declaration_opt,
+            module_named_block: Box::new(module_named_block),
+        };
         // Calling user action here
         self.user_grammar
             .module_for_declaration(&module_for_declaration_built)?;
@@ -22954,12 +22700,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let expression = pop_item!(self, expression, Expression, context);
         let assignment_operator = pop_item!(self, assignment_operator, AssignmentOperator, context);
         let step = pop_item!(self, step, Step, context);
-        let module_for_declaration_opt_0_built = ModuleForDeclarationOptBuilder::default()
-            .step(Box::new(step))
-            .assignment_operator(Box::new(assignment_operator))
-            .expression(Box::new(expression))
-            .build()
-            .into_diagnostic()?;
+        let module_for_declaration_opt_0_built = ModuleForDeclarationOpt {
+            step: Box::new(step),
+            assignment_operator: Box::new(assignment_operator),
+            expression: Box::new(expression),
+        };
         self.push(
             ASTType::ModuleForDeclarationOpt(Some(Box::new(module_for_declaration_opt_0_built))),
             context,
@@ -23004,14 +22749,13 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let l_brace = pop_item!(self, l_brace, LBrace, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
         let colon = pop_item!(self, colon, Colon, context);
-        let module_named_block_built = ModuleNamedBlockBuilder::default()
-            .colon(Box::new(colon))
-            .identifier(Box::new(identifier))
-            .l_brace(Box::new(l_brace))
-            .module_named_block_list(module_named_block_list)
-            .r_brace(Box::new(r_brace))
-            .build()
-            .into_diagnostic()?;
+        let module_named_block_built = ModuleNamedBlock {
+            colon: Box::new(colon),
+            identifier: Box::new(identifier),
+            l_brace: Box::new(l_brace),
+            module_named_block_list,
+            r_brace: Box::new(r_brace),
+        };
         // Calling user action here
         self.user_grammar
             .module_named_block(&module_named_block_built)?;
@@ -23035,10 +22779,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let mut module_named_block_list =
             pop_item!(self, module_named_block_list, ModuleNamedBlockList, context);
         let module_item = pop_item!(self, module_item, ModuleItem, context);
-        let module_named_block_list_0_built = ModuleNamedBlockListBuilder::default()
-            .module_item(Box::new(module_item))
-            .build()
-            .into_diagnostic()?;
+        let module_named_block_list_0_built = ModuleNamedBlockList {
+            module_item: Box::new(module_item),
+        };
         // Add an element to the vector
         module_named_block_list.push(module_named_block_list_0_built);
         self.push(
@@ -23093,13 +22836,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             ModuleOptionalNamedBlockOpt,
             context
         );
-        let module_optional_named_block_built = ModuleOptionalNamedBlockBuilder::default()
-            .module_optional_named_block_opt(module_optional_named_block_opt)
-            .l_brace(Box::new(l_brace))
-            .module_optional_named_block_list(module_optional_named_block_list)
-            .r_brace(Box::new(r_brace))
-            .build()
-            .into_diagnostic()?;
+        let module_optional_named_block_built = ModuleOptionalNamedBlock {
+            module_optional_named_block_opt,
+            l_brace: Box::new(l_brace),
+            module_optional_named_block_list,
+            r_brace: Box::new(r_brace),
+        };
         // Calling user action here
         self.user_grammar
             .module_optional_named_block(&module_optional_named_block_built)?;
@@ -23130,11 +22872,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let module_item = pop_item!(self, module_item, ModuleItem, context);
-        let module_optional_named_block_list_0_built =
-            ModuleOptionalNamedBlockListBuilder::default()
-                .module_item(Box::new(module_item))
-                .build()
-                .into_diagnostic()?;
+        let module_optional_named_block_list_0_built = ModuleOptionalNamedBlockList {
+            module_item: Box::new(module_item),
+        };
         // Add an element to the vector
         module_optional_named_block_list.push(module_optional_named_block_list_0_built);
         self.push(
@@ -23178,11 +22918,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let identifier = pop_item!(self, identifier, Identifier, context);
         let colon = pop_item!(self, colon, Colon, context);
-        let module_optional_named_block_opt_0_built = ModuleOptionalNamedBlockOptBuilder::default()
-            .colon(Box::new(colon))
-            .identifier(Box::new(identifier))
-            .build()
-            .into_diagnostic()?;
+        let module_optional_named_block_opt_0_built = ModuleOptionalNamedBlockOpt {
+            colon: Box::new(colon),
+            identifier: Box::new(identifier),
+        };
         self.push(
             ASTType::ModuleOptionalNamedBlockOpt(Some(Box::new(
                 module_optional_named_block_opt_0_built,
@@ -23220,10 +22959,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let var_declaration = pop_item!(self, var_declaration, VarDeclaration, context);
-        let module_item_0_built = ModuleItemVarDeclarationBuilder::default()
-            .var_declaration(Box::new(var_declaration))
-            .build()
-            .into_diagnostic()?;
+        let module_item_0_built = ModuleItemVarDeclaration {
+            var_declaration: Box::new(var_declaration),
+        };
         let module_item_0_built = ModuleItem::VarDeclaration(module_item_0_built);
         // Calling user action here
         self.user_grammar.module_item(&module_item_0_built)?;
@@ -23244,10 +22982,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let inst_declaration = pop_item!(self, inst_declaration, InstDeclaration, context);
-        let module_item_1_built = ModuleItemInstDeclarationBuilder::default()
-            .inst_declaration(Box::new(inst_declaration))
-            .build()
-            .into_diagnostic()?;
+        let module_item_1_built = ModuleItemInstDeclaration {
+            inst_declaration: Box::new(inst_declaration),
+        };
         let module_item_1_built = ModuleItem::InstDeclaration(module_item_1_built);
         // Calling user action here
         self.user_grammar.module_item(&module_item_1_built)?;
@@ -23269,10 +23006,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let localparam_declaration =
             pop_item!(self, localparam_declaration, LocalparamDeclaration, context);
-        let module_item_2_built = ModuleItemLocalparamDeclarationBuilder::default()
-            .localparam_declaration(Box::new(localparam_declaration))
-            .build()
-            .into_diagnostic()?;
+        let module_item_2_built = ModuleItemLocalparamDeclaration {
+            localparam_declaration: Box::new(localparam_declaration),
+        };
         let module_item_2_built = ModuleItem::LocalparamDeclaration(module_item_2_built);
         // Calling user action here
         self.user_grammar.module_item(&module_item_2_built)?;
@@ -23294,10 +23030,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let always_ff_declaration =
             pop_item!(self, always_ff_declaration, AlwaysFfDeclaration, context);
-        let module_item_3_built = ModuleItemAlwaysFfDeclarationBuilder::default()
-            .always_ff_declaration(Box::new(always_ff_declaration))
-            .build()
-            .into_diagnostic()?;
+        let module_item_3_built = ModuleItemAlwaysFfDeclaration {
+            always_ff_declaration: Box::new(always_ff_declaration),
+        };
         let module_item_3_built = ModuleItem::AlwaysFfDeclaration(module_item_3_built);
         // Calling user action here
         self.user_grammar.module_item(&module_item_3_built)?;
@@ -23323,10 +23058,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             AlwaysCombDeclaration,
             context
         );
-        let module_item_4_built = ModuleItemAlwaysCombDeclarationBuilder::default()
-            .always_comb_declaration(Box::new(always_comb_declaration))
-            .build()
-            .into_diagnostic()?;
+        let module_item_4_built = ModuleItemAlwaysCombDeclaration {
+            always_comb_declaration: Box::new(always_comb_declaration),
+        };
         let module_item_4_built = ModuleItem::AlwaysCombDeclaration(module_item_4_built);
         // Calling user action here
         self.user_grammar.module_item(&module_item_4_built)?;
@@ -23347,10 +23081,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let assign_declaration = pop_item!(self, assign_declaration, AssignDeclaration, context);
-        let module_item_5_built = ModuleItemAssignDeclarationBuilder::default()
-            .assign_declaration(Box::new(assign_declaration))
-            .build()
-            .into_diagnostic()?;
+        let module_item_5_built = ModuleItemAssignDeclaration {
+            assign_declaration: Box::new(assign_declaration),
+        };
         let module_item_5_built = ModuleItem::AssignDeclaration(module_item_5_built);
         // Calling user action here
         self.user_grammar.module_item(&module_item_5_built)?;
@@ -23372,10 +23105,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let function_declaration =
             pop_item!(self, function_declaration, FunctionDeclaration, context);
-        let module_item_6_built = ModuleItemFunctionDeclarationBuilder::default()
-            .function_declaration(Box::new(function_declaration))
-            .build()
-            .into_diagnostic()?;
+        let module_item_6_built = ModuleItemFunctionDeclaration {
+            function_declaration: Box::new(function_declaration),
+        };
         let module_item_6_built = ModuleItem::FunctionDeclaration(module_item_6_built);
         // Calling user action here
         self.user_grammar.module_item(&module_item_6_built)?;
@@ -23397,10 +23129,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let module_if_declaration =
             pop_item!(self, module_if_declaration, ModuleIfDeclaration, context);
-        let module_item_7_built = ModuleItemModuleIfDeclarationBuilder::default()
-            .module_if_declaration(Box::new(module_if_declaration))
-            .build()
-            .into_diagnostic()?;
+        let module_item_7_built = ModuleItemModuleIfDeclaration {
+            module_if_declaration: Box::new(module_if_declaration),
+        };
         let module_item_7_built = ModuleItem::ModuleIfDeclaration(module_item_7_built);
         // Calling user action here
         self.user_grammar.module_item(&module_item_7_built)?;
@@ -23422,10 +23153,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let module_for_declaration =
             pop_item!(self, module_for_declaration, ModuleForDeclaration, context);
-        let module_item_8_built = ModuleItemModuleForDeclarationBuilder::default()
-            .module_for_declaration(Box::new(module_for_declaration))
-            .build()
-            .into_diagnostic()?;
+        let module_item_8_built = ModuleItemModuleForDeclaration {
+            module_for_declaration: Box::new(module_for_declaration),
+        };
         let module_item_8_built = ModuleItem::ModuleForDeclaration(module_item_8_built);
         // Calling user action here
         self.user_grammar.module_item(&module_item_8_built)?;
@@ -23446,10 +23176,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let enum_declaration = pop_item!(self, enum_declaration, EnumDeclaration, context);
-        let module_item_9_built = ModuleItemEnumDeclarationBuilder::default()
-            .enum_declaration(Box::new(enum_declaration))
-            .build()
-            .into_diagnostic()?;
+        let module_item_9_built = ModuleItemEnumDeclaration {
+            enum_declaration: Box::new(enum_declaration),
+        };
         let module_item_9_built = ModuleItem::EnumDeclaration(module_item_9_built);
         // Calling user action here
         self.user_grammar.module_item(&module_item_9_built)?;
@@ -23470,10 +23199,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let struct_declaration = pop_item!(self, struct_declaration, StructDeclaration, context);
-        let module_item_10_built = ModuleItemStructDeclarationBuilder::default()
-            .struct_declaration(Box::new(struct_declaration))
-            .build()
-            .into_diagnostic()?;
+        let module_item_10_built = ModuleItemStructDeclaration {
+            struct_declaration: Box::new(struct_declaration),
+        };
         let module_item_10_built = ModuleItem::StructDeclaration(module_item_10_built);
         // Calling user action here
         self.user_grammar.module_item(&module_item_10_built)?;
@@ -23494,10 +23222,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let module_named_block = pop_item!(self, module_named_block, ModuleNamedBlock, context);
-        let module_item_11_built = ModuleItemModuleNamedBlockBuilder::default()
-            .module_named_block(Box::new(module_named_block))
-            .build()
-            .into_diagnostic()?;
+        let module_item_11_built = ModuleItemModuleNamedBlock {
+            module_named_block: Box::new(module_named_block),
+        };
         let module_item_11_built = ModuleItem::ModuleNamedBlock(module_item_11_built);
         // Calling user action here
         self.user_grammar.module_item(&module_item_11_built)?;
@@ -23518,10 +23245,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let import_declaration = pop_item!(self, import_declaration, ImportDeclaration, context);
-        let module_item_12_built = ModuleItemImportDeclarationBuilder::default()
-            .import_declaration(Box::new(import_declaration))
-            .build()
-            .into_diagnostic()?;
+        let module_item_12_built = ModuleItemImportDeclaration {
+            import_declaration: Box::new(import_declaration),
+        };
         let module_item_12_built = ModuleItem::ImportDeclaration(module_item_12_built);
         // Calling user action here
         self.user_grammar.module_item(&module_item_12_built)?;
@@ -23562,15 +23288,14 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         );
         let identifier = pop_item!(self, identifier, Identifier, context);
         let interface = pop_item!(self, interface, Interface, context);
-        let interface_declaration_built = InterfaceDeclarationBuilder::default()
-            .interface(Box::new(interface))
-            .identifier(Box::new(identifier))
-            .interface_declaration_opt(interface_declaration_opt)
-            .l_brace(Box::new(l_brace))
-            .interface_declaration_list(interface_declaration_list)
-            .r_brace(Box::new(r_brace))
-            .build()
-            .into_diagnostic()?;
+        let interface_declaration_built = InterfaceDeclaration {
+            interface: Box::new(interface),
+            identifier: Box::new(identifier),
+            interface_declaration_opt,
+            l_brace: Box::new(l_brace),
+            interface_declaration_list,
+            r_brace: Box::new(r_brace),
+        };
         // Calling user action here
         self.user_grammar
             .interface_declaration(&interface_declaration_built)?;
@@ -23601,10 +23326,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let interface_item = pop_item!(self, interface_item, InterfaceItem, context);
-        let interface_declaration_list_0_built = InterfaceDeclarationListBuilder::default()
-            .interface_item(Box::new(interface_item))
-            .build()
-            .into_diagnostic()?;
+        let interface_declaration_list_0_built = InterfaceDeclarationList {
+            interface_item: Box::new(interface_item),
+        };
         // Add an element to the vector
         interface_declaration_list.push(interface_declaration_list_0_built);
         self.push(
@@ -23646,10 +23370,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let with_parameter = pop_item!(self, with_parameter, WithParameter, context);
-        let interface_declaration_opt_0_built = InterfaceDeclarationOptBuilder::default()
-            .with_parameter(Box::new(with_parameter))
-            .build()
-            .into_diagnostic()?;
+        let interface_declaration_opt_0_built = InterfaceDeclarationOpt {
+            with_parameter: Box::new(with_parameter),
+        };
         self.push(
             ASTType::InterfaceDeclarationOpt(Some(Box::new(interface_declaration_opt_0_built))),
             context,
@@ -23701,14 +23424,13 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             pop_item!(self, interface_named_block, InterfaceNamedBlock, context);
         let expression = pop_item!(self, expression, Expression, context);
         let r#if = pop_item!(self, r#if, If, context);
-        let interface_if_declaration_built = InterfaceIfDeclarationBuilder::default()
-            .r#if(Box::new(r#if))
-            .expression(Box::new(expression))
-            .interface_named_block(Box::new(interface_named_block))
-            .interface_if_declaration_list(interface_if_declaration_list)
-            .interface_if_declaration_opt(interface_if_declaration_opt)
-            .build()
-            .into_diagnostic()?;
+        let interface_if_declaration_built = InterfaceIfDeclaration {
+            r#if: Box::new(r#if),
+            expression: Box::new(expression),
+            interface_named_block: Box::new(interface_named_block),
+            interface_if_declaration_list,
+            interface_if_declaration_opt,
+        };
         // Calling user action here
         self.user_grammar
             .interface_if_declaration(&interface_if_declaration_built)?;
@@ -23750,13 +23472,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let expression = pop_item!(self, expression, Expression, context);
         let r#if = pop_item!(self, r#if, If, context);
         let r#else = pop_item!(self, r#else, Else, context);
-        let interface_if_declaration_list_0_built = InterfaceIfDeclarationListBuilder::default()
-            .interface_optional_named_block(Box::new(interface_optional_named_block))
-            .expression(Box::new(expression))
-            .r#if(Box::new(r#if))
-            .r#else(Box::new(r#else))
-            .build()
-            .into_diagnostic()?;
+        let interface_if_declaration_list_0_built = InterfaceIfDeclarationList {
+            interface_optional_named_block: Box::new(interface_optional_named_block),
+            expression: Box::new(expression),
+            r#if: Box::new(r#if),
+            r#else: Box::new(r#else),
+        };
         // Add an element to the vector
         interface_if_declaration_list.push(interface_if_declaration_list_0_built);
         self.push(
@@ -23805,11 +23526,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let r#else = pop_item!(self, r#else, Else, context);
-        let interface_if_declaration_opt_0_built = InterfaceIfDeclarationOptBuilder::default()
-            .r#else(Box::new(r#else))
-            .interface_optional_named_block(Box::new(interface_optional_named_block))
-            .build()
-            .into_diagnostic()?;
+        let interface_if_declaration_opt_0_built = InterfaceIfDeclarationOpt {
+            r#else: Box::new(r#else),
+            interface_optional_named_block: Box::new(interface_optional_named_block),
+        };
         self.push(
             ASTType::InterfaceIfDeclarationOpt(Some(Box::new(
                 interface_if_declaration_opt_0_built,
@@ -23867,17 +23587,16 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let r#in = pop_item!(self, r#in, In, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
         let r#for = pop_item!(self, r#for, For, context);
-        let interface_for_declaration_built = InterfaceForDeclarationBuilder::default()
-            .r#for(Box::new(r#for))
-            .identifier(Box::new(identifier))
-            .r#in(Box::new(r#in))
-            .expression(Box::new(expression))
-            .dot_dot(Box::new(dot_dot))
-            .expression0(Box::new(expression0))
-            .interface_for_declaration_opt(interface_for_declaration_opt)
-            .interface_named_block(Box::new(interface_named_block))
-            .build()
-            .into_diagnostic()?;
+        let interface_for_declaration_built = InterfaceForDeclaration {
+            r#for: Box::new(r#for),
+            identifier: Box::new(identifier),
+            r#in: Box::new(r#in),
+            expression: Box::new(expression),
+            dot_dot: Box::new(dot_dot),
+            expression0: Box::new(expression0),
+            interface_for_declaration_opt,
+            interface_named_block: Box::new(interface_named_block),
+        };
         // Calling user action here
         self.user_grammar
             .interface_for_declaration(&interface_for_declaration_built)?;
@@ -23905,12 +23624,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let expression = pop_item!(self, expression, Expression, context);
         let assignment_operator = pop_item!(self, assignment_operator, AssignmentOperator, context);
         let step = pop_item!(self, step, Step, context);
-        let interface_for_declaration_opt_0_built = InterfaceForDeclarationOptBuilder::default()
-            .step(Box::new(step))
-            .assignment_operator(Box::new(assignment_operator))
-            .expression(Box::new(expression))
-            .build()
-            .into_diagnostic()?;
+        let interface_for_declaration_opt_0_built = InterfaceForDeclarationOpt {
+            step: Box::new(step),
+            assignment_operator: Box::new(assignment_operator),
+            expression: Box::new(expression),
+        };
         self.push(
             ASTType::InterfaceForDeclarationOpt(Some(Box::new(
                 interface_for_declaration_opt_0_built,
@@ -23961,14 +23679,13 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let l_brace = pop_item!(self, l_brace, LBrace, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
         let colon = pop_item!(self, colon, Colon, context);
-        let interface_named_block_built = InterfaceNamedBlockBuilder::default()
-            .colon(Box::new(colon))
-            .identifier(Box::new(identifier))
-            .l_brace(Box::new(l_brace))
-            .interface_named_block_list(interface_named_block_list)
-            .r_brace(Box::new(r_brace))
-            .build()
-            .into_diagnostic()?;
+        let interface_named_block_built = InterfaceNamedBlock {
+            colon: Box::new(colon),
+            identifier: Box::new(identifier),
+            l_brace: Box::new(l_brace),
+            interface_named_block_list,
+            r_brace: Box::new(r_brace),
+        };
         // Calling user action here
         self.user_grammar
             .interface_named_block(&interface_named_block_built)?;
@@ -23999,10 +23716,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let interface_item = pop_item!(self, interface_item, InterfaceItem, context);
-        let interface_named_block_list_0_built = InterfaceNamedBlockListBuilder::default()
-            .interface_item(Box::new(interface_item))
-            .build()
-            .into_diagnostic()?;
+        let interface_named_block_list_0_built = InterfaceNamedBlockList {
+            interface_item: Box::new(interface_item),
+        };
         // Add an element to the vector
         interface_named_block_list.push(interface_named_block_list_0_built);
         self.push(
@@ -24060,13 +23776,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             InterfaceOptionalNamedBlockOpt,
             context
         );
-        let interface_optional_named_block_built = InterfaceOptionalNamedBlockBuilder::default()
-            .interface_optional_named_block_opt(interface_optional_named_block_opt)
-            .l_brace(Box::new(l_brace))
-            .interface_optional_named_block_list(interface_optional_named_block_list)
-            .r_brace(Box::new(r_brace))
-            .build()
-            .into_diagnostic()?;
+        let interface_optional_named_block_built = InterfaceOptionalNamedBlock {
+            interface_optional_named_block_opt,
+            l_brace: Box::new(l_brace),
+            interface_optional_named_block_list,
+            r_brace: Box::new(r_brace),
+        };
         // Calling user action here
         self.user_grammar
             .interface_optional_named_block(&interface_optional_named_block_built)?;
@@ -24097,11 +23812,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let interface_item = pop_item!(self, interface_item, InterfaceItem, context);
-        let interface_optional_named_block_list_0_built =
-            InterfaceOptionalNamedBlockListBuilder::default()
-                .interface_item(Box::new(interface_item))
-                .build()
-                .into_diagnostic()?;
+        let interface_optional_named_block_list_0_built = InterfaceOptionalNamedBlockList {
+            interface_item: Box::new(interface_item),
+        };
         // Add an element to the vector
         interface_optional_named_block_list.push(interface_optional_named_block_list_0_built);
         self.push(
@@ -24145,12 +23858,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let identifier = pop_item!(self, identifier, Identifier, context);
         let colon = pop_item!(self, colon, Colon, context);
-        let interface_optional_named_block_opt_0_built =
-            InterfaceOptionalNamedBlockOptBuilder::default()
-                .colon(Box::new(colon))
-                .identifier(Box::new(identifier))
-                .build()
-                .into_diagnostic()?;
+        let interface_optional_named_block_opt_0_built = InterfaceOptionalNamedBlockOpt {
+            colon: Box::new(colon),
+            identifier: Box::new(identifier),
+        };
         self.push(
             ASTType::InterfaceOptionalNamedBlockOpt(Some(Box::new(
                 interface_optional_named_block_opt_0_built,
@@ -24188,10 +23899,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let var_declaration = pop_item!(self, var_declaration, VarDeclaration, context);
-        let interface_item_0_built = InterfaceItemVarDeclarationBuilder::default()
-            .var_declaration(Box::new(var_declaration))
-            .build()
-            .into_diagnostic()?;
+        let interface_item_0_built = InterfaceItemVarDeclaration {
+            var_declaration: Box::new(var_declaration),
+        };
         let interface_item_0_built = InterfaceItem::VarDeclaration(interface_item_0_built);
         // Calling user action here
         self.user_grammar.interface_item(&interface_item_0_built)?;
@@ -24213,10 +23923,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let localparam_declaration =
             pop_item!(self, localparam_declaration, LocalparamDeclaration, context);
-        let interface_item_1_built = InterfaceItemLocalparamDeclarationBuilder::default()
-            .localparam_declaration(Box::new(localparam_declaration))
-            .build()
-            .into_diagnostic()?;
+        let interface_item_1_built = InterfaceItemLocalparamDeclaration {
+            localparam_declaration: Box::new(localparam_declaration),
+        };
         let interface_item_1_built = InterfaceItem::LocalparamDeclaration(interface_item_1_built);
         // Calling user action here
         self.user_grammar.interface_item(&interface_item_1_built)?;
@@ -24237,10 +23946,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let modport_declaration = pop_item!(self, modport_declaration, ModportDeclaration, context);
-        let interface_item_2_built = InterfaceItemModportDeclarationBuilder::default()
-            .modport_declaration(Box::new(modport_declaration))
-            .build()
-            .into_diagnostic()?;
+        let interface_item_2_built = InterfaceItemModportDeclaration {
+            modport_declaration: Box::new(modport_declaration),
+        };
         let interface_item_2_built = InterfaceItem::ModportDeclaration(interface_item_2_built);
         // Calling user action here
         self.user_grammar.interface_item(&interface_item_2_built)?;
@@ -24266,10 +23974,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             InterfaceIfDeclaration,
             context
         );
-        let interface_item_3_built = InterfaceItemInterfaceIfDeclarationBuilder::default()
-            .interface_if_declaration(Box::new(interface_if_declaration))
-            .build()
-            .into_diagnostic()?;
+        let interface_item_3_built = InterfaceItemInterfaceIfDeclaration {
+            interface_if_declaration: Box::new(interface_if_declaration),
+        };
         let interface_item_3_built = InterfaceItem::InterfaceIfDeclaration(interface_item_3_built);
         // Calling user action here
         self.user_grammar.interface_item(&interface_item_3_built)?;
@@ -24295,10 +24002,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             InterfaceForDeclaration,
             context
         );
-        let interface_item_4_built = InterfaceItemInterfaceForDeclarationBuilder::default()
-            .interface_for_declaration(Box::new(interface_for_declaration))
-            .build()
-            .into_diagnostic()?;
+        let interface_item_4_built = InterfaceItemInterfaceForDeclaration {
+            interface_for_declaration: Box::new(interface_for_declaration),
+        };
         let interface_item_4_built = InterfaceItem::InterfaceForDeclaration(interface_item_4_built);
         // Calling user action here
         self.user_grammar.interface_item(&interface_item_4_built)?;
@@ -24319,10 +24025,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let enum_declaration = pop_item!(self, enum_declaration, EnumDeclaration, context);
-        let interface_item_5_built = InterfaceItemEnumDeclarationBuilder::default()
-            .enum_declaration(Box::new(enum_declaration))
-            .build()
-            .into_diagnostic()?;
+        let interface_item_5_built = InterfaceItemEnumDeclaration {
+            enum_declaration: Box::new(enum_declaration),
+        };
         let interface_item_5_built = InterfaceItem::EnumDeclaration(interface_item_5_built);
         // Calling user action here
         self.user_grammar.interface_item(&interface_item_5_built)?;
@@ -24343,10 +24048,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let struct_declaration = pop_item!(self, struct_declaration, StructDeclaration, context);
-        let interface_item_6_built = InterfaceItemStructDeclarationBuilder::default()
-            .struct_declaration(Box::new(struct_declaration))
-            .build()
-            .into_diagnostic()?;
+        let interface_item_6_built = InterfaceItemStructDeclaration {
+            struct_declaration: Box::new(struct_declaration),
+        };
         let interface_item_6_built = InterfaceItem::StructDeclaration(interface_item_6_built);
         // Calling user action here
         self.user_grammar.interface_item(&interface_item_6_built)?;
@@ -24368,10 +24072,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let interface_named_block =
             pop_item!(self, interface_named_block, InterfaceNamedBlock, context);
-        let interface_item_7_built = InterfaceItemInterfaceNamedBlockBuilder::default()
-            .interface_named_block(Box::new(interface_named_block))
-            .build()
-            .into_diagnostic()?;
+        let interface_item_7_built = InterfaceItemInterfaceNamedBlock {
+            interface_named_block: Box::new(interface_named_block),
+        };
         let interface_item_7_built = InterfaceItem::InterfaceNamedBlock(interface_item_7_built);
         // Calling user action here
         self.user_grammar.interface_item(&interface_item_7_built)?;
@@ -24393,10 +24096,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let function_declaration =
             pop_item!(self, function_declaration, FunctionDeclaration, context);
-        let interface_item_8_built = InterfaceItemFunctionDeclarationBuilder::default()
-            .function_declaration(Box::new(function_declaration))
-            .build()
-            .into_diagnostic()?;
+        let interface_item_8_built = InterfaceItemFunctionDeclaration {
+            function_declaration: Box::new(function_declaration),
+        };
         let interface_item_8_built = InterfaceItem::FunctionDeclaration(interface_item_8_built);
         // Calling user action here
         self.user_grammar.interface_item(&interface_item_8_built)?;
@@ -24417,10 +24119,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let import_declaration = pop_item!(self, import_declaration, ImportDeclaration, context);
-        let interface_item_9_built = InterfaceItemImportDeclarationBuilder::default()
-            .import_declaration(Box::new(import_declaration))
-            .build()
-            .into_diagnostic()?;
+        let interface_item_9_built = InterfaceItemImportDeclaration {
+            import_declaration: Box::new(import_declaration),
+        };
         let interface_item_9_built = InterfaceItem::ImportDeclaration(interface_item_9_built);
         // Calling user action here
         self.user_grammar.interface_item(&interface_item_9_built)?;
@@ -24454,14 +24155,13 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let l_brace = pop_item!(self, l_brace, LBrace, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
         let package = pop_item!(self, package, Package, context);
-        let package_declaration_built = PackageDeclarationBuilder::default()
-            .package(Box::new(package))
-            .identifier(Box::new(identifier))
-            .l_brace(Box::new(l_brace))
-            .package_declaration_list(package_declaration_list)
-            .r_brace(Box::new(r_brace))
-            .build()
-            .into_diagnostic()?;
+        let package_declaration_built = PackageDeclaration {
+            package: Box::new(package),
+            identifier: Box::new(identifier),
+            l_brace: Box::new(l_brace),
+            package_declaration_list,
+            r_brace: Box::new(r_brace),
+        };
         // Calling user action here
         self.user_grammar
             .package_declaration(&package_declaration_built)?;
@@ -24492,10 +24192,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             context
         );
         let package_item = pop_item!(self, package_item, PackageItem, context);
-        let package_declaration_list_0_built = PackageDeclarationListBuilder::default()
-            .package_item(Box::new(package_item))
-            .build()
-            .into_diagnostic()?;
+        let package_declaration_list_0_built = PackageDeclarationList {
+            package_item: Box::new(package_item),
+        };
         // Add an element to the vector
         package_declaration_list.push(package_declaration_list_0_built);
         self.push(
@@ -24534,10 +24233,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let var_declaration = pop_item!(self, var_declaration, VarDeclaration, context);
-        let package_item_0_built = PackageItemVarDeclarationBuilder::default()
-            .var_declaration(Box::new(var_declaration))
-            .build()
-            .into_diagnostic()?;
+        let package_item_0_built = PackageItemVarDeclaration {
+            var_declaration: Box::new(var_declaration),
+        };
         let package_item_0_built = PackageItem::VarDeclaration(package_item_0_built);
         // Calling user action here
         self.user_grammar.package_item(&package_item_0_built)?;
@@ -24559,10 +24257,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let localparam_declaration =
             pop_item!(self, localparam_declaration, LocalparamDeclaration, context);
-        let package_item_1_built = PackageItemLocalparamDeclarationBuilder::default()
-            .localparam_declaration(Box::new(localparam_declaration))
-            .build()
-            .into_diagnostic()?;
+        let package_item_1_built = PackageItemLocalparamDeclaration {
+            localparam_declaration: Box::new(localparam_declaration),
+        };
         let package_item_1_built = PackageItem::LocalparamDeclaration(package_item_1_built);
         // Calling user action here
         self.user_grammar.package_item(&package_item_1_built)?;
@@ -24583,10 +24280,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let enum_declaration = pop_item!(self, enum_declaration, EnumDeclaration, context);
-        let package_item_2_built = PackageItemEnumDeclarationBuilder::default()
-            .enum_declaration(Box::new(enum_declaration))
-            .build()
-            .into_diagnostic()?;
+        let package_item_2_built = PackageItemEnumDeclaration {
+            enum_declaration: Box::new(enum_declaration),
+        };
         let package_item_2_built = PackageItem::EnumDeclaration(package_item_2_built);
         // Calling user action here
         self.user_grammar.package_item(&package_item_2_built)?;
@@ -24607,10 +24303,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let struct_declaration = pop_item!(self, struct_declaration, StructDeclaration, context);
-        let package_item_3_built = PackageItemStructDeclarationBuilder::default()
-            .struct_declaration(Box::new(struct_declaration))
-            .build()
-            .into_diagnostic()?;
+        let package_item_3_built = PackageItemStructDeclaration {
+            struct_declaration: Box::new(struct_declaration),
+        };
         let package_item_3_built = PackageItem::StructDeclaration(package_item_3_built);
         // Calling user action here
         self.user_grammar.package_item(&package_item_3_built)?;
@@ -24632,10 +24327,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let function_declaration =
             pop_item!(self, function_declaration, FunctionDeclaration, context);
-        let package_item_4_built = PackageItemFunctionDeclarationBuilder::default()
-            .function_declaration(Box::new(function_declaration))
-            .build()
-            .into_diagnostic()?;
+        let package_item_4_built = PackageItemFunctionDeclaration {
+            function_declaration: Box::new(function_declaration),
+        };
         let package_item_4_built = PackageItem::FunctionDeclaration(package_item_4_built);
         // Calling user action here
         self.user_grammar.package_item(&package_item_4_built)?;
@@ -24656,10 +24350,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let import_declaration = pop_item!(self, import_declaration, ImportDeclaration, context);
-        let package_item_5_built = PackageItemImportDeclarationBuilder::default()
-            .import_declaration(Box::new(import_declaration))
-            .build()
-            .into_diagnostic()?;
+        let package_item_5_built = PackageItemImportDeclaration {
+            import_declaration: Box::new(import_declaration),
+        };
         let package_item_5_built = PackageItem::ImportDeclaration(package_item_5_built);
         // Calling user action here
         self.user_grammar.package_item(&package_item_5_built)?;
@@ -24680,10 +24373,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let export_declaration = pop_item!(self, export_declaration, ExportDeclaration, context);
-        let package_item_6_built = PackageItemExportDeclarationBuilder::default()
-            .export_declaration(Box::new(export_declaration))
-            .build()
-            .into_diagnostic()?;
+        let package_item_6_built = PackageItemExportDeclaration {
+            export_declaration: Box::new(export_declaration),
+        };
         let package_item_6_built = PackageItem::ExportDeclaration(package_item_6_built);
         // Calling user action here
         self.user_grammar.package_item(&package_item_6_built)?;
@@ -24704,10 +24396,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let module_declaration = pop_item!(self, module_declaration, ModuleDeclaration, context);
-        let description_0_built = DescriptionModuleDeclarationBuilder::default()
-            .module_declaration(Box::new(module_declaration))
-            .build()
-            .into_diagnostic()?;
+        let description_0_built = DescriptionModuleDeclaration {
+            module_declaration: Box::new(module_declaration),
+        };
         let description_0_built = Description::ModuleDeclaration(description_0_built);
         // Calling user action here
         self.user_grammar.description(&description_0_built)?;
@@ -24729,10 +24420,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let interface_declaration =
             pop_item!(self, interface_declaration, InterfaceDeclaration, context);
-        let description_1_built = DescriptionInterfaceDeclarationBuilder::default()
-            .interface_declaration(Box::new(interface_declaration))
-            .build()
-            .into_diagnostic()?;
+        let description_1_built = DescriptionInterfaceDeclaration {
+            interface_declaration: Box::new(interface_declaration),
+        };
         let description_1_built = Description::InterfaceDeclaration(description_1_built);
         // Calling user action here
         self.user_grammar.description(&description_1_built)?;
@@ -24753,10 +24443,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let package_declaration = pop_item!(self, package_declaration, PackageDeclaration, context);
-        let description_2_built = DescriptionPackageDeclarationBuilder::default()
-            .package_declaration(Box::new(package_declaration))
-            .build()
-            .into_diagnostic()?;
+        let description_2_built = DescriptionPackageDeclaration {
+            package_declaration: Box::new(package_declaration),
+        };
         let description_2_built = Description::PackageDeclaration(description_2_built);
         // Calling user action here
         self.user_grammar.description(&description_2_built)?;
@@ -24777,10 +24466,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let import_declaration = pop_item!(self, import_declaration, ImportDeclaration, context);
-        let description_3_built = DescriptionImportDeclarationBuilder::default()
-            .import_declaration(Box::new(import_declaration))
-            .build()
-            .into_diagnostic()?;
+        let description_3_built = DescriptionImportDeclaration {
+            import_declaration: Box::new(import_declaration),
+        };
         let description_3_built = Description::ImportDeclaration(description_3_built);
         // Calling user action here
         self.user_grammar.description(&description_3_built)?;
@@ -24803,11 +24491,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let veryl_list = pop_and_reverse_item!(self, veryl_list, VerylList, context);
         let start = pop_item!(self, start, Start, context);
-        let veryl_built = VerylBuilder::default()
-            .start(Box::new(start))
-            .veryl_list(veryl_list)
-            .build()
-            .into_diagnostic()?;
+        let veryl_built = Veryl {
+            start: Box::new(start),
+            veryl_list,
+        };
         // Calling user action here
         self.user_grammar.veryl(&veryl_built)?;
         self.push(ASTType::Veryl(veryl_built), context);
@@ -24829,10 +24516,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let mut veryl_list = pop_item!(self, veryl_list, VerylList, context);
         let description = pop_item!(self, description, Description, context);
-        let veryl_list_0_built = VerylListBuilder::default()
-            .description(Box::new(description))
-            .build()
-            .into_diagnostic()?;
+        let veryl_list_0_built = VerylList {
+            description: Box::new(description),
+        };
         // Add an element to the vector
         veryl_list.push(veryl_list_0_built);
         self.push(ASTType::VerylList(veryl_list), context);
@@ -25908,7 +25594,11 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             633 => self.veryl(&children[0], &children[1], parse_tree),
             634 => self.veryl_list_0(&children[0], &children[1], parse_tree),
             635 => self.veryl_list_1(parse_tree),
-            _ => Err(miette!("Unhandled production number: {}", prod_num)),
+            _ => Err(ParserError::InternalError(format!(
+                "Unhandled production number: {}",
+                prod_num
+            ))
+            .into()),
         }
     }
 }
