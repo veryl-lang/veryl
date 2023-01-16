@@ -1,8 +1,6 @@
 use crate::analyzer_error::AnalyzerError;
-use crate::namespace_table;
 use crate::symbol::SymbolKind;
 use crate::symbol_table::{self, SymbolPath};
-use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
@@ -38,13 +36,7 @@ impl<'a> VerylGrammarTrait for CheckFunctionArity<'a> {
                     return Ok(());
                 }
 
-                let path: SymbolPath = x.expression_identifier.as_ref().into();
-                let namespace = namespace_table::get(
-                    x.expression_identifier.identifier.identifier_token.token.id,
-                )
-                .unwrap();
-                let symbol = symbol_table::get(&path, &namespace);
-
+                let symbol = symbol_table::resolve(x.expression_identifier.as_ref());
                 let arity = if let Some(symbol) = symbol {
                     if let SymbolKind::Function(x) = symbol.kind {
                         Some(x.ports.len())
@@ -65,8 +57,13 @@ impl<'a> VerylGrammarTrait for CheckFunctionArity<'a> {
 
                 if let Some(arity) = arity {
                     if arity != args {
-                        let name = resource_table::get_str_value(*path.as_slice().last().unwrap())
-                            .unwrap();
+                        let name = format!(
+                            "{}",
+                            SymbolPath::from(x.expression_identifier.as_ref())
+                                .as_slice()
+                                .last()
+                                .unwrap()
+                        );
                         self.errors.push(AnalyzerError::mismatch_arity(
                             &name,
                             arity,

@@ -190,15 +190,7 @@ fn main() -> Result<ExitCode> {
         Commands::Init(x) => cmd_init::CmdInit::new(x).exec()?,
         Commands::Fmt(x) => cmd_fmt::CmdFmt::new(x).exec(&metadata)?,
         Commands::Check(x) => cmd_check::CmdCheck::new(x).exec(&metadata)?,
-        Commands::Build(x) => {
-            let opt_check = OptCheck {
-                files: x.files.clone(),
-                quiet: x.quiet,
-                verbose: x.verbose,
-            };
-            cmd_check::CmdCheck::new(opt_check).exec(&metadata)?;
-            cmd_build::CmdBuild::new(x).exec(&metadata)?
-        }
+        Commands::Build(x) => cmd_build::CmdBuild::new(x).exec(&metadata)?,
         Commands::Metadata(x) => cmd_metadata::CmdMetadata::new(x).exec(&metadata)?,
         Commands::Dump(x) => cmd_dump::CmdDump::new(x).exec(&metadata)?,
     };

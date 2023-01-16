@@ -1,7 +1,5 @@
 use crate::analyzer_error::AnalyzerError;
-use crate::namespace_table;
 use crate::symbol_table::{self, SymbolPath};
-use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
@@ -31,19 +29,16 @@ impl<'a> Handler for CreateReference<'a> {
 impl<'a> VerylGrammarTrait for CreateReference<'a> {
     fn hierarchical_identifier(&mut self, arg: &HierarchicalIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let namespace = namespace_table::get(arg.identifier.identifier_token.token.id).unwrap();
-            let path = SymbolPath::from(arg);
-            let symbol = symbol_table::get(&path, &namespace);
+            let symbol = symbol_table::resolve(arg);
             if let Some(symbol) = symbol {
                 symbol_table::add_reference(
                     symbol.token.id,
                     &arg.identifier.identifier_token.token,
                 );
             } else {
-                let is_single_identifier = path.as_slice().len() == 1;
+                let is_single_identifier = SymbolPath::from(arg).as_slice().len() == 1;
                 if is_single_identifier {
-                    let name =
-                        resource_table::get_str_value(*path.as_slice().last().unwrap()).unwrap();
+                    let name = arg.identifier.identifier_token.text();
                     self.errors.push(AnalyzerError::undefined_identifier(
                         &name,
                         self.text,
@@ -62,19 +57,16 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                 return Ok(());
             }
 
-            let namespace = namespace_table::get(arg.identifier.identifier_token.token.id).unwrap();
-            let path = SymbolPath::from(arg);
-            let symbol = symbol_table::get(&path, &namespace);
+            let symbol = symbol_table::resolve(arg);
             if let Some(symbol) = symbol {
                 symbol_table::add_reference(
                     symbol.token.id,
                     &arg.identifier.identifier_token.token,
                 );
             } else {
-                let is_single_identifier = path.as_slice().len() == 1;
+                let is_single_identifier = SymbolPath::from(arg).as_slice().len() == 1;
                 if is_single_identifier {
-                    let name =
-                        resource_table::get_str_value(*path.as_slice().last().unwrap()).unwrap();
+                    let name = arg.identifier.identifier_token.text();
                     self.errors.push(AnalyzerError::undefined_identifier(
                         &name,
                         self.text,
@@ -88,9 +80,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
 
     fn modport_item(&mut self, arg: &ModportItem) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let namespace = namespace_table::get(arg.identifier.identifier_token.token.id).unwrap();
-            let path = SymbolPath::from(arg.identifier.as_ref());
-            let symbol = symbol_table::get(&path, &namespace);
+            let symbol = symbol_table::resolve(arg.identifier.as_ref());
             if let Some(symbol) = symbol {
                 symbol_table::add_reference(
                     symbol.token.id,
@@ -103,10 +93,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
 
     fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let namespace =
-                namespace_table::get(arg.identifier0.identifier_token.token.id).unwrap();
-            let path = SymbolPath::from(arg.identifier0.as_ref());
-            let symbol = symbol_table::get(&path, &namespace);
+            let symbol = symbol_table::resolve(arg.identifier0.as_ref());
             if let Some(symbol) = symbol {
                 symbol_table::add_reference(
                     symbol.token.id,

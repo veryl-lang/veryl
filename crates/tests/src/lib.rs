@@ -80,6 +80,7 @@ mod formatter {
 #[cfg(test)]
 mod emitter {
     use std::fs;
+    use veryl_analyzer::Analyzer;
     use veryl_emitter::Emitter;
     use veryl_metadata::Metadata;
     use veryl_parser::Parser;
@@ -92,6 +93,8 @@ mod emitter {
         let input = fs::read_to_string(&file).unwrap();
 
         let ret = Parser::parse(&input, &file).unwrap();
+        let mut analyzer = Analyzer::new(&input);
+        let _ = analyzer.analyze(&ret.veryl);
         let mut emitter = Emitter::new(&metadata);
         emitter.emit(&ret.veryl);
 

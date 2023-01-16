@@ -111,11 +111,17 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
     }
 
     fn enum_declaration(&mut self, arg: &EnumDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            let r#type = arg.r#type.as_ref().into();
-            let property = EnumProperty { r#type };
-            let kind = SymbolKind::Enum(property);
-            self.insert_symbol(&arg.identifier.identifier_token, kind);
+        match self.point {
+            HandlerPoint::Before => {
+                let r#type = arg.r#type.as_ref().into();
+                let property = EnumProperty { r#type };
+                let kind = SymbolKind::Enum(property);
+                self.insert_symbol(&arg.identifier.identifier_token, kind);
+
+                let name = arg.identifier.identifier_token.token.text;
+                self.namespace.push(name)
+            }
+            HandlerPoint::After => self.namespace.pop(),
         }
         Ok(())
     }

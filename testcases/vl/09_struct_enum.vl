@@ -12,4 +12,10 @@ module Module09 {
         Y = 2,
         Z,
     }
+
+    var a: A ;
+    var b: B ;
+
+    assign a.a = 1;
+    assign b   = B::X;
 }

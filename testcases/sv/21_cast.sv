@@ -3,13 +3,13 @@ module Module21 ;
     logic  b;
     typedef 
     enum logic  {
-        A,
-        B
+        EnumA_A,
+        EnumA_B
     } EnumA;
     typedef 
     enum logic  {
-        C,
-        D
+        EnumB_C,
+        EnumB_D
     } EnumB;
 
     assign a = EnumA'(EnumB'(b));

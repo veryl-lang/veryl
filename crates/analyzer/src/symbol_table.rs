@@ -1,4 +1,5 @@
 use crate::namespace::Namespace;
+use crate::namespace_table;
 use crate::symbol::{Symbol, SymbolKind};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -87,6 +88,36 @@ impl From<&syntax_tree::ExpressionIdentifier> for SymbolPath {
     }
 }
 
+pub struct SymbolPathNamespace(SymbolPath, Namespace);
+
+impl From<&syntax_tree::Identifier> for SymbolPathNamespace {
+    fn from(value: &syntax_tree::Identifier) -> Self {
+        let namespace = namespace_table::get(value.identifier_token.token.id).unwrap();
+        SymbolPathNamespace(value.into(), namespace)
+    }
+}
+
+impl From<&syntax_tree::HierarchicalIdentifier> for SymbolPathNamespace {
+    fn from(value: &syntax_tree::HierarchicalIdentifier) -> Self {
+        let namespace = namespace_table::get(value.identifier.identifier_token.token.id).unwrap();
+        SymbolPathNamespace(value.into(), namespace)
+    }
+}
+
+impl From<&syntax_tree::ScopedIdentifier> for SymbolPathNamespace {
+    fn from(value: &syntax_tree::ScopedIdentifier) -> Self {
+        let namespace = namespace_table::get(value.identifier.identifier_token.token.id).unwrap();
+        SymbolPathNamespace(value.into(), namespace)
+    }
+}
+
+impl From<&syntax_tree::ExpressionIdentifier> for SymbolPathNamespace {
+    fn from(value: &syntax_tree::ExpressionIdentifier) -> Self {
+        let namespace = namespace_table::get(value.identifier.identifier_token.token.id).unwrap();
+        SymbolPathNamespace(value.into(), namespace)
+    }
+}
+
 #[derive(Clone, Default, Debug)]
 pub struct SymbolTable {
     table: HashMap<StrId, Vec<Symbol>>,
@@ -128,6 +159,9 @@ impl SymbolTable {
                         }
                         SymbolKind::Package => {
                             namespace = Namespace::default();
+                            namespace.push(ret.token.text);
+                        }
+                        SymbolKind::Enum(_) => {
                             namespace.push(ret.token.text);
                         }
                         SymbolKind::Instance(ref x) => {
@@ -222,6 +256,11 @@ pub fn insert(token: &Token, symbol: Symbol) -> bool {
 
 pub fn get(path: &SymbolPath, namespace: &Namespace) -> Option<Symbol> {
     SYMBOL_TABLE.with(|f| f.borrow().get(path, namespace).cloned())
+}
+
+pub fn resolve<T: Into<SymbolPathNamespace>>(path: T) -> Option<Symbol> {
+    let SymbolPathNamespace(path, namespace) = path.into();
+    SYMBOL_TABLE.with(|f| f.borrow().get(&path, &namespace).cloned())
 }
 
 pub fn get_all() -> Vec<Symbol> {

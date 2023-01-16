@@ -16,7 +16,7 @@ pub struct CmdCheck {
 #[error("Check error")]
 pub struct CheckError {
     #[related]
-    related: Vec<AnalyzerError>,
+    pub related: Vec<AnalyzerError>,
 }
 
 impl CmdCheck {

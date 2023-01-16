@@ -14,5 +14,6 @@ edition               = "2021"
 
 [dependencies]
 serde          = {workspace = true}
+veryl-analyzer = {version = "0.1.14", path = "../analyzer"}
 veryl-metadata = {version = "0.1.14", path = "../metadata"}
 veryl-parser   = {version = "0.1.14", path = "../parser"}

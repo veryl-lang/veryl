@@ -1,7 +1,6 @@
 use crate::analyzer_error::AnalyzerError;
-use crate::namespace_table;
 use crate::symbol::SymbolKind;
-use crate::symbol_table::{self, SymbolPath};
+use crate::symbol_table;
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
@@ -32,8 +31,6 @@ impl<'a> Handler for CheckInstance<'a> {
 impl<'a> VerylGrammarTrait for CheckInstance<'a> {
     fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let path = &SymbolPath::new(&[arg.identifier0.identifier_token.token.text]);
-
             let mut connected_ports = Vec::new();
             if let Some(ref x) = arg.inst_declaration_opt1 {
                 if let Some(ref x) = x.inst_declaration_opt2 {
@@ -46,16 +43,13 @@ impl<'a> VerylGrammarTrait for CheckInstance<'a> {
                 }
             }
 
-            let namespace = namespace_table::get(arg.identifier.identifier_token.token.id).unwrap();
-            let symbol = symbol_table::get(path, &namespace);
+            let symbol = symbol_table::resolve(arg.identifier0.as_ref());
+            let name = arg.identifier0.identifier_token.text();
             if let Some(symbol) = symbol {
                 match symbol.kind {
                     SymbolKind::Module(ref x) => {
                         for port in &x.ports {
                             if !connected_ports.contains(&port.name) {
-                                let name =
-                                    resource_table::get_str_value(*path.as_slice().last().unwrap())
-                                        .unwrap();
                                 let port = resource_table::get_str_value(port.name).unwrap();
                                 self.errors.push(AnalyzerError::missing_port(
                                     &name,
@@ -67,9 +61,6 @@ impl<'a> VerylGrammarTrait for CheckInstance<'a> {
                         }
                         for port in &connected_ports {
                             if !x.ports.iter().any(|x| &x.name == port) {
-                                let name =
-                                    resource_table::get_str_value(*path.as_slice().last().unwrap())
-                                        .unwrap();
                                 let port = resource_table::get_str_value(*port).unwrap();
                                 self.errors.push(AnalyzerError::unknown_port(
                                     &name,
@@ -82,8 +73,6 @@ impl<'a> VerylGrammarTrait for CheckInstance<'a> {
                     }
                     SymbolKind::Interface(_) => (),
                     _ => {
-                        let name = resource_table::get_str_value(*path.as_slice().last().unwrap())
-                            .unwrap();
                         self.errors.push(AnalyzerError::mismatch_type(
                             &name,
                             "module or interface",

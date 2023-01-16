@@ -14,9 +14,9 @@ package Package17;
 
     // enum declaration
     typedef enum logic [2-1:0] {
-        X = 1,
-        Y = 2,
-        Z
+        B_X = 1,
+        B_Y = 2,
+        B_Z
     } B;
 
     // function declaration

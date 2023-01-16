@@ -1,4 +1,6 @@
 use crate::aligner::{Aligner, Location};
+use veryl_analyzer::symbol::SymbolKind;
+use veryl_analyzer::symbol_table;
 use veryl_metadata::{ClockType, Metadata, ResetType};
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
@@ -25,6 +27,7 @@ pub struct Emitter {
     in_direction_modport: bool,
     reset_signal: Option<String>,
     default_block: Option<String>,
+    enum_name: Option<String>,
 }
 
 impl Default for Emitter {
@@ -48,6 +51,7 @@ impl Default for Emitter {
             in_direction_modport: false,
             reset_signal: None,
             default_block: None,
+            enum_name: None,
         }
     }
 }
@@ -284,6 +288,48 @@ impl VerylWalker for Emitter {
                 self.colon_colon(&x.colon_colon);
             }
             self.identifier(&x.identifier);
+        }
+    }
+
+    /// Semantic action for non-terminal 'ExpressionIdentifier'
+    fn expression_identifier(&mut self, arg: &ExpressionIdentifier) {
+        if let Some(ref x) = arg.expression_identifier_opt {
+            self.dollar(&x.dollar);
+        }
+
+        self.identifier(&arg.identifier);
+        let symbol = symbol_table::resolve(arg);
+        let is_enum_member = if let Some(ref symbol) = symbol {
+            matches!(symbol.kind, SymbolKind::EnumMember(_))
+        } else {
+            false
+        };
+
+        match &*arg.expression_identifier_group {
+            ExpressionIdentifierGroup::ColonColonIdentifierExpressionIdentifierGroupList(x) => {
+                if is_enum_member {
+                    self.str("_");
+                } else {
+                    self.colon_colon(&x.colon_colon);
+                }
+                self.identifier(&x.identifier);
+                for x in &x.expression_identifier_group_list {
+                    self.colon_colon(&x.colon_colon);
+                    self.identifier(&x.identifier);
+                }
+            }
+            ExpressionIdentifierGroup::ExpressionIdentifierGroupList0ExpressionIdentifierGroupList1(x) => {
+                for x in &x.expression_identifier_group_list0 {
+                    self.range(&x.range);
+                }
+                for x in &x.expression_identifier_group_list1 {
+                    self.dot(&x.dot);
+                    self.identifier(&x.identifier);
+                    for x in &x.expression_identifier_group_list1_list {
+                        self.range(&x.range);
+                    }
+                }
+            }
         }
     }
 
@@ -1011,6 +1057,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'EnumDeclaration'
     fn enum_declaration(&mut self, arg: &EnumDeclaration) {
+        self.enum_name = Some(arg.identifier.identifier_token.text());
         self.str("typedef");
         self.space(1);
         self.r#enum(&arg.r#enum);
@@ -1044,6 +1091,8 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'EnumItem'
     fn enum_item(&mut self, arg: &EnumItem) {
+        self.str(&self.enum_name.clone().unwrap());
+        self.str("_");
         self.identifier(&arg.identifier);
         if let Some(ref x) = arg.enum_item_opt {
             self.space(1);

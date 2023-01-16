@@ -189,7 +189,6 @@ pub enum TypeKind {
     F32,
     F64,
     UserDefined(Vec<StrId>),
-    Modport(StrId, StrId),
 }
 
 #[derive(Debug, Clone)]
@@ -219,9 +218,6 @@ impl fmt::Display for Type {
                 for path in &paths[1..] {
                     text.push_str(&format!("::{}", path));
                 }
-            }
-            TypeKind::Modport(interface, modport) => {
-                text.push_str(&format!("{}.{}", interface, modport));
             }
         }
         if !self.width.is_empty() {
