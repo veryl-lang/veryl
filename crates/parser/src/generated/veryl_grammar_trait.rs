@@ -1316,8 +1316,8 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'ScopedOrHierIdentifier'
-    fn scoped_or_hier_identifier(&mut self, _arg: &ScopedOrHierIdentifier) -> Result<()> {
+    /// Semantic action for non-terminal 'ExpressionIdentifier'
+    fn expression_identifier(&mut self, _arg: &ExpressionIdentifier) -> Result<()> {
         Ok(())
     }
 
@@ -1819,33 +1819,32 @@ pub struct RealNumberExponent {
 ///
 /// Type derived for production 274
 ///
-/// ScopedOrHierIdentifierGroup: ColonColon Identifier ScopedOrHierIdentifierGroupList /* Vec */;
+/// ExpressionIdentifierGroup: ColonColon Identifier ExpressionIdentifierGroupList /* Vec */;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct ScopedOrHierIdentifierGroupColonColonIdentifierScopedOrHierIdentifierGroupList {
+pub struct ExpressionIdentifierGroupColonColonIdentifierExpressionIdentifierGroupList {
     pub colon_colon: Box<ColonColon>,
     pub identifier: Box<Identifier>,
-    pub scoped_or_hier_identifier_group_list: Vec<ScopedOrHierIdentifierGroupList>,
+    pub expression_identifier_group_list: Vec<ExpressionIdentifierGroupList>,
 }
 
 ///
 /// Type derived for production 277
 ///
-/// ScopedOrHierIdentifierGroup: ScopedOrHierIdentifierGroupList0 /* Vec */ ScopedOrHierIdentifierGroupList1 /* Vec */;
+/// ExpressionIdentifierGroup: ExpressionIdentifierGroupList0 /* Vec */ ExpressionIdentifierGroupList1 /* Vec */;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct ScopedOrHierIdentifierGroupScopedOrHierIdentifierGroupList0ScopedOrHierIdentifierGroupList1
-{
-    pub scoped_or_hier_identifier_group_list0: Vec<ScopedOrHierIdentifierGroupList0>,
-    pub scoped_or_hier_identifier_group_list1: Vec<ScopedOrHierIdentifierGroupList1>,
+pub struct ExpressionIdentifierGroupExpressionIdentifierGroupList0ExpressionIdentifierGroupList1 {
+    pub expression_identifier_group_list0: Vec<ExpressionIdentifierGroupList0>,
+    pub expression_identifier_group_list1: Vec<ExpressionIdentifierGroupList1>,
 }
 
 ///
-/// Type derived for production 313
+/// Type derived for production 315
 ///
 /// Expression09ListGroup: Operator10;
 ///
@@ -1857,7 +1856,7 @@ pub struct Expression09ListGroupOperator10 {
 }
 
 ///
-/// Type derived for production 314
+/// Type derived for production 316
 ///
 /// Expression09ListGroup: Star;
 ///
@@ -1869,7 +1868,7 @@ pub struct Expression09ListGroupStar {
 }
 
 ///
-/// Type derived for production 321
+/// Type derived for production 323
 ///
 /// Expression11ListGroup: UnaryOperator;
 ///
@@ -1881,7 +1880,7 @@ pub struct Expression11ListGroupUnaryOperator {
 }
 
 ///
-/// Type derived for production 322
+/// Type derived for production 324
 ///
 /// Expression11ListGroup: Operator09;
 ///
@@ -1893,7 +1892,7 @@ pub struct Expression11ListGroupOperator09 {
 }
 
 ///
-/// Type derived for production 323
+/// Type derived for production 325
 ///
 /// Expression11ListGroup: Operator05;
 ///
@@ -1905,7 +1904,7 @@ pub struct Expression11ListGroupOperator05 {
 }
 
 ///
-/// Type derived for production 324
+/// Type derived for production 326
 ///
 /// Expression11ListGroup: Operator03;
 ///
@@ -1917,7 +1916,7 @@ pub struct Expression11ListGroupOperator03 {
 }
 
 ///
-/// Type derived for production 325
+/// Type derived for production 327
 ///
 /// Expression11ListGroup: Operator04;
 ///
@@ -1929,7 +1928,7 @@ pub struct Expression11ListGroupOperator04 {
 }
 
 ///
-/// Type derived for production 327
+/// Type derived for production 329
 ///
 /// Factor: Number;
 ///
@@ -1941,21 +1940,20 @@ pub struct FactorNumber {
 }
 
 ///
-/// Type derived for production 328
+/// Type derived for production 330
 ///
-/// Factor: FactorOpt /* Option */ ScopedOrHierIdentifier FactorOpt0 /* Option */;
+/// Factor: ExpressionIdentifier FactorOpt /* Option */;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct FactorFactorOptScopedOrHierIdentifierFactorOpt0 {
+pub struct FactorExpressionIdentifierFactorOpt {
+    pub expression_identifier: Box<ExpressionIdentifier>,
     pub factor_opt: Option<Box<FactorOpt>>,
-    pub scoped_or_hier_identifier: Box<ScopedOrHierIdentifier>,
-    pub factor_opt0: Option<Box<FactorOpt0>>,
 }
 
 ///
-/// Type derived for production 329
+/// Type derived for production 331
 ///
 /// Factor: LParen Expression RParen;
 ///
@@ -1969,7 +1967,7 @@ pub struct FactorLParenExpressionRParen {
 }
 
 ///
-/// Type derived for production 330
+/// Type derived for production 332
 ///
 /// Factor: LBrace ConcatenationList RBrace;
 ///
@@ -1983,7 +1981,7 @@ pub struct FactorLBraceConcatenationListRBrace {
 }
 
 ///
-/// Type derived for production 331
+/// Type derived for production 333
 ///
 /// Factor: IfExpression;
 ///
@@ -1995,7 +1993,7 @@ pub struct FactorIfExpression {
 }
 
 ///
-/// Type derived for production 332
+/// Type derived for production 334
 ///
 /// Factor: CaseExpression;
 ///
@@ -4515,6 +4513,85 @@ pub enum Expression11ListGroup {
 }
 
 ///
+/// Type derived for non-terminal ExpressionIdentifier
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct ExpressionIdentifier {
+    pub expression_identifier_opt: Option<Box<ExpressionIdentifierOpt>>,
+    pub identifier: Box<Identifier>,
+    pub expression_identifier_group: Box<ExpressionIdentifierGroup>,
+}
+
+///
+/// Type derived for non-terminal ExpressionIdentifierGroup
+///
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub enum ExpressionIdentifierGroup {
+    ColonColonIdentifierExpressionIdentifierGroupList(
+        ExpressionIdentifierGroupColonColonIdentifierExpressionIdentifierGroupList,
+    ),
+    ExpressionIdentifierGroupList0ExpressionIdentifierGroupList1(
+        ExpressionIdentifierGroupExpressionIdentifierGroupList0ExpressionIdentifierGroupList1,
+    ),
+}
+
+///
+/// Type derived for non-terminal ExpressionIdentifierGroupList
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct ExpressionIdentifierGroupList {
+    pub colon_colon: Box<ColonColon>,
+    pub identifier: Box<Identifier>,
+}
+
+///
+/// Type derived for non-terminal ExpressionIdentifierGroupList0
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct ExpressionIdentifierGroupList0 {
+    pub range: Box<Range>,
+}
+
+///
+/// Type derived for non-terminal ExpressionIdentifierGroupList1
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct ExpressionIdentifierGroupList1 {
+    pub dot: Box<Dot>,
+    pub identifier: Box<Identifier>,
+    pub expression_identifier_group_list1_list: Vec<ExpressionIdentifierGroupList1List>,
+}
+
+///
+/// Type derived for non-terminal ExpressionIdentifierGroupList1List
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct ExpressionIdentifierGroupList1List {
+    pub range: Box<Range>,
+}
+
+///
+/// Type derived for non-terminal ExpressionIdentifierOpt
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct ExpressionIdentifierOpt {
+    pub dollar: Box<Dollar>,
+}
+
+///
 /// Type derived for non-terminal ExpressionList
 ///
 #[allow(dead_code)]
@@ -4594,7 +4671,7 @@ pub struct F64Token {
 #[derive(Debug, Clone)]
 pub enum Factor {
     Number(FactorNumber),
-    FactorOptScopedOrHierIdentifierFactorOpt0(FactorFactorOptScopedOrHierIdentifierFactorOpt0),
+    ExpressionIdentifierFactorOpt(FactorExpressionIdentifierFactorOpt),
     LParenExpressionRParen(FactorLParenExpressionRParen),
     LBraceConcatenationListRBrace(FactorLBraceConcatenationListRBrace),
     IfExpression(FactorIfExpression),
@@ -4608,7 +4685,9 @@ pub enum Factor {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct FactorOpt {
-    pub dollar: Box<Dollar>,
+    pub l_paren: Box<LParen>,
+    pub factor_opt0: Option<Box<FactorOpt0>>,
+    pub r_paren: Box<RParen>,
 }
 
 ///
@@ -4618,18 +4697,6 @@ pub struct FactorOpt {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct FactorOpt0 {
-    pub l_paren: Box<LParen>,
-    pub factor_opt1: Option<Box<FactorOpt1>>,
-    pub r_paren: Box<RParen>,
-}
-
-///
-/// Type derived for non-terminal FactorOpt1
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct FactorOpt1 {
     pub function_call_arg: Box<FunctionCallArg>,
 }
 
@@ -7340,74 +7407,6 @@ pub struct ScopedIdentifierList {
 }
 
 ///
-/// Type derived for non-terminal ScopedOrHierIdentifier
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ScopedOrHierIdentifier {
-    pub identifier: Box<Identifier>,
-    pub scoped_or_hier_identifier_group: Box<ScopedOrHierIdentifierGroup>,
-}
-
-///
-/// Type derived for non-terminal ScopedOrHierIdentifierGroup
-///
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub enum ScopedOrHierIdentifierGroup {
-    ColonColonIdentifierScopedOrHierIdentifierGroupList(
-        ScopedOrHierIdentifierGroupColonColonIdentifierScopedOrHierIdentifierGroupList,
-    ),
-    ScopedOrHierIdentifierGroupList0ScopedOrHierIdentifierGroupList1(
-        ScopedOrHierIdentifierGroupScopedOrHierIdentifierGroupList0ScopedOrHierIdentifierGroupList1,
-    ),
-}
-
-///
-/// Type derived for non-terminal ScopedOrHierIdentifierGroupList
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ScopedOrHierIdentifierGroupList {
-    pub colon_colon: Box<ColonColon>,
-    pub identifier: Box<Identifier>,
-}
-
-///
-/// Type derived for non-terminal ScopedOrHierIdentifierGroupList0
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ScopedOrHierIdentifierGroupList0 {
-    pub range: Box<Range>,
-}
-
-///
-/// Type derived for non-terminal ScopedOrHierIdentifierGroupList1
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ScopedOrHierIdentifierGroupList1 {
-    pub dot: Box<Dot>,
-    pub identifier: Box<Identifier>,
-    pub scoped_or_hier_identifier_group_list1_list: Vec<ScopedOrHierIdentifierGroupList1List>,
-}
-
-///
-/// Type derived for non-terminal ScopedOrHierIdentifierGroupList1List
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ScopedOrHierIdentifierGroupList1List {
-    pub range: Box<Range>,
-}
-
-///
 /// Type derived for non-terminal Semicolon
 ///
 #[allow(dead_code)]
@@ -8179,6 +8178,13 @@ pub enum ASTType {
     Expression11(Expression11),
     Expression11List(Vec<Expression11List>),
     Expression11ListGroup(Expression11ListGroup),
+    ExpressionIdentifier(ExpressionIdentifier),
+    ExpressionIdentifierGroup(ExpressionIdentifierGroup),
+    ExpressionIdentifierGroupList(Vec<ExpressionIdentifierGroupList>),
+    ExpressionIdentifierGroupList0(Vec<ExpressionIdentifierGroupList0>),
+    ExpressionIdentifierGroupList1(Vec<ExpressionIdentifierGroupList1>),
+    ExpressionIdentifierGroupList1List(Vec<ExpressionIdentifierGroupList1List>),
+    ExpressionIdentifierOpt(Option<Box<ExpressionIdentifierOpt>>),
     ExpressionList(Vec<ExpressionList>),
     F32(F32),
     F32Term(F32Term),
@@ -8189,7 +8195,6 @@ pub enum ASTType {
     Factor(Factor),
     FactorOpt(Option<Box<FactorOpt>>),
     FactorOpt0(Option<Box<FactorOpt0>>),
-    FactorOpt1(Option<Box<FactorOpt1>>),
     FixedPoint(FixedPoint),
     FixedPointTerm(FixedPointTerm),
     FixedPointToken(FixedPointToken),
@@ -8434,12 +8439,6 @@ pub enum ASTType {
     ReturnToken(ReturnToken),
     ScopedIdentifier(ScopedIdentifier),
     ScopedIdentifierList(Vec<ScopedIdentifierList>),
-    ScopedOrHierIdentifier(ScopedOrHierIdentifier),
-    ScopedOrHierIdentifierGroup(ScopedOrHierIdentifierGroup),
-    ScopedOrHierIdentifierGroupList(Vec<ScopedOrHierIdentifierGroupList>),
-    ScopedOrHierIdentifierGroupList0(Vec<ScopedOrHierIdentifierGroupList0>),
-    ScopedOrHierIdentifierGroupList1(Vec<ScopedOrHierIdentifierGroupList1>),
-    ScopedOrHierIdentifierGroupList1List(Vec<ScopedOrHierIdentifierGroupList1List>),
     Semicolon(Semicolon),
     SemicolonTerm(SemicolonTerm),
     SemicolonToken(SemicolonToken),
@@ -15368,33 +15367,41 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 273:
     ///
-    /// ScopedOrHierIdentifier: Identifier ScopedOrHierIdentifierGroup;
+    /// ExpressionIdentifier: ExpressionIdentifierOpt /* Option */ Identifier ExpressionIdentifierGroup;
     ///
     #[parol_runtime::function_name::named]
-    fn scoped_or_hier_identifier(
+    fn expression_identifier(
         &mut self,
+        _expression_identifier_opt: &ParseTreeStackEntry<'t>,
         _identifier: &ParseTreeStackEntry<'t>,
-        _scoped_or_hier_identifier_group: &ParseTreeStackEntry<'t>,
+        _expression_identifier_group: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let scoped_or_hier_identifier_group = pop_item!(
+        let expression_identifier_group = pop_item!(
             self,
-            scoped_or_hier_identifier_group,
-            ScopedOrHierIdentifierGroup,
+            expression_identifier_group,
+            ExpressionIdentifierGroup,
             context
         );
         let identifier = pop_item!(self, identifier, Identifier, context);
-        let scoped_or_hier_identifier_built = ScopedOrHierIdentifier {
+        let expression_identifier_opt = pop_item!(
+            self,
+            expression_identifier_opt,
+            ExpressionIdentifierOpt,
+            context
+        );
+        let expression_identifier_built = ExpressionIdentifier {
+            expression_identifier_opt,
             identifier: Box::new(identifier),
-            scoped_or_hier_identifier_group: Box::new(scoped_or_hier_identifier_group),
+            expression_identifier_group: Box::new(expression_identifier_group),
         };
         // Calling user action here
         self.user_grammar
-            .scoped_or_hier_identifier(&scoped_or_hier_identifier_built)?;
+            .expression_identifier(&expression_identifier_built)?;
         self.push(
-            ASTType::ScopedOrHierIdentifier(scoped_or_hier_identifier_built),
+            ASTType::ExpressionIdentifier(expression_identifier_built),
             context,
         );
         Ok(())
@@ -15402,38 +15409,38 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 274:
     ///
-    /// ScopedOrHierIdentifierGroup: ColonColon Identifier ScopedOrHierIdentifierGroupList /* Vec */;
+    /// ExpressionIdentifierGroup: ColonColon Identifier ExpressionIdentifierGroupList /* Vec */;
     ///
     #[parol_runtime::function_name::named]
-    fn scoped_or_hier_identifier_group_0(
+    fn expression_identifier_group_0(
         &mut self,
         _colon_colon: &ParseTreeStackEntry<'t>,
         _identifier: &ParseTreeStackEntry<'t>,
-        _scoped_or_hier_identifier_group_list: &ParseTreeStackEntry<'t>,
+        _expression_identifier_group_list: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let scoped_or_hier_identifier_group_list = pop_and_reverse_item!(
+        let expression_identifier_group_list = pop_and_reverse_item!(
             self,
-            scoped_or_hier_identifier_group_list,
-            ScopedOrHierIdentifierGroupList,
+            expression_identifier_group_list,
+            ExpressionIdentifierGroupList,
             context
         );
         let identifier = pop_item!(self, identifier, Identifier, context);
         let colon_colon = pop_item!(self, colon_colon, ColonColon, context);
-        let scoped_or_hier_identifier_group_0_built =
-            ScopedOrHierIdentifierGroupColonColonIdentifierScopedOrHierIdentifierGroupList {
+        let expression_identifier_group_0_built =
+            ExpressionIdentifierGroupColonColonIdentifierExpressionIdentifierGroupList {
                 colon_colon: Box::new(colon_colon),
                 identifier: Box::new(identifier),
-                scoped_or_hier_identifier_group_list,
+                expression_identifier_group_list,
             };
-        let scoped_or_hier_identifier_group_0_built =
-            ScopedOrHierIdentifierGroup::ColonColonIdentifierScopedOrHierIdentifierGroupList(
-                scoped_or_hier_identifier_group_0_built,
+        let expression_identifier_group_0_built =
+            ExpressionIdentifierGroup::ColonColonIdentifierExpressionIdentifierGroupList(
+                expression_identifier_group_0_built,
             );
         self.push(
-            ASTType::ScopedOrHierIdentifierGroup(scoped_or_hier_identifier_group_0_built),
+            ASTType::ExpressionIdentifierGroup(expression_identifier_group_0_built),
             context,
         );
         Ok(())
@@ -15441,34 +15448,34 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 275:
     ///
-    /// ScopedOrHierIdentifierGroupList /* Vec<T>::Push */: ColonColon Identifier ScopedOrHierIdentifierGroupList;
+    /// ExpressionIdentifierGroupList /* Vec<T>::Push */: ColonColon Identifier ExpressionIdentifierGroupList;
     ///
     #[parol_runtime::function_name::named]
-    fn scoped_or_hier_identifier_group_list_0(
+    fn expression_identifier_group_list_0(
         &mut self,
         _colon_colon: &ParseTreeStackEntry<'t>,
         _identifier: &ParseTreeStackEntry<'t>,
-        _scoped_or_hier_identifier_group_list: &ParseTreeStackEntry<'t>,
+        _expression_identifier_group_list: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let mut scoped_or_hier_identifier_group_list = pop_item!(
+        let mut expression_identifier_group_list = pop_item!(
             self,
-            scoped_or_hier_identifier_group_list,
-            ScopedOrHierIdentifierGroupList,
+            expression_identifier_group_list,
+            ExpressionIdentifierGroupList,
             context
         );
         let identifier = pop_item!(self, identifier, Identifier, context);
         let colon_colon = pop_item!(self, colon_colon, ColonColon, context);
-        let scoped_or_hier_identifier_group_list_0_built = ScopedOrHierIdentifierGroupList {
+        let expression_identifier_group_list_0_built = ExpressionIdentifierGroupList {
             identifier: Box::new(identifier),
             colon_colon: Box::new(colon_colon),
         };
         // Add an element to the vector
-        scoped_or_hier_identifier_group_list.push(scoped_or_hier_identifier_group_list_0_built);
+        expression_identifier_group_list.push(expression_identifier_group_list_0_built);
         self.push(
-            ASTType::ScopedOrHierIdentifierGroupList(scoped_or_hier_identifier_group_list),
+            ASTType::ExpressionIdentifierGroupList(expression_identifier_group_list),
             context,
         );
         Ok(())
@@ -15476,18 +15483,18 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 276:
     ///
-    /// ScopedOrHierIdentifierGroupList /* Vec<T>::New */: ;
+    /// ExpressionIdentifierGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn scoped_or_hier_identifier_group_list_1(
+    fn expression_identifier_group_list_1(
         &mut self,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let scoped_or_hier_identifier_group_list_1_built = Vec::new();
+        let expression_identifier_group_list_1_built = Vec::new();
         self.push(
-            ASTType::ScopedOrHierIdentifierGroupList(scoped_or_hier_identifier_group_list_1_built),
+            ASTType::ExpressionIdentifierGroupList(expression_identifier_group_list_1_built),
             context,
         );
         Ok(())
@@ -15495,36 +15502,40 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 277:
     ///
-    /// ScopedOrHierIdentifierGroup: ScopedOrHierIdentifierGroupList0 /* Vec */ ScopedOrHierIdentifierGroupList1 /* Vec */;
+    /// ExpressionIdentifierGroup: ExpressionIdentifierGroupList0 /* Vec */ ExpressionIdentifierGroupList1 /* Vec */;
     ///
     #[parol_runtime::function_name::named]
-    fn scoped_or_hier_identifier_group_1(
+    fn expression_identifier_group_1(
         &mut self,
-        _scoped_or_hier_identifier_group_list0: &ParseTreeStackEntry<'t>,
-        _scoped_or_hier_identifier_group_list1: &ParseTreeStackEntry<'t>,
+        _expression_identifier_group_list0: &ParseTreeStackEntry<'t>,
+        _expression_identifier_group_list1: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let scoped_or_hier_identifier_group_list1 = pop_and_reverse_item!(
+        let expression_identifier_group_list1 = pop_and_reverse_item!(
             self,
-            scoped_or_hier_identifier_group_list1,
-            ScopedOrHierIdentifierGroupList1,
+            expression_identifier_group_list1,
+            ExpressionIdentifierGroupList1,
             context
         );
-        let scoped_or_hier_identifier_group_list0 = pop_and_reverse_item!(
+        let expression_identifier_group_list0 = pop_and_reverse_item!(
             self,
-            scoped_or_hier_identifier_group_list0,
-            ScopedOrHierIdentifierGroupList0,
+            expression_identifier_group_list0,
+            ExpressionIdentifierGroupList0,
             context
         );
-        let scoped_or_hier_identifier_group_1_built = ScopedOrHierIdentifierGroupScopedOrHierIdentifierGroupList0ScopedOrHierIdentifierGroupList1 {
-            scoped_or_hier_identifier_group_list0,
-            scoped_or_hier_identifier_group_list1,
-        };
-        let scoped_or_hier_identifier_group_1_built = ScopedOrHierIdentifierGroup::ScopedOrHierIdentifierGroupList0ScopedOrHierIdentifierGroupList1(scoped_or_hier_identifier_group_1_built);
+        let expression_identifier_group_1_built =
+            ExpressionIdentifierGroupExpressionIdentifierGroupList0ExpressionIdentifierGroupList1 {
+                expression_identifier_group_list0,
+                expression_identifier_group_list1,
+            };
+        let expression_identifier_group_1_built =
+            ExpressionIdentifierGroup::ExpressionIdentifierGroupList0ExpressionIdentifierGroupList1(
+                expression_identifier_group_1_built,
+            );
         self.push(
-            ASTType::ScopedOrHierIdentifierGroup(scoped_or_hier_identifier_group_1_built),
+            ASTType::ExpressionIdentifierGroup(expression_identifier_group_1_built),
             context,
         );
         Ok(())
@@ -15532,42 +15543,42 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 278:
     ///
-    /// ScopedOrHierIdentifierGroupList1 /* Vec<T>::Push */: Dot Identifier ScopedOrHierIdentifierGroupList1List /* Vec */ ScopedOrHierIdentifierGroupList1;
+    /// ExpressionIdentifierGroupList1 /* Vec<T>::Push */: Dot Identifier ExpressionIdentifierGroupList1List /* Vec */ ExpressionIdentifierGroupList1;
     ///
     #[parol_runtime::function_name::named]
-    fn scoped_or_hier_identifier_group_list1_0(
+    fn expression_identifier_group_list1_0(
         &mut self,
         _dot: &ParseTreeStackEntry<'t>,
         _identifier: &ParseTreeStackEntry<'t>,
-        _scoped_or_hier_identifier_group_list1_list: &ParseTreeStackEntry<'t>,
-        _scoped_or_hier_identifier_group_list1: &ParseTreeStackEntry<'t>,
+        _expression_identifier_group_list1_list: &ParseTreeStackEntry<'t>,
+        _expression_identifier_group_list1: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let mut scoped_or_hier_identifier_group_list1 = pop_item!(
+        let mut expression_identifier_group_list1 = pop_item!(
             self,
-            scoped_or_hier_identifier_group_list1,
-            ScopedOrHierIdentifierGroupList1,
+            expression_identifier_group_list1,
+            ExpressionIdentifierGroupList1,
             context
         );
-        let scoped_or_hier_identifier_group_list1_list = pop_and_reverse_item!(
+        let expression_identifier_group_list1_list = pop_and_reverse_item!(
             self,
-            scoped_or_hier_identifier_group_list1_list,
-            ScopedOrHierIdentifierGroupList1List,
+            expression_identifier_group_list1_list,
+            ExpressionIdentifierGroupList1List,
             context
         );
         let identifier = pop_item!(self, identifier, Identifier, context);
         let dot = pop_item!(self, dot, Dot, context);
-        let scoped_or_hier_identifier_group_list1_0_built = ScopedOrHierIdentifierGroupList1 {
-            scoped_or_hier_identifier_group_list1_list,
+        let expression_identifier_group_list1_0_built = ExpressionIdentifierGroupList1 {
+            expression_identifier_group_list1_list,
             identifier: Box::new(identifier),
             dot: Box::new(dot),
         };
         // Add an element to the vector
-        scoped_or_hier_identifier_group_list1.push(scoped_or_hier_identifier_group_list1_0_built);
+        expression_identifier_group_list1.push(expression_identifier_group_list1_0_built);
         self.push(
-            ASTType::ScopedOrHierIdentifierGroupList1(scoped_or_hier_identifier_group_list1),
+            ASTType::ExpressionIdentifierGroupList1(expression_identifier_group_list1),
             context,
         );
         Ok(())
@@ -15575,35 +15586,31 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 279:
     ///
-    /// ScopedOrHierIdentifierGroupList1List /* Vec<T>::Push */: Range ScopedOrHierIdentifierGroupList1List;
+    /// ExpressionIdentifierGroupList1List /* Vec<T>::Push */: Range ExpressionIdentifierGroupList1List;
     ///
     #[parol_runtime::function_name::named]
-    fn scoped_or_hier_identifier_group_list1_list_0(
+    fn expression_identifier_group_list1_list_0(
         &mut self,
         _range: &ParseTreeStackEntry<'t>,
-        _scoped_or_hier_identifier_group_list1_list: &ParseTreeStackEntry<'t>,
+        _expression_identifier_group_list1_list: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let mut scoped_or_hier_identifier_group_list1_list = pop_item!(
+        let mut expression_identifier_group_list1_list = pop_item!(
             self,
-            scoped_or_hier_identifier_group_list1_list,
-            ScopedOrHierIdentifierGroupList1List,
+            expression_identifier_group_list1_list,
+            ExpressionIdentifierGroupList1List,
             context
         );
         let range = pop_item!(self, range, Range, context);
-        let scoped_or_hier_identifier_group_list1_list_0_built =
-            ScopedOrHierIdentifierGroupList1List {
-                range: Box::new(range),
-            };
+        let expression_identifier_group_list1_list_0_built = ExpressionIdentifierGroupList1List {
+            range: Box::new(range),
+        };
         // Add an element to the vector
-        scoped_or_hier_identifier_group_list1_list
-            .push(scoped_or_hier_identifier_group_list1_list_0_built);
+        expression_identifier_group_list1_list.push(expression_identifier_group_list1_list_0_built);
         self.push(
-            ASTType::ScopedOrHierIdentifierGroupList1List(
-                scoped_or_hier_identifier_group_list1_list,
-            ),
+            ASTType::ExpressionIdentifierGroupList1List(expression_identifier_group_list1_list),
             context,
         );
         Ok(())
@@ -15611,19 +15618,19 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 280:
     ///
-    /// ScopedOrHierIdentifierGroupList1List /* Vec<T>::New */: ;
+    /// ExpressionIdentifierGroupList1List /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn scoped_or_hier_identifier_group_list1_list_1(
+    fn expression_identifier_group_list1_list_1(
         &mut self,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let scoped_or_hier_identifier_group_list1_list_1_built = Vec::new();
+        let expression_identifier_group_list1_list_1_built = Vec::new();
         self.push(
-            ASTType::ScopedOrHierIdentifierGroupList1List(
-                scoped_or_hier_identifier_group_list1_list_1_built,
+            ASTType::ExpressionIdentifierGroupList1List(
+                expression_identifier_group_list1_list_1_built,
             ),
             context,
         );
@@ -15632,20 +15639,18 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 281:
     ///
-    /// ScopedOrHierIdentifierGroupList1 /* Vec<T>::New */: ;
+    /// ExpressionIdentifierGroupList1 /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn scoped_or_hier_identifier_group_list1_1(
+    fn expression_identifier_group_list1_1(
         &mut self,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let scoped_or_hier_identifier_group_list1_1_built = Vec::new();
+        let expression_identifier_group_list1_1_built = Vec::new();
         self.push(
-            ASTType::ScopedOrHierIdentifierGroupList1(
-                scoped_or_hier_identifier_group_list1_1_built,
-            ),
+            ASTType::ExpressionIdentifierGroupList1(expression_identifier_group_list1_1_built),
             context,
         );
         Ok(())
@@ -15653,31 +15658,31 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 282:
     ///
-    /// ScopedOrHierIdentifierGroupList0 /* Vec<T>::Push */: Range ScopedOrHierIdentifierGroupList0;
+    /// ExpressionIdentifierGroupList0 /* Vec<T>::Push */: Range ExpressionIdentifierGroupList0;
     ///
     #[parol_runtime::function_name::named]
-    fn scoped_or_hier_identifier_group_list0_0(
+    fn expression_identifier_group_list0_0(
         &mut self,
         _range: &ParseTreeStackEntry<'t>,
-        _scoped_or_hier_identifier_group_list0: &ParseTreeStackEntry<'t>,
+        _expression_identifier_group_list0: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let mut scoped_or_hier_identifier_group_list0 = pop_item!(
+        let mut expression_identifier_group_list0 = pop_item!(
             self,
-            scoped_or_hier_identifier_group_list0,
-            ScopedOrHierIdentifierGroupList0,
+            expression_identifier_group_list0,
+            ExpressionIdentifierGroupList0,
             context
         );
         let range = pop_item!(self, range, Range, context);
-        let scoped_or_hier_identifier_group_list0_0_built = ScopedOrHierIdentifierGroupList0 {
+        let expression_identifier_group_list0_0_built = ExpressionIdentifierGroupList0 {
             range: Box::new(range),
         };
         // Add an element to the vector
-        scoped_or_hier_identifier_group_list0.push(scoped_or_hier_identifier_group_list0_0_built);
+        expression_identifier_group_list0.push(expression_identifier_group_list0_0_built);
         self.push(
-            ASTType::ScopedOrHierIdentifierGroupList0(scoped_or_hier_identifier_group_list0),
+            ASTType::ExpressionIdentifierGroupList0(expression_identifier_group_list0),
             context,
         );
         Ok(())
@@ -15685,26 +15690,59 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 283:
     ///
-    /// ScopedOrHierIdentifierGroupList0 /* Vec<T>::New */: ;
+    /// ExpressionIdentifierGroupList0 /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn scoped_or_hier_identifier_group_list0_1(
+    fn expression_identifier_group_list0_1(
         &mut self,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let scoped_or_hier_identifier_group_list0_1_built = Vec::new();
+        let expression_identifier_group_list0_1_built = Vec::new();
         self.push(
-            ASTType::ScopedOrHierIdentifierGroupList0(
-                scoped_or_hier_identifier_group_list0_1_built,
-            ),
+            ASTType::ExpressionIdentifierGroupList0(expression_identifier_group_list0_1_built),
             context,
         );
         Ok(())
     }
 
     /// Semantic action for production 284:
+    ///
+    /// ExpressionIdentifierOpt /* Option<T>::Some */: Dollar;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression_identifier_opt_0(
+        &mut self,
+        _dollar: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let dollar = pop_item!(self, dollar, Dollar, context);
+        let expression_identifier_opt_0_built = ExpressionIdentifierOpt {
+            dollar: Box::new(dollar),
+        };
+        self.push(
+            ASTType::ExpressionIdentifierOpt(Some(Box::new(expression_identifier_opt_0_built))),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 285:
+    ///
+    /// ExpressionIdentifierOpt /* Option<T>::None */: ;
+    ///
+    #[parol_runtime::function_name::named]
+    fn expression_identifier_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        self.push(ASTType::ExpressionIdentifierOpt(None), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 286:
     ///
     /// Expression: Expression01 ExpressionList /* Vec */;
     ///
@@ -15729,7 +15767,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 285:
+    /// Semantic action for production 287:
     ///
     /// ExpressionList /* Vec<T>::Push */: Operator01 Expression01 ExpressionList;
     ///
@@ -15756,7 +15794,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 286:
+    /// Semantic action for production 288:
     ///
     /// ExpressionList /* Vec<T>::New */: ;
     ///
@@ -15769,7 +15807,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 287:
+    /// Semantic action for production 289:
     ///
     /// Expression01: Expression02 Expression01List /* Vec */;
     ///
@@ -15795,7 +15833,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 288:
+    /// Semantic action for production 290:
     ///
     /// Expression01List /* Vec<T>::Push */: Operator02 Expression02 Expression01List;
     ///
@@ -15822,7 +15860,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 289:
+    /// Semantic action for production 291:
     ///
     /// Expression01List /* Vec<T>::New */: ;
     ///
@@ -15838,7 +15876,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 290:
+    /// Semantic action for production 292:
     ///
     /// Expression02: Expression03 Expression02List /* Vec */;
     ///
@@ -15864,7 +15902,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 291:
+    /// Semantic action for production 293:
     ///
     /// Expression02List /* Vec<T>::Push */: Operator03 Expression03 Expression02List;
     ///
@@ -15891,7 +15929,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 292:
+    /// Semantic action for production 294:
     ///
     /// Expression02List /* Vec<T>::New */: ;
     ///
@@ -15907,7 +15945,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 293:
+    /// Semantic action for production 295:
     ///
     /// Expression03: Expression04 Expression03List /* Vec */;
     ///
@@ -15933,7 +15971,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 294:
+    /// Semantic action for production 296:
     ///
     /// Expression03List /* Vec<T>::Push */: Operator04 Expression04 Expression03List;
     ///
@@ -15960,7 +15998,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 295:
+    /// Semantic action for production 297:
     ///
     /// Expression03List /* Vec<T>::New */: ;
     ///
@@ -15976,7 +16014,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 296:
+    /// Semantic action for production 298:
     ///
     /// Expression04: Expression05 Expression04List /* Vec */;
     ///
@@ -16002,7 +16040,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 297:
+    /// Semantic action for production 299:
     ///
     /// Expression04List /* Vec<T>::Push */: Operator05 Expression05 Expression04List;
     ///
@@ -16029,7 +16067,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 298:
+    /// Semantic action for production 300:
     ///
     /// Expression04List /* Vec<T>::New */: ;
     ///
@@ -16045,7 +16083,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 299:
+    /// Semantic action for production 301:
     ///
     /// Expression05: Expression06 Expression05List /* Vec */;
     ///
@@ -16071,7 +16109,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 300:
+    /// Semantic action for production 302:
     ///
     /// Expression05List /* Vec<T>::Push */: Operator06 Expression06 Expression05List;
     ///
@@ -16098,7 +16136,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 301:
+    /// Semantic action for production 303:
     ///
     /// Expression05List /* Vec<T>::New */: ;
     ///
@@ -16114,7 +16152,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 302:
+    /// Semantic action for production 304:
     ///
     /// Expression06: Expression07 Expression06List /* Vec */;
     ///
@@ -16140,7 +16178,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 303:
+    /// Semantic action for production 305:
     ///
     /// Expression06List /* Vec<T>::Push */: Operator07 Expression07 Expression06List;
     ///
@@ -16167,7 +16205,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 304:
+    /// Semantic action for production 306:
     ///
     /// Expression06List /* Vec<T>::New */: ;
     ///
@@ -16183,7 +16221,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 305:
+    /// Semantic action for production 307:
     ///
     /// Expression07: Expression08 Expression07List /* Vec */;
     ///
@@ -16209,7 +16247,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 306:
+    /// Semantic action for production 308:
     ///
     /// Expression07List /* Vec<T>::Push */: Operator08 Expression08 Expression07List;
     ///
@@ -16236,7 +16274,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 307:
+    /// Semantic action for production 309:
     ///
     /// Expression07List /* Vec<T>::New */: ;
     ///
@@ -16252,7 +16290,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 308:
+    /// Semantic action for production 310:
     ///
     /// Expression08: Expression09 Expression08List /* Vec */;
     ///
@@ -16278,7 +16316,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 309:
+    /// Semantic action for production 311:
     ///
     /// Expression08List /* Vec<T>::Push */: Operator09 Expression09 Expression08List;
     ///
@@ -16305,7 +16343,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 310:
+    /// Semantic action for production 312:
     ///
     /// Expression08List /* Vec<T>::New */: ;
     ///
@@ -16321,7 +16359,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 311:
+    /// Semantic action for production 313:
     ///
     /// Expression09: Expression10 Expression09List /* Vec */;
     ///
@@ -16347,7 +16385,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 312:
+    /// Semantic action for production 314:
     ///
     /// Expression09List /* Vec<T>::Push */: Expression09ListGroup Expression10 Expression09List;
     ///
@@ -16379,7 +16417,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 313:
+    /// Semantic action for production 315:
     ///
     /// Expression09ListGroup: Operator10;
     ///
@@ -16404,7 +16442,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 314:
+    /// Semantic action for production 316:
     ///
     /// Expression09ListGroup: Star;
     ///
@@ -16429,7 +16467,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 315:
+    /// Semantic action for production 317:
     ///
     /// Expression09List /* Vec<T>::New */: ;
     ///
@@ -16445,7 +16483,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 316:
+    /// Semantic action for production 318:
     ///
     /// Expression10: Expression11 Expression10List /* Vec */;
     ///
@@ -16471,7 +16509,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 317:
+    /// Semantic action for production 319:
     ///
     /// Expression10List /* Vec<T>::Push */: Operator11 Expression11 Expression10List;
     ///
@@ -16498,7 +16536,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 318:
+    /// Semantic action for production 320:
     ///
     /// Expression10List /* Vec<T>::New */: ;
     ///
@@ -16514,7 +16552,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 319:
+    /// Semantic action for production 321:
     ///
     /// Expression11: Expression11List /* Vec */ Factor;
     ///
@@ -16540,7 +16578,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 320:
+    /// Semantic action for production 322:
     ///
     /// Expression11List /* Vec<T>::Push */: Expression11ListGroup Expression11List;
     ///
@@ -16569,7 +16607,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 321:
+    /// Semantic action for production 323:
     ///
     /// Expression11ListGroup: UnaryOperator;
     ///
@@ -16594,7 +16632,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 322:
+    /// Semantic action for production 324:
     ///
     /// Expression11ListGroup: Operator09;
     ///
@@ -16619,7 +16657,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 323:
+    /// Semantic action for production 325:
     ///
     /// Expression11ListGroup: Operator05;
     ///
@@ -16644,7 +16682,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 324:
+    /// Semantic action for production 326:
     ///
     /// Expression11ListGroup: Operator03;
     ///
@@ -16669,7 +16707,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 325:
+    /// Semantic action for production 327:
     ///
     /// Expression11ListGroup: Operator04;
     ///
@@ -16694,7 +16732,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 326:
+    /// Semantic action for production 328:
     ///
     /// Expression11List /* Vec<T>::New */: ;
     ///
@@ -16710,7 +16748,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 327:
+    /// Semantic action for production 329:
     ///
     /// Factor: Number;
     ///
@@ -16733,41 +16771,34 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 328:
+    /// Semantic action for production 330:
     ///
-    /// Factor: FactorOpt /* Option */ ScopedOrHierIdentifier FactorOpt0 /* Option */;
+    /// Factor: ExpressionIdentifier FactorOpt /* Option */;
     ///
     #[parol_runtime::function_name::named]
     fn factor_1(
         &mut self,
+        _expression_identifier: &ParseTreeStackEntry<'t>,
         _factor_opt: &ParseTreeStackEntry<'t>,
-        _scoped_or_hier_identifier: &ParseTreeStackEntry<'t>,
-        _factor_opt0: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let factor_opt0 = pop_item!(self, factor_opt0, FactorOpt0, context);
-        let scoped_or_hier_identifier = pop_item!(
-            self,
-            scoped_or_hier_identifier,
-            ScopedOrHierIdentifier,
-            context
-        );
         let factor_opt = pop_item!(self, factor_opt, FactorOpt, context);
-        let factor_1_built = FactorFactorOptScopedOrHierIdentifierFactorOpt0 {
+        let expression_identifier =
+            pop_item!(self, expression_identifier, ExpressionIdentifier, context);
+        let factor_1_built = FactorExpressionIdentifierFactorOpt {
+            expression_identifier: Box::new(expression_identifier),
             factor_opt,
-            scoped_or_hier_identifier: Box::new(scoped_or_hier_identifier),
-            factor_opt0,
         };
-        let factor_1_built = Factor::FactorOptScopedOrHierIdentifierFactorOpt0(factor_1_built);
+        let factor_1_built = Factor::ExpressionIdentifierFactorOpt(factor_1_built);
         // Calling user action here
         self.user_grammar.factor(&factor_1_built)?;
         self.push(ASTType::Factor(factor_1_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 329:
+    /// Semantic action for production 331:
     ///
     /// Factor: LParen Expression RParen;
     ///
@@ -16796,7 +16827,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 330:
+    /// Semantic action for production 332:
     ///
     /// Factor: LBrace ConcatenationList RBrace;
     ///
@@ -16825,7 +16856,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 331:
+    /// Semantic action for production 333:
     ///
     /// Factor: IfExpression;
     ///
@@ -16848,7 +16879,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 332:
+    /// Semantic action for production 334:
     ///
     /// Factor: CaseExpression;
     ///
@@ -16871,27 +16902,50 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 333:
+    /// Semantic action for production 335:
     ///
-    /// FactorOpt0 /* Option<T>::Some */: LParen FactorOpt1 /* Option */ RParen;
+    /// FactorOpt /* Option<T>::Some */: LParen FactorOpt0 /* Option */ RParen;
     ///
     #[parol_runtime::function_name::named]
-    fn factor_opt0_0(
+    fn factor_opt_0(
         &mut self,
         _l_paren: &ParseTreeStackEntry<'t>,
-        _factor_opt1: &ParseTreeStackEntry<'t>,
+        _factor_opt0: &ParseTreeStackEntry<'t>,
         _r_paren: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let r_paren = pop_item!(self, r_paren, RParen, context);
-        let factor_opt1 = pop_item!(self, factor_opt1, FactorOpt1, context);
+        let factor_opt0 = pop_item!(self, factor_opt0, FactorOpt0, context);
         let l_paren = pop_item!(self, l_paren, LParen, context);
-        let factor_opt0_0_built = FactorOpt0 {
+        let factor_opt_0_built = FactorOpt {
             l_paren: Box::new(l_paren),
-            factor_opt1,
+            factor_opt0,
             r_paren: Box::new(r_paren),
+        };
+        self.push(
+            ASTType::FactorOpt(Some(Box::new(factor_opt_0_built))),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 336:
+    ///
+    /// FactorOpt0 /* Option<T>::Some */: FunctionCallArg;
+    ///
+    #[parol_runtime::function_name::named]
+    fn factor_opt0_0(
+        &mut self,
+        _function_call_arg: &ParseTreeStackEntry<'t>,
+        _parse_tree: &Tree<ParseTreeType<'t>>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let function_call_arg = pop_item!(self, function_call_arg, FunctionCallArg, context);
+        let factor_opt0_0_built = FactorOpt0 {
+            function_call_arg: Box::new(function_call_arg),
         };
         self.push(
             ASTType::FactorOpt0(Some(Box::new(factor_opt0_0_built))),
@@ -16900,42 +16954,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 334:
-    ///
-    /// FactorOpt1 /* Option<T>::Some */: FunctionCallArg;
-    ///
-    #[parol_runtime::function_name::named]
-    fn factor_opt1_0(
-        &mut self,
-        _function_call_arg: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let function_call_arg = pop_item!(self, function_call_arg, FunctionCallArg, context);
-        let factor_opt1_0_built = FactorOpt1 {
-            function_call_arg: Box::new(function_call_arg),
-        };
-        self.push(
-            ASTType::FactorOpt1(Some(Box::new(factor_opt1_0_built))),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 335:
-    ///
-    /// FactorOpt1 /* Option<T>::None */: ;
-    ///
-    #[parol_runtime::function_name::named]
-    fn factor_opt1_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::FactorOpt1(None), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 336:
+    /// Semantic action for production 337:
     ///
     /// FactorOpt0 /* Option<T>::None */: ;
     ///
@@ -16944,29 +16963,6 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::FactorOpt0(None), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 337:
-    ///
-    /// FactorOpt /* Option<T>::Some */: Dollar;
-    ///
-    #[parol_runtime::function_name::named]
-    fn factor_opt_0(
-        &mut self,
-        _dollar: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let dollar = pop_item!(self, dollar, Dollar, context);
-        let factor_opt_0_built = FactorOpt {
-            dollar: Box::new(dollar),
-        };
-        self.push(
-            ASTType::FactorOpt(Some(Box::new(factor_opt_0_built))),
-            context,
-        );
         Ok(())
     }
 
@@ -24835,93 +24831,91 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             }
             271 => self.scoped_identifier_list_1(parse_tree),
             272 => self.modport_identifier(&children[0], &children[1], &children[2], parse_tree),
-            273 => self.scoped_or_hier_identifier(&children[0], &children[1], parse_tree),
-            274 => self.scoped_or_hier_identifier_group_0(
+            273 => self.expression_identifier(&children[0], &children[1], &children[2], parse_tree),
+            274 => self.expression_identifier_group_0(
                 &children[0],
                 &children[1],
                 &children[2],
                 parse_tree,
             ),
-            275 => self.scoped_or_hier_identifier_group_list_0(
+            275 => self.expression_identifier_group_list_0(
                 &children[0],
                 &children[1],
                 &children[2],
                 parse_tree,
             ),
-            276 => self.scoped_or_hier_identifier_group_list_1(parse_tree),
-            277 => self.scoped_or_hier_identifier_group_1(&children[0], &children[1], parse_tree),
-            278 => self.scoped_or_hier_identifier_group_list1_0(
+            276 => self.expression_identifier_group_list_1(parse_tree),
+            277 => self.expression_identifier_group_1(&children[0], &children[1], parse_tree),
+            278 => self.expression_identifier_group_list1_0(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 parse_tree,
             ),
-            279 => self.scoped_or_hier_identifier_group_list1_list_0(
+            279 => self.expression_identifier_group_list1_list_0(
                 &children[0],
                 &children[1],
                 parse_tree,
             ),
-            280 => self.scoped_or_hier_identifier_group_list1_list_1(parse_tree),
-            281 => self.scoped_or_hier_identifier_group_list1_1(parse_tree),
-            282 => {
-                self.scoped_or_hier_identifier_group_list0_0(&children[0], &children[1], parse_tree)
-            }
-            283 => self.scoped_or_hier_identifier_group_list0_1(parse_tree),
-            284 => self.expression(&children[0], &children[1], parse_tree),
-            285 => self.expression_list_0(&children[0], &children[1], &children[2], parse_tree),
-            286 => self.expression_list_1(parse_tree),
-            287 => self.expression01(&children[0], &children[1], parse_tree),
-            288 => self.expression01_list_0(&children[0], &children[1], &children[2], parse_tree),
-            289 => self.expression01_list_1(parse_tree),
-            290 => self.expression02(&children[0], &children[1], parse_tree),
-            291 => self.expression02_list_0(&children[0], &children[1], &children[2], parse_tree),
-            292 => self.expression02_list_1(parse_tree),
-            293 => self.expression03(&children[0], &children[1], parse_tree),
-            294 => self.expression03_list_0(&children[0], &children[1], &children[2], parse_tree),
-            295 => self.expression03_list_1(parse_tree),
-            296 => self.expression04(&children[0], &children[1], parse_tree),
-            297 => self.expression04_list_0(&children[0], &children[1], &children[2], parse_tree),
-            298 => self.expression04_list_1(parse_tree),
-            299 => self.expression05(&children[0], &children[1], parse_tree),
-            300 => self.expression05_list_0(&children[0], &children[1], &children[2], parse_tree),
-            301 => self.expression05_list_1(parse_tree),
-            302 => self.expression06(&children[0], &children[1], parse_tree),
-            303 => self.expression06_list_0(&children[0], &children[1], &children[2], parse_tree),
-            304 => self.expression06_list_1(parse_tree),
-            305 => self.expression07(&children[0], &children[1], parse_tree),
-            306 => self.expression07_list_0(&children[0], &children[1], &children[2], parse_tree),
-            307 => self.expression07_list_1(parse_tree),
-            308 => self.expression08(&children[0], &children[1], parse_tree),
-            309 => self.expression08_list_0(&children[0], &children[1], &children[2], parse_tree),
-            310 => self.expression08_list_1(parse_tree),
-            311 => self.expression09(&children[0], &children[1], parse_tree),
-            312 => self.expression09_list_0(&children[0], &children[1], &children[2], parse_tree),
-            313 => self.expression09_list_group_0(&children[0], parse_tree),
-            314 => self.expression09_list_group_1(&children[0], parse_tree),
-            315 => self.expression09_list_1(parse_tree),
-            316 => self.expression10(&children[0], &children[1], parse_tree),
-            317 => self.expression10_list_0(&children[0], &children[1], &children[2], parse_tree),
-            318 => self.expression10_list_1(parse_tree),
-            319 => self.expression11(&children[0], &children[1], parse_tree),
-            320 => self.expression11_list_0(&children[0], &children[1], parse_tree),
-            321 => self.expression11_list_group_0(&children[0], parse_tree),
-            322 => self.expression11_list_group_1(&children[0], parse_tree),
-            323 => self.expression11_list_group_2(&children[0], parse_tree),
-            324 => self.expression11_list_group_3(&children[0], parse_tree),
-            325 => self.expression11_list_group_4(&children[0], parse_tree),
-            326 => self.expression11_list_1(parse_tree),
-            327 => self.factor_0(&children[0], parse_tree),
-            328 => self.factor_1(&children[0], &children[1], &children[2], parse_tree),
-            329 => self.factor_2(&children[0], &children[1], &children[2], parse_tree),
-            330 => self.factor_3(&children[0], &children[1], &children[2], parse_tree),
-            331 => self.factor_4(&children[0], parse_tree),
-            332 => self.factor_5(&children[0], parse_tree),
-            333 => self.factor_opt0_0(&children[0], &children[1], &children[2], parse_tree),
-            334 => self.factor_opt1_0(&children[0], parse_tree),
-            335 => self.factor_opt1_1(parse_tree),
-            336 => self.factor_opt0_1(parse_tree),
-            337 => self.factor_opt_0(&children[0], parse_tree),
+            280 => self.expression_identifier_group_list1_list_1(parse_tree),
+            281 => self.expression_identifier_group_list1_1(parse_tree),
+            282 => self.expression_identifier_group_list0_0(&children[0], &children[1], parse_tree),
+            283 => self.expression_identifier_group_list0_1(parse_tree),
+            284 => self.expression_identifier_opt_0(&children[0], parse_tree),
+            285 => self.expression_identifier_opt_1(parse_tree),
+            286 => self.expression(&children[0], &children[1], parse_tree),
+            287 => self.expression_list_0(&children[0], &children[1], &children[2], parse_tree),
+            288 => self.expression_list_1(parse_tree),
+            289 => self.expression01(&children[0], &children[1], parse_tree),
+            290 => self.expression01_list_0(&children[0], &children[1], &children[2], parse_tree),
+            291 => self.expression01_list_1(parse_tree),
+            292 => self.expression02(&children[0], &children[1], parse_tree),
+            293 => self.expression02_list_0(&children[0], &children[1], &children[2], parse_tree),
+            294 => self.expression02_list_1(parse_tree),
+            295 => self.expression03(&children[0], &children[1], parse_tree),
+            296 => self.expression03_list_0(&children[0], &children[1], &children[2], parse_tree),
+            297 => self.expression03_list_1(parse_tree),
+            298 => self.expression04(&children[0], &children[1], parse_tree),
+            299 => self.expression04_list_0(&children[0], &children[1], &children[2], parse_tree),
+            300 => self.expression04_list_1(parse_tree),
+            301 => self.expression05(&children[0], &children[1], parse_tree),
+            302 => self.expression05_list_0(&children[0], &children[1], &children[2], parse_tree),
+            303 => self.expression05_list_1(parse_tree),
+            304 => self.expression06(&children[0], &children[1], parse_tree),
+            305 => self.expression06_list_0(&children[0], &children[1], &children[2], parse_tree),
+            306 => self.expression06_list_1(parse_tree),
+            307 => self.expression07(&children[0], &children[1], parse_tree),
+            308 => self.expression07_list_0(&children[0], &children[1], &children[2], parse_tree),
+            309 => self.expression07_list_1(parse_tree),
+            310 => self.expression08(&children[0], &children[1], parse_tree),
+            311 => self.expression08_list_0(&children[0], &children[1], &children[2], parse_tree),
+            312 => self.expression08_list_1(parse_tree),
+            313 => self.expression09(&children[0], &children[1], parse_tree),
+            314 => self.expression09_list_0(&children[0], &children[1], &children[2], parse_tree),
+            315 => self.expression09_list_group_0(&children[0], parse_tree),
+            316 => self.expression09_list_group_1(&children[0], parse_tree),
+            317 => self.expression09_list_1(parse_tree),
+            318 => self.expression10(&children[0], &children[1], parse_tree),
+            319 => self.expression10_list_0(&children[0], &children[1], &children[2], parse_tree),
+            320 => self.expression10_list_1(parse_tree),
+            321 => self.expression11(&children[0], &children[1], parse_tree),
+            322 => self.expression11_list_0(&children[0], &children[1], parse_tree),
+            323 => self.expression11_list_group_0(&children[0], parse_tree),
+            324 => self.expression11_list_group_1(&children[0], parse_tree),
+            325 => self.expression11_list_group_2(&children[0], parse_tree),
+            326 => self.expression11_list_group_3(&children[0], parse_tree),
+            327 => self.expression11_list_group_4(&children[0], parse_tree),
+            328 => self.expression11_list_1(parse_tree),
+            329 => self.factor_0(&children[0], parse_tree),
+            330 => self.factor_1(&children[0], &children[1], parse_tree),
+            331 => self.factor_2(&children[0], &children[1], &children[2], parse_tree),
+            332 => self.factor_3(&children[0], &children[1], &children[2], parse_tree),
+            333 => self.factor_4(&children[0], parse_tree),
+            334 => self.factor_5(&children[0], parse_tree),
+            335 => self.factor_opt_0(&children[0], &children[1], &children[2], parse_tree),
+            336 => self.factor_opt0_0(&children[0], parse_tree),
+            337 => self.factor_opt0_1(parse_tree),
             338 => self.factor_opt_1(parse_tree),
             339 => self.function_call_arg(&children[0], &children[1], &children[2], parse_tree),
             340 => {

@@ -1,4 +1,8 @@
 module Module07 ;
+    logic  a  ;
+    logic  aa ;
+    logic  clk;
+
     always_comb begin
         // assignment statement
         a =    1;

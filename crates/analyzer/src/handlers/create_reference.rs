@@ -1,6 +1,7 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::namespace_table;
 use crate::symbol_table::{self, SymbolPath};
+use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
@@ -8,14 +9,14 @@ use veryl_parser::ParolError;
 #[derive(Default)]
 pub struct CreateReference<'a> {
     pub errors: Vec<AnalyzerError>,
-    _text: &'a str,
+    text: &'a str,
     point: HandlerPoint,
 }
 
 impl<'a> CreateReference<'a> {
     pub fn new(text: &'a str) -> Self {
         Self {
-            _text: text,
+            text,
             ..Default::default()
         }
     }
@@ -38,16 +39,29 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                     symbol.token.id,
                     &arg.identifier.identifier_token.token,
                 );
+            } else {
+                let is_single_identifier = path.as_slice().len() == 1;
+                if is_single_identifier {
+                    let name =
+                        resource_table::get_str_value(*path.as_slice().last().unwrap()).unwrap();
+                    self.errors.push(AnalyzerError::undefined_identifier(
+                        &name,
+                        self.text,
+                        &arg.identifier.identifier_token,
+                    ));
+                }
             }
         }
         Ok(())
     }
 
-    fn scoped_or_hier_identifier(
-        &mut self,
-        arg: &ScopedOrHierIdentifier,
-    ) -> Result<(), ParolError> {
+    fn expression_identifier(&mut self, arg: &ExpressionIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
+            // system function
+            if arg.expression_identifier_opt.is_some() {
+                return Ok(());
+            }
+
             let namespace = namespace_table::get(arg.identifier.identifier_token.token.id).unwrap();
             let path = SymbolPath::from(arg);
             let symbol = symbol_table::get(&path, &namespace);
@@ -56,6 +70,17 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                     symbol.token.id,
                     &arg.identifier.identifier_token.token,
                 );
+            } else {
+                let is_single_identifier = path.as_slice().len() == 1;
+                if is_single_identifier {
+                    let name =
+                        resource_table::get_str_value(*path.as_slice().last().unwrap()).unwrap();
+                    self.errors.push(AnalyzerError::undefined_identifier(
+                        &name,
+                        self.text,
+                        &arg.identifier.identifier_token,
+                    ));
+                }
             }
         }
         Ok(())

@@ -1,4 +1,7 @@
 module Module14 {
+    var aa : logic ;
+    var bbb: logic ;
+
     // module instantiation
     inst x: Module14B;
 

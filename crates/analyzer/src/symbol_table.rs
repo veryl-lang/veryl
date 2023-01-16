@@ -63,19 +63,22 @@ impl From<&syntax_tree::ScopedIdentifier> for SymbolPath {
     }
 }
 
-impl From<&syntax_tree::ScopedOrHierIdentifier> for SymbolPath {
-    fn from(value: &syntax_tree::ScopedOrHierIdentifier) -> Self {
+impl From<&syntax_tree::ExpressionIdentifier> for SymbolPath {
+    fn from(value: &syntax_tree::ExpressionIdentifier) -> Self {
         let mut path = Vec::new();
+        if let Some(ref x) = value.expression_identifier_opt {
+            path.push(x.dollar.dollar_token.token.text);
+        }
         path.push(value.identifier.identifier_token.token.text);
-        match &*value.scoped_or_hier_identifier_group {
-            syntax_tree::ScopedOrHierIdentifierGroup::ColonColonIdentifierScopedOrHierIdentifierGroupList(x) => {
+        match &*value.expression_identifier_group {
+            syntax_tree::ExpressionIdentifierGroup::ColonColonIdentifierExpressionIdentifierGroupList(x) => {
                 path.push(x.identifier.identifier_token.token.text);
-                for x in &x.scoped_or_hier_identifier_group_list {
+                for x in &x.expression_identifier_group_list {
                     path.push(x.identifier.identifier_token.token.text);
                 }
             },
-            syntax_tree::ScopedOrHierIdentifierGroup::ScopedOrHierIdentifierGroupList0ScopedOrHierIdentifierGroupList1(x) => {
-                for x in &x.scoped_or_hier_identifier_group_list1 {
+            syntax_tree::ExpressionIdentifierGroup::ExpressionIdentifierGroupList0ExpressionIdentifierGroupList1(x) => {
+                for x in &x.expression_identifier_group_list1 {
                     path.push(x.identifier.identifier_token.token.text);
                 }
             },

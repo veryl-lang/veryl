@@ -1,4 +1,9 @@
 module Module08 ;
+    logic  a    ;
+    logic  b    ;
+    logic  c    ;
+    logic  i_clk;
+
     // if declaration
     if (a == 1) begin :label
         logic  a;

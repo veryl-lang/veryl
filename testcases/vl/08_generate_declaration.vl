@@ -1,4 +1,9 @@
 module Module08 {
+    var a    : logic ;
+    var b    : logic ;
+    var c    : logic ;
+    var i_clk: logic ;
+
     // if declaration
     if a == 1 :label {
         var a: logic ;

@@ -1,6 +1,6 @@
 package Package17;
     // localparam declaration
-    localparam int unsigned a  = 1;
+    localparam int unsigned ParamX  = 1;
 
     // variable declaration
     logic  _b;

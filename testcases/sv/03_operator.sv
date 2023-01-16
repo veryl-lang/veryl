@@ -1,4 +1,15 @@
 module Module03 ;
+    logic  a         ;
+    logic  aa        ;
+    logic  aaa       ;
+    logic  aaaa      ;
+    logic  aaaaa     ;
+    logic  aaaaaa    ;
+    logic  aaaaaaa   ;
+    logic  aaaaaaaa  ;
+    logic  aaaaaaaaa ;
+    logic  aaaaaaaaaa;
+
     // unary arithmetic
     assign a  = +1;
     assign aa = -1;

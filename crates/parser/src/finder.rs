@@ -88,35 +88,38 @@ impl VerylWalker for Finder {
         }
     }
 
-    /// Semantic action for non-terminal 'ScopedOrHierIdentifier'
-    fn scoped_or_hier_identifier(&mut self, arg: &ScopedOrHierIdentifier) {
+    /// Semantic action for non-terminal 'ExpressionIdentifier'
+    fn expression_identifier(&mut self, arg: &ExpressionIdentifier) {
         self.hit = false;
+        if let Some(ref x) = arg.expression_identifier_opt {
+            self.dollar(&x.dollar);
+        }
         self.in_group = true;
         self.identifier(&arg.identifier);
         self.in_group = false;
-        match &*arg.scoped_or_hier_identifier_group {
-            ScopedOrHierIdentifierGroup::ColonColonIdentifierScopedOrHierIdentifierGroupList(x) => {
+        match &*arg.expression_identifier_group {
+            ExpressionIdentifierGroup::ColonColonIdentifierExpressionIdentifierGroupList(x) => {
                 self.colon_colon(&x.colon_colon);
                 self.in_group = true;
                 self.identifier(&x.identifier);
                 self.in_group = false;
-                for x in &x.scoped_or_hier_identifier_group_list {
+                for x in &x.expression_identifier_group_list {
                     self.colon_colon(&x.colon_colon);
                     self.in_group = true;
                     self.identifier(&x.identifier);
                     self.in_group = false;
                 }
             }
-            ScopedOrHierIdentifierGroup::ScopedOrHierIdentifierGroupList0ScopedOrHierIdentifierGroupList1(x) => {
-                for x in &x.scoped_or_hier_identifier_group_list0 {
+            ExpressionIdentifierGroup::ExpressionIdentifierGroupList0ExpressionIdentifierGroupList1(x) => {
+                for x in &x.expression_identifier_group_list0 {
                     self.range(&x.range);
                 }
-                for x in &x.scoped_or_hier_identifier_group_list1 {
+                for x in &x.expression_identifier_group_list1 {
                     self.dot(&x.dot);
                     self.in_group = true;
                     self.identifier(&x.identifier);
                     self.in_group = false;
-                    for x in &x.scoped_or_hier_identifier_group_list1_list{
+                    for x in &x.expression_identifier_group_list1_list {
                         self.range(&x.range);
                     }
                 }

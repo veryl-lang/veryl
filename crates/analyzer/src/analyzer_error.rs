@@ -133,6 +133,16 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
+    #[diagnostic(code(AnalyzerError::UndefinedIdentifier), help(""))]
+    #[error("{identifier} is undefined")]
+    UndefinedIdentifier {
+        identifier: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
     #[diagnostic(
         code(AnalyzerError::UnusedVariable),
         help("add prefix `_` to unused variable name")
@@ -269,6 +279,14 @@ impl AnalyzerError {
 
     pub fn duplicated_identifier(identifier: &str, source: &str, token: &VerylToken) -> Self {
         AnalyzerError::DuplicatedIdentifier {
+            identifier: identifier.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.token.into(),
+        }
+    }
+
+    pub fn undefined_identifier(identifier: &str, source: &str, token: &VerylToken) -> Self {
+        AnalyzerError::UndefinedIdentifier {
             identifier: identifier.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),

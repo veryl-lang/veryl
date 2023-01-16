@@ -1,7 +1,7 @@
 module Module11 ;
     // variable declaration
-    logic                  _b  ;
-    logic [10-1:0]         _bb ;
+    logic                  b   ;
+    logic [10-1:0]         bb  ;
     bit   [10-1:0][10-1:0] _bbb;
 
     // variable declaration with assignment
@@ -9,7 +9,7 @@ module Module11 ;
     assign _c = 1;
 
     // assign declaration
-    assign a    = 1;
-    assign aa   = 1;
+    assign b    = 1;
+    assign bb   = 1;
     assign aa.a = 1;
 endmodule

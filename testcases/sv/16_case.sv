@@ -1,4 +1,8 @@
 module Module16 ;
+    logic  a;
+    logic  x;
+    logic  y;
+
     always_comb begin
         case (x)
             0: a = 1;

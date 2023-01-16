@@ -1,4 +1,9 @@
 module Module20 ;
+    logic  a;
+    logic  b;
+    logic  x;
+    logic  y;
+
     assign a = ((x) ? (
         1
     ) : (

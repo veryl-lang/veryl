@@ -1,4 +1,7 @@
 module Module13 ;
+    logic  a;
+    logic  X;
+
     // bit select
     assign a = X[0];
 

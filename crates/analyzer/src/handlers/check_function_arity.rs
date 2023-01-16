@@ -32,19 +32,15 @@ impl<'a> Handler for CheckFunctionArity<'a> {
 impl<'a> VerylGrammarTrait for CheckFunctionArity<'a> {
     fn factor(&mut self, arg: &Factor) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            if let Factor::FactorOptScopedOrHierIdentifierFactorOpt0(x) = arg {
+            if let Factor::ExpressionIdentifierFactorOpt(x) = arg {
                 // skip system function
                 if x.factor_opt.is_some() {
                     return Ok(());
                 }
 
-                let path: SymbolPath = x.scoped_or_hier_identifier.as_ref().into();
+                let path: SymbolPath = x.expression_identifier.as_ref().into();
                 let namespace = namespace_table::get(
-                    x.scoped_or_hier_identifier
-                        .identifier
-                        .identifier_token
-                        .token
-                        .id,
+                    x.expression_identifier.identifier.identifier_token.token.id,
                 )
                 .unwrap();
                 let symbol = symbol_table::get(&path, &namespace);
@@ -60,8 +56,8 @@ impl<'a> VerylGrammarTrait for CheckFunctionArity<'a> {
                 };
 
                 let mut args = 0;
-                if let Some(ref x) = x.factor_opt0 {
-                    if let Some(ref x) = x.factor_opt1 {
+                if let Some(ref x) = x.factor_opt {
+                    if let Some(ref x) = x.factor_opt0 {
                         args += 1;
                         args += x.function_call_arg.function_call_arg_list.len();
                     }
@@ -76,7 +72,7 @@ impl<'a> VerylGrammarTrait for CheckFunctionArity<'a> {
                             arity,
                             args,
                             self.text,
-                            &x.scoped_or_hier_identifier.identifier.identifier_token,
+                            &x.expression_identifier.identifier.identifier_token,
                         ));
                     }
                 }

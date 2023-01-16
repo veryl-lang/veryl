@@ -1,4 +1,6 @@
 module Module06 ;
+    localparam int unsigned ParamX  = 1;
+
     // function without parameter
     function automatic logic [ParamX-1:0] FuncA(
         input  logic [ParamX-1:0] a,
@@ -27,12 +29,17 @@ module Module06 ;
         endfunction
     endmodule
 
+    logic [ParamX-1:0] a;
+    logic [ParamX-1:0] b;
+    logic [ParamX-1:0] c;
+    logic [ParamX-1:0] d;
+
     // function call
-    assign a = FuncA(a, b, c);
+    assign d = FuncA(a, b, c);
 
     // function call with parameter
     //assign a = FuncB #(ParamX: 1) (a, b, c);
 
     // system function call
-    assign a = $clog2(a);
+    assign d = $clog2(a);
 endmodule

@@ -1,4 +1,8 @@
 module Module07 {
+    var a  : logic ;
+    var aa : logic ;
+    var clk: logic ;
+
     always_comb {
         // assignment statement
         a =    1;

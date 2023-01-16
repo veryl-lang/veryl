@@ -1,4 +1,7 @@
 module Module13 {
+    var a: logic ;
+    var X: logic ;
+
     // bit select
     assign a = X[0];
 

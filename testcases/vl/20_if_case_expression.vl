@@ -1,4 +1,9 @@
 module Module20 {
+    var a: logic ;
+    var b: logic ;
+    var x: logic ;
+    var y: logic ;
+
     assign a = if x {
         1
     } else {

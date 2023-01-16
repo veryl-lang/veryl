@@ -1,4 +1,6 @@
 module Module06 {
+    localparam ParamX: u32  = 1;
+
     // function without parameter
     function FuncA (
         a: input  logic [ParamX],
@@ -24,12 +26,17 @@ module Module06 {
         return a + 2;
     }
 
+    var a: logic [ParamX];
+    var b: logic [ParamX];
+    var c: logic [ParamX];
+    var d: logic [ParamX];
+
     // function call
-    assign a = FuncA(a, b, c);
+    assign d = FuncA(a, b, c);
 
     // function call with parameter
     //assign a = FuncB #(ParamX: 1) (a, b, c);
 
     // system function call
-    assign a = $clog2(a);
+    assign d = $clog2(a);
 }

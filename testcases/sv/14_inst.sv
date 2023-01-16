@@ -1,4 +1,7 @@
 module Module14 ;
+    logic  aa ;
+    logic  bbb;
+
     // module instantiation
     Module14B x ();
 

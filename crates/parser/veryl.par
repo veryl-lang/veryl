@@ -318,7 +318,7 @@ RealNumber: FixedPoint
 HierarchicalIdentifier: Identifier { Range } { Dot Identifier { Range } };
 ScopedIdentifier      : Identifier { ColonColon Identifier };
 ModportIdentifier     : Identifier Dot Identifier;
-ScopedOrHierIdentifier: Identifier ( ColonColon Identifier { ColonColon Identifier } | ( { Range } { Dot Identifier { Range } } ) );
+ExpressionIdentifier  : [ Dollar ] Identifier ( ColonColon Identifier { ColonColon Identifier } | ( { Range } { Dot Identifier { Range } } ) );
 
 // ----------------------------------------------------------------------------
 // Expression
@@ -338,7 +338,7 @@ Expression10: Expression11 { Operator11 Expression11 };
 Expression11: { ( UnaryOperator | Operator09 | Operator05 | Operator03 | Operator04 ) } Factor;
 
 Factor: Number
-      | [ Dollar ] ScopedOrHierIdentifier [ LParen [ FunctionCallArg ] RParen ]
+      | ExpressionIdentifier [ LParen [ FunctionCallArg ] RParen ]
       | LParen Expression RParen
       | LBrace ConcatenationList RBrace
       | IfExpression
