@@ -2,7 +2,7 @@ use miette::{ErrReport, GraphicalReportHandler, GraphicalTheme, ThemeCharacters,
 use semver::Version;
 use veryl_emitter::Emitter;
 use veryl_formatter::Formatter;
-use veryl_metadata::{Build, Format, Metadata, Package};
+use veryl_metadata::{Build, Format, Metadata, Project};
 use veryl_parser::Parser;
 use wasm_bindgen::prelude::*;
 
@@ -44,7 +44,7 @@ fn render_err(err: ErrReport) -> String {
 
 fn metadata() -> Metadata {
     Metadata {
-        package: Package {
+        project: Project {
             name: "".into(),
             version: Version::parse("0.0.0").unwrap(),
             authors: vec![],

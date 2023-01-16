@@ -37,7 +37,7 @@ enum Commands {
     Dump(OptDump),
 }
 
-/// Create a new package
+/// Create a new project
 #[derive(Args)]
 pub struct OptNew {
     pub path: PathBuf,
@@ -51,7 +51,7 @@ pub struct OptNew {
     pub verbose: bool,
 }
 
-/// Create a new package in an existing directory
+/// Create a new project in an existing directory
 #[derive(Args)]
 pub struct OptInit {
     #[arg(default_value = ".")]
@@ -66,7 +66,7 @@ pub struct OptInit {
     pub verbose: bool,
 }
 
-/// Format the current package
+/// Format the current project
 #[derive(Args)]
 pub struct OptFmt {
     /// Target files
@@ -85,7 +85,7 @@ pub struct OptFmt {
     pub verbose: bool,
 }
 
-/// Analyze the current package
+/// Analyze the current project
 #[derive(Args)]
 pub struct OptCheck {
     /// Target files
@@ -100,7 +100,7 @@ pub struct OptCheck {
     pub verbose: bool,
 }
 
-/// Build the target codes corresponding to the current package
+/// Build the target codes corresponding to the current project
 #[derive(Args)]
 pub struct OptBuild {
     /// Target files

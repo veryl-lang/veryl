@@ -2,7 +2,8 @@
 
 ## [Unreleased](https://github.com/dalance/veryl/compare/v0.1.14...Unreleased) - ReleaseDate
 
-* [Changed] modport separator from `.` to `::`
+* [Changed] modport separator from `.` to `::` [#65](https://github.com/dalance/veryl/issues/65)
+* [Changed] `[package]` in Veryl.toml to `[project]` [#82](https://github.com/dalance/veryl/issues/82)
 
 ## [v0.1.14](https://github.com/dalance/veryl/compare/v0.1.13...v0.1.14) - 2023-01-12
 

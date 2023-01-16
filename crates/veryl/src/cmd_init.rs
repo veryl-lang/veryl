@@ -33,7 +33,7 @@ impl CmdInit {
             write!(file, "{}", toml).into_diagnostic()?;
             file.flush().into_diagnostic()?;
 
-            println!("Created \"{}\" package", name.to_string_lossy());
+            println!("Created \"{}\" project", name.to_string_lossy());
         } else {
             bail!("path \"{}\" is not valid", self.opt.path.to_string_lossy());
         }

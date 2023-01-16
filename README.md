@@ -86,31 +86,31 @@ cargo install veryl veryl-ls
 
 ## Usage
 
-* Create a new package
+* Create a new project
 
 ```
-veryl new [package name]
+veryl new [project name]
 ```
 
-* Create a new package in an existing directory
+* Create a new project in an existing directory
 
 ```
 veryl init [path]
 ```
 
-* Format the current package
+* Format the current project
 
 ```
 veryl fmt
 ```
 
-* Analyze the current package
+* Analyze the current project
 
 ```
 veryl check
 ```
 
-* Build target codes corresponding to the current package
+* Build target codes corresponding to the current project
 
 ```
 veryl build
@@ -127,9 +127,9 @@ Transpiled SystemVerilog: https://github.com/dalance/veryl/tree/master/testcases
 ### Package Configuration
 
 ```toml
-[package]
-name = "name"      # package name
-version = "0.1.0"  # package version (semver is recommended)
+[project]
+name = "name"      # project name
+version = "0.1.0"  # project version (semver is recommended)
 
 [build]
 clock_type = "posedge"    # default clock type [posedge|negedge]

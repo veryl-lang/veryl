@@ -7,7 +7,7 @@ use std::str::FromStr;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Metadata {
-    pub package: Package,
+    pub project: Project,
     #[serde(default)]
     pub build: Build,
     #[serde(default)]
@@ -51,7 +51,7 @@ impl FromStr for Metadata {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Package {
+pub struct Project {
     pub name: String,
     pub version: Version,
     #[serde(default)]
@@ -129,7 +129,7 @@ mod tests {
     use semver::{BuildMetadata, Prerelease};
 
     const TEST_TOML: &'static str = r#"
-[package]
+[project]
 name = "test"
 version = "0.1.0"
 
@@ -146,9 +146,9 @@ indent_width = 4
     #[test]
     fn load_toml() {
         let metadata: Metadata = toml::from_str(TEST_TOML).unwrap();
-        assert_eq!(metadata.package.name, "test");
+        assert_eq!(metadata.project.name, "test");
         assert_eq!(
-            metadata.package.version,
+            metadata.project.version,
             Version {
                 major: 0,
                 minor: 1,

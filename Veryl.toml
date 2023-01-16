@@ -1,4 +1,4 @@
-[package]
+[project]
 name = "veryl-testcase"
 version = "0.1.0"
 

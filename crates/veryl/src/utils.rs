@@ -19,7 +19,7 @@ pub fn gather_files<T: AsRef<Path>>(base_dir: T) -> Result<Vec<PathBuf>> {
 
 pub fn create_default_toml(name: &str) -> String {
     format!(
-        r###"[package]
+        r###"[project]
 name = "{}"
 version = "0.1.0""###,
         name
