@@ -317,7 +317,6 @@ RealNumber: FixedPoint
 
 HierarchicalIdentifier: Identifier { Range } { Dot Identifier { Range } };
 ScopedIdentifier      : Identifier { ColonColon Identifier };
-ModportIdentifier     : Identifier Dot Identifier;
 ExpressionIdentifier  : [ Dollar ] Identifier ( ColonColon Identifier { ColonColon Identifier } | ( { Range } { Dot Identifier { Range } } ) );
 
 // ----------------------------------------------------------------------------
@@ -380,7 +379,7 @@ BuiltinType: Logic
 
 TypeModifier: Tri;
 
-Type: [ TypeModifier ] ( BuiltinType | ScopedIdentifier | ModportIdentifier ) { Width };
+Type: [ TypeModifier ] ( BuiltinType | ScopedIdentifier ) { Width };
 
 // ----------------------------------------------------------------------------
 // Statement

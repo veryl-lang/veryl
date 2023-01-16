@@ -22,6 +22,7 @@ pub struct Emitter {
     in_always_ff: bool,
     in_function: bool,
     in_generate: bool,
+    in_direction_modport: bool,
     reset_signal: Option<String>,
     default_block: Option<String>,
 }
@@ -44,6 +45,7 @@ impl Default for Emitter {
             in_always_ff: false,
             in_function: false,
             in_generate: false,
+            in_direction_modport: false,
             reset_signal: None,
             default_block: None,
         }
@@ -222,7 +224,6 @@ impl Emitter {
                 }
             }
             TypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
-            TypeGroup::ModportIdentifier(x) => self.modport_identifier(&x.modport_identifier),
         }
     }
 
@@ -239,7 +240,6 @@ impl Emitter {
                 BuiltinType::F64(_) => true,
             },
             TypeGroup::ScopedIdentifier(_) => true,
-            TypeGroup::ModportIdentifier(_) => true,
         };
         if width {
             self.space(1);
@@ -272,6 +272,19 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'VerylToken'
     fn veryl_token(&mut self, arg: &VerylToken) {
         self.token(arg);
+    }
+
+    /// Semantic action for non-terminal 'ScopedIdentifier'
+    fn scoped_identifier(&mut self, arg: &ScopedIdentifier) {
+        self.identifier(&arg.identifier);
+        for x in &arg.scoped_identifier_list {
+            if self.in_direction_modport {
+                self.str(".");
+            } else {
+                self.colon_colon(&x.colon_colon);
+            }
+            self.identifier(&x.identifier);
+        }
     }
 
     /// Semantic action for non-terminal 'Expression'
@@ -1258,6 +1271,7 @@ impl VerylWalker for Emitter {
             PortDeclarationItemGroup::DirectionType(x) => {
                 self.direction(&x.direction);
                 if let Direction::Modport(_) = *x.direction {
+                    self.in_direction_modport = true;
                 } else {
                     self.space(1);
                 }
@@ -1265,6 +1279,7 @@ impl VerylWalker for Emitter {
                 self.space(1);
                 self.identifier(&arg.identifier);
                 self.r#type_right(&x.r#type);
+                self.in_direction_modport = false;
             }
             PortDeclarationItemGroup::Interface(x) => {
                 self.interface(&x.interface);

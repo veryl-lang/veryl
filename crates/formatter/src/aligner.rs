@@ -345,7 +345,6 @@ impl VerylWalker for Aligner {
         match &*arg.type_group {
             TypeGroup::BuiltinType(x) => self.builtin_type(&x.builtin_type),
             TypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
-            TypeGroup::ModportIdentifier(x) => self.modport_identifier(&x.modport_identifier),
         };
         let loc = self.aligns[align_kind::TYPE].last_location;
         self.aligns[align_kind::TYPE].finish_item();

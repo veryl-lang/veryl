@@ -263,12 +263,6 @@ impl From<&syntax_tree::Type> for Type {
                 }
                 TypeKind::UserDefined(name)
             }
-            syntax_tree::TypeGroup::ModportIdentifier(x) => {
-                let x = &x.modport_identifier;
-                let interface = x.identifier.identifier_token.token.text;
-                let modport = x.identifier0.identifier_token.token.text;
-                TypeKind::Modport(interface, modport)
-            }
         };
         let mut width = Vec::new();
         for x in &value.type_list {

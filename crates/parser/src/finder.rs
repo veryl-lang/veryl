@@ -73,21 +73,6 @@ impl VerylWalker for Finder {
         }
     }
 
-    /// Semantic action for non-terminal 'ModportIdentifier'
-    fn modport_identifier(&mut self, arg: &ModportIdentifier) {
-        self.hit = false;
-        self.in_group = true;
-        self.identifier(&arg.identifier);
-        self.in_group = false;
-        self.dot(&arg.dot);
-        self.in_group = true;
-        self.identifier(&arg.identifier0);
-        self.in_group = false;
-        if !self.hit {
-            self.token_group.clear();
-        }
-    }
-
     /// Semantic action for non-terminal 'ExpressionIdentifier'
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) {
         self.hit = false;

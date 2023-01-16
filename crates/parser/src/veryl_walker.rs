@@ -674,15 +674,6 @@ pub trait VerylWalker {
         after!(self, scoped_identifier, arg);
     }
 
-    /// Semantic action for non-terminal 'ModportIdentifier'
-    fn modport_identifier(&mut self, arg: &ModportIdentifier) {
-        before!(self, modport_identifier, arg);
-        self.identifier(&arg.identifier);
-        self.dot(&arg.dot);
-        self.identifier(&arg.identifier0);
-        after!(self, modport_identifier, arg);
-    }
-
     /// Semantic action for non-terminal 'ExpressionIdentifier'
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) {
         before!(self, expression_identifier, arg);
@@ -1044,7 +1035,6 @@ pub trait VerylWalker {
         match &*arg.type_group {
             TypeGroup::BuiltinType(x) => self.builtin_type(&x.builtin_type),
             TypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
-            TypeGroup::ModportIdentifier(x) => self.modport_identifier(&x.modport_identifier),
         };
         for x in &arg.type_list {
             self.width(&x.width);
