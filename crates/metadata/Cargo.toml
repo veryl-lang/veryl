@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl-metadata"
-version               = "0.1.14"
+version               = "0.2.0"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -18,4 +18,4 @@ semver       = {workspace = true}
 serde        = {workspace = true}
 thiserror    = {workspace = true}
 toml         = "0.5.10"
-veryl-parser = {version = "0.1.14", path = "../parser"}
+veryl-parser = {version = "0.2.0", path = "../parser"}

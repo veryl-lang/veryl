@@ -1,6 +1,8 @@
 # Change Log
 
-## [Unreleased](https://github.com/dalance/veryl/compare/v0.1.14...Unreleased) - ReleaseDate
+## [Unreleased](https://github.com/dalance/veryl/compare/v0.2.0...Unreleased) - ReleaseDate
+
+## [v0.2.0](https://github.com/dalance/veryl/compare/v0.1.14...v0.2.0) - 2023-01-16
 
 * [Changed] modport separator from `.` to `::` [#65](https://github.com/dalance/veryl/issues/65)
 * [Changed] `[package]` in Veryl.toml to `[project]` [#82](https://github.com/dalance/veryl/issues/82)
