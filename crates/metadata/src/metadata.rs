@@ -68,6 +68,8 @@ pub struct Build {
     #[serde(default)]
     pub reset_type: ResetType,
     #[serde(default)]
+    pub filelist_type: FilelistType,
+    #[serde(default)]
     pub target: Target,
 }
 
@@ -91,6 +93,17 @@ pub enum ResetType {
     SyncLow,
     #[serde(rename = "sync_high")]
     SyncHigh,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum FilelistType {
+    #[default]
+    #[serde(rename = "absolute")]
+    Absolute,
+    #[serde(rename = "relative")]
+    Relative,
+    #[serde(rename = "flgen")]
+    Flgen,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

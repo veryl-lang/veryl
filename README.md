@@ -132,8 +132,9 @@ name = "name"      # project name
 version = "0.1.0"  # project version (semver is recommended)
 
 [build]
-clock_type = "posedge"    # default clock type [posedge|negedge]
-reset_type = "async_low"  # default reset type [async_low|async_high|sync_low|sync_high]
+clock_type    = "posedge"    # default clock type [posedge|negedge]
+reset_type    = "async_low"  # default reset type [async_low|async_high|sync_low|sync_high]
+filelist_type = "absolute"   # filelist type [absolute|relative|flgen]
 
 # output target files in the same location as source
 target     = {type = "source"}
