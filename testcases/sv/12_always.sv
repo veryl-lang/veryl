@@ -1,7 +1,7 @@
 module Module12 (
     input logic  i_clk,
     input logic  i_rst
-) ;
+);
     logic  a ;
     logic  aa;
     logic  b ;

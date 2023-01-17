@@ -1,4 +1,4 @@
-module Module06 ;
+module Module06;
     localparam int unsigned ParamX  = 1;
 
     // function without parameter

@@ -4,7 +4,7 @@ interface Interface05 #(
     parameter  int unsigned a    = 1,
     parameter  int unsigned aa   = 1,
     localparam int unsigned aaa  = 1
-) ;
+);
     // localparam declaration
     localparam int unsigned     b   = 1;
     localparam longint unsigned bb  = 1;

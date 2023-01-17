@@ -1,4 +1,4 @@
-module Module13 ;
+module Module13;
     logic  a;
     logic  X;
 

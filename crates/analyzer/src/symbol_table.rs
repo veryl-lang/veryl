@@ -209,7 +209,6 @@ impl SymbolTable {
                                         inner = true;
                                     }
                                 }
-                                dbg!(format!("{}", namespace));
                             }
                         }
                         SymbolKind::Interface(_) => {

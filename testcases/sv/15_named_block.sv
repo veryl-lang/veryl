@@ -1,4 +1,4 @@
-module Module15 ;
+module Module15;
     logic  _a;
     if (1) begin 
     :label

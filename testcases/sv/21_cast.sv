@@ -1,4 +1,4 @@
-module Module21 ;
+module Module21;
     logic  a;
     logic  b;
     typedef 

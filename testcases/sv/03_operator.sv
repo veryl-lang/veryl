@@ -1,4 +1,4 @@
-module Module03 ;
+module Module03;
     logic  a         ;
     logic  aa        ;
     logic  aaa       ;

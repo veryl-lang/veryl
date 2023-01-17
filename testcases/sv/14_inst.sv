@@ -1,4 +1,4 @@
-module Module14 ;
+module Module14;
     logic  aa ;
     logic  bbb;
 
@@ -27,7 +27,7 @@ module Module14 ;
     InterfaceA yyy [10-1:0] ();
 endmodule
 
-module Module14B ;
+module Module14B;
 
 
 endmodule
@@ -36,7 +36,7 @@ module Module14C (
     input int unsigned a    ,
     input int unsigned bb   ,
     input int unsigned bbbb 
-) ;
+);
 
 
 endmodule
@@ -44,7 +44,7 @@ endmodule
 interface InterfaceA #(
     parameter int unsigned a  = 1,
     parameter int unsigned b  = 1
-) ;
+);
 
 
 endinterface

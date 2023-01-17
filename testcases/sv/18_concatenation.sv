@@ -1,4 +1,4 @@
-module Module18 ;
+module Module18;
     logic  a;
     logic  b;
 

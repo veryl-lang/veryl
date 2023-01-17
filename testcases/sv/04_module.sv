@@ -10,7 +10,7 @@ module Module04 #(
     inout  tri logic [10-1:0] bbb  ,
     interface bbbb ,
     Interface05.d bbbbb 
-) ;
+);
     // localparam declaration
     localparam int unsigned     c   = 1;
     localparam longint unsigned cc  = 1;

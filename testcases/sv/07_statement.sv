@@ -1,4 +1,4 @@
-module Module07 ;
+module Module07;
     logic  a  ;
     logic  aa ;
     logic  clk;

@@ -11,7 +11,7 @@ module //a
 
     input  logic         i_down ,
     output logic [8-1:0] o_count
-) ;
+);
 
     logic //a
      [ // a

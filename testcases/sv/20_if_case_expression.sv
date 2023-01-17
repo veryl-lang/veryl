@@ -1,4 +1,4 @@
-module Module20 ;
+module Module20;
     logic  a;
     logic  b;
     logic  x;

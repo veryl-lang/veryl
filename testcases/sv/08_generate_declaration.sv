@@ -1,4 +1,4 @@
-module Module08 ;
+module Module08;
     logic  a    ;
     logic  b    ;
     logic  c    ;
