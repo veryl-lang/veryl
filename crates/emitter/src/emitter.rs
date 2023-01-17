@@ -205,9 +205,11 @@ impl Emitter {
     }
 
     fn type_left(&mut self, input: &Type) {
-        if let Some(ref x) = input.type_opt {
-            self.type_modifier(&x.type_modifier);
-            self.space(1);
+        for x in &input.type_list {
+            if let TypeModifier::Tri(x) = &*x.type_modifier {
+                self.tri(&x.tri);
+                self.space(1);
+            }
         }
         match &*input.type_group {
             TypeGroup::BuiltinType(x) => {
@@ -222,9 +224,15 @@ impl Emitter {
                     BuiltinType::F64(x) => (false, x.f64.f64_token.replace("real")),
                 };
                 self.token(&token);
+                for x in &input.type_list {
+                    if let TypeModifier::Signed(x) = &*x.type_modifier {
+                        self.space(1);
+                        self.signed(&x.signed);
+                    }
+                }
                 if width {
                     self.space(1);
-                    for x in &input.type_list {
+                    for x in &input.type_list0 {
                         self.width(&x.width);
                     }
                 }
@@ -249,7 +257,7 @@ impl Emitter {
         };
         if width {
             self.space(1);
-            for x in &input.type_list {
+            for x in &input.type_list0 {
                 self.width(&x.width);
             }
         }

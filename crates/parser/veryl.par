@@ -89,6 +89,7 @@ PosedgeTerm           : /\bposedge\b/                                           
 RefTerm               : /\bref\b/                                                            : Token;
 RepeatTerm            : /\brepeat\b/                                                         : Token;
 ReturnTerm            : /\breturn\b/                                                         : Token;
+SignedTerm            : /\bsigned\b/                                                         : Token;
 StepTerm              : /\bstep\b/                                                           : Token;
 StructTerm            : /\bstruct\b/                                                         : Token;
 SyncHighTerm          : /\bsync_high\b/                                                      : Token;
@@ -185,6 +186,7 @@ PosedgeToken   : PosedgeTerm   : Token Comments;
 RefToken       : RefTerm       : Token Comments;
 RepeatToken    : RepeatTerm    : Token Comments;
 ReturnToken    : ReturnTerm    : Token Comments;
+SignedToken    : SignedTerm    : Token Comments;
 StepToken      : StepTerm      : Token Comments;
 StructToken    : StructTerm    : Token Comments;
 SyncHighToken  : SyncHighTerm  : Token Comments;
@@ -285,6 +287,7 @@ Posedge   : PosedgeToken   : VerylToken;
 Ref       : RefToken       : VerylToken;
 Repeat    : RepeatToken    : VerylToken;
 Return    : ReturnToken    : VerylToken;
+Signed    : SignedToken    : VerylToken;
 Step      : StepToken      : VerylToken;
 Struct    : StructToken    : VerylToken;
 SyncHigh  : SyncHighToken  : VerylToken;
@@ -381,9 +384,9 @@ BuiltinType: Logic
            | U32 | U64 | I32 | I64 | F32 | F64
            ;
 
-TypeModifier: Tri;
+TypeModifier: Tri | Signed;
 
-Type: [ TypeModifier ] ( BuiltinType | ScopedIdentifier ) { Width };
+Type: { TypeModifier } ( BuiltinType | ScopedIdentifier ) { Width };
 
 // ----------------------------------------------------------------------------
 // Statement

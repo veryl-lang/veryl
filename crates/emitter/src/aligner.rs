@@ -328,7 +328,7 @@ impl VerylWalker for Aligner {
     /// Semantic action for non-terminal 'Type'
     fn r#type(&mut self, arg: &Type) {
         self.aligns[align_kind::TYPE].start_item();
-        if let Some(ref x) = arg.type_opt {
+        for x in &arg.type_list {
             self.type_modifier(&x.type_modifier);
             self.space(1);
         }
@@ -339,11 +339,11 @@ impl VerylWalker for Aligner {
         let loc = self.aligns[align_kind::TYPE].last_location;
         self.aligns[align_kind::TYPE].finish_item();
         self.aligns[align_kind::WIDTH].start_item();
-        if arg.type_list.is_empty() {
+        if arg.type_list0.is_empty() {
             let loc = loc.unwrap();
             self.aligns[align_kind::WIDTH].dummy_location(loc);
         } else {
-            for x in &arg.type_list {
+            for x in &arg.type_list0 {
                 self.width(&x.width);
             }
         }

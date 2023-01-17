@@ -173,7 +173,7 @@ impl From<&syntax_tree::Direction> for Direction {
 
 #[derive(Debug, Clone)]
 pub struct Type {
-    pub modifier: Option<TypeModifier>,
+    pub modifier: Vec<TypeModifier>,
     pub kind: TypeKind,
     pub width: Vec<syntax_tree::Expression>,
 }
@@ -194,14 +194,16 @@ pub enum TypeKind {
 #[derive(Debug, Clone)]
 pub enum TypeModifier {
     Tri,
+    Signed,
 }
 
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut text = String::new();
-        if let Some(x) = &self.modifier {
+        for x in &self.modifier {
             match x {
                 TypeModifier::Tri => text.push_str("tri "),
+                TypeModifier::Signed => text.push_str("signed "),
             }
         }
         match &self.kind {
@@ -234,11 +236,13 @@ impl fmt::Display for Type {
 
 impl From<&syntax_tree::Type> for Type {
     fn from(value: &syntax_tree::Type) -> Self {
-        let modifier = if value.type_opt.is_some() {
-            Some(TypeModifier::Tri)
-        } else {
-            None
-        };
+        let mut modifier = Vec::new();
+        for x in &value.type_list {
+            match &*x.type_modifier {
+                syntax_tree::TypeModifier::Tri(_) => modifier.push(TypeModifier::Tri),
+                syntax_tree::TypeModifier::Signed(_) => modifier.push(TypeModifier::Signed),
+            }
+        }
         let kind = match &*value.type_group {
             syntax_tree::TypeGroup::BuiltinType(x) => match &*x.builtin_type {
                 syntax_tree::BuiltinType::Logic(_) => TypeKind::Logic,
@@ -261,7 +265,7 @@ impl From<&syntax_tree::Type> for Type {
             }
         };
         let mut width = Vec::new();
-        for x in &value.type_list {
+        for x in &value.type_list0 {
             width.push(*x.width.expression.clone());
         }
         Type {

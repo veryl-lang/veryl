@@ -559,6 +559,13 @@ pub trait VerylWalker {
         after!(self, r#return, arg);
     }
 
+    /// Semantic action for non-terminal 'Signed'
+    fn signed(&mut self, arg: &Signed) {
+        before!(self, signed, arg);
+        self.veryl_token(&arg.signed_token);
+        after!(self, signed, arg);
+    }
+
     /// Semantic action for non-terminal 'Step'
     fn step(&mut self, arg: &Step) {
         before!(self, step, arg);
@@ -1040,21 +1047,24 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'TypeModifier'
     fn type_modifier(&mut self, arg: &TypeModifier) {
         before!(self, type_modifier, arg);
-        self.tri(&arg.tri);
+        match arg {
+            TypeModifier::Tri(x) => self.tri(&x.tri),
+            TypeModifier::Signed(x) => self.signed(&x.signed),
+        }
         after!(self, type_modifier, arg);
     }
 
     /// Semantic action for non-terminal 'Type'
     fn r#type(&mut self, arg: &Type) {
         before!(self, r#type, arg);
-        if let Some(ref x) = arg.type_opt {
+        for x in &arg.type_list {
             self.type_modifier(&x.type_modifier);
         }
         match &*arg.type_group {
             TypeGroup::BuiltinType(x) => self.builtin_type(&x.builtin_type),
             TypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
         };
-        for x in &arg.type_list {
+        for x in &arg.type_list0 {
             self.width(&x.width);
         }
         after!(self, r#type, arg);

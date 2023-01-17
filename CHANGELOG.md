@@ -4,6 +4,7 @@
 
 * [Added] uknown member check [#84](https://github.com/dalance/veryl/issues/84)
 * [Changed] file scope import [#59](https://github.com/dalance/veryl/issues/59)
+* [Added] signed type modifier [#85](https://github.com/dalance/veryl/issues/85)
 
 ## [v0.2.0](https://github.com/dalance/veryl/compare/v0.1.14...v0.2.0) - 2023-01-16
 
