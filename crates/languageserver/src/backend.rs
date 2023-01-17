@@ -329,9 +329,11 @@ impl LanguageServer for Backend {
                     } else {
                         SymbolPath::from(finder.token_group.as_slice())
                     };
-                    if let Some(symbol) = symbol_table::get(&path, &namespace) {
-                        let location = Backend::to_location(&symbol.token);
-                        return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+                    if let Ok(symbol) = symbol_table::get(&path, &namespace) {
+                        if let Some(symbol) = symbol.found {
+                            let location = Backend::to_location(&symbol.token);
+                            return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+                        }
                     }
                 }
             }
@@ -394,13 +396,15 @@ impl LanguageServer for Backend {
                     } else {
                         SymbolPath::from(finder.token_group.as_slice())
                     };
-                    if let Some(symbol) = symbol_table::get(&path, &namespace) {
-                        let text = symbol.kind.to_string();
-                        let hover = Hover {
-                            contents: HoverContents::Scalar(MarkedString::String(text)),
-                            range: None,
-                        };
-                        return Ok(Some(hover));
+                    if let Ok(symbol) = symbol_table::get(&path, &namespace) {
+                        if let Some(symbol) = symbol.found {
+                            let text = symbol.kind.to_string();
+                            let hover = Hover {
+                                contents: HoverContents::Scalar(MarkedString::String(text)),
+                                range: None,
+                            };
+                            return Ok(Some(hover));
+                        }
                     }
                 }
             }
@@ -424,10 +428,12 @@ impl LanguageServer for Backend {
                     } else {
                         SymbolPath::from(finder.token_group.as_slice())
                     };
-                    if let Some(symbol) = symbol_table::get(&path, &namespace) {
-                        for reference in &symbol.references {
-                            let location = Backend::to_location(reference);
-                            ret.push(location);
+                    if let Ok(symbol) = symbol_table::get(&path, &namespace) {
+                        if let Some(symbol) = symbol.found {
+                            for reference in &symbol.references {
+                                let location = Backend::to_location(reference);
+                                ret.push(location);
+                            }
                         }
                     }
                 }

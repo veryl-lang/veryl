@@ -113,10 +113,21 @@ pub enum AnalyzerError {
     },
 
     #[diagnostic(code(AnalyzerError::UnknownPort), help("remove \"{port}\" port"))]
-    #[error("module \"{name}\" doesn't has \"{port}\", but it is connected")]
+    #[error("module \"{name}\" doesn't have port \"{port}\", but it is connected")]
     UnknownPort {
         name: String,
         port: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(code(AnalyzerError::UnknownMember), help(""))]
+    #[error("\"{name}\" doesn't have member \"{member}\"")]
+    UnknownMember {
+        name: String,
+        member: String,
         #[source_code]
         input: NamedSource,
         #[label("Error location")]
@@ -272,6 +283,15 @@ impl AnalyzerError {
         AnalyzerError::UnknownPort {
             name: name.to_string(),
             port: port.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.token.into(),
+        }
+    }
+
+    pub fn unknown_member(name: &str, member: &str, source: &str, token: &VerylToken) -> Self {
+        AnalyzerError::UnknownMember {
+            name: name.to_string(),
+            member: member.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),
         }

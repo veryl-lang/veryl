@@ -29,18 +29,33 @@ impl<'a> Handler for CreateReference<'a> {
 impl<'a> VerylGrammarTrait for CreateReference<'a> {
     fn hierarchical_identifier(&mut self, arg: &HierarchicalIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let symbol = symbol_table::resolve(arg);
-            if let Some(symbol) = symbol {
-                symbol_table::add_reference(
-                    symbol.token.id,
-                    &arg.identifier.identifier_token.token,
-                );
-            } else {
-                let is_single_identifier = SymbolPath::from(arg).as_slice().len() == 1;
-                if is_single_identifier {
-                    let name = arg.identifier.identifier_token.text();
-                    self.errors.push(AnalyzerError::undefined_identifier(
+            match symbol_table::resolve(arg) {
+                Ok(symbol) => {
+                    if symbol.found.is_some() {
+                        for symbol in symbol.full_path {
+                            symbol_table::add_reference(
+                                symbol.token.id,
+                                &arg.identifier.identifier_token.token,
+                            );
+                        }
+                    } else {
+                        let is_single_identifier = SymbolPath::from(arg).as_slice().len() == 1;
+                        if is_single_identifier {
+                            let name = arg.identifier.identifier_token.text();
+                            self.errors.push(AnalyzerError::undefined_identifier(
+                                &name,
+                                self.text,
+                                &arg.identifier.identifier_token,
+                            ));
+                        }
+                    }
+                }
+                Err(err) => {
+                    let name = format!("{}", err.last_found.token.text);
+                    let member = format!("{}", err.not_found);
+                    self.errors.push(AnalyzerError::unknown_member(
                         &name,
+                        &member,
                         self.text,
                         &arg.identifier.identifier_token,
                     ));
@@ -57,18 +72,33 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                 return Ok(());
             }
 
-            let symbol = symbol_table::resolve(arg);
-            if let Some(symbol) = symbol {
-                symbol_table::add_reference(
-                    symbol.token.id,
-                    &arg.identifier.identifier_token.token,
-                );
-            } else {
-                let is_single_identifier = SymbolPath::from(arg).as_slice().len() == 1;
-                if is_single_identifier {
-                    let name = arg.identifier.identifier_token.text();
-                    self.errors.push(AnalyzerError::undefined_identifier(
+            match symbol_table::resolve(arg) {
+                Ok(symbol) => {
+                    if symbol.found.is_some() {
+                        for symbol in symbol.full_path {
+                            symbol_table::add_reference(
+                                symbol.token.id,
+                                &arg.identifier.identifier_token.token,
+                            );
+                        }
+                    } else {
+                        let is_single_identifier = SymbolPath::from(arg).as_slice().len() == 1;
+                        if is_single_identifier {
+                            let name = arg.identifier.identifier_token.text();
+                            self.errors.push(AnalyzerError::undefined_identifier(
+                                &name,
+                                self.text,
+                                &arg.identifier.identifier_token,
+                            ));
+                        }
+                    }
+                }
+                Err(err) => {
+                    let name = format!("{}", err.last_found.token.text);
+                    let member = format!("{}", err.not_found);
+                    self.errors.push(AnalyzerError::unknown_member(
                         &name,
+                        &member,
                         self.text,
                         &arg.identifier.identifier_token,
                     ));
@@ -80,12 +110,27 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
 
     fn modport_item(&mut self, arg: &ModportItem) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let symbol = symbol_table::resolve(arg.identifier.as_ref());
-            if let Some(symbol) = symbol {
-                symbol_table::add_reference(
-                    symbol.token.id,
-                    &arg.identifier.identifier_token.token,
-                );
+            match symbol_table::resolve(arg.identifier.as_ref()) {
+                Ok(symbol) => {
+                    if symbol.found.is_some() {
+                        for symbol in symbol.full_path {
+                            symbol_table::add_reference(
+                                symbol.token.id,
+                                &arg.identifier.identifier_token.token,
+                            );
+                        }
+                    }
+                }
+                Err(err) => {
+                    let name = format!("{}", err.last_found.token.text);
+                    let member = format!("{}", err.not_found);
+                    self.errors.push(AnalyzerError::unknown_member(
+                        &name,
+                        &member,
+                        self.text,
+                        &arg.identifier.identifier_token,
+                    ));
+                }
             }
         }
         Ok(())
@@ -93,12 +138,27 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
 
     fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let symbol = symbol_table::resolve(arg.identifier0.as_ref());
-            if let Some(symbol) = symbol {
-                symbol_table::add_reference(
-                    symbol.token.id,
-                    &arg.identifier0.identifier_token.token,
-                );
+            match symbol_table::resolve(arg.identifier0.as_ref()) {
+                Ok(symbol) => {
+                    if symbol.found.is_some() {
+                        for symbol in symbol.full_path {
+                            symbol_table::add_reference(
+                                symbol.token.id,
+                                &arg.identifier0.identifier_token.token,
+                            );
+                        }
+                    }
+                }
+                Err(err) => {
+                    let name = format!("{}", err.last_found.token.text);
+                    let member = format!("{}", err.not_found);
+                    self.errors.push(AnalyzerError::unknown_member(
+                        &name,
+                        &member,
+                        self.text,
+                        &arg.identifier0.identifier_token,
+                    ));
+                }
             }
         }
         Ok(())

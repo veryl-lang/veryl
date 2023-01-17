@@ -31,6 +31,14 @@ impl Namespace {
         }
         true
     }
+
+    pub fn matched(&self, x: &Namespace) -> bool {
+        if self.paths.len() != x.paths.len() {
+            false
+        } else {
+            self.included(x)
+        }
+    }
 }
 
 impl fmt::Display for Namespace {

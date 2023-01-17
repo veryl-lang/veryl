@@ -299,8 +299,12 @@ impl VerylWalker for Emitter {
 
         self.identifier(&arg.identifier);
         let symbol = symbol_table::resolve(arg);
-        let is_enum_member = if let Some(ref symbol) = symbol {
-            matches!(symbol.kind, SymbolKind::EnumMember(_))
+        let is_enum_member = if let Ok(ref symbol) = symbol {
+            if let Some(ref symbol) = symbol.found {
+                matches!(symbol.kind, SymbolKind::EnumMember(_))
+            } else {
+                false
+            }
         } else {
             false
         };

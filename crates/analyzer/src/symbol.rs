@@ -173,9 +173,9 @@ impl From<&syntax_tree::Direction> for Direction {
 
 #[derive(Debug, Clone)]
 pub struct Type {
-    modifier: Option<TypeModifier>,
-    kind: TypeKind,
-    width: Vec<syntax_tree::Expression>,
+    pub modifier: Option<TypeModifier>,
+    pub kind: TypeKind,
+    pub width: Vec<syntax_tree::Expression>,
 }
 
 #[derive(Debug, Clone)]

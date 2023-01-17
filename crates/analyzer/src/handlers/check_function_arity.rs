@@ -36,41 +36,42 @@ impl<'a> VerylGrammarTrait for CheckFunctionArity<'a> {
                     return Ok(());
                 }
 
-                let symbol = symbol_table::resolve(x.expression_identifier.as_ref());
-                let arity = if let Some(symbol) = symbol {
-                    if let SymbolKind::Function(x) = symbol.kind {
-                        Some(x.ports.len())
+                if let Ok(symbol) = symbol_table::resolve(x.expression_identifier.as_ref()) {
+                    let arity = if let Some(symbol) = symbol.found {
+                        if let SymbolKind::Function(x) = symbol.kind {
+                            Some(x.ports.len())
+                        } else {
+                            None
+                        }
                     } else {
                         None
-                    }
-                } else {
-                    None
-                };
+                    };
 
-                let mut args = 0;
-                if let Some(ref x) = x.factor_opt {
-                    if let Some(ref x) = x.factor_opt0 {
-                        args += 1;
-                        args += x.function_call_arg.function_call_arg_list.len();
+                    let mut args = 0;
+                    if let Some(ref x) = x.factor_opt {
+                        if let Some(ref x) = x.factor_opt0 {
+                            args += 1;
+                            args += x.function_call_arg.function_call_arg_list.len();
+                        }
                     }
-                }
 
-                if let Some(arity) = arity {
-                    if arity != args {
-                        let name = format!(
-                            "{}",
-                            SymbolPath::from(x.expression_identifier.as_ref())
-                                .as_slice()
-                                .last()
-                                .unwrap()
-                        );
-                        self.errors.push(AnalyzerError::mismatch_arity(
-                            &name,
-                            arity,
-                            args,
-                            self.text,
-                            &x.expression_identifier.identifier.identifier_token,
-                        ));
+                    if let Some(arity) = arity {
+                        if arity != args {
+                            let name = format!(
+                                "{}",
+                                SymbolPath::from(x.expression_identifier.as_ref())
+                                    .as_slice()
+                                    .last()
+                                    .unwrap()
+                            );
+                            self.errors.push(AnalyzerError::mismatch_arity(
+                                &name,
+                                arity,
+                                args,
+                                self.text,
+                                &x.expression_identifier.identifier.identifier_token,
+                            ));
+                        }
                     }
                 }
             }
