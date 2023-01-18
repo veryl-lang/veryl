@@ -1,3 +1,4 @@
+use crate::evaluator::Evaluated;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::{Symbol, SymbolKind, TypeKind};
@@ -187,6 +188,7 @@ impl SymbolTable {
                         namespace.included(&symbol.namespace)
                     };
                     if included && symbol.namespace.depth() >= max_depth {
+                        symbol.evaluate();
                         ret = Some(symbol);
                         last_found = Some(symbol);
                         max_depth = symbol.namespace.depth();
@@ -258,6 +260,9 @@ impl SymbolTable {
     pub fn get_all(&self) -> Vec<Symbol> {
         let mut ret = Vec::new();
         for value in self.table.values() {
+            for symbol in value {
+                symbol.evaluate();
+            }
             let mut value = value.clone();
             ret.append(&mut value);
         }
@@ -305,13 +310,22 @@ impl fmt::Display for SymbolTable {
         }
         for (k, v) in &vec {
             for symbol in *v {
+                let evaluated = if let Some(evaluated) = symbol.evaluated.get() {
+                    match evaluated {
+                        Evaluated::Unknown => "".to_string(),
+                        _ => format!(" ( {:?} )", evaluated),
+                    }
+                } else {
+                    "".to_string()
+                };
                 writeln!(
                     f,
-                    "    {:symbol_width$} @ {:namespace_width$} {{ refs: {:reference_width$} }}: {},",
+                    "    {:symbol_width$} @ {:namespace_width$} {{ refs: {:reference_width$} }}: {}{},",
                     k,
                     symbol.namespace,
                     symbol.references.len(),
                     symbol.kind,
+                    evaluated,
                     symbol_width = symbol_width,
                     namespace_width = namespace_width,
                     reference_width = reference_width
@@ -439,273 +453,273 @@ mod tests {
         assert_eq!(format!("{}", symbol.unwrap().namespace), "");
     }
 
-    //#[test]
-    //fn interface() {
-    //    parse();
+    #[test]
+    fn interface() {
+        parse();
 
-    //    let mut symbol_path = SymbolPath::default();
-    //    symbol_path.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
+        let mut symbol_path = SymbolPath::default();
+        symbol_path.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
 
-    //    let namespace = Namespace::default();
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let namespace = Namespace::default();
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_some());
-    //    assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
 
-    //    let mut namespace = Namespace::default();
-    //    namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_some());
-    //    assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
 
-    //    let mut namespace = Namespace::default();
-    //    namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_some());
-    //    assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
 
-    //    let mut namespace = Namespace::default();
-    //    namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_some());
-    //    assert_eq!(format!("{}", symbol.unwrap().namespace), "");
-    //}
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+    }
 
-    //#[test]
-    //fn package() {
-    //    parse();
+    #[test]
+    fn package() {
+        parse();
 
-    //    let mut symbol_path = SymbolPath::default();
-    //    symbol_path.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
+        let mut symbol_path = SymbolPath::default();
+        symbol_path.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
 
-    //    let namespace = Namespace::default();
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let namespace = Namespace::default();
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_some());
-    //    assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
 
-    //    let mut namespace = Namespace::default();
-    //    namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_some());
-    //    assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
 
-    //    let mut namespace = Namespace::default();
-    //    namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_some());
-    //    assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
 
-    //    let mut namespace = Namespace::default();
-    //    namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_some());
-    //    assert_eq!(format!("{}", symbol.unwrap().namespace), "");
-    //}
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+    }
 
-    //#[test]
-    //fn parameter() {
-    //    parse();
+    #[test]
+    fn parameter() {
+        parse();
 
-    //    let mut symbol_path = SymbolPath::default();
-    //    symbol_path.push(resource_table::get_str_id("paramA".to_string()).unwrap());
+        let mut symbol_path = SymbolPath::default();
+        symbol_path.push(resource_table::get_str_id("paramA".to_string()).unwrap());
 
-    //    let namespace = Namespace::default();
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let namespace = Namespace::default();
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_none());
+        assert!(symbol.is_none());
 
-    //    let mut namespace = Namespace::default();
-    //    namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_some());
-    //    assert_eq!(format!("{}", symbol.unwrap().namespace), "ModuleA");
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "ModuleA");
 
-    //    let mut namespace = Namespace::default();
-    //    namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_some());
-    //    assert_eq!(format!("{}", symbol.unwrap().namespace), "InterfaceA");
-    //}
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "InterfaceA");
+    }
 
-    //#[test]
-    //fn localparam() {
-    //    parse();
+    #[test]
+    fn localparam() {
+        parse();
 
-    //    let mut symbol_path = SymbolPath::default();
-    //    symbol_path.push(resource_table::get_str_id("paramB".to_string()).unwrap());
+        let mut symbol_path = SymbolPath::default();
+        symbol_path.push(resource_table::get_str_id("paramB".to_string()).unwrap());
 
-    //    let namespace = Namespace::default();
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let namespace = Namespace::default();
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_none());
+        assert!(symbol.is_none());
 
-    //    let mut namespace = Namespace::default();
-    //    namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_some());
-    //    assert_eq!(format!("{}", symbol.unwrap().namespace), "ModuleA");
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "ModuleA");
 
-    //    let mut namespace = Namespace::default();
-    //    namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_some());
-    //    assert_eq!(format!("{}", symbol.unwrap().namespace), "InterfaceA");
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "InterfaceA");
 
-    //    let mut namespace = Namespace::default();
-    //    namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_some());
-    //    assert_eq!(format!("{}", symbol.unwrap().namespace), "PackageA");
-    //}
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "PackageA");
+    }
 
-    //#[test]
-    //fn port() {
-    //    parse();
+    #[test]
+    fn port() {
+        parse();
 
-    //    let mut symbol_path = SymbolPath::default();
-    //    symbol_path.push(resource_table::get_str_id("portA".to_string()).unwrap());
+        let mut symbol_path = SymbolPath::default();
+        symbol_path.push(resource_table::get_str_id("portA".to_string()).unwrap());
 
-    //    let namespace = Namespace::default();
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let namespace = Namespace::default();
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_none());
+        assert!(symbol.is_none());
 
-    //    let mut namespace = Namespace::default();
-    //    namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_some());
-    //    assert_eq!(format!("{}", symbol.unwrap().namespace), "ModuleA");
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "ModuleA");
 
-    //    let mut namespace = Namespace::default();
-    //    namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_none());
+        assert!(symbol.is_none());
 
-    //    let mut namespace = Namespace::default();
-    //    namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_none());
-    //}
+        assert!(symbol.is_none());
+    }
 
-    //#[test]
-    //fn variable() {
-    //    parse();
+    #[test]
+    fn variable() {
+        parse();
 
-    //    let mut symbol_path = SymbolPath::default();
-    //    symbol_path.push(resource_table::get_str_id("memberA".to_string()).unwrap());
+        let mut symbol_path = SymbolPath::default();
+        symbol_path.push(resource_table::get_str_id("memberA".to_string()).unwrap());
 
-    //    let namespace = Namespace::default();
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let namespace = Namespace::default();
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_none());
+        assert!(symbol.is_none());
 
-    //    let mut namespace = Namespace::default();
-    //    namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_some());
-    //    assert_eq!(format!("{}", symbol.unwrap().namespace), "ModuleA");
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "ModuleA");
 
-    //    let mut namespace = Namespace::default();
-    //    namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_some());
-    //    assert_eq!(format!("{}", symbol.unwrap().namespace), "InterfaceA");
-    //}
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "InterfaceA");
+    }
 
-    //#[test]
-    //fn r#struct() {
-    //    parse();
+    #[test]
+    fn r#struct() {
+        parse();
 
-    //    let mut symbol_path = SymbolPath::default();
-    //    symbol_path.push(resource_table::get_str_id("StructA".to_string()).unwrap());
+        let mut symbol_path = SymbolPath::default();
+        symbol_path.push(resource_table::get_str_id("StructA".to_string()).unwrap());
 
-    //    let namespace = Namespace::default();
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let namespace = Namespace::default();
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_none());
+        assert!(symbol.is_none());
 
-    //    let mut namespace = Namespace::default();
-    //    namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_none());
+        assert!(symbol.is_none());
 
-    //    let mut namespace = Namespace::default();
-    //    namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_none());
+        assert!(symbol.is_none());
 
-    //    let mut namespace = Namespace::default();
-    //    namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_some());
-    //    assert_eq!(format!("{}", symbol.unwrap().namespace), "PackageA");
-    //}
+        assert!(symbol.is_some());
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "PackageA");
+    }
 
-    //#[test]
-    //fn struct_member() {
-    //    parse();
+    #[test]
+    fn struct_member() {
+        parse();
 
-    //    let mut symbol_path = SymbolPath::default();
-    //    symbol_path.push(resource_table::get_str_id("memberA".to_string()).unwrap());
+        let mut symbol_path = SymbolPath::default();
+        symbol_path.push(resource_table::get_str_id("memberA".to_string()).unwrap());
 
-    //    let namespace = Namespace::default();
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let namespace = Namespace::default();
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_none());
+        assert!(symbol.is_none());
 
-    //    let mut namespace = Namespace::default();
-    //    namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
-    //    namespace.push(resource_table::get_str_id("StructA".to_string()).unwrap());
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
+        namespace.push(resource_table::get_str_id("StructA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_some());
-    //    assert_eq!(
-    //        format!("{}", symbol.unwrap().namespace),
-    //        "PackageA::StructA"
-    //    );
+        assert!(symbol.is_some());
+        assert_eq!(
+            format!("{}", symbol.unwrap().namespace),
+            "PackageA::StructA"
+        );
 
-    //    let mut symbol_path = SymbolPath::default();
-    //    symbol_path.push(resource_table::get_str_id("memberB".to_string()).unwrap());
-    //    symbol_path.push(resource_table::get_str_id("memberA".to_string()).unwrap());
+        let mut symbol_path = SymbolPath::default();
+        symbol_path.push(resource_table::get_str_id("memberB".to_string()).unwrap());
+        symbol_path.push(resource_table::get_str_id("memberA".to_string()).unwrap());
 
-    //    let mut namespace = Namespace::default();
-    //    namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
-    //    let symbol = symbol_table::get(&symbol_path, &namespace).unwrap();
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
-    //    assert!(symbol.is_some());
-    //    assert_eq!(
-    //        format!("{}", symbol.unwrap().namespace),
-    //        "PackageA::StructA"
-    //    );
+        assert!(symbol.is_some());
+        assert_eq!(
+            format!("{}", symbol.unwrap().namespace),
+            "PackageA::StructA"
+        );
 
-    //    let mut symbol_path = SymbolPath::default();
-    //    symbol_path.push(resource_table::get_str_id("memberB".to_string()).unwrap());
-    //    symbol_path.push(resource_table::get_str_id("memberB".to_string()).unwrap());
+        let mut symbol_path = SymbolPath::default();
+        symbol_path.push(resource_table::get_str_id("memberB".to_string()).unwrap());
+        symbol_path.push(resource_table::get_str_id("memberB".to_string()).unwrap());
 
-    //    let mut namespace = Namespace::default();
-    //    namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
-    //    let symbol = symbol_table::get(&symbol_path, &namespace);
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace);
 
-    //    assert!(symbol.is_err());
-    //}
+        assert!(symbol.is_err());
+    }
 }

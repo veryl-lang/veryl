@@ -36,6 +36,10 @@ impl CmdDump {
             let mut analyzer = Analyzer::new(&input);
             analyzer.analyze(&parser.veryl);
         }
+        for file in &files {
+            let input = fs::read_to_string(file).into_diagnostic().wrap_err("")?;
+            Analyzer::analyze_post(file, &input);
+        }
 
         if self.opt.symbol_table {
             println!("{}", veryl_analyzer::symbol_table::dump());

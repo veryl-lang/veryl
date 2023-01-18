@@ -1,4 +1,6 @@
+use crate::evaluator::{Evaluated, Evaluator};
 use crate::namespace::Namespace;
+use std::cell::Cell;
 use std::fmt;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::veryl_grammar_trait as syntax_tree;
@@ -12,6 +14,7 @@ pub struct Symbol {
     pub kind: SymbolKind,
     pub namespace: Namespace,
     pub references: Vec<Token>,
+    pub evaluated: Cell<Option<Evaluated>>,
 }
 
 impl Symbol {
@@ -21,6 +24,34 @@ impl Symbol {
             kind,
             namespace: namespace.to_owned(),
             references: Vec::new(),
+            evaluated: Cell::new(None),
+        }
+    }
+
+    pub fn evaluate(&self) -> Evaluated {
+        if let Some(evaluated) = self.evaluated.get() {
+            evaluated
+        } else {
+            let evaluated = match &self.kind {
+                SymbolKind::Variable(x) => {
+                    let mut evaluator = Evaluator::new();
+                    if let Some(width) = evaluator.type_width(x.r#type.clone()) {
+                        Evaluated::Variable { width }
+                    } else {
+                        Evaluated::Unknown
+                    }
+                }
+                SymbolKind::Parameter(x) => {
+                    let mut evaluator = Evaluator::new();
+                    if let Some(width) = evaluator.type_width(x.r#type.clone()) {
+                        evaluator.context_width.push(width);
+                    }
+                    evaluator.expression(&x.value)
+                }
+                _ => Evaluated::Unknown,
+            };
+            self.evaluated.replace(Some(evaluated));
+            evaluated
         }
     }
 }
