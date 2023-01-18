@@ -28,10 +28,10 @@ impl CmdBuild {
             self.opt.files.clone()
         };
 
-        let mut all_pass = true;
         let now = Instant::now();
 
         let mut check_error = CheckError::default();
+        let mut contexts = Vec::new();
         let mut outputs = Vec::new();
 
         for file in &files {
@@ -44,15 +44,29 @@ impl CmdBuild {
             let parser = Parser::parse(&input, file)?;
 
             let mut analyzer = Analyzer::new(&input);
-            let errors = analyzer.analyze(&parser.veryl);
-            if !errors.is_empty() {
-                all_pass = false;
+            let errors = analyzer.analyze_tree(&parser.veryl);
+            for error in errors {
+                check_error.related.push(error);
+            }
 
+            contexts.push((file, input, parser));
+        }
+
+        for (file, input, _) in &contexts {
+            let errors = Analyzer::analyze_post(file, &input);
+            if !errors.is_empty() {
                 for error in errors {
                     check_error.related.push(error);
                 }
+                return Err(check_error.into());
             }
+        }
 
+        if !check_error.related.is_empty() {
+            return Err(check_error.into());
+        }
+
+        for (file, _, parser) in &contexts {
             let mut emitter = Emitter::new(metadata);
             emitter.emit(&parser.veryl);
 
@@ -85,11 +99,7 @@ impl CmdBuild {
             elapsed_time.as_millis()
         ));
 
-        if check_error.related.is_empty() {
-            Ok(all_pass)
-        } else {
-            Err(check_error.into())
-        }
+        Ok(true)
     }
 
     fn gen_filelist(&self, metadata: &Metadata, paths: &[PathBuf]) -> Result<()> {

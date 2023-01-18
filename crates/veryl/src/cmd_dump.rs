@@ -34,11 +34,7 @@ impl CmdDump {
             let input = fs::read_to_string(file).into_diagnostic().wrap_err("")?;
             let parser = Parser::parse(&input, file)?;
             let mut analyzer = Analyzer::new(&input);
-            analyzer.analyze(&parser.veryl);
-        }
-        for file in &files {
-            let input = fs::read_to_string(file).into_diagnostic().wrap_err("")?;
-            Analyzer::analyze_post(file, &input);
+            analyzer.analyze_tree(&parser.veryl);
         }
 
         if self.opt.symbol_table {

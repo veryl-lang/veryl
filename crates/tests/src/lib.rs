@@ -29,7 +29,7 @@ mod analyzer {
 
         let ret = Parser::parse(&input, &file).unwrap();
         let mut analyzer = Analyzer::new(&input);
-        let errors = analyzer.analyze(&ret.veryl);
+        let errors = analyzer.analyze_tree(&ret.veryl);
         assert!(errors.is_empty());
 
         let errors = Analyzer::analyze_post(&Path::new(&file), &input);
@@ -94,7 +94,7 @@ mod emitter {
 
         let ret = Parser::parse(&input, &file).unwrap();
         let mut analyzer = Analyzer::new(&input);
-        let _ = analyzer.analyze(&ret.veryl);
+        let _ = analyzer.analyze_tree(&ret.veryl);
         let mut emitter = Emitter::new(&metadata);
         emitter.emit(&ret.veryl);
 

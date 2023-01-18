@@ -415,7 +415,7 @@ mod tests {
     fn parse() {
         let parser = Parser::parse(&CODE, &"").unwrap();
         let mut analyzer = Analyzer::new(&CODE);
-        analyzer.analyze(&parser.veryl);
+        analyzer.analyze_tree(&parser.veryl);
     }
 
     #[test]

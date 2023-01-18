@@ -31,10 +31,10 @@ impl CmdCheck {
             self.opt.files.clone()
         };
 
-        let mut all_pass = true;
         let now = Instant::now();
 
         let mut check_error = CheckError::default();
+        let mut contexts = Vec::new();
 
         for file in &files {
             self.print(&format!(
@@ -46,24 +46,18 @@ impl CmdCheck {
             let parser = Parser::parse(&input, file)?;
 
             let mut analyzer = Analyzer::new(&input);
-            let errors = analyzer.analyze(&parser.veryl);
-            if !errors.is_empty() {
-                all_pass = false;
-
-                for error in errors {
-                    check_error.related.push(error);
-                }
+            let errors = analyzer.analyze_tree(&parser.veryl);
+            for error in errors {
+                check_error.related.push(error);
             }
-        }
-        for file in &files {
-            let input = fs::read_to_string(file).into_diagnostic().wrap_err("")?;
-            let errors = Analyzer::analyze_post(file, &input);
-            if !errors.is_empty() {
-                all_pass = false;
 
-                for error in errors {
-                    check_error.related.push(error);
-                }
+            contexts.push((file, input));
+        }
+
+        for (file, input) in &contexts {
+            let errors = Analyzer::analyze_post(file, &input);
+            for error in errors {
+                check_error.related.push(error);
             }
         }
 
@@ -74,7 +68,7 @@ impl CmdCheck {
         ));
 
         if check_error.related.is_empty() {
-            Ok(all_pass)
+            Ok(true)
         } else {
             Err(check_error.into())
         }

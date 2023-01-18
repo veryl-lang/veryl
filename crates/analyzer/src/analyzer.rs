@@ -53,7 +53,7 @@ impl<'a> Analyzer<'a> {
         Analyzer { text }
     }
 
-    pub fn analyze(&'a mut self, input: &Veryl) -> Vec<AnalyzerError> {
+    pub fn analyze_tree(&'a mut self, input: &Veryl) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
 
         let mut pass1 = AnalyzerPass1::new(self.text);
