@@ -270,6 +270,11 @@ impl SymbolTable {
     }
 
     pub fn dump(&self) -> String {
+        for value in self.table.values() {
+            for symbol in value {
+                symbol.evaluate();
+            }
+        }
         format!("{}", self)
     }
 

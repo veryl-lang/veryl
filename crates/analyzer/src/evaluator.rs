@@ -409,7 +409,7 @@ impl Evaluator {
 
     fn all_bit(&mut self, arg: &AllBit) -> Evaluated {
         let text = arg.all_bit_token.text();
-        let mut overflow = false;
+        let mut unknown = false;
         let value = match text.as_str() {
             "'1" => {
                 let mut ret: isize = 0;
@@ -417,15 +417,19 @@ impl Evaluator {
                     if let Some(x) = ret.checked_shl(1) {
                         ret = x;
                     } else {
-                        overflow = true;
+                        unknown = true;
                     }
                     ret |= 1;
                 }
                 ret
             }
-            _ => 0,
+            "'0" => 0,
+            _ => {
+                unknown = true;
+                0
+            }
         };
-        if overflow {
+        if unknown {
             Evaluated::Unknown
         } else {
             Evaluated::Fixed {
