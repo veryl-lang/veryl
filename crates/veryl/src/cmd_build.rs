@@ -53,7 +53,7 @@ impl CmdBuild {
         }
 
         for (file, input, _) in &contexts {
-            let errors = Analyzer::analyze_post(file, &input);
+            let errors = Analyzer::analyze_post(file, input);
             if !errors.is_empty() {
                 for error in errors {
                     check_error.related.push(error);

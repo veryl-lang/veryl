@@ -166,6 +166,32 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
     },
+
+    #[diagnostic(code(AnalyzerError::EnumMemberTooMuch), help(""))]
+    #[error(
+        "enum {identifier} has {number} variants, they are can't be represented by {width} bits"
+    )]
+    EnumVariantTooMuch {
+        identifier: String,
+        number: usize,
+        width: usize,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(code(AnalyzerError::EnumVariantTooLarge), help(""))]
+    #[error("The value of enum variant {identifier} is {value}, it is can't be represented by {width} bits")]
+    EnumVariantTooLarge {
+        identifier: String,
+        value: isize,
+        width: usize,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
 }
 
 impl AnalyzerError {
@@ -316,6 +342,38 @@ impl AnalyzerError {
     pub fn unused_variable(identifier: &str, source: &str, token: &VerylToken) -> Self {
         AnalyzerError::UnusedVariable {
             identifier: identifier.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.token.into(),
+        }
+    }
+
+    pub fn enum_variant_too_much(
+        identifier: &str,
+        number: usize,
+        width: usize,
+        source: &str,
+        token: &VerylToken,
+    ) -> Self {
+        AnalyzerError::EnumVariantTooMuch {
+            identifier: identifier.to_string(),
+            number,
+            width,
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.token.into(),
+        }
+    }
+
+    pub fn enum_variant_too_large(
+        identifier: &str,
+        value: isize,
+        width: usize,
+        source: &str,
+        token: &VerylToken,
+    ) -> Self {
+        AnalyzerError::EnumVariantTooLarge {
+            identifier: identifier.to_string(),
+            value,
+            width,
             input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),
         }

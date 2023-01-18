@@ -55,7 +55,7 @@ impl CmdCheck {
         }
 
         for (file, input) in &contexts {
-            let errors = Analyzer::analyze_post(file, &input);
+            let errors = Analyzer::analyze_post(file, input);
             for error in errors {
                 check_error.related.push(error);
             }
