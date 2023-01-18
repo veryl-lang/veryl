@@ -1,4 +1,4 @@
-pub mod check_function_arity;
+pub mod check_function;
 pub mod check_instance;
 pub mod check_invalid_direction;
 pub mod check_invalid_number_character;
@@ -8,7 +8,7 @@ pub mod check_number_overflow;
 pub mod check_system_function;
 pub mod create_reference;
 pub mod create_symbol_table;
-use check_function_arity::*;
+use check_function::*;
 use check_instance::*;
 use check_invalid_direction::*;
 use check_invalid_number_character::*;
@@ -71,7 +71,7 @@ impl<'a> Pass1Handlers<'a> {
 }
 
 pub struct Pass2Handlers<'a> {
-    check_function_arity: CheckFunctionArity<'a>,
+    check_function_arity: CheckFunction<'a>,
     check_instance: CheckInstance<'a>,
     create_reference: CreateReference<'a>,
 }
@@ -79,7 +79,7 @@ pub struct Pass2Handlers<'a> {
 impl<'a> Pass2Handlers<'a> {
     pub fn new(text: &'a str) -> Self {
         Self {
-            check_function_arity: CheckFunctionArity::new(text),
+            check_function_arity: CheckFunction::new(text),
             check_instance: CheckInstance::new(text),
             create_reference: CreateReference::new(text),
         }

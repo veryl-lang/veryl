@@ -5,13 +5,13 @@ use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
-pub struct CheckFunctionArity<'a> {
+pub struct CheckFunction<'a> {
     pub errors: Vec<AnalyzerError>,
     text: &'a str,
     point: HandlerPoint,
 }
 
-impl<'a> CheckFunctionArity<'a> {
+impl<'a> CheckFunction<'a> {
     pub fn new(text: &'a str) -> Self {
         Self {
             errors: Vec::new(),
@@ -21,13 +21,13 @@ impl<'a> CheckFunctionArity<'a> {
     }
 }
 
-impl<'a> Handler for CheckFunctionArity<'a> {
+impl<'a> Handler for CheckFunction<'a> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl<'a> VerylGrammarTrait for CheckFunctionArity<'a> {
+impl<'a> VerylGrammarTrait for CheckFunction<'a> {
     fn factor(&mut self, arg: &Factor) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if let Factor::ExpressionIdentifierFactorOpt(x) = arg {
