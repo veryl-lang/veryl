@@ -1,6 +1,8 @@
 # Change Log
 
-## [Unreleased](https://github.com/dalance/veryl/compare/v0.2.0...Unreleased) - ReleaseDate
+## [Unreleased](https://github.com/dalance/veryl/compare/v0.2.1...Unreleased) - ReleaseDate
+
+## [v0.2.1](https://github.com/dalance/veryl/compare/v0.2.0...v0.2.1) - 2023-01-19
 
 * [Added] uknown member check [#84](https://github.com/dalance/veryl/issues/84)
 * [Changed] file scope import [#59](https://github.com/dalance/veryl/issues/59)
