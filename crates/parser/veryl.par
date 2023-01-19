@@ -415,6 +415,16 @@ CaseStatement: Case Expression LBrace { CaseItem } RBrace;
 CaseItem: ( Expression | Defaul ) Colon ( Statement | LBrace { Statement } RBrace );
 
 // ----------------------------------------------------------------------------
+// Attribute
+// ----------------------------------------------------------------------------
+
+Attribute: Hash LBracket Identifier [ LParen AttributeList RParen ] RBracket;
+
+AttributeList: AttributeItem { Comma AttributeItem } [ Comma ];
+
+AttributeItem: Identifier;
+
+// ----------------------------------------------------------------------------
 // Declaration
 // ----------------------------------------------------------------------------
 
@@ -434,19 +444,25 @@ AssignDeclaration: Assign HierarchicalIdentifier Equ Expression Semicolon;
 
 ModportDeclaration: Modport Identifier LBrace ModportList RBrace;
 
-ModportList: ModportItem { Comma ModportItem } [ Comma ];
+ModportList: ModportGroup { Comma ModportGroup } [ Comma ];
+
+ModportGroup: [ Attribute ] ( LBrace ModportList RBrace | ModportItem );
 
 ModportItem: Identifier Colon Direction;
 
 EnumDeclaration: Enum Identifier Colon Type LBrace EnumList RBrace;
 
-EnumList: EnumItem { Comma EnumItem } [ Comma ];
+EnumList: EnumGroup { Comma EnumGroup } [ Comma ];
+
+EnumGroup: [ Attribute ] ( LBrace EnumList RBrace | EnumItem );
 
 EnumItem: Identifier [ Equ Expression ];
 
 StructDeclaration: Struct Identifier LBrace StructList RBrace;
 
-StructList: StructItem { Comma StructItem } [ Comma ];
+StructList: StructGroup { Comma StructGroup } [ Comma ];
+
+StructGroup: [ Attribute ] ( LBrace StructList RBrace | StructItem );
 
 StructItem: Identifier Colon Type;
 
@@ -458,11 +474,15 @@ InstDeclaration: Inst Identifier Colon Identifier [ Width ] [ InstParameter ] [ 
 
 InstParameter: Hash LParen [ InstParameterList ] RParen;
 
-InstParameterList: InstParameterItem { Comma InstParameterItem } [ Comma ];
+InstParameterList: InstParameterGroup { Comma InstParameterGroup } [ Comma ];
+
+InstParameterGroup: [ Attribute ] ( LBrace InstParameterList RBrace | InstParameterItem );
 
 InstParameterItem: Identifier [ Colon Expression ];
 
-InstPortList: InstPortItem { Comma InstPortItem } [ Comma ];
+InstPortList: InstPortGroup { Comma InstPortGroup } [ Comma ];
+
+InstPortGroup: [ Attribute ] ( LBrace InstPortList RBrace | InstPortItem );
 
 InstPortItem: Identifier [ Colon Expression ];
 
@@ -472,7 +492,9 @@ InstPortItem: Identifier [ Colon Expression ];
 
 WithParameter: Hash LParen [ WithParameterList ] RParen;
 
-WithParameterList: WithParameterItem { Comma WithParameterItem } [ Comma ];
+WithParameterList: WithParameterGroup { Comma WithParameterGroup } [ Comma ];
+
+WithParameterGroup: [ Attribute ] ( LBrace WithParameterList RBrace | WithParameterItem );
 
 WithParameterItem: ( Parameter | Localparam ) Identifier Colon Type Equ Expression;
 
@@ -482,7 +504,9 @@ WithParameterItem: ( Parameter | Localparam ) Identifier Colon Type Equ Expressi
 
 PortDeclaration: LParen [ PortDeclarationList ] RParen;
 
-PortDeclarationList: PortDeclarationItem { Comma PortDeclarationItem } [ Comma ];
+PortDeclarationList: PortDeclarationGroup { Comma PortDeclarationGroup } [ Comma ];
+
+PortDeclarationGroup: [ Attribute ] ( LBrace PortDeclarationList RBrace | PortDeclarationItem );
 
 PortDeclarationItem: Identifier Colon ( Direction Type | Interface );
 
@@ -515,15 +539,17 @@ ExportDeclaration: Export ( Identifier | Star ) ColonColon ( Identifier | Star )
 // Module
 // ----------------------------------------------------------------------------
 
-ModuleDeclaration: Module Identifier [ WithParameter ] [ PortDeclaration ] LBrace { ModuleItem } RBrace;
+ModuleDeclaration: Module Identifier [ WithParameter ] [ PortDeclaration ] LBrace { ModuleGroup } RBrace;
 
 ModuleIfDeclaration: If Expression ModuleNamedBlock { Else If Expression ModuleOptionalNamedBlock } [ Else ModuleOptionalNamedBlock ];
 
 ModuleForDeclaration: For Identifier In Expression DotDot Expression [ Step AssignmentOperator Expression ] ModuleNamedBlock;
 
-ModuleNamedBlock: Colon Identifier LBrace { ModuleItem } RBrace;
+ModuleNamedBlock: Colon Identifier LBrace { ModuleGroup } RBrace;
 
-ModuleOptionalNamedBlock: [ Colon Identifier ] LBrace { ModuleItem } RBrace;
+ModuleOptionalNamedBlock: [ Colon Identifier ] LBrace { ModuleGroup } RBrace;
+
+ModuleGroup: [ Attribute ] ( LBrace { ModuleGroup } RBrace | ModuleItem );
 
 ModuleItem: VarDeclaration
           | InstDeclaration
@@ -544,15 +570,17 @@ ModuleItem: VarDeclaration
 // Interface
 // ----------------------------------------------------------------------------
 
-InterfaceDeclaration: Interface Identifier [ WithParameter ] LBrace { InterfaceItem } RBrace;
+InterfaceDeclaration: Interface Identifier [ WithParameter ] LBrace { InterfaceGroup } RBrace;
 
 InterfaceIfDeclaration: If Expression InterfaceNamedBlock { Else If Expression InterfaceOptionalNamedBlock } [ Else InterfaceOptionalNamedBlock ];
 
 InterfaceForDeclaration: For Identifier In Expression DotDot Expression [ Step AssignmentOperator Expression ] InterfaceNamedBlock;
 
-InterfaceNamedBlock: Colon Identifier LBrace { InterfaceItem } RBrace;
+InterfaceNamedBlock: Colon Identifier LBrace { InterfaceGroup } RBrace;
 
-InterfaceOptionalNamedBlock: [ Colon Identifier ] LBrace { InterfaceItem } RBrace;
+InterfaceOptionalNamedBlock: [ Colon Identifier ] LBrace { InterfaceGroup } RBrace;
+
+InterfaceGroup: [ Attribute ] ( LBrace { InterfaceGroup } RBrace | InterfaceItem );
 
 InterfaceItem: VarDeclaration
              | LocalparamDeclaration
@@ -570,7 +598,9 @@ InterfaceItem: VarDeclaration
 // Package
 // ----------------------------------------------------------------------------
 
-PackageDeclaration: Package Identifier LBrace { PackageItem } RBrace;
+PackageDeclaration: Package Identifier LBrace { PackageGroup } RBrace;
+
+PackageGroup: [ Attribute ] ( LBrace { PackageGroup } RBrace | PackageItem );
 
 PackageItem: VarDeclaration
            | LocalparamDeclaration
@@ -585,14 +615,16 @@ PackageItem: VarDeclaration
 // Description
 // ----------------------------------------------------------------------------
 
-Description: ModuleDeclaration
-           | InterfaceDeclaration
-           | PackageDeclaration
-           | ImportDeclaration
-           ;
+DescriptionGroup: [ Attribute ] ( LBrace { DescriptionGroup } RBrace | DescriptionItem );
+
+DescriptionItem: ModuleDeclaration
+               | InterfaceDeclaration
+               | PackageDeclaration
+               | ImportDeclaration
+               ;
 
 // ----------------------------------------------------------------------------
 // SourceCode
 // ----------------------------------------------------------------------------
 
-Veryl: Start { Description };
+Veryl: Start { DescriptionGroup };

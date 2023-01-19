@@ -34,11 +34,9 @@ impl<'a> VerylGrammarTrait for CheckInstance<'a> {
             let mut connected_ports = Vec::new();
             if let Some(ref x) = arg.inst_declaration_opt1 {
                 if let Some(ref x) = x.inst_declaration_opt2 {
-                    let x = &x.inst_port_list;
-                    connected_ports.push(x.inst_port_item.identifier.identifier_token.token.text);
-                    for x in &x.inst_port_list_list {
-                        connected_ports
-                            .push(x.inst_port_item.identifier.identifier_token.token.text);
+                    let items: Vec<InstPortItem> = x.inst_port_list.as_ref().into();
+                    for item in items {
+                        connected_ports.push(item.identifier.identifier_token.token.text);
                     }
                 }
             }

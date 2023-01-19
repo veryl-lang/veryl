@@ -85,21 +85,12 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
     fn modport_declaration(&mut self, arg: &ModportDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let member = ModportMember {
-                name: arg
-                    .modport_list
-                    .modport_item
-                    .identifier
-                    .identifier_token
-                    .token
-                    .text,
-                direction: arg.modport_list.modport_item.direction.as_ref().into(),
-            };
-            let mut members = vec![member];
-            for x in &arg.modport_list.modport_list_list {
+            let mut members = Vec::new();
+            let items: Vec<ModportItem> = arg.modport_list.as_ref().into();
+            for item in items {
                 let member = ModportMember {
-                    name: x.modport_item.identifier.identifier_token.token.text,
-                    direction: x.modport_item.direction.as_ref().into(),
+                    name: item.identifier.identifier_token.token.text,
+                    direction: item.direction.as_ref().into(),
                 };
                 members.push(member);
             }
@@ -217,20 +208,19 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 let mut parameters = Vec::new();
                 if let Some(ref x) = arg.function_declaration_opt {
                     if let Some(ref x) = x.with_parameter.with_parameter_opt {
-                        let x = &x.with_parameter_list;
-                        parameters.push(x.with_parameter_item.as_ref().into());
-                        for x in &x.with_parameter_list_list {
-                            parameters.push(x.with_parameter_item.as_ref().into());
+                        let items: Vec<WithParameterItem> = x.with_parameter_list.as_ref().into();
+                        for item in items {
+                            parameters.push((&item).into());
                         }
                     }
                 }
                 let mut ports = Vec::new();
                 if let Some(ref x) = arg.function_declaration_opt0 {
                     if let Some(ref x) = x.port_declaration.port_declaration_opt {
-                        let x = &x.port_declaration_list;
-                        ports.push(x.port_declaration_item.as_ref().into());
-                        for x in &x.port_declaration_list_list {
-                            ports.push(x.port_declaration_item.as_ref().into());
+                        let items: Vec<PortDeclarationItem> =
+                            x.port_declaration_list.as_ref().into();
+                        for item in items {
+                            ports.push((&item).into());
                         }
                     }
                 }
@@ -254,20 +244,19 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 let mut parameters = Vec::new();
                 if let Some(ref x) = arg.module_declaration_opt {
                     if let Some(ref x) = x.with_parameter.with_parameter_opt {
-                        let x = &x.with_parameter_list;
-                        parameters.push(x.with_parameter_item.as_ref().into());
-                        for x in &x.with_parameter_list_list {
-                            parameters.push(x.with_parameter_item.as_ref().into());
+                        let items: Vec<WithParameterItem> = x.with_parameter_list.as_ref().into();
+                        for item in items {
+                            parameters.push((&item).into());
                         }
                     }
                 }
                 let mut ports = Vec::new();
                 if let Some(ref x) = arg.module_declaration_opt0 {
                     if let Some(ref x) = x.port_declaration.port_declaration_opt {
-                        let x = &x.port_declaration_list;
-                        ports.push(x.port_declaration_item.as_ref().into());
-                        for x in &x.port_declaration_list_list {
-                            ports.push(x.port_declaration_item.as_ref().into());
+                        let items: Vec<PortDeclarationItem> =
+                            x.port_declaration_list.as_ref().into();
+                        for item in items {
+                            ports.push((&item).into());
                         }
                     }
                 }
@@ -325,10 +314,9 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 let mut parameters = Vec::new();
                 if let Some(ref x) = arg.interface_declaration_opt {
                     if let Some(ref x) = x.with_parameter.with_parameter_opt {
-                        let x = &x.with_parameter_list;
-                        parameters.push(x.with_parameter_item.as_ref().into());
-                        for x in &x.with_parameter_list_list {
-                            parameters.push(x.with_parameter_item.as_ref().into());
+                        let items: Vec<WithParameterItem> = x.with_parameter_list.as_ref().into();
+                        for item in items {
+                            parameters.push((&item).into());
                         }
                     }
                 }

@@ -18,6 +18,7 @@ anyhow        = {workspace = true}
 bimap         = "0.6.2"
 miette        = {workspace = true}
 parol_runtime = {version = "0.12.1", features = ["auto_generation"]}
+paste         = "1.0"
 regex         = {workspace = true}
 thiserror     = {workspace = true}
 

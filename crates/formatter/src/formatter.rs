@@ -778,16 +778,34 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'ModportList'
     fn modport_list(&mut self, arg: &ModportList) {
-        self.modport_item(&arg.modport_item);
+        self.modport_group(&arg.modport_group);
         for x in &arg.modport_list_list {
             self.comma(&x.comma);
             self.newline();
-            self.modport_item(&x.modport_item);
+            self.modport_group(&x.modport_group);
         }
         if let Some(ref x) = arg.modport_list_opt {
             self.comma(&x.comma);
         } else {
             self.str(",");
+        }
+    }
+
+    /// Semantic action for non-terminal 'ModportGroup'
+    fn modport_group(&mut self, arg: &ModportGroup) {
+        if let Some(ref x) = arg.modport_group_opt {
+            self.attribute(&x.attribute);
+            self.newline();
+        }
+        match &*arg.modport_group_group {
+            ModportGroupGroup::LBraceModportListRBrace(x) => {
+                self.token_will_push(&x.l_brace.l_brace_token);
+                self.newline_push();
+                self.modport_list(&x.modport_list);
+                self.newline_pop();
+                self.r_brace(&x.r_brace);
+            }
+            ModportGroupGroup::ModportItem(x) => self.modport_item(&x.modport_item),
         }
     }
 
@@ -817,16 +835,34 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'EnumList'
     fn enum_list(&mut self, arg: &EnumList) {
-        self.enum_item(&arg.enum_item);
+        self.enum_group(&arg.enum_group);
         for x in &arg.enum_list_list {
             self.comma(&x.comma);
             self.newline();
-            self.enum_item(&x.enum_item);
+            self.enum_group(&x.enum_group);
         }
         if let Some(ref x) = arg.enum_list_opt {
             self.comma(&x.comma);
         } else {
             self.str(",");
+        }
+    }
+
+    /// Semantic action for non-terminal 'EnumGroup'
+    fn enum_group(&mut self, arg: &EnumGroup) {
+        if let Some(ref x) = arg.enum_group_opt {
+            self.attribute(&x.attribute);
+            self.newline();
+        }
+        match &*arg.enum_group_group {
+            EnumGroupGroup::LBraceEnumListRBrace(x) => {
+                self.token_will_push(&x.l_brace.l_brace_token);
+                self.newline_push();
+                self.enum_list(&x.enum_list);
+                self.newline_pop();
+                self.r_brace(&x.r_brace);
+            }
+            EnumGroupGroup::EnumItem(x) => self.enum_item(&x.enum_item),
         }
     }
 
@@ -856,16 +892,34 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'StructList'
     fn struct_list(&mut self, arg: &StructList) {
-        self.struct_item(&arg.struct_item);
+        self.struct_group(&arg.struct_group);
         for x in &arg.struct_list_list {
             self.comma(&x.comma);
             self.newline();
-            self.struct_item(&x.struct_item);
+            self.struct_group(&x.struct_group);
         }
         if let Some(ref x) = arg.struct_list_opt {
             self.comma(&x.comma);
         } else {
             self.str(",");
+        }
+    }
+
+    /// Semantic action for non-terminal 'StructGroup'
+    fn struct_group(&mut self, arg: &StructGroup) {
+        if let Some(ref x) = arg.struct_group_opt {
+            self.attribute(&x.attribute);
+            self.newline();
+        }
+        match &*arg.struct_group_group {
+            StructGroupGroup::LBraceStructListRBrace(x) => {
+                self.token_will_push(&x.l_brace.l_brace_token);
+                self.newline_push();
+                self.struct_list(&x.struct_list);
+                self.newline_pop();
+                self.r_brace(&x.r_brace);
+            }
+            StructGroupGroup::StructItem(x) => self.struct_item(&x.struct_item),
         }
     }
 
@@ -930,7 +984,7 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'InstParameterList'
     fn inst_parameter_list(&mut self, arg: &InstParameterList) {
-        self.inst_parameter_item(&arg.inst_parameter_item);
+        self.inst_parameter_group(&arg.inst_parameter_group);
         for x in &arg.inst_parameter_list_list {
             self.comma(&x.comma);
             if self.single_line {
@@ -938,12 +992,32 @@ impl VerylWalker for Formatter {
             } else {
                 self.newline();
             }
-            self.inst_parameter_item(&x.inst_parameter_item);
+            self.inst_parameter_group(&x.inst_parameter_group);
         }
         if let Some(ref x) = arg.inst_parameter_list_opt {
             self.comma(&x.comma);
         } else {
             self.str(",");
+        }
+    }
+
+    /// Semantic action for non-terminal 'InstParameterGroup'
+    fn inst_parameter_group(&mut self, arg: &InstParameterGroup) {
+        if let Some(ref x) = arg.inst_parameter_group_opt {
+            self.attribute(&x.attribute);
+            self.newline();
+        }
+        match &*arg.inst_parameter_group_group {
+            InstParameterGroupGroup::LBraceInstParameterListRBrace(x) => {
+                self.token_will_push(&x.l_brace.l_brace_token);
+                self.newline_push();
+                self.inst_parameter_list(&x.inst_parameter_list);
+                self.newline_pop();
+                self.r_brace(&x.r_brace);
+            }
+            InstParameterGroupGroup::InstParameterItem(x) => {
+                self.inst_parameter_item(&x.inst_parameter_item)
+            }
         }
     }
 
@@ -959,16 +1033,34 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'InstPortList'
     fn inst_port_list(&mut self, arg: &InstPortList) {
-        self.inst_port_item(&arg.inst_port_item);
+        self.inst_port_group(&arg.inst_port_group);
         for x in &arg.inst_port_list_list {
             self.comma(&x.comma);
             self.newline();
-            self.inst_port_item(&x.inst_port_item);
+            self.inst_port_group(&x.inst_port_group);
         }
         if let Some(ref x) = arg.inst_port_list_opt {
             self.comma(&x.comma);
         } else {
             self.str(",");
+        }
+    }
+
+    /// Semantic action for non-terminal 'InstPortGroup'
+    fn inst_port_group(&mut self, arg: &InstPortGroup) {
+        if let Some(ref x) = arg.inst_port_group_opt {
+            self.attribute(&x.attribute);
+            self.newline();
+        }
+        match &*arg.inst_port_group_group {
+            InstPortGroupGroup::LBraceInstPortListRBrace(x) => {
+                self.token_will_push(&x.l_brace.l_brace_token);
+                self.newline_push();
+                self.inst_port_list(&x.inst_port_list);
+                self.newline_pop();
+                self.r_brace(&x.r_brace);
+            }
+            InstPortGroupGroup::InstPortItem(x) => self.inst_port_item(&x.inst_port_item),
         }
     }
 
@@ -1000,16 +1092,36 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'WithParameterList'
     fn with_parameter_list(&mut self, arg: &WithParameterList) {
-        self.with_parameter_item(&arg.with_parameter_item);
+        self.with_parameter_group(&arg.with_parameter_group);
         for x in &arg.with_parameter_list_list {
             self.comma(&x.comma);
             self.newline();
-            self.with_parameter_item(&x.with_parameter_item);
+            self.with_parameter_group(&x.with_parameter_group);
         }
         if let Some(ref x) = arg.with_parameter_list_opt {
             self.comma(&x.comma);
         } else {
             self.str(",");
+        }
+    }
+
+    /// Semantic action for non-terminal 'WithParameterGroup'
+    fn with_parameter_group(&mut self, arg: &WithParameterGroup) {
+        if let Some(ref x) = arg.with_parameter_group_opt {
+            self.attribute(&x.attribute);
+            self.newline();
+        }
+        match &*arg.with_parameter_group_group {
+            WithParameterGroupGroup::LBraceWithParameterListRBrace(x) => {
+                self.token_will_push(&x.l_brace.l_brace_token);
+                self.newline_push();
+                self.with_parameter_list(&x.with_parameter_list);
+                self.newline_pop();
+                self.r_brace(&x.r_brace);
+            }
+            WithParameterGroupGroup::WithParameterItem(x) => {
+                self.with_parameter_item(&x.with_parameter_item)
+            }
         }
     }
 
@@ -1046,16 +1158,36 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'PortDeclarationList'
     fn port_declaration_list(&mut self, arg: &PortDeclarationList) {
-        self.port_declaration_item(&arg.port_declaration_item);
+        self.port_declaration_group(&arg.port_declaration_group);
         for x in &arg.port_declaration_list_list {
             self.comma(&x.comma);
             self.newline();
-            self.port_declaration_item(&x.port_declaration_item);
+            self.port_declaration_group(&x.port_declaration_group);
         }
         if let Some(ref x) = arg.port_declaration_list_opt {
             self.comma(&x.comma);
         } else {
             self.str(",");
+        }
+    }
+
+    /// Semantic action for non-terminal 'PortDeclarationGroup'
+    fn port_declaration_group(&mut self, arg: &PortDeclarationGroup) {
+        if let Some(ref x) = arg.port_declaration_group_opt {
+            self.attribute(&x.attribute);
+            self.newline();
+        }
+        match &*arg.port_declaration_group_group {
+            PortDeclarationGroupGroup::LBracePortDeclarationListRBrace(x) => {
+                self.token_will_push(&x.l_brace.l_brace_token);
+                self.newline_push();
+                self.port_declaration_list(&x.port_declaration_list);
+                self.newline_pop();
+                self.r_brace(&x.r_brace);
+            }
+            PortDeclarationGroupGroup::PortDeclarationItem(x) => {
+                self.port_declaration_item(&x.port_declaration_item)
+            }
         }
     }
 
@@ -1153,7 +1285,7 @@ impl VerylWalker for Formatter {
             if i != 0 {
                 self.newline();
             }
-            self.module_item(&x.module_item);
+            self.module_group(&x.module_group);
         }
         self.newline_pop();
         self.r_brace(&arg.r_brace);
@@ -1218,7 +1350,7 @@ impl VerylWalker for Formatter {
             if i != 0 {
                 self.newline();
             }
-            self.module_item(&x.module_item);
+            self.module_group(&x.module_group);
         }
         self.newline_pop();
         self.r_brace(&arg.r_brace);
@@ -1237,10 +1369,30 @@ impl VerylWalker for Formatter {
             if i != 0 {
                 self.newline();
             }
-            self.module_item(&x.module_item);
+            self.module_group(&x.module_group);
         }
         self.newline_pop();
         self.r_brace(&arg.r_brace);
+    }
+
+    /// Semantic action for non-terminal 'ModuleGroup'
+    fn module_group(&mut self, arg: &ModuleGroup) {
+        if let Some(ref x) = arg.module_group_opt {
+            self.attribute(&x.attribute);
+            self.newline();
+        }
+        match &*arg.module_group_group {
+            ModuleGroupGroup::LBraceModuleGroupGroupListRBrace(x) => {
+                self.token_will_push(&x.l_brace.l_brace_token);
+                self.newline_push();
+                for x in &x.module_group_group_list {
+                    self.module_group(&x.module_group);
+                }
+                self.newline_pop();
+                self.r_brace(&x.r_brace);
+            }
+            ModuleGroupGroup::ModuleItem(x) => self.module_item(&x.module_item),
+        }
     }
 
     /// Semantic action for non-terminal 'InterfaceDeclaration'
@@ -1259,7 +1411,7 @@ impl VerylWalker for Formatter {
             if i != 0 {
                 self.newline();
             }
-            self.interface_item(&x.interface_item);
+            self.interface_group(&x.interface_group);
         }
         self.newline_pop();
         self.r_brace(&arg.r_brace);
@@ -1324,7 +1476,7 @@ impl VerylWalker for Formatter {
             if i != 0 {
                 self.newline();
             }
-            self.interface_item(&x.interface_item);
+            self.interface_group(&x.interface_group);
         }
         self.newline_pop();
         self.r_brace(&arg.r_brace);
@@ -1343,10 +1495,30 @@ impl VerylWalker for Formatter {
             if i != 0 {
                 self.newline();
             }
-            self.interface_item(&x.interface_item);
+            self.interface_group(&x.interface_group);
         }
         self.newline_pop();
         self.r_brace(&arg.r_brace);
+    }
+
+    /// Semantic action for non-terminal 'InterfaceGroup'
+    fn interface_group(&mut self, arg: &InterfaceGroup) {
+        if let Some(ref x) = arg.interface_group_opt {
+            self.attribute(&x.attribute);
+            self.newline();
+        }
+        match &*arg.interface_group_group {
+            InterfaceGroupGroup::LBraceInterfaceGroupGroupListRBrace(x) => {
+                self.token_will_push(&x.l_brace.l_brace_token);
+                self.newline_push();
+                for x in &x.interface_group_group_list {
+                    self.interface_group(&x.interface_group);
+                }
+                self.newline_pop();
+                self.r_brace(&x.r_brace);
+            }
+            InterfaceGroupGroup::InterfaceItem(x) => self.interface_item(&x.interface_item),
+        }
     }
 
     /// Semantic action for non-terminal 'PackageDeclaration'
@@ -1361,10 +1533,50 @@ impl VerylWalker for Formatter {
             if i != 0 {
                 self.newline();
             }
-            self.package_item(&x.package_item);
+            self.package_group(&x.package_group);
         }
         self.newline_pop();
         self.r_brace(&arg.r_brace);
+    }
+
+    /// Semantic action for non-terminal 'PackageGroup'
+    fn package_group(&mut self, arg: &PackageGroup) {
+        if let Some(ref x) = arg.package_group_opt {
+            self.attribute(&x.attribute);
+            self.newline();
+        }
+        match &*arg.package_group_group {
+            PackageGroupGroup::LBracePackageGroupGroupListRBrace(x) => {
+                self.token_will_push(&x.l_brace.l_brace_token);
+                self.newline_push();
+                for x in &x.package_group_group_list {
+                    self.package_group(&x.package_group);
+                }
+                self.newline_pop();
+                self.r_brace(&x.r_brace);
+            }
+            PackageGroupGroup::PackageItem(x) => self.package_item(&x.package_item),
+        }
+    }
+
+    /// Semantic action for non-terminal 'DescriptionGroup'
+    fn description_group(&mut self, arg: &DescriptionGroup) {
+        if let Some(ref x) = arg.description_group_opt {
+            self.attribute(&x.attribute);
+            self.newline();
+        }
+        match &*arg.description_group_group {
+            DescriptionGroupGroup::LBraceDescriptionGroupGroupListRBrace(x) => {
+                self.token_will_push(&x.l_brace.l_brace_token);
+                self.newline_push();
+                for x in &x.description_group_group_list {
+                    self.description_group(&x.description_group);
+                }
+                self.newline_pop();
+                self.r_brace(&x.r_brace);
+            }
+            DescriptionGroupGroup::DescriptionItem(x) => self.description_item(&x.description_item),
+        }
     }
 
     /// Semantic action for non-terminal 'Veryl'
@@ -1379,7 +1591,7 @@ impl VerylWalker for Formatter {
             if i != 0 {
                 self.newline();
             }
-            self.description(&x.description);
+            self.description_group(&x.description_group);
         }
         self.newline();
     }
