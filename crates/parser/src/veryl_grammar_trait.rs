@@ -62,6 +62,17 @@ macro_rules! group_to_item {
     };
 }
 
+impl From<&AttributeList> for Vec<AttributeItem> {
+    fn from(x: &AttributeList) -> Self {
+        let mut ret = Vec::new();
+        ret.push(x.attribute_item.as_ref().clone());
+        for x in &x.attribute_list_list {
+            ret.push(x.attribute_item.as_ref().clone());
+        }
+        ret
+    }
+}
+
 list_to_item!(Modport);
 list_to_item!(Enum);
 list_to_item!(Struct);

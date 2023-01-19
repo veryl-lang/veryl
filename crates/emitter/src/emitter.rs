@@ -8,6 +8,11 @@ use veryl_parser::veryl_token::{Token, VerylToken};
 use veryl_parser::veryl_walker::VerylWalker;
 use veryl_parser::Stringifier;
 
+pub enum AttributeType {
+    Ifdef,
+    Sv,
+}
+
 pub struct Emitter {
     pub indent_width: usize,
     pub clock_type: ClockType,
@@ -29,6 +34,7 @@ pub struct Emitter {
     default_block: Option<String>,
     enum_name: Option<String>,
     file_scope_import: Vec<String>,
+    attribute: Vec<AttributeType>,
 }
 
 impl Default for Emitter {
@@ -54,6 +60,7 @@ impl Default for Emitter {
             default_block: None,
             enum_name: None,
             file_scope_import: Vec::new(),
+            attribute: Vec::new(),
         }
     }
 }
@@ -280,12 +287,33 @@ impl Emitter {
             }
         }
     }
+
+    fn attribute_end(&mut self) {
+        match self.attribute.pop() {
+            Some(AttributeType::Ifdef) => {
+                self.newline();
+                self.str("`endif");
+            }
+            _ => (),
+        }
+    }
 }
 
 impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'VerylToken'
     fn veryl_token(&mut self, arg: &VerylToken) {
         self.token(arg);
+    }
+
+    /// Semantic action for non-terminal 'Comma'
+    fn comma(&mut self, arg: &Comma) {
+        if self.string.ends_with("`endif") {
+            self.string.truncate(self.string.len() - "`endif".len());
+            self.veryl_token(&arg.comma_token);
+            self.str("`endif");
+        } else {
+            self.veryl_token(&arg.comma_token);
+        }
     }
 
     /// Semantic action for non-terminal 'ScopedIdentifier'
@@ -878,7 +906,37 @@ impl VerylWalker for Emitter {
     }
 
     /// Semantic action for non-terminal 'Attribute'
-    fn attribute(&mut self, _arg: &Attribute) {}
+    fn attribute(&mut self, arg: &Attribute) {
+        let identifier = arg.identifier.identifier_token.text();
+        match identifier.as_str() {
+            "ifdef" | "ifndef" => {
+                if let Some(ref x) = arg.attribute_opt {
+                    let comma = if self.string.trim_end().ends_with(',') {
+                        self.unindent();
+                        self.string.truncate(self.string.len() - ",\n".len());
+                        self.newline();
+                        true
+                    } else {
+                        false
+                    };
+
+                    self.adjust_line = false;
+                    self.str("`");
+                    self.identifier(&arg.identifier);
+                    self.space(1);
+                    self.identifier(&x.attribute_list.attribute_item.identifier);
+                    self.newline();
+                    self.attribute.push(AttributeType::Ifdef);
+
+                    if comma {
+                        self.str(",");
+                        self.newline();
+                    }
+                }
+            }
+            _ => (),
+        }
+    }
 
     /// Semantic action for non-terminal 'VarDeclaration'
     fn var_declaration(&mut self, arg: &VarDeclaration) {
@@ -1076,6 +1134,9 @@ impl VerylWalker for Emitter {
             }
             ModportGroupGroup::ModportItem(x) => self.modport_item(&x.modport_item),
         }
+        if arg.modport_group_opt.is_some() {
+            self.attribute_end();
+        }
     }
 
     /// Semantic action for non-terminal 'ModportItem'
@@ -1129,6 +1190,9 @@ impl VerylWalker for Emitter {
                 self.enum_list(&x.enum_list);
             }
             EnumGroupGroup::EnumItem(x) => self.enum_item(&x.enum_item),
+        }
+        if arg.enum_group_opt.is_some() {
+            self.attribute_end();
         }
     }
 
@@ -1187,6 +1251,9 @@ impl VerylWalker for Emitter {
                 self.struct_list(&x.struct_list);
             }
             StructGroupGroup::StructItem(x) => self.struct_item(&x.struct_item),
+        }
+        if arg.struct_group_opt.is_some() {
+            self.attribute_end();
         }
     }
 
@@ -1279,6 +1346,9 @@ impl VerylWalker for Emitter {
                 self.inst_parameter_item(&x.inst_parameter_item)
             }
         }
+        if arg.inst_parameter_group_opt.is_some() {
+            self.attribute_end();
+        }
     }
 
     /// Semantic action for non-terminal 'InstParameterItem'
@@ -1319,6 +1389,9 @@ impl VerylWalker for Emitter {
                 self.inst_port_list(&x.inst_port_list);
             }
             InstPortGroupGroup::InstPortItem(x) => self.inst_port_item(&x.inst_port_item),
+        }
+        if arg.inst_port_group_opt.is_some() {
+            self.attribute_end();
         }
     }
 
@@ -1379,6 +1452,9 @@ impl VerylWalker for Emitter {
                 self.with_parameter_item(&x.with_parameter_item)
             }
         }
+        if arg.with_parameter_group_opt.is_some() {
+            self.attribute_end();
+        }
     }
 
     /// Semantic action for non-terminal 'WithParameterItem'
@@ -1437,6 +1513,9 @@ impl VerylWalker for Emitter {
             PortDeclarationGroupGroup::PortDeclarationItem(x) => {
                 self.port_declaration_item(&x.port_declaration_item)
             }
+        }
+        if arg.port_declaration_group_opt.is_some() {
+            self.attribute_end();
         }
     }
 
@@ -1713,11 +1792,17 @@ impl VerylWalker for Emitter {
         }
         match &*arg.module_group_group {
             ModuleGroupGroup::LBraceModuleGroupGroupListRBrace(x) => {
-                for x in &x.module_group_group_list {
+                for (i, x) in x.module_group_group_list.iter().enumerate() {
+                    if i != 0 {
+                        self.newline();
+                    }
                     self.module_group(&x.module_group);
                 }
             }
             ModuleGroupGroup::ModuleItem(x) => self.module_item(&x.module_item),
+        }
+        if arg.module_group_opt.is_some() {
+            self.attribute_end();
         }
     }
 
@@ -1881,11 +1966,17 @@ impl VerylWalker for Emitter {
         }
         match &*arg.interface_group_group {
             InterfaceGroupGroup::LBraceInterfaceGroupGroupListRBrace(x) => {
-                for x in &x.interface_group_group_list {
+                for (i, x) in x.interface_group_group_list.iter().enumerate() {
+                    if i != 0 {
+                        self.newline();
+                    }
                     self.interface_group(&x.interface_group);
                 }
             }
             InterfaceGroupGroup::InterfaceItem(x) => self.interface_item(&x.interface_item),
+        }
+        if arg.interface_group_opt.is_some() {
+            self.attribute_end();
         }
     }
 
@@ -1918,11 +2009,17 @@ impl VerylWalker for Emitter {
         }
         match &*arg.package_group_group {
             PackageGroupGroup::LBracePackageGroupGroupListRBrace(x) => {
-                for x in &x.package_group_group_list {
+                for (i, x) in x.package_group_group_list.iter().enumerate() {
+                    if i != 0 {
+                        self.newline();
+                    }
                     self.package_group(&x.package_group);
                 }
             }
             PackageGroupGroup::PackageItem(x) => self.package_item(&x.package_item),
+        }
+        if arg.package_group_opt.is_some() {
+            self.attribute_end();
         }
     }
 
@@ -1933,11 +2030,17 @@ impl VerylWalker for Emitter {
         }
         match &*arg.description_group_group {
             DescriptionGroupGroup::LBraceDescriptionGroupGroupListRBrace(x) => {
-                for x in &x.description_group_group_list {
+                for (i, x) in x.description_group_group_list.iter().enumerate() {
+                    if i != 0 {
+                        self.newline();
+                    }
                     self.description_group(&x.description_group);
                 }
             }
             DescriptionGroupGroup::DescriptionItem(x) => self.description_item(&x.description_item),
+        }
+        if arg.description_group_opt.is_some() {
+            self.attribute_end();
         }
     }
 
