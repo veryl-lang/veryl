@@ -156,6 +156,8 @@ impl TryFrom<&StartToken> for VerylToken {
     }
 }
 
+token_with_comments!(StringToken, StringTerm, string_term);
+
 token_with_comments!(FixedPointToken, FixedPointTerm, fixed_point_term);
 token_with_comments!(ExponentToken, ExponentTerm, exponent_term);
 token_with_comments!(BasedToken, BasedTerm, based_term);

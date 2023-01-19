@@ -74,4 +74,8 @@ syn region verylComment start="/\*" end="\*/"
 syn match  verylComment "//.*"
 hi def link verylComment Comment
 
+" String
+syn region verylString start="\"" skip="\\\"" end="\""
+hi def link verylString String
+
 let b:current_syntax = 'veryl'

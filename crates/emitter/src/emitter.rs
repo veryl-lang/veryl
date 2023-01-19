@@ -907,6 +907,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Attribute'
     fn attribute(&mut self, arg: &Attribute) {
+        self.adjust_line = false;
         let identifier = arg.identifier.identifier_token.text();
         match identifier.as_str() {
             "ifdef" | "ifndef" => {
@@ -920,11 +921,12 @@ impl VerylWalker for Emitter {
                         false
                     };
 
-                    self.adjust_line = false;
                     self.str("`");
                     self.identifier(&arg.identifier);
                     self.space(1);
-                    self.identifier(&x.attribute_list.attribute_item.identifier);
+                    if let AttributeItem::Identifier(x) = &*x.attribute_list.attribute_item {
+                        self.identifier(&x.identifier);
+                    }
                     self.newline();
                     self.attribute.push(AttributeType::Ifdef);
 
@@ -934,8 +936,24 @@ impl VerylWalker for Emitter {
                     }
                 }
             }
+            "sv" => {
+                if let Some(ref x) = arg.attribute_opt {
+                    self.str("(*");
+                    self.space(1);
+                    if let AttributeItem::Strin(x) = &*x.attribute_list.attribute_item {
+                        let text = x.strin.string_token.text();
+                        let text = &text[1..text.len() - 1];
+                        let text = text.replace("\\\"", "\"");
+                        self.str(&text);
+                    }
+                    self.space(1);
+                    self.str("*)");
+                    self.newline();
+                }
+            }
             _ => (),
         }
+        self.adjust_line = false;
     }
 
     /// Semantic action for non-terminal 'VarDeclaration'

@@ -34,6 +34,13 @@ pub trait VerylWalker {
         after!(self, start, arg);
     }
 
+    /// Semantic action for non-terminal 'Strin'
+    fn strin(&mut self, arg: &Strin) {
+        before!(self, strin, arg);
+        self.veryl_token(&arg.string_token);
+        after!(self, strin, arg);
+    }
+
     /// Semantic action for non-terminal 'Exponent'
     fn exponent(&mut self, arg: &Exponent) {
         before!(self, exponent, arg);
@@ -1259,7 +1266,10 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'AttributeItem'
     fn attribute_item(&mut self, arg: &AttributeItem) {
         before!(self, attribute_item, arg);
-        self.identifier(&arg.identifier);
+        match arg {
+            AttributeItem::Identifier(x) => self.identifier(&x.identifier),
+            AttributeItem::Strin(x) => self.strin(&x.strin),
+        }
         after!(self, attribute_item, arg);
     }
 

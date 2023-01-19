@@ -13,92 +13,93 @@
 
 // Longest match should be first
 
-CommentsTerm          : "(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+"    : Token;
-ExponentTerm          : /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/  : Token;
-FixedPointTerm        : /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/                             : Token;
-BasedTerm             : /[0-9]+(?:_[0-9]+)*'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/    : Token;
-BaseLessTerm          : /[0-9]+(?:_[0-9]+)*/                                                 : Token;
-AllBitTerm            : /'[01xzXZ]/                                                          : Token;
-MinusColonTerm        : '-:'                                                                 : Token;
-MinusGTTerm           : '->'                                                                 : Token;
-PlusColonTerm         : '+:'                                                                 : Token;
-AssignmentOperatorTerm: "\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<=|>>=|<<<=|>>>="                      : Token;
-Operator11Term        : "\*\*"                                                               : Token;
-Operator10Term        : "/|%"                                                                : Token;
-Operator09Term        : "\+|-"                                                               : Token;
-Operator08Term        : "<<<|>>>|<<|>>"                                                      : Token;
-Operator07Term        : "<=|>=|<|>"                                                          : Token;
-Operator06Term        : "===|==\?|!==|!=\?|==|!="                                            : Token;
-Operator02Term        : "&&"                                                                 : Token;
-Operator01Term        : "\|\|"                                                               : Token;
-Operator05Term        : "&"                                                                  : Token;
-Operator04Term        : "\^~|\^|~\^"                                                         : Token;
-Operator03Term        : "\|"                                                                 : Token;
-UnaryOperatorTerm     : "~&|~\||!|~"                                                         : Token;
-ColonColonTerm        : '::'                                                                 : Token;
-ColonTerm             : ':'                                                                  : Token;
-CommaTerm             : ','                                                                  : Token;
-DollarTerm            : '$'                                                                  : Token;
-DotDotTerm            : '..'                                                                 : Token;
-DotTerm               : '.'                                                                  : Token;
-EquTerm               : '='                                                                  : Token;
-HashTerm              : '#'                                                                  : Token;
-LBraceTerm            : '{'                                                                  : Token;
-LBracketTerm          : '['                                                                  : Token;
-LParenTerm            : '('                                                                  : Token;
-RBraceTerm            : '}'                                                                  : Token;
-RBracketTerm          : ']'                                                                  : Token;
-RParenTerm            : ')'                                                                  : Token;
-SemicolonTerm         : ';'                                                                  : Token;
-StarTerm              : '*'                                                                  : Token;
-AlwaysCombTerm        : /\balways_comb\b/                                                    : Token;
-AlwaysFfTerm          : /\balways_ff\b/                                                      : Token;
-AssignTerm            : /\bassign\b/                                                         : Token;
-AsyncHighTerm         : /\basync_high\b/                                                     : Token;
-AsyncLowTerm          : /\basync_low\b/                                                      : Token;
-AsTerm                : /\bas\b/                                                             : Token;
-BitTerm               : /\bbit\b/                                                            : Token;
-CaseTerm              : /\bcase\b/                                                           : Token;
-DefaultTerm           : /\bdefault\b/                                                        : Token;
-ElseTerm              : /\belse\b/                                                           : Token;
-EnumTerm              : /\benum\b/                                                           : Token;
-ExportTerm            : /\bexport\b/                                                         : Token;
-F32Term               : /\bf32\b/                                                            : Token;
-F64Term               : /\bf64\b/                                                            : Token;
-ForTerm               : /\bfor\b/                                                            : Token;
-FunctionTerm          : /\bfunction\b/                                                       : Token;
-I32Term               : /\bi32\b/                                                            : Token;
-I64Term               : /\bi64\b/                                                            : Token;
-IfResetTerm           : /\bif_reset\b/                                                       : Token;
-IfTerm                : /\bif\b/                                                             : Token;
-ImportTerm            : /\bimport\b/                                                         : Token;
-InoutTerm             : /\binout\b/                                                          : Token;
-InputTerm             : /\binput\b/                                                          : Token;
-InstTerm              : /\binst\b/                                                           : Token;
-InterfaceTerm         : /\binterface\b/                                                      : Token;
-InTerm                : /\bin\b/                                                             : Token;
-LocalparamTerm        : /\blocalparam\b/                                                     : Token;
-LogicTerm             : /\blogic\b/                                                          : Token;
-ModportTerm           : /\bmodport\b/                                                        : Token;
-ModuleTerm            : /\bmodule\b/                                                         : Token;
-NegedgeTerm           : /\bnegedge\b/                                                        : Token;
-OutputTerm            : /\boutput\b/                                                         : Token;
-PackageTerm           : /\bpackage\b/                                                        : Token;
-ParameterTerm         : /\bparameter\b/                                                      : Token;
-PosedgeTerm           : /\bposedge\b/                                                        : Token;
-RefTerm               : /\bref\b/                                                            : Token;
-RepeatTerm            : /\brepeat\b/                                                         : Token;
-ReturnTerm            : /\breturn\b/                                                         : Token;
-SignedTerm            : /\bsigned\b/                                                         : Token;
-StepTerm              : /\bstep\b/                                                           : Token;
-StructTerm            : /\bstruct\b/                                                         : Token;
-SyncHighTerm          : /\bsync_high\b/                                                      : Token;
-SyncLowTerm           : /\bsync_low\b/                                                       : Token;
-TriTerm               : /\btri\b/                                                            : Token;
-U32Term               : /\bu32\b/                                                            : Token;
-U64Term               : /\bu64\b/                                                            : Token;
-VarTerm               : /\bvar\b/                                                            : Token;
-IdentifierTerm        : /[a-zA-Z_][0-9a-zA-Z_]*/                                             : Token;
+CommentsTerm          : "(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+"                     : Token;
+StringTerm            : "\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}": Token;
+ExponentTerm          : /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/                   : Token;
+FixedPointTerm        : /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/                                              : Token;
+BasedTerm             : /[0-9]+(?:_[0-9]+)*'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/                     : Token;
+BaseLessTerm          : /[0-9]+(?:_[0-9]+)*/                                                                  : Token;
+AllBitTerm            : /'[01xzXZ]/                                                                           : Token;
+MinusColonTerm        : '-:'                                                                                  : Token;
+MinusGTTerm           : '->'                                                                                  : Token;
+PlusColonTerm         : '+:'                                                                                  : Token;
+AssignmentOperatorTerm: "\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<=|>>=|<<<=|>>>="                                       : Token;
+Operator11Term        : "\*\*"                                                                                : Token;
+Operator10Term        : "/|%"                                                                                 : Token;
+Operator09Term        : "\+|-"                                                                                : Token;
+Operator08Term        : "<<<|>>>|<<|>>"                                                                       : Token;
+Operator07Term        : "<=|>=|<|>"                                                                           : Token;
+Operator06Term        : "===|==\?|!==|!=\?|==|!="                                                             : Token;
+Operator02Term        : "&&"                                                                                  : Token;
+Operator01Term        : "\|\|"                                                                                : Token;
+Operator05Term        : "&"                                                                                   : Token;
+Operator04Term        : "\^~|\^|~\^"                                                                          : Token;
+Operator03Term        : "\|"                                                                                  : Token;
+UnaryOperatorTerm     : "~&|~\||!|~"                                                                          : Token;
+ColonColonTerm        : '::'                                                                                  : Token;
+ColonTerm             : ':'                                                                                   : Token;
+CommaTerm             : ','                                                                                   : Token;
+DollarTerm            : '$'                                                                                   : Token;
+DotDotTerm            : '..'                                                                                  : Token;
+DotTerm               : '.'                                                                                   : Token;
+EquTerm               : '='                                                                                   : Token;
+HashTerm              : '#'                                                                                   : Token;
+LBraceTerm            : '{'                                                                                   : Token;
+LBracketTerm          : '['                                                                                   : Token;
+LParenTerm            : '('                                                                                   : Token;
+RBraceTerm            : '}'                                                                                   : Token;
+RBracketTerm          : ']'                                                                                   : Token;
+RParenTerm            : ')'                                                                                   : Token;
+SemicolonTerm         : ';'                                                                                   : Token;
+StarTerm              : '*'                                                                                   : Token;
+AlwaysCombTerm        : /\balways_comb\b/                                                                     : Token;
+AlwaysFfTerm          : /\balways_ff\b/                                                                       : Token;
+AssignTerm            : /\bassign\b/                                                                          : Token;
+AsyncHighTerm         : /\basync_high\b/                                                                      : Token;
+AsyncLowTerm          : /\basync_low\b/                                                                       : Token;
+AsTerm                : /\bas\b/                                                                              : Token;
+BitTerm               : /\bbit\b/                                                                             : Token;
+CaseTerm              : /\bcase\b/                                                                            : Token;
+DefaultTerm           : /\bdefault\b/                                                                         : Token;
+ElseTerm              : /\belse\b/                                                                            : Token;
+EnumTerm              : /\benum\b/                                                                            : Token;
+ExportTerm            : /\bexport\b/                                                                          : Token;
+F32Term               : /\bf32\b/                                                                             : Token;
+F64Term               : /\bf64\b/                                                                             : Token;
+ForTerm               : /\bfor\b/                                                                             : Token;
+FunctionTerm          : /\bfunction\b/                                                                        : Token;
+I32Term               : /\bi32\b/                                                                             : Token;
+I64Term               : /\bi64\b/                                                                             : Token;
+IfResetTerm           : /\bif_reset\b/                                                                        : Token;
+IfTerm                : /\bif\b/                                                                              : Token;
+ImportTerm            : /\bimport\b/                                                                          : Token;
+InoutTerm             : /\binout\b/                                                                           : Token;
+InputTerm             : /\binput\b/                                                                           : Token;
+InstTerm              : /\binst\b/                                                                            : Token;
+InterfaceTerm         : /\binterface\b/                                                                       : Token;
+InTerm                : /\bin\b/                                                                              : Token;
+LocalparamTerm        : /\blocalparam\b/                                                                      : Token;
+LogicTerm             : /\blogic\b/                                                                           : Token;
+ModportTerm           : /\bmodport\b/                                                                         : Token;
+ModuleTerm            : /\bmodule\b/                                                                          : Token;
+NegedgeTerm           : /\bnegedge\b/                                                                         : Token;
+OutputTerm            : /\boutput\b/                                                                          : Token;
+PackageTerm           : /\bpackage\b/                                                                         : Token;
+ParameterTerm         : /\bparameter\b/                                                                       : Token;
+PosedgeTerm           : /\bposedge\b/                                                                         : Token;
+RefTerm               : /\bref\b/                                                                             : Token;
+RepeatTerm            : /\brepeat\b/                                                                          : Token;
+ReturnTerm            : /\breturn\b/                                                                          : Token;
+SignedTerm            : /\bsigned\b/                                                                          : Token;
+StepTerm              : /\bstep\b/                                                                            : Token;
+StructTerm            : /\bstruct\b/                                                                          : Token;
+SyncHighTerm          : /\bsync_high\b/                                                                       : Token;
+SyncLowTerm           : /\bsync_low\b/                                                                        : Token;
+TriTerm               : /\btri\b/                                                                             : Token;
+U32Term               : /\bu32\b/                                                                             : Token;
+U64Term               : /\bu64\b/                                                                             : Token;
+VarTerm               : /\bvar\b/                                                                             : Token;
+IdentifierTerm        : /[a-zA-Z_][0-9a-zA-Z_]*/                                                              : Token;
 
 // ----------------------------------------------------------------------------
 // Token
@@ -107,6 +108,8 @@ IdentifierTerm        : /[a-zA-Z_][0-9a-zA-Z_]*/                                
 Comments: [ CommentsTerm ];
 
 StartToken: Comments;
+
+StringToken: StringTerm: Token Comments;
 
 ExponentToken  : ExponentTerm  : Token Comments;
 FixedPointToken: FixedPointTerm: Token Comments;
@@ -204,6 +207,9 @@ IdentifierToken: IdentifierTerm: Token Comments;
 
 // Start
 Start: StartToken: VerylToken;
+
+// String
+Strin: StringToken: VerylToken; // avoid to conflict with Rust's String
 
 // Number
 Exponent  : ExponentToken  : VerylToken;
@@ -422,7 +428,9 @@ Attribute: Hash LBracket Identifier [ LParen AttributeList RParen ] RBracket;
 
 AttributeList: AttributeItem { Comma AttributeItem } [ Comma ];
 
-AttributeItem: Identifier;
+AttributeItem: Identifier
+             | Strin
+             ;
 
 // ----------------------------------------------------------------------------
 // Declaration
