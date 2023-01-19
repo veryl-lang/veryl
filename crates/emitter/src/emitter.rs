@@ -289,12 +289,9 @@ impl Emitter {
     }
 
     fn attribute_end(&mut self) {
-        match self.attribute.pop() {
-            Some(AttributeType::Ifdef) => {
-                self.newline();
-                self.str("`endif");
-            }
-            _ => (),
+        if let Some(AttributeType::Ifdef) = self.attribute.pop() {
+            self.newline();
+            self.str("`endif");
         }
     }
 }
