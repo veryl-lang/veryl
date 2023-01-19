@@ -1224,16 +1224,21 @@ impl VerylWalker for Formatter {
         self.space(1);
         self.r#type(&arg.r#type);
         self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token);
-        self.newline_push();
-        for (i, x) in arg.function_declaration_list.iter().enumerate() {
-            if i != 0 {
-                self.newline();
+        if arg.function_declaration_list.is_empty() {
+            self.l_brace(&arg.l_brace);
+            self.r_brace(&arg.r_brace);
+        } else {
+            self.token_will_push(&arg.l_brace.l_brace_token);
+            self.newline_push();
+            for (i, x) in arg.function_declaration_list.iter().enumerate() {
+                if i != 0 {
+                    self.newline();
+                }
+                self.function_item(&x.function_item);
             }
-            self.function_item(&x.function_item);
+            self.newline_pop();
+            self.r_brace(&arg.r_brace);
         }
-        self.newline_pop();
-        self.r_brace(&arg.r_brace);
     }
 
     /// Semantic action for non-terminal 'ImportDeclaration'
@@ -1279,16 +1284,21 @@ impl VerylWalker for Formatter {
             self.port_declaration(&x.port_declaration);
             self.space(1);
         }
-        self.token_will_push(&arg.l_brace.l_brace_token);
-        self.newline_push();
-        for (i, x) in arg.module_declaration_list.iter().enumerate() {
-            if i != 0 {
-                self.newline();
+        if arg.module_declaration_list.is_empty() {
+            self.l_brace(&arg.l_brace);
+            self.r_brace(&arg.r_brace);
+        } else {
+            self.token_will_push(&arg.l_brace.l_brace_token);
+            self.newline_push();
+            for (i, x) in arg.module_declaration_list.iter().enumerate() {
+                if i != 0 {
+                    self.newline();
+                }
+                self.module_group(&x.module_group);
             }
-            self.module_group(&x.module_group);
+            self.newline_pop();
+            self.r_brace(&arg.r_brace);
         }
-        self.newline_pop();
-        self.r_brace(&arg.r_brace);
     }
 
     /// Semantic action for non-terminal 'ModuleIfDeclaration'
@@ -1344,16 +1354,21 @@ impl VerylWalker for Formatter {
         self.colon(&arg.colon);
         self.identifier(&arg.identifier);
         self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token);
-        self.newline_push();
-        for (i, x) in arg.module_named_block_list.iter().enumerate() {
-            if i != 0 {
-                self.newline();
+        if arg.module_named_block_list.is_empty() {
+            self.l_brace(&arg.l_brace);
+            self.r_brace(&arg.r_brace);
+        } else {
+            self.token_will_push(&arg.l_brace.l_brace_token);
+            self.newline_push();
+            for (i, x) in arg.module_named_block_list.iter().enumerate() {
+                if i != 0 {
+                    self.newline();
+                }
+                self.module_group(&x.module_group);
             }
-            self.module_group(&x.module_group);
+            self.newline_pop();
+            self.r_brace(&arg.r_brace);
         }
-        self.newline_pop();
-        self.r_brace(&arg.r_brace);
     }
 
     /// Semantic action for non-terminal 'ModuleOptionalNamedBlock'
@@ -1363,16 +1378,21 @@ impl VerylWalker for Formatter {
             self.identifier(&x.identifier);
             self.space(1);
         }
-        self.token_will_push(&arg.l_brace.l_brace_token);
-        self.newline_push();
-        for (i, x) in arg.module_optional_named_block_list.iter().enumerate() {
-            if i != 0 {
-                self.newline();
+        if arg.module_optional_named_block_list.is_empty() {
+            self.l_brace(&arg.l_brace);
+            self.r_brace(&arg.r_brace);
+        } else {
+            self.token_will_push(&arg.l_brace.l_brace_token);
+            self.newline_push();
+            for (i, x) in arg.module_optional_named_block_list.iter().enumerate() {
+                if i != 0 {
+                    self.newline();
+                }
+                self.module_group(&x.module_group);
             }
-            self.module_group(&x.module_group);
+            self.newline_pop();
+            self.r_brace(&arg.r_brace);
         }
-        self.newline_pop();
-        self.r_brace(&arg.r_brace);
     }
 
     /// Semantic action for non-terminal 'ModuleGroup'
@@ -1383,13 +1403,21 @@ impl VerylWalker for Formatter {
         }
         match &*arg.module_group_group {
             ModuleGroupGroup::LBraceModuleGroupGroupListRBrace(x) => {
-                self.token_will_push(&x.l_brace.l_brace_token);
-                self.newline_push();
-                for x in &x.module_group_group_list {
-                    self.module_group(&x.module_group);
+                if x.module_group_group_list.is_empty() {
+                    self.l_brace(&x.l_brace);
+                    self.r_brace(&x.r_brace);
+                } else {
+                    self.token_will_push(&x.l_brace.l_brace_token);
+                    self.newline_push();
+                    for (i, x) in x.module_group_group_list.iter().enumerate() {
+                        if i != 0 {
+                            self.newline();
+                        }
+                        self.module_group(&x.module_group);
+                    }
+                    self.newline_pop();
+                    self.r_brace(&x.r_brace);
                 }
-                self.newline_pop();
-                self.r_brace(&x.r_brace);
             }
             ModuleGroupGroup::ModuleItem(x) => self.module_item(&x.module_item),
         }
@@ -1405,16 +1433,21 @@ impl VerylWalker for Formatter {
             self.with_parameter(&x.with_parameter);
             self.space(1);
         }
-        self.token_will_push(&arg.l_brace.l_brace_token);
-        self.newline_push();
-        for (i, x) in arg.interface_declaration_list.iter().enumerate() {
-            if i != 0 {
-                self.newline();
+        if arg.interface_declaration_list.is_empty() {
+            self.l_brace(&arg.l_brace);
+            self.r_brace(&arg.r_brace);
+        } else {
+            self.token_will_push(&arg.l_brace.l_brace_token);
+            self.newline_push();
+            for (i, x) in arg.interface_declaration_list.iter().enumerate() {
+                if i != 0 {
+                    self.newline();
+                }
+                self.interface_group(&x.interface_group);
             }
-            self.interface_group(&x.interface_group);
+            self.newline_pop();
+            self.r_brace(&arg.r_brace);
         }
-        self.newline_pop();
-        self.r_brace(&arg.r_brace);
     }
 
     /// Semantic action for non-terminal 'InterfaceIfDeclaration'
@@ -1470,16 +1503,21 @@ impl VerylWalker for Formatter {
         self.colon(&arg.colon);
         self.identifier(&arg.identifier);
         self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token);
-        self.newline_push();
-        for (i, x) in arg.interface_named_block_list.iter().enumerate() {
-            if i != 0 {
-                self.newline();
+        if arg.interface_named_block_list.is_empty() {
+            self.l_brace(&arg.l_brace);
+            self.r_brace(&arg.r_brace);
+        } else {
+            self.token_will_push(&arg.l_brace.l_brace_token);
+            self.newline_push();
+            for (i, x) in arg.interface_named_block_list.iter().enumerate() {
+                if i != 0 {
+                    self.newline();
+                }
+                self.interface_group(&x.interface_group);
             }
-            self.interface_group(&x.interface_group);
+            self.newline_pop();
+            self.r_brace(&arg.r_brace);
         }
-        self.newline_pop();
-        self.r_brace(&arg.r_brace);
     }
 
     /// Semantic action for non-terminal 'InterfaceOptionalNamedBlock'
@@ -1489,16 +1527,21 @@ impl VerylWalker for Formatter {
             self.identifier(&x.identifier);
             self.space(1);
         }
-        self.token_will_push(&arg.l_brace.l_brace_token);
-        self.newline_push();
-        for (i, x) in arg.interface_optional_named_block_list.iter().enumerate() {
-            if i != 0 {
-                self.newline();
+        if arg.interface_optional_named_block_list.is_empty() {
+            self.l_brace(&arg.l_brace);
+            self.r_brace(&arg.r_brace);
+        } else {
+            self.token_will_push(&arg.l_brace.l_brace_token);
+            self.newline_push();
+            for (i, x) in arg.interface_optional_named_block_list.iter().enumerate() {
+                if i != 0 {
+                    self.newline();
+                }
+                self.interface_group(&x.interface_group);
             }
-            self.interface_group(&x.interface_group);
+            self.newline_pop();
+            self.r_brace(&arg.r_brace);
         }
-        self.newline_pop();
-        self.r_brace(&arg.r_brace);
     }
 
     /// Semantic action for non-terminal 'InterfaceGroup'
@@ -1509,13 +1552,21 @@ impl VerylWalker for Formatter {
         }
         match &*arg.interface_group_group {
             InterfaceGroupGroup::LBraceInterfaceGroupGroupListRBrace(x) => {
-                self.token_will_push(&x.l_brace.l_brace_token);
-                self.newline_push();
-                for x in &x.interface_group_group_list {
-                    self.interface_group(&x.interface_group);
+                if x.interface_group_group_list.is_empty() {
+                    self.l_brace(&x.l_brace);
+                    self.r_brace(&x.r_brace);
+                } else {
+                    self.token_will_push(&x.l_brace.l_brace_token);
+                    self.newline_push();
+                    for (i, x) in x.interface_group_group_list.iter().enumerate() {
+                        if i != 0 {
+                            self.newline();
+                        }
+                        self.interface_group(&x.interface_group);
+                    }
+                    self.newline_pop();
+                    self.r_brace(&x.r_brace);
                 }
-                self.newline_pop();
-                self.r_brace(&x.r_brace);
             }
             InterfaceGroupGroup::InterfaceItem(x) => self.interface_item(&x.interface_item),
         }
@@ -1527,16 +1578,21 @@ impl VerylWalker for Formatter {
         self.space(1);
         self.identifier(&arg.identifier);
         self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token);
-        self.newline_push();
-        for (i, x) in arg.package_declaration_list.iter().enumerate() {
-            if i != 0 {
-                self.newline();
+        if arg.package_declaration_list.is_empty() {
+            self.l_brace(&arg.l_brace);
+            self.r_brace(&arg.r_brace);
+        } else {
+            self.token_will_push(&arg.l_brace.l_brace_token);
+            self.newline_push();
+            for (i, x) in arg.package_declaration_list.iter().enumerate() {
+                if i != 0 {
+                    self.newline();
+                }
+                self.package_group(&x.package_group);
             }
-            self.package_group(&x.package_group);
+            self.newline_pop();
+            self.r_brace(&arg.r_brace);
         }
-        self.newline_pop();
-        self.r_brace(&arg.r_brace);
     }
 
     /// Semantic action for non-terminal 'PackageGroup'
@@ -1547,13 +1603,21 @@ impl VerylWalker for Formatter {
         }
         match &*arg.package_group_group {
             PackageGroupGroup::LBracePackageGroupGroupListRBrace(x) => {
-                self.token_will_push(&x.l_brace.l_brace_token);
-                self.newline_push();
-                for x in &x.package_group_group_list {
-                    self.package_group(&x.package_group);
+                if x.package_group_group_list.is_empty() {
+                    self.l_brace(&x.l_brace);
+                    self.r_brace(&x.r_brace);
+                } else {
+                    self.token_will_push(&x.l_brace.l_brace_token);
+                    self.newline_push();
+                    for (i, x) in x.package_group_group_list.iter().enumerate() {
+                        if i != 0 {
+                            self.newline();
+                        }
+                        self.package_group(&x.package_group);
+                    }
+                    self.newline_pop();
+                    self.r_brace(&x.r_brace);
                 }
-                self.newline_pop();
-                self.r_brace(&x.r_brace);
             }
             PackageGroupGroup::PackageItem(x) => self.package_item(&x.package_item),
         }
@@ -1567,13 +1631,21 @@ impl VerylWalker for Formatter {
         }
         match &*arg.description_group_group {
             DescriptionGroupGroup::LBraceDescriptionGroupGroupListRBrace(x) => {
-                self.token_will_push(&x.l_brace.l_brace_token);
-                self.newline_push();
-                for x in &x.description_group_group_list {
-                    self.description_group(&x.description_group);
+                if x.description_group_group_list.is_empty() {
+                    self.l_brace(&x.l_brace);
+                    self.r_brace(&x.r_brace);
+                } else {
+                    self.token_will_push(&x.l_brace.l_brace_token);
+                    self.newline_push();
+                    for (i, x) in x.description_group_group_list.iter().enumerate() {
+                        if i != 0 {
+                            self.newline();
+                        }
+                        self.description_group(&x.description_group);
+                    }
+                    self.newline_pop();
+                    self.r_brace(&x.r_brace);
                 }
-                self.newline_pop();
-                self.r_brace(&x.r_brace);
             }
             DescriptionGroupGroup::DescriptionItem(x) => self.description_item(&x.description_item),
         }

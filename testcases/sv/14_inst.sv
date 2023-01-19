@@ -29,7 +29,6 @@ endmodule
 
 module Module14B;
 
-
 endmodule
 
 module Module14C (
@@ -38,13 +37,11 @@ module Module14C (
     input int unsigned bbbb 
 );
 
-
 endmodule
 
 interface InterfaceA #(
     parameter int unsigned a  = 1,
     parameter int unsigned b  = 1
 );
-
 
 endinterface
