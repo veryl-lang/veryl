@@ -1,5 +1,6 @@
 use crate::resource_table::{self, PathId, StrId, TokenId};
 use crate::veryl_grammar_trait::*;
+use paste::paste;
 use regex::Regex;
 
 #[derive(Debug, Clone, Copy)]
@@ -65,41 +66,6 @@ impl VerylToken {
     }
 }
 
-macro_rules! token_with_comments {
-    ($x:ident, $y:ident, $z:ident) => {
-        impl TryFrom<&$x> for VerylToken {
-            type Error = anyhow::Error;
-
-            fn try_from(x: &$x) -> Result<Self, anyhow::Error> {
-                let mut comments = Vec::new();
-                if let Some(ref x) = x.comments.comments_opt {
-                    let mut tokens = split_comment_token(x.comments_term.comments_term);
-                    comments.append(&mut tokens)
-                }
-                Ok(VerylToken {
-                    token: x.$z.clone(),
-                    comments,
-                })
-            }
-        }
-        impl TryFrom<&$y> for Token {
-            type Error = anyhow::Error;
-
-            fn try_from(x: &$y) -> Result<Self, anyhow::Error> {
-                Ok(Token {
-                    id: x.$z.id,
-                    text: x.$z.text,
-                    line: x.$z.line,
-                    column: x.$z.column,
-                    length: x.$z.length,
-                    pos: x.$z.pos,
-                    file_path: x.$z.file_path,
-                })
-            }
-        }
-    };
-}
-
 fn split_comment_token(token: Token) -> Vec<Token> {
     let mut line = token.line;
     let text = resource_table::get_str_value(token.text).unwrap();
@@ -156,98 +122,131 @@ impl TryFrom<&StartToken> for VerylToken {
     }
 }
 
-token_with_comments!(StringToken, StringTerm, string_term);
+macro_rules! token_with_comments {
+    ($x:ident) => {
+        paste! {
+            impl TryFrom<&[<$x Token>]> for VerylToken {
+                type Error = anyhow::Error;
 
-token_with_comments!(FixedPointToken, FixedPointTerm, fixed_point_term);
-token_with_comments!(ExponentToken, ExponentTerm, exponent_term);
-token_with_comments!(BasedToken, BasedTerm, based_term);
-token_with_comments!(BaseLessToken, BaseLessTerm, base_less_term);
-token_with_comments!(AllBitToken, AllBitTerm, all_bit_term);
+                fn try_from(x: &[<$x Token>]) -> Result<Self, anyhow::Error> {
+                    let mut comments = Vec::new();
+                    if let Some(ref x) = x.comments.comments_opt {
+                        let mut tokens = split_comment_token(x.comments_term.comments_term);
+                        comments.append(&mut tokens)
+                    }
+                    Ok(VerylToken {
+                        token: x.[<$x:snake _term>].clone(),
+                        comments,
+                    })
+                }
+            }
+            impl TryFrom<&[<$x Term>]> for Token {
+                type Error = anyhow::Error;
 
-token_with_comments!(ColonToken, ColonTerm, colon_term);
-token_with_comments!(ColonColonToken, ColonColonTerm, colon_colon_term);
-token_with_comments!(CommaToken, CommaTerm, comma_term);
-token_with_comments!(DollarToken, DollarTerm, dollar_term);
-token_with_comments!(DotDotToken, DotDotTerm, dot_dot_term);
-token_with_comments!(DotToken, DotTerm, dot_term);
-token_with_comments!(EquToken, EquTerm, equ_term);
-token_with_comments!(HashToken, HashTerm, hash_term);
-token_with_comments!(LBraceToken, LBraceTerm, l_brace_term);
-token_with_comments!(LBracketToken, LBracketTerm, l_bracket_term);
-token_with_comments!(LParenToken, LParenTerm, l_paren_term);
-token_with_comments!(MinusColonToken, MinusColonTerm, minus_colon_term);
-token_with_comments!(MinusGTToken, MinusGTTerm, minus_g_t_term);
-token_with_comments!(PlusColonToken, PlusColonTerm, plus_colon_term);
-token_with_comments!(RBraceToken, RBraceTerm, r_brace_term);
-token_with_comments!(RBracketToken, RBracketTerm, r_bracket_term);
-token_with_comments!(RParenToken, RParenTerm, r_paren_term);
-token_with_comments!(SemicolonToken, SemicolonTerm, semicolon_term);
-token_with_comments!(StarToken, StarTerm, star_term);
+                fn try_from(x: &[<$x Term>]) -> Result<Self, anyhow::Error> {
+                    Ok(Token {
+                        id: x.[<$x:snake _term>].id,
+                        text: x.[<$x:snake _term>].text,
+                        line: x.[<$x:snake _term>].line,
+                        column: x.[<$x:snake _term>].column,
+                        length: x.[<$x:snake _term>].length,
+                        pos: x.[<$x:snake _term>].pos,
+                        file_path: x.[<$x:snake _term>].file_path,
+                    })
+                }
+            }
+        }
+    };
+}
 
-token_with_comments!(
-    AssignmentOperatorToken,
-    AssignmentOperatorTerm,
-    assignment_operator_term
-);
-token_with_comments!(Operator01Token, Operator01Term, operator01_term);
-token_with_comments!(Operator02Token, Operator02Term, operator02_term);
-token_with_comments!(Operator03Token, Operator03Term, operator03_term);
-token_with_comments!(Operator04Token, Operator04Term, operator04_term);
-token_with_comments!(Operator05Token, Operator05Term, operator05_term);
-token_with_comments!(Operator06Token, Operator06Term, operator06_term);
-token_with_comments!(Operator07Token, Operator07Term, operator07_term);
-token_with_comments!(Operator08Token, Operator08Term, operator08_term);
-token_with_comments!(Operator09Token, Operator09Term, operator09_term);
-token_with_comments!(Operator10Token, Operator10Term, operator10_term);
-token_with_comments!(Operator11Token, Operator11Term, operator11_term);
-token_with_comments!(UnaryOperatorToken, UnaryOperatorTerm, unary_operator_term);
+token_with_comments!(String);
 
-token_with_comments!(AlwaysCombToken, AlwaysCombTerm, always_comb_term);
-token_with_comments!(AlwaysFfToken, AlwaysFfTerm, always_ff_term);
-token_with_comments!(AsToken, AsTerm, as_term);
-token_with_comments!(AssignToken, AssignTerm, assign_term);
-token_with_comments!(AsyncHighToken, AsyncHighTerm, async_high_term);
-token_with_comments!(AsyncLowToken, AsyncLowTerm, async_low_term);
-token_with_comments!(BitToken, BitTerm, bit_term);
-token_with_comments!(CaseToken, CaseTerm, case_term);
-token_with_comments!(DefaultToken, DefaultTerm, default_term);
-token_with_comments!(ElseToken, ElseTerm, else_term);
-token_with_comments!(EnumToken, EnumTerm, enum_term);
-token_with_comments!(ExportToken, ExportTerm, export_term);
-token_with_comments!(F32Token, F32Term, f32_term);
-token_with_comments!(F64Token, F64Term, f64_term);
-token_with_comments!(FunctionToken, FunctionTerm, function_term);
-token_with_comments!(ForToken, ForTerm, for_term);
-token_with_comments!(I32Token, I32Term, i32_term);
-token_with_comments!(I64Token, I64Term, i64_term);
-token_with_comments!(IfToken, IfTerm, if_term);
-token_with_comments!(IfResetToken, IfResetTerm, if_reset_term);
-token_with_comments!(ImportToken, ImportTerm, import_term);
-token_with_comments!(InoutToken, InoutTerm, inout_term);
-token_with_comments!(InputToken, InputTerm, input_term);
-token_with_comments!(InstToken, InstTerm, inst_term);
-token_with_comments!(InterfaceToken, InterfaceTerm, interface_term);
-token_with_comments!(InToken, InTerm, in_term);
-token_with_comments!(LocalparamToken, LocalparamTerm, localparam_term);
-token_with_comments!(LogicToken, LogicTerm, logic_term);
-token_with_comments!(ModportToken, ModportTerm, modport_term);
-token_with_comments!(ModuleToken, ModuleTerm, module_term);
-token_with_comments!(NegedgeToken, NegedgeTerm, negedge_term);
-token_with_comments!(OutputToken, OutputTerm, output_term);
-token_with_comments!(PackageToken, PackageTerm, package_term);
-token_with_comments!(ParameterToken, ParameterTerm, parameter_term);
-token_with_comments!(PosedgeToken, PosedgeTerm, posedge_term);
-token_with_comments!(RefToken, RefTerm, ref_term);
-token_with_comments!(RepeatToken, RepeatTerm, repeat_term);
-token_with_comments!(ReturnToken, ReturnTerm, return_term);
-token_with_comments!(SignedToken, SignedTerm, signed_term);
-token_with_comments!(StepToken, StepTerm, step_term);
-token_with_comments!(StructToken, StructTerm, struct_term);
-token_with_comments!(SyncHighToken, SyncHighTerm, sync_high_term);
-token_with_comments!(SyncLowToken, SyncLowTerm, sync_low_term);
-token_with_comments!(TriToken, TriTerm, tri_term);
-token_with_comments!(U32Token, U32Term, u32_term);
-token_with_comments!(U64Token, U64Term, u64_term);
-token_with_comments!(VarToken, VarTerm, var_term);
+token_with_comments!(FixedPoint);
+token_with_comments!(Exponent);
+token_with_comments!(Based);
+token_with_comments!(BaseLess);
+token_with_comments!(AllBit);
 
-token_with_comments!(IdentifierToken, IdentifierTerm, identifier_term);
+token_with_comments!(Colon);
+token_with_comments!(ColonColon);
+token_with_comments!(Comma);
+token_with_comments!(Dollar);
+token_with_comments!(DotDot);
+token_with_comments!(Dot);
+token_with_comments!(Equ);
+token_with_comments!(Hash);
+token_with_comments!(LBrace);
+token_with_comments!(LBracket);
+token_with_comments!(LParen);
+token_with_comments!(MinusColon);
+token_with_comments!(MinusGT);
+token_with_comments!(PlusColon);
+token_with_comments!(RBrace);
+token_with_comments!(RBracket);
+token_with_comments!(RParen);
+token_with_comments!(Semicolon);
+token_with_comments!(Star);
+
+token_with_comments!(AssignmentOperator);
+token_with_comments!(Operator01);
+token_with_comments!(Operator02);
+token_with_comments!(Operator03);
+token_with_comments!(Operator04);
+token_with_comments!(Operator05);
+token_with_comments!(Operator06);
+token_with_comments!(Operator07);
+token_with_comments!(Operator08);
+token_with_comments!(Operator09);
+token_with_comments!(Operator10);
+token_with_comments!(Operator11);
+token_with_comments!(UnaryOperator);
+
+token_with_comments!(AlwaysComb);
+token_with_comments!(AlwaysFf);
+token_with_comments!(As);
+token_with_comments!(Assign);
+token_with_comments!(AsyncHigh);
+token_with_comments!(AsyncLow);
+token_with_comments!(Bit);
+token_with_comments!(Case);
+token_with_comments!(Default);
+token_with_comments!(Else);
+token_with_comments!(Enum);
+token_with_comments!(Export);
+token_with_comments!(F32);
+token_with_comments!(F64);
+token_with_comments!(Function);
+token_with_comments!(For);
+token_with_comments!(I32);
+token_with_comments!(I64);
+token_with_comments!(If);
+token_with_comments!(IfReset);
+token_with_comments!(Import);
+token_with_comments!(Inout);
+token_with_comments!(Input);
+token_with_comments!(Inst);
+token_with_comments!(Interface);
+token_with_comments!(In);
+token_with_comments!(Localparam);
+token_with_comments!(Logic);
+token_with_comments!(Modport);
+token_with_comments!(Module);
+token_with_comments!(Negedge);
+token_with_comments!(Output);
+token_with_comments!(Package);
+token_with_comments!(Parameter);
+token_with_comments!(Posedge);
+token_with_comments!(Ref);
+token_with_comments!(Repeat);
+token_with_comments!(Return);
+token_with_comments!(Signed);
+token_with_comments!(Step);
+token_with_comments!(Struct);
+token_with_comments!(SyncHigh);
+token_with_comments!(SyncLow);
+token_with_comments!(Tri);
+token_with_comments!(U32);
+token_with_comments!(U64);
+token_with_comments!(Var);
+
+token_with_comments!(Identifier);
