@@ -351,6 +351,7 @@ Expression12: { ( UnaryOperator | Operator09 | Operator05 | Operator03 | Operato
 
 Factor: Number
       | ExpressionIdentifier [ LParen [ FunctionCallArg ] RParen ]
+      | BuiltinType { Width }
       | LParen Expression RParen
       | LBrace ConcatenationList RBrace
       | IfExpression

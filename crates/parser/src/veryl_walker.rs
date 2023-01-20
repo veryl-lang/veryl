@@ -893,6 +893,12 @@ pub trait VerylWalker {
                     self.r_paren(&x.r_paren);
                 }
             }
+            Factor::BuiltinTypeFactorList(x) => {
+                self.builtin_type(&x.builtin_type);
+                for x in &x.factor_list {
+                    self.width(&x.width);
+                }
+            }
             Factor::LParenExpressionRParen(x) => {
                 self.l_paren(&x.l_paren);
                 self.expression(&x.expression);
