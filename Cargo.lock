@@ -2139,6 +2139,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "spdx"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52dd48832ddda0d79ca6062064d530680e24c5ee85ba1d9fae41f102b2d9f34f"
+dependencies = [
+ "smallvec",
+]
+
+[[package]]
 name = "str_indices"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2699,8 +2708,10 @@ name = "veryl-metadata"
 version = "0.2.1"
 dependencies = [
  "miette",
+ "regex",
  "semver",
  "serde",
+ "spdx",
  "thiserror",
  "toml",
  "veryl-parser",

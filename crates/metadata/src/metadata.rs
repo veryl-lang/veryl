@@ -1,6 +1,8 @@
 use crate::MetadataError;
+use regex::Regex;
 use semver::Version;
 use serde::{Deserialize, Serialize};
+use spdx::Expression;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -37,7 +39,21 @@ impl Metadata {
         let text = std::fs::read_to_string(&path)?;
         let mut metadata: Metadata = Self::from_str(&text)?;
         metadata.metadata_path = path;
+        metadata.check()?;
         Ok(metadata)
+    }
+
+    pub fn check(&self) -> Result<(), MetadataError> {
+        let valid_project_name = Regex::new(r"^[a-zA-Z_][0-9a-zA-Z_]*$").unwrap();
+        if !valid_project_name.is_match(&self.project.name) {
+            return Err(MetadataError::InvalidProjectName(self.project.name.clone()));
+        }
+
+        if let Some(ref license) = self.project.license {
+            let _ = Expression::parse(license)?;
+        }
+
+        Ok(())
     }
 }
 

@@ -7,4 +7,4 @@ support/vscode/.vscode-test/
 support/vscode/*.vsix
 support/vscode/bin
 support/highlightjs/dist/
-veryl-testcase.*
+veryl_testcase.*
