@@ -22,7 +22,10 @@ pub enum MetadataError {
     #[error("project name \"{0}\" is invalid")]
     InvalidProjectName(String),
 
-    #[diagnostic(code(MetadataError::InvalidLicense), help(""))]
+    #[diagnostic(
+        code(MetadataError::InvalidLicense),
+        help("license text should follow SPDX expression")
+    )]
     #[error("license parse failed")]
     InvalidLicense(#[from] spdx::ParseError),
 }
