@@ -1,8 +1,7 @@
 [project]
 name    = "veryl_testcase"
 version = "0.1.0"
-#license = "MIT"
-license = "MI OR Apache-2.0"
+license = "MIT"
 
 [build]
 clock_type    = "posedge"
