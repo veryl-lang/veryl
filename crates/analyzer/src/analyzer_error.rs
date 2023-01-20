@@ -101,6 +101,17 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
+    #[diagnostic(code(AnalyzerError::MismatchAttributeArgs), help(""))]
+    #[error("Arguments of \"{name}\" is expected to \"{expected}\"")]
+    MismatchAttributeArgs {
+        name: String,
+        expected: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
     #[diagnostic(code(AnalyzerError::MissingPort), help("add \"{port}\" port"))]
     #[error("module \"{name}\" has \"{port}\", but it is not connected")]
     MissingPort {
@@ -128,6 +139,16 @@ pub enum AnalyzerError {
     UnknownMember {
         name: String,
         member: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(code(AnalyzerError::UnknownAttribute), help(""))]
+    #[error("\"{name}\" is not valid attribute")]
+    UnknownAttribute {
+        name: String,
         #[source_code]
         input: NamedSource,
         #[label("Error location")]
@@ -296,6 +317,20 @@ impl AnalyzerError {
         }
     }
 
+    pub fn mismatch_attribute_args(
+        name: &str,
+        expected: &str,
+        source: &str,
+        token: &VerylToken,
+    ) -> Self {
+        AnalyzerError::MismatchAttributeArgs {
+            name: name.to_string(),
+            expected: expected.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.token.into(),
+        }
+    }
+
     pub fn missing_port(name: &str, port: &str, source: &str, token: &VerylToken) -> Self {
         AnalyzerError::MissingPort {
             name: name.to_string(),
@@ -318,6 +353,14 @@ impl AnalyzerError {
         AnalyzerError::UnknownMember {
             name: name.to_string(),
             member: member.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.token.into(),
+        }
+    }
+
+    pub fn unknown_attribute(name: &str, source: &str, token: &VerylToken) -> Self {
+        AnalyzerError::UnknownAttribute {
+            name: name.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),
         }

@@ -1,3 +1,4 @@
+pub mod check_attribute;
 pub mod check_enum;
 pub mod check_function;
 pub mod check_instance;
@@ -9,6 +10,7 @@ pub mod check_number_overflow;
 pub mod check_system_function;
 pub mod create_reference;
 pub mod create_symbol_table;
+use check_attribute::*;
 use check_enum::*;
 use check_function::*;
 use check_instance::*;
@@ -25,6 +27,7 @@ use crate::analyzer_error::AnalyzerError;
 use veryl_parser::veryl_walker::Handler;
 
 pub struct Pass1Handlers<'a> {
+    check_attribute: CheckAttribute<'a>,
     check_invalid_direction: CheckInvalidDirection<'a>,
     check_invalid_number_character: CheckInvalidNumberCharacter<'a>,
     check_invalid_reset: CheckInvalidReset<'a>,
@@ -37,6 +40,7 @@ pub struct Pass1Handlers<'a> {
 impl<'a> Pass1Handlers<'a> {
     pub fn new(text: &'a str) -> Self {
         Self {
+            check_attribute: CheckAttribute::new(text),
             check_invalid_direction: CheckInvalidDirection::new(text),
             check_invalid_number_character: CheckInvalidNumberCharacter::new(text),
             check_invalid_reset: CheckInvalidReset::new(text),
@@ -49,6 +53,7 @@ impl<'a> Pass1Handlers<'a> {
 
     pub fn get_handlers(&mut self) -> Vec<&mut dyn Handler> {
         vec![
+            &mut self.check_attribute as &mut dyn Handler,
             &mut self.check_invalid_direction as &mut dyn Handler,
             &mut self.check_invalid_number_character as &mut dyn Handler,
             &mut self.check_invalid_reset as &mut dyn Handler,
@@ -61,6 +66,7 @@ impl<'a> Pass1Handlers<'a> {
 
     pub fn get_errors(&mut self) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
+        ret.append(&mut self.check_attribute.errors);
         ret.append(&mut self.check_invalid_direction.errors);
         ret.append(&mut self.check_invalid_number_character.errors);
         ret.append(&mut self.check_invalid_reset.errors);
