@@ -19,5 +19,5 @@ semver       = {workspace = true}
 serde        = {workspace = true}
 spdx         = "0.10.0"
 thiserror    = {workspace = true}
-toml         = "0.5.10"
+toml         = "0.5.11"
 veryl-parser = {version = "0.2.1", path = "../parser"}
