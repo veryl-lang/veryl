@@ -25,18 +25,18 @@ module Module08;
     end
 
     // for declaration
-    for (genvar a = 0; a < 10; a++) begin :label2
+    for (genvar i = 0; i < 10; i++) begin :label2
         logic  a;
         always_ff @ (posedge i_clk) begin
-            a <= 1;
+            a <= i;
         end
     end
 
     // for declaration with custom step
-    for (genvar a = 0; a < 10; a += 2) begin :label3
+    for (genvar i = 0; i < 10; i += 2) begin :label3
         logic  a;
         always_ff @ (posedge i_clk) begin
-            a <= 1;
+            a <= i;
         end
     end
 endmodule

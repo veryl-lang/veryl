@@ -22,6 +22,8 @@ pub struct CreateSymbolTable<'a> {
     point: HandlerPoint,
     namespace: Namespace,
     default_block: Option<StrId>,
+    for_identifier: Option<VerylToken>,
+    anonymous_namespace: usize,
 }
 
 impl<'a> CreateSymbolTable<'a> {
@@ -55,6 +57,24 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             let id = arg.identifier_token.token.id;
             let file_path = arg.identifier_token.token.file_path;
             namespace_table::insert(id, file_path, &self.namespace);
+        }
+        Ok(())
+    }
+
+    fn for_statement(&mut self, arg: &ForStatement) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                let name = format!("@{}", self.anonymous_namespace);
+                let name = resource_table::insert_str(&name);
+                self.namespace.push(name);
+                self.anonymous_namespace += 1;
+
+                let r#type: SymType = arg.r#type.as_ref().into();
+                let property = VariableProperty { r#type };
+                let kind = SymbolKind::Variable(property);
+                self.insert_symbol(&arg.identifier.identifier_token, kind);
+            }
+            HandlerPoint::After => self.namespace.pop(),
         }
         Ok(())
     }
@@ -274,6 +294,13 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         Ok(())
     }
 
+    fn module_for_declaration(&mut self, arg: &ModuleForDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            self.for_identifier = Some(arg.identifier.identifier_token.clone());
+        }
+        Ok(())
+    }
+
     fn module_named_block(&mut self, arg: &ModuleNamedBlock) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
@@ -281,7 +308,13 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
                 let name = arg.identifier.identifier_token.token.text;
                 self.default_block = Some(name);
-                self.namespace.push(name)
+                self.namespace.push(name);
+
+                if self.for_identifier.is_some() {
+                    let identifier = self.for_identifier.clone().unwrap();
+                    self.insert_symbol(&identifier, SymbolKind::Genvar);
+                    self.for_identifier = None;
+                }
             }
             HandlerPoint::After => self.namespace.pop(),
         }
@@ -334,6 +367,16 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         Ok(())
     }
 
+    fn interface_for_declaration(
+        &mut self,
+        arg: &InterfaceForDeclaration,
+    ) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            self.for_identifier = Some(arg.identifier.identifier_token.clone());
+        }
+        Ok(())
+    }
+
     fn interface_named_block(&mut self, arg: &InterfaceNamedBlock) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
@@ -341,7 +384,13 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
                 let name = arg.identifier.identifier_token.token.text;
                 self.default_block = Some(name);
-                self.namespace.push(name)
+                self.namespace.push(name);
+
+                if self.for_identifier.is_some() {
+                    let identifier = self.for_identifier.clone().unwrap();
+                    self.insert_symbol(&identifier, SymbolKind::Genvar);
+                    self.for_identifier = None;
+                }
             }
             HandlerPoint::After => self.namespace.pop(),
         }

@@ -364,6 +364,7 @@ impl LanguageServer for Backend {
                     veryl_analyzer::symbol::SymbolKind::Enum(_) => SymbolKind::ENUM,
                     veryl_analyzer::symbol::SymbolKind::EnumMember(_) => SymbolKind::ENUM_MEMBER,
                     veryl_analyzer::symbol::SymbolKind::Modport(_) => SymbolKind::INTERFACE,
+                    veryl_analyzer::symbol::SymbolKind::Genvar => SymbolKind::VARIABLE,
                 };
                 let location = Backend::to_location(&symbol.token);
                 #[allow(deprecated)]

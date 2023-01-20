@@ -32,19 +32,19 @@ module Module07;
         end
 
         // for statement
-        for (int unsigned a  = 0; a < 10; a++) begin
-            a  = 1;
-            aa = 1;
+        for (int unsigned i  = 0; i < 10; i++) begin
+            a  = i;
+            aa = i + 1;
         end
 
         // for statement with custom step
-        for (int unsigned a  = 0; a < 10; a += 2) begin
-            a  = 1;
-            aa = 1;
+        for (int unsigned i  = 0; i < 10; i += 2) begin
+            a  = i;
+            aa = i + 1;
         end
-        for (int unsigned a  = 0; a < 10; a *= 2) begin
-            a  = 1;
-            aa = 1;
+        for (int unsigned i  = 0; i < 10; i *= 2) begin
+            a  = i;
+            aa = i + 1;
         end
     end
 
