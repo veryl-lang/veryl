@@ -1,8 +1,9 @@
 // module declaration
 module Module04 #(
     // module parameter
-    parameter  int unsigned a   = 1,
-    localparam int unsigned aa  = 1
+    parameter  int unsigned a    = 1            ,
+    localparam int unsigned aa   = 1            ,
+    localparam type         aaa  = logic[10-1:0]
 ) (
     // module port
     input  logic     [10-1:0] b    ,
