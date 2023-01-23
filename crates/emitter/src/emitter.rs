@@ -1286,6 +1286,11 @@ impl VerylWalker for Emitter {
             self.single_line = true;
         }
         self.token(&arg.inst.inst_token.replace(""));
+        if let Ok(symbol) = symbol_table::resolve(arg.identifier0.as_ref()) {
+            if let Some(symbol) = symbol.found {
+                self.str(&format!("{}_", symbol.namespace));
+            }
+        }
         self.identifier(&arg.identifier0);
         self.space(1);
         if let Some(ref x) = arg.inst_declaration_opt0 {
@@ -1647,6 +1652,11 @@ impl VerylWalker for Emitter {
     fn module_declaration(&mut self, arg: &ModuleDeclaration) {
         self.module(&arg.module);
         self.space(1);
+        if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
+            if let Some(symbol) = symbol.found {
+                self.str(&format!("{}_", symbol.namespace));
+            }
+        }
         self.identifier(&arg.identifier);
         let file_scope_import = self.file_scope_import.clone();
         if !file_scope_import.is_empty() {
@@ -1825,6 +1835,11 @@ impl VerylWalker for Emitter {
     fn interface_declaration(&mut self, arg: &InterfaceDeclaration) {
         self.interface(&arg.interface);
         self.space(1);
+        if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
+            if let Some(symbol) = symbol.found {
+                self.str(&format!("{}_", symbol.namespace));
+            }
+        }
         self.identifier(&arg.identifier);
         let file_scope_import = self.file_scope_import.clone();
         if !file_scope_import.is_empty() {
@@ -1999,6 +2014,11 @@ impl VerylWalker for Emitter {
     fn package_declaration(&mut self, arg: &PackageDeclaration) {
         self.package(&arg.package);
         self.space(1);
+        if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
+            if let Some(symbol) = symbol.found {
+                self.str(&format!("{}_", symbol.namespace));
+            }
+        }
         self.identifier(&arg.identifier);
         self.token_will_push(&arg.l_brace.l_brace_token.replace(";"));
         self.newline_push();

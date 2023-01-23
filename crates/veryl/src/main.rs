@@ -13,6 +13,7 @@ mod cmd_init;
 mod cmd_metadata;
 mod cmd_new;
 mod dependency_manager;
+mod git;
 mod utils;
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -186,16 +187,16 @@ fn main() -> Result<ExitCode> {
         }
     };
 
-    dependency_manager::DependencyManager::update(&metadata)?;
+    let deps = dependency_manager::DependencyManager::gather(&metadata)?;
 
     let ret = match opt.command {
         Commands::New(x) => cmd_new::CmdNew::new(x).exec()?,
         Commands::Init(x) => cmd_init::CmdInit::new(x).exec()?,
         Commands::Fmt(x) => cmd_fmt::CmdFmt::new(x).exec(&metadata)?,
-        Commands::Check(x) => cmd_check::CmdCheck::new(x).exec(&metadata)?,
-        Commands::Build(x) => cmd_build::CmdBuild::new(x).exec(&metadata)?,
+        Commands::Check(x) => cmd_check::CmdCheck::new(x).exec(&metadata, &deps)?,
+        Commands::Build(x) => cmd_build::CmdBuild::new(x).exec(&metadata, &deps)?,
         Commands::Metadata(x) => cmd_metadata::CmdMetadata::new(x).exec(&metadata)?,
-        Commands::Dump(x) => cmd_dump::CmdDump::new(x).exec(&metadata)?,
+        Commands::Dump(x) => cmd_dump::CmdDump::new(x).exec(&metadata, &deps)?,
     };
     if ret {
         Ok(ExitCode::SUCCESS)

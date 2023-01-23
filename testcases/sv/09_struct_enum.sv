@@ -1,4 +1,4 @@
-module Module09;
+module veryl_testcase_Module09;
     // struct declaration
     typedef struct {
         logic        [10-1:0] a  ;

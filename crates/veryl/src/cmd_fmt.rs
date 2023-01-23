@@ -31,11 +31,13 @@ impl CmdFmt {
         for file in &files {
             self.print(&format!(
                 "[Info] Processing file: {}",
-                file.to_string_lossy()
+                file.src.to_string_lossy()
             ));
 
-            let input = fs::read_to_string(file).into_diagnostic().wrap_err("")?;
-            let parser = Parser::parse(&input, file)?;
+            let input = fs::read_to_string(&file.src)
+                .into_diagnostic()
+                .wrap_err("")?;
+            let parser = Parser::parse(&input, &file.src)?;
             let mut formatter = Formatter::new(metadata);
             formatter.format(&parser.veryl);
 
@@ -43,17 +45,17 @@ impl CmdFmt {
 
             if !pass {
                 if self.opt.check {
-                    print_diff(file, input.as_str(), formatter.as_str());
+                    print_diff(&file.src, input.as_str(), formatter.as_str());
                     all_pass = false;
                 } else {
                     self.print(&format!(
                         "[Info] Overwrite file: {}",
-                        file.to_string_lossy()
+                        file.src.to_string_lossy()
                     ));
                     let mut file = OpenOptions::new()
                         .write(true)
                         .truncate(true)
-                        .open(file)
+                        .open(&file.src)
                         .into_diagnostic()?;
                     file.write_all(formatter.as_str().as_bytes())
                         .into_diagnostic()?;

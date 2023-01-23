@@ -1,15 +1,14 @@
 use crate::cmd_check::CheckError;
-use crate::utils;
+use crate::utils::{self, PathPair};
 use crate::OptBuild;
 use miette::{IntoDiagnostic, Result, WrapErr};
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::PathBuf;
 use std::time::Instant;
 use veryl_analyzer::Analyzer;
 use veryl_emitter::Emitter;
-use veryl_metadata::{FilelistType, Metadata, Target};
+use veryl_metadata::{FilelistType, Metadata};
 use veryl_parser::Parser;
 
 pub struct CmdBuild {
@@ -21,25 +20,29 @@ impl CmdBuild {
         Self { opt }
     }
 
-    pub fn exec(&self, metadata: &Metadata) -> Result<bool> {
-        let files = utils::gather_files(&self.opt.files, metadata)?;
+    pub fn exec(&self, metadata: &Metadata, deps: &[PathPair]) -> Result<bool> {
+        let mut files = utils::gather_files(&self.opt.files, metadata)?;
+        for dep in deps {
+            files.push(dep.clone());
+        }
 
         let now = Instant::now();
 
         let mut check_error = CheckError::default();
         let mut contexts = Vec::new();
-        let mut outputs = Vec::new();
 
         for file in &files {
             self.print(&format!(
                 "[Info] Processing file: {}",
-                file.to_string_lossy()
+                file.src.to_string_lossy()
             ));
 
-            let input = fs::read_to_string(file).into_diagnostic().wrap_err("")?;
-            let parser = Parser::parse(&input, file)?;
+            let input = fs::read_to_string(&file.src)
+                .into_diagnostic()
+                .wrap_err("")?;
+            let parser = Parser::parse(&input, &file.src)?;
 
-            let mut analyzer = Analyzer::new(&input);
+            let mut analyzer = Analyzer::new(&input, &file.prj);
             let errors = analyzer.analyze_tree(&parser.veryl);
             for error in errors {
                 check_error.related.push(error);
@@ -49,7 +52,7 @@ impl CmdBuild {
         }
 
         for (file, input, _) in &contexts {
-            let errors = Analyzer::analyze_post(file, input);
+            let errors = Analyzer::analyze_post(&file.src, input);
             if !errors.is_empty() {
                 for error in errors {
                     check_error.related.push(error);
@@ -66,28 +69,28 @@ impl CmdBuild {
             let mut emitter = Emitter::new(metadata);
             emitter.emit(&parser.veryl);
 
-            let output = match metadata.build.target {
-                Target::Source => file.with_extension("sv"),
-                Target::Directory { ref path } => {
-                    let base = metadata.metadata_path.parent().unwrap().to_owned();
-                    base.join(path.join(file.with_extension("sv").file_name().unwrap()))
-                }
-            };
-            outputs.push(output.clone());
+            self.print(&format!(
+                "[Info] Output file: {}",
+                file.dst.to_string_lossy()
+            ));
 
-            self.print(&format!("[Info] Output file: {}", output.to_string_lossy()));
+            let dst_dir = file.dst.parent().unwrap();
+            if !dst_dir.exists() {
+                std::fs::create_dir_all(file.dst.parent().unwrap()).into_diagnostic()?;
+            }
+
             let mut file = OpenOptions::new()
                 .create(true)
                 .write(true)
                 .truncate(true)
-                .open(output)
+                .open(&file.dst)
                 .into_diagnostic()?;
             file.write_all(emitter.as_str().as_bytes())
                 .into_diagnostic()?;
             file.flush().into_diagnostic()?;
         }
 
-        self.gen_filelist(metadata, &outputs)?;
+        self.gen_filelist(metadata, &files)?;
 
         let elapsed_time = now.elapsed();
         self.print(&format!(
@@ -98,7 +101,7 @@ impl CmdBuild {
         Ok(true)
     }
 
-    fn gen_filelist(&self, metadata: &Metadata, paths: &[PathBuf]) -> Result<()> {
+    fn gen_filelist(&self, metadata: &Metadata, paths: &[PathPair]) -> Result<()> {
         let filelist_name = match metadata.build.filelist_type {
             FilelistType::Absolute => format!("{}.f", metadata.project.name),
             FilelistType::Relative => format!("{}.f", metadata.project.name),
@@ -110,7 +113,7 @@ impl CmdBuild {
 
         let mut text = String::new();
         for path in paths {
-            let path = path.canonicalize().into_diagnostic()?;
+            let path = path.dst.canonicalize().into_diagnostic()?;
             let relative = path.strip_prefix(base_path).into_diagnostic()?;
             let line = match metadata.build.filelist_type {
                 FilelistType::Absolute => format!("{}\n", path.to_string_lossy()),

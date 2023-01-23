@@ -1,7 +1,7 @@
 
 
 
-module Module19
+module veryl_testcase_Module19
     import PackageA::A;
     import PackageA::*;
 ;
@@ -9,7 +9,7 @@ module Module19
     import PackageA::*;
 endmodule
 
-interface Interface19
+interface veryl_testcase_Interface19
     import PackageA::A;
     import PackageA::*;
 ;
@@ -17,7 +17,7 @@ interface Interface19
     import PackageA::*;
 endinterface
 
-package Package19;
+package veryl_testcase_Package19;
     import PackageA::A;
     import PackageA::*;
     import PackageA::A;

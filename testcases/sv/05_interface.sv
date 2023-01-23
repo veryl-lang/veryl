@@ -1,5 +1,5 @@
 // interface declaration
-interface Interface05 #(
+interface veryl_testcase_Interface05 #(
     // interface parameter
     parameter  int unsigned a    = 1,
     parameter  int unsigned aa   = 1,

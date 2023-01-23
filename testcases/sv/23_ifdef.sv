@@ -1,4 +1,4 @@
-module Module23 #(
+module veryl_testcase_Module23 #(
     `ifdef DEFINE_A
     parameter int unsigned ParamA  = 1
     ,`endif
@@ -28,15 +28,15 @@ module Module23 #(
 
 endmodule
 `ifdef DEFINE_A
-module Module23_A;
+module veryl_testcase_Module23_A;
 
 endmodule
 `endif
 `ifndef DEFINE_A
-module Module23_B;
+module veryl_testcase_Module23_B;
 
 endmodule
-module Module23_C;
+module veryl_testcase_Module23_C;
 
 endmodule
 `endif

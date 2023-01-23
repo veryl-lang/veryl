@@ -1,12 +1,17 @@
+use crate::namespace_table;
 use std::fmt;
 use veryl_parser::resource_table::StrId;
 
-#[derive(Default, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Namespace {
     pub paths: Vec<StrId>,
 }
 
 impl Namespace {
+    pub fn new() -> Self {
+        Self { paths: Vec::new() }
+    }
+
     pub fn push(&mut self, path: StrId) {
         self.paths.push(path);
     }
@@ -37,6 +42,14 @@ impl Namespace {
             false
         } else {
             self.included(x)
+        }
+    }
+}
+
+impl Default for Namespace {
+    fn default() -> Self {
+        Namespace {
+            paths: namespace_table::get_default().into_iter().collect(),
         }
     }
 }

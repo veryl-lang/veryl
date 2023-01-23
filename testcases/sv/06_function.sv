@@ -1,4 +1,4 @@
-module Module06;
+module veryl_testcase_Module06;
     localparam int unsigned ParamX  = 1;
 
     // function without parameter

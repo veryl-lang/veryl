@@ -1,4 +1,4 @@
-module Module21;
+module veryl_testcase_Module21;
     logic  a;
     logic  b;
     typedef 

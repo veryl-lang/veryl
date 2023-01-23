@@ -21,14 +21,18 @@ mod analyzer {
     use std::fs;
     use std::path::Path;
     use veryl_analyzer::Analyzer;
+    use veryl_metadata::Metadata;
     use veryl_parser::Parser;
 
     fn test(name: &str) {
+        let metadata_path = Metadata::search_from_current().unwrap();
+        let metadata = Metadata::load(&metadata_path).unwrap();
+
         let file = format!("../../testcases/vl/{}.vl", name);
         let input = fs::read_to_string(&file).unwrap();
 
         let ret = Parser::parse(&input, &file).unwrap();
-        let mut analyzer = Analyzer::new(&input);
+        let mut analyzer = Analyzer::new(&input, &metadata.project.name);
         let errors = analyzer.analyze_tree(&ret.veryl);
         assert!(errors.is_empty());
 
@@ -93,7 +97,7 @@ mod emitter {
         let input = fs::read_to_string(&file).unwrap();
 
         let ret = Parser::parse(&input, &file).unwrap();
-        let mut analyzer = Analyzer::new(&input);
+        let mut analyzer = Analyzer::new(&input, &metadata.project.name);
         let _ = analyzer.analyze_tree(&ret.veryl);
         let mut emitter = Emitter::new(&metadata);
         emitter.emit(&ret.veryl);

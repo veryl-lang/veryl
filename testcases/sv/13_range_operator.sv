@@ -1,4 +1,4 @@
-module Module13;
+module veryl_testcase_Module13;
     logic  a;
     logic  X;
 

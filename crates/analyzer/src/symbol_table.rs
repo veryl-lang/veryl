@@ -203,7 +203,7 @@ impl SymbolTable {
                                 let path = SymbolPath::new(x);
                                 if let Ok(symbol) = self.get(&path, &namespace) {
                                     if let Some(found) = symbol.found {
-                                        namespace = Namespace::default();
+                                        namespace = Namespace::new();
                                         for path in &found.namespace.paths {
                                             namespace.push(*path);
                                         }
@@ -419,7 +419,7 @@ mod tests {
 
     fn parse() {
         let parser = Parser::parse(&CODE, &"").unwrap();
-        let mut analyzer = Analyzer::new(&CODE);
+        let mut analyzer = Analyzer::new(&CODE, &"prj");
         analyzer.analyze_tree(&parser.veryl);
     }
 
@@ -434,28 +434,28 @@ mod tests {
         let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
         assert!(symbol.is_some());
-        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "prj");
 
         let mut namespace = Namespace::default();
         namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
         let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
         assert!(symbol.is_some());
-        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "prj");
 
         let mut namespace = Namespace::default();
         namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
         let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
         assert!(symbol.is_some());
-        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "prj");
 
         let mut namespace = Namespace::default();
         namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
         let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
         assert!(symbol.is_some());
-        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "prj");
     }
 
     #[test]
@@ -469,28 +469,28 @@ mod tests {
         let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
         assert!(symbol.is_some());
-        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "prj");
 
         let mut namespace = Namespace::default();
         namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
         let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
         assert!(symbol.is_some());
-        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "prj");
 
         let mut namespace = Namespace::default();
         namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
         let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
         assert!(symbol.is_some());
-        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "prj");
 
         let mut namespace = Namespace::default();
         namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
         let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
         assert!(symbol.is_some());
-        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "prj");
     }
 
     #[test]
@@ -504,28 +504,28 @@ mod tests {
         let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
         assert!(symbol.is_some());
-        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "prj");
 
         let mut namespace = Namespace::default();
         namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
         let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
         assert!(symbol.is_some());
-        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "prj");
 
         let mut namespace = Namespace::default();
         namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
         let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
         assert!(symbol.is_some());
-        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "prj");
 
         let mut namespace = Namespace::default();
         namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
         let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
         assert!(symbol.is_some());
-        assert_eq!(format!("{}", symbol.unwrap().namespace), "");
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "prj");
     }
 
     #[test]
@@ -545,14 +545,14 @@ mod tests {
         let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
         assert!(symbol.is_some());
-        assert_eq!(format!("{}", symbol.unwrap().namespace), "ModuleA");
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "prj::ModuleA");
 
         let mut namespace = Namespace::default();
         namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
         let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
         assert!(symbol.is_some());
-        assert_eq!(format!("{}", symbol.unwrap().namespace), "InterfaceA");
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "prj::InterfaceA");
     }
 
     #[test]
@@ -572,21 +572,21 @@ mod tests {
         let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
         assert!(symbol.is_some());
-        assert_eq!(format!("{}", symbol.unwrap().namespace), "ModuleA");
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "prj::ModuleA");
 
         let mut namespace = Namespace::default();
         namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
         let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
         assert!(symbol.is_some());
-        assert_eq!(format!("{}", symbol.unwrap().namespace), "InterfaceA");
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "prj::InterfaceA");
 
         let mut namespace = Namespace::default();
         namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
         let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
         assert!(symbol.is_some());
-        assert_eq!(format!("{}", symbol.unwrap().namespace), "PackageA");
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "prj::PackageA");
     }
 
     #[test]
@@ -606,7 +606,7 @@ mod tests {
         let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
         assert!(symbol.is_some());
-        assert_eq!(format!("{}", symbol.unwrap().namespace), "ModuleA");
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "prj::ModuleA");
 
         let mut namespace = Namespace::default();
         namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
@@ -638,14 +638,14 @@ mod tests {
         let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
         assert!(symbol.is_some());
-        assert_eq!(format!("{}", symbol.unwrap().namespace), "ModuleA");
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "prj::ModuleA");
 
         let mut namespace = Namespace::default();
         namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
         let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
         assert!(symbol.is_some());
-        assert_eq!(format!("{}", symbol.unwrap().namespace), "InterfaceA");
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "prj::InterfaceA");
     }
 
     #[test]
@@ -677,7 +677,7 @@ mod tests {
         let symbol = symbol_table::get(&symbol_path, &namespace).unwrap().found;
 
         assert!(symbol.is_some());
-        assert_eq!(format!("{}", symbol.unwrap().namespace), "PackageA");
+        assert_eq!(format!("{}", symbol.unwrap().namespace), "prj::PackageA");
     }
 
     #[test]
@@ -700,7 +700,7 @@ mod tests {
         assert!(symbol.is_some());
         assert_eq!(
             format!("{}", symbol.unwrap().namespace),
-            "PackageA::StructA"
+            "prj::PackageA::StructA"
         );
 
         let mut symbol_path = SymbolPath::default();
@@ -714,7 +714,7 @@ mod tests {
         assert!(symbol.is_some());
         assert_eq!(
             format!("{}", symbol.unwrap().namespace),
-            "PackageA::StructA"
+            "prj::PackageA::StructA"
         );
 
         let mut symbol_path = SymbolPath::default();

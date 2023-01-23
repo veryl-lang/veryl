@@ -1,5 +1,5 @@
 module //a
- Module10 //a
+ veryl_testcase_Module10 //a
  (
 
     input //a

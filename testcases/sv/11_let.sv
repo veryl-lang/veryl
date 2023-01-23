@@ -1,4 +1,4 @@
-module Module11;
+module veryl_testcase_Module11;
     // variable declaration
     logic                  b   ;
     logic [10-1:0]         bb  ;

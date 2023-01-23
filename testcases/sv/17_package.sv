@@ -1,4 +1,4 @@
-package Package17;
+package veryl_testcase_Package17;
     // localparam declaration
     localparam int unsigned ParamX  = 1;
 

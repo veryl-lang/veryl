@@ -1,4 +1,4 @@
-module Module07;
+module veryl_testcase_Module07;
     logic  a  ;
     logic  aa ;
     logic  clk;

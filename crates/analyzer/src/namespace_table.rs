@@ -2,10 +2,11 @@ use crate::namespace::Namespace;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
-use veryl_parser::resource_table::{PathId, TokenId};
+use veryl_parser::resource_table::{PathId, StrId, TokenId};
 
 #[derive(Clone, Default, Debug)]
 pub struct NamespaceTable {
+    default: Option<StrId>,
     table: HashMap<TokenId, (Namespace, PathId)>,
 }
 
@@ -24,6 +25,14 @@ impl NamespaceTable {
 
     pub fn drop(&mut self, file_path: PathId) {
         self.table.retain(|_, x| x.1 != file_path);
+    }
+
+    pub fn set_default(&mut self, id: StrId) {
+        self.default = Some(id);
+    }
+
+    pub fn get_default(&self) -> Option<StrId> {
+        self.default
     }
 }
 
@@ -70,4 +79,12 @@ pub fn dump() -> String {
 
 pub fn drop(file_path: PathId) {
     NAMESPACE_TABLE.with(|f| f.borrow_mut().drop(file_path))
+}
+
+pub fn set_default(id: StrId) {
+    NAMESPACE_TABLE.with(|f| f.borrow_mut().set_default(id))
+}
+
+pub fn get_default() -> Option<StrId> {
+    NAMESPACE_TABLE.with(|f| f.borrow().get_default())
 }

@@ -50,7 +50,7 @@ impl Backend {
                     symbol_table::drop(path);
                     namespace_table::drop(path);
                 }
-                let mut analyzer = Analyzer::new(&text);
+                let mut analyzer = Analyzer::new(&text, "");
                 let mut errors = analyzer.analyze_tree(&x.veryl);
                 errors.append(&mut Analyzer::analyze_post(Path::new(&path), &text));
                 let ret: Vec<_> = errors
@@ -88,7 +88,7 @@ impl Backend {
                         symbol_table::drop(path);
                         namespace_table::drop(path);
                     }
-                    let mut analyzer = Analyzer::new(&text);
+                    let mut analyzer = Analyzer::new(&text, "");
                     let _ = analyzer.analyze_tree(&x.veryl);
                     self.client
                         .log_message(MessageType::INFO, format!("background_analyze: {}", path))

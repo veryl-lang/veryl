@@ -1,4 +1,4 @@
-module Module02;
+module veryl_testcase_Module02;
     // unsigned integer
     int unsigned     _a  ;
     longint unsigned _aa ;

@@ -1,4 +1,4 @@
-module Module22;
+module veryl_testcase_Module22;
     logic     signed [10-1:0] _a;
     tri logic signed [10-1:0] _b;
     tri logic signed [10-1:0] _c;

@@ -1,4 +1,4 @@
-module Module12 (
+module veryl_testcase_Module12 (
     input logic  i_clk,
     input logic  i_rst
 );

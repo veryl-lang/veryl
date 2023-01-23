@@ -1,5 +1,6 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::handlers::*;
+use crate::namespace_table;
 use crate::symbol::SymbolKind;
 use crate::symbol_table;
 use std::path::Path;
@@ -49,7 +50,8 @@ pub struct Analyzer<'a> {
 }
 
 impl<'a> Analyzer<'a> {
-    pub fn new(text: &'a str) -> Self {
+    pub fn new(text: &'a str, project_name: &'a str) -> Self {
+        namespace_table::set_default(resource_table::insert_str(project_name));
         Analyzer { text }
     }
 

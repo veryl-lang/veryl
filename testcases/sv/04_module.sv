@@ -1,5 +1,5 @@
 // module declaration
-module Module04 #(
+module veryl_testcase_Module04 #(
     // module parameter
     parameter  int unsigned a    = 1            ,
     localparam int unsigned aa   = 1            ,

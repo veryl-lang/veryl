@@ -1,4 +1,4 @@
-module Module15;
+module veryl_testcase_Module15;
     logic  _a;
     if (1) begin 
     :label
