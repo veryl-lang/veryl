@@ -11,3 +11,6 @@ target        = {type = "directory", path = "testcases/sv"}
 
 [format]
 indent_width = 4
+
+[dependencies]
+veryl_sample = {git = "https://github.com/dalance/veryl_sample"}

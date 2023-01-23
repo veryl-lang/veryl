@@ -22,11 +22,7 @@ impl CmdBuild {
     }
 
     pub fn exec(&self, metadata: &Metadata) -> Result<bool> {
-        let files = if self.opt.files.is_empty() {
-            utils::gather_files("./")?
-        } else {
-            self.opt.files.clone()
-        };
+        let files = utils::gather_files(&self.opt.files, metadata)?;
 
         let now = Instant::now();
 

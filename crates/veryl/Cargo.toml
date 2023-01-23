@@ -25,7 +25,9 @@ pre-release-replacements = [
 [dependencies]
 clap            = {workspace = true}
 console         = "0.15.4"
+directories     = "4.0"
 env_logger      = "0.10.0"
+git-repository  = {version = "0.33.0", features = ["blocking-network-client", "blocking-http-transport-reqwest", "blocking-http-transport-reqwest-rust-tls"]}
 miette          = {workspace = true}
 serde_json      = {workspace = true}
 similar         = {version = "2.2.1", features = ["text", "inline"]}

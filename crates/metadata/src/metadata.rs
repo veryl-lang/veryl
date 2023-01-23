@@ -3,9 +3,11 @@ use regex::Regex;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use spdx::Expression;
+use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use url::Url;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Metadata {
@@ -14,6 +16,8 @@ pub struct Metadata {
     pub build: Build,
     #[serde(default)]
     pub format: Format,
+    #[serde(default)]
+    pub dependencies: HashMap<String, Dependency>,
     #[serde(skip)]
     pub metadata_path: PathBuf,
 }
@@ -150,6 +154,14 @@ impl Default for Format {
 
 fn default_indent_width() -> usize {
     DEFAULT_INDENT_WIDTH
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct Dependency {
+    pub git: Option<Url>,
+    pub rev: Option<String>,
+    pub tag: Option<String>,
+    pub branch: Option<String>,
 }
 
 #[cfg(test)]

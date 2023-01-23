@@ -1,5 +1,6 @@
 use miette::{ErrReport, GraphicalReportHandler, GraphicalTheme, ThemeCharacters, ThemeStyles};
 use semver::Version;
+use std::collections::HashMap;
 use veryl_emitter::Emitter;
 use veryl_formatter::Formatter;
 use veryl_metadata::{Build, Format, Metadata, Project};
@@ -54,6 +55,7 @@ fn metadata() -> Metadata {
         },
         build: Build::default(),
         format: Format::default(),
+        dependencies: HashMap::new(),
         metadata_path: "".into(),
     }
 }

@@ -1,8 +1,17 @@
 use miette::{IntoDiagnostic, Result};
 use std::path::{Path, PathBuf};
+use veryl_metadata::Metadata;
 use walkdir::WalkDir;
 
-pub fn gather_files<T: AsRef<Path>>(base_dir: T) -> Result<Vec<PathBuf>> {
+pub fn gather_files(files: &[PathBuf], metadata: &Metadata) -> Result<Vec<PathBuf>> {
+    if files.is_empty() {
+        gather_vl_files(metadata.metadata_path.parent().unwrap())
+    } else {
+        Ok(files.to_vec())
+    }
+}
+
+fn gather_vl_files<T: AsRef<Path>>(base_dir: T) -> Result<Vec<PathBuf>> {
     let mut ret = Vec::new();
     for entry in WalkDir::new(base_dir) {
         let entry = entry.into_diagnostic()?;

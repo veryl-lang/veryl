@@ -12,6 +12,7 @@ mod cmd_fmt;
 mod cmd_init;
 mod cmd_metadata;
 mod cmd_new;
+mod dependency_manager;
 mod utils;
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -184,6 +185,8 @@ fn main() -> Result<ExitCode> {
             Metadata::load(metadata_path)?
         }
     };
+
+    dependency_manager::DependencyManager::update(&metadata)?;
 
     let ret = match opt.command {
         Commands::New(x) => cmd_new::CmdNew::new(x).exec()?,
