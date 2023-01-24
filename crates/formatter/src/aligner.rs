@@ -457,14 +457,19 @@ impl VerylWalker for Aligner {
 
     /// Semantic action for non-terminal 'InstDeclaration'
     fn inst_declaration(&mut self, arg: &InstDeclaration) {
+        let single_line = arg.inst_declaration_opt1.is_none();
         self.inst(&arg.inst);
-        self.aligns[align_kind::IDENTIFIER].start_item();
+        if single_line {
+            self.aligns[align_kind::IDENTIFIER].start_item();
+        }
         self.identifier(&arg.identifier);
-        self.aligns[align_kind::IDENTIFIER].finish_item();
+        if single_line {
+            self.aligns[align_kind::IDENTIFIER].finish_item();
+        }
         self.colon(&arg.colon);
         self.scoped_identifier(&arg.scoped_identifier);
         // skip align at single line
-        if arg.inst_declaration_opt1.is_none() {
+        if single_line {
             return;
         }
         if let Some(ref x) = arg.inst_declaration_opt {

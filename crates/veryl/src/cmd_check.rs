@@ -40,20 +40,21 @@ impl CmdCheck {
                 .wrap_err("")?;
             let parser = Parser::parse(&input, &path.src)?;
 
-            let mut analyzer = Analyzer::new(&input, &path.prj);
-            let errors = analyzer.analyze_tree(&parser.veryl);
-            for error in errors {
-                check_error.related.push(error);
-            }
+            let analyzer = Analyzer::new(&path.prj);
+            let mut errors = analyzer.analyze_pass1(&input, &path.src, &parser.veryl);
+            check_error.related.append(&mut errors);
 
-            contexts.push((path, input));
+            contexts.push((path, input, parser, analyzer));
         }
 
-        for (path, input) in &contexts {
-            let errors = Analyzer::analyze_post(&path.src, input);
-            for error in errors {
-                check_error.related.push(error);
-            }
+        for (path, input, parser, analyzer) in &contexts {
+            let mut errors = analyzer.analyze_pass2(&input, &path.src, &parser.veryl);
+            check_error.related.append(&mut errors);
+        }
+
+        for (path, input, parser, analyzer) in &contexts {
+            let mut errors = analyzer.analyze_pass3(&input, &path.src, &parser.veryl);
+            check_error.related.append(&mut errors);
         }
 
         let elapsed_time = now.elapsed();

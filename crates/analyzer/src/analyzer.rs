@@ -45,37 +45,58 @@ impl<'a> VerylWalker for AnalyzerPass2<'a> {
     }
 }
 
-pub struct Analyzer<'a> {
-    text: &'a str,
-}
+pub struct Analyzer {}
 
-impl<'a> Analyzer<'a> {
-    pub fn new<T: AsRef<str>>(text: &'a str, project_paths: &'a [T]) -> Self {
+impl Analyzer {
+    pub fn new<T: AsRef<str>>(project_paths: &[T]) -> Self {
         let mut ids = Vec::new();
         for path in project_paths {
             ids.push(resource_table::insert_str(path.as_ref()));
         }
         namespace_table::set_default(&ids);
-        Analyzer { text }
+        Analyzer {}
     }
 
-    pub fn analyze_tree(&'a mut self, input: &Veryl) -> Vec<AnalyzerError> {
+    pub fn analyze_pass1<T: AsRef<Path>>(
+        &self,
+        text: &str,
+        _path: T,
+        input: &Veryl,
+    ) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
 
-        let mut pass1 = AnalyzerPass1::new(self.text);
+        let mut pass1 = AnalyzerPass1::new(text);
         pass1.veryl(input);
         ret.append(&mut pass1.handlers.get_errors());
 
-        let mut pass2 = AnalyzerPass2::new(self.text);
+        ret
+    }
+
+    pub fn analyze_pass2<T: AsRef<Path>>(
+        &self,
+        text: &str,
+        _path: T,
+        input: &Veryl,
+    ) -> Vec<AnalyzerError> {
+        let mut ret = Vec::new();
+
+        let mut pass2 = AnalyzerPass2::new(text);
         pass2.veryl(input);
         ret.append(&mut pass2.handlers.get_errors());
 
         ret
     }
 
-    pub fn analyze_post(path: &Path, text: &str) -> Vec<AnalyzerError> {
+    pub fn analyze_pass3<T: AsRef<Path>>(
+        &self,
+        text: &str,
+        path: T,
+        _input: &Veryl,
+    ) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
-        ret.append(&mut Analyzer::check_symbol_table(path, text));
+
+        ret.append(&mut Analyzer::check_symbol_table(path.as_ref(), text));
+
         ret
     }
 

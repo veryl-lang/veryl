@@ -19,7 +19,6 @@ mod parser {
 #[cfg(test)]
 mod analyzer {
     use std::fs;
-    use std::path::Path;
     use veryl_analyzer::Analyzer;
     use veryl_metadata::Metadata;
     use veryl_parser::Parser;
@@ -33,11 +32,14 @@ mod analyzer {
 
         let ret = Parser::parse(&input, &file).unwrap();
         let prj = vec![&metadata.project.name];
-        let mut analyzer = Analyzer::new(&input, &prj);
-        let errors = analyzer.analyze_tree(&ret.veryl);
+        let analyzer = Analyzer::new(&prj);
+        let errors = analyzer.analyze_pass1(&input, &file, &ret.veryl);
         assert!(errors.is_empty());
 
-        let errors = Analyzer::analyze_post(&Path::new(&file), &input);
+        let errors = analyzer.analyze_pass2(&input, &file, &ret.veryl);
+        assert!(errors.is_empty());
+
+        let errors = analyzer.analyze_pass3(&input, &file, &ret.veryl);
         assert!(errors.is_empty());
     }
 
@@ -94,13 +96,25 @@ mod emitter {
         let metadata_path = Metadata::search_from_current().unwrap();
         let metadata = Metadata::load(&metadata_path).unwrap();
 
+        if name == "25_dependency" {
+            let paths = metadata.paths::<&str>(&[], false).unwrap();
+            for path in paths {
+                if path.src.to_string_lossy().contains("veryl/repository") {
+                    let input = fs::read_to_string(&path.src).unwrap();
+                    let ret = Parser::parse(&input, &path.src).unwrap();
+                    let analyzer = Analyzer::new(&path.prj);
+                    let _ = analyzer.analyze_pass1(&input, &path.src, &ret.veryl);
+                }
+            }
+        }
+
         let file = format!("../../testcases/vl/{}.vl", name);
         let input = fs::read_to_string(&file).unwrap();
 
         let ret = Parser::parse(&input, &file).unwrap();
         let prj = vec![&metadata.project.name];
-        let mut analyzer = Analyzer::new(&input, &prj);
-        let _ = analyzer.analyze_tree(&ret.veryl);
+        let analyzer = Analyzer::new(&prj);
+        let _ = analyzer.analyze_pass1(&input, &file, &ret.veryl);
         let mut emitter = Emitter::new(&metadata);
         emitter.emit(&ret.veryl);
 

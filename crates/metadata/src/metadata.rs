@@ -101,8 +101,7 @@ impl Metadata {
         base_dst: &Path,
         tomls: &mut HashSet<PathBuf>,
     ) -> Result<Vec<PathPair>, MetadataError> {
-        let project_dir = ProjectDirs::from("", "dalance", "veryl").unwrap();
-        let cache_dir = project_dir.cache_dir();
+        let cache_dir = Self::cache_dir();
 
         let mut ret = Vec::new();
         for (name, dep) in &self.dependencies {
@@ -221,6 +220,11 @@ name = "{}"
 version = "0.1.0""###,
             name
         )
+    }
+
+    pub fn cache_dir() -> PathBuf {
+        let project_dir = ProjectDirs::from("", "dalance", "veryl").unwrap();
+        project_dir.cache_dir().to_path_buf()
     }
 }
 

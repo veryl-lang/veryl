@@ -1,13 +1,14 @@
 use dashmap::DashMap;
 use ropey::Rope;
 use std::path::Path;
+use std::path::PathBuf;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 use veryl_analyzer::symbol_table::SymbolPath;
 use veryl_analyzer::{namespace_table, symbol_table, Analyzer};
 use veryl_formatter::Formatter;
-use veryl_metadata::Metadata;
+use veryl_metadata::{Metadata, PathPair};
 use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::VerylWalker;
 use veryl_parser::{resource_table, Finder, Parser, ParserError};
@@ -17,6 +18,7 @@ pub struct Backend {
     client: Client,
     document_map: DashMap<String, Rope>,
     parser_map: DashMap<String, Parser>,
+    cache_dir: PathBuf,
 }
 
 struct TextDocumentItem {
@@ -31,6 +33,7 @@ impl Backend {
             client,
             document_map: DashMap::new(),
             parser_map: DashMap::new(),
+            cache_dir: Metadata::cache_dir(),
         }
     }
 
@@ -45,9 +48,10 @@ impl Backend {
                     symbol_table::drop(path);
                     namespace_table::drop(path);
                 }
-                let mut analyzer = Analyzer::new(&text, &[""]);
-                let mut errors = analyzer.analyze_tree(&x.veryl);
-                errors.append(&mut Analyzer::analyze_post(Path::new(&path), &text));
+                let analyzer = Analyzer::new(&[""]);
+                let mut errors = analyzer.analyze_pass1(&text, &path, &x.veryl);
+                errors.append(&mut analyzer.analyze_pass2(&text, &path, &x.veryl));
+                errors.append(&mut analyzer.analyze_pass3(&text, &path, &x.veryl));
                 let ret: Vec<_> = errors
                     .drain(0..)
                     .map(|x| {
@@ -70,23 +74,22 @@ impl Backend {
         self.document_map.insert(path, rope);
     }
 
-    async fn background_analyze(&self, path: &Path) {
-        if let Ok(text) = std::fs::read_to_string(path) {
-            if let Ok(uri) = Url::from_file_path(path) {
-                let path = uri.to_string();
-                if self.document_map.contains_key(&path) {
+    async fn background_analyze(&self, path: &PathPair) {
+        if let Ok(text) = std::fs::read_to_string(&path.src) {
+            if let Ok(uri) = Url::from_file_path(&path.src) {
+                let uri = uri.to_string();
+                if self.document_map.contains_key(&uri) {
                     return;
                 }
-                if let Ok(x) = Parser::parse(&text, &path) {
-                    if let Some(path) = resource_table::get_path_id(Path::new(&path).to_path_buf())
-                    {
-                        symbol_table::drop(path);
-                        namespace_table::drop(path);
+                if let Ok(x) = Parser::parse(&text, &uri) {
+                    if let Some(uri) = resource_table::get_path_id(Path::new(&uri).to_path_buf()) {
+                        symbol_table::drop(uri);
+                        namespace_table::drop(uri);
                     }
-                    let mut analyzer = Analyzer::new(&text, &[""]);
-                    let _ = analyzer.analyze_tree(&x.veryl);
+                    let analyzer = Analyzer::new(&path.prj);
+                    let _ = analyzer.analyze_pass1(&text, &uri, &x.veryl);
                     self.client
-                        .log_message(MessageType::INFO, format!("background_analyze: {}", path))
+                        .log_message(MessageType::INFO, format!("background_analyze: {}", uri))
                         .await;
                 }
             }
@@ -234,6 +237,15 @@ impl LanguageServer for Backend {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         self.client.log_message(MessageType::INFO, "did_open").await;
 
+        if params
+            .text_document
+            .uri
+            .as_str()
+            .contains(self.cache_dir.to_string_lossy().as_ref())
+        {
+            return;
+        }
+
         self.on_change(TextDocumentItem {
             uri: params.text_document.uri.clone(),
             text: params.text_document.text.clone(),
@@ -246,7 +258,7 @@ impl LanguageServer for Backend {
             if let Ok(metadata) = Metadata::load(metadata_path) {
                 if let Ok(paths) = metadata.paths::<&str>(&[], false) {
                     for path in &paths {
-                        self.background_analyze(&path.src).await;
+                        self.background_analyze(&path).await;
                     }
                 }
             }

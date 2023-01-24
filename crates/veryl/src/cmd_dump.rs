@@ -21,6 +21,8 @@ impl CmdDump {
 
         let paths = metadata.paths(&self.opt.files, false)?;
 
+        let mut contexts = Vec::new();
+
         for path in &paths {
             info!("Processing file ({})", path.src.to_string_lossy());
 
@@ -28,8 +30,18 @@ impl CmdDump {
                 .into_diagnostic()
                 .wrap_err("")?;
             let parser = Parser::parse(&input, &path.src)?;
-            let mut analyzer = Analyzer::new(&input, &path.prj);
-            analyzer.analyze_tree(&parser.veryl);
+            let analyzer = Analyzer::new(&path.prj);
+            analyzer.analyze_pass1(&input, &path.src, &parser.veryl);
+
+            contexts.push((path, input, parser, analyzer));
+        }
+
+        for (path, input, parser, analyzer) in &contexts {
+            analyzer.analyze_pass2(&input, &path.src, &parser.veryl);
+        }
+
+        for (path, input, parser, analyzer) in &contexts {
+            analyzer.analyze_pass3(&input, &path.src, &parser.veryl);
         }
 
         if self.opt.symbol_table {
