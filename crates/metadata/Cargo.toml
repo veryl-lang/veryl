@@ -22,7 +22,7 @@ semver         = {workspace = true}
 serde          = {workspace = true}
 spdx           = "0.10.0"
 thiserror      = {workspace = true}
-toml           = "0.5.11"
+toml           = "0.6.0"
 url            = {workspace = true}
 veryl-parser   = {version = "0.2.2", path = "../parser"}
 walkdir        = "2.3.2"
