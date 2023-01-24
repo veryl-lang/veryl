@@ -1,9 +1,6 @@
 use dashmap::DashMap;
-use glob::glob;
 use ropey::Rope;
-use serde_json::Value;
 use std::path::Path;
-use std::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
@@ -18,7 +15,6 @@ use veryl_parser::{resource_table, Finder, Parser, ParserError};
 #[derive(Debug)]
 pub struct Backend {
     client: Client,
-    root_uri: Mutex<Option<Url>>,
     document_map: DashMap<String, Rope>,
     parser_map: DashMap<String, Parser>,
 }
@@ -33,7 +29,6 @@ impl Backend {
     pub fn new(client: Client) -> Self {
         Self {
             client,
-            root_uri: Mutex::new(None),
             document_map: DashMap::new(),
             parser_map: DashMap::new(),
         }
@@ -188,13 +183,7 @@ mod semantic_legend {
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
-    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
-        if let Some(root_uri) = params.root_uri {
-            if let Ok(mut x) = self.root_uri.lock() {
-                x.replace(root_uri);
-            }
-        }
-
+    async fn initialize(&self, _params: InitializeParams) -> Result<InitializeResult> {
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
@@ -240,51 +229,28 @@ impl LanguageServer for Backend {
         self.client
             .log_message(MessageType::INFO, "server initialized!")
             .await;
-
-        let root = if let Ok(x) = self.root_uri.lock() {
-            if let Some(ref x) = *x {
-                if x.scheme() == "file" {
-                    x.to_file_path().ok()
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        if let Some(root) = root {
-            let glob_pattern = format!("{}/**/*.vl", root.to_string_lossy());
-            let register_options = format!(
-                "{{ \"watchers\": [ {{\"globPattern\": \"{}\"}} ] }}",
-                glob_pattern
-            );
-            let register_options: Value = serde_json::from_str(&register_options).unwrap();
-
-            let registration = Registration {
-                id: "workspace/didChangeWatchedFiles".to_string(),
-                method: "workspace/didChangeWatchedFiles".to_string(),
-                register_options: Some(register_options),
-            };
-            let _ = self.client.register_capability(vec![registration]).await;
-
-            for entry in glob(&glob_pattern).unwrap().flatten() {
-                self.background_analyze(&entry).await;
-            }
-        }
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         self.client.log_message(MessageType::INFO, "did_open").await;
 
         self.on_change(TextDocumentItem {
-            uri: params.text_document.uri,
-            text: params.text_document.text,
+            uri: params.text_document.uri.clone(),
+            text: params.text_document.text.clone(),
             version: params.text_document.version,
         })
-        .await
+        .await;
+
+        let uri = &params.text_document.uri;
+        if let Ok(metadata_path) = Metadata::search_from(uri.path()) {
+            if let Ok(metadata) = Metadata::load(metadata_path) {
+                if let Ok(paths) = metadata.paths::<&str>(&[], false) {
+                    for path in &paths {
+                        self.background_analyze(&path.src).await;
+                    }
+                }
+            }
+        }
     }
 
     async fn did_change(&self, mut params: DidChangeTextDocumentParams) {
