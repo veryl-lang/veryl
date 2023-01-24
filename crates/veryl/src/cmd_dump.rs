@@ -37,11 +37,11 @@ impl CmdDump {
         }
 
         for (path, input, parser, analyzer) in &contexts {
-            analyzer.analyze_pass2(&input, &path.src, &parser.veryl);
+            analyzer.analyze_pass2(input, &path.src, &parser.veryl);
         }
 
         for (path, input, parser, analyzer) in &contexts {
-            analyzer.analyze_pass3(&input, &path.src, &parser.veryl);
+            analyzer.analyze_pass3(input, &path.src, &parser.veryl);
         }
 
         if self.opt.symbol_table {

@@ -44,7 +44,7 @@ impl CmdBuild {
         }
 
         for (path, input, parser, analyzer) in &contexts {
-            let mut errors = analyzer.analyze_pass2(&input, &path.src, &parser.veryl);
+            let mut errors = analyzer.analyze_pass2(input, &path.src, &parser.veryl);
             if !errors.is_empty() {
                 check_error.related.append(&mut errors);
                 return Err(check_error.into());
@@ -52,7 +52,7 @@ impl CmdBuild {
         }
 
         for (path, input, parser, analyzer) in &contexts {
-            let mut errors = analyzer.analyze_pass3(&input, &path.src, &parser.veryl);
+            let mut errors = analyzer.analyze_pass3(input, &path.src, &parser.veryl);
             if !errors.is_empty() {
                 check_error.related.append(&mut errors);
                 return Err(check_error.into());

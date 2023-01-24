@@ -258,7 +258,7 @@ impl LanguageServer for Backend {
             if let Ok(metadata) = Metadata::load(metadata_path) {
                 if let Ok(paths) = metadata.paths::<&str>(&[], false) {
                     for path in &paths {
-                        self.background_analyze(&path).await;
+                        self.background_analyze(path).await;
                     }
                 }
             }

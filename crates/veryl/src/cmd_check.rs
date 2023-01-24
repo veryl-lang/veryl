@@ -48,12 +48,12 @@ impl CmdCheck {
         }
 
         for (path, input, parser, analyzer) in &contexts {
-            let mut errors = analyzer.analyze_pass2(&input, &path.src, &parser.veryl);
+            let mut errors = analyzer.analyze_pass2(input, &path.src, &parser.veryl);
             check_error.related.append(&mut errors);
         }
 
         for (path, input, parser, analyzer) in &contexts {
-            let mut errors = analyzer.analyze_pass3(&input, &path.src, &parser.veryl);
+            let mut errors = analyzer.analyze_pass3(input, &path.src, &parser.veryl);
             check_error.related.append(&mut errors);
         }
 
