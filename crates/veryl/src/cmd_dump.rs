@@ -1,4 +1,5 @@
 use crate::OptDump;
+use log::{debug, info};
 use miette::{IntoDiagnostic, Result, WrapErr};
 use std::fs;
 use std::time::Instant;
@@ -21,10 +22,7 @@ impl CmdDump {
         let paths = metadata.paths(&self.opt.files, false)?;
 
         for path in &paths {
-            self.print(&format!(
-                "[Info] Processing file: {}",
-                path.src.to_string_lossy()
-            ));
+            info!("Processing file ({})", path.src.to_string_lossy());
 
             let input = fs::read_to_string(&path.src)
                 .into_diagnostic()
@@ -43,17 +41,8 @@ impl CmdDump {
         }
 
         let elapsed_time = now.elapsed();
-        self.print(&format!(
-            "[Info] Elapsed time: {} milliseconds.",
-            elapsed_time.as_millis()
-        ));
+        debug!("Elapsed time ({} milliseconds)", elapsed_time.as_millis());
 
         Ok(true)
-    }
-
-    fn print(&self, msg: &str) {
-        if self.opt.verbose {
-            println!("{}", msg);
-        }
     }
 }

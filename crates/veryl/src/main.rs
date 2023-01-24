@@ -1,5 +1,8 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use miette::Result;
+use console::Style;
+use fern::Dispatch;
+use log::{Level, LevelFilter};
+use miette::{IntoDiagnostic, Result};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::str::FromStr;
@@ -22,6 +25,14 @@ mod cmd_update;
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
 struct Opt {
+    /// No output printed to stdout
+    #[arg(long, global = true)]
+    pub quiet: bool,
+
+    /// Use verbose output
+    #[arg(long, global = true)]
+    pub verbose: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -42,14 +53,6 @@ enum Commands {
 #[derive(Args)]
 pub struct OptNew {
     pub path: PathBuf,
-
-    /// No output printed to stdout
-    #[arg(long)]
-    pub quiet: bool,
-
-    /// Use verbose output
-    #[arg(long)]
-    pub verbose: bool,
 }
 
 /// Create a new project in an existing directory
@@ -57,14 +60,6 @@ pub struct OptNew {
 pub struct OptInit {
     #[arg(default_value = ".")]
     pub path: PathBuf,
-
-    /// No output printed to stdout
-    #[arg(long)]
-    pub quiet: bool,
-
-    /// Use verbose output
-    #[arg(long)]
-    pub verbose: bool,
 }
 
 /// Format the current project
@@ -76,14 +71,6 @@ pub struct OptFmt {
     /// Run fmt in check mode
     #[arg(long)]
     pub check: bool,
-
-    /// No output printed to stdout
-    #[arg(long)]
-    pub quiet: bool,
-
-    /// Use verbose output
-    #[arg(long)]
-    pub verbose: bool,
 }
 
 /// Analyze the current project
@@ -91,14 +78,6 @@ pub struct OptFmt {
 pub struct OptCheck {
     /// Target files
     pub files: Vec<PathBuf>,
-
-    /// No output printed to stdout
-    #[arg(long)]
-    pub quiet: bool,
-
-    /// Use verbose output
-    #[arg(long)]
-    pub verbose: bool,
 }
 
 /// Build the target codes corresponding to the current project
@@ -106,27 +85,11 @@ pub struct OptCheck {
 pub struct OptBuild {
     /// Target files
     pub files: Vec<PathBuf>,
-
-    /// No output printed to stdout
-    #[arg(long)]
-    pub quiet: bool,
-
-    /// Use verbose output
-    #[arg(long)]
-    pub verbose: bool,
 }
 
 /// Update dependencies
 #[derive(Args)]
-pub struct OptUpdate {
-    /// No output printed to stdout
-    #[arg(long)]
-    pub quiet: bool,
-
-    /// Use verbose output
-    #[arg(long)]
-    pub verbose: bool,
-}
+pub struct OptUpdate {}
 
 /// Dump metadata of the current packege
 #[derive(Args)]
@@ -134,14 +97,6 @@ pub struct OptMetadata {
     /// output format
     #[arg(long, value_enum, default_value_t)]
     pub format: Format,
-
-    /// No output printed to stdout
-    #[arg(long)]
-    pub quiet: bool,
-
-    /// Use verbose output
-    #[arg(long)]
-    pub verbose: bool,
 }
 
 #[derive(Clone, Copy, Default, Debug, ValueEnum)]
@@ -168,14 +123,6 @@ pub struct OptDump {
     /// output namespace table
     #[arg(long)]
     pub namespace_table: bool,
-
-    /// No output printed to stdout
-    #[arg(long)]
-    pub quiet: bool,
-
-    /// Use verbose output
-    #[arg(long)]
-    pub verbose: bool,
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -183,8 +130,43 @@ pub struct OptDump {
 // ---------------------------------------------------------------------------------------------------------------------
 
 fn main() -> Result<ExitCode> {
-    env_logger::init();
     let opt = Opt::parse();
+
+    let level = if opt.verbose {
+        LevelFilter::Debug
+    } else if opt.quiet {
+        LevelFilter::Warn
+    } else {
+        LevelFilter::Info
+    };
+
+    Dispatch::new()
+        .format(|out, message, record| {
+            let style = match record.level() {
+                Level::Error => Style::new().red().bright(),
+                Level::Warn => Style::new().yellow().bright(),
+                Level::Info => Style::new().green().bright(),
+                Level::Debug => Style::new().cyan().bright(),
+                Level::Trace => Style::new().magenta().bright(),
+            };
+            out.finish(format_args!(
+                "{} {}{}",
+                style.apply_to(format!("[{:<5}]", record.level())),
+                " ".repeat(
+                    12 - format!("{}", message)
+                        .split_ascii_whitespace()
+                        .next()
+                        .unwrap()
+                        .len()
+                ),
+                message
+            ))
+        })
+        .level(level)
+        .level_for("parol_runtime", LevelFilter::Warn)
+        .chain(std::io::stderr())
+        .apply()
+        .into_diagnostic()?;
 
     let metadata = match opt.command {
         Commands::New(_) | Commands::Init(_) => {

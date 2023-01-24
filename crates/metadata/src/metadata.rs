@@ -1,6 +1,7 @@
 use crate::git::Git;
 use crate::MetadataError;
 use directories::ProjectDirs;
+use log::debug;
 use regex::Regex;
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -54,6 +55,10 @@ impl Metadata {
         let mut metadata: Metadata = Self::from_str(&text)?;
         metadata.metadata_path = path;
         metadata.check()?;
+        debug!(
+            "Loaded metadata ({})",
+            metadata.metadata_path.to_string_lossy()
+        );
         Ok(metadata)
     }
 
@@ -80,6 +85,7 @@ impl Metadata {
             if entry.file_type().is_file() {
                 if let Some(x) = entry.path().extension() {
                     if x == ext {
+                        debug!("Found file ({})", entry.path().to_string_lossy());
                         ret.push(entry.path().to_path_buf());
                     }
                 }
@@ -107,6 +113,8 @@ impl Metadata {
                     path.push(host);
                 }
                 path.push(git.path().to_string().trim_start_matches('/'));
+
+                debug!("Found dependency ({})", path.to_string_lossy());
 
                 if let Some(ref rev) = dep.rev {
                     path.set_extension(rev);

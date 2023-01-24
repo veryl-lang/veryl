@@ -819,6 +819,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fern"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3bdd7b0849075e79ee9a1836df22c717d1eba30451796fdc631b04565dd11e2a"
+dependencies = [
+ "log",
+]
+
+[[package]]
 name = "filetime"
 version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3885,7 +3894,8 @@ version = "0.2.1"
 dependencies = [
  "clap 4.1.2",
  "console",
- "env_logger",
+ "fern",
+ "log",
  "miette",
  "serde_json",
  "similar",
@@ -3947,6 +3957,7 @@ version = "0.2.1"
 dependencies = [
  "directories",
  "git-repository",
+ "log",
  "miette",
  "regex",
  "semver",

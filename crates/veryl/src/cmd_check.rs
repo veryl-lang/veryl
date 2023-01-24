@@ -1,4 +1,5 @@
 use crate::OptCheck;
+use log::{debug, info};
 use miette::{self, Diagnostic, IntoDiagnostic, Result, WrapErr};
 use std::fs;
 use std::time::Instant;
@@ -32,10 +33,7 @@ impl CmdCheck {
         let mut contexts = Vec::new();
 
         for path in &paths {
-            self.print(&format!(
-                "[Info] Processing file: {}",
-                path.src.to_string_lossy()
-            ));
+            info!("Processing file ({})", path.src.to_string_lossy());
 
             let input = fs::read_to_string(&path.src)
                 .into_diagnostic()
@@ -59,21 +57,12 @@ impl CmdCheck {
         }
 
         let elapsed_time = now.elapsed();
-        self.print(&format!(
-            "[Info] Elapsed time: {} milliseconds.",
-            elapsed_time.as_millis()
-        ));
+        debug!("Elapsed time ({} milliseconds)", elapsed_time.as_millis());
 
         if check_error.related.is_empty() {
             Ok(true)
         } else {
             Err(check_error.into())
-        }
-    }
-
-    fn print(&self, msg: &str) {
-        if self.opt.verbose {
-            println!("{}", msg);
         }
     }
 }

@@ -1,5 +1,6 @@
 use crate::cmd_check::CheckError;
 use crate::OptBuild;
+use log::{debug, info};
 use miette::{IntoDiagnostic, Result, WrapErr};
 use std::fs;
 use std::fs::OpenOptions;
@@ -28,10 +29,7 @@ impl CmdBuild {
         let mut contexts = Vec::new();
 
         for path in &paths {
-            self.print(&format!(
-                "[Info] Processing file: {}",
-                path.src.to_string_lossy()
-            ));
+            info!("Processing file ({})", path.src.to_string_lossy());
 
             let input = fs::read_to_string(&path.src)
                 .into_diagnostic()
@@ -65,11 +63,6 @@ impl CmdBuild {
             let mut emitter = Emitter::new(metadata);
             emitter.emit(&parser.veryl);
 
-            self.print(&format!(
-                "[Info] Output file: {}",
-                path.dst.to_string_lossy()
-            ));
-
             let dst_dir = path.dst.parent().unwrap();
             if !dst_dir.exists() {
                 std::fs::create_dir_all(path.dst.parent().unwrap()).into_diagnostic()?;
@@ -84,15 +77,14 @@ impl CmdBuild {
             file.write_all(emitter.as_str().as_bytes())
                 .into_diagnostic()?;
             file.flush().into_diagnostic()?;
+
+            debug!("Output file ({})", path.dst.to_string_lossy());
         }
 
         self.gen_filelist(metadata, &paths)?;
 
         let elapsed_time = now.elapsed();
-        self.print(&format!(
-            "[Info] Elapsed time: {} milliseconds.",
-            elapsed_time.as_millis()
-        ));
+        debug!("Elapsed time ({} milliseconds)", elapsed_time.as_millis());
 
         Ok(true)
     }
@@ -119,10 +111,7 @@ impl CmdBuild {
             text.push_str(&line);
         }
 
-        self.print(&format!(
-            "[Info] Output filelist: {}",
-            filelist_path.to_string_lossy()
-        ));
+        info!("Output filelist ({})", filelist_path.to_string_lossy());
         let mut file = OpenOptions::new()
             .create(true)
             .write(true)
@@ -133,11 +122,5 @@ impl CmdBuild {
         file.flush().into_diagnostic()?;
 
         Ok(())
-    }
-
-    fn print(&self, msg: &str) {
-        if self.opt.verbose {
-            println!("{}", msg);
-        }
     }
 }

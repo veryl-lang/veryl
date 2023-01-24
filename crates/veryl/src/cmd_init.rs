@@ -1,4 +1,5 @@
 use crate::OptInit;
+use log::info;
 use miette::{bail, IntoDiagnostic, Result};
 use std::fs::File;
 use std::io::Write;
@@ -33,7 +34,7 @@ impl CmdInit {
             write!(file, "{}", toml).into_diagnostic()?;
             file.flush().into_diagnostic()?;
 
-            println!("Created \"{}\" project", name.to_string_lossy());
+            info!("Created \"{}\" project", name.to_string_lossy());
         } else {
             bail!("path \"{}\" is not valid", self.opt.path.to_string_lossy());
         }
