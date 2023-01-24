@@ -3,8 +3,8 @@ use crate::symbol::SymbolKind;
 use crate::symbol_table;
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_walker::{Handler, HandlerPoint};
-use veryl_parser::ParolError;
+use veryl_parser::veryl_walker::{Handler, HandlerPoint, VerylWalker};
+use veryl_parser::{ParolError, Stringifier};
 
 pub struct CheckInstance<'a> {
     pub errors: Vec<AnalyzerError>,
@@ -41,8 +41,10 @@ impl<'a> VerylGrammarTrait for CheckInstance<'a> {
                 }
             }
 
-            if let Ok(symbol) = symbol_table::resolve(arg.identifier0.as_ref()) {
-                let name = arg.identifier0.identifier_token.text();
+            if let Ok(symbol) = symbol_table::resolve(arg.scoped_identifier.as_ref()) {
+                let mut stringifier = Stringifier::new();
+                stringifier.scoped_identifier(&arg.scoped_identifier);
+                let name = stringifier.as_str();
                 if let Some(symbol) = symbol.found {
                     match symbol.kind {
                         SymbolKind::Module(ref x) => {
@@ -50,7 +52,7 @@ impl<'a> VerylGrammarTrait for CheckInstance<'a> {
                                 if !connected_ports.contains(&port.name) {
                                     let port = resource_table::get_str_value(port.name).unwrap();
                                     self.errors.push(AnalyzerError::missing_port(
-                                        &name,
+                                        name,
                                         &port,
                                         self.text,
                                         &arg.identifier.identifier_token,
@@ -61,7 +63,7 @@ impl<'a> VerylGrammarTrait for CheckInstance<'a> {
                                 if !x.ports.iter().any(|x| &x.name == port) {
                                     let port = resource_table::get_str_value(*port).unwrap();
                                     self.errors.push(AnalyzerError::unknown_port(
-                                        &name,
+                                        name,
                                         &port,
                                         self.text,
                                         &arg.identifier.identifier_token,
@@ -72,7 +74,7 @@ impl<'a> VerylGrammarTrait for CheckInstance<'a> {
                         SymbolKind::Interface(_) => (),
                         _ => {
                             self.errors.push(AnalyzerError::mismatch_type(
-                                &name,
+                                name,
                                 "module or interface",
                                 &symbol.kind.to_kind_name(),
                                 self.text,

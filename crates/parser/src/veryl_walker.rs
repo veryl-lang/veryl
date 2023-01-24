@@ -1540,7 +1540,7 @@ pub trait VerylWalker {
         self.inst(&arg.inst);
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
-        self.identifier(&arg.identifier0);
+        self.scoped_identifier(&arg.scoped_identifier);
         if let Some(ref x) = arg.inst_declaration_opt {
             self.width(&x.width);
         }

@@ -525,7 +525,7 @@
 /* 516 */ StructGroupOpt /* Option<T>::Some */: Attribute;
 /* 517 */ StructGroupOpt /* Option<T>::None */: ;
 /* 518 */ StructItem: Identifier Colon Type;
-/* 519 */ InstDeclaration: Inst Identifier Colon Identifier InstDeclarationOpt /* Option */ InstDeclarationOpt0 /* Option */ InstDeclarationOpt1 /* Option */ Semicolon;
+/* 519 */ InstDeclaration: Inst Identifier Colon ScopedIdentifier InstDeclarationOpt /* Option */ InstDeclarationOpt0 /* Option */ InstDeclarationOpt1 /* Option */ Semicolon;
 /* 520 */ InstDeclarationOpt1 /* Option<T>::Some */: LParen InstDeclarationOpt2 /* Option */ RParen;
 /* 521 */ InstDeclarationOpt2 /* Option<T>::Some */: InstPortList;
 /* 522 */ InstDeclarationOpt2 /* Option<T>::None */: ;

@@ -229,7 +229,9 @@ impl SymbolTable {
                         }
                         SymbolKind::Instance(ref x) => {
                             namespace = Namespace::default();
-                            namespace.push(x.type_name);
+                            for x in &x.type_name {
+                                namespace.push(*x);
+                            }
                             inner = true;
                         }
                         _ => (),
@@ -245,10 +247,10 @@ impl SymbolTable {
             } else if let Some(last_found) = last_found {
                 return Err(ResolveError::new(last_found, name));
             } else {
-                return Ok(ResolveResult {
-                    found: None,
-                    full_path,
-                });
+                // If symbol is not found, the name is treated as namespace
+                namespace = Namespace::new();
+                namespace.push(*name);
+                inner = true;
             }
         }
         Ok(ResolveResult {

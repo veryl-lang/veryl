@@ -462,7 +462,7 @@ impl VerylWalker for Aligner {
         self.identifier(&arg.identifier);
         self.aligns[align_kind::IDENTIFIER].finish_item();
         self.colon(&arg.colon);
-        self.identifier(&arg.identifier0);
+        self.scoped_identifier(&arg.scoped_identifier);
         // skip align at single line
         if arg.inst_declaration_opt1.is_none() {
             return;

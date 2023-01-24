@@ -140,7 +140,14 @@ impl fmt::Display for SymbolKind {
                 }
             }
             SymbolKind::Instance(x) => {
-                format!("instance ({})", x.type_name)
+                let mut type_name = String::new();
+                for (i, x) in x.type_name.iter().enumerate() {
+                    if i != 0 {
+                        type_name.push_str("::");
+                    }
+                    type_name.push_str(&format!("{}", x));
+                }
+                format!("instance ({})", type_name)
             }
             SymbolKind::Block => "block".to_string(),
             SymbolKind::Package => "package".to_string(),
@@ -421,7 +428,7 @@ pub struct FunctionProperty {
 
 #[derive(Debug, Clone)]
 pub struct InstanceProperty {
-    pub type_name: StrId,
+    pub type_name: Vec<StrId>,
 }
 
 #[derive(Debug, Clone)]

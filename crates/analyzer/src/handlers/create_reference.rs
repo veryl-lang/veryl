@@ -138,13 +138,13 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
 
     fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            match symbol_table::resolve(arg.identifier0.as_ref()) {
+            match symbol_table::resolve(arg.scoped_identifier.as_ref()) {
                 Ok(symbol) => {
                     if symbol.found.is_some() {
                         for symbol in symbol.full_path {
                             symbol_table::add_reference(
                                 symbol.token.id,
-                                &arg.identifier0.identifier_token.token,
+                                &arg.scoped_identifier.identifier.identifier_token.token,
                             );
                         }
                     }
@@ -156,7 +156,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                         &name,
                         &member,
                         self.text,
-                        &arg.identifier0.identifier_token,
+                        &arg.scoped_identifier.identifier.identifier_token,
                     ));
                 }
             }

@@ -1286,12 +1286,16 @@ impl VerylWalker for Emitter {
             self.single_line = true;
         }
         self.token(&arg.inst.inst_token.replace(""));
-        if let Ok(symbol) = symbol_table::resolve(arg.identifier0.as_ref()) {
+        if let Ok(symbol) = symbol_table::resolve(arg.scoped_identifier.as_ref()) {
             if let Some(symbol) = symbol.found {
-                self.str(&format!("{}_", symbol.namespace));
+                self.str(&format!("{}_", symbol.namespace).replace("::", "_"));
+                self.str(&format!("{}", symbol.token.text));
+            } else {
+                self.scoped_identifier(&arg.scoped_identifier);
             }
+        } else {
+            self.scoped_identifier(&arg.scoped_identifier);
         }
-        self.identifier(&arg.identifier0);
         self.space(1);
         if let Some(ref x) = arg.inst_declaration_opt0 {
             self.inst_parameter(&x.inst_parameter);
