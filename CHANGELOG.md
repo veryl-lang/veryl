@@ -1,6 +1,8 @@
 # Change Log
 
-## [Unreleased](https://github.com/dalance/veryl/compare/v0.2.1...Unreleased) - ReleaseDate
+## [Unreleased](https://github.com/dalance/veryl/compare/v0.2.2...Unreleased) - ReleaseDate
+
+## [v0.2.2](https://github.com/dalance/veryl/compare/v0.2.1...v0.2.2) - 2023-01-24
 
 * [Added] attribute arguments check [#90](https://github.com/dalance/veryl/issues/90)
 * [Added] metadata check [#91](https://github.com/dalance/veryl/issues/91)
