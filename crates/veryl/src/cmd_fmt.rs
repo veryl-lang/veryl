@@ -22,11 +22,11 @@ impl CmdFmt {
     }
 
     pub fn exec(&self, metadata: &Metadata) -> Result<bool> {
-        let paths = metadata.paths(&self.opt.files)?;
-
-        let mut all_pass = true;
         let now = Instant::now();
 
+        let paths = metadata.paths(&self.opt.files, false)?;
+
+        let mut all_pass = true;
         for path in &paths {
             self.print(&format!(
                 "[Info] Processing file: {}",

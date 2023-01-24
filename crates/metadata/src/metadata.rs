@@ -90,6 +90,7 @@ impl Metadata {
 
     fn gather_dependencies<T: AsRef<str>>(
         &self,
+        update: bool,
         base_prj: &[T],
         base_dst: &Path,
         tomls: &mut HashSet<PathBuf>,
@@ -127,7 +128,9 @@ impl Metadata {
                     dep.tag.as_deref(),
                     dep.branch.as_deref(),
                 )?;
-                git.fetch()?;
+                if update {
+                    git.fetch()?;
+                }
                 git.checkout()?;
 
                 let mut prj: Vec<_> = base_prj.iter().map(|x| x.as_ref().to_string()).collect();
@@ -150,7 +153,7 @@ impl Metadata {
                     let metadata = Metadata::load(&toml)?;
                     tomls.insert(toml);
                     let base_dst = base_dst.join(name);
-                    let deps = metadata.gather_dependencies(&prj, &base_dst, tomls)?;
+                    let deps = metadata.gather_dependencies(update, &prj, &base_dst, tomls)?;
                     for dep in deps {
                         ret.push(dep);
                     }
@@ -161,11 +164,15 @@ impl Metadata {
         Ok(ret)
     }
 
-    pub fn paths<T: AsRef<Path>>(&self, files: &[T]) -> Result<Vec<PathPair>, MetadataError> {
+    pub fn paths<T: AsRef<Path>>(
+        &self,
+        files: &[T],
+        update: bool,
+    ) -> Result<Vec<PathPair>, MetadataError> {
         let base = self.metadata_path.parent().unwrap();
 
         let src_files = if files.is_empty() {
-            Self::gather_files_with_extension(&base, "vl")?
+            Self::gather_files_with_extension(base, "vl")?
         } else {
             files.iter().map(|x| x.as_ref().to_path_buf()).collect()
         };
@@ -175,7 +182,6 @@ impl Metadata {
             let dst = match self.build.target {
                 Target::Source => src.with_extension("sv"),
                 Target::Directory { ref path } => {
-                    let base = base.clone();
                     base.join(path.join(src.with_extension("sv").file_name().unwrap()))
                 }
             };
@@ -192,7 +198,7 @@ impl Metadata {
         }
 
         let mut tomls = HashSet::new();
-        let deps = self.gather_dependencies::<&str>(&[], &base_dst, &mut tomls)?;
+        let deps = self.gather_dependencies::<&str>(update, &[], &base_dst, &mut tomls)?;
         for dep in deps {
             ret.push(dep);
         }

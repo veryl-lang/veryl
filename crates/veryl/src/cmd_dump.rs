@@ -16,9 +16,9 @@ impl CmdDump {
     }
 
     pub fn exec(&self, metadata: &Metadata) -> Result<bool> {
-        let paths = metadata.paths(&self.opt.files)?;
-
         let now = Instant::now();
+
+        let paths = metadata.paths(&self.opt.files, false)?;
 
         for path in &paths {
             self.print(&format!(

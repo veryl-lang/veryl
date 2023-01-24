@@ -24,9 +24,9 @@ impl CmdCheck {
     }
 
     pub fn exec(&self, metadata: &Metadata) -> Result<bool> {
-        let paths = metadata.paths(&self.opt.files)?;
-
         let now = Instant::now();
+
+        let paths = metadata.paths(&self.opt.files, false)?;
 
         let mut check_error = CheckError::default();
         let mut contexts = Vec::new();
