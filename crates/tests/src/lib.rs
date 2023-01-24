@@ -32,7 +32,8 @@ mod analyzer {
         let input = fs::read_to_string(&file).unwrap();
 
         let ret = Parser::parse(&input, &file).unwrap();
-        let mut analyzer = Analyzer::new(&input, &metadata.project.name);
+        let prj = vec![&metadata.project.name];
+        let mut analyzer = Analyzer::new(&input, &prj);
         let errors = analyzer.analyze_tree(&ret.veryl);
         assert!(errors.is_empty());
 
@@ -97,7 +98,8 @@ mod emitter {
         let input = fs::read_to_string(&file).unwrap();
 
         let ret = Parser::parse(&input, &file).unwrap();
-        let mut analyzer = Analyzer::new(&input, &metadata.project.name);
+        let prj = vec![&metadata.project.name];
+        let mut analyzer = Analyzer::new(&input, &prj);
         let _ = analyzer.analyze_tree(&ret.veryl);
         let mut emitter = Emitter::new(&metadata);
         emitter.emit(&ret.veryl);

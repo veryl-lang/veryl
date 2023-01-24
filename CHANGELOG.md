@@ -4,6 +4,7 @@
 
 * [Added] attribute arguments check [#90](https://github.com/dalance/veryl/issues/90)
 * [Added] metadata check [#91](https://github.com/dalance/veryl/issues/91)
+* [Added] dependency support [#36](https://github.com/dalance/veryl/issues/36)
 
 ## [v0.2.1](https://github.com/dalance/veryl/compare/v0.2.0...v0.2.1) - 2023-01-19
 

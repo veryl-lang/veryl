@@ -1654,7 +1654,7 @@ impl VerylWalker for Emitter {
         self.space(1);
         if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
             if let Some(symbol) = symbol.found {
-                self.str(&format!("{}_", symbol.namespace));
+                self.str(&format!("{}_", symbol.namespace).replace("::", "_"));
             }
         }
         self.identifier(&arg.identifier);
@@ -1837,7 +1837,7 @@ impl VerylWalker for Emitter {
         self.space(1);
         if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
             if let Some(symbol) = symbol.found {
-                self.str(&format!("{}_", symbol.namespace));
+                self.str(&format!("{}_", symbol.namespace).replace("::", "_"));
             }
         }
         self.identifier(&arg.identifier);
@@ -2016,7 +2016,7 @@ impl VerylWalker for Emitter {
         self.space(1);
         if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
             if let Some(symbol) = symbol.found {
-                self.str(&format!("{}_", symbol.namespace));
+                self.str(&format!("{}_", symbol.namespace).replace("::", "_"));
             }
         }
         self.identifier(&arg.identifier);

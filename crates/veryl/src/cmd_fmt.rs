@@ -1,4 +1,3 @@
-use crate::utils;
 use crate::OptFmt;
 use console::{style, Style};
 use miette::{IntoDiagnostic, Result, WrapErr};
@@ -23,21 +22,21 @@ impl CmdFmt {
     }
 
     pub fn exec(&self, metadata: &Metadata) -> Result<bool> {
-        let files = utils::gather_files(&self.opt.files, metadata)?;
+        let paths = metadata.paths(&self.opt.files)?;
 
         let mut all_pass = true;
         let now = Instant::now();
 
-        for file in &files {
+        for path in &paths {
             self.print(&format!(
                 "[Info] Processing file: {}",
-                file.src.to_string_lossy()
+                path.src.to_string_lossy()
             ));
 
-            let input = fs::read_to_string(&file.src)
+            let input = fs::read_to_string(&path.src)
                 .into_diagnostic()
                 .wrap_err("")?;
-            let parser = Parser::parse(&input, &file.src)?;
+            let parser = Parser::parse(&input, &path.src)?;
             let mut formatter = Formatter::new(metadata);
             formatter.format(&parser.veryl);
 
@@ -45,17 +44,17 @@ impl CmdFmt {
 
             if !pass {
                 if self.opt.check {
-                    print_diff(&file.src, input.as_str(), formatter.as_str());
+                    print_diff(&path.src, input.as_str(), formatter.as_str());
                     all_pass = false;
                 } else {
                     self.print(&format!(
                         "[Info] Overwrite file: {}",
-                        file.src.to_string_lossy()
+                        path.src.to_string_lossy()
                     ));
                     let mut file = OpenOptions::new()
                         .write(true)
                         .truncate(true)
-                        .open(&file.src)
+                        .open(&path.src)
                         .into_diagnostic()?;
                     file.write_all(formatter.as_str().as_bytes())
                         .into_diagnostic()?;

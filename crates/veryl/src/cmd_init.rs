@@ -1,8 +1,8 @@
-use crate::utils;
 use crate::OptInit;
 use miette::{bail, IntoDiagnostic, Result};
 use std::fs::File;
 use std::io::Write;
+use veryl_metadata::Metadata;
 
 pub struct CmdInit {
     opt: OptInit,
@@ -22,7 +22,7 @@ impl CmdInit {
         }
 
         if let Some(name) = self.opt.path.canonicalize().into_diagnostic()?.file_name() {
-            let toml = utils::create_default_toml(&name.to_string_lossy());
+            let toml = Metadata::create_default_toml(&name.to_string_lossy());
             let toml_path = self.opt.path.join("Veryl.toml");
 
             if toml_path.exists() {

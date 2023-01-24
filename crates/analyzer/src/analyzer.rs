@@ -50,8 +50,12 @@ pub struct Analyzer<'a> {
 }
 
 impl<'a> Analyzer<'a> {
-    pub fn new(text: &'a str, project_name: &'a str) -> Self {
-        namespace_table::set_default(resource_table::insert_str(project_name));
+    pub fn new<T: AsRef<str>>(text: &'a str, project_paths: &'a [T]) -> Self {
+        let mut ids = Vec::new();
+        for path in project_paths {
+            ids.push(resource_table::insert_str(path.as_ref()));
+        }
+        namespace_table::set_default(&ids);
         Analyzer { text }
     }
 

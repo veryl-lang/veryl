@@ -419,7 +419,7 @@ mod tests {
 
     fn parse() {
         let parser = Parser::parse(&CODE, &"").unwrap();
-        let mut analyzer = Analyzer::new(&CODE, &"prj");
+        let mut analyzer = Analyzer::new(&CODE, &["prj"]);
         analyzer.analyze_tree(&parser.veryl);
     }
 

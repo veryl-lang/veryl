@@ -48,9 +48,7 @@ impl Namespace {
 
 impl Default for Namespace {
     fn default() -> Self {
-        Namespace {
-            paths: namespace_table::get_default().into_iter().collect(),
-        }
+        namespace_table::get_default()
     }
 }
 

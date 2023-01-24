@@ -1,13 +1,23 @@
+use crate::git::Git;
 use crate::MetadataError;
+use directories::ProjectDirs;
 use regex::Regex;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use spdx::Expression;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use url::Url;
+use walkdir::WalkDir;
+
+#[derive(Clone, Debug)]
+pub struct PathPair {
+    pub prj: Vec<String>,
+    pub src: PathBuf,
+    pub dst: PathBuf,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Metadata {
@@ -58,6 +68,145 @@ impl Metadata {
         }
 
         Ok(())
+    }
+
+    fn gather_files_with_extension<T: AsRef<Path>>(
+        base_dir: T,
+        ext: &str,
+    ) -> Result<Vec<PathBuf>, MetadataError> {
+        let mut ret = Vec::new();
+        for entry in WalkDir::new(base_dir) {
+            let entry = entry?;
+            if entry.file_type().is_file() {
+                if let Some(x) = entry.path().extension() {
+                    if x == ext {
+                        ret.push(entry.path().to_path_buf());
+                    }
+                }
+            }
+        }
+        Ok(ret)
+    }
+
+    fn gather_dependencies<T: AsRef<str>>(
+        &self,
+        base_prj: &[T],
+        base_dst: &Path,
+        tomls: &mut HashSet<PathBuf>,
+    ) -> Result<Vec<PathPair>, MetadataError> {
+        let project_dir = ProjectDirs::from("", "dalance", "veryl").unwrap();
+        let cache_dir = project_dir.cache_dir();
+
+        let mut ret = Vec::new();
+        for (name, dep) in &self.dependencies {
+            if let Some(ref git) = dep.git {
+                let mut path = cache_dir.to_path_buf();
+                path.push("repository");
+                if let Some(host) = git.host_str() {
+                    path.push(host);
+                }
+                path.push(git.path().to_string().trim_start_matches('/'));
+
+                if let Some(ref rev) = dep.rev {
+                    path.set_extension(rev);
+                } else if let Some(ref tag) = dep.tag {
+                    path.set_extension(tag);
+                } else if let Some(ref branch) = dep.branch {
+                    path.set_extension(branch);
+                }
+
+                let parent = path.parent().unwrap();
+                if !parent.exists() {
+                    std::fs::create_dir_all(parent)?;
+                }
+
+                let git = Git::clone(
+                    git,
+                    &path,
+                    dep.rev.as_deref(),
+                    dep.tag.as_deref(),
+                    dep.branch.as_deref(),
+                )?;
+                git.fetch()?;
+                git.checkout()?;
+
+                let mut prj: Vec<_> = base_prj.iter().map(|x| x.as_ref().to_string()).collect();
+                prj.push(name.clone());
+
+                for src in &Self::gather_files_with_extension(&path, "vl")? {
+                    let rel = src.strip_prefix(&path)?;
+                    let mut dst = base_dst.join(name);
+                    dst.push(rel);
+                    dst.set_extension("sv");
+                    ret.push(PathPair {
+                        prj: prj.clone(),
+                        src: src.to_path_buf(),
+                        dst,
+                    });
+                }
+
+                let toml = path.join("Veryl.toml");
+                if !tomls.contains(&toml) {
+                    let metadata = Metadata::load(&toml)?;
+                    tomls.insert(toml);
+                    let base_dst = base_dst.join(name);
+                    let deps = metadata.gather_dependencies(&prj, &base_dst, tomls)?;
+                    for dep in deps {
+                        ret.push(dep);
+                    }
+                }
+            }
+        }
+
+        Ok(ret)
+    }
+
+    pub fn paths<T: AsRef<Path>>(&self, files: &[T]) -> Result<Vec<PathPair>, MetadataError> {
+        let base = self.metadata_path.parent().unwrap();
+
+        let src_files = if files.is_empty() {
+            Self::gather_files_with_extension(&base, "vl")?
+        } else {
+            files.iter().map(|x| x.as_ref().to_path_buf()).collect()
+        };
+
+        let mut ret = Vec::new();
+        for src in src_files {
+            let dst = match self.build.target {
+                Target::Source => src.with_extension("sv"),
+                Target::Directory { ref path } => {
+                    let base = base.clone();
+                    base.join(path.join(src.with_extension("sv").file_name().unwrap()))
+                }
+            };
+            ret.push(PathPair {
+                prj: vec![self.project.name.clone()],
+                src: src.to_path_buf(),
+                dst,
+            });
+        }
+
+        let base_dst = self.metadata_path.parent().unwrap().join("dependencies");
+        if !base_dst.exists() {
+            std::fs::create_dir(&base_dst)?;
+        }
+
+        let mut tomls = HashSet::new();
+        let deps = self.gather_dependencies::<&str>(&[], &base_dst, &mut tomls)?;
+        for dep in deps {
+            ret.push(dep);
+        }
+
+        Ok(ret)
+    }
+
+    pub fn create_default_toml(name: &str) -> String {
+        format!(
+            r###"[project]
+name = "{}"
+version = "0.1.0""###,
+            name
+        )
     }
 }
 

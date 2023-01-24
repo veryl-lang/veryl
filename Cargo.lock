@@ -3885,20 +3885,16 @@ version = "0.2.1"
 dependencies = [
  "clap 4.1.1",
  "console",
- "directories",
  "env_logger",
- "git-repository",
  "miette",
  "serde_json",
  "similar",
  "thiserror",
- "url",
  "veryl-analyzer",
  "veryl-emitter",
  "veryl-formatter",
  "veryl-metadata",
  "veryl-parser",
- "walkdir",
 ]
 
 [[package]]
@@ -3949,6 +3945,8 @@ dependencies = [
 name = "veryl-metadata"
 version = "0.2.1"
 dependencies = [
+ "directories",
+ "git-repository",
  "miette",
  "regex",
  "semver",
@@ -3958,6 +3956,7 @@ dependencies = [
  "toml",
  "url",
  "veryl-parser",
+ "walkdir",
 ]
 
 [[package]]

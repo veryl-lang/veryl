@@ -12,9 +12,6 @@ mod cmd_fmt;
 mod cmd_init;
 mod cmd_metadata;
 mod cmd_new;
-mod dependency_manager;
-mod git;
-mod utils;
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Opt
@@ -178,7 +175,7 @@ fn main() -> Result<ExitCode> {
     let metadata = match opt.command {
         Commands::New(_) | Commands::Init(_) => {
             // dummy metadata
-            let metadata = utils::create_default_toml("");
+            let metadata = Metadata::create_default_toml("");
             Metadata::from_str(&metadata)?
         }
         _ => {
@@ -187,16 +184,14 @@ fn main() -> Result<ExitCode> {
         }
     };
 
-    let deps = dependency_manager::DependencyManager::gather(&metadata)?;
-
     let ret = match opt.command {
         Commands::New(x) => cmd_new::CmdNew::new(x).exec()?,
         Commands::Init(x) => cmd_init::CmdInit::new(x).exec()?,
         Commands::Fmt(x) => cmd_fmt::CmdFmt::new(x).exec(&metadata)?,
-        Commands::Check(x) => cmd_check::CmdCheck::new(x).exec(&metadata, &deps)?,
-        Commands::Build(x) => cmd_build::CmdBuild::new(x).exec(&metadata, &deps)?,
+        Commands::Check(x) => cmd_check::CmdCheck::new(x).exec(&metadata)?,
+        Commands::Build(x) => cmd_build::CmdBuild::new(x).exec(&metadata)?,
         Commands::Metadata(x) => cmd_metadata::CmdMetadata::new(x).exec(&metadata)?,
-        Commands::Dump(x) => cmd_dump::CmdDump::new(x).exec(&metadata, &deps)?,
+        Commands::Dump(x) => cmd_dump::CmdDump::new(x).exec(&metadata)?,
     };
     if ret {
         Ok(ExitCode::SUCCESS)

@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::fmt;
 use veryl_parser::resource_table::{PathId, StrId, TokenId};
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Debug)]
 pub struct NamespaceTable {
-    default: Option<StrId>,
+    default: Namespace,
     table: HashMap<TokenId, (Namespace, PathId)>,
 }
 
@@ -27,12 +27,25 @@ impl NamespaceTable {
         self.table.retain(|_, x| x.1 != file_path);
     }
 
-    pub fn set_default(&mut self, id: StrId) {
-        self.default = Some(id);
+    pub fn set_default(&mut self, id: &[StrId]) {
+        let mut namespace = Namespace::new();
+        for id in id {
+            namespace.push(*id);
+        }
+        self.default = namespace;
     }
 
-    pub fn get_default(&self) -> Option<StrId> {
-        self.default
+    pub fn get_default(&self) -> Namespace {
+        self.default.clone()
+    }
+}
+
+impl Default for NamespaceTable {
+    fn default() -> Self {
+        Self {
+            default: Namespace::new(),
+            table: HashMap::new(),
+        }
     }
 }
 
@@ -81,10 +94,10 @@ pub fn drop(file_path: PathId) {
     NAMESPACE_TABLE.with(|f| f.borrow_mut().drop(file_path))
 }
 
-pub fn set_default(id: StrId) {
+pub fn set_default(id: &[StrId]) {
     NAMESPACE_TABLE.with(|f| f.borrow_mut().set_default(id))
 }
 
-pub fn get_default() -> Option<StrId> {
+pub fn get_default() -> Namespace {
     NAMESPACE_TABLE.with(|f| f.borrow().get_default())
 }

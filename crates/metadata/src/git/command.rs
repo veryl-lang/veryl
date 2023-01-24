@@ -1,4 +1,4 @@
-use miette::{miette, IntoDiagnostic, Result};
+use crate::metadata_error::MetadataError;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use url::Url;
@@ -17,7 +17,7 @@ impl Git {
         rev: Option<&str>,
         tag: Option<&str>,
         branch: Option<&str>,
-    ) -> Result<Self> {
+    ) -> Result<Self, MetadataError> {
         let current_dir = path.parent().unwrap();
         let target = path.file_name().unwrap();
         if !path.exists() {
@@ -26,11 +26,11 @@ impl Git {
                 .arg(url.as_str())
                 .arg(target)
                 .current_dir(current_dir)
-                .output()
-                .into_diagnostic()?;
+                .output()?;
             if !output.status.success() {
-                return Err(miette!("{}", String::from_utf8_lossy(&output.stderr))
-                    .context(format!("failed to clone repository: {}", url.as_str())));
+                let context = String::from_utf8_lossy(&output.stderr).to_string();
+                let msg = format!("failed to clone repository: {}", url.as_str());
+                return Err(MetadataError::Git { msg, context });
             }
         }
 
@@ -42,25 +42,24 @@ impl Git {
         })
     }
 
-    pub fn fetch(&self) -> Result<()> {
+    pub fn fetch(&self) -> Result<(), MetadataError> {
         let output = Command::new("git")
             .arg("fetch")
             .current_dir(&self.path)
-            .output()
-            .into_diagnostic()?;
+            .output()?;
         if !output.status.success() {
-            return Err(
-                miette!("{}", String::from_utf8_lossy(&output.stderr)).context(format!(
-                    "failed to fetch repository: {}",
-                    self.path.to_string_lossy()
-                )),
+            let context = String::from_utf8_lossy(&output.stderr).to_string();
+            let msg = format!(
+                "failed to fetch repository: {}",
+                self.path.to_string_lossy()
             );
+            return Err(MetadataError::Git { msg, context });
         }
 
         Ok(())
     }
 
-    pub fn checkout(&self) -> Result<()> {
+    pub fn checkout(&self) -> Result<(), MetadataError> {
         let dst = if let Some(ref rev) = self.rev {
             rev.to_string()
         } else if let Some(ref tag) = self.tag {
@@ -75,15 +74,14 @@ impl Git {
             .arg("checkout")
             .arg(dst)
             .current_dir(&self.path)
-            .output()
-            .into_diagnostic()?;
+            .output()?;
         if !output.status.success() {
-            return Err(
-                miette!("{}", String::from_utf8_lossy(&output.stderr)).context(format!(
-                    "failed to checkout repository: {}",
-                    self.path.to_string_lossy()
-                )),
+            let context = String::from_utf8_lossy(&output.stderr).to_string();
+            let msg = format!(
+                "failed to checkout repository: {}",
+                self.path.to_string_lossy()
             );
+            return Err(MetadataError::Git { msg, context });
         }
 
         Ok(())

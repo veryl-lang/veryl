@@ -1,4 +1,3 @@
-use crate::utils::{self, PathPair};
 use crate::OptDump;
 use miette::{IntoDiagnostic, Result, WrapErr};
 use std::fs;
@@ -16,25 +15,22 @@ impl CmdDump {
         Self { opt }
     }
 
-    pub fn exec(&self, metadata: &Metadata, deps: &[PathPair]) -> Result<bool> {
-        let mut files = utils::gather_files(&self.opt.files, metadata)?;
-        for dep in deps {
-            files.push(dep.clone());
-        }
+    pub fn exec(&self, metadata: &Metadata) -> Result<bool> {
+        let paths = metadata.paths(&self.opt.files)?;
 
         let now = Instant::now();
 
-        for file in &files {
+        for path in &paths {
             self.print(&format!(
                 "[Info] Processing file: {}",
-                file.src.to_string_lossy()
+                path.src.to_string_lossy()
             ));
 
-            let input = fs::read_to_string(&file.src)
+            let input = fs::read_to_string(&path.src)
                 .into_diagnostic()
                 .wrap_err("")?;
-            let parser = Parser::parse(&input, &file.src)?;
-            let mut analyzer = Analyzer::new(&input, &file.prj);
+            let parser = Parser::parse(&input, &path.src)?;
+            let mut analyzer = Analyzer::new(&input, &path.prj);
             analyzer.analyze_tree(&parser.veryl);
         }
 

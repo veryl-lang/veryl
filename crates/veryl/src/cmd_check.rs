@@ -1,4 +1,3 @@
-use crate::utils::{self, PathPair};
 use crate::OptCheck;
 use miette::{self, Diagnostic, IntoDiagnostic, Result, WrapErr};
 use std::fs;
@@ -24,39 +23,36 @@ impl CmdCheck {
         Self { opt }
     }
 
-    pub fn exec(&self, metadata: &Metadata, deps: &[PathPair]) -> Result<bool> {
-        let mut files = utils::gather_files(&self.opt.files, metadata)?;
-        for dep in deps {
-            files.push(dep.clone());
-        }
+    pub fn exec(&self, metadata: &Metadata) -> Result<bool> {
+        let paths = metadata.paths(&self.opt.files)?;
 
         let now = Instant::now();
 
         let mut check_error = CheckError::default();
         let mut contexts = Vec::new();
 
-        for file in &files {
+        for path in &paths {
             self.print(&format!(
                 "[Info] Processing file: {}",
-                file.src.to_string_lossy()
+                path.src.to_string_lossy()
             ));
 
-            let input = fs::read_to_string(&file.src)
+            let input = fs::read_to_string(&path.src)
                 .into_diagnostic()
                 .wrap_err("")?;
-            let parser = Parser::parse(&input, &file.src)?;
+            let parser = Parser::parse(&input, &path.src)?;
 
-            let mut analyzer = Analyzer::new(&input, &file.prj);
+            let mut analyzer = Analyzer::new(&input, &path.prj);
             let errors = analyzer.analyze_tree(&parser.veryl);
             for error in errors {
                 check_error.related.push(error);
             }
 
-            contexts.push((file, input));
+            contexts.push((path, input));
         }
 
-        for (file, input) in &contexts {
-            let errors = Analyzer::analyze_post(&file.src, input);
+        for (path, input) in &contexts {
+            let errors = Analyzer::analyze_post(&path.src, input);
             for error in errors {
                 check_error.related.push(error);
             }

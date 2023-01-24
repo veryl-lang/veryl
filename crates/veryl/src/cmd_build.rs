@@ -1,5 +1,4 @@
 use crate::cmd_check::CheckError;
-use crate::utils::{self, PathPair};
 use crate::OptBuild;
 use miette::{IntoDiagnostic, Result, WrapErr};
 use std::fs;
@@ -8,7 +7,7 @@ use std::io::Write;
 use std::time::Instant;
 use veryl_analyzer::Analyzer;
 use veryl_emitter::Emitter;
-use veryl_metadata::{FilelistType, Metadata};
+use veryl_metadata::{FilelistType, Metadata, PathPair};
 use veryl_parser::Parser;
 
 pub struct CmdBuild {
@@ -20,39 +19,36 @@ impl CmdBuild {
         Self { opt }
     }
 
-    pub fn exec(&self, metadata: &Metadata, deps: &[PathPair]) -> Result<bool> {
-        let mut files = utils::gather_files(&self.opt.files, metadata)?;
-        for dep in deps {
-            files.push(dep.clone());
-        }
+    pub fn exec(&self, metadata: &Metadata) -> Result<bool> {
+        let paths = metadata.paths(&self.opt.files)?;
 
         let now = Instant::now();
 
         let mut check_error = CheckError::default();
         let mut contexts = Vec::new();
 
-        for file in &files {
+        for path in &paths {
             self.print(&format!(
                 "[Info] Processing file: {}",
-                file.src.to_string_lossy()
+                path.src.to_string_lossy()
             ));
 
-            let input = fs::read_to_string(&file.src)
+            let input = fs::read_to_string(&path.src)
                 .into_diagnostic()
                 .wrap_err("")?;
-            let parser = Parser::parse(&input, &file.src)?;
+            let parser = Parser::parse(&input, &path.src)?;
 
-            let mut analyzer = Analyzer::new(&input, &file.prj);
+            let mut analyzer = Analyzer::new(&input, &path.prj);
             let errors = analyzer.analyze_tree(&parser.veryl);
             for error in errors {
                 check_error.related.push(error);
             }
 
-            contexts.push((file, input, parser));
+            contexts.push((path, input, parser));
         }
 
-        for (file, input, _) in &contexts {
-            let errors = Analyzer::analyze_post(&file.src, input);
+        for (path, input, _) in &contexts {
+            let errors = Analyzer::analyze_post(&path.src, input);
             if !errors.is_empty() {
                 for error in errors {
                     check_error.related.push(error);
@@ -65,32 +61,32 @@ impl CmdBuild {
             return Err(check_error.into());
         }
 
-        for (file, _, parser) in &contexts {
+        for (path, _, parser) in &contexts {
             let mut emitter = Emitter::new(metadata);
             emitter.emit(&parser.veryl);
 
             self.print(&format!(
                 "[Info] Output file: {}",
-                file.dst.to_string_lossy()
+                path.dst.to_string_lossy()
             ));
 
-            let dst_dir = file.dst.parent().unwrap();
+            let dst_dir = path.dst.parent().unwrap();
             if !dst_dir.exists() {
-                std::fs::create_dir_all(file.dst.parent().unwrap()).into_diagnostic()?;
+                std::fs::create_dir_all(path.dst.parent().unwrap()).into_diagnostic()?;
             }
 
             let mut file = OpenOptions::new()
                 .create(true)
                 .write(true)
                 .truncate(true)
-                .open(&file.dst)
+                .open(&path.dst)
                 .into_diagnostic()?;
             file.write_all(emitter.as_str().as_bytes())
                 .into_diagnostic()?;
             file.flush().into_diagnostic()?;
         }
 
-        self.gen_filelist(metadata, &files)?;
+        self.gen_filelist(metadata, &paths)?;
 
         let elapsed_time = now.elapsed();
         self.print(&format!(

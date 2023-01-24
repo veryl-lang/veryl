@@ -1,8 +1,8 @@
-use crate::utils;
 use crate::OptNew;
 use miette::{bail, IntoDiagnostic, Result};
 use std::fs::{self, File};
 use std::io::Write;
+use veryl_metadata::Metadata;
 
 pub struct CmdNew {
     opt: OptNew,
@@ -19,7 +19,7 @@ impl CmdNew {
         }
 
         if let Some(name) = self.opt.path.file_name() {
-            let toml = utils::create_default_toml(&name.to_string_lossy());
+            let toml = Metadata::create_default_toml(&name.to_string_lossy());
 
             fs::create_dir_all(&self.opt.path).into_diagnostic()?;
             let mut file = File::create(self.opt.path.join("Veryl.toml")).into_diagnostic()?;
