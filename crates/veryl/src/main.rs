@@ -12,6 +12,7 @@ mod cmd_fmt;
 mod cmd_init;
 mod cmd_metadata;
 mod cmd_new;
+mod cmd_update;
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Opt
@@ -32,6 +33,7 @@ enum Commands {
     Fmt(OptFmt),
     Check(OptCheck),
     Build(OptBuild),
+    Update(OptUpdate),
     Metadata(OptMetadata),
     Dump(OptDump),
 }
@@ -105,6 +107,18 @@ pub struct OptBuild {
     /// Target files
     pub files: Vec<PathBuf>,
 
+    /// No output printed to stdout
+    #[arg(long)]
+    pub quiet: bool,
+
+    /// Use verbose output
+    #[arg(long)]
+    pub verbose: bool,
+}
+
+/// Update dependencies
+#[derive(Args)]
+pub struct OptUpdate {
     /// No output printed to stdout
     #[arg(long)]
     pub quiet: bool,
@@ -190,6 +204,7 @@ fn main() -> Result<ExitCode> {
         Commands::Fmt(x) => cmd_fmt::CmdFmt::new(x).exec(&metadata)?,
         Commands::Check(x) => cmd_check::CmdCheck::new(x).exec(&metadata)?,
         Commands::Build(x) => cmd_build::CmdBuild::new(x).exec(&metadata)?,
+        Commands::Update(x) => cmd_update::CmdUpdate::new(x).exec(&metadata)?,
         Commands::Metadata(x) => cmd_metadata::CmdMetadata::new(x).exec(&metadata)?,
         Commands::Dump(x) => cmd_dump::CmdDump::new(x).exec(&metadata)?,
     };
