@@ -11,6 +11,12 @@ pub struct Git {
     path: PathBuf,
 }
 
+#[cfg(windows)]
+const GIT_COMMAND: &str = "git.exe";
+
+#[cfg(not(windows))]
+const GIT_COMMAND: &str = "git";
+
 impl Git {
     pub fn clone(
         url: &Url,
@@ -22,7 +28,7 @@ impl Git {
         let current_dir = path.parent().unwrap();
         let target = path.file_name().unwrap();
         if !path.exists() {
-            let output = Command::new("git")
+            let output = Command::new(GIT_COMMAND)
                 .arg("clone")
                 .arg(url.as_str())
                 .arg(target)
@@ -45,7 +51,7 @@ impl Git {
     }
 
     pub fn fetch(&self) -> Result<(), MetadataError> {
-        let output = Command::new("git")
+        let output = Command::new(GIT_COMMAND)
             .arg("fetch")
             .current_dir(&self.path)
             .output()?;
@@ -74,7 +80,7 @@ impl Git {
             "origin/HEAD".to_string()
         };
 
-        let output = Command::new("git")
+        let output = Command::new(GIT_COMMAND)
             .arg("checkout")
             .arg(&dst)
             .current_dir(&self.path)
