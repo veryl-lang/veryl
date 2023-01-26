@@ -13,6 +13,8 @@ use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::VerylWalker;
 use veryl_parser::{resource_table, Finder, Parser, ParserError};
 
+const COMPLETION_TRIGGER: &[&str] = &["<", ">", "=", "!"];
+
 #[derive(Debug)]
 pub struct Backend {
     client: Client,
@@ -168,6 +170,15 @@ impl Backend {
         );
         Location { uri, range }
     }
+
+    fn completion_item_operator(label: &str, detail: &str) -> CompletionItem {
+        CompletionItem {
+            label: label.to_string(),
+            kind: Some(CompletionItemKind::OPERATOR),
+            detail: Some(detail.to_string()),
+            ..Default::default()
+        }
+    }
 }
 
 mod semantic_legend {
@@ -219,6 +230,14 @@ impl LanguageServer for Backend {
                         },
                     ),
                 ),
+                completion_provider: Some(CompletionOptions {
+                    resolve_provider: Some(false),
+                    trigger_characters: Some(
+                        COMPLETION_TRIGGER.iter().map(|x| x.to_string()).collect(),
+                    ),
+                    all_commit_characters: None,
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
+                }),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -275,7 +294,7 @@ impl LanguageServer for Backend {
             text: std::mem::take(&mut params.content_changes[0].text),
             version: params.text_document.version,
         })
-        .await
+        .await;
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
@@ -287,6 +306,64 @@ impl LanguageServer for Backend {
                 )
                 .await;
         }
+    }
+
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        if let Some(context) = params.context {
+            if let CompletionTriggerKind::TRIGGER_CHARACTER = context.trigger_kind {
+                let trigger = context.trigger_character.unwrap();
+                let res = match trigger.as_str() {
+                    "<" => {
+                        let items = vec![
+                            Self::completion_item_operator("=", "less than equal"),
+                            Self::completion_item_operator(":", "less than"),
+                            Self::completion_item_operator("<<", "arithmetic left shift"),
+                            Self::completion_item_operator(
+                                "<<=",
+                                "arithmetic left shift assignment",
+                            ),
+                            Self::completion_item_operator("<", "logical left shift"),
+                            Self::completion_item_operator("<=", "logical left shift assignment"),
+                        ];
+                        Some(CompletionResponse::Array(items))
+                    }
+                    ">" => {
+                        let items = vec![
+                            Self::completion_item_operator("=", "greater than equal"),
+                            Self::completion_item_operator(":", "greater than"),
+                            Self::completion_item_operator(">>", "arithmetic right shift"),
+                            Self::completion_item_operator(
+                                ">>=",
+                                "arithmetic right shift assignment",
+                            ),
+                            Self::completion_item_operator(">", "logical right shift"),
+                            Self::completion_item_operator(">=", "logical right shift assignment"),
+                        ];
+                        Some(CompletionResponse::Array(items))
+                    }
+                    "=" => {
+                        let items = vec![
+                            Self::completion_item_operator("=", "logical equality"),
+                            Self::completion_item_operator("==", "case equality"),
+                            Self::completion_item_operator("=?", "wildcard equality"),
+                        ];
+                        Some(CompletionResponse::Array(items))
+                    }
+                    "!" => {
+                        let items = vec![
+                            Self::completion_item_operator("=", "logical inequality"),
+                            Self::completion_item_operator("==", "case inequality"),
+                            Self::completion_item_operator("=?", "wildcard inequality"),
+                        ];
+                        Some(CompletionResponse::Array(items))
+                    }
+                    _ => None,
+                };
+
+                return Ok(res);
+            }
+        }
+        Ok(None)
     }
 
     async fn goto_definition(

@@ -2,6 +2,8 @@
 
 ## [Unreleased](https://github.com/dalance/veryl/compare/v0.2.2...Unreleased) - ReleaseDate
 
+* [Added] operator completeion support of language server [#16](https://github.com/dalance/veryl/issues/16)
+
 ## [v0.2.2](https://github.com/dalance/veryl/compare/v0.2.1...v0.2.2) - 2023-01-24
 
 * [Added] attribute arguments check [#90](https://github.com/dalance/veryl/issues/90)
