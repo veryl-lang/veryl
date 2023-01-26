@@ -98,8 +98,9 @@ mod emitter {
 
         if name == "25_dependency" {
             let paths = metadata.paths::<&str>(&[], false).unwrap();
+            let cache_dir = Metadata::cache_dir();
             for path in paths {
-                if path.src.to_string_lossy().contains("veryl/repository") {
+                if path.src.starts_with(&cache_dir) {
                     let input = fs::read_to_string(&path.src).unwrap();
                     let ret = Parser::parse(&input, &path.src).unwrap();
                     let analyzer = Analyzer::new(&path.prj);
