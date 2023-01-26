@@ -79,7 +79,7 @@ fn identifier() {
 #[test]
 fn expression() {
     success("var a: u32 = 1 && 1 || 1 & 1 ^ 1 ~^ 1 ^~ 1 | 1;");
-    success("var a: u32 = 1 < 1 <= 1 > 1 >= 1 == 1 != 1 === 1 !== 1 ==? 1 !=? 1;");
+    success("var a: u32 = 1 <: 1 <= 1 >: 1 >= 1 == 1 != 1 === 1 !== 1 ==? 1 !=? 1;");
     success("var a: u32 = 1 << 1 >> 1 <<< 1 >>> 1;");
     success("var a: u32 = 1 ** 1 * 1 / 1 % 1 + 1 - 1;");
     success("var a: u32 = +-!~&|^~&~|~^^~1;");

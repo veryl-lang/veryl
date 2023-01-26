@@ -313,6 +313,15 @@ impl VerylWalker for Emitter {
         }
     }
 
+    /// Semantic action for non-terminal 'Operator07'
+    fn operator07(&mut self, arg: &Operator07) {
+        match arg.operator07_token.text().as_str() {
+            "<:" => self.str("<"),
+            ">:" => self.str(">"),
+            _ => self.veryl_token(&arg.operator07_token),
+        }
+    }
+
     /// Semantic action for non-terminal 'ScopedIdentifier'
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) {
         self.identifier(&arg.identifier);

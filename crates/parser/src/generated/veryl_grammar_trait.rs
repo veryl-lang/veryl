@@ -7551,7 +7551,7 @@ pub struct Operator07 {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct Operator07Term {
-    pub operator07_term: crate::veryl_token::Token, /* <=|>=|<|> */
+    pub operator07_term: crate::veryl_token::Token, /* <=|>=|<:|>: */
 }
 
 ///
@@ -9989,7 +9989,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 15:
     ///
-    /// Operator07Term: "<=|>=|<|>" : Token;
+    /// Operator07Term: "<=|>=|<:|>:" : Token;
     ///
     #[parol_runtime::function_name::named]
     fn operator07_term(

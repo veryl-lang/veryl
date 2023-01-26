@@ -42,9 +42,9 @@ module Module03 {
     assign aaaa = 1 >>> 1;
 
     // binary compare
-    assign a          = 1 < 1;
+    assign a          = 1 <: 1;
     assign aa         = 1 <= 1;
-    assign aaa        = 1 > 1;
+    assign aaa        = 1 >: 1;
     assign aaaa       = 1 >= 1;
     assign aaaaa      = 1 == 1;
     assign aaaaaa     = 1 != 1;

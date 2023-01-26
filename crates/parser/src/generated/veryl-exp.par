@@ -21,7 +21,7 @@
 /*  12 */ Operator10Term: "/|%" : Token;
 /*  13 */ Operator09Term: "\+|-" : Token;
 /*  14 */ Operator08Term: "<<<|>>>|<<|>>" : Token;
-/*  15 */ Operator07Term: "<=|>=|<|>" : Token;
+/*  15 */ Operator07Term: "<=|>=|<:|>:" : Token;
 /*  16 */ Operator06Term: "===|==\?|!==|!=\?|==|!=" : Token;
 /*  17 */ Operator02Term: "&&" : Token;
 /*  18 */ Operator01Term: "\|\|" : Token;
