@@ -32,6 +32,7 @@ impl From<Token> for Location {
 
 #[derive(Default)]
 pub struct Align {
+    enable: bool,
     index: usize,
     max_width: usize,
     width: usize,
@@ -51,8 +52,8 @@ impl Align {
     }
 
     fn finish_item(&mut self) {
-        let last_location = self.last_location.take();
-        if let Some(loc) = last_location {
+        self.enable = false;
+        if let Some(loc) = self.last_location {
             if loc.line - self.line > 1 {
                 self.finish_group();
             }
@@ -66,28 +67,37 @@ impl Align {
     }
 
     fn start_item(&mut self) {
+        self.enable = true;
         self.width = 0;
     }
 
     fn token(&mut self, x: &VerylToken) {
-        self.width += x.token.length;
-        let loc: Location = x.token.into();
-        self.last_location = Some(loc);
-    }
-
-    fn dummy_token(&mut self, x: &VerylToken) {
-        self.width += 0; // 0 length token
-        let loc: Location = x.token.into();
-        self.last_location = Some(loc);
+        if self.enable {
+            self.width += x.token.length;
+            let loc: Location = x.token.into();
+            self.last_location = Some(loc);
+        }
     }
 
     fn dummy_location(&mut self, x: Location) {
-        self.width += 0; // 0 length token
-        self.last_location = Some(x);
+        if self.enable {
+            self.width += 0; // 0 length token
+            self.last_location = Some(x);
+        }
+    }
+
+    fn dummy_token(&mut self, x: &VerylToken) {
+        if self.enable {
+            self.width += 0; // 0 length token
+            let loc: Location = x.token.into();
+            self.last_location = Some(loc);
+        }
     }
 
     fn space(&mut self, x: usize) {
-        self.width += x;
+        if self.enable {
+            self.width += x;
+        }
     }
 }
 
@@ -96,15 +106,16 @@ mod align_kind {
     pub const TYPE: usize = 1;
     pub const EXPRESSION: usize = 2;
     pub const WIDTH: usize = 3;
-    pub const ASSIGNMENT: usize = 4;
-    pub const PARAMETER: usize = 5;
-    pub const DIRECTION: usize = 6;
+    pub const ARRAY: usize = 4;
+    pub const ASSIGNMENT: usize = 5;
+    pub const PARAMETER: usize = 6;
+    pub const DIRECTION: usize = 7;
 }
 
 #[derive(Default)]
 pub struct Aligner {
     pub additions: HashMap<Location, usize>,
-    aligns: [Align; 7],
+    aligns: [Align; 8],
     in_type_expression: bool,
 }
 
@@ -388,6 +399,12 @@ impl VerylWalker for Aligner {
         }
         if let Some(ref x) = arg.variable_type_opt {
             self.width(&x.width);
+        } else {
+            if !self.in_type_expression {
+                let loc = self.aligns[align_kind::TYPE].last_location;
+                let loc = loc.unwrap();
+                self.aligns[align_kind::WIDTH].dummy_location(loc);
+            }
         }
     }
 
@@ -405,9 +422,9 @@ impl VerylWalker for Aligner {
             ScalarTypeGroup::FixedType(x) => {
                 self.fixed_type(&x.fixed_type);
                 if !self.in_type_expression {
-                    let loc = self.aligns[align_kind::TYPE].last_location;
                     self.aligns[align_kind::TYPE].finish_item();
                     self.aligns[align_kind::WIDTH].start_item();
+                    let loc = self.aligns[align_kind::TYPE].last_location;
                     let loc = loc.unwrap();
                     self.aligns[align_kind::WIDTH].dummy_location(loc);
                 }
@@ -421,9 +438,16 @@ impl VerylWalker for Aligner {
     /// Semantic action for non-terminal 'ArrayType'
     fn array_type(&mut self, arg: &ArrayType) {
         self.scalar_type(&arg.scalar_type);
+        self.aligns[align_kind::ARRAY].start_item();
         if let Some(ref x) = arg.array_type_opt {
+            self.space(1);
             self.array(&x.array);
+        } else {
+            let loc = self.aligns[align_kind::WIDTH].last_location;
+            let loc = loc.unwrap();
+            self.aligns[align_kind::ARRAY].dummy_location(loc);
         }
+        self.aligns[align_kind::ARRAY].finish_item();
     }
 
     /// Semantic action for non-terminal 'AssignmentStatement'

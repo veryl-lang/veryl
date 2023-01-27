@@ -634,12 +634,14 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'Array'
     fn array(&mut self, arg: &Array) {
         self.l_bracket(&arg.l_bracket);
+        self.str("0:");
         self.expression(&arg.expression);
-        self.str("-1:0");
+        self.str("-1");
         for x in &arg.array_list {
             self.token(&x.comma.comma_token.replace("]["));
+            self.str("0:");
             self.expression(&x.expression);
-            self.str("-1:0");
+            self.str("-1");
         }
         self.r_bracket(&arg.r_bracket);
     }

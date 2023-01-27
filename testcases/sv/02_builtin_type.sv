@@ -22,10 +22,10 @@ module veryl_testcase_Module02;
     bit [10-1:0][10-1:0] _eee;
 
     // array
-    int unsigned     _f      [10-1:0];
-    longint unsigned _ff     [10-1:0];
-    int signed       _fff    [10-1:0];
-    longint signed   _ffff   [10-1:0];
-    shortreal        _fffff  [10-1:0];
-    real             _ffffff [10-1:0];
+    int unsigned     _f      [0:10-1];
+    longint unsigned _ff     [0:10-1];
+    int signed       _fff    [0:10-1];
+    longint signed   _ffff   [0:10-1];
+    shortreal        _fffff  [0:10-1];
+    real             _ffffff [0:10-1];
 endmodule
