@@ -23,22 +23,22 @@
 // module declaration
 module ModuleA #(
     // module parameter
-    parameter  a : u32  = 1,
-    localparam aa: u32  = 1,
+    parameter  a : u32 = 1,
+    localparam aa: u32 = 1,
 ) (
     // module port
-    b  : input  logic [10],
-    bb : output logic [10],
-    bbb: inout  logic [10],
+    b  : input  logic<10>,
+    bb : output logic<10>,
+    bbb: inout  logic<10>,
 ) {
     // localparam declaration
-    localparam c : u32  = 1;
-    localparam cc: u64  = 1;
+    localparam c : u32 = 1;
+    localparam cc: u64 = 1;
 
     // variable declaration
     var d  : logic         ;
-    var dd : logic [10]    ;
-    var ddd: bit   [10][10];
+    var dd : logic <10>    ;
+    var ddd: bit   <10, 10>;
 }
             </textarea>
         </div>
