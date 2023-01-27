@@ -384,12 +384,10 @@ impl VerylWalker for Aligner {
         if let Some(ref x) = arg.variable_type_opt {
             self.space(1);
             self.width(&x.width);
-        } else {
-            if !self.in_type_expression {
-                let loc = self.aligns[align_kind::TYPE].last_location;
-                let loc = loc.unwrap();
-                self.aligns[align_kind::WIDTH].dummy_location(loc);
-            }
+        } else if !self.in_type_expression {
+            let loc = self.aligns[align_kind::TYPE].last_location;
+            let loc = loc.unwrap();
+            self.aligns[align_kind::WIDTH].dummy_location(loc);
         }
     }
 
