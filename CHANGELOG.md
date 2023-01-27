@@ -1,6 +1,8 @@
 # Change Log
 
-## [Unreleased](https://github.com/dalance/veryl/compare/v0.2.2...Unreleased) - ReleaseDate
+## [Unreleased](https://github.com/dalance/veryl/compare/v0.3.0...Unreleased) - ReleaseDate
+
+## [v0.3.0](https://github.com/dalance/veryl/compare/v0.2.2...v0.3.0) - 2023-01-27
 
 * [Added] operator completeion support of language server [#16](https://github.com/dalance/veryl/issues/16)
 * [Changed] compare operator to `<:` and `>:` [#94](https://github.com/dalance/veryl/issues/94)
