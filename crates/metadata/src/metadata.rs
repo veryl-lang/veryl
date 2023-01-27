@@ -216,9 +216,8 @@ impl Metadata {
     pub fn create_default_toml(name: &str) -> String {
         format!(
             r###"[project]
-name = "{}"
-version = "0.1.0""###,
-            name
+name = "{name}"
+version = "0.1.0""###
         )
     }
 

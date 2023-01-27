@@ -40,7 +40,7 @@ impl<'a> VerylGrammarTrait for CheckEnum<'a> {
             }
             HandlerPoint::After => {
                 let mut evaluator = Evaluator::new();
-                let r#type: crate::symbol::Type = arg.r#type.as_ref().into();
+                let r#type: crate::symbol::Type = arg.scalar_type.as_ref().into();
                 let width = evaluator.type_width(r#type);
                 if let Some(width) = width {
                     let max_members = 2_usize.pow(width as u32);

@@ -46,7 +46,10 @@ impl Symbol {
                     if let Some(width) = evaluator.type_width(x.r#type.clone()) {
                         evaluator.context_width.push(width);
                     }
-                    evaluator.expression(&x.value)
+                    match &x.value {
+                        ParameterValue::Expression(x) => evaluator.expression(x),
+                        ParameterValue::TypeExpression(_) => Evaluated::Unknown,
+                    }
                 }
                 _ => Evaluated::Unknown,
             };
@@ -129,7 +132,10 @@ impl fmt::Display for SymbolKind {
             }
             SymbolKind::Parameter(x) => {
                 let mut stringifier = Stringifier::new();
-                stringifier.expression(&x.value);
+                match &x.value {
+                    ParameterValue::Expression(x) => stringifier.expression(x),
+                    ParameterValue::TypeExpression(x) => stringifier.type_expression(x),
+                }
                 match x.scope {
                     ParameterScope::Global => {
                         format!("parameter ({}) = {}", x.r#type, stringifier.as_str())
@@ -145,9 +151,9 @@ impl fmt::Display for SymbolKind {
                     if i != 0 {
                         type_name.push_str("::");
                     }
-                    type_name.push_str(&format!("{}", x));
+                    type_name.push_str(&format!("{x}"));
                 }
-                format!("instance ({})", type_name)
+                format!("instance ({type_name})")
             }
             SymbolKind::Block => "block".to_string(),
             SymbolKind::Package => "package".to_string(),
@@ -217,6 +223,7 @@ pub struct Type {
     pub modifier: Vec<TypeModifier>,
     pub kind: TypeKind,
     pub width: Vec<syntax_tree::Expression>,
+    pub array: Vec<syntax_tree::Expression>,
 }
 
 #[derive(Debug, Clone)]
@@ -229,6 +236,7 @@ pub enum TypeKind {
     I64,
     F32,
     F64,
+    Type,
     UserDefined(Vec<StrId>),
 }
 
@@ -256,63 +264,119 @@ impl fmt::Display for Type {
             TypeKind::I64 => text.push_str("i64"),
             TypeKind::F32 => text.push_str("f32"),
             TypeKind::F64 => text.push_str("f64"),
+            TypeKind::Type => text.push_str("type"),
             TypeKind::UserDefined(paths) => {
                 text.push_str(&format!("{}", paths.first().unwrap()));
                 for path in &paths[1..] {
-                    text.push_str(&format!("::{}", path));
+                    text.push_str(&format!("::{path}"));
                 }
             }
         }
         if !self.width.is_empty() {
-            text.push(' ');
+            text.push('<');
+            for (i, x) in self.width.iter().enumerate() {
+                if i != 0 {
+                    text.push_str(", ");
+                }
+                let mut stringifier = Stringifier::new();
+                stringifier.expression(x);
+                text.push_str(stringifier.as_str());
+            }
+            text.push('>');
         }
-        for x in &self.width {
-            let mut stringifier = Stringifier::new();
-            stringifier.expression(x);
-            text.push_str(&format!("[{}]", stringifier.as_str()));
+        if !self.array.is_empty() {
+            text.push_str(" [");
+            for (i, x) in self.array.iter().enumerate() {
+                if i != 0 {
+                    text.push_str(", ");
+                }
+                let mut stringifier = Stringifier::new();
+                stringifier.expression(x);
+                text.push_str(stringifier.as_str());
+            }
+            text.push(']');
         }
         text.fmt(f)
     }
 }
 
-impl From<&syntax_tree::Type> for Type {
-    fn from(value: &syntax_tree::Type) -> Self {
+impl From<&syntax_tree::ScalarType> for Type {
+    fn from(value: &syntax_tree::ScalarType) -> Self {
         let mut modifier = Vec::new();
-        for x in &value.type_list {
+        for x in &value.scalar_type_list {
             match &*x.type_modifier {
                 syntax_tree::TypeModifier::Tri(_) => modifier.push(TypeModifier::Tri),
                 syntax_tree::TypeModifier::Signed(_) => modifier.push(TypeModifier::Signed),
             }
         }
-        let kind = match &*value.type_group {
-            syntax_tree::TypeGroup::BuiltinType(x) => match &*x.builtin_type {
-                syntax_tree::BuiltinType::Logic(_) => TypeKind::Logic,
-                syntax_tree::BuiltinType::Bit(_) => TypeKind::Bit,
-                syntax_tree::BuiltinType::U32(_) => TypeKind::U32,
-                syntax_tree::BuiltinType::U64(_) => TypeKind::U64,
-                syntax_tree::BuiltinType::I32(_) => TypeKind::I32,
-                syntax_tree::BuiltinType::I64(_) => TypeKind::I64,
-                syntax_tree::BuiltinType::F32(_) => TypeKind::F32,
-                syntax_tree::BuiltinType::F64(_) => TypeKind::F64,
-            },
-            syntax_tree::TypeGroup::ScopedIdentifier(x) => {
-                let x = &x.scoped_identifier;
-                let mut name = Vec::new();
-                name.push(x.identifier.identifier_token.token.text);
-                for x in &x.scoped_identifier_list {
-                    name.push(x.identifier.identifier_token.token.text);
+        match &*value.scalar_type_group {
+            syntax_tree::ScalarTypeGroup::VariableType(x) => {
+                let x = &x.variable_type;
+                let kind = match &*x.variable_type_group {
+                    syntax_tree::VariableTypeGroup::Logic(_) => TypeKind::Logic,
+                    syntax_tree::VariableTypeGroup::Bit(_) => TypeKind::Bit,
+                    syntax_tree::VariableTypeGroup::ScopedIdentifier(x) => {
+                        let x = &x.scoped_identifier;
+                        let mut name = Vec::new();
+                        name.push(x.identifier.identifier_token.token.text);
+                        for x in &x.scoped_identifier_list {
+                            name.push(x.identifier.identifier_token.token.text);
+                        }
+                        TypeKind::UserDefined(name)
+                    }
+                };
+                let mut width = Vec::new();
+                if let Some(ref x) = x.variable_type_opt {
+                    let x = &x.width;
+                    width.push(*x.expression.clone());
+                    for x in &x.width_list {
+                        width.push(*x.expression.clone());
+                    }
                 }
-                TypeKind::UserDefined(name)
+                Type {
+                    kind,
+                    modifier,
+                    width,
+                    array: vec![],
+                }
             }
-        };
-        let mut width = Vec::new();
-        for x in &value.type_list0 {
-            width.push(*x.width.expression.clone());
+            syntax_tree::ScalarTypeGroup::FixedType(x) => {
+                let x = &x.fixed_type;
+                let kind = match **x {
+                    syntax_tree::FixedType::U32(_) => TypeKind::U32,
+                    syntax_tree::FixedType::U64(_) => TypeKind::U64,
+                    syntax_tree::FixedType::I32(_) => TypeKind::I32,
+                    syntax_tree::FixedType::I64(_) => TypeKind::I64,
+                    syntax_tree::FixedType::F32(_) => TypeKind::F32,
+                    syntax_tree::FixedType::F64(_) => TypeKind::F64,
+                };
+                Type {
+                    kind,
+                    modifier,
+                    width: vec![],
+                    array: vec![],
+                }
+            }
+        }
+    }
+}
+
+impl From<&syntax_tree::ArrayType> for Type {
+    fn from(value: &syntax_tree::ArrayType) -> Self {
+        let scalar_type: Type = value.scalar_type.as_ref().into();
+        let mut array = Vec::new();
+        if let Some(ref x) = value.array_type_opt {
+            let x = &x.array;
+            array.push(*x.expression.clone());
+            for x in &x.array_list {
+                array.push(*x.expression.clone());
+            }
         }
         Type {
-            kind,
-            modifier,
-            width,
+            kind: scalar_type.kind,
+            modifier: scalar_type.modifier,
+            width: scalar_type.width,
+            array,
         }
     }
 }
@@ -344,18 +408,20 @@ impl fmt::Display for Port {
 impl From<&syntax_tree::PortDeclarationItem> for Port {
     fn from(value: &syntax_tree::PortDeclarationItem) -> Self {
         let property = match &*value.port_declaration_item_group {
-            syntax_tree::PortDeclarationItemGroup::DirectionType(x) => {
-                let r#type: Type = x.r#type.as_ref().into();
+            syntax_tree::PortDeclarationItemGroup::DirectionArrayType(x) => {
+                let r#type: Type = x.array_type.as_ref().into();
                 let direction: Direction = x.direction.as_ref().into();
                 PortProperty {
                     r#type: Some(r#type),
                     direction,
                 }
             }
-            syntax_tree::PortDeclarationItemGroup::Interface(_) => PortProperty {
-                r#type: None,
-                direction: Direction::Interface,
-            },
+            syntax_tree::PortDeclarationItemGroup::InterfacePortDeclarationItemOpt(_) => {
+                PortProperty {
+                    r#type: None,
+                    direction: Direction::Interface,
+                }
+            }
         };
         Port {
             name: value.identifier.identifier_token.token.text,
@@ -374,7 +440,13 @@ pub enum ParameterScope {
 pub struct ParameterProperty {
     pub r#type: Type,
     pub scope: ParameterScope,
-    pub value: syntax_tree::Expression,
+    pub value: ParameterValue,
+}
+
+#[derive(Debug, Clone)]
+pub enum ParameterValue {
+    Expression(syntax_tree::Expression),
+    TypeExpression(syntax_tree::TypeExpression),
 }
 
 #[derive(Debug, Clone)]
@@ -396,15 +468,36 @@ impl From<&syntax_tree::WithParameterItem> for Parameter {
             syntax_tree::WithParameterItemGroup::Parameter(_) => ParameterScope::Global,
             syntax_tree::WithParameterItemGroup::Localparam(_) => ParameterScope::Local,
         };
-        let r#type: Type = value.r#type.as_ref().into();
-        let property = ParameterProperty {
-            r#type,
-            scope,
-            value: *value.expression.clone(),
-        };
-        Parameter {
-            name: value.identifier.identifier_token.token.text,
-            property,
+        match &*value.with_parameter_item_group0 {
+            syntax_tree::WithParameterItemGroup0::ArrayTypeEquExpression(x) => {
+                let r#type: Type = x.array_type.as_ref().into();
+                let property = ParameterProperty {
+                    r#type,
+                    scope,
+                    value: ParameterValue::Expression(*x.expression.clone()),
+                };
+                Parameter {
+                    name: value.identifier.identifier_token.token.text,
+                    property,
+                }
+            }
+            syntax_tree::WithParameterItemGroup0::TypeEquTypeExpression(x) => {
+                let r#type: Type = Type {
+                    modifier: vec![],
+                    kind: TypeKind::Type,
+                    width: vec![],
+                    array: vec![],
+                };
+                let property = ParameterProperty {
+                    r#type,
+                    scope,
+                    value: ParameterValue::TypeExpression(*x.type_expression.clone()),
+                };
+                Parameter {
+                    name: value.identifier.identifier_token.token.text,
+                    property,
+                }
+            }
         }
     }
 }

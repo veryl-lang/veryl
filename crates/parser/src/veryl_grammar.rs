@@ -15,14 +15,14 @@ impl VerylGrammar {
 
 impl Display for Veryl {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::result::Result<(), Error> {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
 impl Display for VerylGrammar {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::result::Result<(), Error> {
         match &self.veryl {
-            Some(veryl) => writeln!(f, "{}", veryl),
+            Some(veryl) => writeln!(f, "{veryl}"),
             None => write!(f, "No parse result"),
         }
     }

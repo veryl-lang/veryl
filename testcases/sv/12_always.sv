@@ -1,11 +1,11 @@
 module veryl_testcase_Module12 (
-    input logic  i_clk,
-    input logic  i_rst
+    input logic i_clk,
+    input logic i_rst
 );
-    logic  a ;
-    logic  aa;
-    logic  b ;
-    logic  c ;
+    logic a ;
+    logic aa;
+    logic b ;
+    logic c ;
 
     // always_ff declaration with default polarity
     always_ff @ (posedge i_clk, negedge i_rst) begin

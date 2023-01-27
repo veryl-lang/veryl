@@ -620,7 +620,6 @@ impl Evaluator {
                     }
                 }
             }
-            Factor::BuiltinTypeFactorList(_) => Evaluated::Unknown,
             Factor::LParenExpressionRParen(x) => self.expression(&x.expression),
             Factor::LBraceConcatenationListRBrace(x) => {
                 self.concatenation_list(&x.concatenation_list)

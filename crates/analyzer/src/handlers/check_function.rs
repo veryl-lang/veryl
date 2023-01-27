@@ -49,9 +49,9 @@ impl<'a> VerylGrammarTrait for CheckFunction<'a> {
 
                     let mut args = 0;
                     if let Some(ref x) = x.factor_opt {
-                        if let Some(ref x) = x.factor_opt0 {
+                        if let Some(ref x) = x.function_call.function_call_opt {
                             args += 1;
-                            args += x.function_call_arg.function_call_arg_list.len();
+                            args += x.argument_list.argument_list_list.len();
                         }
                     }
 

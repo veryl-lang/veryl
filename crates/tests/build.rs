@@ -26,8 +26,8 @@ fn main() {
             );
             let file = entry.path().file_stem().unwrap().to_string_lossy();
             let _ = writeln!(out_test, "#[test]");
-            let _ = writeln!(out_test, "fn test_{}() {{", file);
-            let _ = writeln!(out_test, "    test(\"{}\");", file);
+            let _ = writeln!(out_test, "fn test_{file}() {{");
+            let _ = writeln!(out_test, "    test(\"{file}\");");
             let _ = writeln!(out_test, "}}");
         }
     }
@@ -35,7 +35,7 @@ fn main() {
     let _ = writeln!(out_test, "#[allow(dead_code)]");
     let _ = writeln!(out_test, "const TESTCASES: [&str; {}] = [", testcases.len());
     for testcase in testcases {
-        let _ = writeln!(out_test, "    r\"{}\",", testcase);
+        let _ = writeln!(out_test, "    r\"{testcase}\",");
     }
     let _ = writeln!(out_test, "];");
 }

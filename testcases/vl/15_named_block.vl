@@ -1,11 +1,11 @@
 module Module15 {
-    var _a: logic ;
+    var _a: logic;
 
     :label {
-        var _a: logic ;
+        var _a: logic;
     }
 
     :label1 {
-        var _a: logic ;
+        var _a: logic;
     }
 }

@@ -1,8 +1,8 @@
 module veryl_testcase_Module20;
-    logic  a;
-    logic  b;
-    logic  x;
-    logic  y;
+    logic a;
+    logic b;
+    logic x;
+    logic y;
 
     assign a = ((x) ? (
         1

@@ -3,7 +3,7 @@ module veryl_testcase_Module09;
     typedef struct {
         logic        [10-1:0] a  ;
         logic        [10-1:0] aa ;
-        int unsigned         aaa ;
+        int unsigned          aaa;
     } A;
 
     // enum declaration
@@ -13,8 +13,8 @@ module veryl_testcase_Module09;
         B_Z
     } B;
 
-    A a ;
-    B b ;
+    A a;
+    B b;
 
     assign a.a = 1;
     assign b   = B_X;

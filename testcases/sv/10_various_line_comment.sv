@@ -4,10 +4,10 @@ module //a
 
     input //a
      logic //a
-      i_clk // a
+     i_clk // a
     ,
-    input logic  i_rst_n,
-    input logic  i_up   ,
+    input logic i_rst_n,
+    input logic i_up   ,
 
     input  logic         i_down ,
     output logic [8-1:0] o_count

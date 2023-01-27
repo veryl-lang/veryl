@@ -20,7 +20,7 @@ impl NamespaceTable {
     }
 
     pub fn dump(&self) -> String {
-        format!("{}", self)
+        format!("{self}")
     }
 
     pub fn drop(&mut self, file_path: PathId) {
@@ -57,7 +57,7 @@ impl fmt::Display for NamespaceTable {
         let mut vec: Vec<_> = self.table.iter().collect();
         vec.sort_by(|x, y| x.0.cmp(y.0));
         for (k, v) in &vec {
-            id_witdh = id_witdh.max(format!("{}", k).len());
+            id_witdh = id_witdh.max(format!("{k}").len());
             namespace_width = namespace_width.max(format!("{}", v.0).len());
         }
         for (k, v) in &vec {

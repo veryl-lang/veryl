@@ -27,7 +27,7 @@ fn main() {
     if let Some(sub_args) = matches.subcommand_matches("supports") {
         handle_supports(&preprocessor, sub_args);
     } else if let Err(e) = handle_preprocessing(&preprocessor) {
-        eprintln!("{}", e);
+        eprintln!("{e}");
         process::exit(1);
     }
 }
@@ -115,7 +115,7 @@ impl Preprocessor for Veryl {
                                 let ret = veryl_parser::Parser::parse(&x, &"");
                                 let (line, col) = lookup.get(range.start);
                                 if ret.is_err() {
-                                    eprintln!("veryl parse failed : {}:{}:{}", path, line, col);
+                                    eprintln!("veryl parse failed : {path}:{line}:{col}");
                                     total_success = false;
                                     chapter_success = false;
                                 }
@@ -125,9 +125,9 @@ impl Preprocessor for Veryl {
                     }
                 }
                 if chapter_skip {
-                    eprintln!("veryl parse skipped: {}", path);
+                    eprintln!("veryl parse skipped: {path}");
                 } else if chapter_success {
-                    eprintln!("veryl parse success: {}", path);
+                    eprintln!("veryl parse success: {path}");
                 }
                 for (code_block, replaced_code) in code_blocks {
                     chapter.content = chapter.content.replace(&code_block, &replaced_code);

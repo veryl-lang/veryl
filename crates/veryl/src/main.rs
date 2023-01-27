@@ -153,7 +153,7 @@ fn main() -> Result<ExitCode> {
                 "{} {}{}",
                 style.apply_to(format!("[{:<5}]", record.level())),
                 " ".repeat(
-                    12 - format!("{}", message)
+                    12 - format!("{message}")
                         .split_ascii_whitespace()
                         .next()
                         .unwrap()

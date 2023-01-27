@@ -1,14 +1,14 @@
 module Module03 {
-    var a         : logic ;
-    var aa        : logic ;
-    var aaa       : logic ;
-    var aaaa      : logic ;
-    var aaaaa     : logic ;
-    var aaaaaa    : logic ;
-    var aaaaaaa   : logic ;
-    var aaaaaaaa  : logic ;
-    var aaaaaaaaa : logic ;
-    var aaaaaaaaaa: logic ;
+    var a         : logic;
+    var aa        : logic;
+    var aaa       : logic;
+    var aaaa      : logic;
+    var aaaaa     : logic;
+    var aaaaaa    : logic;
+    var aaaaaaa   : logic;
+    var aaaaaaaa  : logic;
+    var aaaaaaaaa : logic;
+    var aaaaaaaaaa: logic;
 
     // unary arithmetic
     assign a  = +1;

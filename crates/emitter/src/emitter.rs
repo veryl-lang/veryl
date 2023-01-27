@@ -30,6 +30,7 @@ pub struct Emitter {
     in_function: bool,
     in_generate: bool,
     in_direction_modport: bool,
+    signed: bool,
     reset_signal: Option<String>,
     default_block: Option<String>,
     enum_name: Option<String>,
@@ -56,6 +57,7 @@ impl Default for Emitter {
             in_function: false,
             in_generate: false,
             in_direction_modport: false,
+            signed: false,
             reset_signal: None,
             default_block: None,
             enum_name: None,
@@ -211,65 +213,6 @@ impl Emitter {
         self.process_token(x, false, Some(i))
     }
 
-    fn type_left(&mut self, input: &Type) {
-        for x in &input.type_list {
-            if let TypeModifier::Tri(x) = &*x.type_modifier {
-                self.tri(&x.tri);
-                self.space(1);
-            }
-        }
-        match &*input.type_group {
-            TypeGroup::BuiltinType(x) => {
-                let (width, token) = match &*x.builtin_type {
-                    BuiltinType::Logic(x) => (true, x.logic.logic_token.clone()),
-                    BuiltinType::Bit(x) => (true, x.bit.bit_token.clone()),
-                    BuiltinType::U32(x) => (false, x.u32.u32_token.replace("int unsigned")),
-                    BuiltinType::U64(x) => (false, x.u64.u64_token.replace("longint unsigned")),
-                    BuiltinType::I32(x) => (false, x.i32.i32_token.replace("int signed")),
-                    BuiltinType::I64(x) => (false, x.i64.i64_token.replace("longint signed")),
-                    BuiltinType::F32(x) => (false, x.f32.f32_token.replace("shortreal")),
-                    BuiltinType::F64(x) => (false, x.f64.f64_token.replace("real")),
-                };
-                self.token(&token);
-                for x in &input.type_list {
-                    if let TypeModifier::Signed(x) = &*x.type_modifier {
-                        self.space(1);
-                        self.signed(&x.signed);
-                    }
-                }
-                if width {
-                    self.space(1);
-                    for x in &input.type_list0 {
-                        self.width(&x.width);
-                    }
-                }
-            }
-            TypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
-        }
-    }
-
-    fn type_right(&mut self, input: &Type) {
-        let width = match &*input.type_group {
-            TypeGroup::BuiltinType(x) => match &*x.builtin_type {
-                BuiltinType::Logic(_) => false,
-                BuiltinType::Bit(_) => false,
-                BuiltinType::U32(_) => true,
-                BuiltinType::U64(_) => true,
-                BuiltinType::I32(_) => true,
-                BuiltinType::I64(_) => true,
-                BuiltinType::F32(_) => true,
-                BuiltinType::F64(_) => true,
-            },
-            TypeGroup::ScopedIdentifier(_) => true,
-        };
-        if width {
-            self.space(1);
-            for x in &input.type_list0 {
-                self.width(&x.width);
-            }
-        }
-    }
-
     fn always_ff_reset_exist_in_sensitivity_list(&mut self, arg: &AlwaysFfReset) -> bool {
         if let Some(ref x) = arg.always_ff_reset_opt {
             match &*x.always_ff_reset_opt_group {
@@ -311,6 +254,36 @@ impl VerylWalker for Emitter {
         } else {
             self.veryl_token(&arg.comma_token);
         }
+    }
+
+    /// Semantic action for non-terminal 'F32'
+    fn f32(&mut self, arg: &F32) {
+        self.veryl_token(&arg.f32_token.replace("shortreal"));
+    }
+
+    /// Semantic action for non-terminal 'F64'
+    fn f64(&mut self, arg: &F64) {
+        self.veryl_token(&arg.f64_token.replace("real"));
+    }
+
+    /// Semantic action for non-terminal 'I32'
+    fn i32(&mut self, arg: &I32) {
+        self.veryl_token(&arg.i32_token.replace("int signed"));
+    }
+
+    /// Semantic action for non-terminal 'I64'
+    fn i64(&mut self, arg: &I64) {
+        self.veryl_token(&arg.i64_token.replace("longint signed"));
+    }
+
+    /// Semantic action for non-terminal 'U32'
+    fn u32(&mut self, arg: &U32) {
+        self.veryl_token(&arg.u32_token.replace("int unsigned"));
+    }
+
+    /// Semantic action for non-terminal 'U64'
+    fn u64(&mut self, arg: &U64) {
+        self.veryl_token(&arg.u64_token.replace("longint unsigned"));
     }
 
     /// Semantic action for non-terminal 'Operator07'
@@ -517,15 +490,15 @@ impl VerylWalker for Emitter {
         }
     }
 
-    /// Semantic action for non-terminal 'FunctionCallArg'
-    fn function_call_arg(&mut self, arg: &FunctionCallArg) {
-        self.expression(&arg.expression);
-        for x in &arg.function_call_arg_list {
+    /// Semantic action for non-terminal 'ArgumentList'
+    fn argument_list(&mut self, arg: &ArgumentList) {
+        self.argument_item(&arg.argument_item);
+        for x in &arg.argument_list_list {
             self.comma(&x.comma);
             self.space(1);
-            self.expression(&x.expression);
+            self.argument_item(&x.argument_item);
         }
-        if let Some(ref x) = arg.function_call_arg_opt {
+        if let Some(ref x) = arg.argument_list_opt {
             self.comma(&x.comma);
         }
     }
@@ -647,14 +620,69 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Width'
     fn width(&mut self, arg: &Width) {
+        self.token(&arg.l_angle.l_angle_token.replace("["));
+        self.expression(&arg.expression);
+        self.str("-1:0");
+        for x in &arg.width_list {
+            self.token(&x.comma.comma_token.replace("]["));
+            self.expression(&x.expression);
+            self.str("-1:0");
+        }
+        self.token(&arg.r_angle.r_angle_token.replace("]"));
+    }
+
+    /// Semantic action for non-terminal 'Array'
+    fn array(&mut self, arg: &Array) {
         self.l_bracket(&arg.l_bracket);
         self.expression(&arg.expression);
         self.str("-1:0");
+        for x in &arg.array_list {
+            self.token(&x.comma.comma_token.replace("]["));
+            self.expression(&x.expression);
+            self.str("-1:0");
+        }
         self.r_bracket(&arg.r_bracket);
     }
 
-    /// Semantic action for non-terminal 'Type'
-    fn r#type(&mut self, _arg: &Type) {}
+    /// Semantic action for non-terminal 'VariableType'
+    fn variable_type(&mut self, arg: &VariableType) {
+        match &*arg.variable_type_group {
+            VariableTypeGroup::Logic(x) => self.logic(&x.logic),
+            VariableTypeGroup::Bit(x) => self.bit(&x.bit),
+            VariableTypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
+        };
+        if self.signed {
+            self.space(1);
+            self.str("signed");
+        }
+        if let Some(ref x) = arg.variable_type_opt {
+            self.space(1);
+            self.width(&x.width);
+        }
+    }
+
+    /// Semantic action for non-terminal 'TypeModifier'
+    fn type_modifier(&mut self, arg: &TypeModifier) {
+        match arg {
+            TypeModifier::Tri(x) => {
+                self.tri(&x.tri);
+                self.space(1);
+            }
+            TypeModifier::Signed(_) => self.signed = true,
+        }
+    }
+
+    /// Semantic action for non-terminal 'ScalarType'
+    fn scalar_type(&mut self, arg: &ScalarType) {
+        for x in &arg.scalar_type_list {
+            self.type_modifier(&x.type_modifier);
+        }
+        match &*arg.scalar_type_group {
+            ScalarTypeGroup::VariableType(x) => self.variable_type(&x.variable_type),
+            ScalarTypeGroup::FixedType(x) => self.fixed_type(&x.fixed_type),
+        }
+        self.signed = false;
+    }
 
     /// Semantic action for non-terminal 'AssignmentStatement'
     fn assignment_statement(&mut self, arg: &AssignmentStatement) {
@@ -827,10 +855,9 @@ impl VerylWalker for Emitter {
         self.r#for(&arg.r#for);
         self.space(1);
         self.str("(");
-        self.type_left(&arg.r#type);
+        self.scalar_type(&arg.scalar_type);
         self.space(1);
         self.identifier(&arg.identifier);
-        self.type_right(&arg.r#type);
         self.space(1);
         self.str("=");
         self.space(1);
@@ -964,10 +991,13 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'VarDeclaration'
     fn var_declaration(&mut self, arg: &VarDeclaration) {
-        self.type_left(&arg.r#type);
+        self.scalar_type(&arg.array_type.scalar_type);
         self.space(1);
         self.identifier(&arg.identifier);
-        self.type_right(&arg.r#type);
+        if let Some(ref x) = arg.array_type.array_type_opt {
+            self.space(1);
+            self.array(&x.array);
+        }
         if let Some(ref x) = arg.var_declaration_opt {
             self.str(";");
             self.newline();
@@ -988,14 +1018,30 @@ impl VerylWalker for Emitter {
     fn localparam_declaration(&mut self, arg: &LocalparamDeclaration) {
         self.localparam(&arg.localparam);
         self.space(1);
-        self.type_left(&arg.r#type);
-        self.space(1);
-        self.identifier(&arg.identifier);
-        self.type_right(&arg.r#type);
-        self.space(1);
-        self.equ(&arg.equ);
-        self.space(1);
-        self.expression(&arg.expression);
+        match &*arg.localparam_declaration_group {
+            LocalparamDeclarationGroup::ArrayTypeEquExpression(x) => {
+                self.scalar_type(&x.array_type.scalar_type);
+                self.space(1);
+                self.identifier(&arg.identifier);
+                if let Some(ref x) = x.array_type.array_type_opt {
+                    self.space(1);
+                    self.array(&x.array);
+                }
+                self.space(1);
+                self.equ(&x.equ);
+                self.space(1);
+                self.expression(&x.expression);
+            }
+            LocalparamDeclarationGroup::TypeEquTypeExpression(x) => {
+                self.r#type(&x.r#type);
+                self.space(1);
+                self.identifier(&arg.identifier);
+                self.space(1);
+                self.equ(&x.equ);
+                self.space(1);
+                self.type_expression(&x.type_expression);
+            }
+        }
         self.semicolon(&arg.semicolon);
     }
 
@@ -1177,8 +1223,7 @@ impl VerylWalker for Emitter {
         self.space(1);
         self.r#enum(&arg.r#enum);
         self.space(1);
-        self.type_left(&arg.r#type);
-        self.type_right(&arg.r#type);
+        self.scalar_type(&arg.scalar_type);
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
@@ -1283,10 +1328,9 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'StructItem'
     fn struct_item(&mut self, arg: &StructItem) {
-        self.type_left(&arg.r#type);
+        self.scalar_type(&arg.scalar_type);
         self.space(1);
         self.identifier(&arg.identifier);
-        self.type_right(&arg.r#type);
     }
 
     /// Semantic action for non-terminal 'InstDeclaration'
@@ -1313,7 +1357,7 @@ impl VerylWalker for Emitter {
         self.identifier(&arg.identifier);
         if let Some(ref x) = arg.inst_declaration_opt {
             self.space(1);
-            self.width(&x.width);
+            self.array(&x.array);
         }
         self.space(1);
         if let Some(ref x) = arg.inst_declaration_opt1 {
@@ -1497,14 +1541,30 @@ impl VerylWalker for Emitter {
             WithParameterItemGroup::Localparam(x) => self.localparam(&x.localparam),
         };
         self.space(1);
-        self.type_left(&arg.r#type);
-        self.space(1);
-        self.identifier(&arg.identifier);
-        self.type_right(&arg.r#type);
-        self.space(1);
-        self.equ(&arg.equ);
-        self.space(1);
-        self.expression(&arg.expression);
+        match &*arg.with_parameter_item_group0 {
+            WithParameterItemGroup0::ArrayTypeEquExpression(x) => {
+                self.scalar_type(&x.array_type.scalar_type);
+                self.space(1);
+                self.identifier(&arg.identifier);
+                if let Some(ref x) = x.array_type.array_type_opt {
+                    self.space(1);
+                    self.array(&x.array);
+                }
+                self.space(1);
+                self.equ(&x.equ);
+                self.space(1);
+                self.expression(&x.expression);
+            }
+            WithParameterItemGroup0::TypeEquTypeExpression(x) => {
+                self.r#type(&x.r#type);
+                self.space(1);
+                self.identifier(&arg.identifier);
+                self.space(1);
+                self.equ(&x.equ);
+                self.space(1);
+                self.type_expression(&x.type_expression);
+            }
+        }
     }
 
     /// Semantic action for non-terminal 'PortDeclaration'
@@ -1555,23 +1615,30 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'PortDeclarationItem'
     fn port_declaration_item(&mut self, arg: &PortDeclarationItem) {
         match &*arg.port_declaration_item_group {
-            PortDeclarationItemGroup::DirectionType(x) => {
+            PortDeclarationItemGroup::DirectionArrayType(x) => {
                 self.direction(&x.direction);
                 if let Direction::Modport(_) = *x.direction {
                     self.in_direction_modport = true;
                 } else {
                     self.space(1);
                 }
-                self.r#type_left(&x.r#type);
+                self.scalar_type(&x.array_type.scalar_type);
                 self.space(1);
                 self.identifier(&arg.identifier);
-                self.r#type_right(&x.r#type);
+                if let Some(ref x) = x.array_type.array_type_opt {
+                    self.space(1);
+                    self.array(&x.array);
+                }
                 self.in_direction_modport = false;
             }
-            PortDeclarationItemGroup::Interface(x) => {
+            PortDeclarationItemGroup::InterfacePortDeclarationItemOpt(x) => {
                 self.interface(&x.interface);
                 self.space(1);
                 self.identifier(&arg.identifier);
+                if let Some(ref x) = x.port_declaration_item_opt {
+                    self.space(1);
+                    self.array(&x.array);
+                }
             }
         }
     }
@@ -1603,8 +1670,7 @@ impl VerylWalker for Emitter {
         self.space(1);
         self.str("automatic");
         self.space(1);
-        self.type_left(&arg.r#type);
-        self.type_right(&arg.r#type);
+        self.scalar_type(&arg.scalar_type);
         self.space(1);
         self.identifier(&arg.identifier);
         if let Some(ref x) = arg.function_declaration_opt0 {

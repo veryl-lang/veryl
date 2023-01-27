@@ -223,6 +223,13 @@ pub trait VerylWalker {
         after!(self, hash, arg);
     }
 
+    /// Semantic action for non-terminal 'LAngle'
+    fn l_angle(&mut self, arg: &LAngle) {
+        before!(self, l_angle, arg);
+        self.veryl_token(&arg.l_angle_token);
+        after!(self, l_angle, arg);
+    }
+
     /// Semantic action for non-terminal 'LBrace'
     fn l_brace(&mut self, arg: &LBrace) {
         before!(self, l_brace, arg);
@@ -263,6 +270,13 @@ pub trait VerylWalker {
         before!(self, plus_colon, arg);
         self.veryl_token(&arg.plus_colon_token);
         after!(self, plus_colon, arg);
+    }
+
+    /// Semantic action for non-terminal 'RAngle'
+    fn r_angle(&mut self, arg: &RAngle) {
+        before!(self, r_angle, arg);
+        self.veryl_token(&arg.r_angle_token);
+        after!(self, r_angle, arg);
     }
 
     /// Semantic action for non-terminal 'RBrace'
@@ -608,6 +622,13 @@ pub trait VerylWalker {
         after!(self, tri, arg);
     }
 
+    /// Semantic action for non-terminal 'Type'
+    fn r#type(&mut self, arg: &Type) {
+        before!(self, r#type, arg);
+        self.veryl_token(&arg.type_token);
+        after!(self, r#type, arg);
+    }
+
     /// Semantic action for non-terminal 'U32'
     fn u32(&mut self, arg: &U32) {
         before!(self, u32, arg);
@@ -886,17 +907,7 @@ pub trait VerylWalker {
             Factor::ExpressionIdentifierFactorOpt(x) => {
                 self.expression_identifier(&x.expression_identifier);
                 if let Some(ref x) = x.factor_opt {
-                    self.l_paren(&x.l_paren);
-                    if let Some(ref x) = x.factor_opt0 {
-                        self.function_call_arg(&x.function_call_arg);
-                    }
-                    self.r_paren(&x.r_paren);
-                }
-            }
-            Factor::BuiltinTypeFactorList(x) => {
-                self.builtin_type(&x.builtin_type);
-                for x in &x.factor_list {
-                    self.width(&x.width);
+                    self.function_call(&x.function_call);
                 }
             }
             Factor::LParenExpressionRParen(x) => {
@@ -919,18 +930,36 @@ pub trait VerylWalker {
         after!(self, factor, arg);
     }
 
-    /// Semantic action for non-terminal 'FunctionCallArg'
-    fn function_call_arg(&mut self, arg: &FunctionCallArg) {
-        before!(self, function_call_arg, arg);
+    /// Semantic action for non-terminal 'FunctionCall'
+    fn function_call(&mut self, arg: &FunctionCall) {
+        before!(self, function_call, arg);
+        self.l_paren(&arg.l_paren);
+        if let Some(ref x) = arg.function_call_opt {
+            self.argument_list(&x.argument_list);
+        }
+        self.r_paren(&arg.r_paren);
+        after!(self, function_call, arg);
+    }
+
+    /// Semantic action for non-terminal 'ArgumentList'
+    fn argument_list(&mut self, arg: &ArgumentList) {
+        before!(self, argument_list, arg);
+        self.argument_item(&arg.argument_item);
+        for x in &arg.argument_list_list {
+            self.comma(&x.comma);
+            self.argument_item(&x.argument_item);
+        }
+        if let Some(ref x) = arg.argument_list_opt {
+            self.comma(&x.comma);
+        }
+        after!(self, argument_list, arg);
+    }
+
+    /// Semantic action for non-terminal 'ArgumentItem'
+    fn argument_item(&mut self, arg: &ArgumentItem) {
+        before!(self, argument_item, arg);
         self.expression(&arg.expression);
-        for x in &arg.function_call_arg_list {
-            self.comma(&x.comma);
-            self.expression(&x.expression);
-        }
-        if let Some(ref x) = arg.function_call_arg_opt {
-            self.comma(&x.comma);
-        }
-        after!(self, function_call_arg, arg);
+        after!(self, argument_item, arg);
     }
 
     /// Semantic action for non-terminal 'ConcatenationList'
@@ -1007,6 +1036,21 @@ pub trait VerylWalker {
         after!(self, case_expression, arg);
     }
 
+    /// Semantic action for non-terminal 'TypeExpression'
+    fn type_expression(&mut self, arg: &TypeExpression) {
+        before!(self, type_expression, arg);
+        match arg {
+            TypeExpression::ScalarType(x) => self.scalar_type(&x.scalar_type),
+            TypeExpression::TypeLParenExpressionRParen(x) => {
+                self.r#type(&x.r#type);
+                self.l_paren(&x.l_paren);
+                self.expression(&x.expression);
+                self.r_paren(&x.r_paren);
+            }
+        }
+        after!(self, type_expression, arg);
+    }
+
     /// Semantic action for non-terminal 'Range'
     fn range(&mut self, arg: &Range) {
         before!(self, range, arg);
@@ -1035,26 +1079,55 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'Width'
     fn width(&mut self, arg: &Width) {
         before!(self, width, arg);
-        self.l_bracket(&arg.l_bracket);
+        self.l_angle(&arg.l_angle);
         self.expression(&arg.expression);
-        self.r_bracket(&arg.r_bracket);
+        for x in &arg.width_list {
+            self.comma(&x.comma);
+            self.expression(&x.expression);
+        }
+        self.r_angle(&arg.r_angle);
         after!(self, width, arg);
     }
 
-    /// Semantic action for non-terminal 'BuiltinType'
-    fn builtin_type(&mut self, arg: &BuiltinType) {
-        before!(self, builtin_type, arg);
+    /// Semantic action for non-terminal 'Array'
+    fn array(&mut self, arg: &Array) {
+        before!(self, array, arg);
+        self.l_bracket(&arg.l_bracket);
+        self.expression(&arg.expression);
+        for x in &arg.array_list {
+            self.comma(&x.comma);
+            self.expression(&x.expression);
+        }
+        self.r_bracket(&arg.r_bracket);
+        after!(self, array, arg);
+    }
+
+    /// Semantic action for non-terminal 'FixedType'
+    fn fixed_type(&mut self, arg: &FixedType) {
+        before!(self, fixed_type, arg);
         match arg {
-            BuiltinType::Logic(x) => self.logic(&x.logic),
-            BuiltinType::Bit(x) => self.bit(&x.bit),
-            BuiltinType::U32(x) => self.u32(&x.u32),
-            BuiltinType::U64(x) => self.u64(&x.u64),
-            BuiltinType::I32(x) => self.i32(&x.i32),
-            BuiltinType::I64(x) => self.i64(&x.i64),
-            BuiltinType::F32(x) => self.f32(&x.f32),
-            BuiltinType::F64(x) => self.f64(&x.f64),
+            FixedType::U32(x) => self.u32(&x.u32),
+            FixedType::U64(x) => self.u64(&x.u64),
+            FixedType::I32(x) => self.i32(&x.i32),
+            FixedType::I64(x) => self.i64(&x.i64),
+            FixedType::F32(x) => self.f32(&x.f32),
+            FixedType::F64(x) => self.f64(&x.f64),
         };
-        after!(self, builtin_type, arg);
+        after!(self, fixed_type, arg);
+    }
+
+    /// Semantic action for non-terminal 'VariableType'
+    fn variable_type(&mut self, arg: &VariableType) {
+        before!(self, variable_type, arg);
+        match &*arg.variable_type_group {
+            VariableTypeGroup::Logic(x) => self.logic(&x.logic),
+            VariableTypeGroup::Bit(x) => self.bit(&x.bit),
+            VariableTypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
+        };
+        if let Some(ref x) = arg.variable_type_opt {
+            self.width(&x.width);
+        }
+        after!(self, variable_type, arg);
     }
 
     /// Semantic action for non-terminal 'TypeModifier'
@@ -1067,20 +1140,27 @@ pub trait VerylWalker {
         after!(self, type_modifier, arg);
     }
 
-    /// Semantic action for non-terminal 'Type'
-    fn r#type(&mut self, arg: &Type) {
-        before!(self, r#type, arg);
-        for x in &arg.type_list {
+    /// Semantic action for non-terminal 'ScalarType'
+    fn scalar_type(&mut self, arg: &ScalarType) {
+        before!(self, scalar_type, arg);
+        for x in &arg.scalar_type_list {
             self.type_modifier(&x.type_modifier);
         }
-        match &*arg.type_group {
-            TypeGroup::BuiltinType(x) => self.builtin_type(&x.builtin_type),
-            TypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
-        };
-        for x in &arg.type_list0 {
-            self.width(&x.width);
+        match &*arg.scalar_type_group {
+            ScalarTypeGroup::VariableType(x) => self.variable_type(&x.variable_type),
+            ScalarTypeGroup::FixedType(x) => self.fixed_type(&x.fixed_type),
         }
-        after!(self, r#type, arg);
+        after!(self, scalar_type, arg);
+    }
+
+    /// Semantic action for non-terminal 'ArrayType'
+    fn array_type(&mut self, arg: &ArrayType) {
+        before!(self, array_type, arg);
+        self.scalar_type(&arg.scalar_type);
+        if let Some(ref x) = arg.array_type_opt {
+            self.array(&x.array);
+        }
+        after!(self, array_type, arg);
     }
 
     /// Semantic action for non-terminal 'Statement'
@@ -1188,7 +1268,7 @@ pub trait VerylWalker {
         self.r#for(&arg.r#for);
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
-        self.r#type(&arg.r#type);
+        self.scalar_type(&arg.scalar_type);
         self.r#in(&arg.r#in);
         self.expression(&arg.expression);
         self.dot_dot(&arg.dot_dot);
@@ -1285,7 +1365,7 @@ pub trait VerylWalker {
         self.var(&arg.var);
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
-        self.r#type(&arg.r#type);
+        self.array_type(&arg.array_type);
         if let Some(ref x) = arg.var_declaration_opt {
             self.equ(&x.equ);
             self.expression(&x.expression);
@@ -1300,9 +1380,18 @@ pub trait VerylWalker {
         self.localparam(&arg.localparam);
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
-        self.r#type(&arg.r#type);
-        self.equ(&arg.equ);
-        self.expression(&arg.expression);
+        match &*arg.localparam_declaration_group {
+            LocalparamDeclarationGroup::ArrayTypeEquExpression(x) => {
+                self.array_type(&x.array_type);
+                self.equ(&x.equ);
+                self.expression(&x.expression);
+            }
+            LocalparamDeclarationGroup::TypeEquTypeExpression(x) => {
+                self.r#type(&x.r#type);
+                self.equ(&x.equ);
+                self.type_expression(&x.type_expression);
+            }
+        }
         self.semicolon(&arg.semicolon);
         after!(self, localparam_declaration, arg);
     }
@@ -1434,7 +1523,7 @@ pub trait VerylWalker {
         self.r#enum(&arg.r#enum);
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
-        self.r#type(&arg.r#type);
+        self.scalar_type(&arg.scalar_type);
         self.l_brace(&arg.l_brace);
         self.enum_list(&arg.enum_list);
         self.r_brace(&arg.r_brace);
@@ -1530,7 +1619,7 @@ pub trait VerylWalker {
         before!(self, struct_item, arg);
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
-        self.r#type(&arg.r#type);
+        self.scalar_type(&arg.scalar_type);
         after!(self, struct_item, arg);
     }
 
@@ -1542,7 +1631,7 @@ pub trait VerylWalker {
         self.colon(&arg.colon);
         self.scoped_identifier(&arg.scoped_identifier);
         if let Some(ref x) = arg.inst_declaration_opt {
-            self.width(&x.width);
+            self.array(&x.array);
         }
         if let Some(ref x) = arg.inst_declaration_opt0 {
             self.inst_parameter(&x.inst_parameter);
@@ -1710,9 +1799,18 @@ pub trait VerylWalker {
         };
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
-        self.r#type(&arg.r#type);
-        self.equ(&arg.equ);
-        self.expression(&arg.expression);
+        match &*arg.with_parameter_item_group0 {
+            WithParameterItemGroup0::ArrayTypeEquExpression(x) => {
+                self.array_type(&x.array_type);
+                self.equ(&x.equ);
+                self.expression(&x.expression);
+            }
+            WithParameterItemGroup0::TypeEquTypeExpression(x) => {
+                self.r#type(&x.r#type);
+                self.equ(&x.equ);
+                self.type_expression(&x.type_expression);
+            }
+        }
         after!(self, with_parameter_item, arg);
     }
 
@@ -1766,11 +1864,16 @@ pub trait VerylWalker {
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
         match &*arg.port_declaration_item_group {
-            PortDeclarationItemGroup::DirectionType(x) => {
+            PortDeclarationItemGroup::DirectionArrayType(x) => {
                 self.direction(&x.direction);
-                self.r#type(&x.r#type);
+                self.array_type(&x.array_type);
             }
-            PortDeclarationItemGroup::Interface(x) => self.interface(&x.interface),
+            PortDeclarationItemGroup::InterfacePortDeclarationItemOpt(x) => {
+                self.interface(&x.interface);
+                if let Some(ref x) = x.port_declaration_item_opt {
+                    self.array(&x.array);
+                }
+            }
         }
         after!(self, port_declaration_item, arg);
     }
@@ -1800,7 +1903,7 @@ pub trait VerylWalker {
             self.port_declaration(&x.port_declaration);
         }
         self.minus_g_t(&arg.minus_g_t);
-        self.r#type(&arg.r#type);
+        self.scalar_type(&arg.scalar_type);
         self.l_brace(&arg.l_brace);
         for x in &arg.function_declaration_list {
             self.function_item(&x.function_item);

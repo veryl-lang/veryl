@@ -120,15 +120,15 @@ fn r#type() {
     success("var a: f64;");
     success("var a: a::a;");
 
-    success("var a: logic[10][10];");
-    success("var a: bit[10][10];");
-    success("var a: u32[10][10];");
-    success("var a: u64[10][10];");
-    success("var a: i32[10][10];");
-    success("var a: i64[10][10];");
-    success("var a: f32[10][10];");
-    success("var a: f64[10][10];");
-    success("var a: a::a[10][10];");
+    success("var a: logic<10, 10>;");
+    success("var a: bit<10, 10>;");
+    success("var a: u32[10, 10];");
+    success("var a: u64[10, 10];");
+    success("var a: i32[10, 10];");
+    success("var a: i64[10, 10];");
+    success("var a: f32[10, 10];");
+    success("var a: f64[10, 10];");
+    success("var a: a::a<10, 10>;");
 }
 
 #[test]

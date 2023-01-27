@@ -1,13 +1,13 @@
 module Module06 {
-    localparam ParamX: u32  = 1;
+    localparam ParamX: u32 = 1;
 
     // function without parameter
     function FuncA (
-        a: input  logic [ParamX],
-        b: output logic [ParamX],
-        c: ref    logic [ParamX],
-    ) -> logic [ParamX] {
-        var d: u32  = 1;
+        a: input  logic<ParamX>,
+        b: output logic<ParamX>,
+        c: ref    logic<ParamX>,
+    ) -> logic<ParamX> {
+        var d: u32 = 1;
         b = a + 1 + d;
         c = a / 1;
         return a + 2;
@@ -15,21 +15,21 @@ module Module06 {
 
     // function with parameter
     function FuncB #(
-        parameter ParamX: u32  = 1,
+        parameter ParamX: u32 = 1,
     ) (
-        a: input  logic [ParamX],
-        b: output logic [ParamX],
-        c: ref    logic [ParamX],
-    ) -> logic [ParamX] {
+        a: input  logic<ParamX>,
+        b: output logic<ParamX>,
+        c: ref    logic<ParamX>,
+    ) -> logic<ParamX> {
         b = a + 1;
         c = a / 1;
         return a + 2;
     }
 
-    var a: logic [ParamX];
-    var b: logic [ParamX];
-    var c: logic [ParamX];
-    var d: logic [ParamX];
+    var a: logic<ParamX>;
+    var b: logic<ParamX>;
+    var c: logic<ParamX>;
+    var d: logic<ParamX>;
 
     // function call
     assign d = FuncA(a, b, c);

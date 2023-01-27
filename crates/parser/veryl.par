@@ -44,9 +44,11 @@ DotDotTerm            : '..'                                                    
 DotTerm               : '.'                                                                                   : Token;
 EquTerm               : '='                                                                                   : Token;
 HashTerm              : '#'                                                                                   : Token;
+LAngleTerm            : '<'                                                                                   : Token;
 LBraceTerm            : '{'                                                                                   : Token;
 LBracketTerm          : '['                                                                                   : Token;
 LParenTerm            : '('                                                                                   : Token;
+RAngleTerm            : '>'                                                                                   : Token;
 RBraceTerm            : '}'                                                                                   : Token;
 RBracketTerm          : ']'                                                                                   : Token;
 RParenTerm            : ')'                                                                                   : Token;
@@ -96,6 +98,7 @@ StructTerm            : /\bstruct\b/                                            
 SyncHighTerm          : /\bsync_high\b/                                                                       : Token;
 SyncLowTerm           : /\bsync_low\b/                                                                        : Token;
 TriTerm               : /\btri\b/                                                                             : Token;
+TypeTerm              : /\btype\b/                                                                            : Token;
 U32Term               : /\bu32\b/                                                                             : Token;
 U64Term               : /\bu64\b/                                                                             : Token;
 VarTerm               : /\bvar\b/                                                                             : Token;
@@ -139,12 +142,14 @@ DotDotToken    : DotDotTerm    : Token Comments;
 DotToken       : DotTerm       : Token Comments;
 EquToken       : EquTerm       : Token Comments;
 HashToken      : HashTerm      : Token Comments;
+LAngleToken    : LAngleTerm    : Token Comments;
 LBraceToken    : LBraceTerm    : Token Comments;
 LBracketToken  : LBracketTerm  : Token Comments;
 LParenToken    : LParenTerm    : Token Comments;
 MinusColonToken: MinusColonTerm: Token Comments;
 MinusGTToken   : MinusGTTerm   : Token Comments;
 PlusColonToken : PlusColonTerm : Token Comments;
+RAngleToken    : RAngleTerm    : Token Comments;
 RBraceToken    : RBraceTerm    : Token Comments;
 RBracketToken  : RBracketTerm  : Token Comments;
 RParenToken    : RParenTerm    : Token Comments;
@@ -195,6 +200,7 @@ StructToken    : StructTerm    : Token Comments;
 SyncHighToken  : SyncHighTerm  : Token Comments;
 SyncLowToken   : SyncLowTerm   : Token Comments;
 TriToken       : TriTerm       : Token Comments;
+TypeToken      : TypeTerm      : Token Comments;
 U32Token       : U32Term       : Token Comments;
 U64Token       : U64Term       : Token Comments;
 VarToken       : VarTerm       : Token Comments;
@@ -242,12 +248,14 @@ DotDot    : DotDotToken    : VerylToken;
 Dot       : DotToken       : VerylToken;
 Equ       : EquToken       : VerylToken;
 Hash      : HashToken      : VerylToken;
+LAngle    : LAngleToken    : VerylToken;
 LBrace    : LBraceToken    : VerylToken;
 LBracket  : LBracketToken  : VerylToken;
 LParen    : LParenToken    : VerylToken;
 MinusColon: MinusColonToken: VerylToken;
 MinusGT   : MinusGTToken   : VerylToken;
 PlusColon : PlusColonToken : VerylToken;
+RAngle    : RAngleToken    : VerylToken;
 RBrace    : RBraceToken    : VerylToken;
 RBracket  : RBracketToken  : VerylToken;
 RParen    : RParenToken    : VerylToken;
@@ -299,6 +307,7 @@ Struct    : StructToken    : VerylToken;
 SyncHigh  : SyncHighToken  : VerylToken;
 SyncLow   : SyncLowToken   : VerylToken;
 Tri       : TriToken       : VerylToken;
+Type      : TypeToken      : VerylToken;
 U32       : U32Token       : VerylToken;
 U64       : U64Token       : VerylToken;
 Var       : VarToken       : VerylToken;
@@ -350,15 +359,18 @@ Expression11: Expression12 { As ScopedIdentifier };
 Expression12: { ( UnaryOperator | Operator09 | Operator05 | Operator03 | Operator04 ) } Factor;
 
 Factor: Number
-      | ExpressionIdentifier [ LParen [ FunctionCallArg ] RParen ]
-      | BuiltinType { Width }
+      | ExpressionIdentifier [ FunctionCall ]
       | LParen Expression RParen
       | LBrace ConcatenationList RBrace
       | IfExpression
       | CaseExpression
       ;
 
-FunctionCallArg: Expression { Comma Expression } [ Comma ];
+FunctionCall: LParen [ ArgumentList ] RParen;
+
+ArgumentList: ArgumentItem { Comma ArgumentItem } [ Comma ];
+
+ArgumentItem: Expression;
 
 ConcatenationList: ConcatenationItem { Comma ConcatenationItem } [ Comma ];
 
@@ -368,8 +380,12 @@ IfExpression: If Expression LBrace Expression RBrace { Else If Expression LBrace
 
 CaseExpression: Case Expression LBrace Expression Colon Expression Comma { Expression Colon Expression Comma } Defaul Colon Expression [ Comma ] RBrace;
 
+TypeExpression: ScalarType
+              | Type LParen Expression RParen
+              ;
+
 // ----------------------------------------------------------------------------
-// Range / Width
+// Range / Width / Array
 // ----------------------------------------------------------------------------
 
 Range: LBracket Expression [ RangeOperator Expression ] RBracket;
@@ -380,20 +396,23 @@ RangeOperator: Colon
              | Step
              ;
 
-Width: LBracket Expression RBracket;
+Width: LAngle Expression { Comma Expression } RAngle;
+
+Array: LBracket Expression { Comma Expression } RBracket;
 
 // ----------------------------------------------------------------------------
-// Type
+// ScalarType / ArrayType
 // ----------------------------------------------------------------------------
 
-BuiltinType: Logic
-           | Bit
-           | U32 | U64 | I32 | I64 | F32 | F64
-           ;
+FixedType: U32 | U64 | I32 | I64 | F32 | F64;
+
+VariableType: ( Logic | Bit | ScopedIdentifier ) [ Width ];
 
 TypeModifier: Tri | Signed;
 
-Type: { TypeModifier } ( BuiltinType | ScopedIdentifier ) { Width };
+ScalarType: { TypeModifier } ( VariableType | FixedType );
+
+ArrayType: ScalarType [ Array ];
 
 // ----------------------------------------------------------------------------
 // Statement
@@ -415,7 +434,7 @@ IfResetStatement: IfReset LBrace { Statement } RBrace { Else If Expression LBrac
 
 ReturnStatement: Return Expression Semicolon;
 
-ForStatement: For Identifier Colon Type In Expression DotDot Expression [ Step AssignmentOperator Expression ] LBrace { Statement } RBrace;
+ForStatement: For Identifier Colon ScalarType In Expression DotDot Expression [ Step AssignmentOperator Expression ] LBrace { Statement } RBrace;
 
 CaseStatement: Case Expression LBrace { CaseItem } RBrace;
 
@@ -437,9 +456,9 @@ AttributeItem: Identifier
 // Declaration
 // ----------------------------------------------------------------------------
 
-VarDeclaration: Var Identifier Colon Type [ Equ Expression ] Semicolon;
+VarDeclaration: Var Identifier Colon ArrayType [ Equ Expression ] Semicolon;
 
-LocalparamDeclaration: Localparam Identifier Colon Type Equ Expression Semicolon;
+LocalparamDeclaration: Localparam Identifier Colon ( ArrayType Equ Expression | Type Equ TypeExpression ) Semicolon;
 
 AlwaysFfDeclaration: AlwaysFf LParen AlwaysFfClock [ Comma AlwaysFfReset ] RParen LBrace { Statement } RBrace;
 
@@ -459,7 +478,7 @@ ModportGroup: [ Attribute ] ( LBrace ModportList RBrace | ModportItem );
 
 ModportItem: Identifier Colon Direction;
 
-EnumDeclaration: Enum Identifier Colon Type LBrace EnumList RBrace;
+EnumDeclaration: Enum Identifier Colon ScalarType LBrace EnumList RBrace;
 
 EnumList: EnumGroup { Comma EnumGroup } [ Comma ];
 
@@ -473,13 +492,13 @@ StructList: StructGroup { Comma StructGroup } [ Comma ];
 
 StructGroup: [ Attribute ] ( LBrace StructList RBrace | StructItem );
 
-StructItem: Identifier Colon Type;
+StructItem: Identifier Colon ScalarType;
 
 // ----------------------------------------------------------------------------
 // InstDeclaration
 // ----------------------------------------------------------------------------
 
-InstDeclaration: Inst Identifier Colon ScopedIdentifier [ Width ] [ InstParameter ] [ LParen [ InstPortList ] RParen ] Semicolon;
+InstDeclaration: Inst Identifier Colon ScopedIdentifier [ Array ] [ InstParameter ] [ LParen [ InstPortList ] RParen ] Semicolon;
 
 InstParameter: Hash LParen [ InstParameterList ] RParen;
 
@@ -505,7 +524,7 @@ WithParameterList: WithParameterGroup { Comma WithParameterGroup } [ Comma ];
 
 WithParameterGroup: [ Attribute ] ( LBrace WithParameterList RBrace | WithParameterItem );
 
-WithParameterItem: ( Parameter | Localparam ) Identifier Colon Type Equ Expression;
+WithParameterItem: ( Parameter | Localparam ) Identifier Colon ( ArrayType Equ Expression | Type Equ TypeExpression );
 
 // ----------------------------------------------------------------------------
 // PortDeclaration
@@ -517,7 +536,7 @@ PortDeclarationList: PortDeclarationGroup { Comma PortDeclarationGroup } [ Comma
 
 PortDeclarationGroup: [ Attribute ] ( LBrace PortDeclarationList RBrace | PortDeclarationItem );
 
-PortDeclarationItem: Identifier Colon ( Direction Type | Interface );
+PortDeclarationItem: Identifier Colon ( Direction ArrayType | Interface [ Array ] );
 
 Direction: Input
          | Output
@@ -530,7 +549,7 @@ Direction: Input
 // Function
 // ----------------------------------------------------------------------------
 
-FunctionDeclaration: Function Identifier [ WithParameter ] [ PortDeclaration ] MinusGT Type LBrace { FunctionItem } RBrace;
+FunctionDeclaration: Function Identifier [ WithParameter ] [ PortDeclaration ] MinusGT ScalarType LBrace { FunctionItem } RBrace;
 
 FunctionItem: VarDeclaration
             | Statement

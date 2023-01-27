@@ -1,28 +1,28 @@
 module Module23 #(
     #[ifdef(DEFINE_A)]
-    parameter ParamA: u32  = 1,
-    parameter ParamB: u32  = 1,
+    parameter ParamA: u32 = 1,
+    parameter ParamB: u32 = 1,
     #[ifdef(DEFINE_A)]
     {
-        parameter ParamC: u32  = 1,
+        parameter ParamC: u32 = 1,
     },
 ) (
     #[ifdef(DEFINE_A)]
-    port_a: input logic ,
-    port_b: input logic ,
+    port_a: input logic,
+    port_b: input logic,
 
     #[ifdef(DEFINE_A)]
     {
-        port_c: input logic ,
+        port_c: input logic,
     },
 ) {
     #[ifdef(DEFINE_A)]
-    var _a: logic [10];
+    var _a: logic<10>;
 
     #[ifdef(DEFINE_A)]
     {
-        var _b: logic [10];
-        var _c: logic [10];
+        var _b: logic<10>;
+        var _c: logic<10>;
     }
 }
 

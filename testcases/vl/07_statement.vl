@@ -1,7 +1,7 @@
 module Module07 {
-    var a  : logic ;
-    var aa : logic ;
-    var clk: logic ;
+    var a  : logic;
+    var aa : logic;
+    var clk: logic;
 
     always_comb {
         // assignment statement
@@ -32,17 +32,17 @@ module Module07 {
         }
 
         // for statement
-        for i: u32  in 0..10 {
+        for i: u32 in 0..10 {
             a  = i;
             aa = i + 1;
         }
 
         // for statement with custom step
-        for i: u32  in 0..10 step += 2 {
+        for i: u32 in 0..10 step += 2 {
             a  = i;
             aa = i + 1;
         }
-        for i: u32  in 0..10 step *= 2 {
+        for i: u32 in 0..10 step *= 2 {
             a  = i;
             aa = i + 1;
         }

@@ -30,7 +30,7 @@ impl fmt::Display for SymbolPath {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut text = String::new();
         for path in self.as_slice() {
-            text.push_str(&format!("{} ", path));
+            text.push_str(&format!("{path} "));
         }
         text.fmt(f)
     }
@@ -277,7 +277,7 @@ impl SymbolTable {
                 symbol.evaluate();
             }
         }
-        format!("{}", self)
+        format!("{self}")
     }
 
     pub fn drop(&mut self, file_path: PathId) {
@@ -309,7 +309,7 @@ impl fmt::Display for SymbolTable {
         let mut vec: Vec<_> = self.table.iter().collect();
         vec.sort_by(|x, y| x.0.cmp(y.0));
         for (k, v) in &vec {
-            symbol_width = symbol_width.max(format!("{}", k).len());
+            symbol_width = symbol_width.max(format!("{k}").len());
             for symbol in *v {
                 namespace_width = namespace_width.max(format!("{}", symbol.namespace).len());
                 reference_width = reference_width.max(format!("{}", symbol.references.len()).len());
@@ -320,7 +320,7 @@ impl fmt::Display for SymbolTable {
                 let evaluated = if let Some(evaluated) = symbol.evaluated.get() {
                     match evaluated {
                         Evaluated::Unknown => "".to_string(),
-                        _ => format!(" ( {:?} )", evaluated),
+                        _ => format!(" ( {evaluated:?} )"),
                     }
                 } else {
                     "".to_string()
@@ -386,7 +386,7 @@ mod tests {
     module ModuleA #(
         parameter paramA: u32 = 1,
     ) (
-        portA: input logic [10],
+        portA: input logic<10>,
     ) {
         localparam paramB: u32 = 1;
 
@@ -413,7 +413,7 @@ mod tests {
             memberA: logic,
         }
 
-        enum EnumA: logic [2] {
+        enum EnumA: logic<2> {
             memberA,
         }
     }

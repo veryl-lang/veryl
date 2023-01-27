@@ -1,11 +1,11 @@
 module Module12 (
-    i_clk: input logic ,
-    i_rst: input logic ,
+    i_clk: input logic,
+    i_rst: input logic,
 ) {
-    var a : logic ;
-    var aa: logic ;
-    var b : logic ;
-    var c : logic ;
+    var a : logic;
+    var aa: logic;
+    var b : logic;
+    var c : logic;
 
     // always_ff declaration with default polarity
     always_ff (i_clk, i_rst) {

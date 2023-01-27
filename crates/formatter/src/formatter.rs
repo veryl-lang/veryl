@@ -312,15 +312,15 @@ impl VerylWalker for Formatter {
         }
     }
 
-    /// Semantic action for non-terminal 'FunctionCallArg'
-    fn function_call_arg(&mut self, arg: &FunctionCallArg) {
-        self.expression(&arg.expression);
-        for x in &arg.function_call_arg_list {
+    /// Semantic action for non-terminal 'ArgumentList'
+    fn argument_list(&mut self, arg: &ArgumentList) {
+        self.argument_item(&arg.argument_item);
+        for x in &arg.argument_list_list {
             self.comma(&x.comma);
             self.space(1);
-            self.expression(&x.expression);
+            self.argument_item(&x.argument_item);
         }
-        if let Some(ref x) = arg.function_call_arg_opt {
+        if let Some(ref x) = arg.argument_list_opt {
             self.comma(&x.comma);
         }
     }
@@ -419,6 +419,19 @@ impl VerylWalker for Formatter {
         self.r_brace(&arg.r_brace);
     }
 
+    /// Semantic action for non-terminal 'TypeExpression'
+    fn type_expression(&mut self, arg: &TypeExpression) {
+        match arg {
+            TypeExpression::ScalarType(x) => self.scalar_type(&x.scalar_type),
+            TypeExpression::TypeLParenExpressionRParen(x) => {
+                self.r#type(&x.r#type);
+                self.l_paren(&x.l_paren);
+                self.expression(&x.expression);
+                self.r_paren(&x.r_paren);
+            }
+        }
+    }
+
     /// Semantic action for non-terminal 'RangeOperator'
     fn range_operator(&mut self, arg: &RangeOperator) {
         match arg {
@@ -433,19 +446,48 @@ impl VerylWalker for Formatter {
         }
     }
 
-    /// Semantic action for non-terminal 'Type'
-    fn r#type(&mut self, arg: &Type) {
-        for x in &arg.type_list {
+    /// Semantic action for non-terminal 'Width'
+    fn width(&mut self, arg: &Width) {
+        self.l_angle(&arg.l_angle);
+        self.expression(&arg.expression);
+        for x in &arg.width_list {
+            self.comma(&x.comma);
+            self.space(1);
+            self.expression(&x.expression);
+        }
+        self.r_angle(&arg.r_angle);
+    }
+
+    /// Semantic action for non-terminal 'Array'
+    fn array(&mut self, arg: &Array) {
+        self.l_bracket(&arg.l_bracket);
+        self.expression(&arg.expression);
+        for x in &arg.array_list {
+            self.comma(&x.comma);
+            self.space(1);
+            self.expression(&x.expression);
+        }
+        self.r_bracket(&arg.r_bracket);
+    }
+
+    /// Semantic action for non-terminal 'ScalarType'
+    fn scalar_type(&mut self, arg: &ScalarType) {
+        for x in &arg.scalar_type_list {
             self.type_modifier(&x.type_modifier);
             self.space(1);
         }
-        match &*arg.type_group {
-            TypeGroup::BuiltinType(x) => self.builtin_type(&x.builtin_type),
-            TypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
+        match &*arg.scalar_type_group {
+            ScalarTypeGroup::VariableType(x) => self.variable_type(&x.variable_type),
+            ScalarTypeGroup::FixedType(x) => self.fixed_type(&x.fixed_type),
         };
-        self.space(1);
-        for x in &arg.type_list0 {
-            self.width(&x.width);
+    }
+
+    /// Semantic action for non-terminal 'ArrayType'
+    fn array_type(&mut self, arg: &ArrayType) {
+        self.scalar_type(&arg.scalar_type);
+        if let Some(ref x) = arg.array_type_opt {
+            self.space(1);
+            self.array(&x.array);
         }
     }
 
@@ -581,7 +623,7 @@ impl VerylWalker for Formatter {
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
         self.space(1);
-        self.r#type(&arg.r#type);
+        self.scalar_type(&arg.scalar_type);
         self.space(1);
         self.r#in(&arg.r#in);
         self.space(1);
@@ -659,7 +701,7 @@ impl VerylWalker for Formatter {
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
         self.space(1);
-        self.r#type(&arg.r#type);
+        self.array_type(&arg.array_type);
         if let Some(ref x) = arg.var_declaration_opt {
             self.space(1);
             self.equ(&x.equ);
@@ -676,11 +718,22 @@ impl VerylWalker for Formatter {
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
         self.space(1);
-        self.r#type(&arg.r#type);
-        self.space(1);
-        self.equ(&arg.equ);
-        self.space(1);
-        self.expression(&arg.expression);
+        match &*arg.localparam_declaration_group {
+            LocalparamDeclarationGroup::ArrayTypeEquExpression(x) => {
+                self.array_type(&x.array_type);
+                self.space(1);
+                self.equ(&x.equ);
+                self.space(1);
+                self.expression(&x.expression);
+            }
+            LocalparamDeclarationGroup::TypeEquTypeExpression(x) => {
+                self.r#type(&x.r#type);
+                self.space(1);
+                self.equ(&x.equ);
+                self.space(1);
+                self.type_expression(&x.type_expression);
+            }
+        }
         self.semicolon(&arg.semicolon);
     }
 
@@ -824,7 +877,7 @@ impl VerylWalker for Formatter {
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
         self.space(1);
-        self.r#type(&arg.r#type);
+        self.scalar_type(&arg.scalar_type);
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
@@ -928,7 +981,7 @@ impl VerylWalker for Formatter {
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
         self.space(1);
-        self.r#type(&arg.r#type);
+        self.scalar_type(&arg.scalar_type);
     }
 
     /// Semantic action for non-terminal 'InstDeclaration'
@@ -944,7 +997,7 @@ impl VerylWalker for Formatter {
         self.scoped_identifier(&arg.scoped_identifier);
         if let Some(ref x) = arg.inst_declaration_opt {
             self.space(1);
-            self.width(&x.width);
+            self.array(&x.array);
         }
         if let Some(ref x) = arg.inst_declaration_opt0 {
             self.space(1);
@@ -1135,11 +1188,22 @@ impl VerylWalker for Formatter {
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
         self.space(1);
-        self.r#type(&arg.r#type);
-        self.space(1);
-        self.equ(&arg.equ);
-        self.space(1);
-        self.expression(&arg.expression);
+        match &*arg.with_parameter_item_group0 {
+            WithParameterItemGroup0::ArrayTypeEquExpression(x) => {
+                self.array_type(&x.array_type);
+                self.space(1);
+                self.equ(&x.equ);
+                self.space(1);
+                self.expression(&x.expression);
+            }
+            WithParameterItemGroup0::TypeEquTypeExpression(x) => {
+                self.r#type(&x.r#type);
+                self.space(1);
+                self.equ(&x.equ);
+                self.space(1);
+                self.type_expression(&x.type_expression);
+            }
+        }
     }
 
     /// Semantic action for non-terminal 'PortDeclaration'
@@ -1197,12 +1261,18 @@ impl VerylWalker for Formatter {
         self.colon(&arg.colon);
         self.space(1);
         match &*arg.port_declaration_item_group {
-            PortDeclarationItemGroup::DirectionType(x) => {
+            PortDeclarationItemGroup::DirectionArrayType(x) => {
                 self.direction(&x.direction);
                 self.space(1);
-                self.r#type(&x.r#type);
+                self.array_type(&x.array_type);
             }
-            PortDeclarationItemGroup::Interface(x) => self.interface(&x.interface),
+            PortDeclarationItemGroup::InterfacePortDeclarationItemOpt(x) => {
+                self.interface(&x.interface);
+                if let Some(ref x) = x.port_declaration_item_opt {
+                    self.space(1);
+                    self.array(&x.array);
+                }
+            }
         }
     }
 
@@ -1222,7 +1292,7 @@ impl VerylWalker for Formatter {
         }
         self.minus_g_t(&arg.minus_g_t);
         self.space(1);
-        self.r#type(&arg.r#type);
+        self.scalar_type(&arg.scalar_type);
         self.space(1);
         if arg.function_declaration_list.is_empty() {
             self.l_brace(&arg.l_brace);

@@ -75,7 +75,7 @@ impl Git {
         } else if let Some(ref tag) = self.tag {
             tag.to_string()
         } else if let Some(ref branch) = self.branch {
-            format!("origin/{}", branch)
+            format!("origin/{branch}")
         } else {
             "origin/HEAD".to_string()
         };

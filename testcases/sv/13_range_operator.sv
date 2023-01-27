@@ -1,6 +1,6 @@
 module veryl_testcase_Module13;
-    logic  a;
-    logic  X;
+    logic a;
+    logic X;
 
     // bit select
     assign a = X[0];

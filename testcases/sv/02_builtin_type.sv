@@ -1,15 +1,15 @@
 module veryl_testcase_Module02;
     // unsigned integer
-    int unsigned     _a  ;
-    longint unsigned _aa ;
+    int unsigned     _a ;
+    longint unsigned _aa;
 
     // signed integer
-    int signed     _b  ;
-    longint signed _bb ;
+    int signed     _b ;
+    longint signed _bb;
 
     // floating point
-    shortreal _c  ;
-    real      _cc ;
+    shortreal _c ;
+    real      _cc;
 
     // 4 state (01xz) type
     logic                  _d  ;

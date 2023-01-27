@@ -6,7 +6,8 @@ use crate::symbol::Type as SymType;
 use crate::symbol::{
     EnumMemberProperty, EnumProperty, FunctionProperty, InstanceProperty, InterfaceProperty,
     ModportMember, ModportProperty, ModuleProperty, ParameterProperty, ParameterScope,
-    PortProperty, StructMemberProperty, Symbol, SymbolKind, VariableProperty,
+    ParameterValue, PortProperty, StructMemberProperty, Symbol, SymbolKind, TypeKind,
+    VariableProperty,
 };
 use crate::symbol_table;
 use veryl_parser::resource_table::{self, StrId};
@@ -69,7 +70,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 self.namespace.push(name);
                 self.anonymous_namespace += 1;
 
-                let r#type: SymType = arg.r#type.as_ref().into();
+                let r#type: SymType = arg.scalar_type.as_ref().into();
                 let property = VariableProperty { r#type };
                 let kind = SymbolKind::Variable(property);
                 self.insert_symbol(&arg.identifier.identifier_token, kind);
@@ -81,7 +82,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
     fn var_declaration(&mut self, arg: &VarDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let r#type: SymType = arg.r#type.as_ref().into();
+            let r#type: SymType = arg.array_type.as_ref().into();
             let property = VariableProperty { r#type };
             let kind = SymbolKind::Variable(property);
             self.insert_symbol(&arg.identifier.identifier_token, kind);
@@ -91,13 +92,32 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
     fn localparam_declaration(&mut self, arg: &LocalparamDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let r#type: SymType = arg.r#type.as_ref().into();
-            let value = *arg.expression.clone();
-            let kind = SymbolKind::Parameter(ParameterProperty {
-                r#type,
-                scope: ParameterScope::Local,
-                value,
-            });
+            let property = match &*arg.localparam_declaration_group {
+                LocalparamDeclarationGroup::ArrayTypeEquExpression(x) => {
+                    let r#type: SymType = x.array_type.as_ref().into();
+                    let value = ParameterValue::Expression(*x.expression.clone());
+                    ParameterProperty {
+                        r#type,
+                        scope: ParameterScope::Local,
+                        value,
+                    }
+                }
+                LocalparamDeclarationGroup::TypeEquTypeExpression(x) => {
+                    let r#type: SymType = SymType {
+                        modifier: vec![],
+                        kind: TypeKind::Type,
+                        width: vec![],
+                        array: vec![],
+                    };
+                    let value = ParameterValue::TypeExpression(*x.type_expression.clone());
+                    ParameterProperty {
+                        r#type,
+                        scope: ParameterScope::Local,
+                        value,
+                    }
+                }
+            };
+            let kind = SymbolKind::Parameter(property);
             self.insert_symbol(&arg.identifier.identifier_token, kind);
         }
         Ok(())
@@ -124,7 +144,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
     fn enum_declaration(&mut self, arg: &EnumDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                let r#type = arg.r#type.as_ref().into();
+                let r#type = arg.scalar_type.as_ref().into();
                 let property = EnumProperty { r#type };
                 let kind = SymbolKind::Enum(property);
                 self.insert_symbol(&arg.identifier.identifier_token, kind);
@@ -163,7 +183,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
     fn struct_item(&mut self, arg: &StructItem) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let r#type = arg.r#type.as_ref().into();
+            let r#type = arg.scalar_type.as_ref().into();
             let property = StructMemberProperty { r#type };
             let kind = SymbolKind::StructMember(property);
             self.insert_symbol(&arg.identifier.identifier_token, kind);
@@ -190,12 +210,30 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 WithParameterItemGroup::Parameter(_) => ParameterScope::Global,
                 WithParameterItemGroup::Localparam(_) => ParameterScope::Local,
             };
-            let r#type: SymType = arg.r#type.as_ref().into();
-            let value = *arg.expression.clone();
-            let property = ParameterProperty {
-                r#type,
-                scope,
-                value,
+            let property = match &*arg.with_parameter_item_group0 {
+                WithParameterItemGroup0::ArrayTypeEquExpression(x) => {
+                    let r#type: SymType = x.array_type.as_ref().into();
+                    let value = ParameterValue::Expression(*x.expression.clone());
+                    ParameterProperty {
+                        r#type,
+                        scope,
+                        value,
+                    }
+                }
+                WithParameterItemGroup0::TypeEquTypeExpression(x) => {
+                    let r#type: SymType = SymType {
+                        modifier: vec![],
+                        kind: TypeKind::Type,
+                        width: vec![],
+                        array: vec![],
+                    };
+                    let value = ParameterValue::TypeExpression(*x.type_expression.clone());
+                    ParameterProperty {
+                        r#type,
+                        scope,
+                        value,
+                    }
+                }
             };
             let kind = SymbolKind::Parameter(property);
             self.insert_symbol(&arg.identifier.identifier_token, kind);
@@ -206,15 +244,15 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
     fn port_declaration_item(&mut self, arg: &PortDeclarationItem) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let property = match &*arg.port_declaration_item_group {
-                PortDeclarationItemGroup::DirectionType(x) => {
-                    let r#type: SymType = x.r#type.as_ref().into();
+                PortDeclarationItemGroup::DirectionArrayType(x) => {
+                    let r#type: SymType = x.array_type.as_ref().into();
                     let direction: SymDirection = x.direction.as_ref().into();
                     PortProperty {
                         r#type: Some(r#type),
                         direction,
                     }
                 }
-                PortDeclarationItemGroup::Interface(_) => PortProperty {
+                PortDeclarationItemGroup::InterfacePortDeclarationItemOpt(_) => PortProperty {
                     r#type: None,
                     direction: SymDirection::Interface,
                 },

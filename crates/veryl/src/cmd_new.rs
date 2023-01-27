@@ -24,7 +24,7 @@ impl CmdNew {
 
             fs::create_dir_all(&self.opt.path).into_diagnostic()?;
             let mut file = File::create(self.opt.path.join("Veryl.toml")).into_diagnostic()?;
-            write!(file, "{}", toml).into_diagnostic()?;
+            write!(file, "{toml}").into_diagnostic()?;
             file.flush().into_diagnostic()?;
 
             info!("Created \"{}\" project", name.to_string_lossy());

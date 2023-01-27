@@ -1,21 +1,21 @@
 module veryl_testcase_Module23 #(
     `ifdef DEFINE_A
-    parameter int unsigned ParamA  = 1
+    parameter int unsigned ParamA = 1
     ,`endif
-    parameter int unsigned ParamB  = 1
+    parameter int unsigned ParamB = 1
     `ifdef DEFINE_A
     ,
-    parameter int unsigned ParamC  = 1
+    parameter int unsigned ParamC = 1
     `endif
 ) (
     `ifdef DEFINE_A
-    input logic  port_a
+    input logic port_a
     ,`endif
-    input logic  port_b
+    input logic port_b
     `
     ifdef DEFINE_A
     ,
-    input logic  port_c
+    input logic port_c
     `endif
 );
     `ifdef DEFINE_A

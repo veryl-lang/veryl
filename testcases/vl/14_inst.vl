@@ -1,6 +1,6 @@
 module Module14 {
-    var aa : logic ;
-    var bbb: logic ;
+    var aa : logic;
+    var bbb: logic;
 
     // module instantiation
     inst x: Module14B;
@@ -30,12 +30,12 @@ module Module14 {
 module Module14B {}
 
 module Module14C (
-    a   : input u32 ,
-    bb  : input u32 ,
-    bbbb: input u32 ,
+    a   : input u32,
+    bb  : input u32,
+    bbbb: input u32,
 ) {}
 
 interface InterfaceA #(
-    parameter a: u32  = 1,
-    parameter b: u32  = 1,
+    parameter a: u32 = 1,
+    parameter b: u32 = 1,
 ) {}

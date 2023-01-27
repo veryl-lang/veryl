@@ -31,7 +31,7 @@ impl CmdInit {
             }
 
             let mut file = File::create(toml_path).into_diagnostic()?;
-            write!(file, "{}", toml).into_diagnostic()?;
+            write!(file, "{toml}").into_diagnostic()?;
             file.flush().into_diagnostic()?;
 
             info!("Created \"{}\" project", name.to_string_lossy());

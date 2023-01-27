@@ -1,13 +1,13 @@
 // interface declaration
 interface veryl_testcase_Interface05 #(
     // interface parameter
-    parameter  int unsigned a    = 1,
-    parameter  int unsigned aa   = 1,
-    localparam int unsigned aaa  = 1
+    parameter  int unsigned a   = 1,
+    parameter  int unsigned aa  = 1,
+    localparam int unsigned aaa = 1
 );
     // localparam declaration
-    localparam int unsigned     b   = 1;
-    localparam longint unsigned bb  = 1;
+    localparam int unsigned     b  = 1;
+    localparam longint unsigned bb = 1;
 
     // variable declaration
     logic                      c  ;

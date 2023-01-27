@@ -56,9 +56,9 @@ impl fmt::Display for Namespace {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut text = String::new();
         if let Some(first) = self.paths.first() {
-            text.push_str(&format!("{}", first));
+            text.push_str(&format!("{first}"));
             for path in &self.paths[1..] {
-                text.push_str(&format!("::{}", path));
+                text.push_str(&format!("::{path}"));
             }
         }
         text.fmt(f)

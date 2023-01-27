@@ -1,13 +1,13 @@
 module Module21 {
-    var a: logic ;
-    var b: logic ;
+    var a: logic;
+    var b: logic;
 
-    enum EnumA: logic  {
+    enum EnumA: logic {
         A,
         B,
     }
 
-    enum EnumB: logic  {
+    enum EnumB: logic {
         C,
         D,
     }

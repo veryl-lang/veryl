@@ -1,36 +1,36 @@
 module Module01 {
     // integer
-    localparam a : u32  = 0123456789;
-    localparam aa: u32  = 01234_56789;
+    localparam a : u32 = 0123456789;
+    localparam aa: u32 = 01234_56789;
 
     // binary
-    localparam b : u32  = 32'b01xzXZ;
-    localparam bb: u32  = 32'b01_xz_XZ;
+    localparam b : u32 = 32'b01xzXZ;
+    localparam bb: u32 = 32'b01_xz_XZ;
 
     // octal
-    localparam c : u32  = 32'o01234567xzXZ;
-    localparam cc: u32  = 32'o01234_567xzXZ;
+    localparam c : u32 = 32'o01234567xzXZ;
+    localparam cc: u32 = 32'o01234_567xzXZ;
 
     // decimal
-    localparam d : u32  = 32'd0123456789;
-    localparam dd: u32  = 32'd01234_56789;
+    localparam d : u32 = 32'd0123456789;
+    localparam dd: u32 = 32'd01234_56789;
 
     // hex
-    localparam e : u32  = 128'h0123456789abcdefxzABCDEFXZ;
-    localparam ee: u32  = 128'h01234_5678_9abc_defxz_ABCD_EFXZ;
+    localparam e : u32 = 128'h0123456789abcdefxzABCDEFXZ;
+    localparam ee: u32 = 128'h01234_5678_9abc_defxz_ABCD_EFXZ;
 
     // all0, all1, allx, allz
-    localparam f     : u32  = '0;
-    localparam ff    : u32  = '1;
-    localparam fff   : u32  = 'x;
-    localparam ffff  : u32  = 'X;
-    localparam fffff : u32  = 'z;
-    localparam ffffff: u32  = 'Z;
+    localparam f     : u32 = '0;
+    localparam ff    : u32 = '1;
+    localparam fff   : u32 = 'x;
+    localparam ffff  : u32 = 'X;
+    localparam fffff : u32 = 'z;
+    localparam ffffff: u32 = 'Z;
 
     // floating point
-    localparam g    : u32  = 0123456789.0123456789;
-    localparam gg   : u32  = 0123456789.0123456789e+0123456789;
-    localparam ggg  : u32  = 0123456789.0123456789e-0123456789;
-    localparam gggg : u32  = 0123456789.0123456789E+0123456789;
-    localparam ggggg: u32  = 0123456789.0123456789E-0123456789;
+    localparam g    : u32 = 0123456789.0123456789;
+    localparam gg   : u32 = 0123456789.0123456789e+0123456789;
+    localparam ggg  : u32 = 0123456789.0123456789e-0123456789;
+    localparam gggg : u32 = 0123456789.0123456789E+0123456789;
+    localparam ggggg: u32 = 0123456789.0123456789E-0123456789;
 }

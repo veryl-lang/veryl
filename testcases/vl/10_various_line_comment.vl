@@ -5,20 +5,20 @@ module //a
     : // a
      input //a
      logic //a
-     ,
-    i_rst_n: input logic ,
-    i_up   : input logic ,
+    ,
+    i_rst_n: input logic,
+    i_up   : input logic,
 
-    i_down : input  logic    ,
-    o_count: output logic [8],
+    i_down : input  logic   ,
+    o_count: output logic<8>,
 ) {
     var count //a
     : logic //a
-     [ // a
+    < // a
     8 //a
-    ] // a
+    > // a
     ;
-    var up_down: logic [2];
+    var up_down: logic<2>;
 
     always_comb // a
      {

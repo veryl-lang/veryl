@@ -1,7 +1,7 @@
 module veryl_testcase_Module07;
-    logic  a  ;
-    logic  aa ;
-    logic  clk;
+    logic a  ;
+    logic aa ;
+    logic clk;
 
     always_comb begin
         // assignment statement
@@ -32,17 +32,17 @@ module veryl_testcase_Module07;
         end
 
         // for statement
-        for (int unsigned i  = 0; i < 10; i++) begin
+        for (int unsigned i = 0; i < 10; i++) begin
             a  = i;
             aa = i + 1;
         end
 
         // for statement with custom step
-        for (int unsigned i  = 0; i < 10; i += 2) begin
+        for (int unsigned i = 0; i < 10; i += 2) begin
             a  = i;
             aa = i + 1;
         end
-        for (int unsigned i  = 0; i < 10; i *= 2) begin
+        for (int unsigned i = 0; i < 10; i *= 2) begin
             a  = i;
             aa = i + 1;
         end

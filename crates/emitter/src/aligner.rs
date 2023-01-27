@@ -109,6 +109,7 @@ mod align_kind {
 pub struct Aligner {
     pub additions: HashMap<Location, usize>,
     aligns: [Align; 7],
+    in_type_expression: bool,
 }
 
 impl Aligner {
@@ -162,22 +163,22 @@ impl VerylWalker for Aligner {
 
     /// Semantic action for non-terminal 'I32'
     fn i32(&mut self, arg: &I32) {
-        self.veryl_token(&arg.i32_token.replace("signed int"));
+        self.veryl_token(&arg.i32_token.replace("int signed"));
     }
 
     /// Semantic action for non-terminal 'I64'
     fn i64(&mut self, arg: &I64) {
-        self.veryl_token(&arg.i64_token.replace("signed longint"));
+        self.veryl_token(&arg.i64_token.replace("longint signed"));
     }
 
     /// Semantic action for non-terminal 'U32'
     fn u32(&mut self, arg: &U32) {
-        self.veryl_token(&arg.u32_token.replace("unsigned int"));
+        self.veryl_token(&arg.u32_token.replace("int unsigned"));
     }
 
     /// Semantic action for non-terminal 'U64'
     fn u64(&mut self, arg: &U64) {
-        self.veryl_token(&arg.u64_token.replace("unsigned longint"));
+        self.veryl_token(&arg.u64_token.replace("longint unsigned"));
     }
 
     /// Semantic action for non-terminal 'Expression'
@@ -304,50 +305,110 @@ impl VerylWalker for Aligner {
         }
     }
 
-    /// Semantic action for non-terminal 'FunctionCallArg'
-    fn function_call_arg(&mut self, arg: &FunctionCallArg) {
-        self.expression(&arg.expression);
-        for x in &arg.function_call_arg_list {
+    /// Semantic action for non-terminal 'ArgumentList'
+    fn argument_list(&mut self, arg: &ArgumentList) {
+        self.argument_item(&arg.argument_item);
+        for x in &arg.argument_list_list {
             self.comma(&x.comma);
             self.space(1);
-            self.expression(&x.expression);
+            self.argument_item(&x.argument_item);
         }
-        if let Some(ref x) = arg.function_call_arg_opt {
+        if let Some(ref x) = arg.argument_list_opt {
             self.comma(&x.comma);
         }
+    }
+
+    /// Semantic action for non-terminal 'TypeExpression'
+    fn type_expression(&mut self, arg: &TypeExpression) {
+        self.in_type_expression = true;
+        match arg {
+            TypeExpression::ScalarType(x) => self.scalar_type(&x.scalar_type),
+            TypeExpression::TypeLParenExpressionRParen(x) => {
+                self.r#type(&x.r#type);
+                self.l_paren(&x.l_paren);
+                self.expression(&x.expression);
+                self.r_paren(&x.r_paren);
+            }
+        }
+        self.in_type_expression = false;
     }
 
     /// Semantic action for non-terminal 'Width'
     fn width(&mut self, arg: &Width) {
+        self.l_angle(&arg.l_angle);
+        self.expression(&arg.expression);
+        self.space("-1:0".len());
+        for x in &arg.width_list {
+            self.space("][".len());
+            self.expression(&x.expression);
+            self.space("-1:0".len());
+        }
+        self.r_angle(&arg.r_angle);
+    }
+
+    /// Semantic action for non-terminal 'Array'
+    fn array(&mut self, arg: &Array) {
         self.l_bracket(&arg.l_bracket);
         self.expression(&arg.expression);
         self.space("-1:0".len());
-        self.r_bracket(&arg.r_bracket);
+        for x in &arg.array_list {
+            self.space("][".len());
+            self.expression(&x.expression);
+            self.space("-1:0".len());
+        }
+        self.l_bracket(&arg.l_bracket);
     }
 
-    /// Semantic action for non-terminal 'Type'
-    fn r#type(&mut self, arg: &Type) {
-        self.aligns[align_kind::TYPE].start_item();
-        for x in &arg.type_list {
+    /// Semantic action for non-terminal 'VariableType'
+    fn variable_type(&mut self, arg: &VariableType) {
+        match &*arg.variable_type_group {
+            VariableTypeGroup::Logic(x) => self.logic(&x.logic),
+            VariableTypeGroup::Bit(x) => self.bit(&x.bit),
+            VariableTypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
+        };
+        if !self.in_type_expression {
+            self.aligns[align_kind::TYPE].finish_item();
+            self.aligns[align_kind::WIDTH].start_item();
+        }
+        if let Some(ref x) = arg.variable_type_opt {
+            self.space(1);
+            self.width(&x.width);
+        }
+    }
+
+    /// Semantic action for non-terminal 'ScalarType'
+    fn scalar_type(&mut self, arg: &ScalarType) {
+        if !self.in_type_expression {
+            self.aligns[align_kind::TYPE].start_item();
+        }
+        for x in &arg.scalar_type_list {
             self.type_modifier(&x.type_modifier);
             self.space(1);
         }
-        match &*arg.type_group {
-            TypeGroup::BuiltinType(x) => self.builtin_type(&x.builtin_type),
-            TypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
-        };
-        let loc = self.aligns[align_kind::TYPE].last_location;
-        self.aligns[align_kind::TYPE].finish_item();
-        self.aligns[align_kind::WIDTH].start_item();
-        if arg.type_list0.is_empty() {
-            let loc = loc.unwrap();
-            self.aligns[align_kind::WIDTH].dummy_location(loc);
-        } else {
-            for x in &arg.type_list0 {
-                self.width(&x.width);
+        match &*arg.scalar_type_group {
+            ScalarTypeGroup::VariableType(x) => self.variable_type(&x.variable_type),
+            ScalarTypeGroup::FixedType(x) => {
+                self.fixed_type(&x.fixed_type);
+                if !self.in_type_expression {
+                    let loc = self.aligns[align_kind::TYPE].last_location;
+                    self.aligns[align_kind::TYPE].finish_item();
+                    self.aligns[align_kind::WIDTH].start_item();
+                    let loc = loc.unwrap();
+                    self.aligns[align_kind::WIDTH].dummy_location(loc);
+                }
             }
         }
-        self.aligns[align_kind::WIDTH].finish_item();
+        if !self.in_type_expression {
+            self.aligns[align_kind::WIDTH].finish_item();
+        }
+    }
+
+    /// Semantic action for non-terminal 'ArrayType'
+    fn array_type(&mut self, arg: &ArrayType) {
+        self.scalar_type(&arg.scalar_type);
+        if let Some(ref x) = arg.array_type_opt {
+            self.array(&x.array);
+        }
     }
 
     /// Semantic action for non-terminal 'AssignmentStatement'
@@ -395,7 +456,7 @@ impl VerylWalker for Aligner {
         self.identifier(&arg.identifier);
         self.aligns[align_kind::IDENTIFIER].finish_item();
         self.colon(&arg.colon);
-        self.r#type(&arg.r#type);
+        self.array_type(&arg.array_type);
         if let Some(ref x) = arg.var_declaration_opt {
             self.equ(&x.equ);
             self.expression(&x.expression);
@@ -410,9 +471,20 @@ impl VerylWalker for Aligner {
         self.identifier(&arg.identifier);
         self.aligns[align_kind::IDENTIFIER].finish_item();
         self.colon(&arg.colon);
-        self.r#type(&arg.r#type);
-        self.equ(&arg.equ);
-        self.expression(&arg.expression);
+        match &*arg.localparam_declaration_group {
+            LocalparamDeclarationGroup::ArrayTypeEquExpression(x) => {
+                self.array_type(&x.array_type);
+                self.equ(&x.equ);
+                self.expression(&x.expression);
+            }
+            LocalparamDeclarationGroup::TypeEquTypeExpression(x) => {
+                self.aligns[align_kind::TYPE].start_item();
+                self.r#type(&x.r#type);
+                self.aligns[align_kind::TYPE].finish_item();
+                self.equ(&x.equ);
+                self.type_expression(&x.type_expression);
+            }
+        }
         self.semicolon(&arg.semicolon);
     }
 
@@ -442,7 +514,7 @@ impl VerylWalker for Aligner {
         self.identifier(&arg.identifier);
         self.aligns[align_kind::IDENTIFIER].finish_item();
         self.colon(&arg.colon);
-        self.r#type(&arg.r#type);
+        self.scalar_type(&arg.scalar_type);
     }
 
     /// Semantic action for non-terminal 'InstDeclaration'
@@ -463,7 +535,7 @@ impl VerylWalker for Aligner {
             return;
         }
         if let Some(ref x) = arg.inst_declaration_opt {
-            self.width(&x.width);
+            self.array(&x.array);
         }
         if let Some(ref x) = arg.inst_declaration_opt0 {
             self.inst_parameter(&x.inst_parameter);
@@ -528,11 +600,24 @@ impl VerylWalker for Aligner {
         self.identifier(&arg.identifier);
         self.aligns[align_kind::IDENTIFIER].finish_item();
         self.colon(&arg.colon);
-        self.r#type(&arg.r#type);
-        self.equ(&arg.equ);
-        self.aligns[align_kind::EXPRESSION].start_item();
-        self.expression(&arg.expression);
-        self.aligns[align_kind::EXPRESSION].finish_item();
+        match &*arg.with_parameter_item_group0 {
+            WithParameterItemGroup0::ArrayTypeEquExpression(x) => {
+                self.array_type(&x.array_type);
+                self.equ(&x.equ);
+                self.aligns[align_kind::EXPRESSION].start_item();
+                self.expression(&x.expression);
+                self.aligns[align_kind::EXPRESSION].finish_item();
+            }
+            WithParameterItemGroup0::TypeEquTypeExpression(x) => {
+                self.aligns[align_kind::TYPE].start_item();
+                self.r#type(&x.r#type);
+                self.aligns[align_kind::TYPE].finish_item();
+                self.equ(&x.equ);
+                self.aligns[align_kind::EXPRESSION].start_item();
+                self.type_expression(&x.type_expression);
+                self.aligns[align_kind::EXPRESSION].finish_item();
+            }
+        }
     }
 
     /// Semantic action for non-terminal 'PortDeclarationItem'
@@ -542,11 +627,16 @@ impl VerylWalker for Aligner {
         self.aligns[align_kind::IDENTIFIER].finish_item();
         self.colon(&arg.colon);
         match &*arg.port_declaration_item_group {
-            PortDeclarationItemGroup::DirectionType(x) => {
+            PortDeclarationItemGroup::DirectionArrayType(x) => {
                 self.direction(&x.direction);
-                self.r#type(&x.r#type);
+                self.array_type(&x.array_type);
             }
-            PortDeclarationItemGroup::Interface(x) => self.interface(&x.interface),
+            PortDeclarationItemGroup::InterfacePortDeclarationItemOpt(x) => {
+                self.interface(&x.interface);
+                if let Some(ref x) = x.port_declaration_item_opt {
+                    self.array(&x.array);
+                }
+            }
         }
     }
 
@@ -575,7 +665,7 @@ impl VerylWalker for Aligner {
         }
         self.minus_g_t(&arg.minus_g_t);
         // skip type align
-        //self.r#type(&arg.r#type);
+        //self.scalar_type(&arg.scalar_type);
         self.l_brace(&arg.l_brace);
         for x in &arg.function_declaration_list {
             self.function_item(&x.function_item);

@@ -1,11 +1,11 @@
 module Module11 {
     // variable declaration
-    var b   : logic         ;
-    var bb  : logic [10]    ;
-    var _bbb: bit   [10][10];
+    var b   : logic        ;
+    var bb  : logic<10>    ;
+    var _bbb: bit  <10, 10>;
 
     // variable declaration with assignment
-    var _c: logic [10] = 1;
+    var _c: logic<10> = 1;
 
     // assign declaration
     assign b    = 1;

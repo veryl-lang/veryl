@@ -1,6 +1,6 @@
 module Module22 {
-    var _a: signed logic     [10];
-    var _b: tri signed logic [10];
-    var _c: signed tri logic [10];
-    var _d: logic            [10];
+    var _a: signed logic    <10>;
+    var _b: tri signed logic<10>;
+    var _c: signed tri logic<10>;
+    var _d: logic           <10>;
 }

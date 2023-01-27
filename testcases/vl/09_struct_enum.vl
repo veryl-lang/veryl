@@ -1,20 +1,20 @@
 module Module09 {
     // struct declaration
     struct A {
-        a  : logic [10],
-        aa : logic [10],
-        aaa: u32       ,
+        a  : logic<10>,
+        aa : logic<10>,
+        aaa: u32      ,
     }
 
     // enum declaration
-    enum B: logic [2] {
+    enum B: logic<2> {
         X = 1,
         Y = 2,
         Z,
     }
 
-    var a: A ;
-    var b: B ;
+    var a: A;
+    var b: B;
 
     assign a.a = 1;
     assign b   = B::X;

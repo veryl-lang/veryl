@@ -1,5 +1,5 @@
 module veryl_testcase_Module06;
-    localparam int unsigned ParamX  = 1;
+    localparam int unsigned ParamX = 1;
 
     // function without parameter
     function automatic logic [ParamX-1:0] FuncA(
@@ -7,7 +7,7 @@ module veryl_testcase_Module06;
         output logic [ParamX-1:0] b,
         ref    logic [ParamX-1:0] c
     ) ;
-        int unsigned d ;
+        int unsigned d;
         d = 1;
         b = a + 1 + d;
         c = a / 1;
@@ -16,7 +16,7 @@ module veryl_testcase_Module06;
 
     // function with parameter
     module FuncB #(
-        parameter int unsigned ParamX  = 1
+        parameter int unsigned ParamX = 1
     );
         function automatic logic [ParamX-1:0] FuncB(
             input  logic [ParamX-1:0] a,

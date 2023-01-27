@@ -1,18 +1,18 @@
 // interface declaration
 interface Interface05 #(
     // interface parameter
-    parameter  a  : u32  = 1,
-    parameter  aa : u32  = 1,
-    localparam aaa: u32  = 1,
+    parameter  a  : u32 = 1,
+    parameter  aa : u32 = 1,
+    localparam aaa: u32 = 1,
 ) {
     // localparam declaration
-    localparam b : u32  = 1;
-    localparam bb: u64  = 1;
+    localparam b : u32 = 1;
+    localparam bb: u64 = 1;
 
     // variable declaration
-    var c  : logic             ;
-    var cc : logic     [10]    ;
-    var ccc: tri logic [10][10];
+    var c  : logic            ;
+    var cc : logic    <10>    ;
+    var ccc: tri logic<10, 10>;
 
     // modport declaration
     modport d {

@@ -1,15 +1,15 @@
 package veryl_testcase_Package17;
     // localparam declaration
-    localparam int unsigned ParamX  = 1;
+    localparam int unsigned ParamX = 1;
 
     // variable declaration
-    logic  _b;
+    logic _b;
 
     // struct declaration
     typedef struct {
         logic        [10-1:0] a  ;
         logic        [10-1:0] aa ;
-        int unsigned         aaa ;
+        int unsigned          aaa;
     } A;
 
     // enum declaration
@@ -25,7 +25,7 @@ package veryl_testcase_Package17;
         output logic [ParamX-1:0] b,
         ref    logic [ParamX-1:0] c
     ) ;
-        int unsigned d ;
+        int unsigned d;
         d = 1;
         b = a + 1 + d;
         c = a / 1;

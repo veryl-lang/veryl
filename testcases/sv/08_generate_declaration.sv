@@ -1,12 +1,12 @@
 module veryl_testcase_Module08;
-    logic  a    ;
-    logic  b    ;
-    logic  c    ;
-    logic  i_clk;
+    logic a    ;
+    logic b    ;
+    logic c    ;
+    logic i_clk;
 
     // if declaration
     if (a == 1) begin :label
-        logic  a;
+        logic a;
         always_ff @ (posedge i_clk) begin
             a <= 1;
         end
@@ -26,7 +26,7 @@ module veryl_testcase_Module08;
 
     // for declaration
     for (genvar i = 0; i < 10; i++) begin :label2
-        logic  a;
+        logic a;
         always_ff @ (posedge i_clk) begin
             a <= i;
         end
@@ -34,7 +34,7 @@ module veryl_testcase_Module08;
 
     // for declaration with custom step
     for (genvar i = 0; i < 10; i += 2) begin :label3
-        logic  a;
+        logic a;
         always_ff @ (posedge i_clk) begin
             a <= i;
         end

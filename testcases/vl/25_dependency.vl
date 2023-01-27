@@ -1,8 +1,8 @@
 module Module25 (
-    i_clk  : input  logic ,
-    i_rst_n: input  logic ,
-    i_d    : input  logic ,
-    o_d    : output logic ,
+    i_clk  : input  logic,
+    i_rst_n: input  logic,
+    i_d    : input  logic,
+    o_d    : output logic,
 ) {
     inst a: veryl_sample1::delay (
         i_clk    ,

@@ -14,10 +14,10 @@ impl CmdMetadata {
     pub fn exec(&self, metadata: &Metadata) -> Result<bool> {
         let text = match self.opt.format {
             Format::Json => serde_json::to_string(metadata).into_diagnostic()?,
-            Format::Pretty => format!("{:#?}", metadata),
+            Format::Pretty => format!("{metadata:#?}"),
         };
 
-        println!("{}", text);
+        println!("{text}");
 
         Ok(true)
     }

@@ -91,7 +91,7 @@ impl Backend {
                     let analyzer = Analyzer::new(&path.prj);
                     let _ = analyzer.analyze_pass1(&text, &uri, &x.veryl);
                     self.client
-                        .log_message(MessageType::INFO, format!("background_analyze: {}", uri))
+                        .log_message(MessageType::INFO, format!("background_analyze: {uri}"))
                         .await;
                 }
             }
@@ -129,17 +129,17 @@ impl Backend {
                     )
                 }
                 ParserError::ParserError(x) => {
-                    format!("Syntax Error: {}", x)
+                    format!("Syntax Error: {x}")
                 }
                 ParserError::LexerError(x) => {
-                    format!("Syntax Error: {}", x)
+                    format!("Syntax Error: {x}")
                 }
                 ParserError::UserError(x) => {
-                    format!("Syntax Error: {}", x)
+                    format!("Syntax Error: {x}")
                 }
             }
         } else {
-            format!("Semantic Error: {}", err)
+            format!("Semantic Error: {err}")
         };
 
         Diagnostic::new(
@@ -302,7 +302,7 @@ impl LanguageServer for Backend {
             self.client
                 .log_message(
                     MessageType::INFO,
-                    format!("did_change_watched_files: {:?}", change),
+                    format!("did_change_watched_files: {change:?}"),
                 )
                 .await;
         }

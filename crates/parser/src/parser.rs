@@ -10,6 +10,7 @@ pub struct Parser {
 }
 
 impl Parser {
+    #[allow(clippy::result_large_err)]
     pub fn parse<T: AsRef<Path>>(input: &str, file: &T) -> Result<Self, ParserError> {
         let mut grammar = VerylGrammar::new();
         parse(input, file, &mut grammar)?;
