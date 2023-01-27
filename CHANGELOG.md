@@ -3,6 +3,8 @@
 ## [Unreleased](https://github.com/dalance/veryl/compare/v0.2.2...Unreleased) - ReleaseDate
 
 * [Added] operator completeion support of language server [#16](https://github.com/dalance/veryl/issues/16)
+* [Changed] compare operator to `<:` and `>:` [#94](https://github.com/dalance/veryl/issues/94)
+* [Changed] width `<>` and array `[]` notation [#94](https://github.com/dalance/veryl/issues/94)
 
 ## [v0.2.2](https://github.com/dalance/veryl/compare/v0.2.1...v0.2.2) - 2023-01-24
 
