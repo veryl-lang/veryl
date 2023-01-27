@@ -160,7 +160,7 @@ module ModuleA #(
     localparam ParamC: u32 = 10; // [!] `parameter` is not allowed in module
 
     // variable declaration
-    var data: logic [10];
+    var data: logic&lt;10&gt;; // [!] bit width is represented by `&lt;&gt;`
 
     // always_ff statement
     always_ff (i_clk, i_rst) { // [!] `always_ff` can take a mandatory clock

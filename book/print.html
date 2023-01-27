@@ -198,7 +198,7 @@ module ModuleA #(
     localparam ParamC: u32 = 10; // [!] `parameter` is not allowed in module
 
     // variable declaration
-    var data: logic [10];
+    var data: logic&lt;10&gt;; // [!] bit width is represented by `&lt;&gt;`
 
     // always_ff statement
     always_ff (i_clk, i_rst) { // [!] `always_ff` can take a mandatory clock
@@ -313,9 +313,9 @@ a = 1 &lt;&lt;&lt; 1;
 a = 1 &gt;&gt;&gt; 1;
 
 // binary compare
-a = 1 &lt; 1;
+a = 1 &lt;: 1;
 a = 1 &lt;= 1;
-a = 1 &gt; 1;
+a = 1 &gt;: 1;
 a = 1 &gt;= 1;
 a = 1 == 1;
 a = 1 != 1;
@@ -388,11 +388,11 @@ a = 1 || 1;
 <h2 id="struct"><a class="header" href="#struct">Struct</a></h2>
 <pre><code class="language-veryl">struct StructA {
     member_a: logic    ,
-    member_b: logic[10],
+    member_b: logic&lt;10&gt;,
 }
 </code></pre>
 <h2 id="enum"><a class="header" href="#enum">Enum</a></h2>
-<pre><code class="language-veryl">enum EnumA: logic [2] {
+<pre><code class="language-veryl">enum EnumA: logic &lt;2&gt; {
     member_a,
     member_b,
     member_c = 3,
@@ -412,10 +412,10 @@ a = {b[10:0] repeat 10, c repeat 4};
 <div style="break-before: page; page-break-before: always;"></div><h1 id="case"><a class="header" href="#case">Case</a></h1>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="declaration"><a class="header" href="#declaration">Declaration</a></h1>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="variable"><a class="header" href="#variable">Variable</a></h1>
-<pre><code class="language-veryl">var var_a: logic;
-var var_b: logic [10];
-var var_c: logic [10][10];
-var var_d: u32;
+<pre><code class="language-veryl">var var_a: logic        ;
+var var_b: logic&lt;10&gt;    ;
+var var_c: logic&lt;10, 10&gt;;
+var var_d: u32          ;
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="parameter"><a class="header" href="#parameter">Parameter</a></h1>
 <pre><code class="language-veryl">localparam param_a: u32 = 1;
