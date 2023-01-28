@@ -109,8 +109,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    #[test]
-    fn test() {
+    fn get_default_code() -> String {
         let path = std::env::var("CARGO_MANIFEST_DIR").unwrap();
         let mut path = PathBuf::from(path);
         path.push("playground");
@@ -129,9 +128,24 @@ mod tests {
                 code = true;
             }
         }
-        let ret = parse(&code_text);
+        code_text
+    }
+
+    #[test]
+    fn build_default_code() {
+        let text = get_default_code();
+        let ret = parse(&text);
 
         assert_eq!(ret.err, "");
         assert_ne!(ret.code, "");
+    }
+
+    #[test]
+    fn format_default_code() {
+        let text = get_default_code();
+        let ret = format(&text);
+
+        assert_eq!(ret.err, "");
+        assert_eq!(ret.code, text);
     }
 }
