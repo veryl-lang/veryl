@@ -67,9 +67,9 @@ pub fn parse(source: &str) -> ParseResult {
     match Parser::parse(source, &"") {
         Ok(parser) => {
             let analyzer = Analyzer::new::<&str>(&[]);
-            let _ = analyzer.analyze_pass1(source, &"", &parser.veryl);
-            let _ = analyzer.analyze_pass2(source, &"", &parser.veryl);
-            let _ = analyzer.analyze_pass3(source, &"", &parser.veryl);
+            let _ = analyzer.analyze_pass1(source, "", &parser.veryl);
+            let _ = analyzer.analyze_pass2(source, "", &parser.veryl);
+            let _ = analyzer.analyze_pass3(source, "", &parser.veryl);
 
             let mut emitter = Emitter::new(&metadata);
             emitter.emit(&parser.veryl);
