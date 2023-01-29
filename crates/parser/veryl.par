@@ -364,6 +364,7 @@ Factor: Number
       | LBrace ConcatenationList RBrace
       | IfExpression
       | CaseExpression
+      | Strin
       ;
 
 FunctionCall: LParen [ ArgumentList ] RParen;

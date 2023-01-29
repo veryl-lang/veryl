@@ -926,6 +926,9 @@ pub trait VerylWalker {
             Factor::CaseExpression(x) => {
                 self.case_expression(&x.case_expression);
             }
+            Factor::Strin(x) => {
+                self.strin(&x.strin);
+            }
         }
         after!(self, factor, arg);
     }

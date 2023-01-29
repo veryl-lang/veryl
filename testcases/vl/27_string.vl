@@ -1,0 +1,5 @@
+module Module27 {
+    localparam a: string = "aaa";
+
+    var _b: string = "bbb";
+}
