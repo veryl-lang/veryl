@@ -208,9 +208,9 @@
         <script src="../../highlight.js"></script>
         <script src="../../book.js"></script>
         <script type="module">
-            import init, {parse, format} from "https://dalance.github.io/veryl/playground/pkg/veryl_wasm.js";
+            import init, {build, format} from "https://dalance.github.io/veryl/playground/pkg/veryl_wasm.js";
             init().then(() => {});
-            window.parse = parse;
+            window.build = build;
         </script>
 
         <!-- Custom JS scripts -->
