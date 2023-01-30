@@ -14,21 +14,21 @@ extern "C" {
 }
 
 #[wasm_bindgen]
-pub struct ParseResult {
-    code: String,
-    err: String,
+pub struct Result {
+    err: bool,
+    content: String,
 }
 
 #[wasm_bindgen]
-impl ParseResult {
+impl Result {
     #[wasm_bindgen]
-    pub fn code(&self) -> String {
-        self.code.clone()
+    pub fn err(&self) -> bool {
+        self.err
     }
 
     #[wasm_bindgen]
-    pub fn err(&self) -> String {
-        self.err.clone()
+    pub fn content(&self) -> String {
+        self.content.clone()
     }
 }
 
@@ -47,7 +47,7 @@ fn render_err(err: ErrReport) -> String {
 fn metadata() -> Metadata {
     Metadata {
         project: Project {
-            name: "".into(),
+            name: "project".into(),
             version: Version::parse("0.0.0").unwrap(),
             authors: vec![],
             description: None,
@@ -62,44 +62,54 @@ fn metadata() -> Metadata {
 }
 
 #[wasm_bindgen]
-pub fn parse(source: &str) -> ParseResult {
+pub fn build(source: &str) -> Result {
     let metadata = metadata();
     match Parser::parse(source, &"") {
         Ok(parser) => {
             let analyzer = Analyzer::new::<&str>(&[]);
-            let _ = analyzer.analyze_pass1(source, "", &parser.veryl);
-            let _ = analyzer.analyze_pass2(source, "", &parser.veryl);
-            let _ = analyzer.analyze_pass3(source, "", &parser.veryl);
+            let mut errors = Vec::new();
+            errors.append(&mut analyzer.analyze_pass1(source, "", &parser.veryl));
+            errors.append(&mut analyzer.analyze_pass2(source, "", &parser.veryl));
+            errors.append(&mut analyzer.analyze_pass3(source, "", &parser.veryl));
 
-            let mut emitter = Emitter::new(&metadata);
-            emitter.emit(&parser.veryl);
-            ParseResult {
-                code: emitter.as_str().to_owned(),
-                err: "".to_owned(),
-            }
+            let err = !errors.is_empty();
+
+            let content = if err {
+                let mut text = String::new();
+                for e in errors {
+                    text.push_str(&render_err(e.into()));
+                }
+                text
+            } else {
+                let mut emitter = Emitter::new(&metadata);
+                emitter.emit(&parser.veryl);
+                emitter.as_str().to_owned()
+            };
+
+            Result { err, content }
         }
-        Err(e) => ParseResult {
-            code: "".to_owned(),
-            err: render_err(e.into()),
+        Err(e) => Result {
+            err: true,
+            content: render_err(e.into()),
         },
     }
 }
 
 #[wasm_bindgen]
-pub fn format(source: &str) -> ParseResult {
+pub fn format(source: &str) -> Result {
     let metadata = metadata();
     match Parser::parse(source, &"") {
         Ok(parser) => {
             let mut formatter = Formatter::new(&metadata);
             formatter.format(&parser.veryl);
-            ParseResult {
-                code: formatter.as_str().to_owned(),
-                err: "".to_owned(),
+            Result {
+                err: false,
+                content: formatter.as_str().to_owned(),
             }
         }
-        Err(e) => ParseResult {
-            code: "".to_owned(),
-            err: render_err(e.into()),
+        Err(e) => Result {
+            err: true,
+            content: render_err(e.into()),
         },
     }
 }
@@ -134,10 +144,10 @@ mod tests {
     #[test]
     fn build_default_code() {
         let text = get_default_code();
-        let ret = parse(&text);
+        let ret = build(&text);
 
-        assert_eq!(ret.err, "");
-        assert_ne!(ret.code, "");
+        assert_eq!(ret.err, false);
+        assert_ne!(ret.content, "");
     }
 
     #[test]
@@ -145,7 +155,7 @@ mod tests {
         let text = get_default_code();
         let ret = format(&text);
 
-        assert_eq!(ret.err, "");
-        assert_eq!(ret.code, text);
+        assert_eq!(ret.err, false);
+        assert_eq!(ret.content, text);
     }
 }
