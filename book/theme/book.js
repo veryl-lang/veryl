@@ -110,13 +110,13 @@ function playground_text(playground, hidden = true) {
 
         let text = playground_text(code_block).replace('# ', '');
 
-        let result = parse(text);
+        let result = build(text);
         let err = result.err();
-        let code = result.code();
-        if (err !== '') {
-            result_block.innerHTML = err;
+        let content = result.content();
+        if (err) {
+            result_block.innerHTML = content;
         } else {
-            result_block.innerHTML = code;
+            result_block.innerHTML = content;
             hljs.highlightBlock(result_block);
         }
     }
