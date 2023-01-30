@@ -975,8 +975,8 @@ impl VerylWalker for Emitter {
                 if let Some(ref x) = arg.attribute_opt {
                     self.str("(*");
                     self.space(1);
-                    if let AttributeItem::Strin(x) = &*x.attribute_list.attribute_item {
-                        let text = x.strin.string_token.text();
+                    if let AttributeItem::StringLiteral(x) = &*x.attribute_list.attribute_item {
+                        let text = x.string_literal.string_literal_token.text();
                         let text = &text[1..text.len() - 1];
                         let text = text.replace("\\\"", "\"");
                         self.str(&text);

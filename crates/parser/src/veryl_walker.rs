@@ -34,11 +34,11 @@ pub trait VerylWalker {
         after!(self, start, arg);
     }
 
-    /// Semantic action for non-terminal 'Strin'
-    fn strin(&mut self, arg: &Strin) {
-        before!(self, strin, arg);
-        self.veryl_token(&arg.string_token);
-        after!(self, strin, arg);
+    /// Semantic action for non-terminal 'StringLiteral'
+    fn string_literal(&mut self, arg: &StringLiteral) {
+        before!(self, string_literal, arg);
+        self.veryl_token(&arg.string_literal_token);
+        after!(self, string_literal, arg);
     }
 
     /// Semantic action for non-terminal 'Exponent'
@@ -926,8 +926,8 @@ pub trait VerylWalker {
             Factor::CaseExpression(x) => {
                 self.case_expression(&x.case_expression);
             }
-            Factor::Strin(x) => {
-                self.strin(&x.strin);
+            Factor::StringLiteral(x) => {
+                self.string_literal(&x.string_literal);
             }
         }
         after!(self, factor, arg);
@@ -1357,7 +1357,7 @@ pub trait VerylWalker {
         before!(self, attribute_item, arg);
         match arg {
             AttributeItem::Identifier(x) => self.identifier(&x.identifier),
-            AttributeItem::Strin(x) => self.strin(&x.strin),
+            AttributeItem::StringLiteral(x) => self.string_literal(&x.string_literal),
         }
         after!(self, attribute_item, arg);
     }

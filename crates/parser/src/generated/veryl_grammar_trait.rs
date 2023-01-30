@@ -26,8 +26,8 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'StringTerm'
-    fn string_term(&mut self, _arg: &StringTerm) -> Result<()> {
+    /// Semantic action for non-terminal 'StringLiteralTerm'
+    fn string_literal_term(&mut self, _arg: &StringLiteralTerm) -> Result<()> {
         Ok(())
     }
 
@@ -481,8 +481,8 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'StringToken'
-    fn string_token(&mut self, _arg: &StringToken) -> Result<()> {
+    /// Semantic action for non-terminal 'StringLiteralToken'
+    fn string_literal_token(&mut self, _arg: &StringLiteralToken) -> Result<()> {
         Ok(())
     }
 
@@ -931,8 +931,8 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'Strin'
-    fn strin(&mut self, _arg: &Strin) -> Result<()> {
+    /// Semantic action for non-terminal 'StringLiteral'
+    fn string_literal(&mut self, _arg: &StringLiteral) -> Result<()> {
         Ok(())
     }
 
@@ -2197,13 +2197,13 @@ pub struct FactorCaseExpression {
 ///
 /// Type derived for production 355
 ///
-/// Factor: Strin;
+/// Factor: StringLiteral;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct FactorStrin {
-    pub strin: Box<Strin>,
+pub struct FactorStringLiteral {
+    pub string_literal: Box<StringLiteral>,
 }
 
 ///
@@ -2598,13 +2598,13 @@ pub struct AttributeItemIdentifier {
 ///
 /// Type derived for production 476
 ///
-/// AttributeItem: Strin;
+/// AttributeItem: StringLiteral;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct AttributeItemStrin {
-    pub strin: Box<Strin>,
+pub struct AttributeItemStringLiteral {
+    pub string_literal: Box<StringLiteral>,
 }
 
 ///
@@ -4159,7 +4159,7 @@ pub struct Attribute {
 #[derive(Debug, Clone)]
 pub enum AttributeItem {
     Identifier(AttributeItemIdentifier),
-    Strin(AttributeItemStrin),
+    StringLiteral(AttributeItemStringLiteral),
 }
 
 ///
@@ -5564,7 +5564,7 @@ pub enum Factor {
     LBraceConcatenationListRBrace(FactorLBraceConcatenationListRBrace),
     IfExpression(FactorIfExpression),
     CaseExpression(FactorCaseExpression),
-    Strin(FactorStrin),
+    StringLiteral(FactorStringLiteral),
 }
 
 ///
@@ -8791,33 +8791,33 @@ pub struct StepToken {
 }
 
 ///
-/// Type derived for non-terminal Strin
+/// Type derived for non-terminal StringLiteral
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct Strin {
-    pub string_token: crate::veryl_token::VerylToken,
+pub struct StringLiteral {
+    pub string_literal_token: crate::veryl_token::VerylToken,
 }
 
 ///
-/// Type derived for non-terminal StringTerm
+/// Type derived for non-terminal StringLiteralTerm
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct StringTerm {
-    pub string_term: crate::veryl_token::Token, /* \u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022} */
+pub struct StringLiteralTerm {
+    pub string_literal_term: crate::veryl_token::Token, /* \u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022} */
 }
 
 ///
-/// Type derived for non-terminal StringToken
+/// Type derived for non-terminal StringLiteralToken
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct StringToken {
-    pub string_term: crate::veryl_token::Token,
+pub struct StringLiteralToken {
+    pub string_literal_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
 }
 
@@ -9912,9 +9912,9 @@ pub enum ASTType {
     Step(Step),
     StepTerm(StepTerm),
     StepToken(StepToken),
-    Strin(Strin),
-    StringTerm(StringTerm),
-    StringToken(StringToken),
+    StringLiteral(StringLiteral),
+    StringLiteralTerm(StringLiteralTerm),
+    StringLiteralToken(StringLiteralToken),
     Struct(Struct),
     StructDeclaration(StructDeclaration),
     StructGroup(StructGroup),
@@ -10065,24 +10065,30 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 1:
     ///
-    /// StringTerm: "\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}" : Token;
+    /// StringLiteralTerm: "\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}" : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn string_term(
+    fn string_literal_term(
         &mut self,
-        string_term: &ParseTreeStackEntry<'t>,
+        string_literal_term: &ParseTreeStackEntry<'t>,
         parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let string_term = string_term
+        let string_literal_term = string_literal_term
             .token(parse_tree)?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
-        let string_term_built = StringTerm { string_term };
+        let string_literal_term_built = StringLiteralTerm {
+            string_literal_term,
+        };
         // Calling user action here
-        self.user_grammar.string_term(&string_term_built)?;
-        self.push(ASTType::StringTerm(string_term_built), context);
+        self.user_grammar
+            .string_literal_term(&string_literal_term_built)?;
+        self.push(
+            ASTType::StringLiteralTerm(string_literal_term_built),
+            context,
+        );
         Ok(())
     }
 
@@ -12205,28 +12211,32 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 94:
     ///
-    /// StringToken: StringTerm : Token Comments;
+    /// StringLiteralToken: StringLiteralTerm : Token Comments;
     ///
     #[parol_runtime::function_name::named]
-    fn string_token(
+    fn string_literal_token(
         &mut self,
-        _string_term: &ParseTreeStackEntry<'t>,
+        _string_literal_term: &ParseTreeStackEntry<'t>,
         _comments: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
-        let string_term = pop_item!(self, string_term, StringTerm, context);
-        let string_token_built = StringToken {
-            string_term: (&string_term)
+        let string_literal_term = pop_item!(self, string_literal_term, StringLiteralTerm, context);
+        let string_literal_token_built = StringLiteralToken {
+            string_literal_term: (&string_literal_term)
                 .try_into()
                 .map_err(parol_runtime::ParolError::UserError)?,
             comments: Box::new(comments),
         };
         // Calling user action here
-        self.user_grammar.string_token(&string_token_built)?;
-        self.push(ASTType::StringToken(string_token_built), context);
+        self.user_grammar
+            .string_literal_token(&string_literal_token_built)?;
+        self.push(
+            ASTType::StringLiteralToken(string_literal_token_built),
+            context,
+        );
         Ok(())
     }
 
@@ -14664,25 +14674,26 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 184:
     ///
-    /// Strin: StringToken : VerylToken;
+    /// StringLiteral: StringLiteralToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn strin(
+    fn string_literal(
         &mut self,
-        _string_token: &ParseTreeStackEntry<'t>,
+        _string_literal_token: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let string_token = pop_item!(self, string_token, StringToken, context);
-        let strin_built = Strin {
-            string_token: (&string_token)
+        let string_literal_token =
+            pop_item!(self, string_literal_token, StringLiteralToken, context);
+        let string_literal_built = StringLiteral {
+            string_literal_token: (&string_literal_token)
                 .try_into()
                 .map_err(parol_runtime::ParolError::UserError)?,
         };
         // Calling user action here
-        self.user_grammar.strin(&strin_built)?;
-        self.push(ASTType::Strin(strin_built), context);
+        self.user_grammar.string_literal(&string_literal_built)?;
+        self.push(ASTType::StringLiteral(string_literal_built), context);
         Ok(())
     }
 
@@ -18860,21 +18871,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 355:
     ///
-    /// Factor: Strin;
+    /// Factor: StringLiteral;
     ///
     #[parol_runtime::function_name::named]
     fn factor_6(
         &mut self,
-        _strin: &ParseTreeStackEntry<'t>,
+        _string_literal: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let strin = pop_item!(self, strin, Strin, context);
-        let factor_6_built = FactorStrin {
-            strin: Box::new(strin),
+        let string_literal = pop_item!(self, string_literal, StringLiteral, context);
+        let factor_6_built = FactorStringLiteral {
+            string_literal: Box::new(string_literal),
         };
-        let factor_6_built = Factor::Strin(factor_6_built);
+        let factor_6_built = Factor::StringLiteral(factor_6_built);
         // Calling user action here
         self.user_grammar.factor(&factor_6_built)?;
         self.push(ASTType::Factor(factor_6_built), context);
@@ -21792,21 +21803,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 476:
     ///
-    /// AttributeItem: Strin;
+    /// AttributeItem: StringLiteral;
     ///
     #[parol_runtime::function_name::named]
     fn attribute_item_1(
         &mut self,
-        _strin: &ParseTreeStackEntry<'t>,
+        _string_literal: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let strin = pop_item!(self, strin, Strin, context);
-        let attribute_item_1_built = AttributeItemStrin {
-            strin: Box::new(strin),
+        let string_literal = pop_item!(self, string_literal, StringLiteral, context);
+        let attribute_item_1_built = AttributeItemStringLiteral {
+            string_literal: Box::new(string_literal),
         };
-        let attribute_item_1_built = AttributeItem::Strin(attribute_item_1_built);
+        let attribute_item_1_built = AttributeItem::StringLiteral(attribute_item_1_built);
         // Calling user action here
         self.user_grammar.attribute_item(&attribute_item_1_built)?;
         self.push(ASTType::AttributeItem(attribute_item_1_built), context);
@@ -28809,7 +28820,7 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
     ) -> Result<()> {
         match prod_num {
             0 => self.comments_term(&children[0], parse_tree),
-            1 => self.string_term(&children[0], parse_tree),
+            1 => self.string_literal_term(&children[0], parse_tree),
             2 => self.exponent_term(&children[0], parse_tree),
             3 => self.fixed_point_term(&children[0], parse_tree),
             4 => self.based_term(&children[0], parse_tree),
@@ -28902,7 +28913,7 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             91 => self.comments_opt_0(&children[0], parse_tree),
             92 => self.comments_opt_1(parse_tree),
             93 => self.start_token(&children[0], parse_tree),
-            94 => self.string_token(&children[0], &children[1], parse_tree),
+            94 => self.string_literal_token(&children[0], &children[1], parse_tree),
             95 => self.exponent_token(&children[0], &children[1], parse_tree),
             96 => self.fixed_point_token(&children[0], &children[1], parse_tree),
             97 => self.based_token(&children[0], &children[1], parse_tree),
@@ -28992,7 +29003,7 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             181 => self.var_token(&children[0], &children[1], parse_tree),
             182 => self.identifier_token(&children[0], &children[1], parse_tree),
             183 => self.start(&children[0], parse_tree),
-            184 => self.strin(&children[0], parse_tree),
+            184 => self.string_literal(&children[0], parse_tree),
             185 => self.exponent(&children[0], parse_tree),
             186 => self.fixed_point(&children[0], parse_tree),
             187 => self.based(&children[0], parse_tree),

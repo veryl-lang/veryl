@@ -14,7 +14,7 @@
 // Longest match should be first
 
 CommentsTerm          : "(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+"                     : Token;
-StringTerm            : "\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}": Token;
+StringLiteralTerm     : "\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}": Token;
 ExponentTerm          : /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/                   : Token;
 FixedPointTerm        : /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/                                              : Token;
 BasedTerm             : /[0-9]+(?:_[0-9]+)*'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/                     : Token;
@@ -112,7 +112,7 @@ Comments: [ CommentsTerm ];
 
 StartToken: Comments;
 
-StringToken: StringTerm: Token Comments;
+StringLiteralToken: StringLiteralTerm: Token Comments;
 
 ExponentToken  : ExponentTerm  : Token Comments;
 FixedPointToken: FixedPointTerm: Token Comments;
@@ -214,8 +214,8 @@ IdentifierToken: IdentifierTerm: Token Comments;
 // Start
 Start: StartToken: VerylToken;
 
-// String
-Strin: StringToken: VerylToken; // avoid to conflict with Rust's String
+// StringLiteral
+StringLiteral: StringLiteralToken: VerylToken;
 
 // Number
 Exponent  : ExponentToken  : VerylToken;
@@ -364,7 +364,7 @@ Factor: Number
       | LBrace ConcatenationList RBrace
       | IfExpression
       | CaseExpression
-      | Strin
+      | StringLiteral
       ;
 
 FunctionCall: LParen [ ArgumentList ] RParen;
@@ -450,7 +450,7 @@ Attribute: Hash LBracket Identifier [ LParen AttributeList RParen ] RBracket;
 AttributeList: AttributeItem { Comma AttributeItem } [ Comma ];
 
 AttributeItem: Identifier
-             | Strin
+             | StringLiteral
              ;
 
 // ----------------------------------------------------------------------------

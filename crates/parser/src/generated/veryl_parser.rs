@@ -129,7 +129,7 @@ pub const TERMINAL_NAMES: &[&str; 96] = &[
     /*  3 */ "LineComment",
     /*  4 */ "BlockComment",
     /*  5 */ "CommentsTerm",
-    /*  6 */ "StringTerm",
+    /*  6 */ "StringLiteralTerm",
     /*  7 */ "ExponentTerm",
     /*  8 */ "FixedPointTerm",
     /*  9 */ "BasedTerm",
@@ -232,7 +232,7 @@ const SCANNER_0: (&[&str; 5], &[usize; 90]) = (
     ],
     &[
         5,  /* CommentsTerm */
-        6,  /* StringTerm */
+        6,  /* StringLiteralTerm */
         7,  /* ExponentTerm */
         8,  /* FixedPointTerm */
         9,  /* BasedTerm */
@@ -798,9 +798,9 @@ pub const NON_TERMINALS: &[&str; 531] = &[
     /* 468 */ "Step",
     /* 469 */ "StepTerm",
     /* 470 */ "StepToken",
-    /* 471 */ "Strin",
-    /* 472 */ "StringTerm",
-    /* 473 */ "StringToken",
+    /* 471 */ "StringLiteral",
+    /* 472 */ "StringLiteralTerm",
+    /* 473 */ "StringLiteralToken",
     /* 474 */ "Struct",
     /* 475 */ "StructDeclaration",
     /* 476 */ "StructGroup",
@@ -21206,19 +21206,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 531] = &[
         transitions: &[],
         k: 0,
     },
-    /* 471 - "Strin" */
+    /* 471 - "StringLiteral" */
     LookaheadDFA {
         states: &[Some(184)],
         transitions: &[],
         k: 0,
     },
-    /* 472 - "StringTerm" */
+    /* 472 - "StringLiteralTerm" */
     LookaheadDFA {
         states: &[Some(1)],
         transitions: &[],
         k: 0,
     },
-    /* 473 - "StringToken" */
+    /* 473 - "StringLiteralToken" */
     LookaheadDFA {
         states: &[Some(94)],
         transitions: &[],
@@ -21975,7 +21975,7 @@ pub const PRODUCTIONS: &[Production; 750] = &[
         lhs: 84,
         production: &[ParseType::T(5)],
     },
-    // 1 - StringTerm: "\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}";
+    // 1 - StringLiteralTerm: "\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}";
     Production {
         lhs: 472,
         production: &[ParseType::T(6)],
@@ -22440,7 +22440,7 @@ pub const PRODUCTIONS: &[Production; 750] = &[
         lhs: 466,
         production: &[ParseType::N(82)],
     },
-    // 94 - StringToken: StringTerm : crate::veryl_token::Token  Comments;
+    // 94 - StringLiteralToken: StringLiteralTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 473,
         production: &[ParseType::N(82), ParseType::N(472)],
@@ -22890,7 +22890,7 @@ pub const PRODUCTIONS: &[Production; 750] = &[
         lhs: 465,
         production: &[ParseType::N(466)],
     },
-    // 184 - Strin: StringToken : crate::veryl_token::VerylToken ;
+    // 184 - StringLiteral: StringLiteralToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 471,
         production: &[ParseType::N(473)],
@@ -23755,7 +23755,7 @@ pub const PRODUCTIONS: &[Production; 750] = &[
         lhs: 176,
         production: &[ParseType::N(62)],
     },
-    // 355 - Factor: Strin;
+    // 355 - Factor: StringLiteral;
     Production {
         lhs: 176,
         production: &[ParseType::N(471)],
@@ -24490,7 +24490,7 @@ pub const PRODUCTIONS: &[Production; 750] = &[
         lhs: 47,
         production: &[ParseType::N(211)],
     },
-    // 476 - AttributeItem: Strin;
+    // 476 - AttributeItem: StringLiteral;
     Production {
         lhs: 47,
         production: &[ParseType::N(471)],

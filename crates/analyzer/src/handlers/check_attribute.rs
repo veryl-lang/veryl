@@ -57,7 +57,7 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
                         if args.len() != 1 {
                             false
                         } else {
-                            matches!(args[0], AttributeItem::Strin(_))
+                            matches!(args[0], AttributeItem::StringLiteral(_))
                         }
                     } else {
                         false

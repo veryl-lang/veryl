@@ -7,7 +7,7 @@
 %%
 
 /*   0 */ CommentsTerm: "(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+" : Token;
-/*   1 */ StringTerm: "\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}" : Token;
+/*   1 */ StringLiteralTerm: "\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}" : Token;
 /*   2 */ ExponentTerm: /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/ : Token;
 /*   3 */ FixedPointTerm: /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/ : Token;
 /*   4 */ BasedTerm: /[0-9]+(?:_[0-9]+)*'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/ : Token;
@@ -100,7 +100,7 @@
 /*  91 */ CommentsOpt /* Option<T>::Some */: CommentsTerm;
 /*  92 */ CommentsOpt /* Option<T>::None */: ;
 /*  93 */ StartToken: Comments;
-/*  94 */ StringToken: StringTerm : Token Comments;
+/*  94 */ StringLiteralToken: StringLiteralTerm : Token Comments;
 /*  95 */ ExponentToken: ExponentTerm : Token Comments;
 /*  96 */ FixedPointToken: FixedPointTerm : Token Comments;
 /*  97 */ BasedToken: BasedTerm : Token Comments;
@@ -190,7 +190,7 @@
 /* 181 */ VarToken: VarTerm : Token Comments;
 /* 182 */ IdentifierToken: IdentifierTerm : Token Comments;
 /* 183 */ Start: StartToken : VerylToken;
-/* 184 */ Strin: StringToken : VerylToken;
+/* 184 */ StringLiteral: StringLiteralToken : VerylToken;
 /* 185 */ Exponent: ExponentToken : VerylToken;
 /* 186 */ FixedPoint: FixedPointToken : VerylToken;
 /* 187 */ Based: BasedToken : VerylToken;
@@ -361,7 +361,7 @@
 /* 352 */ Factor: LBrace ConcatenationList RBrace;
 /* 353 */ Factor: IfExpression;
 /* 354 */ Factor: CaseExpression;
-/* 355 */ Factor: Strin;
+/* 355 */ Factor: StringLiteral;
 /* 356 */ FactorOpt /* Option<T>::Some */: FunctionCall;
 /* 357 */ FactorOpt /* Option<T>::None */: ;
 /* 358 */ FunctionCall: LParen FunctionCallOpt /* Option */ RParen;
@@ -482,7 +482,7 @@
 /* 473 */ AttributeListOpt /* Option<T>::Some */: Comma;
 /* 474 */ AttributeListOpt /* Option<T>::None */: ;
 /* 475 */ AttributeItem: Identifier;
-/* 476 */ AttributeItem: Strin;
+/* 476 */ AttributeItem: StringLiteral;
 /* 477 */ VarDeclaration: Var Identifier Colon ArrayType VarDeclarationOpt /* Option */ Semicolon;
 /* 478 */ VarDeclarationOpt /* Option<T>::Some */: Equ Expression;
 /* 479 */ VarDeclarationOpt /* Option<T>::None */: ;

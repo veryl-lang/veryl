@@ -159,7 +159,7 @@ macro_rules! token_with_comments {
     };
 }
 
-token_with_comments!(String);
+token_with_comments!(StringLiteral);
 
 token_with_comments!(FixedPoint);
 token_with_comments!(Exponent);
