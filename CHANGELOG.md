@@ -2,6 +2,9 @@
 
 ## [Unreleased](https://github.com/dalance/veryl/compare/v0.3.0...Unreleased) - ReleaseDate
 
+* [Added] string literal support [#109](https://github.com/dalance/veryl/issues/109)
+* [Added] `implicit_parameter_types` in Veryl.toml [#109](https://github.com/dalance/veryl/issues/109)
+
 ## [v0.3.0](https://github.com/dalance/veryl/compare/v0.2.2...v0.3.0) - 2023-01-27
 
 * [Added] operator completeion support of language server [#16](https://github.com/dalance/veryl/issues/16)

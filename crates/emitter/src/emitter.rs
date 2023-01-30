@@ -1,7 +1,7 @@
 use crate::aligner::{Aligner, Location};
 use veryl_analyzer::symbol::SymbolKind;
 use veryl_analyzer::symbol_table;
-use veryl_metadata::{ClockType, Metadata, ResetType};
+use veryl_metadata::{BuiltinType, ClockType, Metadata, ResetType};
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::{Token, VerylToken};
@@ -17,6 +17,7 @@ pub struct Emitter {
     pub indent_width: usize,
     pub clock_type: ClockType,
     pub reset_type: ResetType,
+    pub implicit_parameter_types: Vec<BuiltinType>,
     string: String,
     indent: usize,
     line: usize,
@@ -44,6 +45,7 @@ impl Default for Emitter {
             indent_width: 4,
             clock_type: ClockType::PosEdge,
             reset_type: ResetType::AsyncLow,
+            implicit_parameter_types: Vec::new(),
             string: String::new(),
             indent: 0,
             line: 1,
@@ -73,6 +75,7 @@ impl Emitter {
             indent_width: metadata.format.indent_width,
             clock_type: metadata.build.clock_type,
             reset_type: metadata.build.reset_type,
+            implicit_parameter_types: metadata.build.implicit_parameter_types.clone(),
             ..Default::default()
         }
     }
@@ -236,6 +239,30 @@ impl Emitter {
             self.newline();
             self.str("`endif");
         }
+    }
+
+    fn is_implicit_scalar_type(&mut self, x: &ScalarType) -> bool {
+        let mut stringifier = Stringifier::new();
+        stringifier.scalar_type(x);
+        let r#type = match stringifier.as_str() {
+            "u32" => Some(BuiltinType::U32),
+            "u64" => Some(BuiltinType::U64),
+            "i32" => Some(BuiltinType::I32),
+            "i64" => Some(BuiltinType::I64),
+            "f32" => Some(BuiltinType::F32),
+            "f64" => Some(BuiltinType::F64),
+            "string" => Some(BuiltinType::String),
+            _ => None,
+        };
+        if let Some(x) = r#type {
+            self.implicit_parameter_types.contains(&x)
+        } else {
+            false
+        }
+    }
+
+    fn is_implicit_type(&mut self) -> bool {
+        self.implicit_parameter_types.contains(&BuiltinType::Type)
     }
 }
 
@@ -1022,8 +1049,10 @@ impl VerylWalker for Emitter {
         self.space(1);
         match &*arg.localparam_declaration_group {
             LocalparamDeclarationGroup::ArrayTypeEquExpression(x) => {
-                self.scalar_type(&x.array_type.scalar_type);
-                self.space(1);
+                if !self.is_implicit_scalar_type(&x.array_type.scalar_type) {
+                    self.scalar_type(&x.array_type.scalar_type);
+                    self.space(1);
+                }
                 self.identifier(&arg.identifier);
                 if let Some(ref x) = x.array_type.array_type_opt {
                     self.space(1);
@@ -1035,8 +1064,10 @@ impl VerylWalker for Emitter {
                 self.expression(&x.expression);
             }
             LocalparamDeclarationGroup::TypeEquTypeExpression(x) => {
-                self.r#type(&x.r#type);
-                self.space(1);
+                if !self.is_implicit_type() {
+                    self.r#type(&x.r#type);
+                    self.space(1);
+                }
                 self.identifier(&arg.identifier);
                 self.space(1);
                 self.equ(&x.equ);
@@ -1545,8 +1576,10 @@ impl VerylWalker for Emitter {
         self.space(1);
         match &*arg.with_parameter_item_group0 {
             WithParameterItemGroup0::ArrayTypeEquExpression(x) => {
-                self.scalar_type(&x.array_type.scalar_type);
-                self.space(1);
+                if !self.is_implicit_scalar_type(&x.array_type.scalar_type) {
+                    self.scalar_type(&x.array_type.scalar_type);
+                    self.space(1);
+                }
                 self.identifier(&arg.identifier);
                 if let Some(ref x) = x.array_type.array_type_opt {
                     self.space(1);
@@ -1558,8 +1591,10 @@ impl VerylWalker for Emitter {
                 self.expression(&x.expression);
             }
             WithParameterItemGroup0::TypeEquTypeExpression(x) => {
-                self.r#type(&x.r#type);
-                self.space(1);
+                if !self.is_implicit_type() {
+                    self.r#type(&x.r#type);
+                    self.space(1);
+                }
                 self.identifier(&arg.identifier);
                 self.space(1);
                 self.equ(&x.equ);

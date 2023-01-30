@@ -257,6 +257,8 @@ pub struct Build {
     pub filelist_type: FilelistType,
     #[serde(default)]
     pub target: Target,
+    #[serde(default)]
+    pub implicit_parameter_types: Vec<BuiltinType>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -300,6 +302,26 @@ pub enum Target {
     Source,
     #[serde(rename = "directory")]
     Directory { path: PathBuf },
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum BuiltinType {
+    #[serde(rename = "u32")]
+    U32,
+    #[serde(rename = "u64")]
+    U64,
+    #[serde(rename = "i32")]
+    I32,
+    #[serde(rename = "i64")]
+    I64,
+    #[serde(rename = "f32")]
+    F32,
+    #[serde(rename = "f64")]
+    F64,
+    #[serde(rename = "string")]
+    String,
+    #[serde(rename = "type")]
+    Type,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
