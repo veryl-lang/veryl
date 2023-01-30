@@ -1,5 +1,11 @@
 # Operator
 
+Almost all operators are the same as SystemVerilog.
+Please be careful the some differences.
+
+* `<:` : less than operator which is the same as `<` in SystemVerilog.
+* `>:` : greater than operator which is the same as `>` in SystemVerilog.
+
 ```veryl
 # module ModuleA {
 # always_comb {
