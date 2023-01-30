@@ -36,9 +36,9 @@ module ModuleA #(
     localparam cc: u64 = 1;
 
     // variable declaration
-    var d  : logic        ;
-    var dd : logic<10>    ;
-    var ddd: bit  <10, 10>;
+    var _d  : logic        ;
+    var _dd : logic<10>    ;
+    var _ddd: bit  <10, 10>;
 }
             </textarea>
         </div>
@@ -48,20 +48,20 @@ module ModuleA #(
         </div>
     </div>
     <script type="module">
-      import init, {parse, format} from "./pkg/veryl_wasm.js";
+      import init, {build, format} from "./pkg/veryl_wasm.js";
       init()
         .then(() => {
         });
 
       window.build = () => {
           const src = document.getElementById('source').value;
-          const result = parse(src);
-          const code = result.code();
+          const result = build(src);
+          const content = result.content();
           const err = result.err();
-          if (err !== '') {
-            document.getElementById("output").textContent = err;
+          if (err) {
+            document.getElementById("output").textContent = content;
           } else {
-            document.getElementById("output").textContent = code;
+            document.getElementById("output").textContent = content;
             hljs.highlightAll();
           }
       }
@@ -69,12 +69,12 @@ module ModuleA #(
       window.format = () => {
           const src = document.getElementById('source').value;
           const result = format(src);
-          const code = result.code();
+          const content = result.content();
           const err = result.err();
-          if (err !== '') {
-            document.getElementById("output").textContent = err;
+          if (err) {
+            document.getElementById("output").textContent = content;
           } else {
-            document.getElementById("source").value = code;
+            document.getElementById("source").value = content;
           }
       }
     </script>
