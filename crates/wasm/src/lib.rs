@@ -1,11 +1,12 @@
 use miette::{ErrReport, GraphicalReportHandler, GraphicalTheme, ThemeCharacters, ThemeStyles};
 use semver::Version;
 use std::collections::HashMap;
-use veryl_analyzer::Analyzer;
+use std::path::PathBuf;
+use veryl_analyzer::{namespace_table, symbol_table, Analyzer};
 use veryl_emitter::Emitter;
 use veryl_formatter::Formatter;
 use veryl_metadata::{Build, Format, Metadata, Project};
-use veryl_parser::Parser;
+use veryl_parser::{resource_table, Parser};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -66,6 +67,11 @@ pub fn build(source: &str) -> Result {
     let metadata = metadata();
     match Parser::parse(source, &"") {
         Ok(parser) => {
+            if let Some(path) = resource_table::get_path_id(PathBuf::from("")) {
+                symbol_table::drop(path);
+                namespace_table::drop(path);
+            }
+
             let analyzer = Analyzer::new::<&str>(&[]);
             let mut errors = Vec::new();
             errors.append(&mut analyzer.analyze_pass1(source, "", &parser.veryl));
