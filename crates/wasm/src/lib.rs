@@ -72,7 +72,7 @@ pub fn build(source: &str) -> Result {
                 namespace_table::drop(path);
             }
 
-            let analyzer = Analyzer::new::<&str>(&[]);
+            let analyzer = Analyzer::new::<&str>(&["project"]);
             let mut errors = Vec::new();
             errors.append(&mut analyzer.analyze_pass1(source, "", &parser.veryl));
             errors.append(&mut analyzer.analyze_pass2(source, "", &parser.veryl));
