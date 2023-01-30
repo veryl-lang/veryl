@@ -94,6 +94,7 @@ RepeatTerm            : /\brepeat\b/                                            
 ReturnTerm            : /\breturn\b/                                                                          : Token;
 SignedTerm            : /\bsigned\b/                                                                          : Token;
 StepTerm              : /\bstep\b/                                                                            : Token;
+StringTerm            : /\bstring\b/                                                                          : Token;
 StructTerm            : /\bstruct\b/                                                                          : Token;
 SyncHighTerm          : /\bsync_high\b/                                                                       : Token;
 SyncLowTerm           : /\bsync_low\b/                                                                        : Token;
@@ -196,6 +197,7 @@ RepeatToken    : RepeatTerm    : Token Comments;
 ReturnToken    : ReturnTerm    : Token Comments;
 SignedToken    : SignedTerm    : Token Comments;
 StepToken      : StepTerm      : Token Comments;
+StringToken    : StringTerm    : Token Comments;
 StructToken    : StructTerm    : Token Comments;
 SyncHighToken  : SyncHighTerm  : Token Comments;
 SyncLowToken   : SyncLowTerm   : Token Comments;
@@ -303,6 +305,7 @@ Repeat    : RepeatToken    : VerylToken;
 Return    : ReturnToken    : VerylToken;
 Signed    : SignedToken    : VerylToken;
 Step      : StepToken      : VerylToken;
+Strin     : StringToken    : VerylToken; // avoid to conflict with Rust's String struct
 Struct    : StructToken    : VerylToken;
 SyncHigh  : SyncHighToken  : VerylToken;
 SyncLow   : SyncLowToken   : VerylToken;
@@ -405,7 +408,7 @@ Array: LBracket Expression { Comma Expression } RBracket;
 // ScalarType / ArrayType
 // ----------------------------------------------------------------------------
 
-FixedType: U32 | U64 | I32 | I64 | F32 | F64;
+FixedType: U32 | U64 | I32 | I64 | F32 | F64 | Strin;
 
 VariableType: ( Logic | Bit | ScopedIdentifier ) [ Width ];
 

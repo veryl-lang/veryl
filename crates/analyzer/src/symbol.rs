@@ -237,6 +237,7 @@ pub enum TypeKind {
     F32,
     F64,
     Type,
+    String,
     UserDefined(Vec<StrId>),
 }
 
@@ -265,6 +266,7 @@ impl fmt::Display for Type {
             TypeKind::F32 => text.push_str("f32"),
             TypeKind::F64 => text.push_str("f64"),
             TypeKind::Type => text.push_str("type"),
+            TypeKind::String => text.push_str("string"),
             TypeKind::UserDefined(paths) => {
                 text.push_str(&format!("{}", paths.first().unwrap()));
                 for path in &paths[1..] {
@@ -349,6 +351,7 @@ impl From<&syntax_tree::ScalarType> for Type {
                     syntax_tree::FixedType::I64(_) => TypeKind::I64,
                     syntax_tree::FixedType::F32(_) => TypeKind::F32,
                     syntax_tree::FixedType::F64(_) => TypeKind::F64,
+                    syntax_tree::FixedType::Strin(_) => TypeKind::String,
                 };
                 Type {
                     kind,

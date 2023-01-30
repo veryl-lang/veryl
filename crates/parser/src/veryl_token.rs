@@ -243,6 +243,7 @@ token_with_comments!(Repeat);
 token_with_comments!(Return);
 token_with_comments!(Signed);
 token_with_comments!(Step);
+token_with_comments!(String);
 token_with_comments!(Struct);
 token_with_comments!(SyncHigh);
 token_with_comments!(SyncLow);

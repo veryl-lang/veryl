@@ -594,6 +594,13 @@ pub trait VerylWalker {
         after!(self, step, arg);
     }
 
+    /// Semantic action for non-terminal 'Strin'
+    fn strin(&mut self, arg: &Strin) {
+        before!(self, strin, arg);
+        self.veryl_token(&arg.string_token);
+        after!(self, strin, arg);
+    }
+
     /// Semantic action for non-terminal 'Struct'
     fn r#struct(&mut self, arg: &Struct) {
         before!(self, r#struct, arg);
@@ -1115,6 +1122,7 @@ pub trait VerylWalker {
             FixedType::I64(x) => self.i64(&x.i64),
             FixedType::F32(x) => self.f32(&x.f32),
             FixedType::F64(x) => self.f64(&x.f64),
+            FixedType::Strin(x) => self.strin(&x.strin),
         };
         after!(self, fixed_type, arg);
     }
