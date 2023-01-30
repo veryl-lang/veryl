@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl-analyzer"
-version               = "0.3.0"
+version               = "0.3.1"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -15,4 +15,4 @@ edition               = "2021"
 [dependencies]
 miette        = {workspace = true}
 thiserror     = {workspace = true}
-veryl-parser  = {version = "0.3.0", path = "../parser"}
+veryl-parser  = {version = "0.3.1", path = "../parser"}

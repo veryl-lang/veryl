@@ -1,6 +1,8 @@
 # Change Log
 
-## [Unreleased](https://github.com/dalance/veryl/compare/v0.3.0...Unreleased) - ReleaseDate
+## [Unreleased](https://github.com/dalance/veryl/compare/v0.3.1...Unreleased) - ReleaseDate
+
+## [v0.3.1](https://github.com/dalance/veryl/compare/v0.3.0...v0.3.1) - 2023-01-30
 
 * [Added] string literal support [#109](https://github.com/dalance/veryl/issues/109)
 * [Added] `implicit_parameter_types` in Veryl.toml [#109](https://github.com/dalance/veryl/issues/109)
