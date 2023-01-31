@@ -2,6 +2,9 @@
 
 ## [Unreleased](https://github.com/dalance/veryl/compare/v0.3.1...Unreleased) - ReleaseDate
 
+* [Fixed] Incorrect if block scope [#55](https://github.com/dalance/veryl/issues/55)
+* [Added] msb/lsb notation [#9](https://github.com/dalance/veryl/issues/9)
+
 ## [v0.3.1](https://github.com/dalance/veryl/compare/v0.3.0...v0.3.1) - 2023-01-30
 
 * [Added] string literal support [#109](https://github.com/dalance/veryl/issues/109)
