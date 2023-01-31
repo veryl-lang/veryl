@@ -372,7 +372,13 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     self.insert_symbol(&x.identifier.identifier_token, SymbolKind::Block);
                     x.identifier.identifier_token.token.text
                 } else {
-                    self.default_block.unwrap()
+                    let name = format!(
+                        "{}@{}",
+                        self.default_block.unwrap(),
+                        self.anonymous_namespace
+                    );
+                    self.anonymous_namespace += 1;
+                    resource_table::insert_str(&name)
                 };
 
                 self.namespace.push(name)
@@ -448,7 +454,13 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     self.insert_symbol(&x.identifier.identifier_token, SymbolKind::Block);
                     x.identifier.identifier_token.token.text
                 } else {
-                    self.default_block.unwrap()
+                    let name = format!(
+                        "{}@{}",
+                        self.default_block.unwrap(),
+                        self.anonymous_namespace
+                    );
+                    self.anonymous_namespace += 1;
+                    resource_table::insert_str(&name)
                 };
 
                 self.namespace.push(name)

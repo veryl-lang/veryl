@@ -1,7 +1,6 @@
 module Module08 {
     var a    : logic;
     var b    : logic;
-    var c    : logic;
     var i_clk: logic;
 
     // if declaration
@@ -11,16 +10,19 @@ module Module08 {
             a = 1;
         }
     } else if b == 1 { // label can be omit in else clause
+        var a: logic;
         always_ff (i_clk) {
-            b = 1;
+            a = 1;
         }
     } else if b == 1 :label1 { // label can be override in the specified clause only
+        var a: logic;
         always_ff (i_clk) {
-            b = 1;
+            a = 1;
         }
     } else {
+        var a: logic;
         always_ff (i_clk) {
-            c = 1;
+            a = 1;
         }
     }
 

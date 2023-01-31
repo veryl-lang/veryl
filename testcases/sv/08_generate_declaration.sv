@@ -1,7 +1,6 @@
 module veryl_testcase_Module08;
     logic a    ;
     logic b    ;
-    logic c    ;
     logic i_clk;
 
     // if declaration
@@ -11,16 +10,19 @@ module veryl_testcase_Module08;
             a <= 1;
         end
     end else if (b == 1) begin :label // label can be omit in else clause
+        logic a;
         always_ff @ (posedge i_clk) begin
-            b <= 1;
+            a <= 1;
         end
     end else if (b == 1) begin :label1 // label can be override in the specified clause only
+        logic a;
         always_ff @ (posedge i_clk) begin
-            b <= 1;
+            a <= 1;
         end
     end else begin :label
+        logic a;
         always_ff @ (posedge i_clk) begin
-            c <= 1;
+            a <= 1;
         end
     end
 
