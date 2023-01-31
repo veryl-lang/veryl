@@ -82,8 +82,10 @@ InterfaceTerm         : /\binterface\b/                                         
 InTerm                : /\bin\b/                                                                              : Token;
 LocalparamTerm        : /\blocalparam\b/                                                                      : Token;
 LogicTerm             : /\blogic\b/                                                                           : Token;
+LsbTerm               : /\blsb\b/                                                                             : Token;
 ModportTerm           : /\bmodport\b/                                                                         : Token;
 ModuleTerm            : /\bmodule\b/                                                                          : Token;
+MsbTerm               : /\bmsb\b/                                                                             : Token;
 NegedgeTerm           : /\bnegedge\b/                                                                         : Token;
 OutputTerm            : /\boutput\b/                                                                          : Token;
 PackageTerm           : /\bpackage\b/                                                                         : Token;
@@ -185,8 +187,10 @@ InterfaceToken : InterfaceTerm : Token Comments;
 InToken        : InTerm        : Token Comments;
 LocalparamToken: LocalparamTerm: Token Comments;
 LogicToken     : LogicTerm     : Token Comments;
+LsbToken       : LsbTerm       : Token Comments;
 ModportToken   : ModportTerm   : Token Comments;
 ModuleToken    : ModuleTerm    : Token Comments;
+MsbToken       : MsbTerm       : Token Comments;
 NegedgeToken   : NegedgeTerm   : Token Comments;
 OutputToken    : OutputTerm    : Token Comments;
 PackageToken   : PackageTerm   : Token Comments;
@@ -293,8 +297,10 @@ Inst      : InstToken      : VerylToken;
 Interface : InterfaceToken : VerylToken;
 Localparam: LocalparamToken: VerylToken;
 Logic     : LogicToken     : VerylToken;
+Lsb       : LsbToken       : VerylToken;
 Modport   : ModportToken   : VerylToken;
 Module    : ModuleToken    : VerylToken;
+Msb       : MsbToken       : VerylToken;
 Negedge   : NegedgeToken   : VerylToken;
 Output    : OutputToken    : VerylToken;
 Package   : PackageToken   : VerylToken;
@@ -341,7 +347,7 @@ RealNumber: FixedPoint
 
 HierarchicalIdentifier: Identifier { Range } { Dot Identifier { Range } };
 ScopedIdentifier      : Identifier { ColonColon Identifier };
-ExpressionIdentifier  : [ Dollar ] Identifier ( ColonColon Identifier { ColonColon Identifier } | ( { Range } { Dot Identifier { Range } } ) );
+ExpressionIdentifier  : [ Dollar ] Identifier ( ColonColon Identifier { ColonColon Identifier } { Range } | ( { Range } { Dot Identifier { Range } } ) );
 
 // ----------------------------------------------------------------------------
 // Expression
@@ -368,6 +374,7 @@ Factor: Number
       | IfExpression
       | CaseExpression
       | StringLiteral
+      | ( Msb | Lsb )
       ;
 
 FunctionCall: LParen [ ArgumentList ] RParen;

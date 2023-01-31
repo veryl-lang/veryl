@@ -6,6 +6,7 @@ pub mod check_invalid_direction;
 pub mod check_invalid_number_character;
 pub mod check_invalid_reset;
 pub mod check_invalid_statement;
+pub mod check_msb_lsb;
 pub mod check_number_overflow;
 pub mod check_system_function;
 pub mod create_reference;
@@ -18,6 +19,7 @@ use check_invalid_direction::*;
 use check_invalid_number_character::*;
 use check_invalid_reset::*;
 use check_invalid_statement::*;
+use check_msb_lsb::*;
 use check_number_overflow::*;
 use check_system_function::*;
 use create_reference::*;
@@ -82,6 +84,7 @@ pub struct Pass2Handlers<'a> {
     check_enum: CheckEnum<'a>,
     check_function: CheckFunction<'a>,
     check_instance: CheckInstance<'a>,
+    check_msb_lsb: CheckMsbLsb<'a>,
     create_reference: CreateReference<'a>,
 }
 
@@ -91,6 +94,7 @@ impl<'a> Pass2Handlers<'a> {
             check_enum: CheckEnum::new(text),
             check_function: CheckFunction::new(text),
             check_instance: CheckInstance::new(text),
+            check_msb_lsb: CheckMsbLsb::new(text),
             create_reference: CreateReference::new(text),
         }
     }
@@ -100,6 +104,7 @@ impl<'a> Pass2Handlers<'a> {
             &mut self.check_enum as &mut dyn Handler,
             &mut self.check_function as &mut dyn Handler,
             &mut self.check_instance as &mut dyn Handler,
+            &mut self.check_msb_lsb as &mut dyn Handler,
             &mut self.create_reference as &mut dyn Handler,
         ]
     }
@@ -109,6 +114,7 @@ impl<'a> Pass2Handlers<'a> {
         ret.append(&mut self.check_enum.errors);
         ret.append(&mut self.check_function.errors);
         ret.append(&mut self.check_instance.errors);
+        ret.append(&mut self.check_msb_lsb.errors);
         ret.append(&mut self.create_reference.errors);
         ret
     }

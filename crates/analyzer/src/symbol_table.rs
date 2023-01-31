@@ -21,6 +21,14 @@ impl SymbolPath {
         self.0.push(x)
     }
 
+    pub fn pop(&mut self) -> Option<StrId> {
+        self.0.pop()
+    }
+
+    pub fn clear(&mut self) {
+        self.0.clear()
+    }
+
     pub fn as_slice(&self) -> &[StrId] {
         self.0.as_slice()
     }
@@ -83,14 +91,14 @@ impl From<&syntax_tree::ExpressionIdentifier> for SymbolPath {
         }
         path.push(value.identifier.identifier_token.token.text);
         match &*value.expression_identifier_group {
-            syntax_tree::ExpressionIdentifierGroup::ColonColonIdentifierExpressionIdentifierGroupList(x) => {
+            syntax_tree::ExpressionIdentifierGroup::ColonColonIdentifierExpressionIdentifierGroupListExpressionIdentifierGroupList0(x) => {
                 path.push(x.identifier.identifier_token.token.text);
                 for x in &x.expression_identifier_group_list {
                     path.push(x.identifier.identifier_token.token.text);
                 }
             },
-            syntax_tree::ExpressionIdentifierGroup::ExpressionIdentifierGroupList0ExpressionIdentifierGroupList1(x) => {
-                for x in &x.expression_identifier_group_list1 {
+            syntax_tree::ExpressionIdentifierGroup::ExpressionIdentifierGroupList1ExpressionIdentifierGroupList2(x) => {
+                for x in &x.expression_identifier_group_list2 {
                     path.push(x.identifier.identifier_token.token.text);
                 }
             },
@@ -99,7 +107,8 @@ impl From<&syntax_tree::ExpressionIdentifier> for SymbolPath {
     }
 }
 
-pub struct SymbolPathNamespace(SymbolPath, Namespace);
+#[derive(Clone, Default)]
+pub struct SymbolPathNamespace(pub SymbolPath, pub Namespace);
 
 impl From<&syntax_tree::Identifier> for SymbolPathNamespace {
     fn from(value: &syntax_tree::Identifier) -> Self {

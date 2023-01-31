@@ -627,6 +627,7 @@ impl Evaluator {
             Factor::IfExpression(x) => self.if_expression(&x.if_expression),
             Factor::CaseExpression(x) => self.case_expression(&x.case_expression),
             Factor::StringLiteral(_) => Evaluated::Unknown,
+            Factor::FactorGroup(_) => Evaluated::Unknown,
         }
     }
 

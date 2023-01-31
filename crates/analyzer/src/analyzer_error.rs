@@ -77,6 +77,24 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
+    #[diagnostic(code(AnalyzerError::InvalidLsb), help("remove lsb"))]
+    #[error("lsb can't be placed at here")]
+    InvalidLsb {
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(code(AnalyzerError::InvalidMsb), help("remove msb"))]
+    #[error("msb can't be placed at here")]
+    InvalidMsb {
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
     #[diagnostic(code(AnalyzerError::MismatchArity), help("fix function arguments"))]
     #[error("function \"{name}\" has {arity} arguments, but {args} arguments are supplied")]
     MismatchArity {
@@ -149,6 +167,15 @@ pub enum AnalyzerError {
     #[error("\"{name}\" is not valid attribute")]
     UnknownAttribute {
         name: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(code(AnalyzerError::UnknownMsb), help(""))]
+    #[error("resolving msb is failed")]
+    UnknownMsb {
         #[source_code]
         input: NamedSource,
         #[label("Error location")]
@@ -285,6 +312,20 @@ impl AnalyzerError {
         }
     }
 
+    pub fn invalid_lsb(source: &str, token: &VerylToken) -> Self {
+        AnalyzerError::InvalidLsb {
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.token.into(),
+        }
+    }
+
+    pub fn invalid_msb(source: &str, token: &VerylToken) -> Self {
+        AnalyzerError::InvalidMsb {
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.token.into(),
+        }
+    }
+
     pub fn mismatch_arity(
         name: &str,
         arity: usize,
@@ -361,6 +402,13 @@ impl AnalyzerError {
     pub fn unknown_attribute(name: &str, source: &str, token: &VerylToken) -> Self {
         AnalyzerError::UnknownAttribute {
             name: name.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.token.into(),
+        }
+    }
+
+    pub fn unknown_msb(source: &str, token: &VerylToken) -> Self {
+        AnalyzerError::UnknownMsb {
             input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),
         }

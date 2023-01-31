@@ -116,6 +116,7 @@ mod emitter {
         let prj = vec![&metadata.project.name];
         let analyzer = Analyzer::new(&prj);
         let _ = analyzer.analyze_pass1(&input, &file, &ret.veryl);
+        let _ = analyzer.analyze_pass2(&input, &file, &ret.veryl);
         let mut emitter = Emitter::new(&metadata);
         emitter.emit(&ret.veryl);
 

@@ -1,4 +1,5 @@
 use crate::aligner::{Aligner, Location};
+use veryl_analyzer::msb_table;
 use veryl_analyzer::symbol::SymbolKind;
 use veryl_analyzer::symbol_table;
 use veryl_metadata::{BuiltinType, ClockType, Metadata, ResetType};
@@ -306,6 +307,19 @@ impl VerylWalker for Emitter {
         self.veryl_token(&arg.i64_token.replace("longint signed"));
     }
 
+    /// Semantic action for non-terminal 'Lsb'
+    fn lsb(&mut self, arg: &Lsb) {
+        self.token(&arg.lsb_token.replace("0"));
+    }
+
+    /// Semantic action for non-terminal 'Msb'
+    fn msb(&mut self, arg: &Msb) {
+        let expression = msb_table::get(arg.msb_token.token.id).unwrap();
+        self.str("((");
+        self.expression(&expression);
+        self.str(") - 1)");
+    }
+
     /// Semantic action for non-terminal 'U32'
     fn u32(&mut self, arg: &U32) {
         self.veryl_token(&arg.u32_token.replace("int unsigned"));
@@ -357,7 +371,7 @@ impl VerylWalker for Emitter {
         };
 
         match &*arg.expression_identifier_group {
-            ExpressionIdentifierGroup::ColonColonIdentifierExpressionIdentifierGroupList(x) => {
+            ExpressionIdentifierGroup::ColonColonIdentifierExpressionIdentifierGroupListExpressionIdentifierGroupList0(x) => {
                 if is_enum_member {
                     self.str("_");
                 } else {
@@ -368,15 +382,18 @@ impl VerylWalker for Emitter {
                     self.colon_colon(&x.colon_colon);
                     self.identifier(&x.identifier);
                 }
-            }
-            ExpressionIdentifierGroup::ExpressionIdentifierGroupList0ExpressionIdentifierGroupList1(x) => {
                 for x in &x.expression_identifier_group_list0 {
                     self.range(&x.range);
                 }
+            }
+            ExpressionIdentifierGroup::ExpressionIdentifierGroupList1ExpressionIdentifierGroupList2(x) => {
                 for x in &x.expression_identifier_group_list1 {
+                    self.range(&x.range);
+                }
+                for x in &x.expression_identifier_group_list2 {
                     self.dot(&x.dot);
                     self.identifier(&x.identifier);
-                    for x in &x.expression_identifier_group_list1_list {
+                    for x in &x.expression_identifier_group_list2_list {
                         self.range(&x.range);
                     }
                 }

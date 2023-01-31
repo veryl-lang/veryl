@@ -2,6 +2,7 @@ pub mod analyzer;
 pub mod analyzer_error;
 pub mod evaluator;
 pub mod handlers;
+pub mod msb_table;
 pub mod namespace;
 pub mod namespace_table;
 pub mod symbol;

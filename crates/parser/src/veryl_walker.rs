@@ -510,6 +510,13 @@ pub trait VerylWalker {
         after!(self, logic, arg);
     }
 
+    /// Semantic action for non-terminal 'Lsb'
+    fn lsb(&mut self, arg: &Lsb) {
+        before!(self, lsb, arg);
+        self.veryl_token(&arg.lsb_token);
+        after!(self, lsb, arg);
+    }
+
     /// Semantic action for non-terminal 'Modport'
     fn modport(&mut self, arg: &Modport) {
         before!(self, modport, arg);
@@ -522,6 +529,13 @@ pub trait VerylWalker {
         before!(self, module, arg);
         self.veryl_token(&arg.module_token);
         after!(self, module, arg);
+    }
+
+    /// Semantic action for non-terminal 'Msb'
+    fn msb(&mut self, arg: &Msb) {
+        before!(self, msb, arg);
+        self.veryl_token(&arg.msb_token);
+        after!(self, msb, arg);
     }
 
     /// Semantic action for non-terminal 'Negedge'
@@ -731,22 +745,25 @@ pub trait VerylWalker {
         }
         self.identifier(&arg.identifier);
         match &*arg.expression_identifier_group {
-            ExpressionIdentifierGroup::ColonColonIdentifierExpressionIdentifierGroupList(x) => {
+            ExpressionIdentifierGroup::ColonColonIdentifierExpressionIdentifierGroupListExpressionIdentifierGroupList0(x) => {
                 self.colon_colon(&x.colon_colon);
                 self.identifier(&x.identifier);
                 for x in &x.expression_identifier_group_list {
                     self.colon_colon(&x.colon_colon);
                     self.identifier(&x.identifier);
                 }
-            }
-            ExpressionIdentifierGroup::ExpressionIdentifierGroupList0ExpressionIdentifierGroupList1(x) => {
                 for x in &x.expression_identifier_group_list0 {
                     self.range(&x.range);
                 }
+            }
+            ExpressionIdentifierGroup::ExpressionIdentifierGroupList1ExpressionIdentifierGroupList2(x) => {
                 for x in &x.expression_identifier_group_list1 {
+                    self.range(&x.range);
+                }
+                for x in &x.expression_identifier_group_list2 {
                     self.dot(&x.dot);
                     self.identifier(&x.identifier);
-                    for x in &x.expression_identifier_group_list1_list {
+                    for x in &x.expression_identifier_group_list2_list {
                         self.range(&x.range);
                     }
                 }
@@ -936,6 +953,10 @@ pub trait VerylWalker {
             Factor::StringLiteral(x) => {
                 self.string_literal(&x.string_literal);
             }
+            Factor::FactorGroup(x) => match &*x.factor_group {
+                FactorGroup::Msb(x) => self.msb(&x.msb),
+                FactorGroup::Lsb(x) => self.lsb(&x.lsb),
+            },
         }
         after!(self, factor, arg);
     }
