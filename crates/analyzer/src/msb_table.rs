@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use veryl_parser::resource_table::TokenId;
 use veryl_parser::veryl_grammar_trait::Expression;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct MsbTable {
     table: HashMap<TokenId, Expression>,
 }
@@ -15,14 +15,6 @@ impl MsbTable {
 
     pub fn get(&self, id: TokenId) -> Option<&Expression> {
         self.table.get(&id)
-    }
-}
-
-impl Default for MsbTable {
-    fn default() -> Self {
-        Self {
-            table: HashMap::new(),
-        }
     }
 }
 
