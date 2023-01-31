@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use veryl_metadata::{BuiltinType, Metadata};
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::{Token, VerylToken};
 use veryl_parser::veryl_walker::VerylWalker;
+use veryl_parser::Stringifier;
 
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Hash)]
 pub struct Location {
@@ -121,11 +123,19 @@ pub struct Aligner {
     pub additions: HashMap<Location, usize>,
     aligns: [Align; 8],
     in_type_expression: bool,
+    implicit_parameter_types: Vec<BuiltinType>,
 }
 
 impl Aligner {
     pub fn new() -> Self {
         Default::default()
+    }
+
+    pub fn set_metadata(&mut self, metadata: &Metadata) {
+        self.implicit_parameter_types.clear();
+        for x in &metadata.build.implicit_parameter_types {
+            self.implicit_parameter_types.push(*x);
+        }
     }
 
     pub fn align(&mut self, input: &Veryl) {
@@ -151,6 +161,30 @@ impl Aligner {
         for i in 0..self.aligns.len() {
             self.aligns[i].space(repeat);
         }
+    }
+
+    fn is_implicit_scalar_type(&mut self, x: &ScalarType) -> bool {
+        let mut stringifier = Stringifier::new();
+        stringifier.scalar_type(x);
+        let r#type = match stringifier.as_str() {
+            "u32" => Some(BuiltinType::U32),
+            "u64" => Some(BuiltinType::U64),
+            "i32" => Some(BuiltinType::I32),
+            "i64" => Some(BuiltinType::I64),
+            "f32" => Some(BuiltinType::F32),
+            "f64" => Some(BuiltinType::F64),
+            "string" => Some(BuiltinType::String),
+            _ => None,
+        };
+        if let Some(x) = r#type {
+            self.implicit_parameter_types.contains(&x)
+        } else {
+            false
+        }
+    }
+
+    fn is_implicit_type(&mut self) -> bool {
+        self.implicit_parameter_types.contains(&BuiltinType::Type)
     }
 }
 
@@ -386,8 +420,7 @@ impl VerylWalker for Aligner {
             self.width(&x.width);
         } else if !self.in_type_expression {
             let loc = self.aligns[align_kind::TYPE].last_location;
-            let loc = loc.unwrap();
-            self.aligns[align_kind::WIDTH].dummy_location(loc);
+            self.aligns[align_kind::WIDTH].dummy_location(loc.unwrap());
         }
     }
 
@@ -395,6 +428,8 @@ impl VerylWalker for Aligner {
     fn scalar_type(&mut self, arg: &ScalarType) {
         if !self.in_type_expression {
             self.aligns[align_kind::TYPE].start_item();
+            // dummy space for implicit type
+            self.space(1);
         }
         for x in &arg.scalar_type_list {
             self.type_modifier(&x.type_modifier);
@@ -408,8 +443,7 @@ impl VerylWalker for Aligner {
                     self.aligns[align_kind::TYPE].finish_item();
                     self.aligns[align_kind::WIDTH].start_item();
                     let loc = self.aligns[align_kind::TYPE].last_location;
-                    let loc = loc.unwrap();
-                    self.aligns[align_kind::WIDTH].dummy_location(loc);
+                    self.aligns[align_kind::WIDTH].dummy_location(loc.unwrap());
                 }
             }
         }
@@ -427,8 +461,7 @@ impl VerylWalker for Aligner {
             self.array(&x.array);
         } else {
             let loc = self.aligns[align_kind::IDENTIFIER].last_location;
-            let loc = loc.unwrap();
-            self.aligns[align_kind::ARRAY].dummy_location(loc);
+            self.aligns[align_kind::ARRAY].dummy_location(loc.unwrap());
         }
         self.aligns[align_kind::ARRAY].finish_item();
     }
@@ -495,13 +528,26 @@ impl VerylWalker for Aligner {
         self.colon(&arg.colon);
         match &*arg.localparam_declaration_group {
             LocalparamDeclarationGroup::ArrayTypeEquExpression(x) => {
-                self.array_type(&x.array_type);
+                if !self.is_implicit_scalar_type(&x.array_type.scalar_type) {
+                    self.array_type(&x.array_type);
+                } else {
+                    self.aligns[align_kind::TYPE].start_item();
+                    self.aligns[align_kind::TYPE]
+                        .dummy_location(arg.localparam.localparam_token.token.into());
+                    self.aligns[align_kind::TYPE].finish_item();
+                }
                 self.equ(&x.equ);
                 self.expression(&x.expression);
             }
             LocalparamDeclarationGroup::TypeEquTypeExpression(x) => {
                 self.aligns[align_kind::TYPE].start_item();
-                self.r#type(&x.r#type);
+                if !self.is_implicit_type() {
+                    self.r#type(&x.r#type);
+                    self.space(1);
+                } else {
+                    self.aligns[align_kind::TYPE]
+                        .dummy_location(arg.localparam.localparam_token.token.into());
+                }
                 self.aligns[align_kind::TYPE].finish_item();
                 self.equ(&x.equ);
                 self.type_expression(&x.type_expression);
@@ -624,7 +670,14 @@ impl VerylWalker for Aligner {
         self.colon(&arg.colon);
         match &*arg.with_parameter_item_group0 {
             WithParameterItemGroup0::ArrayTypeEquExpression(x) => {
-                self.array_type(&x.array_type);
+                if !self.is_implicit_scalar_type(&x.array_type.scalar_type) {
+                    self.array_type(&x.array_type);
+                } else {
+                    self.aligns[align_kind::TYPE].start_item();
+                    let loc = self.aligns[align_kind::PARAMETER].last_location;
+                    self.aligns[align_kind::TYPE].dummy_location(loc.unwrap());
+                    self.aligns[align_kind::TYPE].finish_item();
+                }
                 self.equ(&x.equ);
                 self.aligns[align_kind::EXPRESSION].start_item();
                 self.expression(&x.expression);
@@ -632,7 +685,13 @@ impl VerylWalker for Aligner {
             }
             WithParameterItemGroup0::TypeEquTypeExpression(x) => {
                 self.aligns[align_kind::TYPE].start_item();
-                self.r#type(&x.r#type);
+                if !self.is_implicit_type() {
+                    self.r#type(&x.r#type);
+                    self.space(1);
+                } else {
+                    let loc = self.aligns[align_kind::PARAMETER].last_location;
+                    self.aligns[align_kind::TYPE].dummy_location(loc.unwrap());
+                }
                 self.aligns[align_kind::TYPE].finish_item();
                 self.equ(&x.equ);
                 self.aligns[align_kind::EXPRESSION].start_item();

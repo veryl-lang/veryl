@@ -71,11 +71,14 @@ impl Default for Emitter {
 
 impl Emitter {
     pub fn new(metadata: &Metadata) -> Self {
+        let mut aligner = Aligner::new();
+        aligner.set_metadata(metadata);
         Self {
             indent_width: metadata.format.indent_width,
             clock_type: metadata.build.clock_type,
             reset_type: metadata.build.reset_type,
             implicit_parameter_types: metadata.build.implicit_parameter_types.clone(),
+            aligner,
             ..Default::default()
         }
     }

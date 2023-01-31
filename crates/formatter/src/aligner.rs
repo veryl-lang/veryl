@@ -423,8 +423,7 @@ impl VerylWalker for Aligner {
                     self.aligns[align_kind::TYPE].finish_item();
                     self.aligns[align_kind::WIDTH].start_item();
                     let loc = self.aligns[align_kind::TYPE].last_location;
-                    let loc = loc.unwrap();
-                    self.aligns[align_kind::WIDTH].dummy_location(loc);
+                    self.aligns[align_kind::WIDTH].dummy_location(loc.unwrap());
                 }
             }
         }
@@ -442,8 +441,7 @@ impl VerylWalker for Aligner {
             self.array(&x.array);
         } else {
             let loc = self.aligns[align_kind::WIDTH].last_location;
-            let loc = loc.unwrap();
-            self.aligns[align_kind::ARRAY].dummy_location(loc);
+            self.aligns[align_kind::ARRAY].dummy_location(loc.unwrap());
         }
         self.aligns[align_kind::ARRAY].finish_item();
     }
