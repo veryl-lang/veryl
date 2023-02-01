@@ -13,6 +13,7 @@
     - [Data Type](./03_reference/03_data_type.md)
         - [Builtin Type](./03_reference/03_data_type/01_builtin_type.md)
         - [User Defined Type](./03_reference/03_data_type/02_user_defined_type.md)
+        - [Array](./03_reference/03_data_type/03_array.md)
     - [Expression](./03_reference/04_expression.md)
         - [Operator](./03_reference/04_expression/01_operator.md)
         - [Function Call](./03_reference/04_expression/02_function_call.md)
