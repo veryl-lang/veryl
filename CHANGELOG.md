@@ -1,6 +1,8 @@
 # Change Log
 
-## [Unreleased](https://github.com/dalance/veryl/compare/v0.3.1...Unreleased) - ReleaseDate
+## [Unreleased](https://github.com/dalance/veryl/compare/v0.3.2...Unreleased) - ReleaseDate
+
+## [v0.3.2](https://github.com/dalance/veryl/compare/v0.3.1...v0.3.2) - 2023-02-06
 
 * [Fixed] Incorrect if block scope [#55](https://github.com/dalance/veryl/issues/55)
 * [Added] msb/lsb notation [#9](https://github.com/dalance/veryl/issues/9)
