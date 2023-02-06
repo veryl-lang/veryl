@@ -46,7 +46,7 @@ impl<'a> VerylGrammarTrait for CheckEnum<'a> {
                     let max_members = 2_usize.pow(width as u32);
                     if self.enum_variants > max_members {
                         let name = arg.identifier.identifier_token.text();
-                        self.errors.push(AnalyzerError::enum_variant_too_much(
+                        self.errors.push(AnalyzerError::too_much_enum_variant(
                             &name,
                             self.enum_variants,
                             width,
@@ -58,7 +58,7 @@ impl<'a> VerylGrammarTrait for CheckEnum<'a> {
                     for (enum_value, token) in &self.enum_member_values {
                         if let Evaluated::Fixed { value, .. } = enum_value {
                             if *value as usize >= max_members {
-                                self.errors.push(AnalyzerError::enum_variant_too_large(
+                                self.errors.push(AnalyzerError::too_large_enum_variant(
                                     &token.text(),
                                     *value,
                                     width,

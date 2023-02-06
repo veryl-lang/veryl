@@ -53,7 +53,7 @@ impl<'a> VerylGrammarTrait for CheckNumber<'a> {
                     let actual_width = number.chars().count();
                     if actual_width > width {
                         self.errors
-                            .push(AnalyzerError::number_overflow(width, self.text, token));
+                            .push(AnalyzerError::too_large_number(width, self.text, token));
                     }
                 }
                 "o" => {
@@ -72,7 +72,7 @@ impl<'a> VerylGrammarTrait for CheckNumber<'a> {
                     }
                     if actual_width > width {
                         self.errors
-                            .push(AnalyzerError::number_overflow(width, self.text, token));
+                            .push(AnalyzerError::too_large_number(width, self.text, token));
                     }
                 }
                 "d" => {
@@ -96,7 +96,7 @@ impl<'a> VerylGrammarTrait for CheckNumber<'a> {
                     }
                     if actual_width > width {
                         self.errors
-                            .push(AnalyzerError::number_overflow(width, self.text, token));
+                            .push(AnalyzerError::too_large_number(width, self.text, token));
                     }
                 }
                 _ => unreachable!(),

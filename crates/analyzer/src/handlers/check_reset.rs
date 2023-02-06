@@ -89,7 +89,7 @@ impl<'a> VerylGrammarTrait for CheckReset<'a> {
                     false
                 };
                 if if_reset_required {
-                    self.errors.push(AnalyzerError::if_reset_required(
+                    self.errors.push(AnalyzerError::missing_if_reset(
                         self.text,
                         &arg.always_ff.always_ff_token,
                     ));
@@ -100,7 +100,7 @@ impl<'a> VerylGrammarTrait for CheckReset<'a> {
             HandlerPoint::After => {
                 // Check reset signal when if_reset exists
                 if self.if_reset_exist && arg.always_ff_declaration_opt.is_none() {
-                    self.errors.push(AnalyzerError::reset_signal_missing(
+                    self.errors.push(AnalyzerError::missing_reset_signal(
                         self.text,
                         &arg.always_ff.always_ff_token,
                     ));
@@ -119,7 +119,7 @@ impl<'a> VerylGrammarTrait for CheckReset<'a> {
                     stringifier.hierarchical_identifier(x);
                     let name = stringifier.as_str().to_string();
                     if self.if_reset_exist && !reset_lefthand_sides.contains(&name) {
-                        self.errors.push(AnalyzerError::reset_statement_missing(
+                        self.errors.push(AnalyzerError::missing_reset_statement(
                             &name,
                             self.text,
                             &x.identifier.identifier_token,
