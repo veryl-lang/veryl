@@ -6,7 +6,7 @@ package veryl_testcase_Package17;
     logic _b;
 
     // struct declaration
-    typedef struct {
+    typedef struct packed {
         logic        [10-1:0] a  ;
         logic        [10-1:0] aa ;
         int unsigned          aaa;

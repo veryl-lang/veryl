@@ -1337,6 +1337,8 @@ impl VerylWalker for Emitter {
         self.space(1);
         self.r#struct(&arg.r#struct);
         self.space(1);
+        self.str("packed");
+        self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
         self.struct_list(&arg.struct_list);
