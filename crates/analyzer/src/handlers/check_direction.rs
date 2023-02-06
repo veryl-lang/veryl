@@ -4,7 +4,7 @@ use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
 #[derive(Default)]
-pub struct CheckInvalidDirection<'a> {
+pub struct CheckDirection<'a> {
     pub errors: Vec<AnalyzerError>,
     text: &'a str,
     point: HandlerPoint,
@@ -12,7 +12,7 @@ pub struct CheckInvalidDirection<'a> {
     in_module: bool,
 }
 
-impl<'a> CheckInvalidDirection<'a> {
+impl<'a> CheckDirection<'a> {
     pub fn new(text: &'a str) -> Self {
         Self {
             text,
@@ -21,13 +21,13 @@ impl<'a> CheckInvalidDirection<'a> {
     }
 }
 
-impl<'a> Handler for CheckInvalidDirection<'a> {
+impl<'a> Handler for CheckDirection<'a> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl<'a> VerylGrammarTrait for CheckInvalidDirection<'a> {
+impl<'a> VerylGrammarTrait for CheckDirection<'a> {
     fn direction(&mut self, arg: &Direction) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             match arg {

@@ -4,13 +4,13 @@ use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
 #[derive(Default)]
-pub struct CheckInvalidReset<'a> {
+pub struct CheckReset<'a> {
     pub errors: Vec<AnalyzerError>,
     text: &'a str,
     point: HandlerPoint,
 }
 
-impl<'a> CheckInvalidReset<'a> {
+impl<'a> CheckReset<'a> {
     pub fn new(text: &'a str) -> Self {
         Self {
             text,
@@ -19,16 +19,16 @@ impl<'a> CheckInvalidReset<'a> {
     }
 }
 
-impl<'a> Handler for CheckInvalidReset<'a> {
+impl<'a> Handler for CheckReset<'a> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl<'a> VerylGrammarTrait for CheckInvalidReset<'a> {
+impl<'a> VerylGrammarTrait for CheckReset<'a> {
     fn always_ff_declaration(&mut self, arg: &AlwaysFfDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            // Chcek first if_reset when reset signel exists
+            // Check first if_reset when reset signel exists
             let if_reset_required = if arg.always_ff_declaration_opt.is_some() {
                 if let Some(x) = arg.always_ff_declaration_list.first() {
                     !matches!(&*x.statement, Statement::IfResetStatement(_))
@@ -45,7 +45,7 @@ impl<'a> VerylGrammarTrait for CheckInvalidReset<'a> {
                 ));
             }
 
-            // Chcek reset signal when if_reset exists
+            // Check reset signal when if_reset exists
             let mut if_reset_exist = false;
             for x in &arg.always_ff_declaration_list {
                 if let Statement::IfResetStatement(_) = &*x.statement {

@@ -8,13 +8,13 @@ const OCTAL_CHARS: [char; 12] = ['0', '1', '2', '3', '4', '5', '6', '7', 'x', 'z
 const DECIMAL_CHARS: [char; 10] = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
 
 #[derive(Default)]
-pub struct CheckInvalidNumberCharacter<'a> {
+pub struct CheckNumber<'a> {
     pub errors: Vec<AnalyzerError>,
     text: &'a str,
     point: HandlerPoint,
 }
 
-impl<'a> CheckInvalidNumberCharacter<'a> {
+impl<'a> CheckNumber<'a> {
     pub fn new(text: &'a str) -> Self {
         Self {
             text,
@@ -23,21 +23,22 @@ impl<'a> CheckInvalidNumberCharacter<'a> {
     }
 }
 
-impl<'a> Handler for CheckInvalidNumberCharacter<'a> {
+impl<'a> Handler for CheckNumber<'a> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl<'a> VerylGrammarTrait for CheckInvalidNumberCharacter<'a> {
+impl<'a> VerylGrammarTrait for CheckNumber<'a> {
     fn based(&mut self, arg: &Based) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let token = &arg.based_token;
             let text = token.text();
-            let (_, tail) = text.split_once('\'').unwrap();
+            let (width, tail) = text.split_once('\'').unwrap();
             let base = &tail[0..1];
             let number = &tail[1..];
 
+            let width: usize = width.replace('_', "").parse().unwrap();
             let number = number.replace('_', "");
             let number = number.trim_start_matches('0');
 
@@ -48,12 +49,30 @@ impl<'a> VerylGrammarTrait for CheckInvalidNumberCharacter<'a> {
                             x, "binary", self.text, token,
                         ));
                     }
+
+                    let actual_width = number.chars().count();
+                    if actual_width > width {
+                        self.errors
+                            .push(AnalyzerError::number_overflow(width, self.text, token));
+                    }
                 }
                 "o" => {
                     if let Some(x) = number.chars().find(|x| !OCTAL_CHARS.contains(x)) {
                         self.errors.push(AnalyzerError::invalid_number_character(
                             x, "octal", self.text, token,
                         ));
+                    }
+
+                    let mut actual_width = number.chars().count() * 3;
+                    match number.chars().next() {
+                        Some('1') => actual_width -= 2,
+                        Some('2') => actual_width -= 1,
+                        Some('3') => actual_width -= 1,
+                        _ => (),
+                    }
+                    if actual_width > width {
+                        self.errors
+                            .push(AnalyzerError::number_overflow(width, self.text, token));
                     }
                 }
                 "d" => {
@@ -63,7 +82,24 @@ impl<'a> VerylGrammarTrait for CheckInvalidNumberCharacter<'a> {
                         ));
                     }
                 }
-                _ => (),
+                "h" => {
+                    let mut actual_width = number.chars().count() * 4;
+                    match number.chars().next() {
+                        Some('1') => actual_width -= 3,
+                        Some('2') => actual_width -= 2,
+                        Some('3') => actual_width -= 2,
+                        Some('4') => actual_width -= 1,
+                        Some('5') => actual_width -= 1,
+                        Some('6') => actual_width -= 1,
+                        Some('7') => actual_width -= 1,
+                        _ => (),
+                    }
+                    if actual_width > width {
+                        self.errors
+                            .push(AnalyzerError::number_overflow(width, self.text, token));
+                    }
+                }
+                _ => unreachable!(),
             }
         }
 
