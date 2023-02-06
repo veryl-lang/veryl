@@ -44,6 +44,19 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
+    #[diagnostic(
+        code(AnalyzerError::ResetStatementMissing),
+        help("add reset statement")
+    )]
+    #[error("{name} is not reset in if_reset statement")]
+    ResetStatementMissing {
+        name: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
     #[diagnostic(code(AnalyzerError::InvalidStatement), help("remove {kind} statement"))]
     #[error("{kind} statement can't be placed at here")]
     InvalidStatement {
@@ -283,6 +296,14 @@ impl AnalyzerError {
 
     pub fn reset_signal_missing(source: &str, token: &VerylToken) -> Self {
         AnalyzerError::ResetSignalMissing {
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.token.into(),
+        }
+    }
+
+    pub fn reset_statement_missing(name: &str, source: &str, token: &VerylToken) -> Self {
+        AnalyzerError::ResetStatementMissing {
+            name: name.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),
         }
