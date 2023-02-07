@@ -18,6 +18,13 @@ impl<'a> CheckAttribute<'a> {
             point: HandlerPoint::Before,
         }
     }
+
+    pub fn allow_pop(x: &Attribute) {
+        let identifier = x.identifier.identifier_token.text();
+        if identifier.as_str() == "allow" {
+            allow_table::pop();
+        }
+    }
 }
 
 impl<'a> Handler for CheckAttribute<'a> {
@@ -74,27 +81,32 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
                     }
                 }
                 "allow" => {
-                    if let Some(ref x) = arg.attribute_opt {
-                        let items: Vec<AttributeItem> = x.attribute_list.as_ref().into();
-                        for x in &items {
-                            match x {
-                                AttributeItem::Identifier(x) => {
-                                    allow_table::push(x.identifier.identifier_token.token.text);
-                                }
-                                AttributeItem::StringLiteral(_) => {
-                                    self.errors.push(AnalyzerError::mismatch_attribute_args(
-                                        &identifier,
-                                        "identifiers",
-                                        self.text,
-                                        &arg.identifier.identifier_token,
-                                    ));
-                                }
+                    let valid_arg = if let Some(ref x) = arg.attribute_opt {
+                        let args: Vec<AttributeItem> = x.attribute_list.as_ref().into();
+                        if args.is_empty() {
+                            false
+                        } else if let AttributeItem::Identifier(x) = &args[0] {
+                            let text = x.identifier.identifier_token.text();
+                            if !ALLOWABLE_ERROR.contains(&text.as_str()) {
+                                self.errors.push(AnalyzerError::invalid_allow(
+                                    &text,
+                                    self.text,
+                                    &arg.identifier.identifier_token,
+                                ));
                             }
+                            allow_table::push(x.identifier.identifier_token.token.text);
+                            true
+                        } else {
+                            false
                         }
                     } else {
+                        false
+                    };
+
+                    if !valid_arg {
                         self.errors.push(AnalyzerError::mismatch_attribute_args(
                             &identifier,
-                            "identifiers",
+                            "error identifier",
                             self.text,
                             &arg.identifier.identifier_token,
                         ));
@@ -115,10 +127,7 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
     fn modport_group(&mut self, arg: &ModportGroup) -> Result<(), ParolError> {
         if let HandlerPoint::After = self.point {
             for x in &arg.modport_group_list {
-                let identifier = x.attribute.identifier.identifier_token.text();
-                if identifier.as_str() == "allow" {
-                    allow_table::pop();
-                }
+                Self::allow_pop(&x.attribute);
             }
         }
         Ok(())
@@ -127,10 +136,7 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
     fn enum_group(&mut self, arg: &EnumGroup) -> Result<(), ParolError> {
         if let HandlerPoint::After = self.point {
             for x in &arg.enum_group_list {
-                let identifier = x.attribute.identifier.identifier_token.text();
-                if identifier.as_str() == "allow" {
-                    allow_table::pop();
-                }
+                Self::allow_pop(&x.attribute);
             }
         }
         Ok(())
@@ -139,10 +145,7 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
     fn struct_group(&mut self, arg: &StructGroup) -> Result<(), ParolError> {
         if let HandlerPoint::After = self.point {
             for x in &arg.struct_group_list {
-                let identifier = x.attribute.identifier.identifier_token.text();
-                if identifier.as_str() == "allow" {
-                    allow_table::pop();
-                }
+                Self::allow_pop(&x.attribute);
             }
         }
         Ok(())
@@ -151,10 +154,7 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
     fn inst_parameter_group(&mut self, arg: &InstParameterGroup) -> Result<(), ParolError> {
         if let HandlerPoint::After = self.point {
             for x in &arg.inst_parameter_group_list {
-                let identifier = x.attribute.identifier.identifier_token.text();
-                if identifier.as_str() == "allow" {
-                    allow_table::pop();
-                }
+                Self::allow_pop(&x.attribute);
             }
         }
         Ok(())
@@ -163,10 +163,7 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
     fn inst_port_group(&mut self, arg: &InstPortGroup) -> Result<(), ParolError> {
         if let HandlerPoint::After = self.point {
             for x in &arg.inst_port_group_list {
-                let identifier = x.attribute.identifier.identifier_token.text();
-                if identifier.as_str() == "allow" {
-                    allow_table::pop();
-                }
+                Self::allow_pop(&x.attribute);
             }
         }
         Ok(())
@@ -175,10 +172,7 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
     fn with_parameter_group(&mut self, arg: &WithParameterGroup) -> Result<(), ParolError> {
         if let HandlerPoint::After = self.point {
             for x in &arg.with_parameter_group_list {
-                let identifier = x.attribute.identifier.identifier_token.text();
-                if identifier.as_str() == "allow" {
-                    allow_table::pop();
-                }
+                Self::allow_pop(&x.attribute);
             }
         }
         Ok(())
@@ -187,10 +181,7 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
     fn port_declaration_group(&mut self, arg: &PortDeclarationGroup) -> Result<(), ParolError> {
         if let HandlerPoint::After = self.point {
             for x in &arg.port_declaration_group_list {
-                let identifier = x.attribute.identifier.identifier_token.text();
-                if identifier.as_str() == "allow" {
-                    allow_table::pop();
-                }
+                Self::allow_pop(&x.attribute);
             }
         }
         Ok(())
@@ -199,10 +190,7 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
     fn module_group(&mut self, arg: &ModuleGroup) -> Result<(), ParolError> {
         if let HandlerPoint::After = self.point {
             for x in &arg.module_group_list {
-                let identifier = x.attribute.identifier.identifier_token.text();
-                if identifier.as_str() == "allow" {
-                    allow_table::pop();
-                }
+                Self::allow_pop(&x.attribute);
             }
         }
         Ok(())
@@ -211,10 +199,7 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
     fn interface_group(&mut self, arg: &InterfaceGroup) -> Result<(), ParolError> {
         if let HandlerPoint::After = self.point {
             for x in &arg.interface_group_list {
-                let identifier = x.attribute.identifier.identifier_token.text();
-                if identifier.as_str() == "allow" {
-                    allow_table::pop();
-                }
+                Self::allow_pop(&x.attribute);
             }
         }
         Ok(())
@@ -223,10 +208,7 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
     fn package_group(&mut self, arg: &PackageGroup) -> Result<(), ParolError> {
         if let HandlerPoint::After = self.point {
             for x in &arg.package_group_list {
-                let identifier = x.attribute.identifier.identifier_token.text();
-                if identifier.as_str() == "allow" {
-                    allow_table::pop();
-                }
+                Self::allow_pop(&x.attribute);
             }
         }
         Ok(())
@@ -235,12 +217,11 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
     fn description_group(&mut self, arg: &DescriptionGroup) -> Result<(), ParolError> {
         if let HandlerPoint::After = self.point {
             for x in &arg.description_group_list {
-                let identifier = x.attribute.identifier.identifier_token.text();
-                if identifier.as_str() == "allow" {
-                    allow_table::pop();
-                }
+                Self::allow_pop(&x.attribute);
             }
         }
         Ok(())
     }
 }
+
+const ALLOWABLE_ERROR: [&str; 3] = ["missing_port", "missing_reset_statement", "unused_variable"];

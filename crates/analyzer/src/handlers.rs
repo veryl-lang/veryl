@@ -108,7 +108,7 @@ impl<'a> Pass2Handlers<'a> {
 
     pub fn get_errors(&mut self) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
-        ret.append(&mut self.check_attribute.errors);
+        // errors of check_attribute are reported at pass1
         ret.append(&mut self.check_enum.errors);
         ret.append(&mut self.check_function.errors);
         ret.append(&mut self.check_instance.errors);

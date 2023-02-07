@@ -15,6 +15,16 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
+    #[diagnostic(severity(Error), code(invalid_allow), help(""))]
+    #[error("{identifier} can't be allowed")]
+    InvalidAllow {
+        identifier: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
     #[diagnostic(
         severity(Error),
         code(invalid_direction),
@@ -282,6 +292,14 @@ impl AnalyzerError {
 
     pub fn duplicated_identifier(identifier: &str, source: &str, token: &VerylToken) -> Self {
         AnalyzerError::DuplicatedIdentifier {
+            identifier: identifier.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.token.into(),
+        }
+    }
+
+    pub fn invalid_allow(identifier: &str, source: &str, token: &VerylToken) -> Self {
+        AnalyzerError::InvalidAllow {
             identifier: identifier.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),

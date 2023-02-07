@@ -2,6 +2,8 @@
 
 ## [Unreleased](https://github.com/dalance/veryl/compare/v0.3.2...Unreleased) - ReleaseDate
 
+* [Added] allow attribute [#117](https://github.com/dalance/veryl/issues/117)
+
 ## [v0.3.2](https://github.com/dalance/veryl/compare/v0.3.1...v0.3.2) - 2023-02-06
 
 * [Fixed] Incorrect if block scope [#55](https://github.com/dalance/veryl/issues/55)

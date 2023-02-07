@@ -694,6 +694,19 @@ impl VerylWalker for Formatter {
         }
     }
 
+    /// Semantic action for non-terminal 'AttributeList'
+    fn attribute_list(&mut self, arg: &AttributeList) {
+        self.attribute_item(&arg.attribute_item);
+        for x in &arg.attribute_list_list {
+            self.comma(&x.comma);
+            self.space(1);
+            self.attribute_item(&x.attribute_item);
+        }
+        if let Some(ref x) = arg.attribute_list_opt {
+            self.comma(&x.comma);
+        }
+    }
+
     /// Semantic action for non-terminal 'VarDeclaration'
     fn var_declaration(&mut self, arg: &VarDeclaration) {
         self.var(&arg.var);
