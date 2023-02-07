@@ -4,6 +4,11 @@
   "description": "Veryl extension for Visual Studio Code",
   "version": "0.3.2",
   "publisher": "dalance",
+  "icon": "../logo/veryl_icon.png",
+  "galleryBanner": {
+      "color": "#ffffff",
+      "themr": "light"
+  },
   "engines": {
     "vscode": "^1.74.0"
   },
