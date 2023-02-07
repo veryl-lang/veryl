@@ -38,29 +38,19 @@ impl CmdBuild {
 
             let analyzer = Analyzer::new(&path.prj);
             let mut errors = analyzer.analyze_pass1(&input, &path.src, &parser.veryl);
-            check_error.related.append(&mut errors);
+            check_error = check_error.append(&mut errors).check_err()?;
 
             contexts.push((path, input, parser, analyzer));
         }
 
         for (path, input, parser, analyzer) in &contexts {
             let mut errors = analyzer.analyze_pass2(input, &path.src, &parser.veryl);
-            if !errors.is_empty() {
-                check_error.related.append(&mut errors);
-                return Err(check_error.into());
-            }
+            check_error = check_error.append(&mut errors).check_err()?;
         }
 
         for (path, input, parser, analyzer) in &contexts {
             let mut errors = analyzer.analyze_pass3(input, &path.src, &parser.veryl);
-            if !errors.is_empty() {
-                check_error.related.append(&mut errors);
-                return Err(check_error.into());
-            }
-        }
-
-        if !check_error.related.is_empty() {
-            return Err(check_error.into());
+            check_error = check_error.append(&mut errors).check_err()?;
         }
 
         for (path, _, parser, _) in &contexts {
@@ -90,6 +80,7 @@ impl CmdBuild {
         let elapsed_time = now.elapsed();
         debug!("Elapsed time ({} milliseconds)", elapsed_time.as_millis());
 
+        let _ = check_error.check_all()?;
         Ok(true)
     }
 

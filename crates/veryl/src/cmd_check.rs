@@ -1,6 +1,6 @@
 use crate::OptCheck;
 use log::{debug, info};
-use miette::{self, Diagnostic, IntoDiagnostic, Result, WrapErr};
+use miette::{self, Diagnostic, IntoDiagnostic, Result, Severity, WrapErr};
 use std::fs;
 use std::time::Instant;
 use thiserror::Error;
@@ -13,10 +13,37 @@ pub struct CmdCheck {
 }
 
 #[derive(Error, Diagnostic, Debug, Default)]
-#[error("Check error")]
+#[error("veryl check failed")]
 pub struct CheckError {
     #[related]
     pub related: Vec<AnalyzerError>,
+}
+
+impl CheckError {
+    pub fn append(mut self, x: &mut Vec<AnalyzerError>) -> Self {
+        self.related.append(x);
+        self
+    }
+
+    pub fn check_err(self) -> Result<Self> {
+        if self
+            .related
+            .iter()
+            .all(|x| !matches!(x.severity(), Some(Severity::Error) | None))
+        {
+            Ok(self)
+        } else {
+            Err(self.into())
+        }
+    }
+
+    pub fn check_all(self) -> Result<Self> {
+        if self.related.is_empty() {
+            Ok(self)
+        } else {
+            Err(self.into())
+        }
+    }
 }
 
 impl CmdCheck {
@@ -42,28 +69,25 @@ impl CmdCheck {
 
             let analyzer = Analyzer::new(&path.prj);
             let mut errors = analyzer.analyze_pass1(&input, &path.src, &parser.veryl);
-            check_error.related.append(&mut errors);
+            check_error = check_error.append(&mut errors).check_err()?;
 
             contexts.push((path, input, parser, analyzer));
         }
 
         for (path, input, parser, analyzer) in &contexts {
             let mut errors = analyzer.analyze_pass2(input, &path.src, &parser.veryl);
-            check_error.related.append(&mut errors);
+            check_error = check_error.append(&mut errors).check_err()?;
         }
 
         for (path, input, parser, analyzer) in &contexts {
             let mut errors = analyzer.analyze_pass3(input, &path.src, &parser.veryl);
-            check_error.related.append(&mut errors);
+            check_error = check_error.append(&mut errors).check_err()?;
         }
 
         let elapsed_time = now.elapsed();
         debug!("Elapsed time ({} milliseconds)", elapsed_time.as_millis());
 
-        if check_error.related.is_empty() {
-            Ok(true)
-        } else {
-            Err(check_error.into())
-        }
+        let _ = check_error.check_all()?;
+        Ok(true)
     }
 }

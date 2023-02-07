@@ -6,7 +6,7 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 use veryl_analyzer::symbol_table::SymbolPath;
-use veryl_analyzer::{namespace_table, symbol_table, Analyzer};
+use veryl_analyzer::{namespace_table, symbol_table, Analyzer, AnalyzerError};
 use veryl_formatter::Formatter;
 use veryl_metadata::{Metadata, PathPair};
 use veryl_parser::veryl_token::Token;
@@ -118,8 +118,8 @@ impl Backend {
             .code()
             .map(|d| NumberOrString::String(format!("{d}")));
 
-        let message = if let Some(x) = err.downcast_ref::<ParserError>() {
-            match x {
+        let (severity, message) = if let Some(x) = err.downcast_ref::<ParserError>() {
+            let msg = match x {
                 ParserError::UnexpectedToken {
                     unexpected_tokens, ..
                 } => {
@@ -137,14 +137,24 @@ impl Backend {
                 ParserError::UserError(x) => {
                     format!("Syntax Error: {x}")
                 }
-            }
+            };
+            (DiagnosticSeverity::ERROR, msg)
+        } else if let Some(x) = err.downcast_ref::<AnalyzerError>() {
+            use miette::Diagnostic;
+            let (severity, text) = match x.severity() {
+                Some(miette::Severity::Error) => (DiagnosticSeverity::ERROR, "Error"),
+                Some(miette::Severity::Warning) => (DiagnosticSeverity::WARNING, "Warning"),
+                Some(miette::Severity::Advice) => (DiagnosticSeverity::HINT, "Hint"),
+                None => (DiagnosticSeverity::ERROR, "Error"),
+            };
+            (severity, format!("Semantic {text}: {err}"))
         } else {
-            format!("Semantic Error: {err}")
+            (DiagnosticSeverity::ERROR, format!("Semantic Error: {err}"))
         };
 
         Diagnostic::new(
             range,
-            Some(DiagnosticSeverity::ERROR),
+            Some(severity),
             code,
             Some(String::from("veryl-ls")),
             message,
