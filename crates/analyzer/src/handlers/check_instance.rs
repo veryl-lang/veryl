@@ -1,3 +1,4 @@
+use crate::allow_table;
 use crate::analyzer_error::AnalyzerError;
 use crate::symbol::SymbolKind;
 use crate::symbol_table;
@@ -49,7 +50,9 @@ impl<'a> VerylGrammarTrait for CheckInstance<'a> {
                     match symbol.kind {
                         SymbolKind::Module(ref x) => {
                             for port in &x.ports {
-                                if !connected_ports.contains(&port.name) {
+                                if !connected_ports.contains(&port.name)
+                                    && !allow_table::contains("missing_port")
+                                {
                                     let port = resource_table::get_str_value(port.name).unwrap();
                                     self.errors.push(AnalyzerError::missing_port(
                                         name,

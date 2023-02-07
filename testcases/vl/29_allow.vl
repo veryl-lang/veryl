@@ -1,0 +1,25 @@
+module Module29 (
+    clk: input logic,
+    rst: input logic,
+) {
+    var a: logic;
+    var b: logic;
+    #[allow(unused_variable)]
+    var c: logic;
+
+    #[allow(missing_reset_statement)]
+    always_ff (clk, rst) {
+        if_reset {
+            a = 0;
+        } else {
+            a = 0;
+            b = 0;
+        }
+    }
+
+    #[allow(missing_port)]
+    inst u0: Module29 (
+
+
+    );
+}

@@ -1,3 +1,4 @@
+use crate::allow_table;
 use crate::analyzer_error::AnalyzerError;
 use crate::namespace::Namespace;
 use crate::namespace_table;
@@ -36,7 +37,12 @@ impl<'a> CreateSymbolTable<'a> {
     }
 
     fn insert_symbol(&mut self, token: &VerylToken, kind: SymbolKind) {
-        let symbol = Symbol::new(&token.token, kind, &self.namespace);
+        let mut symbol = Symbol::new(&token.token, kind, &self.namespace);
+
+        if allow_table::contains("unused_variable") {
+            symbol.allow_unused = true;
+        }
+
         if !symbol_table::insert(&token.token, symbol) {
             let text = resource_table::get_str_value(token.token.text).unwrap();
             self.errors.push(AnalyzerError::duplicated_identifier(

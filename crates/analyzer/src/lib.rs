@@ -1,3 +1,4 @@
+pub mod allow_table;
 pub mod analyzer;
 pub mod analyzer_error;
 pub mod evaluator;

@@ -15,6 +15,7 @@ pub struct Symbol {
     pub namespace: Namespace,
     pub references: Vec<Token>,
     pub evaluated: Cell<Option<Evaluated>>,
+    pub allow_unused: bool,
 }
 
 impl Symbol {
@@ -25,6 +26,7 @@ impl Symbol {
             namespace: namespace.to_owned(),
             references: Vec::new(),
             evaluated: Cell::new(None),
+            allow_unused: false,
         }
     }
 

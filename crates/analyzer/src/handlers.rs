@@ -75,6 +75,7 @@ impl<'a> Pass1Handlers<'a> {
 }
 
 pub struct Pass2Handlers<'a> {
+    check_attribute: CheckAttribute<'a>,
     check_enum: CheckEnum<'a>,
     check_function: CheckFunction<'a>,
     check_instance: CheckInstance<'a>,
@@ -85,6 +86,7 @@ pub struct Pass2Handlers<'a> {
 impl<'a> Pass2Handlers<'a> {
     pub fn new(text: &'a str) -> Self {
         Self {
+            check_attribute: CheckAttribute::new(text),
             check_enum: CheckEnum::new(text),
             check_function: CheckFunction::new(text),
             check_instance: CheckInstance::new(text),
@@ -95,6 +97,7 @@ impl<'a> Pass2Handlers<'a> {
 
     pub fn get_handlers(&mut self) -> Vec<&mut dyn Handler> {
         vec![
+            &mut self.check_attribute as &mut dyn Handler,
             &mut self.check_enum as &mut dyn Handler,
             &mut self.check_function as &mut dyn Handler,
             &mut self.check_instance as &mut dyn Handler,
@@ -105,6 +108,7 @@ impl<'a> Pass2Handlers<'a> {
 
     pub fn get_errors(&mut self) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
+        ret.append(&mut self.check_attribute.errors);
         ret.append(&mut self.check_enum.errors);
         ret.append(&mut self.check_function.errors);
         ret.append(&mut self.check_instance.errors);

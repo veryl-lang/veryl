@@ -107,7 +107,7 @@ impl Analyzer {
         for symbol in symbols {
             if symbol.token.file_path == path {
                 if let SymbolKind::Variable(_) = symbol.kind {
-                    if symbol.references.is_empty() {
+                    if symbol.references.is_empty() && !symbol.allow_unused {
                         let name = format!("{}", symbol.token.text);
                         if name.starts_with('_') {
                             continue;
