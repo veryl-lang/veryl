@@ -23,6 +23,15 @@ impl<'a> CheckReset<'a> {
             ..Default::default()
         }
     }
+
+    fn get_identifier_path(x: &HierarchicalIdentifier) -> Vec<String> {
+        let mut ret = Vec::new();
+        ret.push(x.identifier.identifier_token.text());
+        for x in &x.hierarchical_identifier_list0 {
+            ret.push(x.identifier.identifier_token.text());
+        }
+        ret
+    }
 }
 
 impl<'a> Handler for CheckReset<'a> {
@@ -109,16 +118,17 @@ impl<'a> VerylGrammarTrait for CheckReset<'a> {
                 // Check lefthand side values which is not reset
                 let mut reset_lefthand_sides = Vec::new();
                 for x in &self.reset_lefthand_sides {
-                    let mut stringifier = Stringifier::new();
-                    stringifier.hierarchical_identifier(x);
-                    reset_lefthand_sides.push(stringifier.as_str().to_string());
+                    reset_lefthand_sides.push(Self::get_identifier_path(x));
                 }
 
                 for x in &self.all_lefthand_sides {
                     let mut stringifier = Stringifier::new();
                     stringifier.hierarchical_identifier(x);
                     let name = stringifier.as_str().to_string();
-                    if self.if_reset_exist && !reset_lefthand_sides.contains(&name) {
+                    let path = Self::get_identifier_path(x);
+                    if self.if_reset_exist
+                        && !reset_lefthand_sides.iter().any(|x| path.starts_with(&x))
+                    {
                         self.errors.push(AnalyzerError::missing_reset_statement(
                             &name,
                             self.text,
