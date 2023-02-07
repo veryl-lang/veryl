@@ -485,7 +485,7 @@ ModportDeclaration: Modport Identifier LBrace ModportList RBrace;
 
 ModportList: ModportGroup { Comma ModportGroup } [ Comma ];
 
-ModportGroup: [ Attribute ] ( LBrace ModportList RBrace | ModportItem );
+ModportGroup: { Attribute } ( LBrace ModportList RBrace | ModportItem );
 
 ModportItem: Identifier Colon Direction;
 
@@ -493,7 +493,7 @@ EnumDeclaration: Enum Identifier Colon ScalarType LBrace EnumList RBrace;
 
 EnumList: EnumGroup { Comma EnumGroup } [ Comma ];
 
-EnumGroup: [ Attribute ] ( LBrace EnumList RBrace | EnumItem );
+EnumGroup: { Attribute } ( LBrace EnumList RBrace | EnumItem );
 
 EnumItem: Identifier [ Equ Expression ];
 
@@ -501,7 +501,7 @@ StructDeclaration: Struct Identifier LBrace StructList RBrace;
 
 StructList: StructGroup { Comma StructGroup } [ Comma ];
 
-StructGroup: [ Attribute ] ( LBrace StructList RBrace | StructItem );
+StructGroup: { Attribute } ( LBrace StructList RBrace | StructItem );
 
 StructItem: Identifier Colon ScalarType;
 
@@ -515,13 +515,13 @@ InstParameter: Hash LParen [ InstParameterList ] RParen;
 
 InstParameterList: InstParameterGroup { Comma InstParameterGroup } [ Comma ];
 
-InstParameterGroup: [ Attribute ] ( LBrace InstParameterList RBrace | InstParameterItem );
+InstParameterGroup: { Attribute } ( LBrace InstParameterList RBrace | InstParameterItem );
 
 InstParameterItem: Identifier [ Colon Expression ];
 
 InstPortList: InstPortGroup { Comma InstPortGroup } [ Comma ];
 
-InstPortGroup: [ Attribute ] ( LBrace InstPortList RBrace | InstPortItem );
+InstPortGroup: { Attribute } ( LBrace InstPortList RBrace | InstPortItem );
 
 InstPortItem: Identifier [ Colon Expression ];
 
@@ -533,7 +533,7 @@ WithParameter: Hash LParen [ WithParameterList ] RParen;
 
 WithParameterList: WithParameterGroup { Comma WithParameterGroup } [ Comma ];
 
-WithParameterGroup: [ Attribute ] ( LBrace WithParameterList RBrace | WithParameterItem );
+WithParameterGroup: { Attribute } ( LBrace WithParameterList RBrace | WithParameterItem );
 
 WithParameterItem: ( Parameter | Localparam ) Identifier Colon ( ArrayType Equ Expression | Type Equ TypeExpression );
 
@@ -545,7 +545,7 @@ PortDeclaration: LParen [ PortDeclarationList ] RParen;
 
 PortDeclarationList: PortDeclarationGroup { Comma PortDeclarationGroup } [ Comma ];
 
-PortDeclarationGroup: [ Attribute ] ( LBrace PortDeclarationList RBrace | PortDeclarationItem );
+PortDeclarationGroup: { Attribute } ( LBrace PortDeclarationList RBrace | PortDeclarationItem );
 
 PortDeclarationItem: Identifier Colon ( Direction ArrayType | Interface [ Array ] );
 
@@ -588,7 +588,7 @@ ModuleNamedBlock: Colon Identifier LBrace { ModuleGroup } RBrace;
 
 ModuleOptionalNamedBlock: [ Colon Identifier ] LBrace { ModuleGroup } RBrace;
 
-ModuleGroup: [ Attribute ] ( LBrace { ModuleGroup } RBrace | ModuleItem );
+ModuleGroup: { Attribute } ( LBrace { ModuleGroup } RBrace | ModuleItem );
 
 ModuleItem: VarDeclaration
           | InstDeclaration
@@ -619,7 +619,7 @@ InterfaceNamedBlock: Colon Identifier LBrace { InterfaceGroup } RBrace;
 
 InterfaceOptionalNamedBlock: [ Colon Identifier ] LBrace { InterfaceGroup } RBrace;
 
-InterfaceGroup: [ Attribute ] ( LBrace { InterfaceGroup } RBrace | InterfaceItem );
+InterfaceGroup: { Attribute } ( LBrace { InterfaceGroup } RBrace | InterfaceItem );
 
 InterfaceItem: VarDeclaration
              | LocalparamDeclaration
@@ -639,7 +639,7 @@ InterfaceItem: VarDeclaration
 
 PackageDeclaration: Package Identifier LBrace { PackageGroup } RBrace;
 
-PackageGroup: [ Attribute ] ( LBrace { PackageGroup } RBrace | PackageItem );
+PackageGroup: { Attribute } ( LBrace { PackageGroup } RBrace | PackageItem );
 
 PackageItem: VarDeclaration
            | LocalparamDeclaration
@@ -654,7 +654,7 @@ PackageItem: VarDeclaration
 // Description
 // ----------------------------------------------------------------------------
 
-DescriptionGroup: [ Attribute ] ( LBrace { DescriptionGroup } RBrace | DescriptionItem );
+DescriptionGroup: { Attribute } ( LBrace { DescriptionGroup } RBrace | DescriptionItem );
 
 DescriptionItem: ModuleDeclaration
                | InterfaceDeclaration

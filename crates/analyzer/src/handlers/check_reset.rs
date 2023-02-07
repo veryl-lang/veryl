@@ -127,7 +127,7 @@ impl<'a> VerylGrammarTrait for CheckReset<'a> {
                     let name = stringifier.as_str().to_string();
                     let path = Self::get_identifier_path(x);
                     if self.if_reset_exist
-                        && !reset_lefthand_sides.iter().any(|x| path.starts_with(&x))
+                        && !reset_lefthand_sides.iter().any(|x| path.starts_with(x))
                     {
                         self.errors.push(AnalyzerError::missing_reset_statement(
                             &name,

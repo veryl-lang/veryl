@@ -432,7 +432,7 @@ pub const NON_TERMINALS: &[&str; 542] = &[
     /*  93 */ "DescriptionGroup",
     /*  94 */ "DescriptionGroupGroup",
     /*  95 */ "DescriptionGroupGroupList",
-    /*  96 */ "DescriptionGroupOpt",
+    /*  96 */ "DescriptionGroupList",
     /*  97 */ "DescriptionItem",
     /*  98 */ "Direction",
     /*  99 */ "Dollar",
@@ -451,7 +451,7 @@ pub const NON_TERMINALS: &[&str; 542] = &[
     /* 112 */ "EnumDeclaration",
     /* 113 */ "EnumGroup",
     /* 114 */ "EnumGroupGroup",
-    /* 115 */ "EnumGroupOpt",
+    /* 115 */ "EnumGroupList",
     /* 116 */ "EnumItem",
     /* 117 */ "EnumItemOpt",
     /* 118 */ "EnumList",
@@ -595,7 +595,7 @@ pub const NON_TERMINALS: &[&str; 542] = &[
     /* 256 */ "InstParameter",
     /* 257 */ "InstParameterGroup",
     /* 258 */ "InstParameterGroupGroup",
-    /* 259 */ "InstParameterGroupOpt",
+    /* 259 */ "InstParameterGroupList",
     /* 260 */ "InstParameterItem",
     /* 261 */ "InstParameterItemOpt",
     /* 262 */ "InstParameterList",
@@ -604,7 +604,7 @@ pub const NON_TERMINALS: &[&str; 542] = &[
     /* 265 */ "InstParameterOpt",
     /* 266 */ "InstPortGroup",
     /* 267 */ "InstPortGroupGroup",
-    /* 268 */ "InstPortGroupOpt",
+    /* 268 */ "InstPortGroupList",
     /* 269 */ "InstPortItem",
     /* 270 */ "InstPortItemOpt",
     /* 271 */ "InstPortList",
@@ -622,7 +622,7 @@ pub const NON_TERMINALS: &[&str; 542] = &[
     /* 283 */ "InterfaceGroup",
     /* 284 */ "InterfaceGroupGroup",
     /* 285 */ "InterfaceGroupGroupList",
-    /* 286 */ "InterfaceGroupOpt",
+    /* 286 */ "InterfaceGroupList",
     /* 287 */ "InterfaceIfDeclaration",
     /* 288 */ "InterfaceIfDeclarationList",
     /* 289 */ "InterfaceIfDeclarationOpt",
@@ -667,7 +667,7 @@ pub const NON_TERMINALS: &[&str; 542] = &[
     /* 328 */ "ModportDeclaration",
     /* 329 */ "ModportGroup",
     /* 330 */ "ModportGroupGroup",
-    /* 331 */ "ModportGroupOpt",
+    /* 331 */ "ModportGroupList",
     /* 332 */ "ModportItem",
     /* 333 */ "ModportList",
     /* 334 */ "ModportListList",
@@ -684,7 +684,7 @@ pub const NON_TERMINALS: &[&str; 542] = &[
     /* 345 */ "ModuleGroup",
     /* 346 */ "ModuleGroupGroup",
     /* 347 */ "ModuleGroupGroupList",
-    /* 348 */ "ModuleGroupOpt",
+    /* 348 */ "ModuleGroupList",
     /* 349 */ "ModuleIfDeclaration",
     /* 350 */ "ModuleIfDeclarationList",
     /* 351 */ "ModuleIfDeclarationOpt",
@@ -745,7 +745,7 @@ pub const NON_TERMINALS: &[&str; 542] = &[
     /* 406 */ "PackageGroup",
     /* 407 */ "PackageGroupGroup",
     /* 408 */ "PackageGroupGroupList",
-    /* 409 */ "PackageGroupOpt",
+    /* 409 */ "PackageGroupList",
     /* 410 */ "PackageItem",
     /* 411 */ "PackageTerm",
     /* 412 */ "PackageToken",
@@ -758,7 +758,7 @@ pub const NON_TERMINALS: &[&str; 542] = &[
     /* 419 */ "PortDeclaration",
     /* 420 */ "PortDeclarationGroup",
     /* 421 */ "PortDeclarationGroupGroup",
-    /* 422 */ "PortDeclarationGroupOpt",
+    /* 422 */ "PortDeclarationGroupList",
     /* 423 */ "PortDeclarationItem",
     /* 424 */ "PortDeclarationItemGroup",
     /* 425 */ "PortDeclarationItemOpt",
@@ -825,7 +825,7 @@ pub const NON_TERMINALS: &[&str; 542] = &[
     /* 486 */ "StructDeclaration",
     /* 487 */ "StructGroup",
     /* 488 */ "StructGroupGroup",
-    /* 489 */ "StructGroupOpt",
+    /* 489 */ "StructGroupList",
     /* 490 */ "StructItem",
     /* 491 */ "StructList",
     /* 492 */ "StructListList",
@@ -870,7 +870,7 @@ pub const NON_TERMINALS: &[&str; 542] = &[
     /* 531 */ "WithParameter",
     /* 532 */ "WithParameterGroup",
     /* 533 */ "WithParameterGroupGroup",
-    /* 534 */ "WithParameterGroupOpt",
+    /* 534 */ "WithParameterGroupList",
     /* 535 */ "WithParameterItem",
     /* 536 */ "WithParameterItemGroup",
     /* 537 */ "WithParameterItemGroup0",
@@ -2342,6 +2342,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 542] = &[
             DFATransition(9, 42, 8),
             DFATransition(10, 5, 8),
             DFATransition(10, 29, 8),
+            DFATransition(10, 35, 8),
             DFATransition(10, 37, 8),
             DFATransition(10, 46, 8),
             DFATransition(10, 47, 8),
@@ -3934,7 +3935,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 542] = &[
         ],
         k: 1,
     },
-    /* 96 - "DescriptionGroupOpt" */
+    /* 96 - "DescriptionGroupList" */
     LookaheadDFA {
         states: &[None, Some(756), Some(757)],
         transitions: &[
@@ -4066,7 +4067,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 542] = &[
         transitions: &[DFATransition(0, 37, 1), DFATransition(0, 97, 2)],
         k: 1,
     },
-    /* 115 - "EnumGroupOpt" */
+    /* 115 - "EnumGroupList" */
     LookaheadDFA {
         states: &[None, Some(540), Some(541)],
         transitions: &[
@@ -20475,7 +20476,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 542] = &[
         transitions: &[DFATransition(0, 37, 1), DFATransition(0, 97, 2)],
         k: 1,
     },
-    /* 259 - "InstParameterGroupOpt" */
+    /* 259 - "InstParameterGroupList" */
     LookaheadDFA {
         states: &[None, Some(577), Some(578)],
         transitions: &[
@@ -20647,7 +20648,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 542] = &[
         transitions: &[DFATransition(0, 37, 1), DFATransition(0, 97, 2)],
         k: 1,
     },
-    /* 268 - "InstPortGroupOpt" */
+    /* 268 - "InstPortGroupList" */
     LookaheadDFA {
         states: &[None, Some(590), Some(591)],
         transitions: &[
@@ -20902,7 +20903,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 542] = &[
         ],
         k: 1,
     },
-    /* 286 - "InterfaceGroupOpt" */
+    /* 286 - "InterfaceGroupList" */
     LookaheadDFA {
         states: &[None, Some(722), Some(723)],
         transitions: &[
@@ -22047,7 +22048,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 542] = &[
         transitions: &[DFATransition(0, 37, 1), DFATransition(0, 97, 2)],
         k: 1,
     },
-    /* 331 - "ModportGroupOpt" */
+    /* 331 - "ModportGroupList" */
     LookaheadDFA {
         states: &[None, Some(528), Some(529)],
         transitions: &[
@@ -22375,7 +22376,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 542] = &[
         ],
         k: 1,
     },
-    /* 348 - "ModuleGroupOpt" */
+    /* 348 - "ModuleGroupList" */
     LookaheadDFA {
         states: &[None, Some(681), Some(682)],
         transitions: &[
@@ -23739,7 +23740,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 542] = &[
         ],
         k: 1,
     },
-    /* 409 - "PackageGroupOpt" */
+    /* 409 - "PackageGroupList" */
     LookaheadDFA {
         states: &[None, Some(742), Some(743)],
         transitions: &[
@@ -23844,7 +23845,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 542] = &[
         transitions: &[DFATransition(0, 37, 1), DFATransition(0, 97, 2)],
         k: 1,
     },
-    /* 422 - "PortDeclarationGroupOpt" */
+    /* 422 - "PortDeclarationGroupList" */
     LookaheadDFA {
         states: &[None, Some(624), Some(625)],
         transitions: &[
@@ -24460,7 +24461,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 542] = &[
         transitions: &[DFATransition(0, 37, 1), DFATransition(0, 97, 2)],
         k: 1,
     },
-    /* 489 - "StructGroupOpt" */
+    /* 489 - "StructGroupList" */
     LookaheadDFA {
         states: &[None, Some(554), Some(555)],
         transitions: &[
@@ -24984,7 +24985,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 542] = &[
         ],
         k: 1,
     },
-    /* 534 - "WithParameterGroupOpt" */
+    /* 534 - "WithParameterGroupList" */
     LookaheadDFA {
         states: &[None, Some(606), Some(607)],
         transitions: &[
@@ -27996,7 +27997,7 @@ pub const PRODUCTIONS: &[Production; 765] = &[
         lhs: 335,
         production: &[],
     },
-    // 525 - ModportGroup: ModportGroupOpt /* Option */ ModportGroupGroup;
+    // 525 - ModportGroup: ModportGroupList /* Vec */ ModportGroupGroup;
     Production {
         lhs: 329,
         production: &[ParseType::N(330), ParseType::N(331)],
@@ -28011,12 +28012,12 @@ pub const PRODUCTIONS: &[Production; 765] = &[
         lhs: 330,
         production: &[ParseType::N(332)],
     },
-    // 528 - ModportGroupOpt: Attribute;
+    // 528 - ModportGroupList: Attribute ModportGroupList;
     Production {
         lhs: 331,
-        production: &[ParseType::N(46)],
+        production: &[ParseType::N(331), ParseType::N(46)],
     },
-    // 529 - ModportGroupOpt: ;
+    // 529 - ModportGroupList: ;
     Production {
         lhs: 331,
         production: &[],
@@ -28064,7 +28065,7 @@ pub const PRODUCTIONS: &[Production; 765] = &[
         lhs: 120,
         production: &[],
     },
-    // 537 - EnumGroup: EnumGroupOpt /* Option */ EnumGroupGroup;
+    // 537 - EnumGroup: EnumGroupList /* Vec */ EnumGroupGroup;
     Production {
         lhs: 113,
         production: &[ParseType::N(114), ParseType::N(115)],
@@ -28079,12 +28080,12 @@ pub const PRODUCTIONS: &[Production; 765] = &[
         lhs: 114,
         production: &[ParseType::N(116)],
     },
-    // 540 - EnumGroupOpt: Attribute;
+    // 540 - EnumGroupList: Attribute EnumGroupList;
     Production {
         lhs: 115,
-        production: &[ParseType::N(46)],
+        production: &[ParseType::N(115), ParseType::N(46)],
     },
-    // 541 - EnumGroupOpt: ;
+    // 541 - EnumGroupList: ;
     Production {
         lhs: 115,
         production: &[],
@@ -28140,7 +28141,7 @@ pub const PRODUCTIONS: &[Production; 765] = &[
         lhs: 493,
         production: &[],
     },
-    // 551 - StructGroup: StructGroupOpt /* Option */ StructGroupGroup;
+    // 551 - StructGroup: StructGroupList /* Vec */ StructGroupGroup;
     Production {
         lhs: 487,
         production: &[ParseType::N(488), ParseType::N(489)],
@@ -28155,12 +28156,12 @@ pub const PRODUCTIONS: &[Production; 765] = &[
         lhs: 488,
         production: &[ParseType::N(490)],
     },
-    // 554 - StructGroupOpt: Attribute;
+    // 554 - StructGroupList: Attribute StructGroupList;
     Production {
         lhs: 489,
-        production: &[ParseType::N(46)],
+        production: &[ParseType::N(489), ParseType::N(46)],
     },
-    // 555 - StructGroupOpt: ;
+    // 555 - StructGroupList: ;
     Production {
         lhs: 489,
         production: &[],
@@ -28269,7 +28270,7 @@ pub const PRODUCTIONS: &[Production; 765] = &[
         lhs: 264,
         production: &[],
     },
-    // 574 - InstParameterGroup: InstParameterGroupOpt /* Option */ InstParameterGroupGroup;
+    // 574 - InstParameterGroup: InstParameterGroupList /* Vec */ InstParameterGroupGroup;
     Production {
         lhs: 257,
         production: &[ParseType::N(258), ParseType::N(259)],
@@ -28284,12 +28285,12 @@ pub const PRODUCTIONS: &[Production; 765] = &[
         lhs: 258,
         production: &[ParseType::N(260)],
     },
-    // 577 - InstParameterGroupOpt: Attribute;
+    // 577 - InstParameterGroupList: Attribute InstParameterGroupList;
     Production {
         lhs: 259,
-        production: &[ParseType::N(46)],
+        production: &[ParseType::N(259), ParseType::N(46)],
     },
-    // 578 - InstParameterGroupOpt: ;
+    // 578 - InstParameterGroupList: ;
     Production {
         lhs: 259,
         production: &[],
@@ -28334,7 +28335,7 @@ pub const PRODUCTIONS: &[Production; 765] = &[
         lhs: 273,
         production: &[],
     },
-    // 587 - InstPortGroup: InstPortGroupOpt /* Option */ InstPortGroupGroup;
+    // 587 - InstPortGroup: InstPortGroupList /* Vec */ InstPortGroupGroup;
     Production {
         lhs: 266,
         production: &[ParseType::N(267), ParseType::N(268)],
@@ -28349,12 +28350,12 @@ pub const PRODUCTIONS: &[Production; 765] = &[
         lhs: 267,
         production: &[ParseType::N(269)],
     },
-    // 590 - InstPortGroupOpt: Attribute;
+    // 590 - InstPortGroupList: Attribute InstPortGroupList;
     Production {
         lhs: 268,
-        production: &[ParseType::N(46)],
+        production: &[ParseType::N(268), ParseType::N(46)],
     },
-    // 591 - InstPortGroupOpt: ;
+    // 591 - InstPortGroupList: ;
     Production {
         lhs: 268,
         production: &[],
@@ -28419,7 +28420,7 @@ pub const PRODUCTIONS: &[Production; 765] = &[
         lhs: 540,
         production: &[],
     },
-    // 603 - WithParameterGroup: WithParameterGroupOpt /* Option */ WithParameterGroupGroup;
+    // 603 - WithParameterGroup: WithParameterGroupList /* Vec */ WithParameterGroupGroup;
     Production {
         lhs: 532,
         production: &[ParseType::N(533), ParseType::N(534)],
@@ -28434,12 +28435,12 @@ pub const PRODUCTIONS: &[Production; 765] = &[
         lhs: 533,
         production: &[ParseType::N(535)],
     },
-    // 606 - WithParameterGroupOpt: Attribute;
+    // 606 - WithParameterGroupList: Attribute WithParameterGroupList;
     Production {
         lhs: 534,
-        production: &[ParseType::N(46)],
+        production: &[ParseType::N(534), ParseType::N(46)],
     },
-    // 607 - WithParameterGroupOpt: ;
+    // 607 - WithParameterGroupList: ;
     Production {
         lhs: 534,
         production: &[],
@@ -28514,7 +28515,7 @@ pub const PRODUCTIONS: &[Production; 765] = &[
         lhs: 428,
         production: &[],
     },
-    // 621 - PortDeclarationGroup: PortDeclarationGroupOpt /* Option */ PortDeclarationGroupGroup;
+    // 621 - PortDeclarationGroup: PortDeclarationGroupList /* Vec */ PortDeclarationGroupGroup;
     Production {
         lhs: 420,
         production: &[ParseType::N(421), ParseType::N(422)],
@@ -28529,12 +28530,12 @@ pub const PRODUCTIONS: &[Production; 765] = &[
         lhs: 421,
         production: &[ParseType::N(423)],
     },
-    // 624 - PortDeclarationGroupOpt: Attribute;
+    // 624 - PortDeclarationGroupList: Attribute PortDeclarationGroupList;
     Production {
         lhs: 422,
-        production: &[ParseType::N(46)],
+        production: &[ParseType::N(422), ParseType::N(46)],
     },
-    // 625 - PortDeclarationGroupOpt: ;
+    // 625 - PortDeclarationGroupList: ;
     Production {
         lhs: 422,
         production: &[],
@@ -28851,7 +28852,7 @@ pub const PRODUCTIONS: &[Production; 765] = &[
         lhs: 357,
         production: &[],
     },
-    // 676 - ModuleGroup: ModuleGroupOpt /* Option */ ModuleGroupGroup;
+    // 676 - ModuleGroup: ModuleGroupList /* Vec */ ModuleGroupGroup;
     Production {
         lhs: 345,
         production: &[ParseType::N(346), ParseType::N(348)],
@@ -28876,12 +28877,12 @@ pub const PRODUCTIONS: &[Production; 765] = &[
         lhs: 346,
         production: &[ParseType::N(352)],
     },
-    // 681 - ModuleGroupOpt: Attribute;
+    // 681 - ModuleGroupList: Attribute ModuleGroupList;
     Production {
         lhs: 348,
-        production: &[ParseType::N(46)],
+        production: &[ParseType::N(348), ParseType::N(46)],
     },
-    // 682 - ModuleGroupOpt: ;
+    // 682 - ModuleGroupList: ;
     Production {
         lhs: 348,
         production: &[],
@@ -29095,7 +29096,7 @@ pub const PRODUCTIONS: &[Production; 765] = &[
         lhs: 295,
         production: &[],
     },
-    // 717 - InterfaceGroup: InterfaceGroupOpt /* Option */ InterfaceGroupGroup;
+    // 717 - InterfaceGroup: InterfaceGroupList /* Vec */ InterfaceGroupGroup;
     Production {
         lhs: 283,
         production: &[ParseType::N(284), ParseType::N(286)],
@@ -29120,12 +29121,12 @@ pub const PRODUCTIONS: &[Production; 765] = &[
         lhs: 284,
         production: &[ParseType::N(290)],
     },
-    // 722 - InterfaceGroupOpt: Attribute;
+    // 722 - InterfaceGroupList: Attribute InterfaceGroupList;
     Production {
         lhs: 286,
-        production: &[ParseType::N(46)],
+        production: &[ParseType::N(286), ParseType::N(46)],
     },
-    // 723 - InterfaceGroupOpt: ;
+    // 723 - InterfaceGroupList: ;
     Production {
         lhs: 286,
         production: &[],
@@ -29201,7 +29202,7 @@ pub const PRODUCTIONS: &[Production; 765] = &[
         lhs: 405,
         production: &[],
     },
-    // 737 - PackageGroup: PackageGroupOpt /* Option */ PackageGroupGroup;
+    // 737 - PackageGroup: PackageGroupList /* Vec */ PackageGroupGroup;
     Production {
         lhs: 406,
         production: &[ParseType::N(407), ParseType::N(409)],
@@ -29226,12 +29227,12 @@ pub const PRODUCTIONS: &[Production; 765] = &[
         lhs: 407,
         production: &[ParseType::N(410)],
     },
-    // 742 - PackageGroupOpt: Attribute;
+    // 742 - PackageGroupList: Attribute PackageGroupList;
     Production {
         lhs: 409,
-        production: &[ParseType::N(46)],
+        production: &[ParseType::N(409), ParseType::N(46)],
     },
-    // 743 - PackageGroupOpt: ;
+    // 743 - PackageGroupList: ;
     Production {
         lhs: 409,
         production: &[],
@@ -29271,7 +29272,7 @@ pub const PRODUCTIONS: &[Production; 765] = &[
         lhs: 410,
         production: &[ParseType::N(130)],
     },
-    // 751 - DescriptionGroup: DescriptionGroupOpt /* Option */ DescriptionGroupGroup;
+    // 751 - DescriptionGroup: DescriptionGroupList /* Vec */ DescriptionGroupGroup;
     Production {
         lhs: 93,
         production: &[ParseType::N(94), ParseType::N(96)],
@@ -29296,12 +29297,12 @@ pub const PRODUCTIONS: &[Production; 765] = &[
         lhs: 94,
         production: &[ParseType::N(97)],
     },
-    // 756 - DescriptionGroupOpt: Attribute;
+    // 756 - DescriptionGroupList: Attribute DescriptionGroupList;
     Production {
         lhs: 96,
-        production: &[ParseType::N(46)],
+        production: &[ParseType::N(96), ParseType::N(46)],
     },
-    // 757 - DescriptionGroupOpt: ;
+    // 757 - DescriptionGroupList: ;
     Production {
         lhs: 96,
         production: &[],

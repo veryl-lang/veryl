@@ -4753,7 +4753,7 @@ pub struct DefaultToken {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct DescriptionGroup {
-    pub description_group_opt: Option<Box<DescriptionGroupOpt>>,
+    pub description_group_list: Vec<DescriptionGroupList>,
     pub description_group_group: Box<DescriptionGroupGroup>,
 }
 
@@ -4780,12 +4780,12 @@ pub struct DescriptionGroupGroupList {
 }
 
 ///
-/// Type derived for non-terminal DescriptionGroupOpt
+/// Type derived for non-terminal DescriptionGroupList
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct DescriptionGroupOpt {
+pub struct DescriptionGroupList {
     pub attribute: Box<Attribute>,
 }
 
@@ -4971,7 +4971,7 @@ pub struct EnumDeclaration {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct EnumGroup {
-    pub enum_group_opt: Option<Box<EnumGroupOpt>>,
+    pub enum_group_list: Vec<EnumGroupList>,
     pub enum_group_group: Box<EnumGroupGroup>,
 }
 
@@ -4986,12 +4986,12 @@ pub enum EnumGroupGroup {
 }
 
 ///
-/// Type derived for non-terminal EnumGroupOpt
+/// Type derived for non-terminal EnumGroupList
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct EnumGroupOpt {
+pub struct EnumGroupList {
     pub attribute: Box<Attribute>,
 }
 
@@ -6568,7 +6568,7 @@ pub struct InstParameter {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct InstParameterGroup {
-    pub inst_parameter_group_opt: Option<Box<InstParameterGroupOpt>>,
+    pub inst_parameter_group_list: Vec<InstParameterGroupList>,
     pub inst_parameter_group_group: Box<InstParameterGroupGroup>,
 }
 
@@ -6583,12 +6583,12 @@ pub enum InstParameterGroupGroup {
 }
 
 ///
-/// Type derived for non-terminal InstParameterGroupOpt
+/// Type derived for non-terminal InstParameterGroupList
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct InstParameterGroupOpt {
+pub struct InstParameterGroupList {
     pub attribute: Box<Attribute>,
 }
 
@@ -6664,7 +6664,7 @@ pub struct InstParameterOpt {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct InstPortGroup {
-    pub inst_port_group_opt: Option<Box<InstPortGroupOpt>>,
+    pub inst_port_group_list: Vec<InstPortGroupList>,
     pub inst_port_group_group: Box<InstPortGroupGroup>,
 }
 
@@ -6679,12 +6679,12 @@ pub enum InstPortGroupGroup {
 }
 
 ///
-/// Type derived for non-terminal InstPortGroupOpt
+/// Type derived for non-terminal InstPortGroupList
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct InstPortGroupOpt {
+pub struct InstPortGroupList {
     pub attribute: Box<Attribute>,
 }
 
@@ -6856,7 +6856,7 @@ pub struct InterfaceForDeclarationOpt {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct InterfaceGroup {
-    pub interface_group_opt: Option<Box<InterfaceGroupOpt>>,
+    pub interface_group_list: Vec<InterfaceGroupList>,
     pub interface_group_group: Box<InterfaceGroupGroup>,
 }
 
@@ -6881,12 +6881,12 @@ pub struct InterfaceGroupGroupList {
 }
 
 ///
-/// Type derived for non-terminal InterfaceGroupOpt
+/// Type derived for non-terminal InterfaceGroupList
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct InterfaceGroupOpt {
+pub struct InterfaceGroupList {
     pub attribute: Box<Attribute>,
 }
 
@@ -7359,7 +7359,7 @@ pub struct ModportDeclaration {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModportGroup {
-    pub modport_group_opt: Option<Box<ModportGroupOpt>>,
+    pub modport_group_list: Vec<ModportGroupList>,
     pub modport_group_group: Box<ModportGroupGroup>,
 }
 
@@ -7374,12 +7374,12 @@ pub enum ModportGroupGroup {
 }
 
 ///
-/// Type derived for non-terminal ModportGroupOpt
+/// Type derived for non-terminal ModportGroupList
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModportGroupOpt {
+pub struct ModportGroupList {
     pub attribute: Box<Attribute>,
 }
 
@@ -7541,7 +7541,7 @@ pub struct ModuleForDeclarationOpt {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModuleGroup {
-    pub module_group_opt: Option<Box<ModuleGroupOpt>>,
+    pub module_group_list: Vec<ModuleGroupList>,
     pub module_group_group: Box<ModuleGroupGroup>,
 }
 
@@ -7566,12 +7566,12 @@ pub struct ModuleGroupGroupList {
 }
 
 ///
-/// Type derived for non-terminal ModuleGroupOpt
+/// Type derived for non-terminal ModuleGroupList
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleGroupOpt {
+pub struct ModuleGroupList {
     pub attribute: Box<Attribute>,
 }
 
@@ -8198,7 +8198,7 @@ pub struct PackageDeclarationList {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct PackageGroup {
-    pub package_group_opt: Option<Box<PackageGroupOpt>>,
+    pub package_group_list: Vec<PackageGroupList>,
     pub package_group_group: Box<PackageGroupGroup>,
 }
 
@@ -8223,12 +8223,12 @@ pub struct PackageGroupGroupList {
 }
 
 ///
-/// Type derived for non-terminal PackageGroupOpt
+/// Type derived for non-terminal PackageGroupList
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct PackageGroupOpt {
+pub struct PackageGroupList {
     pub attribute: Box<Attribute>,
 }
 
@@ -8349,7 +8349,7 @@ pub struct PortDeclaration {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct PortDeclarationGroup {
-    pub port_declaration_group_opt: Option<Box<PortDeclarationGroupOpt>>,
+    pub port_declaration_group_list: Vec<PortDeclarationGroupList>,
     pub port_declaration_group_group: Box<PortDeclarationGroupGroup>,
 }
 
@@ -8364,12 +8364,12 @@ pub enum PortDeclarationGroupGroup {
 }
 
 ///
-/// Type derived for non-terminal PortDeclarationGroupOpt
+/// Type derived for non-terminal PortDeclarationGroupList
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct PortDeclarationGroupOpt {
+pub struct PortDeclarationGroupList {
     pub attribute: Box<Attribute>,
 }
 
@@ -9058,7 +9058,7 @@ pub struct StructDeclaration {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct StructGroup {
-    pub struct_group_opt: Option<Box<StructGroupOpt>>,
+    pub struct_group_list: Vec<StructGroupList>,
     pub struct_group_group: Box<StructGroupGroup>,
 }
 
@@ -9073,12 +9073,12 @@ pub enum StructGroupGroup {
 }
 
 ///
-/// Type derived for non-terminal StructGroupOpt
+/// Type derived for non-terminal StructGroupList
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct StructGroupOpt {
+pub struct StructGroupList {
     pub attribute: Box<Attribute>,
 }
 
@@ -9539,7 +9539,7 @@ pub struct WithParameter {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct WithParameterGroup {
-    pub with_parameter_group_opt: Option<Box<WithParameterGroupOpt>>,
+    pub with_parameter_group_list: Vec<WithParameterGroupList>,
     pub with_parameter_group_group: Box<WithParameterGroupGroup>,
 }
 
@@ -9554,12 +9554,12 @@ pub enum WithParameterGroupGroup {
 }
 
 ///
-/// Type derived for non-terminal WithParameterGroupOpt
+/// Type derived for non-terminal WithParameterGroupList
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct WithParameterGroupOpt {
+pub struct WithParameterGroupList {
     pub attribute: Box<Attribute>,
 }
 
@@ -9743,7 +9743,7 @@ pub enum ASTType {
     DescriptionGroup(DescriptionGroup),
     DescriptionGroupGroup(DescriptionGroupGroup),
     DescriptionGroupGroupList(Vec<DescriptionGroupGroupList>),
-    DescriptionGroupOpt(Option<Box<DescriptionGroupOpt>>),
+    DescriptionGroupList(Vec<DescriptionGroupList>),
     DescriptionItem(DescriptionItem),
     Direction(Direction),
     Dollar(Dollar),
@@ -9762,7 +9762,7 @@ pub enum ASTType {
     EnumDeclaration(EnumDeclaration),
     EnumGroup(EnumGroup),
     EnumGroupGroup(EnumGroupGroup),
-    EnumGroupOpt(Option<Box<EnumGroupOpt>>),
+    EnumGroupList(Vec<EnumGroupList>),
     EnumItem(EnumItem),
     EnumItemOpt(Option<Box<EnumItemOpt>>),
     EnumList(EnumList),
@@ -9906,7 +9906,7 @@ pub enum ASTType {
     InstParameter(InstParameter),
     InstParameterGroup(InstParameterGroup),
     InstParameterGroupGroup(InstParameterGroupGroup),
-    InstParameterGroupOpt(Option<Box<InstParameterGroupOpt>>),
+    InstParameterGroupList(Vec<InstParameterGroupList>),
     InstParameterItem(InstParameterItem),
     InstParameterItemOpt(Option<Box<InstParameterItemOpt>>),
     InstParameterList(InstParameterList),
@@ -9915,7 +9915,7 @@ pub enum ASTType {
     InstParameterOpt(Option<Box<InstParameterOpt>>),
     InstPortGroup(InstPortGroup),
     InstPortGroupGroup(InstPortGroupGroup),
-    InstPortGroupOpt(Option<Box<InstPortGroupOpt>>),
+    InstPortGroupList(Vec<InstPortGroupList>),
     InstPortItem(InstPortItem),
     InstPortItemOpt(Option<Box<InstPortItemOpt>>),
     InstPortList(InstPortList),
@@ -9933,7 +9933,7 @@ pub enum ASTType {
     InterfaceGroup(InterfaceGroup),
     InterfaceGroupGroup(InterfaceGroupGroup),
     InterfaceGroupGroupList(Vec<InterfaceGroupGroupList>),
-    InterfaceGroupOpt(Option<Box<InterfaceGroupOpt>>),
+    InterfaceGroupList(Vec<InterfaceGroupList>),
     InterfaceIfDeclaration(InterfaceIfDeclaration),
     InterfaceIfDeclarationList(Vec<InterfaceIfDeclarationList>),
     InterfaceIfDeclarationOpt(Option<Box<InterfaceIfDeclarationOpt>>),
@@ -9978,7 +9978,7 @@ pub enum ASTType {
     ModportDeclaration(ModportDeclaration),
     ModportGroup(ModportGroup),
     ModportGroupGroup(ModportGroupGroup),
-    ModportGroupOpt(Option<Box<ModportGroupOpt>>),
+    ModportGroupList(Vec<ModportGroupList>),
     ModportItem(ModportItem),
     ModportList(ModportList),
     ModportListList(Vec<ModportListList>),
@@ -9995,7 +9995,7 @@ pub enum ASTType {
     ModuleGroup(ModuleGroup),
     ModuleGroupGroup(ModuleGroupGroup),
     ModuleGroupGroupList(Vec<ModuleGroupGroupList>),
-    ModuleGroupOpt(Option<Box<ModuleGroupOpt>>),
+    ModuleGroupList(Vec<ModuleGroupList>),
     ModuleIfDeclaration(ModuleIfDeclaration),
     ModuleIfDeclarationList(Vec<ModuleIfDeclarationList>),
     ModuleIfDeclarationOpt(Option<Box<ModuleIfDeclarationOpt>>),
@@ -10056,7 +10056,7 @@ pub enum ASTType {
     PackageGroup(PackageGroup),
     PackageGroupGroup(PackageGroupGroup),
     PackageGroupGroupList(Vec<PackageGroupGroupList>),
-    PackageGroupOpt(Option<Box<PackageGroupOpt>>),
+    PackageGroupList(Vec<PackageGroupList>),
     PackageItem(PackageItem),
     PackageTerm(PackageTerm),
     PackageToken(PackageToken),
@@ -10069,7 +10069,7 @@ pub enum ASTType {
     PortDeclaration(PortDeclaration),
     PortDeclarationGroup(PortDeclarationGroup),
     PortDeclarationGroupGroup(PortDeclarationGroupGroup),
-    PortDeclarationGroupOpt(Option<Box<PortDeclarationGroupOpt>>),
+    PortDeclarationGroupList(Vec<PortDeclarationGroupList>),
     PortDeclarationItem(PortDeclarationItem),
     PortDeclarationItemGroup(PortDeclarationItemGroup),
     PortDeclarationItemOpt(Option<Box<PortDeclarationItemOpt>>),
@@ -10136,7 +10136,7 @@ pub enum ASTType {
     StructDeclaration(StructDeclaration),
     StructGroup(StructGroup),
     StructGroupGroup(StructGroupGroup),
-    StructGroupOpt(Option<Box<StructGroupOpt>>),
+    StructGroupList(Vec<StructGroupList>),
     StructItem(StructItem),
     StructList(StructList),
     StructListList(Vec<StructListList>),
@@ -10181,7 +10181,7 @@ pub enum ASTType {
     WithParameter(WithParameter),
     WithParameterGroup(WithParameterGroup),
     WithParameterGroupGroup(WithParameterGroupGroup),
-    WithParameterGroupOpt(Option<Box<WithParameterGroupOpt>>),
+    WithParameterGroupList(Vec<WithParameterGroupList>),
     WithParameterItem(WithParameterItem),
     WithParameterItemGroup(WithParameterItemGroup),
     WithParameterItemGroup0(WithParameterItemGroup0),
@@ -23300,21 +23300,22 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 525:
     ///
-    /// ModportGroup: ModportGroupOpt /* Option */ ModportGroupGroup;
+    /// ModportGroup: ModportGroupList /* Vec */ ModportGroupGroup;
     ///
     #[parol_runtime::function_name::named]
     fn modport_group(
         &mut self,
-        _modport_group_opt: &ParseTreeStackEntry<'t>,
+        _modport_group_list: &ParseTreeStackEntry<'t>,
         _modport_group_group: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let modport_group_group = pop_item!(self, modport_group_group, ModportGroupGroup, context);
-        let modport_group_opt = pop_item!(self, modport_group_opt, ModportGroupOpt, context);
+        let modport_group_list =
+            pop_and_reverse_item!(self, modport_group_list, ModportGroupList, context);
         let modport_group_built = ModportGroup {
-            modport_group_opt,
+            modport_group_list,
             modport_group_group: Box::new(modport_group_group),
         };
         // Calling user action here
@@ -23381,36 +23382,41 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 528:
     ///
-    /// ModportGroupOpt /* Option<T>::Some */: Attribute;
+    /// ModportGroupList /* Vec<T>::Push */: Attribute ModportGroupList;
     ///
     #[parol_runtime::function_name::named]
-    fn modport_group_opt_0(
+    fn modport_group_list_0(
         &mut self,
         _attribute: &ParseTreeStackEntry<'t>,
+        _modport_group_list: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
+        let mut modport_group_list = pop_item!(self, modport_group_list, ModportGroupList, context);
         let attribute = pop_item!(self, attribute, Attribute, context);
-        let modport_group_opt_0_built = ModportGroupOpt {
+        let modport_group_list_0_built = ModportGroupList {
             attribute: Box::new(attribute),
         };
-        self.push(
-            ASTType::ModportGroupOpt(Some(Box::new(modport_group_opt_0_built))),
-            context,
-        );
+        // Add an element to the vector
+        modport_group_list.push(modport_group_list_0_built);
+        self.push(ASTType::ModportGroupList(modport_group_list), context);
         Ok(())
     }
 
     /// Semantic action for production 529:
     ///
-    /// ModportGroupOpt /* Option<T>::None */: ;
+    /// ModportGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn modport_group_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn modport_group_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::ModportGroupOpt(None), context);
+        let modport_group_list_1_built = Vec::new();
+        self.push(
+            ASTType::ModportGroupList(modport_group_list_1_built),
+            context,
+        );
         Ok(())
     }
 
@@ -23588,21 +23594,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 537:
     ///
-    /// EnumGroup: EnumGroupOpt /* Option */ EnumGroupGroup;
+    /// EnumGroup: EnumGroupList /* Vec */ EnumGroupGroup;
     ///
     #[parol_runtime::function_name::named]
     fn enum_group(
         &mut self,
-        _enum_group_opt: &ParseTreeStackEntry<'t>,
+        _enum_group_list: &ParseTreeStackEntry<'t>,
         _enum_group_group: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let enum_group_group = pop_item!(self, enum_group_group, EnumGroupGroup, context);
-        let enum_group_opt = pop_item!(self, enum_group_opt, EnumGroupOpt, context);
+        let enum_group_list = pop_and_reverse_item!(self, enum_group_list, EnumGroupList, context);
         let enum_group_built = EnumGroup {
-            enum_group_opt,
+            enum_group_list,
             enum_group_group: Box::new(enum_group_group),
         };
         // Calling user action here
@@ -23662,36 +23668,38 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 540:
     ///
-    /// EnumGroupOpt /* Option<T>::Some */: Attribute;
+    /// EnumGroupList /* Vec<T>::Push */: Attribute EnumGroupList;
     ///
     #[parol_runtime::function_name::named]
-    fn enum_group_opt_0(
+    fn enum_group_list_0(
         &mut self,
         _attribute: &ParseTreeStackEntry<'t>,
+        _enum_group_list: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
+        let mut enum_group_list = pop_item!(self, enum_group_list, EnumGroupList, context);
         let attribute = pop_item!(self, attribute, Attribute, context);
-        let enum_group_opt_0_built = EnumGroupOpt {
+        let enum_group_list_0_built = EnumGroupList {
             attribute: Box::new(attribute),
         };
-        self.push(
-            ASTType::EnumGroupOpt(Some(Box::new(enum_group_opt_0_built))),
-            context,
-        );
+        // Add an element to the vector
+        enum_group_list.push(enum_group_list_0_built);
+        self.push(ASTType::EnumGroupList(enum_group_list), context);
         Ok(())
     }
 
     /// Semantic action for production 541:
     ///
-    /// EnumGroupOpt /* Option<T>::None */: ;
+    /// EnumGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn enum_group_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn enum_group_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::EnumGroupOpt(None), context);
+        let enum_group_list_1_built = Vec::new();
+        self.push(ASTType::EnumGroupList(enum_group_list_1_built), context);
         Ok(())
     }
 
@@ -23902,21 +23910,22 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 551:
     ///
-    /// StructGroup: StructGroupOpt /* Option */ StructGroupGroup;
+    /// StructGroup: StructGroupList /* Vec */ StructGroupGroup;
     ///
     #[parol_runtime::function_name::named]
     fn struct_group(
         &mut self,
-        _struct_group_opt: &ParseTreeStackEntry<'t>,
+        _struct_group_list: &ParseTreeStackEntry<'t>,
         _struct_group_group: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let struct_group_group = pop_item!(self, struct_group_group, StructGroupGroup, context);
-        let struct_group_opt = pop_item!(self, struct_group_opt, StructGroupOpt, context);
+        let struct_group_list =
+            pop_and_reverse_item!(self, struct_group_list, StructGroupList, context);
         let struct_group_built = StructGroup {
-            struct_group_opt,
+            struct_group_list,
             struct_group_group: Box::new(struct_group_group),
         };
         // Calling user action here
@@ -23982,36 +23991,38 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 554:
     ///
-    /// StructGroupOpt /* Option<T>::Some */: Attribute;
+    /// StructGroupList /* Vec<T>::Push */: Attribute StructGroupList;
     ///
     #[parol_runtime::function_name::named]
-    fn struct_group_opt_0(
+    fn struct_group_list_0(
         &mut self,
         _attribute: &ParseTreeStackEntry<'t>,
+        _struct_group_list: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
+        let mut struct_group_list = pop_item!(self, struct_group_list, StructGroupList, context);
         let attribute = pop_item!(self, attribute, Attribute, context);
-        let struct_group_opt_0_built = StructGroupOpt {
+        let struct_group_list_0_built = StructGroupList {
             attribute: Box::new(attribute),
         };
-        self.push(
-            ASTType::StructGroupOpt(Some(Box::new(struct_group_opt_0_built))),
-            context,
-        );
+        // Add an element to the vector
+        struct_group_list.push(struct_group_list_0_built);
+        self.push(ASTType::StructGroupList(struct_group_list), context);
         Ok(())
     }
 
     /// Semantic action for production 555:
     ///
-    /// StructGroupOpt /* Option<T>::None */: ;
+    /// StructGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn struct_group_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn struct_group_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::StructGroupOpt(None), context);
+        let struct_group_list_1_built = Vec::new();
+        self.push(ASTType::StructGroupList(struct_group_list_1_built), context);
         Ok(())
     }
 
@@ -24431,12 +24442,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 574:
     ///
-    /// InstParameterGroup: InstParameterGroupOpt /* Option */ InstParameterGroupGroup;
+    /// InstParameterGroup: InstParameterGroupList /* Vec */ InstParameterGroupGroup;
     ///
     #[parol_runtime::function_name::named]
     fn inst_parameter_group(
         &mut self,
-        _inst_parameter_group_opt: &ParseTreeStackEntry<'t>,
+        _inst_parameter_group_list: &ParseTreeStackEntry<'t>,
         _inst_parameter_group_group: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
@@ -24448,14 +24459,14 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             InstParameterGroupGroup,
             context
         );
-        let inst_parameter_group_opt = pop_item!(
+        let inst_parameter_group_list = pop_and_reverse_item!(
             self,
-            inst_parameter_group_opt,
-            InstParameterGroupOpt,
+            inst_parameter_group_list,
+            InstParameterGroupList,
             context
         );
         let inst_parameter_group_built = InstParameterGroup {
-            inst_parameter_group_opt,
+            inst_parameter_group_list,
             inst_parameter_group_group: Box::new(inst_parameter_group_group),
         };
         // Calling user action here
@@ -24529,22 +24540,31 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 577:
     ///
-    /// InstParameterGroupOpt /* Option<T>::Some */: Attribute;
+    /// InstParameterGroupList /* Vec<T>::Push */: Attribute InstParameterGroupList;
     ///
     #[parol_runtime::function_name::named]
-    fn inst_parameter_group_opt_0(
+    fn inst_parameter_group_list_0(
         &mut self,
         _attribute: &ParseTreeStackEntry<'t>,
+        _inst_parameter_group_list: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
+        let mut inst_parameter_group_list = pop_item!(
+            self,
+            inst_parameter_group_list,
+            InstParameterGroupList,
+            context
+        );
         let attribute = pop_item!(self, attribute, Attribute, context);
-        let inst_parameter_group_opt_0_built = InstParameterGroupOpt {
+        let inst_parameter_group_list_0_built = InstParameterGroupList {
             attribute: Box::new(attribute),
         };
+        // Add an element to the vector
+        inst_parameter_group_list.push(inst_parameter_group_list_0_built);
         self.push(
-            ASTType::InstParameterGroupOpt(Some(Box::new(inst_parameter_group_opt_0_built))),
+            ASTType::InstParameterGroupList(inst_parameter_group_list),
             context,
         );
         Ok(())
@@ -24552,13 +24572,17 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 578:
     ///
-    /// InstParameterGroupOpt /* Option<T>::None */: ;
+    /// InstParameterGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn inst_parameter_group_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn inst_parameter_group_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::InstParameterGroupOpt(None), context);
+        let inst_parameter_group_list_1_built = Vec::new();
+        self.push(
+            ASTType::InstParameterGroupList(inst_parameter_group_list_1_built),
+            context,
+        );
         Ok(())
     }
 
@@ -24740,12 +24764,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 587:
     ///
-    /// InstPortGroup: InstPortGroupOpt /* Option */ InstPortGroupGroup;
+    /// InstPortGroup: InstPortGroupList /* Vec */ InstPortGroupGroup;
     ///
     #[parol_runtime::function_name::named]
     fn inst_port_group(
         &mut self,
-        _inst_port_group_opt: &ParseTreeStackEntry<'t>,
+        _inst_port_group_list: &ParseTreeStackEntry<'t>,
         _inst_port_group_group: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
@@ -24753,9 +24777,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let inst_port_group_group =
             pop_item!(self, inst_port_group_group, InstPortGroupGroup, context);
-        let inst_port_group_opt = pop_item!(self, inst_port_group_opt, InstPortGroupOpt, context);
+        let inst_port_group_list =
+            pop_and_reverse_item!(self, inst_port_group_list, InstPortGroupList, context);
         let inst_port_group_built = InstPortGroup {
-            inst_port_group_opt,
+            inst_port_group_list,
             inst_port_group_group: Box::new(inst_port_group_group),
         };
         // Calling user action here
@@ -24822,36 +24847,42 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 590:
     ///
-    /// InstPortGroupOpt /* Option<T>::Some */: Attribute;
+    /// InstPortGroupList /* Vec<T>::Push */: Attribute InstPortGroupList;
     ///
     #[parol_runtime::function_name::named]
-    fn inst_port_group_opt_0(
+    fn inst_port_group_list_0(
         &mut self,
         _attribute: &ParseTreeStackEntry<'t>,
+        _inst_port_group_list: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
+        let mut inst_port_group_list =
+            pop_item!(self, inst_port_group_list, InstPortGroupList, context);
         let attribute = pop_item!(self, attribute, Attribute, context);
-        let inst_port_group_opt_0_built = InstPortGroupOpt {
+        let inst_port_group_list_0_built = InstPortGroupList {
             attribute: Box::new(attribute),
         };
-        self.push(
-            ASTType::InstPortGroupOpt(Some(Box::new(inst_port_group_opt_0_built))),
-            context,
-        );
+        // Add an element to the vector
+        inst_port_group_list.push(inst_port_group_list_0_built);
+        self.push(ASTType::InstPortGroupList(inst_port_group_list), context);
         Ok(())
     }
 
     /// Semantic action for production 591:
     ///
-    /// InstPortGroupOpt /* Option<T>::None */: ;
+    /// InstPortGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn inst_port_group_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn inst_port_group_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::InstPortGroupOpt(None), context);
+        let inst_port_group_list_1_built = Vec::new();
+        self.push(
+            ASTType::InstPortGroupList(inst_port_group_list_1_built),
+            context,
+        );
         Ok(())
     }
 
@@ -25112,12 +25143,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 603:
     ///
-    /// WithParameterGroup: WithParameterGroupOpt /* Option */ WithParameterGroupGroup;
+    /// WithParameterGroup: WithParameterGroupList /* Vec */ WithParameterGroupGroup;
     ///
     #[parol_runtime::function_name::named]
     fn with_parameter_group(
         &mut self,
-        _with_parameter_group_opt: &ParseTreeStackEntry<'t>,
+        _with_parameter_group_list: &ParseTreeStackEntry<'t>,
         _with_parameter_group_group: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
@@ -25129,14 +25160,14 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             WithParameterGroupGroup,
             context
         );
-        let with_parameter_group_opt = pop_item!(
+        let with_parameter_group_list = pop_and_reverse_item!(
             self,
-            with_parameter_group_opt,
-            WithParameterGroupOpt,
+            with_parameter_group_list,
+            WithParameterGroupList,
             context
         );
         let with_parameter_group_built = WithParameterGroup {
-            with_parameter_group_opt,
+            with_parameter_group_list,
             with_parameter_group_group: Box::new(with_parameter_group_group),
         };
         // Calling user action here
@@ -25210,22 +25241,31 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 606:
     ///
-    /// WithParameterGroupOpt /* Option<T>::Some */: Attribute;
+    /// WithParameterGroupList /* Vec<T>::Push */: Attribute WithParameterGroupList;
     ///
     #[parol_runtime::function_name::named]
-    fn with_parameter_group_opt_0(
+    fn with_parameter_group_list_0(
         &mut self,
         _attribute: &ParseTreeStackEntry<'t>,
+        _with_parameter_group_list: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
+        let mut with_parameter_group_list = pop_item!(
+            self,
+            with_parameter_group_list,
+            WithParameterGroupList,
+            context
+        );
         let attribute = pop_item!(self, attribute, Attribute, context);
-        let with_parameter_group_opt_0_built = WithParameterGroupOpt {
+        let with_parameter_group_list_0_built = WithParameterGroupList {
             attribute: Box::new(attribute),
         };
+        // Add an element to the vector
+        with_parameter_group_list.push(with_parameter_group_list_0_built);
         self.push(
-            ASTType::WithParameterGroupOpt(Some(Box::new(with_parameter_group_opt_0_built))),
+            ASTType::WithParameterGroupList(with_parameter_group_list),
             context,
         );
         Ok(())
@@ -25233,13 +25273,17 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 607:
     ///
-    /// WithParameterGroupOpt /* Option<T>::None */: ;
+    /// WithParameterGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn with_parameter_group_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn with_parameter_group_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::WithParameterGroupOpt(None), context);
+        let with_parameter_group_list_1_built = Vec::new();
+        self.push(
+            ASTType::WithParameterGroupList(with_parameter_group_list_1_built),
+            context,
+        );
         Ok(())
     }
 
@@ -25601,12 +25645,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 621:
     ///
-    /// PortDeclarationGroup: PortDeclarationGroupOpt /* Option */ PortDeclarationGroupGroup;
+    /// PortDeclarationGroup: PortDeclarationGroupList /* Vec */ PortDeclarationGroupGroup;
     ///
     #[parol_runtime::function_name::named]
     fn port_declaration_group(
         &mut self,
-        _port_declaration_group_opt: &ParseTreeStackEntry<'t>,
+        _port_declaration_group_list: &ParseTreeStackEntry<'t>,
         _port_declaration_group_group: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
@@ -25618,14 +25662,14 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             PortDeclarationGroupGroup,
             context
         );
-        let port_declaration_group_opt = pop_item!(
+        let port_declaration_group_list = pop_and_reverse_item!(
             self,
-            port_declaration_group_opt,
-            PortDeclarationGroupOpt,
+            port_declaration_group_list,
+            PortDeclarationGroupList,
             context
         );
         let port_declaration_group_built = PortDeclarationGroup {
-            port_declaration_group_opt,
+            port_declaration_group_list,
             port_declaration_group_group: Box::new(port_declaration_group_group),
         };
         // Calling user action here
@@ -25701,22 +25745,31 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 624:
     ///
-    /// PortDeclarationGroupOpt /* Option<T>::Some */: Attribute;
+    /// PortDeclarationGroupList /* Vec<T>::Push */: Attribute PortDeclarationGroupList;
     ///
     #[parol_runtime::function_name::named]
-    fn port_declaration_group_opt_0(
+    fn port_declaration_group_list_0(
         &mut self,
         _attribute: &ParseTreeStackEntry<'t>,
+        _port_declaration_group_list: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
+        let mut port_declaration_group_list = pop_item!(
+            self,
+            port_declaration_group_list,
+            PortDeclarationGroupList,
+            context
+        );
         let attribute = pop_item!(self, attribute, Attribute, context);
-        let port_declaration_group_opt_0_built = PortDeclarationGroupOpt {
+        let port_declaration_group_list_0_built = PortDeclarationGroupList {
             attribute: Box::new(attribute),
         };
+        // Add an element to the vector
+        port_declaration_group_list.push(port_declaration_group_list_0_built);
         self.push(
-            ASTType::PortDeclarationGroupOpt(Some(Box::new(port_declaration_group_opt_0_built))),
+            ASTType::PortDeclarationGroupList(port_declaration_group_list),
             context,
         );
         Ok(())
@@ -25724,16 +25777,20 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 625:
     ///
-    /// PortDeclarationGroupOpt /* Option<T>::None */: ;
+    /// PortDeclarationGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn port_declaration_group_opt_1(
+    fn port_declaration_group_list_1(
         &mut self,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::PortDeclarationGroupOpt(None), context);
+        let port_declaration_group_list_1_built = Vec::new();
+        self.push(
+            ASTType::PortDeclarationGroupList(port_declaration_group_list_1_built),
+            context,
+        );
         Ok(())
     }
 
@@ -27104,21 +27161,22 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 676:
     ///
-    /// ModuleGroup: ModuleGroupOpt /* Option */ ModuleGroupGroup;
+    /// ModuleGroup: ModuleGroupList /* Vec */ ModuleGroupGroup;
     ///
     #[parol_runtime::function_name::named]
     fn module_group(
         &mut self,
-        _module_group_opt: &ParseTreeStackEntry<'t>,
+        _module_group_list: &ParseTreeStackEntry<'t>,
         _module_group_group: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let module_group_group = pop_item!(self, module_group_group, ModuleGroupGroup, context);
-        let module_group_opt = pop_item!(self, module_group_opt, ModuleGroupOpt, context);
+        let module_group_list =
+            pop_and_reverse_item!(self, module_group_list, ModuleGroupList, context);
         let module_group_built = ModuleGroup {
-            module_group_opt,
+            module_group_list,
             module_group_group: Box::new(module_group_group),
         };
         // Calling user action here
@@ -27229,36 +27287,38 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 681:
     ///
-    /// ModuleGroupOpt /* Option<T>::Some */: Attribute;
+    /// ModuleGroupList /* Vec<T>::Push */: Attribute ModuleGroupList;
     ///
     #[parol_runtime::function_name::named]
-    fn module_group_opt_0(
+    fn module_group_list_0(
         &mut self,
         _attribute: &ParseTreeStackEntry<'t>,
+        _module_group_list: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
+        let mut module_group_list = pop_item!(self, module_group_list, ModuleGroupList, context);
         let attribute = pop_item!(self, attribute, Attribute, context);
-        let module_group_opt_0_built = ModuleGroupOpt {
+        let module_group_list_0_built = ModuleGroupList {
             attribute: Box::new(attribute),
         };
-        self.push(
-            ASTType::ModuleGroupOpt(Some(Box::new(module_group_opt_0_built))),
-            context,
-        );
+        // Add an element to the vector
+        module_group_list.push(module_group_list_0_built);
+        self.push(ASTType::ModuleGroupList(module_group_list), context);
         Ok(())
     }
 
     /// Semantic action for production 682:
     ///
-    /// ModuleGroupOpt /* Option<T>::None */: ;
+    /// ModuleGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn module_group_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn module_group_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::ModuleGroupOpt(None), context);
+        let module_group_list_1_built = Vec::new();
+        self.push(ASTType::ModuleGroupList(module_group_list_1_built), context);
         Ok(())
     }
 
@@ -28204,12 +28264,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 717:
     ///
-    /// InterfaceGroup: InterfaceGroupOpt /* Option */ InterfaceGroupGroup;
+    /// InterfaceGroup: InterfaceGroupList /* Vec */ InterfaceGroupGroup;
     ///
     #[parol_runtime::function_name::named]
     fn interface_group(
         &mut self,
-        _interface_group_opt: &ParseTreeStackEntry<'t>,
+        _interface_group_list: &ParseTreeStackEntry<'t>,
         _interface_group_group: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
@@ -28217,9 +28277,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let interface_group_group =
             pop_item!(self, interface_group_group, InterfaceGroupGroup, context);
-        let interface_group_opt = pop_item!(self, interface_group_opt, InterfaceGroupOpt, context);
+        let interface_group_list =
+            pop_and_reverse_item!(self, interface_group_list, InterfaceGroupList, context);
         let interface_group_built = InterfaceGroup {
-            interface_group_opt,
+            interface_group_list,
             interface_group_group: Box::new(interface_group_group),
         };
         // Calling user action here
@@ -28343,36 +28404,42 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 722:
     ///
-    /// InterfaceGroupOpt /* Option<T>::Some */: Attribute;
+    /// InterfaceGroupList /* Vec<T>::Push */: Attribute InterfaceGroupList;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_group_opt_0(
+    fn interface_group_list_0(
         &mut self,
         _attribute: &ParseTreeStackEntry<'t>,
+        _interface_group_list: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
+        let mut interface_group_list =
+            pop_item!(self, interface_group_list, InterfaceGroupList, context);
         let attribute = pop_item!(self, attribute, Attribute, context);
-        let interface_group_opt_0_built = InterfaceGroupOpt {
+        let interface_group_list_0_built = InterfaceGroupList {
             attribute: Box::new(attribute),
         };
-        self.push(
-            ASTType::InterfaceGroupOpt(Some(Box::new(interface_group_opt_0_built))),
-            context,
-        );
+        // Add an element to the vector
+        interface_group_list.push(interface_group_list_0_built);
+        self.push(ASTType::InterfaceGroupList(interface_group_list), context);
         Ok(())
     }
 
     /// Semantic action for production 723:
     ///
-    /// InterfaceGroupOpt /* Option<T>::None */: ;
+    /// InterfaceGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_group_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn interface_group_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::InterfaceGroupOpt(None), context);
+        let interface_group_list_1_built = Vec::new();
+        self.push(
+            ASTType::InterfaceGroupList(interface_group_list_1_built),
+            context,
+        );
         Ok(())
     }
 
@@ -28712,21 +28779,22 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 737:
     ///
-    /// PackageGroup: PackageGroupOpt /* Option */ PackageGroupGroup;
+    /// PackageGroup: PackageGroupList /* Vec */ PackageGroupGroup;
     ///
     #[parol_runtime::function_name::named]
     fn package_group(
         &mut self,
-        _package_group_opt: &ParseTreeStackEntry<'t>,
+        _package_group_list: &ParseTreeStackEntry<'t>,
         _package_group_group: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let package_group_group = pop_item!(self, package_group_group, PackageGroupGroup, context);
-        let package_group_opt = pop_item!(self, package_group_opt, PackageGroupOpt, context);
+        let package_group_list =
+            pop_and_reverse_item!(self, package_group_list, PackageGroupList, context);
         let package_group_built = PackageGroup {
-            package_group_opt,
+            package_group_list,
             package_group_group: Box::new(package_group_group),
         };
         // Calling user action here
@@ -28846,36 +28914,41 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 742:
     ///
-    /// PackageGroupOpt /* Option<T>::Some */: Attribute;
+    /// PackageGroupList /* Vec<T>::Push */: Attribute PackageGroupList;
     ///
     #[parol_runtime::function_name::named]
-    fn package_group_opt_0(
+    fn package_group_list_0(
         &mut self,
         _attribute: &ParseTreeStackEntry<'t>,
+        _package_group_list: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
+        let mut package_group_list = pop_item!(self, package_group_list, PackageGroupList, context);
         let attribute = pop_item!(self, attribute, Attribute, context);
-        let package_group_opt_0_built = PackageGroupOpt {
+        let package_group_list_0_built = PackageGroupList {
             attribute: Box::new(attribute),
         };
-        self.push(
-            ASTType::PackageGroupOpt(Some(Box::new(package_group_opt_0_built))),
-            context,
-        );
+        // Add an element to the vector
+        package_group_list.push(package_group_list_0_built);
+        self.push(ASTType::PackageGroupList(package_group_list), context);
         Ok(())
     }
 
     /// Semantic action for production 743:
     ///
-    /// PackageGroupOpt /* Option<T>::None */: ;
+    /// PackageGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn package_group_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn package_group_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::PackageGroupOpt(None), context);
+        let package_group_list_1_built = Vec::new();
+        self.push(
+            ASTType::PackageGroupList(package_group_list_1_built),
+            context,
+        );
         Ok(())
     }
 
@@ -29044,12 +29117,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 751:
     ///
-    /// DescriptionGroup: DescriptionGroupOpt /* Option */ DescriptionGroupGroup;
+    /// DescriptionGroup: DescriptionGroupList /* Vec */ DescriptionGroupGroup;
     ///
     #[parol_runtime::function_name::named]
     fn description_group(
         &mut self,
-        _description_group_opt: &ParseTreeStackEntry<'t>,
+        _description_group_list: &ParseTreeStackEntry<'t>,
         _description_group_group: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
@@ -29061,10 +29134,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             DescriptionGroupGroup,
             context
         );
-        let description_group_opt =
-            pop_item!(self, description_group_opt, DescriptionGroupOpt, context);
+        let description_group_list =
+            pop_and_reverse_item!(self, description_group_list, DescriptionGroupList, context);
         let description_group_built = DescriptionGroup {
-            description_group_opt,
+            description_group_list,
             description_group_group: Box::new(description_group_group),
         };
         // Calling user action here
@@ -29191,22 +29264,27 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 756:
     ///
-    /// DescriptionGroupOpt /* Option<T>::Some */: Attribute;
+    /// DescriptionGroupList /* Vec<T>::Push */: Attribute DescriptionGroupList;
     ///
     #[parol_runtime::function_name::named]
-    fn description_group_opt_0(
+    fn description_group_list_0(
         &mut self,
         _attribute: &ParseTreeStackEntry<'t>,
+        _description_group_list: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
+        let mut description_group_list =
+            pop_item!(self, description_group_list, DescriptionGroupList, context);
         let attribute = pop_item!(self, attribute, Attribute, context);
-        let description_group_opt_0_built = DescriptionGroupOpt {
+        let description_group_list_0_built = DescriptionGroupList {
             attribute: Box::new(attribute),
         };
+        // Add an element to the vector
+        description_group_list.push(description_group_list_0_built);
         self.push(
-            ASTType::DescriptionGroupOpt(Some(Box::new(description_group_opt_0_built))),
+            ASTType::DescriptionGroupList(description_group_list),
             context,
         );
         Ok(())
@@ -29214,13 +29292,17 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 757:
     ///
-    /// DescriptionGroupOpt /* Option<T>::None */: ;
+    /// DescriptionGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn description_group_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn description_group_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::DescriptionGroupOpt(None), context);
+        let description_group_list_1_built = Vec::new();
+        self.push(
+            ASTType::DescriptionGroupList(description_group_list_1_built),
+            context,
+        );
         Ok(())
     }
 
@@ -30163,8 +30245,8 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             525 => self.modport_group(&children[0], &children[1], parse_tree),
             526 => self.modport_group_group_0(&children[0], &children[1], &children[2], parse_tree),
             527 => self.modport_group_group_1(&children[0], parse_tree),
-            528 => self.modport_group_opt_0(&children[0], parse_tree),
-            529 => self.modport_group_opt_1(parse_tree),
+            528 => self.modport_group_list_0(&children[0], &children[1], parse_tree),
+            529 => self.modport_group_list_1(parse_tree),
             530 => self.modport_item(&children[0], &children[1], &children[2], parse_tree),
             531 => self.enum_declaration(
                 &children[0],
@@ -30184,8 +30266,8 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             537 => self.enum_group(&children[0], &children[1], parse_tree),
             538 => self.enum_group_group_0(&children[0], &children[1], &children[2], parse_tree),
             539 => self.enum_group_group_1(&children[0], parse_tree),
-            540 => self.enum_group_opt_0(&children[0], parse_tree),
-            541 => self.enum_group_opt_1(parse_tree),
+            540 => self.enum_group_list_0(&children[0], &children[1], parse_tree),
+            541 => self.enum_group_list_1(parse_tree),
             542 => self.enum_item(&children[0], &children[1], parse_tree),
             543 => self.enum_item_opt_0(&children[0], &children[1], parse_tree),
             544 => self.enum_item_opt_1(parse_tree),
@@ -30205,8 +30287,8 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             551 => self.struct_group(&children[0], &children[1], parse_tree),
             552 => self.struct_group_group_0(&children[0], &children[1], &children[2], parse_tree),
             553 => self.struct_group_group_1(&children[0], parse_tree),
-            554 => self.struct_group_opt_0(&children[0], parse_tree),
-            555 => self.struct_group_opt_1(parse_tree),
+            554 => self.struct_group_list_0(&children[0], &children[1], parse_tree),
+            555 => self.struct_group_list_1(parse_tree),
             556 => self.struct_item(&children[0], &children[1], &children[2], parse_tree),
             557 => self.inst_declaration(
                 &children[0],
@@ -30256,8 +30338,8 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 parse_tree,
             ),
             576 => self.inst_parameter_group_group_1(&children[0], parse_tree),
-            577 => self.inst_parameter_group_opt_0(&children[0], parse_tree),
-            578 => self.inst_parameter_group_opt_1(parse_tree),
+            577 => self.inst_parameter_group_list_0(&children[0], &children[1], parse_tree),
+            578 => self.inst_parameter_group_list_1(parse_tree),
             579 => self.inst_parameter_item(&children[0], &children[1], parse_tree),
             580 => self.inst_parameter_item_opt_0(&children[0], &children[1], parse_tree),
             581 => self.inst_parameter_item_opt_1(parse_tree),
@@ -30271,8 +30353,8 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 self.inst_port_group_group_0(&children[0], &children[1], &children[2], parse_tree)
             }
             589 => self.inst_port_group_group_1(&children[0], parse_tree),
-            590 => self.inst_port_group_opt_0(&children[0], parse_tree),
-            591 => self.inst_port_group_opt_1(parse_tree),
+            590 => self.inst_port_group_list_0(&children[0], &children[1], parse_tree),
+            591 => self.inst_port_group_list_1(parse_tree),
             592 => self.inst_port_item(&children[0], &children[1], parse_tree),
             593 => self.inst_port_item_opt_0(&children[0], &children[1], parse_tree),
             594 => self.inst_port_item_opt_1(parse_tree),
@@ -30303,8 +30385,8 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 parse_tree,
             ),
             605 => self.with_parameter_group_group_1(&children[0], parse_tree),
-            606 => self.with_parameter_group_opt_0(&children[0], parse_tree),
-            607 => self.with_parameter_group_opt_1(parse_tree),
+            606 => self.with_parameter_group_list_0(&children[0], &children[1], parse_tree),
+            607 => self.with_parameter_group_list_1(parse_tree),
             608 => self.with_parameter_item(
                 &children[0],
                 &children[1],
@@ -30347,8 +30429,8 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 parse_tree,
             ),
             623 => self.port_declaration_group_group_1(&children[0], parse_tree),
-            624 => self.port_declaration_group_opt_0(&children[0], parse_tree),
-            625 => self.port_declaration_group_opt_1(parse_tree),
+            624 => self.port_declaration_group_list_0(&children[0], &children[1], parse_tree),
+            625 => self.port_declaration_group_list_1(parse_tree),
             626 => self.port_declaration_item(&children[0], &children[1], &children[2], parse_tree),
             627 => self.port_declaration_item_group_0(&children[0], &children[1], parse_tree),
             628 => self.port_declaration_item_group_1(&children[0], &children[1], parse_tree),
@@ -30480,8 +30562,8 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             678 => self.module_group_group_list_0(&children[0], &children[1], parse_tree),
             679 => self.module_group_group_list_1(parse_tree),
             680 => self.module_group_group_1(&children[0], parse_tree),
-            681 => self.module_group_opt_0(&children[0], parse_tree),
-            682 => self.module_group_opt_1(parse_tree),
+            681 => self.module_group_list_0(&children[0], &children[1], parse_tree),
+            682 => self.module_group_list_1(parse_tree),
             683 => self.module_item_0(&children[0], parse_tree),
             684 => self.module_item_1(&children[0], parse_tree),
             685 => self.module_item_2(&children[0], parse_tree),
@@ -30577,8 +30659,8 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             719 => self.interface_group_group_list_0(&children[0], &children[1], parse_tree),
             720 => self.interface_group_group_list_1(parse_tree),
             721 => self.interface_group_group_1(&children[0], parse_tree),
-            722 => self.interface_group_opt_0(&children[0], parse_tree),
-            723 => self.interface_group_opt_1(parse_tree),
+            722 => self.interface_group_list_0(&children[0], &children[1], parse_tree),
+            723 => self.interface_group_list_1(parse_tree),
             724 => self.interface_item_0(&children[0], parse_tree),
             725 => self.interface_item_1(&children[0], parse_tree),
             726 => self.interface_item_2(&children[0], parse_tree),
@@ -30604,8 +30686,8 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             739 => self.package_group_group_list_0(&children[0], &children[1], parse_tree),
             740 => self.package_group_group_list_1(parse_tree),
             741 => self.package_group_group_1(&children[0], parse_tree),
-            742 => self.package_group_opt_0(&children[0], parse_tree),
-            743 => self.package_group_opt_1(parse_tree),
+            742 => self.package_group_list_0(&children[0], &children[1], parse_tree),
+            743 => self.package_group_list_1(parse_tree),
             744 => self.package_item_0(&children[0], parse_tree),
             745 => self.package_item_1(&children[0], parse_tree),
             746 => self.package_item_2(&children[0], parse_tree),
@@ -30620,8 +30702,8 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             753 => self.description_group_group_list_0(&children[0], &children[1], parse_tree),
             754 => self.description_group_group_list_1(parse_tree),
             755 => self.description_group_group_1(&children[0], parse_tree),
-            756 => self.description_group_opt_0(&children[0], parse_tree),
-            757 => self.description_group_opt_1(parse_tree),
+            756 => self.description_group_list_0(&children[0], &children[1], parse_tree),
+            757 => self.description_group_list_1(parse_tree),
             758 => self.description_item_0(&children[0], parse_tree),
             759 => self.description_item_1(&children[0], parse_tree),
             760 => self.description_item_2(&children[0], parse_tree),

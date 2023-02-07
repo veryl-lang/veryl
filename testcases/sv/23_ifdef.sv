@@ -1,7 +1,13 @@
 module veryl_testcase_Module23 #(
     `ifdef DEFINE_A
+    `ifdef DEFINE_B
+    `ifdef DEFINE_C
+    `ifdef DEFINE_D
     parameter int unsigned ParamA = 1
     ,`endif
+    `endif
+    `endif
+    `endif
     parameter int unsigned ParamB = 1
     `ifdef DEFINE_A
     ,
@@ -12,14 +18,15 @@ module veryl_testcase_Module23 #(
     input logic port_a
     ,`endif
     input logic port_b
-    `
-    ifdef DEFINE_A
+    `ifdef DEFINE_A
     ,
     input logic port_c
     `endif
 );
     `ifdef DEFINE_A
+    `ifdef DEFINE_B
     logic [10-1:0] _a;
+    `endif
     `endif
     `ifdef DEFINE_A
     logic [10-1:0] _b;

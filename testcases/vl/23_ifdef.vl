@@ -1,5 +1,8 @@
 module Module23 #(
     #[ifdef(DEFINE_A)]
+    #[ifdef(DEFINE_B)]
+    #[ifdef(DEFINE_C)]
+    #[ifdef(DEFINE_D)]
     parameter ParamA: u32 = 1,
     parameter ParamB: u32 = 1,
     #[ifdef(DEFINE_A)]
@@ -17,6 +20,7 @@ module Module23 #(
     },
 ) {
     #[ifdef(DEFINE_A)]
+    #[ifdef(DEFINE_B)]
     var _a: logic<10>;
 
     #[ifdef(DEFINE_A)]

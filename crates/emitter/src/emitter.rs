@@ -280,8 +280,21 @@ impl VerylWalker for Emitter {
     fn comma(&mut self, arg: &Comma) {
         if self.string.ends_with("`endif") {
             self.string.truncate(self.string.len() - "`endif".len());
+
+            let trailing_endif = format!("`endif\n{}", " ".repeat(self.indent * self.indent_width));
+            let mut additional_endif = 0;
+            while self.string.ends_with(&trailing_endif) {
+                self.string
+                    .truncate(self.string.len() - trailing_endif.len());
+                additional_endif += 1;
+            }
+
             self.veryl_token(&arg.comma_token);
             self.str("`endif");
+            for _ in 0..additional_endif {
+                self.newline();
+                self.str("`endif");
+            }
         } else {
             self.veryl_token(&arg.comma_token);
         }
@@ -1003,6 +1016,7 @@ impl VerylWalker for Emitter {
                         false
                     };
 
+                    self.adjust_line = false;
                     self.str("`");
                     self.identifier(&arg.identifier);
                     self.space(1);
@@ -1248,7 +1262,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ModportGroup'
     fn modport_group(&mut self, arg: &ModportGroup) {
-        if let Some(ref x) = arg.modport_group_opt {
+        for x in &arg.modport_group_list {
             self.attribute(&x.attribute);
         }
         match &*arg.modport_group_group {
@@ -1257,7 +1271,7 @@ impl VerylWalker for Emitter {
             }
             ModportGroupGroup::ModportItem(x) => self.modport_item(&x.modport_item),
         }
-        if arg.modport_group_opt.is_some() {
+        for _ in &arg.modport_group_list {
             self.attribute_end();
         }
     }
@@ -1304,7 +1318,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'EnumGroup'
     fn enum_group(&mut self, arg: &EnumGroup) {
-        if let Some(ref x) = arg.enum_group_opt {
+        for x in &arg.enum_group_list {
             self.attribute(&x.attribute);
         }
         match &*arg.enum_group_group {
@@ -1313,7 +1327,7 @@ impl VerylWalker for Emitter {
             }
             EnumGroupGroup::EnumItem(x) => self.enum_item(&x.enum_item),
         }
-        if arg.enum_group_opt.is_some() {
+        for _ in &arg.enum_group_list {
             self.attribute_end();
         }
     }
@@ -1367,7 +1381,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'StructGroup'
     fn struct_group(&mut self, arg: &StructGroup) {
-        if let Some(ref x) = arg.struct_group_opt {
+        for x in &arg.struct_group_list {
             self.attribute(&x.attribute);
         }
         match &*arg.struct_group_group {
@@ -1376,7 +1390,7 @@ impl VerylWalker for Emitter {
             }
             StructGroupGroup::StructItem(x) => self.struct_item(&x.struct_item),
         }
-        if arg.struct_group_opt.is_some() {
+        for _ in &arg.struct_group_list {
             self.attribute_end();
         }
     }
@@ -1467,7 +1481,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'InstParameterGroup'
     fn inst_parameter_group(&mut self, arg: &InstParameterGroup) {
-        if let Some(ref x) = arg.inst_parameter_group_opt {
+        for x in &arg.inst_parameter_group_list {
             self.attribute(&x.attribute);
         }
         match &*arg.inst_parameter_group_group {
@@ -1478,7 +1492,7 @@ impl VerylWalker for Emitter {
                 self.inst_parameter_item(&x.inst_parameter_item)
             }
         }
-        if arg.inst_parameter_group_opt.is_some() {
+        for _ in &arg.inst_parameter_group_list {
             self.attribute_end();
         }
     }
@@ -1513,7 +1527,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'InstPortGroup'
     fn inst_port_group(&mut self, arg: &InstPortGroup) {
-        if let Some(ref x) = arg.inst_port_group_opt {
+        for x in &arg.inst_port_group_list {
             self.attribute(&x.attribute);
         }
         match &*arg.inst_port_group_group {
@@ -1522,7 +1536,7 @@ impl VerylWalker for Emitter {
             }
             InstPortGroupGroup::InstPortItem(x) => self.inst_port_item(&x.inst_port_item),
         }
-        if arg.inst_port_group_opt.is_some() {
+        for _ in &arg.inst_port_group_list {
             self.attribute_end();
         }
     }
@@ -1573,7 +1587,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'WithParameterGroup'
     fn with_parameter_group(&mut self, arg: &WithParameterGroup) {
-        if let Some(ref x) = arg.with_parameter_group_opt {
+        for x in &arg.with_parameter_group_list {
             self.attribute(&x.attribute);
         }
         match &*arg.with_parameter_group_group {
@@ -1584,7 +1598,7 @@ impl VerylWalker for Emitter {
                 self.with_parameter_item(&x.with_parameter_item)
             }
         }
-        if arg.with_parameter_group_opt.is_some() {
+        for _ in &arg.with_parameter_group_list {
             self.attribute_end();
         }
     }
@@ -1655,7 +1669,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'PortDeclarationGroup'
     fn port_declaration_group(&mut self, arg: &PortDeclarationGroup) {
-        if let Some(ref x) = arg.port_declaration_group_opt {
+        for x in &arg.port_declaration_group_list {
             self.attribute(&x.attribute);
         }
         match &*arg.port_declaration_group_group {
@@ -1666,7 +1680,7 @@ impl VerylWalker for Emitter {
                 self.port_declaration_item(&x.port_declaration_item)
             }
         }
-        if arg.port_declaration_group_opt.is_some() {
+        for _ in &arg.port_declaration_group_list {
             self.attribute_end();
         }
     }
@@ -1950,7 +1964,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ModuleGroup'
     fn module_group(&mut self, arg: &ModuleGroup) {
-        if let Some(ref x) = arg.module_group_opt {
+        for x in &arg.module_group_list {
             self.attribute(&x.attribute);
         }
         match &*arg.module_group_group {
@@ -1964,7 +1978,7 @@ impl VerylWalker for Emitter {
             }
             ModuleGroupGroup::ModuleItem(x) => self.module_item(&x.module_item),
         }
-        if arg.module_group_opt.is_some() {
+        for _ in &arg.module_group_list {
             self.attribute_end();
         }
     }
@@ -2129,7 +2143,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'InterfaceGroup'
     fn interface_group(&mut self, arg: &InterfaceGroup) {
-        if let Some(ref x) = arg.interface_group_opt {
+        for x in &arg.interface_group_list {
             self.attribute(&x.attribute);
         }
         match &*arg.interface_group_group {
@@ -2143,7 +2157,7 @@ impl VerylWalker for Emitter {
             }
             InterfaceGroupGroup::InterfaceItem(x) => self.interface_item(&x.interface_item),
         }
-        if arg.interface_group_opt.is_some() {
+        for _ in &arg.interface_group_list {
             self.attribute_end();
         }
     }
@@ -2177,7 +2191,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'PackageGroup'
     fn package_group(&mut self, arg: &PackageGroup) {
-        if let Some(ref x) = arg.package_group_opt {
+        for x in &arg.package_group_list {
             self.attribute(&x.attribute);
         }
         match &*arg.package_group_group {
@@ -2191,14 +2205,14 @@ impl VerylWalker for Emitter {
             }
             PackageGroupGroup::PackageItem(x) => self.package_item(&x.package_item),
         }
-        if arg.package_group_opt.is_some() {
+        for _ in &arg.package_group_list {
             self.attribute_end();
         }
     }
 
     /// Semantic action for non-terminal 'DescriptionGroup'
     fn description_group(&mut self, arg: &DescriptionGroup) {
-        if let Some(ref x) = arg.description_group_opt {
+        for x in &arg.description_group_list {
             self.attribute(&x.attribute);
         }
         match &*arg.description_group_group {
@@ -2212,7 +2226,7 @@ impl VerylWalker for Emitter {
             }
             DescriptionGroupGroup::DescriptionItem(x) => self.description_item(&x.description_item),
         }
-        if arg.description_group_opt.is_some() {
+        for _ in &arg.description_group_list {
             self.attribute_end();
         }
     }

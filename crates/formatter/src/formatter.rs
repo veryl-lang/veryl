@@ -846,7 +846,7 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'ModportGroup'
     fn modport_group(&mut self, arg: &ModportGroup) {
-        if let Some(ref x) = arg.modport_group_opt {
+        for x in &arg.modport_group_list {
             self.attribute(&x.attribute);
             self.newline();
         }
@@ -903,7 +903,7 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'EnumGroup'
     fn enum_group(&mut self, arg: &EnumGroup) {
-        if let Some(ref x) = arg.enum_group_opt {
+        for x in &arg.enum_group_list {
             self.attribute(&x.attribute);
             self.newline();
         }
@@ -960,7 +960,7 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'StructGroup'
     fn struct_group(&mut self, arg: &StructGroup) {
-        if let Some(ref x) = arg.struct_group_opt {
+        for x in &arg.struct_group_list {
             self.attribute(&x.attribute);
             self.newline();
         }
@@ -1056,7 +1056,7 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'InstParameterGroup'
     fn inst_parameter_group(&mut self, arg: &InstParameterGroup) {
-        if let Some(ref x) = arg.inst_parameter_group_opt {
+        for x in &arg.inst_parameter_group_list {
             self.attribute(&x.attribute);
             self.newline();
         }
@@ -1101,7 +1101,7 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'InstPortGroup'
     fn inst_port_group(&mut self, arg: &InstPortGroup) {
-        if let Some(ref x) = arg.inst_port_group_opt {
+        for x in &arg.inst_port_group_list {
             self.attribute(&x.attribute);
             self.newline();
         }
@@ -1160,7 +1160,7 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'WithParameterGroup'
     fn with_parameter_group(&mut self, arg: &WithParameterGroup) {
-        if let Some(ref x) = arg.with_parameter_group_opt {
+        for x in &arg.with_parameter_group_list {
             self.attribute(&x.attribute);
             self.newline();
         }
@@ -1237,7 +1237,7 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'PortDeclarationGroup'
     fn port_declaration_group(&mut self, arg: &PortDeclarationGroup) {
-        if let Some(ref x) = arg.port_declaration_group_opt {
+        for x in &arg.port_declaration_group_list {
             self.attribute(&x.attribute);
             self.newline();
         }
@@ -1467,7 +1467,7 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'ModuleGroup'
     fn module_group(&mut self, arg: &ModuleGroup) {
-        if let Some(ref x) = arg.module_group_opt {
+        for x in &arg.module_group_list {
             self.attribute(&x.attribute);
             self.newline();
         }
@@ -1616,7 +1616,7 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'InterfaceGroup'
     fn interface_group(&mut self, arg: &InterfaceGroup) {
-        if let Some(ref x) = arg.interface_group_opt {
+        for x in &arg.interface_group_list {
             self.attribute(&x.attribute);
             self.newline();
         }
@@ -1667,7 +1667,7 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'PackageGroup'
     fn package_group(&mut self, arg: &PackageGroup) {
-        if let Some(ref x) = arg.package_group_opt {
+        for x in &arg.package_group_list {
             self.attribute(&x.attribute);
             self.newline();
         }
@@ -1695,7 +1695,7 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'DescriptionGroup'
     fn description_group(&mut self, arg: &DescriptionGroup) {
-        if let Some(ref x) = arg.description_group_opt {
+        for x in &arg.description_group_list {
             self.attribute(&x.attribute);
             self.newline();
         }
