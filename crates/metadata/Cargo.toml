@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl-metadata"
-version               = "0.3.3"
+version               = "0.3.4"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -24,7 +24,7 @@ spdx           = "0.10.0"
 thiserror      = {workspace = true}
 toml           = "0.7.2"
 url            = {workspace = true}
-veryl-parser   = {version = "0.3.3", path = "../parser"}
+veryl-parser   = {version = "0.3.4", path = "../parser"}
 walkdir        = "2.3.2"
 
 [features]
