@@ -4,7 +4,7 @@
   "description": "Veryl extension for Visual Studio Code",
   "version": "0.3.3",
   "publisher": "dalance",
-  "icon": "../logo/veryl_icon.png",
+  "icon": "veryl_icon.png",
   "galleryBanner": {
       "color": "#ffffff",
       "themr": "light"
