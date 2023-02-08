@@ -5,7 +5,12 @@ use veryl_parser::veryl_token::VerylToken;
 
 #[derive(Error, Diagnostic, Debug)]
 pub enum AnalyzerError {
-    #[diagnostic(severity(Error), code(duplicated_identifier), help(""))]
+    #[diagnostic(
+        severity(Error),
+        code(duplicated_identifier),
+        help(""),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#duplicated_identifier")
+    )]
     #[error("{identifier} is duplicated")]
     DuplicatedIdentifier {
         identifier: String,
@@ -15,7 +20,14 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(severity(Error), code(invalid_allow), help(""))]
+    #[diagnostic(
+        severity(Error),
+        code(invalid_allow),
+        help(""),
+        url(
+            "https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#invalid_allow"
+        )
+    )]
     #[error("{identifier} can't be allowed")]
     InvalidAllow {
         identifier: String,
@@ -28,7 +40,8 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(invalid_direction),
-        help("remove {kind} direction")
+        help("remove {kind} direction"),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#invalid_direction")
     )]
     #[error("{kind} direction can't be placed at here")]
     InvalidDirection {
@@ -39,7 +52,12 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(severity(Error), code(invalid_lsb), help("remove lsb"))]
+    #[diagnostic(
+        severity(Error),
+        code(invalid_lsb),
+        help("remove lsb"),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#invalid_lsb")
+    )]
     #[error("lsb can't be placed at here")]
     InvalidLsb {
         #[source_code]
@@ -48,7 +66,12 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(severity(Error), code(invalid_msb), help("remove msb"))]
+    #[diagnostic(
+        severity(Error),
+        code(invalid_msb),
+        help("remove msb"),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#invalid_msb")
+    )]
     #[error("msb can't be placed at here")]
     InvalidMsb {
         #[source_code]
@@ -57,7 +80,12 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(severity(Error), code(invalid_number_character), help(""))]
+    #[diagnostic(
+        severity(Error),
+        code(invalid_number_character),
+        help(""),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#invalid_number_character")
+    )]
     #[error("{kind} number can't contain {cause}")]
     InvalidNumberCharacter {
         cause: char,
@@ -71,7 +99,8 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(invalid_statement),
-        help("remove {kind} statement")
+        help("remove {kind} statement"),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#invalid_statement")
     )]
     #[error("{kind} statement can't be placed at here")]
     InvalidStatement {
@@ -85,7 +114,8 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(invalid_system_function),
-        help("fix system function name")
+        help("fix system function name"),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#invalid_system_function")
     )]
     #[error("system function \"{name}\" is not defined")]
     InvalidSystemFunction {
@@ -96,7 +126,12 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(severity(Error), code(mismatch_arity), help("fix function arguments"))]
+    #[diagnostic(
+        severity(Error),
+        code(mismatch_arity),
+        help("fix function arguments"),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#mismatch_arity")
+    )]
     #[error("function \"{name}\" has {arity} arguments, but {args} arguments are supplied")]
     MismatchArity {
         name: String,
@@ -108,7 +143,12 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(severity(Error), code(mismatch_attribute_args), help(""))]
+    #[diagnostic(
+        severity(Error),
+        code(mismatch_attribute_args),
+        help(""),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#mismatch_attribute_args")
+    )]
     #[error("Arguments of \"{name}\" is expected to \"{expected}\"")]
     MismatchAttributeArgs {
         name: String,
@@ -119,7 +159,14 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(severity(Error), code(mismatch_type), help(""))]
+    #[diagnostic(
+        severity(Error),
+        code(mismatch_type),
+        help(""),
+        url(
+            "https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#mismatch_type"
+        )
+    )]
     #[error("\"{name}\" is expected to \"{expected}\", but it is \"{actual}\"")]
     MismatchType {
         name: String,
@@ -134,7 +181,8 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(missing_if_reset),
-        help("add if_reset statement")
+        help("add if_reset statement"),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#missing_if_reset")
     )]
     #[error("if_reset statement is required for always_ff with reset signal")]
     MissingIfReset {
@@ -144,7 +192,14 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(severity(Warning), code(missing_port), help("add \"{port}\" port"))]
+    #[diagnostic(
+        severity(Warning),
+        code(missing_port),
+        help("add \"{port}\" port"),
+        url(
+            "https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#missing_port"
+        )
+    )]
     #[error("module \"{name}\" has \"{port}\", but it is not connected")]
     MissingPort {
         name: String,
@@ -155,7 +210,12 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(severity(Error), code(missing_reset_signal), help("add reset port"))]
+    #[diagnostic(
+        severity(Error),
+        code(missing_reset_signal),
+        help("add reset port"),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#missing_reset_signal")
+    )]
     #[error("reset signal is required for always_ff with if_reset statement")]
     MissingResetSignal {
         #[source_code]
@@ -167,7 +227,8 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Warning),
         code(missing_reset_statement),
-        help("add reset statement")
+        help("add reset statement"),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#missing_reset_statement")
     )]
     #[error("{name} is not reset in if_reset statement")]
     MissingResetStatement {
@@ -178,7 +239,12 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(severity(Error), code(too_large_enum_variant), help(""))]
+    #[diagnostic(
+        severity(Error),
+        code(too_large_enum_variant),
+        help(""),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#too_large_enum_variant")
+    )]
     #[error("The value of enum variant {identifier} is {value}, it is can't be represented by {width} bits")]
     TooLargeEnumVariant {
         identifier: String,
@@ -190,7 +256,12 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(severity(Error), code(too_large_number), help("increase bit width"))]
+    #[diagnostic(
+        severity(Error),
+        code(too_large_number),
+        help("increase bit width"),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#too_large_number")
+    )]
     #[error("number is over the maximum size of {width} bits")]
     TooLargeNumber {
         width: usize,
@@ -200,7 +271,12 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(severity(Error), code(too_much_enum_variant), help(""))]
+    #[diagnostic(
+        severity(Error),
+        code(too_much_enum_variant),
+        help(""),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#too_much_enum_variant")
+    )]
     #[error(
         "enum {identifier} has {number} variants, they are can't be represented by {width} bits"
     )]
@@ -214,7 +290,12 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(severity(Error), code(undefined_identifier), help(""))]
+    #[diagnostic(
+        severity(Error),
+        code(undefined_identifier),
+        help(""),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#undefined_identifier")
+    )]
     #[error("{identifier} is undefined")]
     UndefinedIdentifier {
         identifier: String,
@@ -224,7 +305,12 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(severity(Error), code(unknown_attribute), help(""))]
+    #[diagnostic(
+        severity(Error),
+        code(unknown_attribute),
+        help(""),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#unknown_attribute")
+    )]
     #[error("\"{name}\" is not valid attribute")]
     UnknownAttribute {
         name: String,
@@ -234,7 +320,12 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(severity(Error), code(unknown_member), help(""))]
+    #[diagnostic(
+        severity(Error),
+        code(unknown_member),
+        help(""),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#unknown_member")
+    )]
     #[error("\"{name}\" doesn't have member \"{member}\"")]
     UnknownMember {
         name: String,
@@ -245,7 +336,12 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(severity(Error), code(unknown_msb), help(""))]
+    #[diagnostic(
+        severity(Error),
+        code(unknown_msb),
+        help(""),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#unknown_msb")
+    )]
     #[error("resolving msb is failed")]
     UnknownMsb {
         #[source_code]
@@ -254,7 +350,14 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(severity(Error), code(unknown_port), help("remove \"{port}\" port"))]
+    #[diagnostic(
+        severity(Error),
+        code(unknown_port),
+        help("remove \"{port}\" port"),
+        url(
+            "https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#unknown_port"
+        )
+    )]
     #[error("module \"{name}\" doesn't have port \"{port}\", but it is connected")]
     UnknownPort {
         name: String,
@@ -268,7 +371,8 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Warning),
         code(unused_variable),
-        help("add prefix `_` to unused variable name")
+        help("add prefix `_` to unused variable name"),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#unused_variable")
     )]
     #[error("{identifier} is unused")]
     UnusedVariable {
