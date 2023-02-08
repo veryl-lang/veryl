@@ -1,4 +1,4 @@
-# Quick Start
+# Code Examples
 
 Veryl has the almost same semantics as SystemVerilog.
 If you are used to SystemVerilog, you will guess Veryl semantics with a small example source code.
