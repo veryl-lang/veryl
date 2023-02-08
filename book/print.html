@@ -804,21 +804,103 @@ var var_d: u32          ;
 <li><a href="05_development_environment/01_project_configuration.html#the-dependencies-section"><code>[dependencies]</code></a> — Library dependencies.</li>
 </ul>
 <h2 id="the-project-section"><a class="header" href="#the-project-section">The <code>[project]</code> section</a></h2>
+<p>The first section of <code>Veryl.toml</code> is <code>[project]</code>.
+The mandatory fields are <code>name</code> and <code>version</code>.</p>
 <h3 id="the-name-field"><a class="header" href="#the-name-field">The <code>name</code> field</a></h3>
+<p>The project name is used as prefix in the generated codes.
+So the name must start with alphabet or <code>_</code>, and use only alphanumeric charaters or <code>_</code>.</p>
 <h3 id="the-version-field"><a class="header" href="#the-version-field">The <code>version</code> field</a></h3>
+<p>The project version should follow <a href="https://semver.org/">Semantic Versioning</a>.
+The version is constructed by the following three numbers.</p>
+<ul>
+<li>Major – increment at incompatible changes</li>
+<li>Minor – increment at adding features with backward compatibility</li>
+<li>Patch – increment at bug fixes with backward compatibility</li>
+</ul>
+<pre><code class="language-toml">[project]
+version = &quot;0.1.0&quot;
+</code></pre>
 <h3 id="the-authors-field"><a class="header" href="#the-authors-field">The <code>authors</code> field</a></h3>
+<p>The optional <code>authors</code> field lists in an array the people or organizations that are considered the “authors” of the project.
+The format of each string in the list is free. Name only, e-mail address only, and name with e-mail address included within angled brackets are commonly used.</p>
+<pre><code class="language-toml">[project]
+authors = [&quot;Fnu Lnu&quot;, &quot;anonymous@example.com&quot;, &quot;Fnu Lnu &lt;anonymous@example.com&gt;&quot;]
+</code></pre>
 <h3 id="the-description-field"><a class="header" href="#the-description-field">The <code>description</code> field</a></h3>
+<p>The <code>description</code> is a short blurb about the project. This should be plane text (not Markdown).</p>
 <h3 id="the-license-field"><a class="header" href="#the-license-field">The <code>license</code> field</a></h3>
+<p>The <code>license</code> field contains the name of license that the project is released under.
+The string should be follow <a href="https://spdx.org/spdx-specification-21-web-version#h.jxpfx0ykyb60">SPDX 2.1 license expression</a>.</p>
+<pre><code class="language-toml">[project]
+license = &quot;MIT OR Apache-2.0&quot;
+</code></pre>
 <h3 id="the-repository-field"><a class="header" href="#the-repository-field">The <code>repository</code> field</a></h3>
+<p>The <code>repository</code> field should be a URL to the source repository for the project.</p>
+<pre><code class="language-toml">[project]
+repository = &quot;https://github.com/dalance/veryl&quot;
+</code></pre>
 <h2 id="the-build-section"><a class="header" href="#the-build-section">The <code>[build]</code> section</a></h2>
+<p>The <code>[build]</code> section contains the configurations of code generation.</p>
 <h3 id="the-clock_type-field"><a class="header" href="#the-clock_type-field">The <code>clock_type</code> field</a></h3>
+<p>The <code>clock_type</code> field specifies which clock edge is used to drive flip-flop.
+The available types are below:</p>
+<ul>
+<li><code>posedge</code> – positive edge</li>
+<li><code>negedge</code> – negetive edge</li>
+</ul>
 <h3 id="the-reset_type-field"><a class="header" href="#the-reset_type-field">The <code>reset_type</code> field</a></h3>
+<p>The <code>reset_type</code> field specifies reset polarity and synchronisity.
+The available types are below:</p>
+<ul>
+<li><code>async_low</code> – asynchronous and active low</li>
+<li><code>async_high</code> – asynchronous and active high</li>
+<li><code>sync_low</code> – synchronous and active low</li>
+<li><code>sync_high</code> – synchronous and active high</li>
+</ul>
 <h3 id="the-filelist_type-field"><a class="header" href="#the-filelist_type-field">The <code>filelist_type</code> field</a></h3>
+<p>The <code>filelist_type</code> field specifies filelist format.
+The available types are below:</p>
+<ul>
+<li><code>absolute</code> – plane text filelist including absolute file paths</li>
+<li><code>relative</code> – plane text filelist including relative file paths</li>
+<li><code>flgen</code> – <a href="https://github.com/pezy-computing/flgen">flgen</a> filelist</li>
+</ul>
 <h3 id="the-target-field"><a class="header" href="#the-target-field">The <code>target</code> field</a></h3>
+<p>The <code>target</code> field specifies where the generated codes will be placed at.
+The available types are below:</p>
+<ul>
+<li><code>source</code> – as the same directory as the source code</li>
+<li><code>directory</code> – specified directory</li>
+</ul>
+<p>If you want to use <code>directory</code>, you can specify the target directory by <code>path</code> key.</p>
+<pre><code class="language-toml">[build]
+target = {type = &quot;directory&quot;, path = &quot;[dst dir]&quot;}
+</code></pre>
 <h3 id="the-implicit_parameter_types-field"><a class="header" href="#the-implicit_parameter_types-field">The <code>implicit_parameter_types</code> field</a></h3>
+<p>The <code>target</code> field lists the types which will be elided in <code>parameter</code> declaration of the generated codes.
+This is because some EDA tools don’t support <code>parameter</code> declaration with specific types (ex.<code>string</code>).
+If you want to elide <code>string</code>, you can specify like below:</p>
+<pre><code class="language-toml">[build]
+implicit_parameter_types = [&quot;string&quot;]
+</code></pre>
 <h2 id="the-format-section"><a class="header" href="#the-format-section">The <code>[format]</code> section</a></h2>
+<p>The <code>[format]</code> section contains the configurations of code formatter.</p>
 <h3 id="the-indent_width-field"><a class="header" href="#the-indent_width-field">The <code>indent_width</code> field</a></h3>
+<p>The <code>indent_width</code> field specifies the width of indent.
+Veryl formatter will insert indent by <code>indent_width</code> width spaces.</p>
+<pre><code class="language-toml">[format]
+indent_width = 4
+</code></pre>
 <h2 id="the-dependencies-section"><a class="header" href="#the-dependencies-section">The <code>[dependencies]</code> section</a></h2>
+<p>The <code>[dependencies]</code> section contains library dependencies.
+The git URL of a dependency are specified by <code>git</code> key.
+<code>rev</code>, <code>tag</code>, and <code>branch</code> key can be used to specify the specific version.</p>
+<pre><code class="language-toml">[dependencies]
+veryl_sample1 = {git = &quot;https://github.com/dalance/veryl_sample&quot;}
+veryl_sample2 = {git = &quot;https://github.com/dalance/veryl_sample&quot;, rev = &quot;9e9a30a&quot;}
+veryl_sample3 = {git = &quot;https://github.com/dalance/veryl_sample&quot;, tag = &quot;v0.4&quot;}
+veryl_sample4 = {git = &quot;https://github.com/dalance/veryl_sample&quot;, branch = &quot;branch&quot;}
+</code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="dependencies"><a class="header" href="#dependencies">Dependencies</a></h1>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="directory-layout"><a class="header" href="#directory-layout">Directory Layout</a></h1>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="formatter"><a class="header" href="#formatter">Formatter</a></h1>
@@ -826,7 +908,703 @@ var var_d: u32          ;
 <div style="break-before: page; page-break-before: always;"></div><h1 id="language-server"><a class="header" href="#language-server">Language Server</a></h1>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="appendix"><a class="header" href="#appendix">Appendix</a></h1>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="formal-syntax"><a class="header" href="#formal-syntax">Formal Syntax</a></h1>
+<p>Veryl’s parser is based on parser generator <a href="https://github.com/jsinger67/parol">parol</a>.
+The following syntex definition of parol is formal syntax.</p>
+<pre><code>
+%start Veryl
+%title &quot;Veryl grammar&quot;
+%comment &quot;Empty grammar generated by `parol`&quot;
+%user_type VerylToken = crate::veryl_token::VerylToken
+%user_type Token = crate::veryl_token::Token
+
+%%
+
+// ----------------------------------------------------------------------------
+// Terminal
+// ----------------------------------------------------------------------------
+
+// Longest match should be first
+
+CommentsTerm          : &quot;(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+&quot;                     : Token;
+StringLiteralTerm     : &quot;\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}&quot;: Token;
+ExponentTerm          : /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/                   : Token;
+FixedPointTerm        : /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/                                              : Token;
+BasedTerm             : /[0-9]+(?:_[0-9]+)*'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/                     : Token;
+BaseLessTerm          : /[0-9]+(?:_[0-9]+)*/                                                                  : Token;
+AllBitTerm            : /'[01xzXZ]/                                                                           : Token;
+MinusColonTerm        : '-:'                                                                                  : Token;
+MinusGTTerm           : '-&gt;'                                                                                  : Token;
+PlusColonTerm         : '+:'                                                                                  : Token;
+AssignmentOperatorTerm: &quot;\+=|-=|\*=|/=|%=|&amp;=|\|=|\^=|&lt;&lt;=|&gt;&gt;=|&lt;&lt;&lt;=|&gt;&gt;&gt;=&quot;                                       : Token;
+Operator11Term        : &quot;\*\*&quot;                                                                                : Token;
+Operator10Term        : &quot;/|%&quot;                                                                                 : Token;
+Operator09Term        : &quot;\+|-&quot;                                                                                : Token;
+Operator08Term        : &quot;&lt;&lt;&lt;|&gt;&gt;&gt;|&lt;&lt;|&gt;&gt;&quot;                                                                       : Token;
+Operator07Term        : &quot;&lt;=|&gt;=|&lt;:|&gt;:&quot;                                                                         : Token;
+Operator06Term        : &quot;===|==\?|!==|!=\?|==|!=&quot;                                                             : Token;
+Operator02Term        : &quot;&amp;&amp;&quot;                                                                                  : Token;
+Operator01Term        : &quot;\|\|&quot;                                                                                : Token;
+Operator05Term        : &quot;&amp;&quot;                                                                                   : Token;
+Operator04Term        : &quot;\^~|\^|~\^&quot;                                                                          : Token;
+Operator03Term        : &quot;\|&quot;                                                                                  : Token;
+UnaryOperatorTerm     : &quot;~&amp;|~\||!|~&quot;                                                                          : Token;
+ColonColonTerm        : '::'                                                                                  : Token;
+ColonTerm             : ':'                                                                                   : Token;
+CommaTerm             : ','                                                                                   : Token;
+DollarTerm            : '$'                                                                                   : Token;
+DotDotTerm            : '..'                                                                                  : Token;
+DotTerm               : '.'                                                                                   : Token;
+EquTerm               : '='                                                                                   : Token;
+HashTerm              : '#'                                                                                   : Token;
+LAngleTerm            : '&lt;'                                                                                   : Token;
+LBraceTerm            : '{'                                                                                   : Token;
+LBracketTerm          : '['                                                                                   : Token;
+LParenTerm            : '('                                                                                   : Token;
+RAngleTerm            : '&gt;'                                                                                   : Token;
+RBraceTerm            : '}'                                                                                   : Token;
+RBracketTerm          : ']'                                                                                   : Token;
+RParenTerm            : ')'                                                                                   : Token;
+SemicolonTerm         : ';'                                                                                   : Token;
+StarTerm              : '*'                                                                                   : Token;
+AlwaysCombTerm        : /\balways_comb\b/                                                                     : Token;
+AlwaysFfTerm          : /\balways_ff\b/                                                                       : Token;
+AssignTerm            : /\bassign\b/                                                                          : Token;
+AsyncHighTerm         : /\basync_high\b/                                                                      : Token;
+AsyncLowTerm          : /\basync_low\b/                                                                       : Token;
+AsTerm                : /\bas\b/                                                                              : Token;
+BitTerm               : /\bbit\b/                                                                             : Token;
+CaseTerm              : /\bcase\b/                                                                            : Token;
+DefaultTerm           : /\bdefault\b/                                                                         : Token;
+ElseTerm              : /\belse\b/                                                                            : Token;
+EnumTerm              : /\benum\b/                                                                            : Token;
+ExportTerm            : /\bexport\b/                                                                          : Token;
+F32Term               : /\bf32\b/                                                                             : Token;
+F64Term               : /\bf64\b/                                                                             : Token;
+ForTerm               : /\bfor\b/                                                                             : Token;
+FunctionTerm          : /\bfunction\b/                                                                        : Token;
+I32Term               : /\bi32\b/                                                                             : Token;
+I64Term               : /\bi64\b/                                                                             : Token;
+IfResetTerm           : /\bif_reset\b/                                                                        : Token;
+IfTerm                : /\bif\b/                                                                              : Token;
+ImportTerm            : /\bimport\b/                                                                          : Token;
+InoutTerm             : /\binout\b/                                                                           : Token;
+InputTerm             : /\binput\b/                                                                           : Token;
+InstTerm              : /\binst\b/                                                                            : Token;
+InterfaceTerm         : /\binterface\b/                                                                       : Token;
+InTerm                : /\bin\b/                                                                              : Token;
+LocalparamTerm        : /\blocalparam\b/                                                                      : Token;
+LogicTerm             : /\blogic\b/                                                                           : Token;
+LsbTerm               : /\blsb\b/                                                                             : Token;
+ModportTerm           : /\bmodport\b/                                                                         : Token;
+ModuleTerm            : /\bmodule\b/                                                                          : Token;
+MsbTerm               : /\bmsb\b/                                                                             : Token;
+NegedgeTerm           : /\bnegedge\b/                                                                         : Token;
+OutputTerm            : /\boutput\b/                                                                          : Token;
+PackageTerm           : /\bpackage\b/                                                                         : Token;
+ParameterTerm         : /\bparameter\b/                                                                       : Token;
+PosedgeTerm           : /\bposedge\b/                                                                         : Token;
+RefTerm               : /\bref\b/                                                                             : Token;
+RepeatTerm            : /\brepeat\b/                                                                          : Token;
+ReturnTerm            : /\breturn\b/                                                                          : Token;
+SignedTerm            : /\bsigned\b/                                                                          : Token;
+StepTerm              : /\bstep\b/                                                                            : Token;
+StringTerm            : /\bstring\b/                                                                          : Token;
+StructTerm            : /\bstruct\b/                                                                          : Token;
+SyncHighTerm          : /\bsync_high\b/                                                                       : Token;
+SyncLowTerm           : /\bsync_low\b/                                                                        : Token;
+TriTerm               : /\btri\b/                                                                             : Token;
+TypeTerm              : /\btype\b/                                                                            : Token;
+U32Term               : /\bu32\b/                                                                             : Token;
+U64Term               : /\bu64\b/                                                                             : Token;
+VarTerm               : /\bvar\b/                                                                             : Token;
+IdentifierTerm        : /[a-zA-Z_][0-9a-zA-Z_]*/                                                              : Token;
+
+// ----------------------------------------------------------------------------
+// Token
+// ----------------------------------------------------------------------------
+
+Comments: [ CommentsTerm ];
+
+StartToken: Comments;
+
+StringLiteralToken: StringLiteralTerm: Token Comments;
+
+ExponentToken  : ExponentTerm  : Token Comments;
+FixedPointToken: FixedPointTerm: Token Comments;
+BasedToken     : BasedTerm     : Token Comments;
+BaseLessToken  : BaseLessTerm  : Token Comments;
+AllBitToken    : AllBitTerm    : Token Comments;
+
+AssignmentOperatorToken: AssignmentOperatorTerm: Token Comments;
+Operator01Token        : Operator01Term        : Token Comments;
+Operator02Token        : Operator02Term        : Token Comments;
+Operator03Token        : Operator03Term        : Token Comments;
+Operator04Token        : Operator04Term        : Token Comments;
+Operator05Token        : Operator05Term        : Token Comments;
+Operator06Token        : Operator06Term        : Token Comments;
+Operator07Token        : Operator07Term        : Token Comments;
+Operator08Token        : Operator08Term        : Token Comments;
+Operator09Token        : Operator09Term        : Token Comments;
+Operator10Token        : Operator10Term        : Token Comments;
+Operator11Token        : Operator11Term        : Token Comments;
+UnaryOperatorToken     : UnaryOperatorTerm     : Token Comments;
+
+ColonToken     : ColonTerm     : Token Comments;
+ColonColonToken: ColonColonTerm: Token Comments;
+CommaToken     : CommaTerm     : Token Comments;
+DollarToken    : DollarTerm    : Token Comments;
+DotDotToken    : DotDotTerm    : Token Comments;
+DotToken       : DotTerm       : Token Comments;
+EquToken       : EquTerm       : Token Comments;
+HashToken      : HashTerm      : Token Comments;
+LAngleToken    : LAngleTerm    : Token Comments;
+LBraceToken    : LBraceTerm    : Token Comments;
+LBracketToken  : LBracketTerm  : Token Comments;
+LParenToken    : LParenTerm    : Token Comments;
+MinusColonToken: MinusColonTerm: Token Comments;
+MinusGTToken   : MinusGTTerm   : Token Comments;
+PlusColonToken : PlusColonTerm : Token Comments;
+RAngleToken    : RAngleTerm    : Token Comments;
+RBraceToken    : RBraceTerm    : Token Comments;
+RBracketToken  : RBracketTerm  : Token Comments;
+RParenToken    : RParenTerm    : Token Comments;
+SemicolonToken : SemicolonTerm : Token Comments;
+StarToken      : StarTerm      : Token Comments;
+
+AlwaysCombToken: AlwaysCombTerm: Token Comments;
+AlwaysFfToken  : AlwaysFfTerm  : Token Comments;
+AsToken        : AsTerm        : Token Comments;
+AssignToken    : AssignTerm    : Token Comments;
+AsyncHighToken : AsyncHighTerm : Token Comments;
+AsyncLowToken  : AsyncLowTerm  : Token Comments;
+BitToken       : BitTerm       : Token Comments;
+CaseToken      : CaseTerm      : Token Comments;
+DefaultToken   : DefaultTerm   : Token Comments;
+ElseToken      : ElseTerm      : Token Comments;
+EnumToken      : EnumTerm      : Token Comments;
+ExportToken    : ExportTerm    : Token Comments;
+F32Token       : F32Term       : Token Comments;
+F64Token       : F64Term       : Token Comments;
+ForToken       : ForTerm       : Token Comments;
+FunctionToken  : FunctionTerm  : Token Comments;
+I32Token       : I32Term       : Token Comments;
+I64Token       : I64Term       : Token Comments;
+IfResetToken   : IfResetTerm   : Token Comments;
+IfToken        : IfTerm        : Token Comments;
+ImportToken    : ImportTerm    : Token Comments;
+InoutToken     : InoutTerm     : Token Comments;
+InputToken     : InputTerm     : Token Comments;
+InstToken      : InstTerm      : Token Comments;
+InterfaceToken : InterfaceTerm : Token Comments;
+InToken        : InTerm        : Token Comments;
+LocalparamToken: LocalparamTerm: Token Comments;
+LogicToken     : LogicTerm     : Token Comments;
+LsbToken       : LsbTerm       : Token Comments;
+ModportToken   : ModportTerm   : Token Comments;
+ModuleToken    : ModuleTerm    : Token Comments;
+MsbToken       : MsbTerm       : Token Comments;
+NegedgeToken   : NegedgeTerm   : Token Comments;
+OutputToken    : OutputTerm    : Token Comments;
+PackageToken   : PackageTerm   : Token Comments;
+ParameterToken : ParameterTerm : Token Comments;
+PosedgeToken   : PosedgeTerm   : Token Comments;
+RefToken       : RefTerm       : Token Comments;
+RepeatToken    : RepeatTerm    : Token Comments;
+ReturnToken    : ReturnTerm    : Token Comments;
+SignedToken    : SignedTerm    : Token Comments;
+StepToken      : StepTerm      : Token Comments;
+StringToken    : StringTerm    : Token Comments;
+StructToken    : StructTerm    : Token Comments;
+SyncHighToken  : SyncHighTerm  : Token Comments;
+SyncLowToken   : SyncLowTerm   : Token Comments;
+TriToken       : TriTerm       : Token Comments;
+TypeToken      : TypeTerm      : Token Comments;
+U32Token       : U32Term       : Token Comments;
+U64Token       : U64Term       : Token Comments;
+VarToken       : VarTerm       : Token Comments;
+
+IdentifierToken: IdentifierTerm: Token Comments;
+
+// ----------------------------------------------------------------------------
+// VerylToken
+// ----------------------------------------------------------------------------
+
+// Start
+Start: StartToken: VerylToken;
+
+// StringLiteral
+StringLiteral: StringLiteralToken: VerylToken;
+
+// Number
+Exponent  : ExponentToken  : VerylToken;
+FixedPoint: FixedPointToken: VerylToken;
+Based     : BasedToken     : VerylToken;
+BaseLess  : BaseLessToken  : VerylToken;
+AllBit    : AllBitToken    : VerylToken;
+
+// Operator
+AssignmentOperator: AssignmentOperatorToken: VerylToken;
+Operator01        : Operator01Token        : VerylToken;
+Operator02        : Operator02Token        : VerylToken;
+Operator03        : Operator03Token        : VerylToken;
+Operator04        : Operator04Token        : VerylToken;
+Operator05        : Operator05Token        : VerylToken;
+Operator06        : Operator06Token        : VerylToken;
+Operator07        : Operator07Token        : VerylToken;
+Operator08        : Operator08Token        : VerylToken;
+Operator09        : Operator09Token        : VerylToken;
+Operator10        : Operator10Token        : VerylToken;
+Operator11        : Operator11Token        : VerylToken;
+UnaryOperator     : UnaryOperatorToken     : VerylToken;
+
+// Symbol
+Colon     : ColonToken     : VerylToken;
+ColonColon: ColonColonToken: VerylToken;
+Comma     : CommaToken     : VerylToken;
+Dollar    : DollarToken    : VerylToken;
+DotDot    : DotDotToken    : VerylToken;
+Dot       : DotToken       : VerylToken;
+Equ       : EquToken       : VerylToken;
+Hash      : HashToken      : VerylToken;
+LAngle    : LAngleToken    : VerylToken;
+LBrace    : LBraceToken    : VerylToken;
+LBracket  : LBracketToken  : VerylToken;
+LParen    : LParenToken    : VerylToken;
+MinusColon: MinusColonToken: VerylToken;
+MinusGT   : MinusGTToken   : VerylToken;
+PlusColon : PlusColonToken : VerylToken;
+RAngle    : RAngleToken    : VerylToken;
+RBrace    : RBraceToken    : VerylToken;
+RBracket  : RBracketToken  : VerylToken;
+RParen    : RParenToken    : VerylToken;
+Semicolon : SemicolonToken : VerylToken;
+Star      : StarToken      : VerylToken;
+
+// Keyword
+AlwaysComb: AlwaysCombToken: VerylToken;
+AlwaysFf  : AlwaysFfToken  : VerylToken;
+As        : AsToken        : VerylToken;
+Assign    : AssignToken    : VerylToken;
+AsyncHigh : AsyncHighToken : VerylToken;
+AsyncLow  : AsyncLowToken  : VerylToken;
+Bit       : BitToken       : VerylToken;
+Case      : CaseToken      : VerylToken;
+Defaul    : DefaultToken   : VerylToken; // avoid to conflict with Rust's Default trait
+Else      : ElseToken      : VerylToken;
+Enum      : EnumToken      : VerylToken;
+Export    : ExportToken    : VerylToken;
+F32       : F32Token       : VerylToken;
+F64       : F64Token       : VerylToken;
+For       : ForToken       : VerylToken;
+Function  : FunctionToken  : VerylToken;
+I32       : I32Token       : VerylToken;
+I64       : I64Token       : VerylToken;
+If        : IfToken        : VerylToken;
+IfReset   : IfResetToken   : VerylToken;
+Import    : ImportToken    : VerylToken;
+In        : InToken        : VerylToken;
+Inout     : InoutToken     : VerylToken;
+Input     : InputToken     : VerylToken;
+Inst      : InstToken      : VerylToken;
+Interface : InterfaceToken : VerylToken;
+Localparam: LocalparamToken: VerylToken;
+Logic     : LogicToken     : VerylToken;
+Lsb       : LsbToken       : VerylToken;
+Modport   : ModportToken   : VerylToken;
+Module    : ModuleToken    : VerylToken;
+Msb       : MsbToken       : VerylToken;
+Negedge   : NegedgeToken   : VerylToken;
+Output    : OutputToken    : VerylToken;
+Package   : PackageToken   : VerylToken;
+Parameter : ParameterToken : VerylToken;
+Posedge   : PosedgeToken   : VerylToken;
+Ref       : RefToken       : VerylToken;
+Repeat    : RepeatToken    : VerylToken;
+Return    : ReturnToken    : VerylToken;
+Signed    : SignedToken    : VerylToken;
+Step      : StepToken      : VerylToken;
+Strin     : StringToken    : VerylToken; // avoid to conflict with Rust's String struct
+Struct    : StructToken    : VerylToken;
+SyncHigh  : SyncHighToken  : VerylToken;
+SyncLow   : SyncLowToken   : VerylToken;
+Tri       : TriToken       : VerylToken;
+Type      : TypeToken      : VerylToken;
+U32       : U32Token       : VerylToken;
+U64       : U64Token       : VerylToken;
+Var       : VarToken       : VerylToken;
+
+// Identifier
+Identifier: IdentifierToken: VerylToken;
+
+// ----------------------------------------------------------------------------
+// Number
+// ----------------------------------------------------------------------------
+
+Number: IntegralNumber
+      | RealNumber
+      ;
+
+IntegralNumber: Based
+              | BaseLess
+              | AllBit
+              ;
+
+RealNumber: FixedPoint
+          | Exponent
+          ;
+
+// ----------------------------------------------------------------------------
+// Complex Identifier
+// ----------------------------------------------------------------------------
+
+HierarchicalIdentifier: Identifier { Range } { Dot Identifier { Range } };
+ScopedIdentifier      : Identifier { ColonColon Identifier };
+ExpressionIdentifier  : [ Dollar ] Identifier ( ColonColon Identifier { ColonColon Identifier } { Range } | ( { Range } { Dot Identifier { Range } } ) );
+
+// ----------------------------------------------------------------------------
+// Expression
+// ----------------------------------------------------------------------------
+
+Expression  : Expression01 { Operator01 Expression01 };
+Expression01: Expression02 { Operator02 Expression02 };
+Expression02: Expression03 { Operator03 Expression03 };
+Expression03: Expression04 { Operator04 Expression04 };
+Expression04: Expression05 { Operator05 Expression05 };
+Expression05: Expression06 { Operator06 Expression06 };
+Expression06: Expression07 { Operator07 Expression07 };
+Expression07: Expression08 { Operator08 Expression08 };
+Expression08: Expression09 { Operator09 Expression09 };
+Expression09: Expression10 { ( Operator10 | Star ) Expression10 };
+Expression10: Expression11 { Operator11 Expression11 };
+Expression11: Expression12 { As ScopedIdentifier };
+Expression12: { ( UnaryOperator | Operator09 | Operator05 | Operator03 | Operator04 ) } Factor;
+
+Factor: Number
+      | ExpressionIdentifier [ FunctionCall ]
+      | LParen Expression RParen
+      | LBrace ConcatenationList RBrace
+      | IfExpression
+      | CaseExpression
+      | StringLiteral
+      | ( Msb | Lsb )
+      ;
+
+FunctionCall: LParen [ ArgumentList ] RParen;
+
+ArgumentList: ArgumentItem { Comma ArgumentItem } [ Comma ];
+
+ArgumentItem: Expression;
+
+ConcatenationList: ConcatenationItem { Comma ConcatenationItem } [ Comma ];
+
+ConcatenationItem: Expression [ Repeat Expression ];
+
+IfExpression: If Expression LBrace Expression RBrace { Else If Expression LBrace Expression RBrace } Else LBrace Expression RBrace;
+
+CaseExpression: Case Expression LBrace Expression Colon Expression Comma { Expression Colon Expression Comma } Defaul Colon Expression [ Comma ] RBrace;
+
+TypeExpression: ScalarType
+              | Type LParen Expression RParen
+              ;
+
+// ----------------------------------------------------------------------------
+// Range / Width / Array
+// ----------------------------------------------------------------------------
+
+Range: LBracket Expression [ RangeOperator Expression ] RBracket;
+
+RangeOperator: Colon
+             | PlusColon
+             | MinusColon
+             | Step
+             ;
+
+Width: LAngle Expression { Comma Expression } RAngle;
+
+Array: LBracket Expression { Comma Expression } RBracket;
+
+// ----------------------------------------------------------------------------
+// ScalarType / ArrayType
+// ----------------------------------------------------------------------------
+
+FixedType: U32 | U64 | I32 | I64 | F32 | F64 | Strin;
+
+VariableType: ( Logic | Bit | ScopedIdentifier ) [ Width ];
+
+TypeModifier: Tri | Signed;
+
+ScalarType: { TypeModifier } ( VariableType | FixedType );
+
+ArrayType: ScalarType [ Array ];
+
+// ----------------------------------------------------------------------------
+// Statement
+// ----------------------------------------------------------------------------
+
+Statement: AssignmentStatement
+         | IfStatement
+         | IfResetStatement
+         | ReturnStatement
+         | ForStatement
+         | CaseStatement
+         ;
+
+AssignmentStatement: HierarchicalIdentifier ( Equ | AssignmentOperator ) Expression Semicolon;
+
+IfStatement: If Expression LBrace { Statement } RBrace { Else If Expression LBrace { Statement } RBrace } [ Else LBrace { Statement } RBrace ];
+
+IfResetStatement: IfReset LBrace { Statement } RBrace { Else If Expression LBrace { Statement } RBrace } [ Else LBrace { Statement } RBrace ];
+
+ReturnStatement: Return Expression Semicolon;
+
+ForStatement: For Identifier Colon ScalarType In Expression DotDot Expression [ Step AssignmentOperator Expression ] LBrace { Statement } RBrace;
+
+CaseStatement: Case Expression LBrace { CaseItem } RBrace;
+
+CaseItem: ( Expression | Defaul ) Colon ( Statement | LBrace { Statement } RBrace );
+
+// ----------------------------------------------------------------------------
+// Attribute
+// ----------------------------------------------------------------------------
+
+Attribute: Hash LBracket Identifier [ LParen AttributeList RParen ] RBracket;
+
+AttributeList: AttributeItem { Comma AttributeItem } [ Comma ];
+
+AttributeItem: Identifier
+             | StringLiteral
+             ;
+
+// ----------------------------------------------------------------------------
+// Declaration
+// ----------------------------------------------------------------------------
+
+VarDeclaration: Var Identifier Colon ArrayType [ Equ Expression ] Semicolon;
+
+LocalparamDeclaration: Localparam Identifier Colon ( ArrayType Equ Expression | Type Equ TypeExpression ) Semicolon;
+
+AlwaysFfDeclaration: AlwaysFf LParen AlwaysFfClock [ Comma AlwaysFfReset ] RParen LBrace { Statement } RBrace;
+
+AlwaysFfClock: [ Posedge | Negedge ] HierarchicalIdentifier;
+
+AlwaysFfReset: [ AsyncLow | AsyncHigh | SyncLow | SyncHigh ] HierarchicalIdentifier;
+
+AlwaysCombDeclaration: AlwaysComb LBrace { Statement } RBrace;
+
+AssignDeclaration: Assign HierarchicalIdentifier Equ Expression Semicolon;
+
+ModportDeclaration: Modport Identifier LBrace ModportList RBrace;
+
+ModportList: ModportGroup { Comma ModportGroup } [ Comma ];
+
+ModportGroup: { Attribute } ( LBrace ModportList RBrace | ModportItem );
+
+ModportItem: Identifier Colon Direction;
+
+EnumDeclaration: Enum Identifier Colon ScalarType LBrace EnumList RBrace;
+
+EnumList: EnumGroup { Comma EnumGroup } [ Comma ];
+
+EnumGroup: { Attribute } ( LBrace EnumList RBrace | EnumItem );
+
+EnumItem: Identifier [ Equ Expression ];
+
+StructDeclaration: Struct Identifier LBrace StructList RBrace;
+
+StructList: StructGroup { Comma StructGroup } [ Comma ];
+
+StructGroup: { Attribute } ( LBrace StructList RBrace | StructItem );
+
+StructItem: Identifier Colon ScalarType;
+
+// ----------------------------------------------------------------------------
+// InstDeclaration
+// ----------------------------------------------------------------------------
+
+InstDeclaration: Inst Identifier Colon ScopedIdentifier [ Array ] [ InstParameter ] [ LParen [ InstPortList ] RParen ] Semicolon;
+
+InstParameter: Hash LParen [ InstParameterList ] RParen;
+
+InstParameterList: InstParameterGroup { Comma InstParameterGroup } [ Comma ];
+
+InstParameterGroup: { Attribute } ( LBrace InstParameterList RBrace | InstParameterItem );
+
+InstParameterItem: Identifier [ Colon Expression ];
+
+InstPortList: InstPortGroup { Comma InstPortGroup } [ Comma ];
+
+InstPortGroup: { Attribute } ( LBrace InstPortList RBrace | InstPortItem );
+
+InstPortItem: Identifier [ Colon Expression ];
+
+// ----------------------------------------------------------------------------
+// WithParameter
+// ----------------------------------------------------------------------------
+
+WithParameter: Hash LParen [ WithParameterList ] RParen;
+
+WithParameterList: WithParameterGroup { Comma WithParameterGroup } [ Comma ];
+
+WithParameterGroup: { Attribute } ( LBrace WithParameterList RBrace | WithParameterItem );
+
+WithParameterItem: ( Parameter | Localparam ) Identifier Colon ( ArrayType Equ Expression | Type Equ TypeExpression );
+
+// ----------------------------------------------------------------------------
+// PortDeclaration
+// ----------------------------------------------------------------------------
+
+PortDeclaration: LParen [ PortDeclarationList ] RParen;
+
+PortDeclarationList: PortDeclarationGroup { Comma PortDeclarationGroup } [ Comma ];
+
+PortDeclarationGroup: { Attribute } ( LBrace PortDeclarationList RBrace | PortDeclarationItem );
+
+PortDeclarationItem: Identifier Colon ( Direction ArrayType | Interface [ Array ] );
+
+Direction: Input
+         | Output
+         | Inout
+         | Ref
+         | Modport
+         ;
+
+// ----------------------------------------------------------------------------
+// Function
+// ----------------------------------------------------------------------------
+
+FunctionDeclaration: Function Identifier [ WithParameter ] [ PortDeclaration ] MinusGT ScalarType LBrace { FunctionItem } RBrace;
+
+FunctionItem: VarDeclaration
+            | Statement
+            ;
+
+// ----------------------------------------------------------------------------
+// Import / Export
+// ----------------------------------------------------------------------------
+
+ImportDeclaration: Import Identifier ColonColon ( Identifier | Star ) Semicolon;
+
+ExportDeclaration: Export ( Identifier | Star ) ColonColon ( Identifier | Star ) Semicolon;
+
+// ----------------------------------------------------------------------------
+// Module
+// ----------------------------------------------------------------------------
+
+ModuleDeclaration: Module Identifier [ WithParameter ] [ PortDeclaration ] LBrace { ModuleGroup } RBrace;
+
+ModuleIfDeclaration: If Expression ModuleNamedBlock { Else If Expression ModuleOptionalNamedBlock } [ Else ModuleOptionalNamedBlock ];
+
+ModuleForDeclaration: For Identifier In Expression DotDot Expression [ Step AssignmentOperator Expression ] ModuleNamedBlock;
+
+ModuleNamedBlock: Colon Identifier LBrace { ModuleGroup } RBrace;
+
+ModuleOptionalNamedBlock: [ Colon Identifier ] LBrace { ModuleGroup } RBrace;
+
+ModuleGroup: { Attribute } ( LBrace { ModuleGroup } RBrace | ModuleItem );
+
+ModuleItem: VarDeclaration
+          | InstDeclaration
+          | LocalparamDeclaration
+          | AlwaysFfDeclaration
+          | AlwaysCombDeclaration
+          | AssignDeclaration
+          | FunctionDeclaration
+          | ModuleIfDeclaration
+          | ModuleForDeclaration
+          | EnumDeclaration
+          | StructDeclaration
+          | ModuleNamedBlock
+          | ImportDeclaration
+          ;
+
+// ----------------------------------------------------------------------------
+// Interface
+// ----------------------------------------------------------------------------
+
+InterfaceDeclaration: Interface Identifier [ WithParameter ] LBrace { InterfaceGroup } RBrace;
+
+InterfaceIfDeclaration: If Expression InterfaceNamedBlock { Else If Expression InterfaceOptionalNamedBlock } [ Else InterfaceOptionalNamedBlock ];
+
+InterfaceForDeclaration: For Identifier In Expression DotDot Expression [ Step AssignmentOperator Expression ] InterfaceNamedBlock;
+
+InterfaceNamedBlock: Colon Identifier LBrace { InterfaceGroup } RBrace;
+
+InterfaceOptionalNamedBlock: [ Colon Identifier ] LBrace { InterfaceGroup } RBrace;
+
+InterfaceGroup: { Attribute } ( LBrace { InterfaceGroup } RBrace | InterfaceItem );
+
+InterfaceItem: VarDeclaration
+             | LocalparamDeclaration
+             | ModportDeclaration
+             | InterfaceIfDeclaration
+             | InterfaceForDeclaration
+             | EnumDeclaration
+             | StructDeclaration
+             | InterfaceNamedBlock
+             | FunctionDeclaration
+             | ImportDeclaration
+             ;
+
+// ----------------------------------------------------------------------------
+// Package
+// ----------------------------------------------------------------------------
+
+PackageDeclaration: Package Identifier LBrace { PackageGroup } RBrace;
+
+PackageGroup: { Attribute } ( LBrace { PackageGroup } RBrace | PackageItem );
+
+PackageItem: VarDeclaration
+           | LocalparamDeclaration
+           | EnumDeclaration
+           | StructDeclaration
+           | FunctionDeclaration
+           | ImportDeclaration
+           | ExportDeclaration
+           ;
+
+// ----------------------------------------------------------------------------
+// Description
+// ----------------------------------------------------------------------------
+
+DescriptionGroup: { Attribute } ( LBrace { DescriptionGroup } RBrace | DescriptionItem );
+
+DescriptionItem: ModuleDeclaration
+               | InterfaceDeclaration
+               | PackageDeclaration
+               | ImportDeclaration
+               ;
+
+// ----------------------------------------------------------------------------
+// SourceCode
+// ----------------------------------------------------------------------------
+
+Veryl: Start { DescriptionGroup };
+</code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="semantic-error"><a class="header" href="#semantic-error">Semantic Error</a></h1>
+<h2 id="duplicated_identifier"><a class="header" href="#duplicated_identifier">duplicated_identifier</a></h2>
+<h2 id="invalid_allow"><a class="header" href="#invalid_allow">invalid_allow</a></h2>
+<h2 id="invalid_direction"><a class="header" href="#invalid_direction">invalid_direction</a></h2>
+<h2 id="invalid_lsb"><a class="header" href="#invalid_lsb">invalid_lsb</a></h2>
+<h2 id="invalid_msb"><a class="header" href="#invalid_msb">invalid_msb</a></h2>
+<h2 id="invalid_number_character"><a class="header" href="#invalid_number_character">invalid_number_character</a></h2>
+<h2 id="invalid_statement"><a class="header" href="#invalid_statement">invalid_statement</a></h2>
+<h2 id="invalid_system_function"><a class="header" href="#invalid_system_function">invalid_system_function</a></h2>
+<h2 id="mismatch_arity"><a class="header" href="#mismatch_arity">mismatch_arity</a></h2>
+<h2 id="mismatch_attribute_args"><a class="header" href="#mismatch_attribute_args">mismatch_attribute_args</a></h2>
+<h2 id="mismatch_type"><a class="header" href="#mismatch_type">mismatch_type</a></h2>
+<h2 id="missing_if_reset"><a class="header" href="#missing_if_reset">missing_if_reset</a></h2>
+<h2 id="missing_port"><a class="header" href="#missing_port">missing_port</a></h2>
+<h2 id="missing_reset_signal"><a class="header" href="#missing_reset_signal">missing_reset_signal</a></h2>
+<h2 id="missing_reset_statement"><a class="header" href="#missing_reset_statement">missing_reset_statement</a></h2>
+<h2 id="too_large_enum_variant"><a class="header" href="#too_large_enum_variant">too_large_enum_variant</a></h2>
+<h2 id="too_large_number"><a class="header" href="#too_large_number">too_large_number</a></h2>
+<h2 id="too_much_enum_variant"><a class="header" href="#too_much_enum_variant">too_much_enum_variant</a></h2>
+<h2 id="undefined_identifier"><a class="header" href="#undefined_identifier">undefined_identifier</a></h2>
+<h2 id="unknown_attribute"><a class="header" href="#unknown_attribute">unknown_attribute</a></h2>
+<h2 id="unknown_member"><a class="header" href="#unknown_member">unknown_member</a></h2>
+<h2 id="unknown_msb"><a class="header" href="#unknown_msb">unknown_msb</a></h2>
+<h2 id="unknown_port"><a class="header" href="#unknown_port">unknown_port</a></h2>
+<h2 id="unused_variable"><a class="header" href="#unused_variable">unused_variable</a></h2>
 
                     </main>
 

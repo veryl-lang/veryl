@@ -170,21 +170,103 @@
 <li><a href="01_project_configuration.html#the-dependencies-section"><code>[dependencies]</code></a> — Library dependencies.</li>
 </ul>
 <h2 id="the-project-section"><a class="header" href="#the-project-section">The <code>[project]</code> section</a></h2>
+<p>The first section of <code>Veryl.toml</code> is <code>[project]</code>.
+The mandatory fields are <code>name</code> and <code>version</code>.</p>
 <h3 id="the-name-field"><a class="header" href="#the-name-field">The <code>name</code> field</a></h3>
+<p>The project name is used as prefix in the generated codes.
+So the name must start with alphabet or <code>_</code>, and use only alphanumeric charaters or <code>_</code>.</p>
 <h3 id="the-version-field"><a class="header" href="#the-version-field">The <code>version</code> field</a></h3>
+<p>The project version should follow <a href="https://semver.org/">Semantic Versioning</a>.
+The version is constructed by the following three numbers.</p>
+<ul>
+<li>Major – increment at incompatible changes</li>
+<li>Minor – increment at adding features with backward compatibility</li>
+<li>Patch – increment at bug fixes with backward compatibility</li>
+</ul>
+<pre><code class="language-toml">[project]
+version = &quot;0.1.0&quot;
+</code></pre>
 <h3 id="the-authors-field"><a class="header" href="#the-authors-field">The <code>authors</code> field</a></h3>
+<p>The optional <code>authors</code> field lists in an array the people or organizations that are considered the “authors” of the project.
+The format of each string in the list is free. Name only, e-mail address only, and name with e-mail address included within angled brackets are commonly used.</p>
+<pre><code class="language-toml">[project]
+authors = [&quot;Fnu Lnu&quot;, &quot;anonymous@example.com&quot;, &quot;Fnu Lnu &lt;anonymous@example.com&gt;&quot;]
+</code></pre>
 <h3 id="the-description-field"><a class="header" href="#the-description-field">The <code>description</code> field</a></h3>
+<p>The <code>description</code> is a short blurb about the project. This should be plane text (not Markdown).</p>
 <h3 id="the-license-field"><a class="header" href="#the-license-field">The <code>license</code> field</a></h3>
+<p>The <code>license</code> field contains the name of license that the project is released under.
+The string should be follow <a href="https://spdx.org/spdx-specification-21-web-version#h.jxpfx0ykyb60">SPDX 2.1 license expression</a>.</p>
+<pre><code class="language-toml">[project]
+license = &quot;MIT OR Apache-2.0&quot;
+</code></pre>
 <h3 id="the-repository-field"><a class="header" href="#the-repository-field">The <code>repository</code> field</a></h3>
+<p>The <code>repository</code> field should be a URL to the source repository for the project.</p>
+<pre><code class="language-toml">[project]
+repository = &quot;https://github.com/dalance/veryl&quot;
+</code></pre>
 <h2 id="the-build-section"><a class="header" href="#the-build-section">The <code>[build]</code> section</a></h2>
+<p>The <code>[build]</code> section contains the configurations of code generation.</p>
 <h3 id="the-clock_type-field"><a class="header" href="#the-clock_type-field">The <code>clock_type</code> field</a></h3>
+<p>The <code>clock_type</code> field specifies which clock edge is used to drive flip-flop.
+The available types are below:</p>
+<ul>
+<li><code>posedge</code> – positive edge</li>
+<li><code>negedge</code> – negetive edge</li>
+</ul>
 <h3 id="the-reset_type-field"><a class="header" href="#the-reset_type-field">The <code>reset_type</code> field</a></h3>
+<p>The <code>reset_type</code> field specifies reset polarity and synchronisity.
+The available types are below:</p>
+<ul>
+<li><code>async_low</code> – asynchronous and active low</li>
+<li><code>async_high</code> – asynchronous and active high</li>
+<li><code>sync_low</code> – synchronous and active low</li>
+<li><code>sync_high</code> – synchronous and active high</li>
+</ul>
 <h3 id="the-filelist_type-field"><a class="header" href="#the-filelist_type-field">The <code>filelist_type</code> field</a></h3>
+<p>The <code>filelist_type</code> field specifies filelist format.
+The available types are below:</p>
+<ul>
+<li><code>absolute</code> – plane text filelist including absolute file paths</li>
+<li><code>relative</code> – plane text filelist including relative file paths</li>
+<li><code>flgen</code> – <a href="https://github.com/pezy-computing/flgen">flgen</a> filelist</li>
+</ul>
 <h3 id="the-target-field"><a class="header" href="#the-target-field">The <code>target</code> field</a></h3>
+<p>The <code>target</code> field specifies where the generated codes will be placed at.
+The available types are below:</p>
+<ul>
+<li><code>source</code> – as the same directory as the source code</li>
+<li><code>directory</code> – specified directory</li>
+</ul>
+<p>If you want to use <code>directory</code>, you can specify the target directory by <code>path</code> key.</p>
+<pre><code class="language-toml">[build]
+target = {type = &quot;directory&quot;, path = &quot;[dst dir]&quot;}
+</code></pre>
 <h3 id="the-implicit_parameter_types-field"><a class="header" href="#the-implicit_parameter_types-field">The <code>implicit_parameter_types</code> field</a></h3>
+<p>The <code>target</code> field lists the types which will be elided in <code>parameter</code> declaration of the generated codes.
+This is because some EDA tools don’t support <code>parameter</code> declaration with specific types (ex.<code>string</code>).
+If you want to elide <code>string</code>, you can specify like below:</p>
+<pre><code class="language-toml">[build]
+implicit_parameter_types = [&quot;string&quot;]
+</code></pre>
 <h2 id="the-format-section"><a class="header" href="#the-format-section">The <code>[format]</code> section</a></h2>
+<p>The <code>[format]</code> section contains the configurations of code formatter.</p>
 <h3 id="the-indent_width-field"><a class="header" href="#the-indent_width-field">The <code>indent_width</code> field</a></h3>
+<p>The <code>indent_width</code> field specifies the width of indent.
+Veryl formatter will insert indent by <code>indent_width</code> width spaces.</p>
+<pre><code class="language-toml">[format]
+indent_width = 4
+</code></pre>
 <h2 id="the-dependencies-section"><a class="header" href="#the-dependencies-section">The <code>[dependencies]</code> section</a></h2>
+<p>The <code>[dependencies]</code> section contains library dependencies.
+The git URL of a dependency are specified by <code>git</code> key.
+<code>rev</code>, <code>tag</code>, and <code>branch</code> key can be used to specify the specific version.</p>
+<pre><code class="language-toml">[dependencies]
+veryl_sample1 = {git = &quot;https://github.com/dalance/veryl_sample&quot;}
+veryl_sample2 = {git = &quot;https://github.com/dalance/veryl_sample&quot;, rev = &quot;9e9a30a&quot;}
+veryl_sample3 = {git = &quot;https://github.com/dalance/veryl_sample&quot;, tag = &quot;v0.4&quot;}
+veryl_sample4 = {git = &quot;https://github.com/dalance/veryl_sample&quot;, branch = &quot;branch&quot;}
+</code></pre>
 
                     </main>
 
