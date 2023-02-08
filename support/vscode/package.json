@@ -2,7 +2,7 @@
   "name": "vscode-veryl",
   "displayName": "Veryl",
   "description": "Veryl extension for Visual Studio Code",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "publisher": "dalance",
   "icon": "../logo/veryl_icon.png",
   "galleryBanner": {

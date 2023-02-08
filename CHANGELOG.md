@@ -1,6 +1,8 @@
 # Change Log
 
-## [Unreleased](https://github.com/dalance/veryl/compare/v0.3.2...Unreleased) - ReleaseDate
+## [Unreleased](https://github.com/dalance/veryl/compare/v0.3.3...Unreleased) - ReleaseDate
+
+## [v0.3.3](https://github.com/dalance/veryl/compare/v0.3.2...v0.3.3) - 2023-02-08
 
 * [Added] allow attribute [#117](https://github.com/dalance/veryl/issues/117)
 
