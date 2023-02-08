@@ -29,11 +29,12 @@ name = "hello"
 version = "0.1.0"
 ```
 
-The description of all configuration is [here]().
+The description of all configuration is [here](../05_development_environment/01_project_configuration.md).
 
 ## Write Code
 
 You can add source codes at an arbitrary position in the project directory.
+This is because Veryl project can be independent or integrated to other SystemVerilog project.
 The extension of Veryl's source codes is `.vl`.
 
 For example, put the following code to `src/hello.vl`.
