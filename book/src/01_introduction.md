@@ -1,5 +1,7 @@
 # The Veryl Hardware Description Language
 
+![Veryl](https://github.com/dalance/veryl/raw/master/support/logo/veryl_wide.png)
+
 Veryl is a modern hardware description language.
 
 ## Concepts
