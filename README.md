@@ -15,10 +15,9 @@ If you have any idea, please open [Issue](https://github.com/dalance/veryl/issue
 ## Documentation quick links
 
 * [Concepts](#concepts)
+* [Example](#example)
 * [Installation](#installation)
 * [Usage](#usage)
-* [Examples](#examples)
-* [Reference](#reference)
 * [License](#license)
 * [Contribution](#contribution)
 
@@ -27,48 +26,62 @@ If you have any idea, please open [Issue](https://github.com/dalance/veryl/issue
 Veryl is designed as a "SystemVerilog Alternative".
 There are some design concepts.
 
-### Symplified Syntax
+* Symplified syntax
+    * Based on SystemVerilog / Rust
+    * Removed traditional Verilog syntax
+* Transpiler to SystemVerilog
+    * Human readable SystemVerilog code generation
+    * Interoperability with SystemVerilog
+* Integrated tools
+    * Formatter / Linter
+    * VSCode, vim/neovim integration
+    * Package management based on git
 
-Veryl has symplified syntax based on SystemVerilog / Rust.
-"Symplified" has two meanings. One is for parser, and another is for human.
+## Example
 
-SystemVerilog has very complicated syntax (see IEEE Std 1800-2017 Annex A).
-This causes difficulty of SystemVerilog tool implementation.
-So Veryl should have simple syntax to parse.
-For example, "off-side rule" like Python, "automatic semicolon insertion" like ECMAScript / Go will not be supported.
+```
+// module definition
+module ModuleA #(
+    parameter  ParamA: u32 = 10,
+    localparam ParamB: u32 = 10, // trailing comma is allowed
+) (
+    i_clk : input  logic,
+    i_rst : input  logic,
+    i_sel : input  logic,
+    i_data: input  logic<ParamA> [2], // `[]` means unpacked array in SystemVerilog
+    o_data: output logic<ParamA>    , // `<>` means packed array in SystemVerilog
+) {
+    // localparam declaration
+    //   `parameter` is not allowed in module
+    localparam ParamC: u32 = 10;
 
-SystemVerilog has various syntax. Some syntaxes are inherited from Verilog, and some syntaxes are added from SystemVerilog.
-Additionally some syntaxes can be written, but cannot be used actually because major EDA tools don't support them.
-So user should learn many syntaxes and whether each syntax can be used or not.
-Veryl will not support old Verilog style, unrecommended description, and so on.
+    // variable declaration
+    var r_data0: logic<ParamA>;
+    var r_data1: logic<ParamA>;
 
-### Transpiler to SystemVerilog
+    // always_ff statement with reset
+    //   `always_ff` can take a mandatory clock and a optional reset
+    //   `if_reset` means `if (i_rst)`. This conceals reset porality
+    //   `()` of `if` is not required
+    //   `=` in `always_ff` is non-blocking assignment
+    always_ff (i_clk, i_rst) {
+        if_reset {
+            r_data0 = 0;
+        } else if i_sel {
+            r_data0 = i_data[0];
+        } else {
+            r_data0 = i_data[1];
+        }
+    }
 
-HDL alternative languages should be transpiler to the tradisional HDLs like Verilog / VHDL because major EDA tools support them.
-Veryl is a transpiler to SystemVerilog.
+    // always_ff statement without reset
+    always_ff (i_clk) {
+        r_data1 = r_data0;
+    }
 
-Transpiler to Verilog has wide EDA tool support including OSS EDA tools.
-But even if there are rich data strucuture like `struct` / `interface` in HDL alternatives, transpiled Verilog can't have it.
-If HDL alternatives have rich code generateion mechanism, transpiled Verilog will be expanded to the very long code.
-For these reason, debugging the transpiled code becomes difficult.
-
-Veryl will has almost all the same semantics as SystemVerilog.
-So transpiled code will be human readable SystemVerilog.
-
-Additionally Veryl have interoperability with SystemVerilog.
-Veryl can use SystemVerilog's module / interface / struct / enum in the code, and vice versa.
-
-### Integrated Tools
-
-Modern programming languages have development support tools like linter, formatter, and language server by default.
-Veryl will have them too from the beginning of development.
-
-The following tools are planed to support.
-
-* Semantic checker
-* Source code formatter
-* Language server
-* Package manager
+    assign o_data = r_data1;
+}
+```
 
 ## Installation
 
@@ -84,45 +97,29 @@ You can install with [cargo](https://crates.io/crates/veryl).
 cargo install veryl veryl-ls
 ```
 
+### Editor integration
+
+* [vim/neovim plugin](https://github.com/dalance/veryl.vim)
+* [VSCode plugin](https://marketplace.visualstudio.com/items?itemName=dalance.vscode-veryl)
+
 ## Usage
 
-* Create a new project
-
 ```
+// Create a new project
 veryl new [project name]
-```
 
-* Create a new project in an existing directory
-
-```
+// Create a new project in an existing directory
 veryl init [path]
-```
 
-* Format the current project
-
-```
+// Format the current project
 veryl fmt
-```
 
-* Analyze the current project
-
-```
+// Analyze the current project
 veryl check
-```
 
-* Build target codes corresponding to the current project
-
-```
+// Build target codes corresponding to the current project
 veryl build
 ```
-
-## Examples
-
-### Source Code
-
-Veryl: https://github.com/dalance/veryl/tree/master/testcases/vl
-
-Transpiled SystemVerilog: https://github.com/dalance/veryl/tree/master/testcases/sv
 
 ### Package Configuration
 
@@ -145,8 +142,6 @@ target     = {type = "source"}
 [format]
 indent_width = 4  # indent width
 ```
-
-## Reference
 
 ## License
 
