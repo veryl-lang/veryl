@@ -141,6 +141,94 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="linter"><a class="header" href="#linter">Linter</a></h1>
+<p>Lint check is executed at <code>veryl check</code> or <code>veryl build</code>.
+Alternatively, language server checks lint in real time.</p>
+<p>The available configurations are below.
+These can be specified in <code>[lint]</code> section of <code>Veryl.toml</code>.</p>
+<pre><code class="language-toml">[lint]
+case_enum = &quot;snake&quot;
+</code></pre>
+<div class="table-wrapper"><table><thead><tr><th>Configuration</th><th>Value</th><th>Description</th></tr></thead><tbody>
+<tr><td>case_enum</td><td>case type<sup class="footnote-reference"><a href="#casetype">1</a></sup></td><td>case style of <code>enum</code></td></tr>
+<tr><td>case_function</td><td>case type<sup class="footnote-reference"><a href="#casetype">1</a></sup></td><td>case style of <code>function</code></td></tr>
+<tr><td>case_instance</td><td>case type<sup class="footnote-reference"><a href="#casetype">1</a></sup></td><td>case style of instance</td></tr>
+<tr><td>case_interface</td><td>case type<sup class="footnote-reference"><a href="#casetype">1</a></sup></td><td>case style of <code>interface</code></td></tr>
+<tr><td>case_modport</td><td>case type<sup class="footnote-reference"><a href="#casetype">1</a></sup></td><td>case style of <code>modport</code></td></tr>
+<tr><td>case_module</td><td>case type<sup class="footnote-reference"><a href="#casetype">1</a></sup></td><td>case style of <code>module</code></td></tr>
+<tr><td>case_package</td><td>case type<sup class="footnote-reference"><a href="#casetype">1</a></sup></td><td>case style of <code>package</code></td></tr>
+<tr><td>case_parameter</td><td>case type<sup class="footnote-reference"><a href="#casetype">1</a></sup></td><td>case style of <code>parameter</code></td></tr>
+<tr><td>case_port_inout</td><td>case type<sup class="footnote-reference"><a href="#casetype">1</a></sup></td><td>case style of <code>inout</code> port</td></tr>
+<tr><td>case_port_input</td><td>case type<sup class="footnote-reference"><a href="#casetype">1</a></sup></td><td>case style of <code>input</code> port</td></tr>
+<tr><td>case_port_modport</td><td>case type<sup class="footnote-reference"><a href="#casetype">1</a></sup></td><td>case style of <code>modport</code> port</td></tr>
+<tr><td>case_port_output</td><td>case type<sup class="footnote-reference"><a href="#casetype">1</a></sup></td><td>case style of <code>output</code> port</td></tr>
+<tr><td>case_reg</td><td>case type<sup class="footnote-reference"><a href="#casetype">1</a></sup></td><td>case style of register type variable<sup class="footnote-reference"><a href="#reg">2</a></sup></td></tr>
+<tr><td>case_struct</td><td>case type<sup class="footnote-reference"><a href="#casetype">1</a></sup></td><td>case style of <code>struct</code></td></tr>
+<tr><td>case_wire</td><td>case type<sup class="footnote-reference"><a href="#casetype">1</a></sup></td><td>case style of wire type variable<sup class="footnote-reference"><a href="#wire">3</a></sup></td></tr>
+<tr><td>prefix_enum</td><td>string</td><td>prefix of <code>enum</code></td></tr>
+<tr><td>prefix_function</td><td>string</td><td>prefix of <code>function</code></td></tr>
+<tr><td>prefix_instance</td><td>string</td><td>prefix of instance</td></tr>
+<tr><td>prefix_interface</td><td>string</td><td>prefix of <code>interface</code></td></tr>
+<tr><td>prefix_modport</td><td>string</td><td>prefix of <code>modport</code></td></tr>
+<tr><td>prefix_module</td><td>string</td><td>prefix of <code>module</code></td></tr>
+<tr><td>prefix_package</td><td>string</td><td>prefix of <code>package</code></td></tr>
+<tr><td>prefix_parameter</td><td>string</td><td>prefix of <code>parameter</code></td></tr>
+<tr><td>prefix_port_inout</td><td>string</td><td>prefix of <code>inout</code> port</td></tr>
+<tr><td>prefix_port_input</td><td>string</td><td>prefix of <code>input</code> port</td></tr>
+<tr><td>prefix_port_modport</td><td>string</td><td>prefix of <code>modport</code> port</td></tr>
+<tr><td>prefix_port_output</td><td>string</td><td>prefix of <code>output</code> port</td></tr>
+<tr><td>prefix_reg</td><td>string</td><td>prefix of register type variable<sup class="footnote-reference"><a href="#reg">2</a></sup></td></tr>
+<tr><td>prefix_struct</td><td>string</td><td>prefix of <code>struct</code></td></tr>
+<tr><td>prefix_wire</td><td>string</td><td>prefix of wire type variable<sup class="footnote-reference"><a href="#wire">3</a></sup></td></tr>
+<tr><td>re_forbidden_enum</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex forbidden of <code>enum</code></td></tr>
+<tr><td>re_forbidden_function</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex forbidden of <code>function</code></td></tr>
+<tr><td>re_forbidden_instance</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex forbidden of instance</td></tr>
+<tr><td>re_forbidden_interface</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex forbidden of <code>interface</code></td></tr>
+<tr><td>re_forbidden_modport</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex forbidden of <code>modport</code></td></tr>
+<tr><td>re_forbidden_module</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex forbidden of <code>module</code></td></tr>
+<tr><td>re_forbidden_package</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex forbidden of <code>package</code></td></tr>
+<tr><td>re_forbidden_parameter</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex forbidden of <code>parameter</code></td></tr>
+<tr><td>re_forbidden_port_inout</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex forbidden of <code>inout</code> port</td></tr>
+<tr><td>re_forbidden_port_input</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex forbidden of <code>input</code> port</td></tr>
+<tr><td>re_forbidden_port_modport</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex forbidden of <code>modport</code> port</td></tr>
+<tr><td>re_forbidden_port_output</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex forbidden of <code>output</code> port</td></tr>
+<tr><td>re_forbidden_reg</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex forbidden of register type variable<sup class="footnote-reference"><a href="#reg">2</a></sup></td></tr>
+<tr><td>re_forbidden_struct</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex forbidden of <code>struct</code></td></tr>
+<tr><td>re_forbidden_wire</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex forbidden of wire type variable<sup class="footnote-reference"><a href="#wire">3</a></sup></td></tr>
+<tr><td>re_required_enum</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex required of <code>enum</code></td></tr>
+<tr><td>re_required_function</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex required of <code>function</code></td></tr>
+<tr><td>re_required_instance</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex required of instance</td></tr>
+<tr><td>re_required_interface</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex required of <code>interface</code></td></tr>
+<tr><td>re_required_modport</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex required of <code>modport</code></td></tr>
+<tr><td>re_required_module</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex required of <code>module</code></td></tr>
+<tr><td>re_required_package</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex required of <code>package</code></td></tr>
+<tr><td>re_required_parameter</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex required of <code>parameter</code></td></tr>
+<tr><td>re_required_port_inout</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex required of <code>inout</code> port</td></tr>
+<tr><td>re_required_port_input</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex required of <code>input</code> port</td></tr>
+<tr><td>re_required_port_modport</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex required of <code>modport</code> port</td></tr>
+<tr><td>re_required_port_output</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex required of <code>output</code> port</td></tr>
+<tr><td>re_required_reg</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex required of register type variable<sup class="footnote-reference"><a href="#reg">2</a></sup></td></tr>
+<tr><td>re_required_struct</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex required of <code>struct</code></td></tr>
+<tr><td>re_required_wire</td><td>regex<sup class="footnote-reference"><a href="#regex">4</a></sup></td><td>regex required of wire type variable<sup class="footnote-reference"><a href="#wire">3</a></sup></td></tr>
+</tbody></table>
+</div>
+<div class="footnote-definition" id="casetype"><sup class="footnote-definition-label">1</sup>
+<p>The available values are </p>
+<ul>
+<li><code>&quot;snake&quot;</code> – snake_case</li>
+<li><code>&quot;screaming_snake&quot;</code> – SCREAMING_SNAKE_CASE</li>
+<li><code>&quot;lower_camel&quot;</code> – lowerCamelCase</li>
+<li><code>&quot;upper_camel&quot;</code> – UpperCamelCase</li>
+</ul>
+<div class="footnote-definition" id="regex"><sup class="footnote-definition-label">4</sup>
+<p>Regular expression string like <code>&quot;.*&quot;</code>. The available syntax is <a href="https://docs.rs/regex/latest/regex/#syntax">here</a>.</p>
+</div>
+<div class="footnote-definition" id="reg"><sup class="footnote-definition-label">2</sup>
+<p>Register type means that the variable is assigned in <code>always_ff</code>. It will be mapped to flip-flop in synthesis phase.</p>
+</div>
+<div class="footnote-definition" id="wire"><sup class="footnote-definition-label">3</sup>
+<p>Wire type means that the variable is assigned in <code>always_comb</code>. It will be mapped to wire in synthesis phase.</p>
+</div>
+</div>
 
                     </main>
 
