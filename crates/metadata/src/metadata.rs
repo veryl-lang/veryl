@@ -24,6 +24,7 @@ pub struct PathPair {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Metadata {
     pub project: Project,
     #[serde(default)]
@@ -242,6 +243,7 @@ impl FromStr for Metadata {
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Dependency {
     pub git: Option<Url>,
     pub rev: Option<String>,

@@ -3,7 +3,15 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Lint {
+    #[serde(default)]
+    pub naming: LintNaming,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LintNaming {
     #[serde(default)]
     pub case_enum: Option<Case>,
     #[serde(default)]

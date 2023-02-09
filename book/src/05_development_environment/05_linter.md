@@ -7,9 +7,13 @@ The available configurations are below.
 These can be specified in `[lint]` section of `Veryl.toml`.
 
 ```toml
-[lint]
+[lint.naming]
 case_enum = "snake"
 ```
+
+## The `[lint.naming]` section
+
+This section contains configurations of naming conventions.
 
 | Configuration             | Value                | Description                                     |
 |---------------------------|----------------------|-------------------------------------------------|
