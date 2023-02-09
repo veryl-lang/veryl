@@ -1,9 +1,12 @@
+use crate::build::{Build, Target};
+use crate::format::Format;
 use crate::git::Git;
+use crate::lint::Lint;
+use crate::project::Project;
 use crate::MetadataError;
 use directories::ProjectDirs;
 use log::debug;
 use regex::Regex;
-use semver::Version;
 use serde::{Deserialize, Serialize};
 use spdx::Expression;
 use std::collections::{HashMap, HashSet};
@@ -20,13 +23,15 @@ pub struct PathPair {
     pub dst: PathBuf,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Metadata {
     pub project: Project,
     #[serde(default)]
     pub build: Build,
     #[serde(default)]
     pub format: Format,
+    #[serde(default)]
+    pub lint: Lint,
     #[serde(default)]
     pub dependencies: HashMap<String, Dependency>,
     #[serde(skip)]
@@ -236,115 +241,7 @@ impl FromStr for Metadata {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Project {
-    pub name: String,
-    pub version: Version,
-    #[serde(default)]
-    pub authors: Vec<String>,
-    pub description: Option<String>,
-    pub license: Option<String>,
-    pub repository: Option<String>,
-}
-
-#[derive(Debug, Default, Serialize, Deserialize)]
-pub struct Build {
-    #[serde(default)]
-    pub clock_type: ClockType,
-    #[serde(default)]
-    pub reset_type: ResetType,
-    #[serde(default)]
-    pub filelist_type: FilelistType,
-    #[serde(default)]
-    pub target: Target,
-    #[serde(default)]
-    pub implicit_parameter_types: Vec<BuiltinType>,
-}
-
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub enum ClockType {
-    #[default]
-    #[serde(rename = "posedge")]
-    PosEdge,
-    #[serde(rename = "negedge")]
-    NegEdge,
-}
-
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub enum ResetType {
-    #[default]
-    #[serde(rename = "async_low")]
-    AsyncLow,
-    #[serde(rename = "async_high")]
-    AsyncHigh,
-    #[serde(rename = "sync_low")]
-    SyncLow,
-    #[serde(rename = "sync_high")]
-    SyncHigh,
-}
-
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub enum FilelistType {
-    #[default]
-    #[serde(rename = "absolute")]
-    Absolute,
-    #[serde(rename = "relative")]
-    Relative,
-    #[serde(rename = "flgen")]
-    Flgen,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type")]
-pub enum Target {
-    #[default]
-    #[serde(rename = "source")]
-    Source,
-    #[serde(rename = "directory")]
-    Directory { path: PathBuf },
-}
-
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub enum BuiltinType {
-    #[serde(rename = "u32")]
-    U32,
-    #[serde(rename = "u64")]
-    U64,
-    #[serde(rename = "i32")]
-    I32,
-    #[serde(rename = "i64")]
-    I64,
-    #[serde(rename = "f32")]
-    F32,
-    #[serde(rename = "f64")]
-    F64,
-    #[serde(rename = "string")]
-    String,
-    #[serde(rename = "type")]
-    Type,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Format {
-    #[serde(default = "default_indent_width")]
-    pub indent_width: usize,
-}
-
-const DEFAULT_INDENT_WIDTH: usize = 4;
-
-impl Default for Format {
-    fn default() -> Self {
-        Self {
-            indent_width: DEFAULT_INDENT_WIDTH,
-        }
-    }
-}
-
-fn default_indent_width() -> usize {
-    DEFAULT_INDENT_WIDTH
-}
-
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Dependency {
     pub git: Option<Url>,
     pub rev: Option<String>,
@@ -355,7 +252,8 @@ pub struct Dependency {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use semver::{BuildMetadata, Prerelease};
+    use crate::build::{ClockType, ResetType};
+    use semver::{BuildMetadata, Prerelease, Version};
 
     const TEST_TOML: &'static str = r#"
 [project]

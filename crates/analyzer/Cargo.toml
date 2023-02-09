@@ -13,6 +13,11 @@ edition               = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-miette        = {workspace = true}
-thiserror     = {workspace = true}
-veryl-parser  = {version = "0.3.4", path = "../parser"}
+Inflector      = "0.11.4"
+miette         = {workspace = true}
+thiserror      = {workspace = true}
+veryl-metadata = {version = "0.3.4", path = "../metadata"}
+veryl-parser   = {version = "0.3.4", path = "../parser"}
+
+[dev-dependencies]
+toml = {workspace = true}

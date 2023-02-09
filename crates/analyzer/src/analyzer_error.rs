@@ -53,6 +53,22 @@ pub enum AnalyzerError {
     },
 
     #[diagnostic(
+        severity(Warning),
+        code(invalid_identifier),
+        help("follow naming rule"),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#invalid_identifier")
+    )]
+    #[error("{identifier} violate \"{rule}\" naming rule")]
+    InvalidIdentifier {
+        identifier: String,
+        rule: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
         severity(Error),
         code(invalid_lsb),
         help("remove lsb"),
@@ -413,6 +429,20 @@ impl AnalyzerError {
     pub fn invalid_direction(kind: &str, source: &str, token: &VerylToken) -> Self {
         AnalyzerError::InvalidDirection {
             kind: kind.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.token.into(),
+        }
+    }
+
+    pub fn invalid_identifier(
+        identifier: &str,
+        rule: &str,
+        source: &str,
+        token: &VerylToken,
+    ) -> Self {
+        AnalyzerError::InvalidIdentifier {
+            identifier: identifier.to_string(),
+            rule: rule.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),
         }

@@ -20,9 +20,10 @@ miette         = {workspace = true}
 regex          = {workspace = true}
 semver         = {workspace = true}
 serde          = {workspace = true}
+serde_regex    = "1.1"
 spdx           = "0.10.0"
 thiserror      = {workspace = true}
-toml           = "0.7.2"
+toml           = {workspace = true}
 url            = {workspace = true}
 veryl-parser   = {version = "0.3.4", path = "../parser"}
 walkdir        = "2.3.2"

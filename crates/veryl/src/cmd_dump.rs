@@ -30,7 +30,7 @@ impl CmdDump {
                 .into_diagnostic()
                 .wrap_err("")?;
             let parser = Parser::parse(&input, &path.src)?;
-            let analyzer = Analyzer::new(&path.prj);
+            let analyzer = Analyzer::new(&path.prj, metadata);
             analyzer.analyze_pass1(&input, &path.src, &parser.veryl);
 
             contexts.push((path, input, parser, analyzer));

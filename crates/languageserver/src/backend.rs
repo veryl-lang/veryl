@@ -20,6 +20,7 @@ pub struct Backend {
     client: Client,
     document_map: DashMap<String, Rope>,
     parser_map: DashMap<String, Parser>,
+    metadata_map: DashMap<String, Metadata>,
     cache_dir: PathBuf,
 }
 
@@ -35,12 +36,13 @@ impl Backend {
             client,
             document_map: DashMap::new(),
             parser_map: DashMap::new(),
+            metadata_map: DashMap::new(),
             cache_dir: Metadata::cache_dir(),
         }
     }
 
-    async fn on_change(&self, params: TextDocumentItem) {
-        let path = params.uri.to_string();
+    async fn on_change(&self, params: TextDocumentItem, metadata: &Metadata) {
+        let path = params.uri.as_str();
         let rope = Rope::from_str(&params.text);
         let text = rope.to_string();
 
@@ -50,10 +52,10 @@ impl Backend {
                     symbol_table::drop(path);
                     namespace_table::drop(path);
                 }
-                let analyzer = Analyzer::new(&[""]);
-                let mut errors = analyzer.analyze_pass1(&text, &path, &x.veryl);
-                errors.append(&mut analyzer.analyze_pass2(&text, &path, &x.veryl));
-                errors.append(&mut analyzer.analyze_pass3(&text, &path, &x.veryl));
+                let analyzer = Analyzer::new(&[""], metadata);
+                let mut errors = analyzer.analyze_pass1(&text, path, &x.veryl);
+                errors.append(&mut analyzer.analyze_pass2(&text, path, &x.veryl));
+                errors.append(&mut analyzer.analyze_pass3(&text, path, &x.veryl));
                 let ret: Vec<_> = errors
                     .drain(0..)
                     .map(|x| {
@@ -61,35 +63,35 @@ impl Backend {
                         Backend::to_diag(x, &rope)
                     })
                     .collect();
-                self.parser_map.insert(path.clone(), x);
+                self.parser_map.insert(path.to_string(), x);
                 ret
             }
             Err(x) => {
-                self.parser_map.remove(&path);
+                self.parser_map.remove(path);
                 vec![Backend::to_diag(x.into(), &rope)]
             }
         };
         self.client
-            .publish_diagnostics(params.uri, diag, Some(params.version))
+            .publish_diagnostics(params.uri.clone(), diag, Some(params.version))
             .await;
 
-        self.document_map.insert(path, rope);
+        self.document_map.insert(path.to_string(), rope);
     }
 
-    async fn background_analyze(&self, path: &PathPair) {
+    async fn background_analyze(&self, path: &PathPair, metadata: &Metadata) {
         if let Ok(text) = std::fs::read_to_string(&path.src) {
             if let Ok(uri) = Url::from_file_path(&path.src) {
-                let uri = uri.to_string();
-                if self.document_map.contains_key(&uri) {
+                let uri = uri.as_str();
+                if self.document_map.contains_key(uri) {
                     return;
                 }
                 if let Ok(x) = Parser::parse(&text, &uri) {
-                    if let Some(uri) = resource_table::get_path_id(Path::new(&uri).to_path_buf()) {
+                    if let Some(uri) = resource_table::get_path_id(Path::new(uri).to_path_buf()) {
                         symbol_table::drop(uri);
                         namespace_table::drop(uri);
                     }
-                    let analyzer = Analyzer::new(&path.prj);
-                    let _ = analyzer.analyze_pass1(&text, &uri, &x.veryl);
+                    let analyzer = Analyzer::new(&path.prj, metadata);
+                    let _ = analyzer.analyze_pass1(&text, uri, &x.veryl);
                     self.client
                         .log_message(MessageType::INFO, format!("background_analyze: {uri}"))
                         .await;
@@ -266,28 +268,27 @@ impl LanguageServer for Backend {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         self.client.log_message(MessageType::INFO, "did_open").await;
 
-        if params
-            .text_document
-            .uri
-            .as_str()
-            .contains(self.cache_dir.to_string_lossy().as_ref())
-        {
+        let uri = params.text_document.uri.as_str();
+        if uri.contains(self.cache_dir.to_string_lossy().as_ref()) {
             return;
         }
 
-        self.on_change(TextDocumentItem {
-            uri: params.text_document.uri.clone(),
-            text: params.text_document.text.clone(),
-            version: params.text_document.version,
-        })
-        .await;
-
-        let uri = &params.text_document.uri;
-        if let Ok(metadata_path) = Metadata::search_from(uri.path()) {
+        if let Ok(metadata_path) = Metadata::search_from(uri) {
             if let Ok(metadata) = Metadata::load(metadata_path) {
+                self.metadata_map.insert(uri.to_string(), metadata.clone());
+                self.on_change(
+                    TextDocumentItem {
+                        uri: params.text_document.uri,
+                        text: params.text_document.text,
+                        version: params.text_document.version,
+                    },
+                    &metadata,
+                )
+                .await;
+
                 if let Ok(paths) = metadata.paths::<&str>(&[], false) {
                     for path in &paths {
-                        self.background_analyze(path).await;
+                        self.background_analyze(path, &metadata).await;
                     }
                 }
             }
@@ -299,12 +300,18 @@ impl LanguageServer for Backend {
             .log_message(MessageType::INFO, "did_change")
             .await;
 
-        self.on_change(TextDocumentItem {
-            uri: params.text_document.uri,
-            text: std::mem::take(&mut params.content_changes[0].text),
-            version: params.text_document.version,
-        })
-        .await;
+        let uri = params.text_document.uri.as_str();
+        if let Some(metadata) = self.metadata_map.get(uri) {
+            self.on_change(
+                TextDocumentItem {
+                    uri: params.text_document.uri,
+                    text: std::mem::take(&mut params.content_changes[0].text),
+                    version: params.text_document.version,
+                },
+                &metadata,
+            )
+            .await;
+        }
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
@@ -380,9 +387,12 @@ impl LanguageServer for Backend {
         &self,
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
-        let uri = params.text_document_position_params.text_document.uri;
-        let path = uri.to_string();
-        if let Some(parser) = self.parser_map.get(&path) {
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .as_str();
+        if let Some(parser) = self.parser_map.get(uri) {
             let mut finder = Finder::new();
             finder.line = params.text_document_position_params.position.line as usize + 1;
             finder.column = params.text_document_position_params.position.character as usize + 1;
@@ -448,9 +458,12 @@ impl LanguageServer for Backend {
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-        let uri = params.text_document_position_params.text_document.uri;
-        let path = uri.to_string();
-        if let Some(parser) = self.parser_map.get(&path) {
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .as_str();
+        if let Some(parser) = self.parser_map.get(uri) {
             let mut finder = Finder::new();
             finder.line = params.text_document_position_params.position.line as usize + 1;
             finder.column = params.text_document_position_params.position.character as usize + 1;
@@ -479,10 +492,9 @@ impl LanguageServer for Backend {
     }
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
-        let uri = params.text_document_position.text_document.uri;
-        let path = uri.to_string();
+        let uri = params.text_document_position.text_document.uri.as_str();
         let mut ret = Vec::new();
-        if let Some(parser) = self.parser_map.get(&path) {
+        if let Some(parser) = self.parser_map.get(uri) {
             let mut finder = Finder::new();
             finder.line = params.text_document_position.position.line as usize + 1;
             finder.column = params.text_document_position.position.character as usize + 1;
@@ -512,8 +524,8 @@ impl LanguageServer for Backend {
         &self,
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
-        let path = params.text_document.uri.to_string();
-        if let Some(path) = resource_table::get_path_id(Path::new(&path).to_path_buf()) {
+        let uri = params.text_document.uri.as_str();
+        if let Some(path) = resource_table::get_path_id(Path::new(uri).to_path_buf()) {
             let mut tokens = Vec::new();
             for symbol in &symbol_table::get_all() {
                 if symbol.token.file_path == path {
@@ -574,13 +586,12 @@ impl LanguageServer for Backend {
     }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
-        let uri = params.text_document.uri;
-        let path = uri.to_string();
-        if let Ok(metadata_path) = Metadata::search_from(uri.path()) {
+        let uri = params.text_document.uri.as_str();
+        if let Ok(metadata_path) = Metadata::search_from(uri) {
             if let Ok(metadata) = Metadata::load(metadata_path) {
-                if let Some(rope) = self.document_map.get(&path) {
+                if let Some(rope) = self.document_map.get(uri) {
                     let line = rope.len_lines() as u32;
-                    if let Some(parser) = self.parser_map.get(&path) {
+                    if let Some(parser) = self.parser_map.get(uri) {
                         let mut formatter = Formatter::new(&metadata);
                         formatter.format(&parser.veryl);
 

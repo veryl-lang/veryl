@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use veryl_analyzer::{namespace_table, symbol_table, Analyzer};
 use veryl_emitter::Emitter;
 use veryl_formatter::Formatter;
-use veryl_metadata::{Build, Format, Metadata, Project};
+use veryl_metadata::{Build, Format, Lint, Metadata, Project};
 use veryl_parser::{resource_table, Parser};
 use wasm_bindgen::prelude::*;
 
@@ -57,6 +57,7 @@ fn metadata() -> Metadata {
         },
         build: Build::default(),
         format: Format::default(),
+        lint: Lint::default(),
         dependencies: HashMap::new(),
         metadata_path: "".into(),
     }
@@ -72,7 +73,7 @@ pub fn build(source: &str) -> Result {
                 namespace_table::drop(path);
             }
 
-            let analyzer = Analyzer::new::<&str>(&["project"]);
+            let analyzer = Analyzer::new::<&str>(&["project"], &metadata);
             let mut errors = Vec::new();
             errors.append(&mut analyzer.analyze_pass1(source, "", &parser.veryl));
             errors.append(&mut analyzer.analyze_pass2(source, "", &parser.veryl));

@@ -6,6 +6,8 @@
 
 ## invalid_direction
 
+## invalid_identifier
+
 ## invalid_lsb
 
 ## invalid_msb

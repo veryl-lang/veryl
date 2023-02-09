@@ -67,7 +67,7 @@ impl CmdCheck {
                 .wrap_err("")?;
             let parser = Parser::parse(&input, &path.src)?;
 
-            let analyzer = Analyzer::new(&path.prj);
+            let analyzer = Analyzer::new(&path.prj, metadata);
             let mut errors = analyzer.analyze_pass1(&input, &path.src, &parser.veryl);
             check_error = check_error.append(&mut errors).check_err()?;
 

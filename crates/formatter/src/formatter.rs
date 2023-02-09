@@ -1,12 +1,12 @@
 use crate::aligner::{Aligner, Location};
-use veryl_metadata::Metadata;
+use veryl_metadata::{Format, Metadata};
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::{Token, VerylToken};
 use veryl_parser::veryl_walker::VerylWalker;
 
 pub struct Formatter {
-    pub indent_width: usize,
+    format_opt: Format,
     string: String,
     indent: usize,
     line: usize,
@@ -21,7 +21,7 @@ pub struct Formatter {
 impl Default for Formatter {
     fn default() -> Self {
         Self {
-            indent_width: 4,
+            format_opt: Format::default(),
             string: String::new(),
             indent: 0,
             line: 1,
@@ -38,7 +38,7 @@ impl Default for Formatter {
 impl Formatter {
     pub fn new(metadata: &Metadata) -> Self {
         Self {
-            indent_width: metadata.format.indent_width,
+            format_opt: metadata.format.clone(),
             ..Default::default()
         }
     }
@@ -59,15 +59,15 @@ impl Formatter {
     fn unindent(&mut self) {
         if self
             .string
-            .ends_with(&" ".repeat(self.indent * self.indent_width))
+            .ends_with(&" ".repeat(self.indent * self.format_opt.indent_width))
         {
             self.string
-                .truncate(self.string.len() - self.indent * self.indent_width);
+                .truncate(self.string.len() - self.indent * self.format_opt.indent_width);
         }
     }
 
     fn indent(&mut self) {
-        self.str(&" ".repeat(self.indent * self.indent_width));
+        self.str(&" ".repeat(self.indent * self.format_opt.indent_width));
     }
 
     fn newline_push(&mut self) {

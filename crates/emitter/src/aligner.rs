@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use veryl_metadata::{BuiltinType, Metadata};
+use veryl_metadata::{Build, BuiltinType, Metadata};
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::{Token, VerylToken};
 use veryl_parser::veryl_walker::VerylWalker;
@@ -123,7 +123,7 @@ pub struct Aligner {
     pub additions: HashMap<Location, usize>,
     aligns: [Align; 8],
     in_type_expression: bool,
-    implicit_parameter_types: Vec<BuiltinType>,
+    build_opt: Build,
 }
 
 impl Aligner {
@@ -132,10 +132,7 @@ impl Aligner {
     }
 
     pub fn set_metadata(&mut self, metadata: &Metadata) {
-        self.implicit_parameter_types.clear();
-        for x in &metadata.build.implicit_parameter_types {
-            self.implicit_parameter_types.push(*x);
-        }
+        self.build_opt = metadata.build.clone();
     }
 
     pub fn align(&mut self, input: &Veryl) {
@@ -177,14 +174,16 @@ impl Aligner {
             _ => None,
         };
         if let Some(x) = r#type {
-            self.implicit_parameter_types.contains(&x)
+            self.build_opt.implicit_parameter_types.contains(&x)
         } else {
             false
         }
     }
 
     fn is_implicit_type(&mut self) -> bool {
-        self.implicit_parameter_types.contains(&BuiltinType::Type)
+        self.build_opt
+            .implicit_parameter_types
+            .contains(&BuiltinType::Type)
     }
 }
 

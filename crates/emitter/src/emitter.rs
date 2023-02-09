@@ -2,7 +2,7 @@ use crate::aligner::{Aligner, Location};
 use veryl_analyzer::msb_table;
 use veryl_analyzer::symbol::SymbolKind;
 use veryl_analyzer::symbol_table;
-use veryl_metadata::{BuiltinType, ClockType, Metadata, ResetType};
+use veryl_metadata::{Build, BuiltinType, ClockType, Format, Metadata, ResetType};
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::{Token, VerylToken};
@@ -15,10 +15,8 @@ pub enum AttributeType {
 }
 
 pub struct Emitter {
-    pub indent_width: usize,
-    pub clock_type: ClockType,
-    pub reset_type: ResetType,
-    pub implicit_parameter_types: Vec<BuiltinType>,
+    build_opt: Build,
+    format_opt: Format,
     string: String,
     indent: usize,
     line: usize,
@@ -43,10 +41,8 @@ pub struct Emitter {
 impl Default for Emitter {
     fn default() -> Self {
         Self {
-            indent_width: 4,
-            clock_type: ClockType::PosEdge,
-            reset_type: ResetType::AsyncLow,
-            implicit_parameter_types: Vec::new(),
+            build_opt: Build::default(),
+            format_opt: Format::default(),
             string: String::new(),
             indent: 0,
             line: 1,
@@ -75,10 +71,8 @@ impl Emitter {
         let mut aligner = Aligner::new();
         aligner.set_metadata(metadata);
         Self {
-            indent_width: metadata.format.indent_width,
-            clock_type: metadata.build.clock_type,
-            reset_type: metadata.build.reset_type,
-            implicit_parameter_types: metadata.build.implicit_parameter_types.clone(),
+            build_opt: metadata.build.clone(),
+            format_opt: metadata.format.clone(),
             aligner,
             ..Default::default()
         }
@@ -100,15 +94,15 @@ impl Emitter {
     fn unindent(&mut self) {
         if self
             .string
-            .ends_with(&" ".repeat(self.indent * self.indent_width))
+            .ends_with(&" ".repeat(self.indent * self.format_opt.indent_width))
         {
             self.string
-                .truncate(self.string.len() - self.indent * self.indent_width);
+                .truncate(self.string.len() - self.indent * self.format_opt.indent_width);
         }
     }
 
     fn indent(&mut self) {
-        self.str(&" ".repeat(self.indent * self.indent_width));
+        self.str(&" ".repeat(self.indent * self.format_opt.indent_width));
     }
 
     fn newline_push(&mut self) {
@@ -229,7 +223,7 @@ impl Emitter {
                 AlwaysFfResetOptGroup::SyncHigh(_) => false,
             }
         } else {
-            match self.reset_type {
+            match self.build_opt.reset_type {
                 ResetType::AsyncLow => true,
                 ResetType::AsyncHigh => true,
                 ResetType::SyncLow => false,
@@ -259,14 +253,16 @@ impl Emitter {
             _ => None,
         };
         if let Some(x) = r#type {
-            self.implicit_parameter_types.contains(&x)
+            self.build_opt.implicit_parameter_types.contains(&x)
         } else {
             false
         }
     }
 
     fn is_implicit_type(&mut self) -> bool {
-        self.implicit_parameter_types.contains(&BuiltinType::Type)
+        self.build_opt
+            .implicit_parameter_types
+            .contains(&BuiltinType::Type)
     }
 }
 
@@ -281,7 +277,10 @@ impl VerylWalker for Emitter {
         if self.string.ends_with("`endif") {
             self.string.truncate(self.string.len() - "`endif".len());
 
-            let trailing_endif = format!("`endif\n{}", " ".repeat(self.indent * self.indent_width));
+            let trailing_endif = format!(
+                "`endif\n{}",
+                " ".repeat(self.indent * self.format_opt.indent_width)
+            );
             let mut additional_endif = 0;
             while self.string.ends_with(&trailing_endif) {
                 self.string
@@ -1151,7 +1150,7 @@ impl VerylWalker for Emitter {
                 AlwaysFfClockOptGroup::Negedge(x) => self.negedge(&x.negedge),
             }
         } else {
-            match self.clock_type {
+            match self.build_opt.clock_type {
                 ClockType::PosEdge => self.str("posedge"),
                 ClockType::NegEdge => self.str("negedge"),
             }
@@ -1182,7 +1181,7 @@ impl VerylWalker for Emitter {
                 }
             }
         } else {
-            match self.reset_type {
+            match self.build_opt.reset_type {
                 ResetType::AsyncLow => {
                     self.str("negedge");
                     "!"

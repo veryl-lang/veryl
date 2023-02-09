@@ -15,6 +15,7 @@
   * [`implicit_parameter_types`](01_project_configuration.md#the-implicit_parameter_types-field) --- Whether implicit parameter type is enabled.
 * [`[format]`](01_project_configuration.md#the-format-section) --- Format settings.
   * [`indent_width`](01_project_configuration.md#the-indent_width-field) --- Indent width by space.
+* [`[lint]`](01_project_configuration.md#the-lint-section) --- Lint settings.
 * [`[dependencies]`](01_project_configuration.md#the-dependencies-section) --- Library dependencies.
 
 ## The `[project]` section
@@ -144,6 +145,11 @@ Veryl formatter will insert indent by `indent_width` width spaces.
 [format]
 indent_width = 4
 ```
+
+## The `[lint]` section
+
+The `[lint]` section contains the configurations of linter.
+Available configurations is [here](./05_linter.md).
 
 ## The `[dependencies]` section
 

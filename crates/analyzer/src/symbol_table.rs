@@ -389,6 +389,7 @@ mod tests {
     use crate::namespace::Namespace;
     use crate::symbol_table::SymbolPath;
     use crate::{symbol_table, Analyzer};
+    use veryl_metadata::Metadata;
     use veryl_parser::{resource_table, Parser};
 
     const CODE: &str = r##"
@@ -429,8 +430,9 @@ mod tests {
     "##;
 
     fn parse() {
+        let metadata: Metadata = toml::from_str(&Metadata::create_default_toml("")).unwrap();
         let parser = Parser::parse(&CODE, &"").unwrap();
-        let analyzer = Analyzer::new(&["prj"]);
+        let analyzer = Analyzer::new(&["prj"], &metadata);
         analyzer.analyze_pass1(&CODE, &"", &parser.veryl);
     }
 

@@ -1,9 +1,14 @@
+mod build;
+mod format;
 mod git;
+mod lint;
 mod metadata;
 mod metadata_error;
-pub use metadata::{
-    Build, BuiltinType, ClockType, FilelistType, Format, Metadata, PathPair, Project, ResetType,
-    Target,
-};
+mod project;
+pub use build::{Build, BuiltinType, ClockType, FilelistType, ResetType, Target};
+pub use format::Format;
+pub use lint::{Case, Lint};
+pub use metadata::{Metadata, PathPair};
 pub use metadata_error::MetadataError;
+pub use project::Project;
 pub use semver;

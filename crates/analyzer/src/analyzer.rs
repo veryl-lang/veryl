@@ -4,6 +4,7 @@ use crate::namespace_table;
 use crate::symbol::SymbolKind;
 use crate::symbol_table;
 use std::path::Path;
+use veryl_metadata::{Lint, Metadata};
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::VerylToken;
@@ -14,9 +15,9 @@ pub struct AnalyzerPass1<'a> {
 }
 
 impl<'a> AnalyzerPass1<'a> {
-    pub fn new(text: &'a str) -> Self {
+    pub fn new(text: &'a str, lint_opt: &'a Lint) -> Self {
         AnalyzerPass1 {
-            handlers: Pass1Handlers::new(text),
+            handlers: Pass1Handlers::new(text, lint_opt),
         }
     }
 }
@@ -32,9 +33,9 @@ pub struct AnalyzerPass2<'a> {
 }
 
 impl<'a> AnalyzerPass2<'a> {
-    pub fn new(text: &'a str) -> Self {
+    pub fn new(text: &'a str, lint_opt: &'a Lint) -> Self {
         AnalyzerPass2 {
-            handlers: Pass2Handlers::new(text),
+            handlers: Pass2Handlers::new(text, lint_opt),
         }
     }
 }
@@ -45,16 +46,20 @@ impl<'a> VerylWalker for AnalyzerPass2<'a> {
     }
 }
 
-pub struct Analyzer {}
+pub struct Analyzer {
+    lint_opt: Lint,
+}
 
 impl Analyzer {
-    pub fn new<T: AsRef<str>>(project_paths: &[T]) -> Self {
+    pub fn new<T: AsRef<str>>(project_paths: &[T], metadata: &Metadata) -> Self {
         let mut ids = Vec::new();
         for path in project_paths {
             ids.push(resource_table::insert_str(path.as_ref()));
         }
         namespace_table::set_default(&ids);
-        Analyzer {}
+        Analyzer {
+            lint_opt: metadata.lint.clone(),
+        }
     }
 
     pub fn analyze_pass1<T: AsRef<Path>>(
@@ -65,7 +70,7 @@ impl Analyzer {
     ) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
 
-        let mut pass1 = AnalyzerPass1::new(text);
+        let mut pass1 = AnalyzerPass1::new(text, &self.lint_opt);
         pass1.veryl(input);
         ret.append(&mut pass1.handlers.get_errors());
 
@@ -80,7 +85,7 @@ impl Analyzer {
     ) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
 
-        let mut pass2 = AnalyzerPass2::new(text);
+        let mut pass2 = AnalyzerPass2::new(text, &self.lint_opt);
         pass2.veryl(input);
         ret.append(&mut pass2.handlers.get_errors());
 

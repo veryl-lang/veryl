@@ -2,6 +2,7 @@ pub mod check_attribute;
 pub mod check_direction;
 pub mod check_enum;
 pub mod check_function;
+pub mod check_identifier;
 pub mod check_instance;
 pub mod check_msb_lsb;
 pub mod check_number;
@@ -14,6 +15,7 @@ use check_attribute::*;
 use check_direction::*;
 use check_enum::*;
 use check_function::*;
+use check_identifier::*;
 use check_instance::*;
 use check_msb_lsb::*;
 use check_number::*;
@@ -24,11 +26,13 @@ use create_reference::*;
 use create_symbol_table::*;
 
 use crate::analyzer_error::AnalyzerError;
+use veryl_metadata::Lint;
 use veryl_parser::veryl_walker::Handler;
 
 pub struct Pass1Handlers<'a> {
     check_attribute: CheckAttribute<'a>,
     check_direction: CheckDirection<'a>,
+    check_identifier: CheckIdentifier<'a>,
     check_number: CheckNumber<'a>,
     check_reset: CheckReset<'a>,
     check_statement: CheckStatement<'a>,
@@ -37,10 +41,11 @@ pub struct Pass1Handlers<'a> {
 }
 
 impl<'a> Pass1Handlers<'a> {
-    pub fn new(text: &'a str) -> Self {
+    pub fn new(text: &'a str, lint_opt: &'a Lint) -> Self {
         Self {
             check_attribute: CheckAttribute::new(text),
             check_direction: CheckDirection::new(text),
+            check_identifier: CheckIdentifier::new(text, lint_opt),
             check_number: CheckNumber::new(text),
             check_reset: CheckReset::new(text),
             check_statement: CheckStatement::new(text),
@@ -53,6 +58,7 @@ impl<'a> Pass1Handlers<'a> {
         vec![
             &mut self.check_attribute as &mut dyn Handler,
             &mut self.check_direction as &mut dyn Handler,
+            &mut self.check_identifier as &mut dyn Handler,
             &mut self.check_number as &mut dyn Handler,
             &mut self.check_reset as &mut dyn Handler,
             &mut self.check_statement as &mut dyn Handler,
@@ -65,6 +71,7 @@ impl<'a> Pass1Handlers<'a> {
         let mut ret = Vec::new();
         ret.append(&mut self.check_attribute.errors);
         ret.append(&mut self.check_direction.errors);
+        ret.append(&mut self.check_identifier.errors);
         ret.append(&mut self.check_number.errors);
         ret.append(&mut self.check_reset.errors);
         ret.append(&mut self.check_statement.errors);
@@ -84,7 +91,7 @@ pub struct Pass2Handlers<'a> {
 }
 
 impl<'a> Pass2Handlers<'a> {
-    pub fn new(text: &'a str) -> Self {
+    pub fn new(text: &'a str, _lint_opt: &'a Lint) -> Self {
         Self {
             check_attribute: CheckAttribute::new(text),
             check_enum: CheckEnum::new(text),
