@@ -196,11 +196,18 @@ If you have Rust development environment, you can use <code>cargo</code> instead
 <pre><code>cargo install veryl veryl-ls
 </code></pre>
 <h2 id="editor-integration"><a class="header" href="#editor-integration">Editor integration</a></h2>
-<p><a href="https://azure.microsoft.com/ja-jp/products/visual-studio-code">VSCode</a> and <a href="https://github.com/vim/vim">vim</a>/<a href="https://neovim.io">neovim</a> are supported officially.</p>
-<ul>
-<li><a href="https://github.com/dalance/veryl.vim">vim/neovim plugin</a></li>
-<li><a href="https://marketplace.visualstudio.com/items?itemName=dalance.vscode-veryl">VSCode plugin</a></li>
-</ul>
+<p><a href="https://azure.microsoft.com/ja-jp/products/visual-studio-code">Visual Studio Code</a> and <a href="https://github.com/vim/vim">Vim</a> / <a href="https://neovim.io">Neovim</a> are supported officially.</p>
+<h3 id="visual-studio-code"><a class="header" href="#visual-studio-code">Visual Studio Code</a></h3>
+<p>For Visual Studio Code, Veryl extension is provided.
+The extension provides file type detection, syntex highlight and language server integration.
+You can install it by searching “Veryl” in extension panel or the following URL.</p>
+<p><a href="https://marketplace.visualstudio.com/items?itemName=dalance.vscode-veryl">Veryl extension for Visual Studio Code</a></p>
+<h3 id="vim--neovim"><a class="header" href="#vim--neovim">Vim / Neovim</a></h3>
+<p>For Vim / Neovim, Veryl plugin is provided.
+The plugin provides file type detection, syntex highlight.
+There are some instructions for plugin installation and language server integration in the following URL.</p>
+<p><a href="https://github.com/dalance/veryl.vim">Vim / Neovim plugin</a></p>
+<h3 id="other-editors"><a class="header" href="#other-editors">Other Editors</a></h3>
 <p>Veryl provides language server. So other editors supporting language server (ex. Emacs) can use it.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="hello-world"><a class="header" href="#hello-world">Hello, World!</a></h1>
 <h2 id="create-project"><a class="header" href="#create-project">Create Project</a></h2>
@@ -780,6 +787,7 @@ var var_d: u32          ;
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="package-1"><a class="header" href="#package-1">Package</a></h1>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="development-environment"><a class="header" href="#development-environment">Development Environment</a></h1>
+<p>In this chapter, we’ll discuss about development environment including project configuration and development tools.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="project-configuration"><a class="header" href="#project-configuration">Project Configuration</a></h1>
 <ul>
 <li><a href="05_development_environment/01_project_configuration.html#the-project-section"><code>[project]</code></a> — Defines a project.
@@ -801,11 +809,7 @@ var var_d: u32          ;
 <li><a href="05_development_environment/01_project_configuration.html#the-implicit_parameter_types-field"><code>implicit_parameter_types</code></a> — Whether implicit parameter type is enabled.</li>
 </ul>
 </li>
-<li><a href="05_development_environment/01_project_configuration.html#the-format-section"><code>[format]</code></a> — Format settings.
-<ul>
-<li><a href="05_development_environment/01_project_configuration.html#the-indent_width-field"><code>indent_width</code></a> — Indent width by space.</li>
-</ul>
-</li>
+<li><a href="05_development_environment/01_project_configuration.html#the-format-section"><code>[format]</code></a> — Format settings.</li>
 <li><a href="05_development_environment/01_project_configuration.html#the-lint-section"><code>[lint]</code></a> — Lint settings.</li>
 <li><a href="05_development_environment/01_project_configuration.html#the-dependencies-section"><code>[dependencies]</code></a> — Library dependencies.</li>
 </ul>
@@ -890,13 +894,8 @@ If you want to elide <code>string</code>, you can specify like below:</p>
 implicit_parameter_types = [&quot;string&quot;]
 </code></pre>
 <h2 id="the-format-section"><a class="header" href="#the-format-section">The <code>[format]</code> section</a></h2>
-<p>The <code>[format]</code> section contains the configurations of code formatter.</p>
-<h3 id="the-indent_width-field"><a class="header" href="#the-indent_width-field">The <code>indent_width</code> field</a></h3>
-<p>The <code>indent_width</code> field specifies the width of indent.
-Veryl formatter will insert indent by <code>indent_width</code> width spaces.</p>
-<pre><code class="language-toml">[format]
-indent_width = 4
-</code></pre>
+<p>The <code>[format]</code> section contains the configurations of code formatter.
+Available configurations is <a href="05_development_environment/./04_formatter.html">here</a>.</p>
 <h2 id="the-lint-section"><a class="header" href="#the-lint-section">The <code>[lint]</code> section</a></h2>
 <p>The <code>[lint]</code> section contains the configurations of linter.
 Available configurations is <a href="05_development_environment/./05_linter.html">here</a>.</p>
@@ -912,8 +911,113 @@ veryl_sample4 = {git = &quot;https://github.com/dalance/veryl_sample&quot;, bran
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="dependencies"><a class="header" href="#dependencies">Dependencies</a></h1>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="directory-layout"><a class="header" href="#directory-layout">Directory Layout</a></h1>
+<p>Veryl supports arbitrary directory layout.
+This is because the optimal directory layout for an independent project and an integrated project within other projects is different.</p>
+<p>In this section, we suggest some directory layout patterns.</p>
+<h2 id="single-source-directory"><a class="header" href="#single-source-directory">Single source directory</a></h2>
+<p>This pattern contains all sources in <code>src</code> directory.
+In <code>src</code>, you can configure arbitrary sub directories.</p>
+<pre><code>$ tree
+.
+|-- src
+|   |-- module_a.vl
+|   `-- module_b
+|       |-- module_b.vl
+|       `-- module_c.vl
+`-- Veryl.toml
+
+2 directories, 4 files
+</code></pre>
+<p>Veryl gathers all <code>*.vl</code> files and generates codes at the same directory as the source by default.
+You can show the behaviour explicitly by the following configuration.</p>
+<pre><code class="language-toml">[build]
+target = &quot;source&quot;
+</code></pre>
+<p>After <code>veryl build</code>, the directory structure will become below:</p>
+<pre><code>$ tree
+.
+|-- dependencies
+|-- prj.f
+|-- src
+|   |-- module_a.sv
+|   |-- module_a.vl
+|   `-- module_b
+|       |-- module_b.sv
+|       |-- module_b.vl
+|       |-- module_c.sv
+|       `-- module_c.vl
+`-- Veryl.toml
+
+3 directories, 8 files
+</code></pre>
+<h2 id="single-source-and-target-directory"><a class="header" href="#single-source-and-target-directory">Single source and target directory</a></h2>
+<p>If you want to place the generated codes into a directory, you can use <code>target</code> configure in <code>[build]</code> section of <code>Veryl.toml</code>.</p>
+<pre><code class="language-toml">[build]
+target = {type = &quot;directory&quot;, path = &quot;target&quot;}
+</code></pre>
+<p>The directory layout of this configure will become below:</p>
+<pre><code>$ tree
+.
+|-- dependencies
+|-- prj.f
+|-- src
+|   |-- module_a.vl
+|   `-- module_b
+|       |-- module_b.vl
+|       `-- module_c.vl
+|-- target
+|   |-- module_a.sv
+|   |-- module_b.sv
+|   `-- module_c.sv
+`-- Veryl.toml
+
+4 directories, 8 files
+</code></pre>
+<h2 id="multi-source-directory"><a class="header" href="#multi-source-directory">Multi source directory</a></h2>
+<p>If you want to add a veryl project to the existing SystemVerilog project, you can choose the following structure.</p>
+<pre><code>$ tree
+.
+|-- dependencies
+|-- module_a
+|   |-- module_a.sv
+|   `-- module_a.vl
+|-- module_b
+|   |-- module_b.sv
+|   |-- module_b.vl
+|   |-- module_c.sv
+|   `-- module_c.vl
+|-- prj.f
+|-- sv_module_x
+|   `-- sv_module_x.sv
+|-- sv_module_y
+|   `-- sv_module_y.sv
+`-- Veryl.toml
+
+5 directories, 10 files
+</code></pre>
+<p>The generated <code>prj.f</code> lists all generated files. So you can use it along with the existing SystemVerilog filelists.</p>
+<h2 id="about-gitignore"><a class="header" href="#about-gitignore">About <code>.gitignore</code></a></h2>
+<p>Veryl doesn’t provide the default <code>.gitignore</code>.
+This is because which files should be ignored is different by each projects.</p>
+<p>The candidates of <code>.gitignore</code> is below:</p>
+<ul>
+<li><code>dependencies/</code></li>
+<li><code>target/</code></li>
+<li><code>*.sv</code></li>
+<li><code>*.f</code></li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="formatter"><a class="header" href="#formatter">Formatter</a></h1>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="linter"><a class="header" href="#linter">Linter</a></h1>
+<p>Source code can be formatted by <code>veryl fmt</code> command.
+Alternatively, language server support formatting through <code>textDocument/formatting</code> request.</p>
+<p>The available configurations are below.
+These can be specified in <code>[format]</code> section of <code>Veryl.toml</code>.</p>
+<pre><code class="language-toml">[format]
+indent_width = 4
+</code></pre>
+<div class="table-wrapper"><table><thead><tr><th>Configuration</th><th>Value</th><th>Description</th></tr></thead><tbody>
+<tr><td>indent_width</td><td>integer</td><td>indent width by space</td></tr>
+</tbody></table>
+</div><div style="break-before: page; page-break-before: always;"></div><h1 id="linter"><a class="header" href="#linter">Linter</a></h1>
 <p>Lint check is executed at <code>veryl check</code> or <code>veryl build</code>.
 Alternatively, language server checks lint in real time.</p>
 <p>The available configurations are below.
@@ -1005,6 +1109,8 @@ case_enum = &quot;snake&quot;
 </div>
 </div>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="language-server"><a class="header" href="#language-server">Language Server</a></h1>
+<p><code>veryl-ls</code> is a language server binary.
+If you want to use it, editor configuration or plugin to use it is required.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="appendix"><a class="header" href="#appendix">Appendix</a></h1>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="formal-syntax"><a class="header" href="#formal-syntax">Formal Syntax</a></h1>
 <p>Veryl’s parser is based on parser generator <a href="https://github.com/jsinger67/parol">parol</a>.

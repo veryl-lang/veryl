@@ -146,7 +146,17 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="formatter"><a class="header" href="#formatter">Formatter</a></h1>
-
+<p>Source code can be formatted by <code>veryl fmt</code> command.
+Alternatively, language server support formatting through <code>textDocument/formatting</code> request.</p>
+<p>The available configurations are below.
+These can be specified in <code>[format]</code> section of <code>Veryl.toml</code>.</p>
+<pre><code class="language-toml">[format]
+indent_width = 4
+</code></pre>
+<div class="table-wrapper"><table><thead><tr><th>Configuration</th><th>Value</th><th>Description</th></tr></thead><tbody>
+<tr><td>indent_width</td><td>integer</td><td>indent width by space</td></tr>
+</tbody></table>
+</div>
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
