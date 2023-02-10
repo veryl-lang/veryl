@@ -17,9 +17,24 @@ cargo install veryl veryl-ls
 
 ## Editor integration
 
-[VSCode](https://azure.microsoft.com/ja-jp/products/visual-studio-code) and [vim](https://github.com/vim/vim)/[neovim](https://neovim.io) are supported officially.
+[Visual Studio Code](https://azure.microsoft.com/ja-jp/products/visual-studio-code) and [Vim](https://github.com/vim/vim) / [Neovim](https://neovim.io) are supported officially.
 
-* [vim/neovim plugin](https://github.com/dalance/veryl.vim)
-* [VSCode plugin](https://marketplace.visualstudio.com/items?itemName=dalance.vscode-veryl)
+### Visual Studio Code
+
+For Visual Studio Code, Veryl extension is provided.
+The extension provides file type detection, syntex highlight and language server integration.
+You can install it by searching "Veryl" in extension panel or the following URL.
+
+[Veryl extension for Visual Studio Code](https://marketplace.visualstudio.com/items?itemName=dalance.vscode-veryl)
+
+### Vim / Neovim
+
+For Vim / Neovim, Veryl plugin is provided.
+The plugin provides file type detection, syntex highlight.
+There are some instructions for plugin installation and language server integration in the following URL.
+
+[Vim / Neovim plugin](https://github.com/dalance/veryl.vim)
+
+### Other Editors
 
 Veryl provides language server. So other editors supporting language server (ex. Emacs) can use it.

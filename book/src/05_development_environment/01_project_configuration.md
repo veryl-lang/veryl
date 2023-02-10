@@ -14,7 +14,6 @@
   * [`target`](01_project_configuration.md#the-target-field) --- The way of output.
   * [`implicit_parameter_types`](01_project_configuration.md#the-implicit_parameter_types-field) --- Whether implicit parameter type is enabled.
 * [`[format]`](01_project_configuration.md#the-format-section) --- Format settings.
-  * [`indent_width`](01_project_configuration.md#the-indent_width-field) --- Indent width by space.
 * [`[lint]`](01_project_configuration.md#the-lint-section) --- Lint settings.
 * [`[dependencies]`](01_project_configuration.md#the-dependencies-section) --- Library dependencies.
 
@@ -135,16 +134,7 @@ implicit_parameter_types = ["string"]
 ## The `[format]` section
 
 The `[format]` section contains the configurations of code formatter.
-
-### The `indent_width` field
-
-The `indent_width` field specifies the width of indent.
-Veryl formatter will insert indent by `indent_width` width spaces.
-
-```toml
-[format]
-indent_width = 4
-```
+Available configurations is [here](./04_formatter.md).
 
 ## The `[lint]` section
 
