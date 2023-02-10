@@ -1,9 +1,17 @@
 use parol::{build::Builder, ParolErrorReporter};
 use parol_runtime::Report;
+use std::env;
 use std::process;
 use std::time::Instant;
 
 fn main() {
+    // Skip in GitHub Actions
+    if let Ok(x) = env::var("GITHUB_ACTIONS") {
+        if x == "true" {
+            return;
+        }
+    }
+
     let now = Instant::now();
 
     // CLI equivalent is:
