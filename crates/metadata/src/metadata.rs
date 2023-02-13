@@ -9,6 +9,7 @@ use crate::MetadataError;
 use directories::ProjectDirs;
 use log::{debug, info};
 use regex::Regex;
+use semver::{Comparator, Version};
 use serde::{Deserialize, Serialize};
 use spdx::Expression;
 use std::collections::{HashMap, HashSet};
@@ -213,12 +214,21 @@ impl Metadata {
 
                 debug!("Found dependency ({})", path.to_string_lossy());
 
-                if let Some(ref rev) = dep.rev {
-                    path.set_extension(rev);
+                let mut rev = None;
+
+                if let Some(ref r) = dep.rev {
+                    path.set_extension(format!("rev_{r}"));
+                    rev = Some(r.clone());
                 } else if let Some(ref tag) = dep.tag {
-                    path.set_extension(tag);
+                    path.set_extension(format!("tag_{tag}"));
                 } else if let Some(ref branch) = dep.branch {
-                    path.set_extension(branch);
+                    path.set_extension(format!("branch_{branch}"));
+                } else if let Some(ref version) = dep.version {
+                    let release = Self::get_release(git, &path, version, update)?;
+                    rev = Some(release.revision.clone());
+                    path.set_extension(format!("{}", release.version));
+                } else {
+                    return Err(MetadataError::GitSpec(git.clone()));
                 }
 
                 let parent = path.parent().unwrap();
@@ -229,7 +239,7 @@ impl Metadata {
                 let git = Git::clone(
                     git,
                     &path,
-                    dep.rev.as_deref(),
+                    rev.as_deref(),
                     dep.tag.as_deref(),
                     dep.branch.as_deref(),
                 )?;
@@ -267,6 +277,44 @@ impl Metadata {
         }
 
         Ok(ret)
+    }
+
+    fn get_release(
+        url: &Url,
+        path: &Path,
+        version: &Version,
+        update: bool,
+    ) -> Result<Release, MetadataError> {
+        let mut path = path.to_path_buf();
+        path.set_extension("pub");
+
+        let parent = path.parent().unwrap();
+        if !parent.exists() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let git = Git::clone(url, &path, None, None, None)?;
+        if update {
+            git.fetch()?;
+        }
+        git.checkout()?;
+
+        let toml = path.join("Veryl.pub");
+        let mut pubdata = Pubdata::load(&toml)?;
+
+        pubdata.releases.sort_by(|a, b| b.version.cmp(&a.version));
+        let version_req = Comparator::parse(&format!("^{version}")).unwrap();
+
+        for release in &pubdata.releases {
+            if version_req.matches(&release.version) {
+                return Ok(release.clone());
+            }
+        }
+
+        Err(MetadataError::VersionNotFound {
+            url: url.clone(),
+            version: version.to_string(),
+        })
     }
 
     pub fn paths<T: AsRef<Path>>(
@@ -338,6 +386,7 @@ impl FromStr for Metadata {
 #[serde(deny_unknown_fields)]
 pub struct Dependency {
     pub git: Option<Url>,
+    pub version: Option<Version>,
     pub rev: Option<String>,
     pub tag: Option<String>,
     pub branch: Option<String>,

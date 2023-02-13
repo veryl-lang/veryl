@@ -2,6 +2,7 @@ use miette::{self, Diagnostic};
 use semver::Version;
 use std::path::PathBuf;
 use thiserror::Error;
+use url::Url;
 
 #[derive(Error, Diagnostic, Debug)]
 pub enum MetadataError {
@@ -54,4 +55,12 @@ pub enum MetadataError {
     #[diagnostic(code(MetadataError::Toml), help(""))]
     #[error("toml serialization error")]
     TomlSer(#[from] toml::ser::Error),
+
+    #[diagnostic(code(MetadataError::VersionNotFound), help(""))]
+    #[error("{version} @ {url} is not found")]
+    VersionNotFound { url: Url, version: String },
+
+    #[diagnostic(code(MetadataError::GitSpec), help(""))]
+    #[error("no version/rev/tag/branch specification of {0}")]
+    GitSpec(Url),
 }

@@ -1,6 +1,7 @@
 use crate::MetadataError;
 use semver::Version;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use std::str::FromStr;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -14,6 +15,16 @@ pub struct Pubdata {
 pub struct Release {
     pub version: Version,
     pub revision: String,
+}
+
+impl Pubdata {
+    pub fn load<T: AsRef<Path>>(path: T) -> Result<Self, MetadataError> {
+        let path = path.as_ref().canonicalize()?;
+        let text = std::fs::read_to_string(path)?;
+        let pubadata: Pubdata = Self::from_str(&text)?;
+
+        Ok(pubadata)
+    }
 }
 
 impl FromStr for Pubdata {

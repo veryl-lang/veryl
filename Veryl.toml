@@ -13,7 +13,7 @@ target        = {type = "directory", path = "testcases/sv"}
 indent_width = 4
 
 [dependencies]
-veryl_sample1 = {git = "https://github.com/dalance/veryl_sample"}
+veryl_sample1 = {git = "https://github.com/dalance/veryl_sample", version = "0.1.0"}
 veryl_sample2 = {git = "https://github.com/dalance/veryl_sample", rev = "9e9a30a"}
 veryl_sample3 = {git = "https://github.com/dalance/veryl_sample", tag = "v0.4"}
 veryl_sample4 = {git = "https://github.com/dalance/veryl_sample", branch = "branch"}
