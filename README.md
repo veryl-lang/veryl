@@ -85,11 +85,17 @@ module ModuleA #(
 
 ## Installation
 
-### Download binary
+### Requirement
+
+Veryl uses `git` command internally.
+
+### Instruction
+
+#### Download binary
 
 Download from [release page](https://github.com/dalance/veryl/releases/latest), and extract to the directory in PATH.
 
-### Cargo
+#### Cargo
 
 You can install with [cargo](https://crates.io/crates/veryl).
 
