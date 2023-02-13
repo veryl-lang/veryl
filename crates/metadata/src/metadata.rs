@@ -5,6 +5,7 @@ use crate::lint::Lint;
 use crate::project::Project;
 use crate::pubdata::Pubdata;
 use crate::pubdata::Release;
+use crate::publish::Publish;
 use crate::MetadataError;
 use directories::ProjectDirs;
 use log::{debug, info};
@@ -45,6 +46,8 @@ pub struct Metadata {
     pub format: Format,
     #[serde(default)]
     pub lint: Lint,
+    #[serde(default)]
+    pub publish: Publish,
     #[serde(default)]
     pub dependencies: HashMap<String, Dependency>,
     #[serde(skip)]
@@ -91,15 +94,6 @@ impl Metadata {
         Ok(metadata)
     }
 
-    pub fn save_pubdata(&self) -> Result<(), MetadataError> {
-        let text = toml::to_string(&self.pubdata)?;
-        let mut file = File::create(&self.pubdata_path)?;
-        write!(file, "{text}")?;
-        file.flush()?;
-        info!("Writing metadata ({})", self.pubdata_path.to_string_lossy());
-        Ok(())
-    }
-
     pub fn publish(&mut self) -> Result<(), MetadataError> {
         let prj_path = self.metadata_path.parent().unwrap();
         if !Git::is_clean(prj_path)? {
@@ -123,6 +117,21 @@ impl Metadata {
 
         self.pubdata.releases.push(release);
 
+        let text = toml::to_string(&self.pubdata)?;
+        let mut file = File::create(&self.pubdata_path)?;
+        write!(file, "{text}")?;
+        file.flush()?;
+        info!("Writing metadata ({})", self.pubdata_path.to_string_lossy());
+
+        if self.publish.publish_commit {
+            Git::add(&self.pubdata_path, prj_path)?;
+            Git::commit(&self.publish.publish_commit_message, prj_path)?;
+            info!(
+                "Committing metadata ({})",
+                self.pubdata_path.to_string_lossy()
+            );
+        }
+
         Ok(())
     }
 
@@ -139,7 +148,9 @@ impl Metadata {
         Ok(())
     }
 
-    pub fn bump_version(&self, kind: BumpKind) -> Result<(), MetadataError> {
+    pub fn bump_version(&mut self, kind: BumpKind) -> Result<(), MetadataError> {
+        let prj_path = self.metadata_path.parent().unwrap();
+
         let mut bumped_version = self.project.version.clone();
         match kind {
             BumpKind::Major => {
@@ -158,6 +169,8 @@ impl Metadata {
             self.project.version, bumped_version
         );
 
+        self.project.version = bumped_version.clone();
+
         let toml = fs::read_to_string(&self.metadata_path)?;
         let re = Regex::new(r##"version\s+=\s+"([^"]*)""##).unwrap();
         let caps = re
@@ -170,6 +183,15 @@ impl Metadata {
             "Updating version field ({})",
             self.metadata_path.to_string_lossy()
         );
+
+        if self.publish.bump_commit {
+            Git::add(&self.metadata_path, prj_path)?;
+            Git::commit(&self.publish.bump_commit_message, prj_path)?;
+            info!(
+                "Committing metadata ({})",
+                self.metadata_path.to_string_lossy()
+            );
+        }
 
         Ok(())
     }

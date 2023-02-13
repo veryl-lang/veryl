@@ -15,6 +15,7 @@
   * [`implicit_parameter_types`](01_project_configuration.md#the-implicit_parameter_types-field) --- Whether implicit parameter type is enabled.
 * [`[format]`](01_project_configuration.md#the-format-section) --- Format settings.
 * [`[lint]`](01_project_configuration.md#the-lint-section) --- Lint settings.
+* [`[publish]`](01_project_configuration.md#the-publish-section) --- Publish settings.
 * [`[dependencies]`](01_project_configuration.md#the-dependencies-section) --- Library dependencies.
 
 ## The `[project]` section
@@ -140,6 +141,11 @@ Available configurations is [here](./04_formatter.md).
 
 The `[lint]` section contains the configurations of linter.
 Available configurations is [here](./05_linter.md).
+
+## The `[publish]` section
+
+The `[publish]` section contains the configurations of publishing.
+Available configurations is [here](./03_publish_project.md).
 
 ## The `[dependencies]` section
 

@@ -148,4 +148,35 @@ impl Git {
 
         Ok(output.stdout.is_empty())
     }
+
+    pub fn add(file: &Path, path: &Path) -> Result<(), MetadataError> {
+        let output = Command::new(GIT_COMMAND)
+            .arg("add")
+            .arg(file)
+            .current_dir(path)
+            .output()?;
+        if !output.status.success() {
+            let context = String::from_utf8_lossy(&output.stderr).to_string();
+            let msg = format!("failed to add: {}", path.to_string_lossy());
+            return Err(GitCommandError { msg, context }.into());
+        }
+
+        Ok(())
+    }
+
+    pub fn commit(msg: &str, path: &Path) -> Result<(), MetadataError> {
+        let output = Command::new(GIT_COMMAND)
+            .arg("commit")
+            .arg("-m")
+            .arg(msg)
+            .current_dir(path)
+            .output()?;
+        if !output.status.success() {
+            let context = String::from_utf8_lossy(&output.stderr).to_string();
+            let msg = format!("failed to commit: {}", path.to_string_lossy());
+            return Err(GitCommandError { msg, context }.into());
+        }
+
+        Ok(())
+    }
 }

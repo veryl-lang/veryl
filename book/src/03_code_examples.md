@@ -19,8 +19,5 @@ module ModuleA (
 }
 ```
 
-Some examples in the book have play button "▶" which will be appeared when mouse cursor is hovered at the code.
-If you click the button, the transpiled SystemVerilog code will appear.
-
 A source code of Veryl has some `module`, `interface` and `package` like SystemVerilog.
 In this chapter, we'll show the some example source codes of them.

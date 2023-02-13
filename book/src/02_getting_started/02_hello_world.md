@@ -54,6 +54,9 @@ $ tree
 1 directory, 2 files
 ```
 
+> Note: Some source codes in the book have play button "▶" which will be appeared when mouse cursor is hovered at the code.
+> If you click the button, the transpiled SystemVerilog code will appear. Please try to click the button of `module ModuleA` code.
+
 ## Build Code
 
 You can generate a SystemVerilog code by `veryl build`.
