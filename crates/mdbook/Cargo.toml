@@ -16,7 +16,7 @@ edition               = "2021"
 anyhow         = {workspace = true}
 clap           = {workspace = true}
 line-col       = "0.2.1"
-mdbook         = "0.4.26"
+mdbook         = "0.4.27"
 pulldown-cmark = "0.9.2"
 regex          = {workspace = true}
 semver         = {workspace = true}
