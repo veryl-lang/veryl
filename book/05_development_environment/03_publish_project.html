@@ -157,7 +157,8 @@ Publising means to associate a version with a git revision.</p>
 version = &quot;0.2.1&quot;
 revision = &quot;297bc6b24c5ceca9e648c3ea5e01011c67d7efe7&quot;
 </code></pre>
-<p>After generating <code>Veryl.pub</code>, publishing sequence is completed by git add, commit and push.</p>
+<p>After generating <code>Veryl.pub</code>, publishing sequence is completed by git add, commit and push.
+The git branch to be committed must be the default branch because Veryl search <code>Veryl.pub</code> in the default branch.</p>
 <pre><code>$ git add Veryl.pub
 $ git commit -m &quot;Publish&quot;
 $ git push
