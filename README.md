@@ -85,28 +85,7 @@ module ModuleA #(
 
 ## Installation
 
-### Requirement
-
-Veryl uses `git` command internally.
-
-### Instruction
-
-#### Download binary
-
-Download from [release page](https://github.com/dalance/veryl/releases/latest), and extract to the directory in PATH.
-
-#### Cargo
-
-You can install with [cargo](https://crates.io/crates/veryl).
-
-```
-cargo install veryl veryl-ls
-```
-
-### Editor integration
-
-* [vim/neovim plugin](https://github.com/dalance/veryl.vim)
-* [VSCode plugin](https://marketplace.visualstudio.com/items?itemName=dalance.vscode-veryl)
+See [Document](https://dalance.github.io/veryl/book/02_getting_started/01_installation.html).
 
 ## Usage
 
@@ -127,27 +106,7 @@ veryl check
 veryl build
 ```
 
-### Package Configuration
-
-```toml
-[project]
-name = "name"      # project name
-version = "0.1.0"  # project version (semver is recommended)
-
-[build]
-clock_type    = "posedge"    # default clock type [posedge|negedge]
-reset_type    = "async_low"  # default reset type [async_low|async_high|sync_low|sync_high]
-filelist_type = "absolute"   # filelist type [absolute|relative|flgen]
-
-# output target files in the same location as source
-target     = {type = "source"}
-
-# output target files in the specified directory
-#target     = {type = "directory", path = "testcases/sv"}
-
-[format]
-indent_width = 4  # indent width
-```
+For detailed information, see [Document](https://dalance.github.io/veryl/book).
 
 ## License
 

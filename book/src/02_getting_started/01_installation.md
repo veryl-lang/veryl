@@ -3,11 +3,17 @@
 You can install Veryl by downloading binary.
 If you have Rust development environment, you can use `cargo` instead of it.
 
-## Download binary
+## Requirement
+
+Veryl uses `git` command internally. Please confirm `git` can be launched.
+
+## Choose a way of installation
+
+### Download binary
 
 Download from [release page](https://github.com/dalance/veryl/releases/latest), and extract to the directory in PATH.
 
-## Cargo
+### Cargo
 
 You can install with [cargo](https://crates.io/crates/veryl).
 
