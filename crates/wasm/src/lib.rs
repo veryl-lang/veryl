@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use veryl_analyzer::{namespace_table, symbol_table, Analyzer};
 use veryl_emitter::Emitter;
 use veryl_formatter::Formatter;
-use veryl_metadata::{Build, Format, Lint, Metadata, Project};
+use veryl_metadata::{Build, Format, Lint, Metadata, Project, Pubdata};
 use veryl_parser::{resource_table, Parser};
 use wasm_bindgen::prelude::*;
 
@@ -60,6 +60,8 @@ fn metadata() -> Metadata {
         lint: Lint::default(),
         dependencies: HashMap::new(),
         metadata_path: "".into(),
+        pubdata_path: "".into(),
+        pubdata: Pubdata::default(),
     }
 }
 

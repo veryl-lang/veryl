@@ -3,6 +3,7 @@
 ## [Unreleased](https://github.com/dalance/veryl/compare/v0.3.4...Unreleased) - ReleaseDate
 
 * [Added] lint for naming convention [#116](https://github.com/dalance/veryl/issues/116)
+* [Added] `veryl publish` command
 
 ## [v0.3.4](https://github.com/dalance/veryl/compare/v0.3.3...v0.3.4) - 2023-02-08
 

@@ -3,14 +3,18 @@ use crate::format::Format;
 use crate::git::Git;
 use crate::lint::Lint;
 use crate::project::Project;
+use crate::pubdata::Pubdata;
+use crate::pubdata::Release;
 use crate::MetadataError;
 use directories::ProjectDirs;
-use log::debug;
+use log::{debug, info};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use spdx::Expression;
 use std::collections::{HashMap, HashSet};
 use std::env;
+use std::fs::{self, File};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use url::Url;
@@ -21,6 +25,13 @@ pub struct PathPair {
     pub prj: Vec<String>,
     pub src: PathBuf,
     pub dst: PathBuf,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum BumpKind {
+    Major,
+    Minor,
+    Patch,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -37,6 +48,10 @@ pub struct Metadata {
     pub dependencies: HashMap<String, Dependency>,
     #[serde(skip)]
     pub metadata_path: PathBuf,
+    #[serde(skip)]
+    pub pubdata_path: PathBuf,
+    #[serde(skip)]
+    pub pubdata: Pubdata,
 }
 
 impl Metadata {
@@ -59,13 +74,55 @@ impl Metadata {
         let path = path.as_ref().canonicalize()?;
         let text = std::fs::read_to_string(&path)?;
         let mut metadata: Metadata = Self::from_str(&text)?;
-        metadata.metadata_path = path;
+        metadata.metadata_path = path.clone();
+        metadata.pubdata_path = path.with_file_name("Veryl.pub");
         metadata.check()?;
+
+        if metadata.pubdata_path.exists() {
+            let text = std::fs::read_to_string(&metadata.pubdata_path)?;
+            metadata.pubdata = Pubdata::from_str(&text)?;
+        }
+
         debug!(
             "Loaded metadata ({})",
             metadata.metadata_path.to_string_lossy()
         );
         Ok(metadata)
+    }
+
+    pub fn save_pubdata(&self) -> Result<(), MetadataError> {
+        let text = toml::to_string(&self.pubdata)?;
+        let mut file = File::create(&self.pubdata_path)?;
+        write!(file, "{text}")?;
+        file.flush()?;
+        info!("Writing metadata ({})", self.pubdata_path.to_string_lossy());
+        Ok(())
+    }
+
+    pub fn publish(&mut self) -> Result<(), MetadataError> {
+        let prj_path = self.metadata_path.parent().unwrap();
+        if !Git::is_clean(prj_path)? {
+            return Err(MetadataError::ModifiedProject(prj_path.to_path_buf()));
+        }
+
+        for release in &self.pubdata.releases {
+            if release.version == self.project.version {
+                return Err(MetadataError::PublishedVersion(
+                    self.project.version.clone(),
+                ));
+            }
+        }
+
+        let version = self.project.version.clone();
+        let revision = Git::get_revision(prj_path)?;
+
+        info!("Publishing release ({} @ {})", version, revision);
+
+        let release = Release { version, revision };
+
+        self.pubdata.releases.push(release);
+
+        Ok(())
     }
 
     pub fn check(&self) -> Result<(), MetadataError> {
@@ -77,6 +134,41 @@ impl Metadata {
         if let Some(ref license) = self.project.license {
             let _ = Expression::parse(license)?;
         }
+
+        Ok(())
+    }
+
+    pub fn bump_version(&self, kind: BumpKind) -> Result<(), MetadataError> {
+        let mut bumped_version = self.project.version.clone();
+        match kind {
+            BumpKind::Major => {
+                bumped_version.major += 1;
+                bumped_version.minor = 0;
+                bumped_version.patch = 0;
+            }
+            BumpKind::Minor => {
+                bumped_version.minor += 1;
+                bumped_version.patch = 0;
+            }
+            BumpKind::Patch => bumped_version.patch += 1,
+        }
+        info!(
+            "Bumping version ({} -> {})",
+            self.project.version, bumped_version
+        );
+
+        let toml = fs::read_to_string(&self.metadata_path)?;
+        let re = Regex::new(r##"version\s+=\s+"([^"]*)""##).unwrap();
+        let caps = re
+            .captures(&toml)
+            .expect("safely unwrap because metadata is valid");
+        let bumped_field = caps[0].replace(&caps[1], &bumped_version.to_string());
+        let bumped_toml = re.replace(&toml, bumped_field);
+        fs::write(&self.metadata_path, bumped_toml.as_bytes())?;
+        info!(
+            "Updating version field ({})",
+            self.metadata_path.to_string_lossy()
+        );
 
         Ok(())
     }

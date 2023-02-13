@@ -2,6 +2,7 @@ use crate::metadata_error::MetadataError;
 use log::info;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use thiserror::Error;
 use url::Url;
 
 pub struct Git {
@@ -9,6 +10,19 @@ pub struct Git {
     tag: Option<String>,
     branch: Option<String>,
     path: PathBuf,
+}
+
+#[derive(Error, Debug)]
+#[error("git operation failure: \"{msg}\"\n  {context}")]
+pub struct GitCommandError {
+    msg: String,
+    context: String,
+}
+
+impl From<GitCommandError> for MetadataError {
+    fn from(x: GitCommandError) -> MetadataError {
+        MetadataError::Git(Box::new(x))
+    }
 }
 
 #[cfg(windows)]
@@ -37,7 +51,7 @@ impl Git {
             if !output.status.success() {
                 let context = String::from_utf8_lossy(&output.stderr).to_string();
                 let msg = format!("failed to clone repository: {}", url.as_str());
-                return Err(MetadataError::Git { msg, context });
+                return Err(GitCommandError { msg, context }.into());
             }
             info!("Cloned repository ({})", url);
         }
@@ -61,7 +75,7 @@ impl Git {
                 "failed to fetch repository: {}",
                 self.path.to_string_lossy()
             );
-            return Err(MetadataError::Git { msg, context });
+            return Err(GitCommandError { msg, context }.into());
         }
 
         info!("Fetched repository ({})", self.path.to_string_lossy());
@@ -91,7 +105,7 @@ impl Git {
                 "failed to checkout repository: {}",
                 self.path.to_string_lossy()
             );
-            return Err(MetadataError::Git { msg, context });
+            return Err(GitCommandError { msg, context }.into());
         }
 
         info!(
@@ -101,5 +115,37 @@ impl Git {
         );
 
         Ok(())
+    }
+
+    pub fn get_revision(path: &Path) -> Result<String, MetadataError> {
+        let output = Command::new(GIT_COMMAND)
+            .arg("rev-parse")
+            .arg("HEAD")
+            .current_dir(path)
+            .output()?;
+        if !output.status.success() {
+            let context = String::from_utf8_lossy(&output.stderr).to_string();
+            let msg = format!("failed to get revision: {}", path.to_string_lossy());
+            return Err(GitCommandError { msg, context }.into());
+        }
+
+        let revision = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+        Ok(revision)
+    }
+
+    pub fn is_clean(path: &Path) -> Result<bool, MetadataError> {
+        let output = Command::new(GIT_COMMAND)
+            .arg("status")
+            .arg("-s")
+            .current_dir(path)
+            .output()?;
+        if !output.status.success() {
+            let context = String::from_utf8_lossy(&output.stderr).to_string();
+            let msg = format!("failed to get status: {}", path.to_string_lossy());
+            return Err(GitCommandError { msg, context }.into());
+        }
+
+        Ok(output.stdout.is_empty())
     }
 }

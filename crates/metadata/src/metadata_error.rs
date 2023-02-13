@@ -1,4 +1,6 @@
 use miette::{self, Diagnostic};
+use semver::Version;
+use std::path::PathBuf;
 use thiserror::Error;
 
 #[derive(Error, Diagnostic, Debug)]
@@ -24,8 +26,8 @@ pub enum MetadataError {
     StripPrefix(#[from] std::path::StripPrefixError),
 
     #[diagnostic(code(MetadataError::Git), help(""))]
-    #[error("git operation failure: \"{msg}\"\n  {context}")]
-    Git { msg: String, context: String },
+    #[error("git operation failure")]
+    Git(Box<dyn std::error::Error + Sync + Send>),
 
     #[diagnostic(
         code(MetadataError::InvalidProjectName),
@@ -40,4 +42,16 @@ pub enum MetadataError {
     )]
     #[error("license parse failed")]
     InvalidLicense(#[from] spdx::ParseError),
+
+    #[diagnostic(code(MetadataError::PublishedVersion), help("bump up version"))]
+    #[error("\"{0}\" is already published")]
+    PublishedVersion(Version),
+
+    #[diagnostic(code(MetadataError::ModifiedProject), help(""))]
+    #[error("There are modified files in {0}")]
+    ModifiedProject(PathBuf),
+
+    #[diagnostic(code(MetadataError::Toml), help(""))]
+    #[error("toml serialization error")]
+    TomlSer(#[from] toml::ser::Error),
 }

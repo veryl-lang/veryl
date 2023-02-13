@@ -15,6 +15,7 @@ mod cmd_fmt;
 mod cmd_init;
 mod cmd_metadata;
 mod cmd_new;
+mod cmd_publish;
 mod cmd_update;
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -45,6 +46,7 @@ enum Commands {
     Check(OptCheck),
     Build(OptBuild),
     Update(OptUpdate),
+    Publish(OptPublish),
     Metadata(OptMetadata),
     Dump(OptDump),
 }
@@ -90,6 +92,35 @@ pub struct OptBuild {
 /// Update dependencies
 #[derive(Args)]
 pub struct OptUpdate {}
+
+/// Publish the current project
+#[derive(Args)]
+pub struct OptPublish {
+    /// Bump version
+    #[arg(long)]
+    pub bump: Option<BumpKind>,
+}
+
+#[derive(Clone, Copy, Default, Debug, ValueEnum)]
+pub enum BumpKind {
+    /// Increment majoir version
+    Major,
+    /// Increment minor version
+    Minor,
+    /// Increment patch version
+    #[default]
+    Patch,
+}
+
+impl From<BumpKind> for veryl_metadata::BumpKind {
+    fn from(x: BumpKind) -> Self {
+        match x {
+            BumpKind::Major => veryl_metadata::BumpKind::Major,
+            BumpKind::Minor => veryl_metadata::BumpKind::Minor,
+            BumpKind::Patch => veryl_metadata::BumpKind::Patch,
+        }
+    }
+}
 
 /// Dump metadata of the current packege
 #[derive(Args)]
@@ -187,6 +218,7 @@ fn main() -> Result<ExitCode> {
         Commands::Check(x) => cmd_check::CmdCheck::new(x).exec(&metadata)?,
         Commands::Build(x) => cmd_build::CmdBuild::new(x).exec(&metadata)?,
         Commands::Update(x) => cmd_update::CmdUpdate::new(x).exec(&metadata)?,
+        Commands::Publish(x) => cmd_publish::CmdPublish::new(x).exec(&metadata)?,
         Commands::Metadata(x) => cmd_metadata::CmdMetadata::new(x).exec(&metadata)?,
         Commands::Dump(x) => cmd_dump::CmdDump::new(x).exec(&metadata)?,
     };
