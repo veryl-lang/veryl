@@ -18,6 +18,7 @@ revision = "297bc6b24c5ceca9e648c3ea5e01011c67d7efe7"
 ```
 
 After generating `Veryl.pub`, publishing sequence is completed by git add, commit and push.
+The git branch to be committed must be the default branch because Veryl search `Veryl.pub` in the default branch.
 
 ```
 $ git add Veryl.pub
