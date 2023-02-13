@@ -9,7 +9,7 @@ use crate::MetadataError;
 use directories::ProjectDirs;
 use log::{debug, info};
 use regex::Regex;
-use semver::{Comparator, Version};
+use semver::VersionReq;
 use serde::{Deserialize, Serialize};
 use spdx::Expression;
 use std::collections::{HashMap, HashSet};
@@ -282,7 +282,7 @@ impl Metadata {
     fn get_release(
         url: &Url,
         path: &Path,
-        version: &Version,
+        version_req: &VersionReq,
         update: bool,
     ) -> Result<Release, MetadataError> {
         let mut path = path.to_path_buf();
@@ -303,7 +303,6 @@ impl Metadata {
         let mut pubdata = Pubdata::load(&toml)?;
 
         pubdata.releases.sort_by(|a, b| b.version.cmp(&a.version));
-        let version_req = Comparator::parse(&format!("^{version}")).unwrap();
 
         for release in &pubdata.releases {
             if version_req.matches(&release.version) {
@@ -313,7 +312,7 @@ impl Metadata {
 
         Err(MetadataError::VersionNotFound {
             url: url.clone(),
-            version: version.to_string(),
+            version: version_req.to_string(),
         })
     }
 
@@ -386,7 +385,7 @@ impl FromStr for Metadata {
 #[serde(deny_unknown_fields)]
 pub struct Dependency {
     pub git: Option<Url>,
-    pub version: Option<Version>,
+    pub version: Option<VersionReq>,
     pub rev: Option<String>,
     pub tag: Option<String>,
     pub branch: Option<String>,
