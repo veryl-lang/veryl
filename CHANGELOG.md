@@ -1,6 +1,8 @@
 # Change Log
 
-## [Unreleased](https://github.com/dalance/veryl/compare/v0.3.4...Unreleased) - ReleaseDate
+## [Unreleased](https://github.com/dalance/veryl/compare/v0.4.0...Unreleased) - ReleaseDate
+
+## [v0.4.0](https://github.com/dalance/veryl/compare/v0.3.4...v0.4.0) - 2023-02-13
 
 * [Added] lint for naming convention [#116](https://github.com/dalance/veryl/issues/116)
 * [Added] `veryl publish` command
