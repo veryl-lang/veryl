@@ -32,6 +32,7 @@ jobs:
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           override: true
+      - uses: Swatinem/rust-cache@v2
       - name: Run tests
         uses: actions-rs/cargo@v1
         with:
@@ -49,6 +50,7 @@ jobs:
           override: true
           profile: minimal
           components: rustfmt
+      - uses: Swatinem/rust-cache@v2
       - name: Run rustfmt
         uses: actions-rs/cargo@v1
         with:
@@ -65,6 +67,7 @@ jobs:
           override: true
           profile: minimal
           components: clippy
+      - uses: Swatinem/rust-cache@v2
       - name: Run clippy
         uses: actions-rs/cargo@v1
         with:
