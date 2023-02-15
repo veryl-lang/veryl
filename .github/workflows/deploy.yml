@@ -13,6 +13,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
+      - uses: Swatinem/rust-cache@v2
       - uses: jetli/wasm-pack-action@v0.4.0
       - name: Build wasm
         run: wasm-pack build --target web -d playground/pkg --no-typescript
@@ -34,6 +35,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
+      - uses: Swatinem/rust-cache@v2
       - name: Setup mdBook
         uses: peaceiris/actions-mdbook@v1
         with:
