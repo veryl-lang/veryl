@@ -96,7 +96,8 @@ impl Metadata {
 
     pub fn publish(&mut self) -> Result<(), MetadataError> {
         let prj_path = self.metadata_path.parent().unwrap();
-        if !Git::is_clean(prj_path)? {
+        let git = Git::open(&prj_path)?;
+        if !git.is_clean()? {
             return Err(MetadataError::ModifiedProject(prj_path.to_path_buf()));
         }
 
@@ -109,7 +110,7 @@ impl Metadata {
         }
 
         let version = self.project.version.clone();
-        let revision = Git::get_revision(prj_path)?;
+        let revision = git.get_revision()?;
 
         info!("Publishing release ({} @ {})", version, revision);
 
@@ -124,8 +125,8 @@ impl Metadata {
         info!("Writing metadata ({})", self.pubdata_path.to_string_lossy());
 
         if self.publish.publish_commit {
-            Git::add(&self.pubdata_path, prj_path)?;
-            Git::commit(&self.publish.publish_commit_message, prj_path)?;
+            git.add(&self.pubdata_path)?;
+            git.commit(&self.publish.publish_commit_message)?;
             info!(
                 "Committing metadata ({})",
                 self.pubdata_path.to_string_lossy()
@@ -150,6 +151,7 @@ impl Metadata {
 
     pub fn bump_version(&mut self, kind: BumpKind) -> Result<(), MetadataError> {
         let prj_path = self.metadata_path.parent().unwrap();
+        let git = Git::open(&prj_path)?;
 
         let mut bumped_version = self.project.version.clone();
         match kind {
@@ -185,8 +187,8 @@ impl Metadata {
         );
 
         if self.publish.bump_commit {
-            Git::add(&self.metadata_path, prj_path)?;
-            Git::commit(&self.publish.bump_commit_message, prj_path)?;
+            git.add(&self.metadata_path)?;
+            git.commit(&self.publish.bump_commit_message)?;
             info!(
                 "Committing metadata ({})",
                 self.metadata_path.to_string_lossy()
@@ -226,74 +228,53 @@ impl Metadata {
 
         let mut ret = Vec::new();
         for (name, dep) in &self.dependencies {
-            if let Some(ref git) = dep.git {
-                let mut path = cache_dir.to_path_buf();
-                path.push("repository");
-                if let Some(host) = git.host_str() {
-                    path.push(host);
-                }
-                path.push(git.path().to_string().trim_start_matches('/'));
+            let mut path = cache_dir.to_path_buf();
+            path.push("repository");
+            if let Some(host) = dep.git.host_str() {
+                path.push(host);
+            }
+            path.push(dep.git.path().to_string().trim_start_matches('/'));
 
-                debug!("Found dependency ({})", path.to_string_lossy());
+            debug!("Found dependency ({})", path.to_string_lossy());
 
-                let mut rev = None;
+            let release = Self::get_release(&dep.git, &path, &dep.version, update)?;
+            let rev = Some(release.revision.clone());
+            path.set_extension(format!("{}", release.version));
 
-                if let Some(ref r) = dep.rev {
-                    path.set_extension(format!("rev_{r}"));
-                    rev = Some(r.clone());
-                } else if let Some(ref tag) = dep.tag {
-                    path.set_extension(format!("tag_{tag}"));
-                } else if let Some(ref branch) = dep.branch {
-                    path.set_extension(format!("branch_{branch}"));
-                } else if let Some(ref version) = dep.version {
-                    let release = Self::get_release(git, &path, version, update)?;
-                    rev = Some(release.revision.clone());
-                    path.set_extension(format!("{}", release.version));
-                } else {
-                    return Err(MetadataError::GitSpec(git.clone()));
-                }
+            let parent = path.parent().unwrap();
+            if !parent.exists() {
+                std::fs::create_dir_all(parent)?;
+            }
 
-                let parent = path.parent().unwrap();
-                if !parent.exists() {
-                    std::fs::create_dir_all(parent)?;
-                }
+            let git = Git::clone(&dep.git, &path)?;
+            if update {
+                git.fetch()?;
+            }
+            git.checkout(rev.as_deref())?;
 
-                let git = Git::clone(
-                    git,
-                    &path,
-                    rev.as_deref(),
-                    dep.tag.as_deref(),
-                    dep.branch.as_deref(),
-                )?;
-                if update {
-                    git.fetch()?;
-                }
-                git.checkout()?;
+            let mut prj: Vec<_> = base_prj.iter().map(|x| x.as_ref().to_string()).collect();
+            prj.push(name.clone());
 
-                let mut prj: Vec<_> = base_prj.iter().map(|x| x.as_ref().to_string()).collect();
-                prj.push(name.clone());
+            for src in &Self::gather_files_with_extension(&path, "vl")? {
+                let rel = src.strip_prefix(&path)?;
+                let mut dst = base_dst.join(name);
+                dst.push(rel);
+                dst.set_extension("sv");
+                ret.push(PathPair {
+                    prj: prj.clone(),
+                    src: src.to_path_buf(),
+                    dst,
+                });
+            }
 
-                for src in &Self::gather_files_with_extension(&path, "vl")? {
-                    let rel = src.strip_prefix(&path)?;
-                    let mut dst = base_dst.join(name);
-                    dst.push(rel);
-                    dst.set_extension("sv");
-                    ret.push(PathPair {
-                        prj: prj.clone(),
-                        src: src.to_path_buf(),
-                        dst,
-                    });
-                }
-
-                let toml = path.join("Veryl.toml");
-                if !tomls.contains(&toml) {
-                    let metadata = Metadata::load(&toml)?;
-                    tomls.insert(toml);
-                    let base_dst = base_dst.join(name);
-                    let deps = metadata.gather_dependencies(update, &prj, &base_dst, tomls)?;
-                    for dep in deps {
-                        ret.push(dep);
-                    }
+            let toml = path.join("Veryl.toml");
+            if !tomls.contains(&toml) {
+                let metadata = Metadata::load(&toml)?;
+                tomls.insert(toml);
+                let base_dst = base_dst.join(name);
+                let deps = metadata.gather_dependencies(update, &prj, &base_dst, tomls)?;
+                for dep in deps {
+                    ret.push(dep);
                 }
             }
         }
@@ -315,11 +296,11 @@ impl Metadata {
             std::fs::create_dir_all(parent)?;
         }
 
-        let git = Git::clone(url, &path, None, None, None)?;
+        let git = Git::clone(url, &path)?;
         if update {
             git.fetch()?;
         }
-        git.checkout()?;
+        git.checkout(None)?;
 
         let toml = path.join("Veryl.pub");
         let mut pubdata = Pubdata::load(&toml)?;
@@ -403,12 +384,9 @@ impl FromStr for Metadata {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Dependency {
-    pub git: Option<Url>,
-    pub version: Option<VersionReq>,
-    pub rev: Option<String>,
-    pub tag: Option<String>,
-    pub branch: Option<String>,
+    pub git: Url,
+    pub version: VersionReq,
 }

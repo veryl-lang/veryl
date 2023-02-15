@@ -30,9 +30,9 @@ fn create_metadata() -> (Metadata, TempDir) {
     let toml_path = tempdir.path().join("Veryl.toml");
     let mut file = File::create(&toml_path).unwrap();
     write!(file, "{}", TEST_TOML).unwrap();
-    Git::init(tempdir.path()).unwrap();
-    Git::add(&toml_path, tempdir.path()).unwrap();
-    Git::commit(&"Add Veryl.toml", tempdir.path()).unwrap();
+    let git = Git::init(tempdir.path()).unwrap();
+    git.add(&toml_path).unwrap();
+    git.commit(&"Add Veryl.toml").unwrap();
     (Metadata::load(&toml_path).unwrap(), tempdir)
 }
 
@@ -80,7 +80,8 @@ fn publish() {
         metadata.project.version
     );
     assert!(metadata.pubdata_path.exists());
-    assert!(!Git::is_clean(tempdir.path()).unwrap());
+    let git = Git::open(tempdir.path()).unwrap();
+    assert!(!git.is_clean().unwrap());
 }
 
 #[test]
@@ -95,7 +96,8 @@ fn publish_with_commit() {
         metadata.project.version
     );
     assert!(metadata.pubdata_path.exists());
-    assert!(Git::is_clean(tempdir.path()).unwrap());
+    let git = Git::open(tempdir.path()).unwrap();
+    assert!(git.is_clean().unwrap());
 }
 
 #[test]
@@ -111,7 +113,8 @@ fn bump_version() {
     metadata.bump_version(BumpKind::Patch).unwrap();
     assert_eq!(metadata.project.version, Version::parse("1.1.1").unwrap());
 
-    assert!(!Git::is_clean(tempdir.path()).unwrap());
+    let git = Git::open(tempdir.path()).unwrap();
+    assert!(!git.is_clean().unwrap());
 }
 
 #[test]
@@ -129,5 +132,6 @@ fn bump_version_with_commit() {
     metadata.bump_version(BumpKind::Patch).unwrap();
     assert_eq!(metadata.project.version, Version::parse("1.1.1").unwrap());
 
-    assert!(Git::is_clean(tempdir.path()).unwrap());
+    let git = Git::open(tempdir.path()).unwrap();
+    assert!(git.is_clean().unwrap());
 }

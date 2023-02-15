@@ -6,9 +6,6 @@ use thiserror::Error;
 use url::Url;
 
 pub struct Git {
-    rev: Option<String>,
-    tag: Option<String>,
-    branch: Option<String>,
     path: PathBuf,
 }
 
@@ -32,13 +29,30 @@ const GIT_COMMAND: &str = "git.exe";
 const GIT_COMMAND: &str = "git";
 
 impl Git {
-    pub fn clone(
-        url: &Url,
-        path: &Path,
-        rev: Option<&str>,
-        tag: Option<&str>,
-        branch: Option<&str>,
-    ) -> Result<Self, MetadataError> {
+    #[cfg(test)]
+    pub fn init(path: &Path) -> Result<Self, MetadataError> {
+        let output = Command::new(GIT_COMMAND)
+            .arg("init")
+            .current_dir(path)
+            .output()?;
+        if !output.status.success() {
+            let context = String::from_utf8_lossy(&output.stderr).to_string();
+            let msg = format!("failed to init: {}", path.to_string_lossy());
+            return Err(GitCommandError { msg, context }.into());
+        }
+
+        Ok(Git {
+            path: path.to_path_buf(),
+        })
+    }
+
+    pub fn open(path: &Path) -> Result<Self, MetadataError> {
+        Ok(Git {
+            path: path.to_path_buf(),
+        })
+    }
+
+    pub fn clone(url: &Url, path: &Path) -> Result<Self, MetadataError> {
         let current_dir = path.parent().unwrap();
         let target = path.file_name().unwrap();
         if !path.exists() {
@@ -58,9 +72,6 @@ impl Git {
 
         Ok(Git {
             path: path.to_path_buf(),
-            rev: rev.map(|x| x.to_owned()),
-            tag: tag.map(|x| x.to_owned()),
-            branch: branch.map(|x| x.to_owned()),
         })
     }
 
@@ -83,13 +94,9 @@ impl Git {
         Ok(())
     }
 
-    pub fn checkout(&self) -> Result<(), MetadataError> {
-        let dst = if let Some(ref rev) = self.rev {
+    pub fn checkout(&self, rev: Option<&str>) -> Result<(), MetadataError> {
+        let dst = if let Some(ref rev) = rev {
             rev.to_string()
-        } else if let Some(ref tag) = self.tag {
-            tag.to_string()
-        } else if let Some(ref branch) = self.branch {
-            format!("origin/{branch}")
         } else {
             "origin/HEAD".to_string()
         };
@@ -117,15 +124,15 @@ impl Git {
         Ok(())
     }
 
-    pub fn get_revision(path: &Path) -> Result<String, MetadataError> {
+    pub fn get_revision(&self) -> Result<String, MetadataError> {
         let output = Command::new(GIT_COMMAND)
             .arg("rev-parse")
             .arg("HEAD")
-            .current_dir(path)
+            .current_dir(&self.path)
             .output()?;
         if !output.status.success() {
             let context = String::from_utf8_lossy(&output.stderr).to_string();
-            let msg = format!("failed to get revision: {}", path.to_string_lossy());
+            let msg = format!("failed to get revision: {}", self.path.to_string_lossy());
             return Err(GitCommandError { msg, context }.into());
         }
 
@@ -134,64 +141,49 @@ impl Git {
         Ok(revision)
     }
 
-    pub fn is_clean(path: &Path) -> Result<bool, MetadataError> {
+    pub fn is_clean(&self) -> Result<bool, MetadataError> {
         let output = Command::new(GIT_COMMAND)
             .arg("status")
             .arg("-s")
-            .current_dir(path)
+            .current_dir(&self.path)
             .output()?;
         if !output.status.success() {
             let context = String::from_utf8_lossy(&output.stderr).to_string();
-            let msg = format!("failed to get status: {}", path.to_string_lossy());
+            let msg = format!("failed to get status: {}", self.path.to_string_lossy());
             return Err(GitCommandError { msg, context }.into());
         }
 
         Ok(output.stdout.is_empty())
     }
 
-    pub fn add(file: &Path, path: &Path) -> Result<(), MetadataError> {
+    pub fn add(&self, file: &Path) -> Result<(), MetadataError> {
         let output = Command::new(GIT_COMMAND)
             .arg("add")
             .arg(file)
-            .current_dir(path)
+            .current_dir(&self.path)
             .output()?;
         if !output.status.success() {
             let context = String::from_utf8_lossy(&output.stderr).to_string();
-            let msg = format!("failed to add: {}", path.to_string_lossy());
+            let msg = format!("failed to add: {}", self.path.to_string_lossy());
             return Err(GitCommandError { msg, context }.into());
         }
 
         Ok(())
     }
 
-    pub fn commit(msg: &str, path: &Path) -> Result<(), MetadataError> {
+    pub fn commit(&self, msg: &str) -> Result<(), MetadataError> {
         let output = Command::new(GIT_COMMAND)
             .arg("commit")
             .arg("-m")
             .arg(msg)
-            .current_dir(path)
+            .current_dir(&self.path)
             .output()?;
         if !output.status.success() {
             let context = String::from_utf8_lossy(&output.stderr).to_string();
-            let msg = format!("failed to commit: {}", path.to_string_lossy());
+            let msg = format!("failed to commit: {}", self.path.to_string_lossy());
             return Err(GitCommandError { msg, context }.into());
         }
 
         Ok(())
-    }
-
-    #[cfg(test)]
-    pub fn init(path: &Path) -> Result<bool, MetadataError> {
-        let output = Command::new(GIT_COMMAND)
-            .arg("init")
-            .current_dir(path)
-            .output()?;
-        if !output.status.success() {
-            let context = String::from_utf8_lossy(&output.stderr).to_string();
-            let msg = format!("failed to init: {}", path.to_string_lossy());
-            return Err(GitCommandError { msg, context }.into());
-        }
-
-        Ok(output.stdout.is_empty())
     }
 }
