@@ -96,7 +96,7 @@ impl Metadata {
 
     pub fn publish(&mut self) -> Result<(), MetadataError> {
         let prj_path = self.metadata_path.parent().unwrap();
-        let git = Git::open(&prj_path)?;
+        let git = Git::open(prj_path)?;
         if !git.is_clean()? {
             return Err(MetadataError::ModifiedProject(prj_path.to_path_buf()));
         }
@@ -151,7 +151,7 @@ impl Metadata {
 
     pub fn bump_version(&mut self, kind: BumpKind) -> Result<(), MetadataError> {
         let prj_path = self.metadata_path.parent().unwrap();
-        let git = Git::open(&prj_path)?;
+        let git = Git::open(prj_path)?;
 
         let mut bumped_version = self.project.version.clone();
         match kind {
