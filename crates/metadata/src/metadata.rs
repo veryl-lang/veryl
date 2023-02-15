@@ -15,8 +15,7 @@ use serde::{Deserialize, Serialize};
 use spdx::Expression;
 use std::collections::{HashMap, HashSet};
 use std::env;
-use std::fs::{self, File};
-use std::io::Write;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use url::Url;
@@ -76,14 +75,14 @@ impl Metadata {
 
     pub fn load<T: AsRef<Path>>(path: T) -> Result<Self, MetadataError> {
         let path = path.as_ref().canonicalize()?;
-        let text = std::fs::read_to_string(&path)?;
+        let text = fs::read_to_string(&path)?;
         let mut metadata: Metadata = Self::from_str(&text)?;
         metadata.metadata_path = path.clone();
         metadata.pubdata_path = path.with_file_name("Veryl.pub");
         metadata.check()?;
 
         if metadata.pubdata_path.exists() {
-            let text = std::fs::read_to_string(&metadata.pubdata_path)?;
+            let text = fs::read_to_string(&metadata.pubdata_path)?;
             metadata.pubdata = Pubdata::from_str(&text)?;
         }
 
@@ -119,9 +118,7 @@ impl Metadata {
         self.pubdata.releases.push(release);
 
         let text = toml::to_string(&self.pubdata)?;
-        let mut file = File::create(&self.pubdata_path)?;
-        write!(file, "{text}")?;
-        file.flush()?;
+        fs::write(&self.pubdata_path, text.as_bytes())?;
         info!("Writing metadata ({})", self.pubdata_path.to_string_lossy());
 
         if self.publish.publish_commit {
@@ -243,7 +240,7 @@ impl Metadata {
 
             let parent = path.parent().unwrap();
             if !parent.exists() {
-                std::fs::create_dir_all(parent)?;
+                fs::create_dir_all(parent)?;
             }
 
             let git = Git::clone(&dep.git, &path)?;
@@ -293,7 +290,7 @@ impl Metadata {
 
         let parent = path.parent().unwrap();
         if !parent.exists() {
-            std::fs::create_dir_all(parent)?;
+            fs::create_dir_all(parent)?;
         }
 
         let git = Git::clone(url, &path)?;
@@ -349,7 +346,7 @@ impl Metadata {
 
         let base_dst = self.metadata_path.parent().unwrap().join("dependencies");
         if !base_dst.exists() {
-            std::fs::create_dir(&base_dst)?;
+            fs::create_dir(&base_dst)?;
         }
 
         let mut tomls = HashSet::new();

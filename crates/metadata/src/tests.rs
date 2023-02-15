@@ -1,8 +1,7 @@
 use crate::git::Git;
 use crate::*;
 use semver::Version;
-use std::fs::File;
-use std::io::Write;
+use std::fs;
 use tempfile::TempDir;
 
 const TEST_TOML: &'static str = r#"
@@ -28,8 +27,7 @@ fn create_metadata() -> (Metadata, TempDir) {
 
     let tempdir = tempfile::tempdir().unwrap();
     let toml_path = tempdir.path().join("Veryl.toml");
-    let mut file = File::create(&toml_path).unwrap();
-    write!(file, "{}", TEST_TOML).unwrap();
+    fs::write(&toml_path, TEST_TOML).unwrap();
     let git = Git::init(tempdir.path()).unwrap();
     git.add(&toml_path).unwrap();
     git.commit(&"Add Veryl.toml").unwrap();
