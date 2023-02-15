@@ -4022,6 +4022,7 @@ dependencies = [
  "serde",
  "serde_regex",
  "spdx",
+ "tempfile",
  "thiserror",
  "toml 0.7.2",
  "url",

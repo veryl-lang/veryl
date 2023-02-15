@@ -179,4 +179,19 @@ impl Git {
 
         Ok(())
     }
+
+    #[cfg(test)]
+    pub fn init(path: &Path) -> Result<bool, MetadataError> {
+        let output = Command::new(GIT_COMMAND)
+            .arg("init")
+            .current_dir(path)
+            .output()?;
+        if !output.status.success() {
+            let context = String::from_utf8_lossy(&output.stderr).to_string();
+            let msg = format!("failed to init: {}", path.to_string_lossy());
+            return Err(GitCommandError { msg, context }.into());
+        }
+
+        Ok(output.stdout.is_empty())
+    }
 }

@@ -28,6 +28,9 @@ url            = {workspace = true}
 veryl-parser   = {version = "0.4.0", path = "../parser"}
 walkdir        = "2.3.2"
 
+[dev-dependencies]
+tempfile       = "3.3"
+
 [features]
 default      = ["git-command"]
 git-command  = []

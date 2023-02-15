@@ -7,6 +7,8 @@ mod metadata_error;
 mod project;
 mod pubdata;
 mod publish;
+#[cfg(test)]
+mod tests;
 pub use build::{Build, BuiltinType, ClockType, FilelistType, ResetType, Target};
 pub use format::Format;
 pub use lint::{Case, Lint};
