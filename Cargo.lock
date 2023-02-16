@@ -210,7 +210,7 @@ checksum = "b7f0778972c64420fdedc63f09919c8a88bda7b25135357fd25a5d9f3257e832"
 dependencies = [
  "memchr",
  "once_cell",
- "regex-automata",
+ "regex-automata 0.1.10",
  "serde",
 ]
 
@@ -2519,9 +2519,9 @@ dependencies = [
 
 [[package]]
 name = "parol"
-version = "0.16.0"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "793e537884119dda7c8ec2ea8c099ad26965c022d8719bded3f40165b6180ec3"
+checksum = "8e672d03152a838921ce0d1853a454a416c73ab9f0ba7cb395e6882a74114ee6"
 dependencies = [
  "anyhow",
  "cfg-if",
@@ -2533,9 +2533,10 @@ dependencies = [
  "id_tree_layout",
  "owo-colors",
  "parol-macros",
- "parol_runtime",
+ "parol_runtime 0.13.0",
  "rand",
  "rand_regex",
+ "rayon",
  "regex",
  "regex-syntax",
  "syn",
@@ -2565,6 +2566,25 @@ dependencies = [
  "once_cell",
  "parol-macros",
  "regex",
+ "thiserror",
+]
+
+[[package]]
+name = "parol_runtime"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d86bc25759ccf7be8e0612cccbc9a3da42e78fb89e9b9e588ed62b9e7027480"
+dependencies = [
+ "anyhow",
+ "codespan-reporting",
+ "derive_builder",
+ "function_name",
+ "id_tree",
+ "id_tree_layout",
+ "log",
+ "once_cell",
+ "parol-macros",
+ "regex-automata 0.2.0",
  "thiserror",
 ]
 
@@ -2910,6 +2930,16 @@ name = "regex-automata"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c230d73fb8d8c1b9c0b3135c5142a8acee3a0558fb8db5cf1cb65f8d7862132"
+
+[[package]]
+name = "regex-automata"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9368763f5a9b804326f3af749e16f9abf378d227bcdee7634b13d8f17793782"
+dependencies = [
+ "memchr",
+ "regex-syntax",
+]
 
 [[package]]
 name = "regex-syntax"
@@ -4038,7 +4068,7 @@ dependencies = [
  "bimap",
  "miette",
  "parol",
- "parol_runtime",
+ "parol_runtime 0.12.1",
  "paste",
  "regex",
  "thiserror",
