@@ -52,3 +52,6 @@ opt-level = 3
 codegen-units = 1
 # for wasm-pack
 opt-level = "z"
+
+[profile.bench]
+debug = true

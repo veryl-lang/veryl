@@ -49,4 +49,4 @@ gen_sv:
 	cargo run --bin veryl -- build
 
 flamegraph:
-	cargo flamegraph --bench benchmark -- --bench
+	cargo bench --bench benchmark -- --profile-time=5

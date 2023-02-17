@@ -5,6 +5,8 @@ use veryl_formatter::Formatter;
 use veryl_metadata::Metadata;
 use veryl_parser::Parser;
 
+mod perf;
+
 fn criterion_benchmark(c: &mut Criterion) {
     let mut text = String::new();
     for testcase in TESTCASES {
@@ -21,8 +23,11 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function("analyze", |b| {
         b.iter(|| {
             let parser = Parser::parse(black_box(&text), &"").unwrap();
-            let mut analyzer = Analyzer::new(black_box(&text));
-            analyzer.analyze(&parser.veryl);
+            let prj = vec![&metadata.project.name];
+            let analyzer = Analyzer::new(&prj, black_box(&metadata));
+            analyzer.analyze_pass1(black_box(&text), &"", &parser.veryl);
+            analyzer.analyze_pass2(black_box(&text), &"", &parser.veryl);
+            analyzer.analyze_pass3(black_box(&text), &"", &parser.veryl);
         })
     });
     group.bench_function("format", |b| {
@@ -37,5 +42,9 @@ fn criterion_benchmark(c: &mut Criterion) {
 
 include!(concat!(env!("OUT_DIR"), "/test.rs"));
 
-criterion_group!(benches, criterion_benchmark);
+criterion_group! {
+    name = benches;
+    config = Criterion::default().with_profiler(perf::FlamegraphProfiler::new(100));
+    targets = criterion_benchmark
+}
 criterion_main!(benches);
