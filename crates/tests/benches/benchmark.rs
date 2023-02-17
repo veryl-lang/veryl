@@ -5,6 +5,7 @@ use veryl_formatter::Formatter;
 use veryl_metadata::Metadata;
 use veryl_parser::Parser;
 
+#[cfg(target_os = "linux")]
 mod perf;
 
 fn criterion_benchmark(c: &mut Criterion) {
@@ -42,9 +43,18 @@ fn criterion_benchmark(c: &mut Criterion) {
 
 include!(concat!(env!("OUT_DIR"), "/test.rs"));
 
+#[cfg(target_os = "linux")]
 criterion_group! {
     name = benches;
     config = Criterion::default().with_profiler(perf::FlamegraphProfiler::new(100));
     targets = criterion_benchmark
 }
+
+#[cfg(not(target_os = "linux"))]
+criterion_group! {
+    name = benches;
+    config = Criterion::default();
+    targets = criterion_benchmark
+}
+
 criterion_main!(benches);
