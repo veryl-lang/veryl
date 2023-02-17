@@ -199,7 +199,7 @@ fn main() -> Result<ExitCode> {
         .apply()
         .into_diagnostic()?;
 
-    let metadata = match opt.command {
+    let mut metadata = match opt.command {
         Commands::New(_) | Commands::Init(_) => {
             // dummy metadata
             let metadata = Metadata::create_default_toml("");
@@ -214,13 +214,13 @@ fn main() -> Result<ExitCode> {
     let ret = match opt.command {
         Commands::New(x) => cmd_new::CmdNew::new(x).exec()?,
         Commands::Init(x) => cmd_init::CmdInit::new(x).exec()?,
-        Commands::Fmt(x) => cmd_fmt::CmdFmt::new(x).exec(&metadata)?,
-        Commands::Check(x) => cmd_check::CmdCheck::new(x).exec(&metadata)?,
-        Commands::Build(x) => cmd_build::CmdBuild::new(x).exec(&metadata)?,
-        Commands::Update(x) => cmd_update::CmdUpdate::new(x).exec(&metadata)?,
+        Commands::Fmt(x) => cmd_fmt::CmdFmt::new(x).exec(&mut metadata)?,
+        Commands::Check(x) => cmd_check::CmdCheck::new(x).exec(&mut metadata)?,
+        Commands::Build(x) => cmd_build::CmdBuild::new(x).exec(&mut metadata)?,
+        Commands::Update(x) => cmd_update::CmdUpdate::new(x).exec(&mut metadata)?,
         Commands::Publish(x) => cmd_publish::CmdPublish::new(x).exec(&metadata)?,
         Commands::Metadata(x) => cmd_metadata::CmdMetadata::new(x).exec(&metadata)?,
-        Commands::Dump(x) => cmd_dump::CmdDump::new(x).exec(&metadata)?,
+        Commands::Dump(x) => cmd_dump::CmdDump::new(x).exec(&mut metadata)?,
     };
     if ret {
         Ok(ExitCode::SUCCESS)

@@ -22,9 +22,7 @@ impl Pubdata {
     pub fn load<T: AsRef<Path>>(path: T) -> Result<Self, MetadataError> {
         let path = path.as_ref().canonicalize()?;
         let text = fs::read_to_string(path)?;
-        let pubadata: Pubdata = Self::from_str(&text)?;
-
-        Ok(pubadata)
+        Self::from_str(&text)
     }
 
     pub fn save<T: AsRef<Path>>(&self, path: T) -> Result<(), MetadataError> {

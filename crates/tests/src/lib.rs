@@ -31,7 +31,7 @@ mod analyzer {
         let input = fs::read_to_string(&file).unwrap();
 
         let ret = Parser::parse(&input, &file).unwrap();
-        let prj = vec![&metadata.project.name];
+        let prj = &metadata.project.name;
         let analyzer = Analyzer::new(&prj, &metadata);
         let errors = analyzer.analyze_pass1(&input, &file, &ret.veryl);
         assert!(errors.is_empty());
@@ -94,10 +94,10 @@ mod emitter {
 
     fn test(name: &str) {
         let metadata_path = Metadata::search_from_current().unwrap();
-        let metadata = Metadata::load(&metadata_path).unwrap();
+        let mut metadata = Metadata::load(&metadata_path).unwrap();
 
         if name == "25_dependency" {
-            let paths = metadata.paths::<&str>(&[], false).unwrap();
+            let paths = metadata.paths::<&str>(&[]).unwrap();
             let cache_dir = Metadata::cache_dir();
             for path in paths {
                 if path.src.starts_with(&cache_dir) {
@@ -113,7 +113,7 @@ mod emitter {
         let input = fs::read_to_string(&file).unwrap();
 
         let ret = Parser::parse(&input, &file).unwrap();
-        let prj = vec![&metadata.project.name];
+        let prj = &metadata.project.name;
         let analyzer = Analyzer::new(&prj, &metadata);
         let _ = analyzer.analyze_pass1(&input, &file, &ret.veryl);
         let _ = analyzer.analyze_pass2(&input, &file, &ret.veryl);

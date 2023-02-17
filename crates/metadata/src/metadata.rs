@@ -2,10 +2,12 @@ use crate::build::{Build, Target};
 use crate::format::Format;
 use crate::git::Git;
 use crate::lint::Lint;
+use crate::lockfile::Lockfile;
 use crate::project::Project;
 use crate::pubdata::Pubdata;
 use crate::pubdata::Release;
 use crate::publish::Publish;
+use crate::utils;
 use crate::MetadataError;
 use directories::ProjectDirs;
 use log::{debug, info};
@@ -13,17 +15,16 @@ use regex::Regex;
 use semver::VersionReq;
 use serde::{Deserialize, Serialize};
 use spdx::Expression;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use url::Url;
-use walkdir::WalkDir;
 
 #[derive(Clone, Debug)]
 pub struct PathPair {
-    pub prj: Vec<String>,
+    pub prj: String,
     pub src: PathBuf,
     pub dst: PathBuf,
 }
@@ -48,13 +49,17 @@ pub struct Metadata {
     #[serde(default)]
     pub publish: Publish,
     #[serde(default)]
-    pub dependencies: HashMap<String, Dependency>,
+    pub dependencies: HashMap<Url, Dependency>,
     #[serde(skip)]
     pub metadata_path: PathBuf,
     #[serde(skip)]
     pub pubdata_path: PathBuf,
     #[serde(skip)]
     pub pubdata: Pubdata,
+    #[serde(skip)]
+    pub lockfile_path: PathBuf,
+    #[serde(skip)]
+    pub lockfile: Lockfile,
 }
 
 impl Metadata {
@@ -79,6 +84,7 @@ impl Metadata {
         let mut metadata: Metadata = Self::from_str(&text)?;
         metadata.metadata_path = path.clone();
         metadata.pubdata_path = path.with_file_name("Veryl.pub");
+        metadata.lockfile_path = path.with_file_name("Veryl.lock");
         metadata.check()?;
 
         if metadata.pubdata_path.exists() {
@@ -193,136 +199,11 @@ impl Metadata {
         Ok(())
     }
 
-    fn gather_files_with_extension<T: AsRef<Path>>(
-        base_dir: T,
-        ext: &str,
-    ) -> Result<Vec<PathBuf>, MetadataError> {
-        let mut ret = Vec::new();
-        for entry in WalkDir::new(base_dir) {
-            let entry = entry?;
-            if entry.file_type().is_file() {
-                if let Some(x) = entry.path().extension() {
-                    if x == ext {
-                        debug!("Found file ({})", entry.path().to_string_lossy());
-                        ret.push(entry.path().to_path_buf());
-                    }
-                }
-            }
-        }
-        Ok(ret)
-    }
-
-    fn gather_dependencies<T: AsRef<str>>(
-        &self,
-        update: bool,
-        base_prj: &[T],
-        base_dst: &Path,
-        tomls: &mut HashSet<PathBuf>,
-    ) -> Result<Vec<PathPair>, MetadataError> {
-        let cache_dir = Self::cache_dir();
-
-        let mut ret = Vec::new();
-        for (name, dep) in &self.dependencies {
-            let mut path = cache_dir.to_path_buf();
-            path.push("repository");
-            if let Some(host) = dep.git.host_str() {
-                path.push(host);
-            }
-            path.push(dep.git.path().to_string().trim_start_matches('/'));
-
-            debug!("Found dependency ({})", path.to_string_lossy());
-
-            let release = Self::get_release(&dep.git, &path, &dep.version, update)?;
-            let rev = Some(release.revision.clone());
-            path.set_extension(format!("{}", release.version));
-
-            let parent = path.parent().unwrap();
-            if !parent.exists() {
-                fs::create_dir_all(parent)?;
-            }
-
-            let git = Git::clone(&dep.git, &path)?;
-            if update {
-                git.fetch()?;
-            }
-            git.checkout(rev.as_deref())?;
-
-            let mut prj: Vec<_> = base_prj.iter().map(|x| x.as_ref().to_string()).collect();
-            prj.push(name.clone());
-
-            for src in &Self::gather_files_with_extension(&path, "vl")? {
-                let rel = src.strip_prefix(&path)?;
-                let mut dst = base_dst.join(name);
-                dst.push(rel);
-                dst.set_extension("sv");
-                ret.push(PathPair {
-                    prj: prj.clone(),
-                    src: src.to_path_buf(),
-                    dst,
-                });
-            }
-
-            let toml = path.join("Veryl.toml");
-            if !tomls.contains(&toml) {
-                let metadata = Metadata::load(&toml)?;
-                tomls.insert(toml);
-                let base_dst = base_dst.join(name);
-                let deps = metadata.gather_dependencies(update, &prj, &base_dst, tomls)?;
-                for dep in deps {
-                    ret.push(dep);
-                }
-            }
-        }
-
-        Ok(ret)
-    }
-
-    fn get_release(
-        url: &Url,
-        path: &Path,
-        version_req: &VersionReq,
-        update: bool,
-    ) -> Result<Release, MetadataError> {
-        let mut path = path.to_path_buf();
-        path.set_extension("pub");
-
-        let parent = path.parent().unwrap();
-        if !parent.exists() {
-            fs::create_dir_all(parent)?;
-        }
-
-        let git = Git::clone(url, &path)?;
-        if update {
-            git.fetch()?;
-        }
-        git.checkout(None)?;
-
-        let toml = path.join("Veryl.pub");
-        let mut pubdata = Pubdata::load(&toml)?;
-
-        pubdata.releases.sort_by(|a, b| b.version.cmp(&a.version));
-
-        for release in &pubdata.releases {
-            if version_req.matches(&release.version) {
-                return Ok(release.clone());
-            }
-        }
-
-        Err(MetadataError::VersionNotFound {
-            url: url.clone(),
-            version: version_req.to_string(),
-        })
-    }
-
-    pub fn paths<T: AsRef<Path>>(
-        &self,
-        files: &[T],
-        update: bool,
-    ) -> Result<Vec<PathPair>, MetadataError> {
+    pub fn paths<T: AsRef<Path>>(&mut self, files: &[T]) -> Result<Vec<PathPair>, MetadataError> {
         let base = self.metadata_path.parent().unwrap();
 
         let src_files = if files.is_empty() {
-            Self::gather_files_with_extension(base, "vl")?
+            utils::gather_files_with_extension(base, "vl")?
         } else {
             files.iter().map(|x| x.as_ref().to_path_buf()).collect()
         };
@@ -336,7 +217,7 @@ impl Metadata {
                 }
             };
             ret.push(PathPair {
-                prj: vec![self.project.name.clone()],
+                prj: self.project.name.clone(),
                 src: src.to_path_buf(),
                 dst,
             });
@@ -347,11 +228,15 @@ impl Metadata {
             fs::create_dir(&base_dst)?;
         }
 
-        let mut tomls = HashSet::new();
-        let deps = self.gather_dependencies::<&str>(update, &[], &base_dst, &mut tomls)?;
-        for dep in deps {
-            ret.push(dep);
+        if self.lockfile_path.exists() {
+            self.lockfile = Lockfile::load(&self.lockfile_path)?;
+        } else {
+            self.lockfile = Lockfile::new(self)?;
+            self.lockfile.save(&self.lockfile_path)?;
         }
+
+        let mut deps = self.lockfile.paths(&base_dst)?;
+        ret.append(&mut deps);
 
         Ok(ret)
     }
@@ -380,8 +265,17 @@ impl FromStr for Metadata {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(untagged)]
 #[serde(deny_unknown_fields)]
-pub struct Dependency {
-    pub git: Url,
+pub enum Dependency {
+    Version(VersionReq),
+    Single(DependencyEntry),
+    Multi(Vec<DependencyEntry>),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DependencyEntry {
+    pub name: String,
     pub version: VersionReq,
 }

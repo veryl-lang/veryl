@@ -51,11 +51,9 @@ pub struct Analyzer {
 }
 
 impl Analyzer {
-    pub fn new<T: AsRef<str>>(project_paths: &[T], metadata: &Metadata) -> Self {
+    pub fn new<T: AsRef<str>>(project_path: &T, metadata: &Metadata) -> Self {
         let mut ids = Vec::new();
-        for path in project_paths {
-            ids.push(resource_table::insert_str(path.as_ref()));
-        }
+        ids.push(resource_table::insert_str(project_path.as_ref()));
         namespace_table::set_default(&ids);
         Analyzer {
             lint_opt: metadata.lint.clone(),
