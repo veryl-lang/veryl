@@ -1,5 +1,6 @@
 use crate::resource_table::{self, PathId, StrId, TokenId};
 use crate::veryl_grammar_trait::*;
+use once_cell::sync::Lazy;
 use paste::paste;
 use regex::Regex;
 
@@ -66,14 +67,16 @@ impl VerylToken {
     }
 }
 
+static COMMENT_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"((?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))").unwrap());
+
 fn split_comment_token(token: Token) -> Vec<Token> {
     let mut line = token.line;
     let text = resource_table::get_str_value(token.text).unwrap();
-    let re = Regex::new(r"((?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))").unwrap();
 
     let mut prev_pos = 0;
     let mut ret = Vec::new();
-    for cap in re.captures_iter(&text) {
+    for cap in COMMENT_REGEX.captures_iter(&text) {
         let cap = cap.get(0).unwrap();
         let pos = cap.start();
         let length = cap.end() - pos;
