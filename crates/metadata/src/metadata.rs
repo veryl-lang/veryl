@@ -82,8 +82,7 @@ impl Metadata {
         metadata.check()?;
 
         if metadata.pubdata_path.exists() {
-            let text = fs::read_to_string(&metadata.pubdata_path)?;
-            metadata.pubdata = Pubdata::from_str(&text)?;
+            metadata.pubdata = Pubdata::load(&metadata.pubdata_path)?;
         }
 
         debug!(
@@ -117,8 +116,7 @@ impl Metadata {
 
         self.pubdata.releases.push(release);
 
-        let text = toml::to_string(&self.pubdata)?;
-        fs::write(&self.pubdata_path, text.as_bytes())?;
+        self.pubdata.save(&self.pubdata_path)?;
         info!("Writing metadata ({})", self.pubdata_path.to_string_lossy());
 
         if self.publish.publish_commit {
