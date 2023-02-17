@@ -6,7 +6,7 @@ mod lockfile;
 mod metadata;
 mod metadata_error;
 mod project;
-mod pubdata;
+mod pubfile;
 mod publish;
 #[cfg(test)]
 mod tests;
@@ -18,6 +18,6 @@ pub use lockfile::Lockfile;
 pub use metadata::{BumpKind, Metadata, PathPair};
 pub use metadata_error::MetadataError;
 pub use project::Project;
-pub use pubdata::{Pubdata, Release};
+pub use pubfile::{Pubfile, Release};
 pub use publish::Publish;
 pub use semver;

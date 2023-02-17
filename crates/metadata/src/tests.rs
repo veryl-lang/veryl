@@ -160,10 +160,10 @@ fn publish() {
     metadata.publish().unwrap();
 
     assert_eq!(
-        metadata.pubdata.releases[0].version,
+        metadata.pubfile.releases[0].version,
         metadata.project.version
     );
-    assert!(metadata.pubdata_path.exists());
+    assert!(metadata.pubfile_path.exists());
     let git = Git::open(&tempdir.path().join("test")).unwrap();
     assert!(!git.is_clean().unwrap());
 }
@@ -176,10 +176,10 @@ fn publish_with_commit() {
     metadata.publish().unwrap();
 
     assert_eq!(
-        metadata.pubdata.releases[0].version,
+        metadata.pubfile.releases[0].version,
         metadata.project.version
     );
-    assert!(metadata.pubdata_path.exists());
+    assert!(metadata.pubfile_path.exists());
     let git = Git::open(&tempdir.path().join("test")).unwrap();
     assert!(git.is_clean().unwrap());
 }

@@ -1,7 +1,7 @@
 use crate::git::Git;
 use crate::metadata::{Dependency, Metadata};
 use crate::metadata_error::MetadataError;
-use crate::pubdata::{Pubdata, Release};
+use crate::pubfile::{Pubfile, Release};
 use crate::{utils, PathPair};
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
@@ -218,11 +218,11 @@ impl Lockfile {
         git.checkout(None)?;
 
         let toml = path.join("Veryl.pub");
-        let mut pubdata = Pubdata::load(&toml)?;
+        let mut pubfile = Pubfile::load(&toml)?;
 
-        pubdata.releases.sort_by(|a, b| b.version.cmp(&a.version));
+        pubfile.releases.sort_by(|a, b| b.version.cmp(&a.version));
 
-        for release in &pubdata.releases {
+        for release in &pubfile.releases {
             if version_req.matches(&release.version) {
                 return Ok(release.clone());
             }

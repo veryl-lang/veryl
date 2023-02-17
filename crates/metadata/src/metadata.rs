@@ -4,8 +4,7 @@ use crate::git::Git;
 use crate::lint::Lint;
 use crate::lockfile::Lockfile;
 use crate::project::Project;
-use crate::pubdata::Pubdata;
-use crate::pubdata::Release;
+use crate::pubfile::{Pubfile, Release};
 use crate::publish::Publish;
 use crate::utils;
 use crate::MetadataError;
@@ -53,9 +52,9 @@ pub struct Metadata {
     #[serde(skip)]
     pub metadata_path: PathBuf,
     #[serde(skip)]
-    pub pubdata_path: PathBuf,
+    pub pubfile_path: PathBuf,
     #[serde(skip)]
-    pub pubdata: Pubdata,
+    pub pubfile: Pubfile,
     #[serde(skip)]
     pub lockfile_path: PathBuf,
     #[serde(skip)]
@@ -83,12 +82,12 @@ impl Metadata {
         let text = fs::read_to_string(&path)?;
         let mut metadata: Metadata = Self::from_str(&text)?;
         metadata.metadata_path = path.clone();
-        metadata.pubdata_path = path.with_file_name("Veryl.pub");
+        metadata.pubfile_path = path.with_file_name("Veryl.pub");
         metadata.lockfile_path = path.with_file_name("Veryl.lock");
         metadata.check()?;
 
-        if metadata.pubdata_path.exists() {
-            metadata.pubdata = Pubdata::load(&metadata.pubdata_path)?;
+        if metadata.pubfile_path.exists() {
+            metadata.pubfile = Pubfile::load(&metadata.pubfile_path)?;
         }
 
         debug!(
@@ -105,7 +104,7 @@ impl Metadata {
             return Err(MetadataError::ModifiedProject(prj_path.to_path_buf()));
         }
 
-        for release in &self.pubdata.releases {
+        for release in &self.pubfile.releases {
             if release.version == self.project.version {
                 return Err(MetadataError::PublishedVersion(
                     self.project.version.clone(),
@@ -120,17 +119,17 @@ impl Metadata {
 
         let release = Release { version, revision };
 
-        self.pubdata.releases.push(release);
+        self.pubfile.releases.push(release);
 
-        self.pubdata.save(&self.pubdata_path)?;
-        info!("Writing metadata ({})", self.pubdata_path.to_string_lossy());
+        self.pubfile.save(&self.pubfile_path)?;
+        info!("Writing metadata ({})", self.pubfile_path.to_string_lossy());
 
         if self.publish.publish_commit {
-            git.add(&self.pubdata_path)?;
+            git.add(&self.pubfile_path)?;
             git.commit(&self.publish.publish_commit_message)?;
             info!(
                 "Committing metadata ({})",
-                self.pubdata_path.to_string_lossy()
+                self.pubfile_path.to_string_lossy()
             );
         }
 

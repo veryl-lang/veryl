@@ -7,7 +7,7 @@ use std::str::FromStr;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Pubdata {
+pub struct Pubfile {
     pub releases: Vec<Release>,
 }
 
@@ -18,7 +18,7 @@ pub struct Release {
     pub revision: String,
 }
 
-impl Pubdata {
+impl Pubfile {
     pub fn load<T: AsRef<Path>>(path: T) -> Result<Self, MetadataError> {
         let path = path.as_ref().canonicalize()?;
         let text = fs::read_to_string(path)?;
@@ -35,11 +35,11 @@ impl Pubdata {
     }
 }
 
-impl FromStr for Pubdata {
+impl FromStr for Pubfile {
     type Err = MetadataError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let pubdata: Pubdata = toml::from_str(s)?;
-        Ok(pubdata)
+        let pubfile: Pubfile = toml::from_str(s)?;
+        Ok(pubfile)
     }
 }
