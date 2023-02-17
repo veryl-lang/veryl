@@ -47,8 +47,10 @@ impl Lockfile {
     }
 
     pub fn new(metadata: &Metadata) -> Result<Self, MetadataError> {
-        let mut ret = Lockfile::default();
-        ret.fetch = true;
+        let mut ret = Lockfile {
+            fetch: true,
+            ..Lockfile::default()
+        };
 
         let mut name_table = HashSet::new();
         let mut uuid_table = HashSet::new();
@@ -68,7 +70,7 @@ impl Lockfile {
         let mut uuid_table = HashSet::new();
         for (uuid, lock) in &self.projects {
             name_table.insert(lock.name.clone());
-            uuid_table.insert(uuid.clone());
+            uuid_table.insert(*uuid);
         }
 
         let locks = self.gen_locks(metadata, &mut name_table, &mut uuid_table)?;
@@ -83,12 +85,12 @@ impl Lockfile {
     pub fn paths(&self, base_dst: &Path) -> Result<Vec<PathPair>, MetadataError> {
         let mut ret = Vec::new();
 
-        for (_, lock) in &self.projects {
+        for lock in self.projects.values() {
             let metadata = self.get_metadata(&lock.url, &lock.revision)?;
             let path = metadata.metadata_path.parent().unwrap();
 
-            for src in &utils::gather_files_with_extension(&path, "vl")? {
-                let rel = src.strip_prefix(&path)?;
+            for src in &utils::gather_files_with_extension(path, "vl")? {
+                let rel = src.strip_prefix(path)?;
                 let mut dst = base_dst.join(&lock.name);
                 dst.push(rel);
                 dst.set_extension("sv");
@@ -121,13 +123,13 @@ impl Lockfile {
             let entries = self.resolve_dependency(url, dep)?;
 
             for (release, name) in entries {
-                let uuid = Self::gen_uuid(&url, &release.revision)?;
-                let metadata = self.get_metadata(&url, &release.revision)?;
+                let uuid = Self::gen_uuid(url, &release.revision)?;
+                let metadata = self.get_metadata(url, &release.revision)?;
                 let mut name = name.unwrap_or(metadata.project.name.clone());
                 if name_table.contains(&name) {
                     let mut suffix = 0;
                     loop {
-                        let new_name = format!("{}_{}", name, suffix);
+                        let new_name = format!("{name}_{suffix}");
                         if !name_table.contains(&new_name) {
                             name = new_name;
                             break;
@@ -141,8 +143,8 @@ impl Lockfile {
                 for (url, dep) in &metadata.dependencies {
                     let entries = self.resolve_dependency(url, dep)?;
                     for (release, name) in entries {
-                        let uuid = Self::gen_uuid(&url, &release.revision)?;
-                        let metadata = self.get_metadata(&url, &release.revision)?;
+                        let uuid = Self::gen_uuid(url, &release.revision)?;
+                        let metadata = self.get_metadata(url, &release.revision)?;
                         let name = name.unwrap_or(metadata.project.name.clone());
                         // project local name is not required to check name_table
 
@@ -177,17 +179,17 @@ impl Lockfile {
     ) -> Result<Vec<(Release, Option<String>)>, MetadataError> {
         Ok(match dep {
             Dependency::Version(x) => {
-                let release = self.resolve_version(&url, x)?;
+                let release = self.resolve_version(url, x)?;
                 vec![(release, None)]
             }
             Dependency::Single(x) => {
-                let release = self.resolve_version(&url, &x.version)?;
+                let release = self.resolve_version(url, &x.version)?;
                 vec![(release, Some(x.name.clone()))]
             }
             Dependency::Multi(x) => {
                 let mut ret = Vec::new();
                 for x in x {
-                    let release = self.resolve_version(&url, &x.version)?;
+                    let release = self.resolve_version(url, &x.version)?;
                     ret.push((release, Some(x.name.clone())));
                 }
                 ret
@@ -206,7 +208,7 @@ impl Lockfile {
             fs::create_dir_all(&resolve_dir)?;
         }
 
-        let uuid = Self::gen_uuid(&url, "")?;
+        let uuid = Self::gen_uuid(url, "")?;
 
         let path = resolve_dir.join(uuid.simple().encode_lower(&mut Uuid::encode_buffer()));
         let git = Git::clone(url, &path)?;
@@ -249,7 +251,7 @@ impl Lockfile {
         git.checkout(Some(revision))?;
 
         let toml = path.join("Veryl.toml");
-        let metadata = Metadata::load(&toml)?;
+        let metadata = Metadata::load(toml)?;
         Ok(metadata)
     }
 }
