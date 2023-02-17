@@ -4,7 +4,14 @@ module Module25 (
     i_d    : input  logic,
     o_d    : output logic,
 ) {
-    inst a: veryl_sample::delay (
+    inst u0: veryl_sample1::delay (
+        i_clk    ,
+        i_rst_n  ,
+        i_d      ,
+        o_d      ,
+    );
+
+    inst u1: veryl_sample2::delay (
         i_clk    ,
         i_rst_n  ,
         i_d      ,

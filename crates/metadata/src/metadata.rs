@@ -229,7 +229,9 @@ impl Metadata {
         }
 
         if self.lockfile_path.exists() {
-            self.lockfile = Lockfile::load(&self.lockfile_path)?;
+            let mut lockfile = Lockfile::load(&self.lockfile_path)?;
+            lockfile.update(self, false)?;
+            self.lockfile = lockfile;
         } else {
             self.lockfile = Lockfile::new(self)?;
             self.lockfile.save(&self.lockfile_path)?;
