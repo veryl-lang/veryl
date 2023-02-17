@@ -17,12 +17,12 @@ exclude               = ["build.rs"]
 anyhow        = {workspace = true}
 bimap         = "0.6.2"
 miette        = {workspace = true}
-parol_runtime = {version = "0.12.1", features = ["auto_generation"]}
+parol_runtime = {version = "0.13.0", features = ["auto_generation"]}
 paste         = "1.0"
 regex         = {workspace = true}
 thiserror     = {workspace = true}
 
 [build-dependencies]
-parol         = "0.16.0"
-parol_runtime = {version = "0.12.1", features = ["auto_generation"]}
+parol         = "0.17.0"
+parol_runtime = {version = "0.13.0", features = ["auto_generation"]}
 walkdir       = "2.3.2"

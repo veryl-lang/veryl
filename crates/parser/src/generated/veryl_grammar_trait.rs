@@ -3806,7 +3806,7 @@ pub struct AlwaysCombDeclarationList {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct AlwaysCombTerm {
-    pub always_comb_term: crate::veryl_token::Token, /* \balways_comb\b */
+    pub always_comb_term: crate::veryl_token::Token, /* (?-u:\b)always_comb(?-u:\b) */
 }
 
 ///
@@ -3939,7 +3939,7 @@ pub enum AlwaysFfResetOptGroup {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct AlwaysFfTerm {
-    pub always_ff_term: crate::veryl_token::Token, /* \balways_ff\b */
+    pub always_ff_term: crate::veryl_token::Token, /* (?-u:\b)always_ff(?-u:\b) */
 }
 
 ///
@@ -4058,7 +4058,7 @@ pub struct As {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct AsTerm {
-    pub as_term: crate::veryl_token::Token, /* \bas\b */
+    pub as_term: crate::veryl_token::Token, /* (?-u:\b)as(?-u:\b) */
 }
 
 ///
@@ -4103,7 +4103,7 @@ pub struct AssignDeclaration {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct AssignTerm {
-    pub assign_term: crate::veryl_token::Token, /* \bassign\b */
+    pub assign_term: crate::veryl_token::Token, /* (?-u:\b)assign(?-u:\b) */
 }
 
 ///
@@ -4188,7 +4188,7 @@ pub struct AsyncHigh {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct AsyncHighTerm {
-    pub async_high_term: crate::veryl_token::Token, /* \basync_high\b */
+    pub async_high_term: crate::veryl_token::Token, /* (?-u:\b)async_high(?-u:\b) */
 }
 
 ///
@@ -4219,7 +4219,7 @@ pub struct AsyncLow {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct AsyncLowTerm {
-    pub async_low_term: crate::veryl_token::Token, /* \basync_low\b */
+    pub async_low_term: crate::veryl_token::Token, /* (?-u:\b)async_low(?-u:\b) */
 }
 
 ///
@@ -4381,7 +4381,7 @@ pub struct Bit {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct BitTerm {
-    pub bit_term: crate::veryl_token::Token, /* \bbit\b */
+    pub bit_term: crate::veryl_token::Token, /* (?-u:\b)bit(?-u:\b) */
 }
 
 ///
@@ -4523,7 +4523,7 @@ pub struct CaseStatementList {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct CaseTerm {
-    pub case_term: crate::veryl_token::Token, /* \bcase\b */
+    pub case_term: crate::veryl_token::Token, /* (?-u:\b)case(?-u:\b) */
 }
 
 ///
@@ -4732,7 +4732,7 @@ pub struct Defaul {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct DefaultTerm {
-    pub default_term: crate::veryl_token::Token, /* \bdefault\b */
+    pub default_term: crate::veryl_token::Token, /* (?-u:\b)default(?-u:\b) */
 }
 
 ///
@@ -4924,7 +4924,7 @@ pub struct Else {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ElseTerm {
-    pub else_term: crate::veryl_token::Token, /* \belse\b */
+    pub else_term: crate::veryl_token::Token, /* (?-u:\b)else(?-u:\b) */
 }
 
 ///
@@ -5057,7 +5057,7 @@ pub struct EnumListOpt {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct EnumTerm {
-    pub enum_term: crate::veryl_token::Token, /* \benum\b */
+    pub enum_term: crate::veryl_token::Token, /* (?-u:\b)enum(?-u:\b) */
 }
 
 ///
@@ -5184,7 +5184,7 @@ pub enum ExportDeclarationGroup0 {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ExportTerm {
-    pub export_term: crate::veryl_token::Token, /* \bexport\b */
+    pub export_term: crate::veryl_token::Token, /* (?-u:\b)export(?-u:\b) */
 }
 
 ///
@@ -5608,7 +5608,7 @@ pub struct F32 {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct F32Term {
-    pub f32_term: crate::veryl_token::Token, /* \bf32\b */
+    pub f32_term: crate::veryl_token::Token, /* (?-u:\b)f32(?-u:\b) */
 }
 
 ///
@@ -5639,7 +5639,7 @@ pub struct F64 {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct F64Term {
-    pub f64_term: crate::veryl_token::Token, /* \bf64\b */
+    pub f64_term: crate::veryl_token::Token, /* (?-u:\b)f64(?-u:\b) */
 }
 
 ///
@@ -5795,7 +5795,7 @@ pub struct ForStatementOpt {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ForTerm {
-    pub for_term: crate::veryl_token::Token, /* \bfor\b */
+    pub for_term: crate::veryl_token::Token, /* (?-u:\b)for(?-u:\b) */
 }
 
 ///
@@ -5906,7 +5906,7 @@ pub enum FunctionItem {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct FunctionTerm {
-    pub function_term: crate::veryl_token::Token, /* \bfunction\b */
+    pub function_term: crate::veryl_token::Token, /* (?-u:\b)function(?-u:\b) */
 }
 
 ///
@@ -6012,7 +6012,7 @@ pub struct I32 {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct I32Term {
-    pub i32_term: crate::veryl_token::Token, /* \bi32\b */
+    pub i32_term: crate::veryl_token::Token, /* (?-u:\b)i32(?-u:\b) */
 }
 
 ///
@@ -6043,7 +6043,7 @@ pub struct I64 {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct I64Term {
-    pub i64_term: crate::veryl_token::Token, /* \bi64\b */
+    pub i64_term: crate::veryl_token::Token, /* (?-u:\b)i64(?-u:\b) */
 }
 
 ///
@@ -6222,7 +6222,7 @@ pub struct IfResetStatementOptList {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct IfResetTerm {
-    pub if_reset_term: crate::veryl_token::Token, /* \bif_reset\b */
+    pub if_reset_term: crate::veryl_token::Token, /* (?-u:\b)if_reset(?-u:\b) */
 }
 
 ///
@@ -6317,7 +6317,7 @@ pub struct IfStatementOptList {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct IfTerm {
-    pub if_term: crate::veryl_token::Token, /* \bif\b */
+    pub if_term: crate::veryl_token::Token, /* (?-u:\b)if(?-u:\b) */
 }
 
 ///
@@ -6372,7 +6372,7 @@ pub enum ImportDeclarationGroup {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ImportTerm {
-    pub import_term: crate::veryl_token::Token, /* \bimport\b */
+    pub import_term: crate::veryl_token::Token, /* (?-u:\b)import(?-u:\b) */
 }
 
 ///
@@ -6403,7 +6403,7 @@ pub struct In {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct InTerm {
-    pub in_term: crate::veryl_token::Token, /* \bin\b */
+    pub in_term: crate::veryl_token::Token, /* (?-u:\b)in(?-u:\b) */
 }
 
 ///
@@ -6434,7 +6434,7 @@ pub struct Inout {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct InoutTerm {
-    pub inout_term: crate::veryl_token::Token, /* \binout\b */
+    pub inout_term: crate::veryl_token::Token, /* (?-u:\b)inout(?-u:\b) */
 }
 
 ///
@@ -6465,7 +6465,7 @@ pub struct Input {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct InputTerm {
-    pub input_term: crate::veryl_token::Token, /* \binput\b */
+    pub input_term: crate::veryl_token::Token, /* (?-u:\b)input(?-u:\b) */
 }
 
 ///
@@ -6750,7 +6750,7 @@ pub struct InstPortListOpt {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct InstTerm {
-    pub inst_term: crate::veryl_token::Token, /* \binst\b */
+    pub inst_term: crate::veryl_token::Token, /* (?-u:\b)inst(?-u:\b) */
 }
 
 ///
@@ -7011,7 +7011,7 @@ pub struct InterfaceOptionalNamedBlockOpt {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct InterfaceTerm {
-    pub interface_term: crate::veryl_token::Token, /* \binterface\b */
+    pub interface_term: crate::veryl_token::Token, /* (?-u:\b)interface(?-u:\b) */
 }
 
 ///
@@ -7190,7 +7190,7 @@ pub enum LocalparamDeclarationGroup {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct LocalparamTerm {
-    pub localparam_term: crate::veryl_token::Token, /* \blocalparam\b */
+    pub localparam_term: crate::veryl_token::Token, /* (?-u:\b)localparam(?-u:\b) */
 }
 
 ///
@@ -7221,7 +7221,7 @@ pub struct Logic {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct LogicTerm {
-    pub logic_term: crate::veryl_token::Token, /* \blogic\b */
+    pub logic_term: crate::veryl_token::Token, /* (?-u:\b)logic(?-u:\b) */
 }
 
 ///
@@ -7252,7 +7252,7 @@ pub struct Lsb {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct LsbTerm {
-    pub lsb_term: crate::veryl_token::Token, /* \blsb\b */
+    pub lsb_term: crate::veryl_token::Token, /* (?-u:\b)lsb(?-u:\b) */
 }
 
 ///
@@ -7435,7 +7435,7 @@ pub struct ModportListOpt {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModportTerm {
-    pub modport_term: crate::veryl_token::Token, /* \bmodport\b */
+    pub modport_term: crate::veryl_token::Token, /* (?-u:\b)modport(?-u:\b) */
 }
 
 ///
@@ -7699,7 +7699,7 @@ pub struct ModuleOptionalNamedBlockOpt {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModuleTerm {
-    pub module_term: crate::veryl_token::Token, /* \bmodule\b */
+    pub module_term: crate::veryl_token::Token, /* (?-u:\b)module(?-u:\b) */
 }
 
 ///
@@ -7730,7 +7730,7 @@ pub struct Msb {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct MsbTerm {
-    pub msb_term: crate::veryl_token::Token, /* \bmsb\b */
+    pub msb_term: crate::veryl_token::Token, /* (?-u:\b)msb(?-u:\b) */
 }
 
 ///
@@ -7761,7 +7761,7 @@ pub struct Negedge {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct NegedgeTerm {
-    pub negedge_term: crate::veryl_token::Token, /* \bnegedge\b */
+    pub negedge_term: crate::veryl_token::Token, /* (?-u:\b)negedge(?-u:\b) */
 }
 
 ///
@@ -8143,7 +8143,7 @@ pub struct Output {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct OutputTerm {
-    pub output_term: crate::veryl_token::Token, /* \boutput\b */
+    pub output_term: crate::veryl_token::Token, /* (?-u:\b)output(?-u:\b) */
 }
 
 ///
@@ -8254,7 +8254,7 @@ pub enum PackageItem {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct PackageTerm {
-    pub package_term: crate::veryl_token::Token, /* \bpackage\b */
+    pub package_term: crate::veryl_token::Token, /* (?-u:\b)package(?-u:\b) */
 }
 
 ///
@@ -8285,7 +8285,7 @@ pub struct Parameter {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ParameterTerm {
-    pub parameter_term: crate::veryl_token::Token, /* \bparameter\b */
+    pub parameter_term: crate::veryl_token::Token, /* (?-u:\b)parameter(?-u:\b) */
 }
 
 ///
@@ -8465,7 +8465,7 @@ pub struct Posedge {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct PosedgeTerm {
-    pub posedge_term: crate::veryl_token::Token, /* \bposedge\b */
+    pub posedge_term: crate::veryl_token::Token, /* (?-u:\b)posedge(?-u:\b) */
 }
 
 ///
@@ -8666,7 +8666,7 @@ pub struct Ref {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct RefTerm {
-    pub ref_term: crate::veryl_token::Token, /* \bref\b */
+    pub ref_term: crate::veryl_token::Token, /* (?-u:\b)ref(?-u:\b) */
 }
 
 ///
@@ -8697,7 +8697,7 @@ pub struct Repeat {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct RepeatTerm {
-    pub repeat_term: crate::veryl_token::Token, /* \brepeat\b */
+    pub repeat_term: crate::veryl_token::Token, /* (?-u:\b)repeat(?-u:\b) */
 }
 
 ///
@@ -8740,7 +8740,7 @@ pub struct ReturnStatement {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ReturnTerm {
-    pub return_term: crate::veryl_token::Token, /* \breturn\b */
+    pub return_term: crate::veryl_token::Token, /* (?-u:\b)return(?-u:\b) */
 }
 
 ///
@@ -8855,7 +8855,7 @@ pub struct Signed {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct SignedTerm {
-    pub signed_term: crate::veryl_token::Token, /* \bsigned\b */
+    pub signed_term: crate::veryl_token::Token, /* (?-u:\b)signed(?-u:\b) */
 }
 
 ///
@@ -8951,7 +8951,7 @@ pub struct Step {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct StepTerm {
-    pub step_term: crate::veryl_token::Token, /* \bstep\b */
+    pub step_term: crate::veryl_token::Token, /* (?-u:\b)step(?-u:\b) */
 }
 
 ///
@@ -9013,7 +9013,7 @@ pub struct StringLiteralToken {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct StringTerm {
-    pub string_term: crate::veryl_token::Token, /* \bstring\b */
+    pub string_term: crate::veryl_token::Token, /* (?-u:\b)string(?-u:\b) */
 }
 
 ///
@@ -9134,7 +9134,7 @@ pub struct StructListOpt {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct StructTerm {
-    pub struct_term: crate::veryl_token::Token, /* \bstruct\b */
+    pub struct_term: crate::veryl_token::Token, /* (?-u:\b)struct(?-u:\b) */
 }
 
 ///
@@ -9165,7 +9165,7 @@ pub struct SyncHigh {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct SyncHighTerm {
-    pub sync_high_term: crate::veryl_token::Token, /* \bsync_high\b */
+    pub sync_high_term: crate::veryl_token::Token, /* (?-u:\b)sync_high(?-u:\b) */
 }
 
 ///
@@ -9196,7 +9196,7 @@ pub struct SyncLow {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct SyncLowTerm {
-    pub sync_low_term: crate::veryl_token::Token, /* \bsync_low\b */
+    pub sync_low_term: crate::veryl_token::Token, /* (?-u:\b)sync_low(?-u:\b) */
 }
 
 ///
@@ -9227,7 +9227,7 @@ pub struct Tri {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct TriTerm {
-    pub tri_term: crate::veryl_token::Token, /* \btri\b */
+    pub tri_term: crate::veryl_token::Token, /* (?-u:\b)tri(?-u:\b) */
 }
 
 ///
@@ -9278,7 +9278,7 @@ pub enum TypeModifier {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct TypeTerm {
-    pub type_term: crate::veryl_token::Token, /* \btype\b */
+    pub type_term: crate::veryl_token::Token, /* (?-u:\b)type(?-u:\b) */
 }
 
 ///
@@ -9309,7 +9309,7 @@ pub struct U32 {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct U32Term {
-    pub u32_term: crate::veryl_token::Token, /* \bu32\b */
+    pub u32_term: crate::veryl_token::Token, /* (?-u:\b)u32(?-u:\b) */
 }
 
 ///
@@ -9340,7 +9340,7 @@ pub struct U64 {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct U64Term {
-    pub u64_term: crate::veryl_token::Token, /* \bu64\b */
+    pub u64_term: crate::veryl_token::Token, /* (?-u:\b)u64(?-u:\b) */
 }
 
 ///
@@ -9428,7 +9428,7 @@ pub struct VarDeclarationOpt {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct VarTerm {
-    pub var_term: crate::veryl_token::Token, /* \bvar\b */
+    pub var_term: crate::veryl_token::Token, /* (?-u:\b)var(?-u:\b) */
 }
 
 ///
@@ -11223,7 +11223,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 41:
     ///
-    /// AlwaysCombTerm: /\balways_comb\b/ : Token;
+    /// AlwaysCombTerm: /(?-u:\b)always_comb(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn always_comb_term(
@@ -11247,7 +11247,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 42:
     ///
-    /// AlwaysFfTerm: /\balways_ff\b/ : Token;
+    /// AlwaysFfTerm: /(?-u:\b)always_ff(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn always_ff_term(
@@ -11270,7 +11270,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 43:
     ///
-    /// AssignTerm: /\bassign\b/ : Token;
+    /// AssignTerm: /(?-u:\b)assign(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn assign_term(
@@ -11293,7 +11293,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 44:
     ///
-    /// AsyncHighTerm: /\basync_high\b/ : Token;
+    /// AsyncHighTerm: /(?-u:\b)async_high(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn async_high_term(
@@ -11316,7 +11316,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 45:
     ///
-    /// AsyncLowTerm: /\basync_low\b/ : Token;
+    /// AsyncLowTerm: /(?-u:\b)async_low(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn async_low_term(
@@ -11339,7 +11339,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 46:
     ///
-    /// AsTerm: /\bas\b/ : Token;
+    /// AsTerm: /(?-u:\b)as(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn as_term(
@@ -11362,7 +11362,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 47:
     ///
-    /// BitTerm: /\bbit\b/ : Token;
+    /// BitTerm: /(?-u:\b)bit(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn bit_term(
@@ -11385,7 +11385,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 48:
     ///
-    /// CaseTerm: /\bcase\b/ : Token;
+    /// CaseTerm: /(?-u:\b)case(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn case_term(
@@ -11408,7 +11408,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 49:
     ///
-    /// DefaultTerm: /\bdefault\b/ : Token;
+    /// DefaultTerm: /(?-u:\b)default(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn default_term(
@@ -11431,7 +11431,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 50:
     ///
-    /// ElseTerm: /\belse\b/ : Token;
+    /// ElseTerm: /(?-u:\b)else(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn else_term(
@@ -11454,7 +11454,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 51:
     ///
-    /// EnumTerm: /\benum\b/ : Token;
+    /// EnumTerm: /(?-u:\b)enum(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn enum_term(
@@ -11477,7 +11477,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 52:
     ///
-    /// ExportTerm: /\bexport\b/ : Token;
+    /// ExportTerm: /(?-u:\b)export(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn export_term(
@@ -11500,7 +11500,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 53:
     ///
-    /// F32Term: /\bf32\b/ : Token;
+    /// F32Term: /(?-u:\b)f32(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn f32_term(
@@ -11523,7 +11523,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 54:
     ///
-    /// F64Term: /\bf64\b/ : Token;
+    /// F64Term: /(?-u:\b)f64(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn f64_term(
@@ -11546,7 +11546,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 55:
     ///
-    /// ForTerm: /\bfor\b/ : Token;
+    /// ForTerm: /(?-u:\b)for(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn for_term(
@@ -11569,7 +11569,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 56:
     ///
-    /// FunctionTerm: /\bfunction\b/ : Token;
+    /// FunctionTerm: /(?-u:\b)function(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn function_term(
@@ -11592,7 +11592,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 57:
     ///
-    /// I32Term: /\bi32\b/ : Token;
+    /// I32Term: /(?-u:\b)i32(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn i32_term(
@@ -11615,7 +11615,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 58:
     ///
-    /// I64Term: /\bi64\b/ : Token;
+    /// I64Term: /(?-u:\b)i64(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn i64_term(
@@ -11638,7 +11638,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 59:
     ///
-    /// IfResetTerm: /\bif_reset\b/ : Token;
+    /// IfResetTerm: /(?-u:\b)if_reset(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn if_reset_term(
@@ -11661,7 +11661,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 60:
     ///
-    /// IfTerm: /\bif\b/ : Token;
+    /// IfTerm: /(?-u:\b)if(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn if_term(
@@ -11684,7 +11684,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 61:
     ///
-    /// ImportTerm: /\bimport\b/ : Token;
+    /// ImportTerm: /(?-u:\b)import(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn import_term(
@@ -11707,7 +11707,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 62:
     ///
-    /// InoutTerm: /\binout\b/ : Token;
+    /// InoutTerm: /(?-u:\b)inout(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn inout_term(
@@ -11730,7 +11730,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 63:
     ///
-    /// InputTerm: /\binput\b/ : Token;
+    /// InputTerm: /(?-u:\b)input(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn input_term(
@@ -11753,7 +11753,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 64:
     ///
-    /// InstTerm: /\binst\b/ : Token;
+    /// InstTerm: /(?-u:\b)inst(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn inst_term(
@@ -11776,7 +11776,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 65:
     ///
-    /// InterfaceTerm: /\binterface\b/ : Token;
+    /// InterfaceTerm: /(?-u:\b)interface(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn interface_term(
@@ -11799,7 +11799,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 66:
     ///
-    /// InTerm: /\bin\b/ : Token;
+    /// InTerm: /(?-u:\b)in(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn in_term(
@@ -11822,7 +11822,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 67:
     ///
-    /// LocalparamTerm: /\blocalparam\b/ : Token;
+    /// LocalparamTerm: /(?-u:\b)localparam(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn localparam_term(
@@ -11845,7 +11845,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 68:
     ///
-    /// LogicTerm: /\blogic\b/ : Token;
+    /// LogicTerm: /(?-u:\b)logic(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn logic_term(
@@ -11868,7 +11868,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 69:
     ///
-    /// LsbTerm: /\blsb\b/ : Token;
+    /// LsbTerm: /(?-u:\b)lsb(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn lsb_term(
@@ -11891,7 +11891,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 70:
     ///
-    /// ModportTerm: /\bmodport\b/ : Token;
+    /// ModportTerm: /(?-u:\b)modport(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn modport_term(
@@ -11914,7 +11914,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 71:
     ///
-    /// ModuleTerm: /\bmodule\b/ : Token;
+    /// ModuleTerm: /(?-u:\b)module(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn module_term(
@@ -11937,7 +11937,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 72:
     ///
-    /// MsbTerm: /\bmsb\b/ : Token;
+    /// MsbTerm: /(?-u:\b)msb(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn msb_term(
@@ -11960,7 +11960,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 73:
     ///
-    /// NegedgeTerm: /\bnegedge\b/ : Token;
+    /// NegedgeTerm: /(?-u:\b)negedge(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn negedge_term(
@@ -11983,7 +11983,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 74:
     ///
-    /// OutputTerm: /\boutput\b/ : Token;
+    /// OutputTerm: /(?-u:\b)output(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn output_term(
@@ -12006,7 +12006,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 75:
     ///
-    /// PackageTerm: /\bpackage\b/ : Token;
+    /// PackageTerm: /(?-u:\b)package(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn package_term(
@@ -12029,7 +12029,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 76:
     ///
-    /// ParameterTerm: /\bparameter\b/ : Token;
+    /// ParameterTerm: /(?-u:\b)parameter(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn parameter_term(
@@ -12052,7 +12052,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 77:
     ///
-    /// PosedgeTerm: /\bposedge\b/ : Token;
+    /// PosedgeTerm: /(?-u:\b)posedge(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn posedge_term(
@@ -12075,7 +12075,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 78:
     ///
-    /// RefTerm: /\bref\b/ : Token;
+    /// RefTerm: /(?-u:\b)ref(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn ref_term(
@@ -12098,7 +12098,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 79:
     ///
-    /// RepeatTerm: /\brepeat\b/ : Token;
+    /// RepeatTerm: /(?-u:\b)repeat(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn repeat_term(
@@ -12121,7 +12121,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 80:
     ///
-    /// ReturnTerm: /\breturn\b/ : Token;
+    /// ReturnTerm: /(?-u:\b)return(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn return_term(
@@ -12144,7 +12144,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 81:
     ///
-    /// SignedTerm: /\bsigned\b/ : Token;
+    /// SignedTerm: /(?-u:\b)signed(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn signed_term(
@@ -12167,7 +12167,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 82:
     ///
-    /// StepTerm: /\bstep\b/ : Token;
+    /// StepTerm: /(?-u:\b)step(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn step_term(
@@ -12190,7 +12190,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 83:
     ///
-    /// StringTerm: /\bstring\b/ : Token;
+    /// StringTerm: /(?-u:\b)string(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn string_term(
@@ -12213,7 +12213,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 84:
     ///
-    /// StructTerm: /\bstruct\b/ : Token;
+    /// StructTerm: /(?-u:\b)struct(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn struct_term(
@@ -12236,7 +12236,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 85:
     ///
-    /// SyncHighTerm: /\bsync_high\b/ : Token;
+    /// SyncHighTerm: /(?-u:\b)sync_high(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn sync_high_term(
@@ -12259,7 +12259,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 86:
     ///
-    /// SyncLowTerm: /\bsync_low\b/ : Token;
+    /// SyncLowTerm: /(?-u:\b)sync_low(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn sync_low_term(
@@ -12282,7 +12282,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 87:
     ///
-    /// TriTerm: /\btri\b/ : Token;
+    /// TriTerm: /(?-u:\b)tri(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn tri_term(
@@ -12305,7 +12305,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 88:
     ///
-    /// TypeTerm: /\btype\b/ : Token;
+    /// TypeTerm: /(?-u:\b)type(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn type_term(
@@ -12328,7 +12328,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 89:
     ///
-    /// U32Term: /\bu32\b/ : Token;
+    /// U32Term: /(?-u:\b)u32(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn u32_term(
@@ -12351,7 +12351,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 90:
     ///
-    /// U64Term: /\bu64\b/ : Token;
+    /// U64Term: /(?-u:\b)u64(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn u64_term(
@@ -12374,7 +12374,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 91:
     ///
-    /// VarTerm: /\bvar\b/ : Token;
+    /// VarTerm: /(?-u:\b)var(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
     fn var_term(

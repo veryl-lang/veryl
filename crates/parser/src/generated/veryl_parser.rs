@@ -70,57 +70,57 @@ pub const TERMINALS: &[&str; 99] = &[
     /* 43 */ r###"\)"###,
     /* 44 */ r###";"###,
     /* 45 */ r###"\*"###,
-    /* 46 */ r###"\balways_comb\b"###,
-    /* 47 */ r###"\balways_ff\b"###,
-    /* 48 */ r###"\bassign\b"###,
-    /* 49 */ r###"\basync_high\b"###,
-    /* 50 */ r###"\basync_low\b"###,
-    /* 51 */ r###"\bas\b"###,
-    /* 52 */ r###"\bbit\b"###,
-    /* 53 */ r###"\bcase\b"###,
-    /* 54 */ r###"\bdefault\b"###,
-    /* 55 */ r###"\belse\b"###,
-    /* 56 */ r###"\benum\b"###,
-    /* 57 */ r###"\bexport\b"###,
-    /* 58 */ r###"\bf32\b"###,
-    /* 59 */ r###"\bf64\b"###,
-    /* 60 */ r###"\bfor\b"###,
-    /* 61 */ r###"\bfunction\b"###,
-    /* 62 */ r###"\bi32\b"###,
-    /* 63 */ r###"\bi64\b"###,
-    /* 64 */ r###"\bif_reset\b"###,
-    /* 65 */ r###"\bif\b"###,
-    /* 66 */ r###"\bimport\b"###,
-    /* 67 */ r###"\binout\b"###,
-    /* 68 */ r###"\binput\b"###,
-    /* 69 */ r###"\binst\b"###,
-    /* 70 */ r###"\binterface\b"###,
-    /* 71 */ r###"\bin\b"###,
-    /* 72 */ r###"\blocalparam\b"###,
-    /* 73 */ r###"\blogic\b"###,
-    /* 74 */ r###"\blsb\b"###,
-    /* 75 */ r###"\bmodport\b"###,
-    /* 76 */ r###"\bmodule\b"###,
-    /* 77 */ r###"\bmsb\b"###,
-    /* 78 */ r###"\bnegedge\b"###,
-    /* 79 */ r###"\boutput\b"###,
-    /* 80 */ r###"\bpackage\b"###,
-    /* 81 */ r###"\bparameter\b"###,
-    /* 82 */ r###"\bposedge\b"###,
-    /* 83 */ r###"\bref\b"###,
-    /* 84 */ r###"\brepeat\b"###,
-    /* 85 */ r###"\breturn\b"###,
-    /* 86 */ r###"\bsigned\b"###,
-    /* 87 */ r###"\bstep\b"###,
-    /* 88 */ r###"\bstring\b"###,
-    /* 89 */ r###"\bstruct\b"###,
-    /* 90 */ r###"\bsync_high\b"###,
-    /* 91 */ r###"\bsync_low\b"###,
-    /* 92 */ r###"\btri\b"###,
-    /* 93 */ r###"\btype\b"###,
-    /* 94 */ r###"\bu32\b"###,
-    /* 95 */ r###"\bu64\b"###,
-    /* 96 */ r###"\bvar\b"###,
+    /* 46 */ r###"(?-u:\b)always_comb(?-u:\b)"###,
+    /* 47 */ r###"(?-u:\b)always_ff(?-u:\b)"###,
+    /* 48 */ r###"(?-u:\b)assign(?-u:\b)"###,
+    /* 49 */ r###"(?-u:\b)async_high(?-u:\b)"###,
+    /* 50 */ r###"(?-u:\b)async_low(?-u:\b)"###,
+    /* 51 */ r###"(?-u:\b)as(?-u:\b)"###,
+    /* 52 */ r###"(?-u:\b)bit(?-u:\b)"###,
+    /* 53 */ r###"(?-u:\b)case(?-u:\b)"###,
+    /* 54 */ r###"(?-u:\b)default(?-u:\b)"###,
+    /* 55 */ r###"(?-u:\b)else(?-u:\b)"###,
+    /* 56 */ r###"(?-u:\b)enum(?-u:\b)"###,
+    /* 57 */ r###"(?-u:\b)export(?-u:\b)"###,
+    /* 58 */ r###"(?-u:\b)f32(?-u:\b)"###,
+    /* 59 */ r###"(?-u:\b)f64(?-u:\b)"###,
+    /* 60 */ r###"(?-u:\b)for(?-u:\b)"###,
+    /* 61 */ r###"(?-u:\b)function(?-u:\b)"###,
+    /* 62 */ r###"(?-u:\b)i32(?-u:\b)"###,
+    /* 63 */ r###"(?-u:\b)i64(?-u:\b)"###,
+    /* 64 */ r###"(?-u:\b)if_reset(?-u:\b)"###,
+    /* 65 */ r###"(?-u:\b)if(?-u:\b)"###,
+    /* 66 */ r###"(?-u:\b)import(?-u:\b)"###,
+    /* 67 */ r###"(?-u:\b)inout(?-u:\b)"###,
+    /* 68 */ r###"(?-u:\b)input(?-u:\b)"###,
+    /* 69 */ r###"(?-u:\b)inst(?-u:\b)"###,
+    /* 70 */ r###"(?-u:\b)interface(?-u:\b)"###,
+    /* 71 */ r###"(?-u:\b)in(?-u:\b)"###,
+    /* 72 */ r###"(?-u:\b)localparam(?-u:\b)"###,
+    /* 73 */ r###"(?-u:\b)logic(?-u:\b)"###,
+    /* 74 */ r###"(?-u:\b)lsb(?-u:\b)"###,
+    /* 75 */ r###"(?-u:\b)modport(?-u:\b)"###,
+    /* 76 */ r###"(?-u:\b)module(?-u:\b)"###,
+    /* 77 */ r###"(?-u:\b)msb(?-u:\b)"###,
+    /* 78 */ r###"(?-u:\b)negedge(?-u:\b)"###,
+    /* 79 */ r###"(?-u:\b)output(?-u:\b)"###,
+    /* 80 */ r###"(?-u:\b)package(?-u:\b)"###,
+    /* 81 */ r###"(?-u:\b)parameter(?-u:\b)"###,
+    /* 82 */ r###"(?-u:\b)posedge(?-u:\b)"###,
+    /* 83 */ r###"(?-u:\b)ref(?-u:\b)"###,
+    /* 84 */ r###"(?-u:\b)repeat(?-u:\b)"###,
+    /* 85 */ r###"(?-u:\b)return(?-u:\b)"###,
+    /* 86 */ r###"(?-u:\b)signed(?-u:\b)"###,
+    /* 87 */ r###"(?-u:\b)step(?-u:\b)"###,
+    /* 88 */ r###"(?-u:\b)string(?-u:\b)"###,
+    /* 89 */ r###"(?-u:\b)struct(?-u:\b)"###,
+    /* 90 */ r###"(?-u:\b)sync_high(?-u:\b)"###,
+    /* 91 */ r###"(?-u:\b)sync_low(?-u:\b)"###,
+    /* 92 */ r###"(?-u:\b)tri(?-u:\b)"###,
+    /* 93 */ r###"(?-u:\b)type(?-u:\b)"###,
+    /* 94 */ r###"(?-u:\b)u32(?-u:\b)"###,
+    /* 95 */ r###"(?-u:\b)u64(?-u:\b)"###,
+    /* 96 */ r###"(?-u:\b)var(?-u:\b)"###,
     /* 97 */ r###"[a-zA-Z_][0-9a-zA-Z_]*"###,
     /* 98 */ ERROR_TOKEN,
 ];
@@ -25393,257 +25393,257 @@ pub const PRODUCTIONS: &[Production; 765] = &[
         lhs: 471,
         production: &[ParseType::T(45)],
     },
-    // 41 - AlwaysCombTerm: /\balways_comb\b/;
+    // 41 - AlwaysCombTerm: /(?-u:\b)always_comb(?-u:\b)/;
     Production {
         lhs: 6,
         production: &[ParseType::T(46)],
     },
-    // 42 - AlwaysFfTerm: /\balways_ff\b/;
+    // 42 - AlwaysFfTerm: /(?-u:\b)always_ff(?-u:\b)/;
     Production {
         lhs: 18,
         production: &[ParseType::T(47)],
     },
-    // 43 - AssignTerm: /\bassign\b/;
+    // 43 - AssignTerm: /(?-u:\b)assign(?-u:\b)/;
     Production {
         lhs: 33,
         production: &[ParseType::T(48)],
     },
-    // 44 - AsyncHighTerm: /\basync_high\b/;
+    // 44 - AsyncHighTerm: /(?-u:\b)async_high(?-u:\b)/;
     Production {
         lhs: 41,
         production: &[ParseType::T(49)],
     },
-    // 45 - AsyncLowTerm: /\basync_low\b/;
+    // 45 - AsyncLowTerm: /(?-u:\b)async_low(?-u:\b)/;
     Production {
         lhs: 44,
         production: &[ParseType::T(50)],
     },
-    // 46 - AsTerm: /\bas\b/;
+    // 46 - AsTerm: /(?-u:\b)as(?-u:\b)/;
     Production {
         lhs: 29,
         production: &[ParseType::T(51)],
     },
-    // 47 - BitTerm: /\bbit\b/;
+    // 47 - BitTerm: /(?-u:\b)bit(?-u:\b)/;
     Production {
         lhs: 59,
         production: &[ParseType::T(52)],
     },
-    // 48 - CaseTerm: /\bcase\b/;
+    // 48 - CaseTerm: /(?-u:\b)case(?-u:\b)/;
     Production {
         lhs: 71,
         production: &[ParseType::T(53)],
     },
-    // 49 - DefaultTerm: /\bdefault\b/;
+    // 49 - DefaultTerm: /(?-u:\b)default(?-u:\b)/;
     Production {
         lhs: 91,
         production: &[ParseType::T(54)],
     },
-    // 50 - ElseTerm: /\belse\b/;
+    // 50 - ElseTerm: /(?-u:\b)else(?-u:\b)/;
     Production {
         lhs: 109,
         production: &[ParseType::T(55)],
     },
-    // 51 - EnumTerm: /\benum\b/;
+    // 51 - EnumTerm: /(?-u:\b)enum(?-u:\b)/;
     Production {
         lhs: 121,
         production: &[ParseType::T(56)],
     },
-    // 52 - ExportTerm: /\bexport\b/;
+    // 52 - ExportTerm: /(?-u:\b)export(?-u:\b)/;
     Production {
         lhs: 133,
         production: &[ParseType::T(57)],
     },
-    // 53 - F32Term: /\bf32\b/;
+    // 53 - F32Term: /(?-u:\b)f32(?-u:\b)/;
     Production {
         lhs: 172,
         production: &[ParseType::T(58)],
     },
-    // 54 - F64Term: /\bf64\b/;
+    // 54 - F64Term: /(?-u:\b)f64(?-u:\b)/;
     Production {
         lhs: 175,
         production: &[ParseType::T(59)],
     },
-    // 55 - ForTerm: /\bfor\b/;
+    // 55 - ForTerm: /(?-u:\b)for(?-u:\b)/;
     Production {
         lhs: 188,
         production: &[ParseType::T(60)],
     },
-    // 56 - FunctionTerm: /\bfunction\b/;
+    // 56 - FunctionTerm: /(?-u:\b)function(?-u:\b)/;
     Production {
         lhs: 198,
         production: &[ParseType::T(61)],
     },
-    // 57 - I32Term: /\bi32\b/;
+    // 57 - I32Term: /(?-u:\b)i32(?-u:\b)/;
     Production {
         lhs: 208,
         production: &[ParseType::T(62)],
     },
-    // 58 - I64Term: /\bi64\b/;
+    // 58 - I64Term: /(?-u:\b)i64(?-u:\b)/;
     Production {
         lhs: 211,
         production: &[ParseType::T(63)],
     },
-    // 59 - IfResetTerm: /\bif_reset\b/;
+    // 59 - IfResetTerm: /(?-u:\b)if_reset(?-u:\b)/;
     Production {
         lhs: 226,
         production: &[ParseType::T(64)],
     },
-    // 60 - IfTerm: /\bif\b/;
+    // 60 - IfTerm: /(?-u:\b)if(?-u:\b)/;
     Production {
         lhs: 234,
         production: &[ParseType::T(65)],
     },
-    // 61 - ImportTerm: /\bimport\b/;
+    // 61 - ImportTerm: /(?-u:\b)import(?-u:\b)/;
     Production {
         lhs: 239,
         production: &[ParseType::T(66)],
     },
-    // 62 - InoutTerm: /\binout\b/;
+    // 62 - InoutTerm: /(?-u:\b)inout(?-u:\b)/;
     Production {
         lhs: 245,
         production: &[ParseType::T(67)],
     },
-    // 63 - InputTerm: /\binput\b/;
+    // 63 - InputTerm: /(?-u:\b)input(?-u:\b)/;
     Production {
         lhs: 248,
         production: &[ParseType::T(68)],
     },
-    // 64 - InstTerm: /\binst\b/;
+    // 64 - InstTerm: /(?-u:\b)inst(?-u:\b)/;
     Production {
         lhs: 274,
         production: &[ParseType::T(69)],
     },
-    // 65 - InterfaceTerm: /\binterface\b/;
+    // 65 - InterfaceTerm: /(?-u:\b)interface(?-u:\b)/;
     Production {
         lhs: 296,
         production: &[ParseType::T(70)],
     },
-    // 66 - InTerm: /\bin\b/;
+    // 66 - InTerm: /(?-u:\b)in(?-u:\b)/;
     Production {
         lhs: 242,
         production: &[ParseType::T(71)],
     },
-    // 67 - LocalparamTerm: /\blocalparam\b/;
+    // 67 - LocalparamTerm: /(?-u:\b)localparam(?-u:\b)/;
     Production {
         lhs: 313,
         production: &[ParseType::T(72)],
     },
-    // 68 - LogicTerm: /\blogic\b/;
+    // 68 - LogicTerm: /(?-u:\b)logic(?-u:\b)/;
     Production {
         lhs: 316,
         production: &[ParseType::T(73)],
     },
-    // 69 - LsbTerm: /\blsb\b/;
+    // 69 - LsbTerm: /(?-u:\b)lsb(?-u:\b)/;
     Production {
         lhs: 319,
         production: &[ParseType::T(74)],
     },
-    // 70 - ModportTerm: /\bmodport\b/;
+    // 70 - ModportTerm: /(?-u:\b)modport(?-u:\b)/;
     Production {
         lhs: 336,
         production: &[ParseType::T(75)],
     },
-    // 71 - ModuleTerm: /\bmodule\b/;
+    // 71 - ModuleTerm: /(?-u:\b)module(?-u:\b)/;
     Production {
         lhs: 358,
         production: &[ParseType::T(76)],
     },
-    // 72 - MsbTerm: /\bmsb\b/;
+    // 72 - MsbTerm: /(?-u:\b)msb(?-u:\b)/;
     Production {
         lhs: 361,
         production: &[ParseType::T(77)],
     },
-    // 73 - NegedgeTerm: /\bnegedge\b/;
+    // 73 - NegedgeTerm: /(?-u:\b)negedge(?-u:\b)/;
     Production {
         lhs: 364,
         production: &[ParseType::T(78)],
     },
-    // 74 - OutputTerm: /\boutput\b/;
+    // 74 - OutputTerm: /(?-u:\b)output(?-u:\b)/;
     Production {
         lhs: 401,
         production: &[ParseType::T(79)],
     },
-    // 75 - PackageTerm: /\bpackage\b/;
+    // 75 - PackageTerm: /(?-u:\b)package(?-u:\b)/;
     Production {
         lhs: 411,
         production: &[ParseType::T(80)],
     },
-    // 76 - ParameterTerm: /\bparameter\b/;
+    // 76 - ParameterTerm: /(?-u:\b)parameter(?-u:\b)/;
     Production {
         lhs: 414,
         production: &[ParseType::T(81)],
     },
-    // 77 - PosedgeTerm: /\bposedge\b/;
+    // 77 - PosedgeTerm: /(?-u:\b)posedge(?-u:\b)/;
     Production {
         lhs: 431,
         production: &[ParseType::T(82)],
     },
-    // 78 - RefTerm: /\bref\b/;
+    // 78 - RefTerm: /(?-u:\b)ref(?-u:\b)/;
     Production {
         lhs: 450,
         production: &[ParseType::T(83)],
     },
-    // 79 - RepeatTerm: /\brepeat\b/;
+    // 79 - RepeatTerm: /(?-u:\b)repeat(?-u:\b)/;
     Production {
         lhs: 453,
         production: &[ParseType::T(84)],
     },
-    // 80 - ReturnTerm: /\breturn\b/;
+    // 80 - ReturnTerm: /(?-u:\b)return(?-u:\b)/;
     Production {
         lhs: 457,
         production: &[ParseType::T(85)],
     },
-    // 81 - SignedTerm: /\bsigned\b/;
+    // 81 - SignedTerm: /(?-u:\b)signed(?-u:\b)/;
     Production {
         lhs: 468,
         production: &[ParseType::T(86)],
     },
-    // 82 - StepTerm: /\bstep\b/;
+    // 82 - StepTerm: /(?-u:\b)step(?-u:\b)/;
     Production {
         lhs: 477,
         production: &[ParseType::T(87)],
     },
-    // 83 - StringTerm: /\bstring\b/;
+    // 83 - StringTerm: /(?-u:\b)string(?-u:\b)/;
     Production {
         lhs: 483,
         production: &[ParseType::T(88)],
     },
-    // 84 - StructTerm: /\bstruct\b/;
+    // 84 - StructTerm: /(?-u:\b)struct(?-u:\b)/;
     Production {
         lhs: 494,
         production: &[ParseType::T(89)],
     },
-    // 85 - SyncHighTerm: /\bsync_high\b/;
+    // 85 - SyncHighTerm: /(?-u:\b)sync_high(?-u:\b)/;
     Production {
         lhs: 497,
         production: &[ParseType::T(90)],
     },
-    // 86 - SyncLowTerm: /\bsync_low\b/;
+    // 86 - SyncLowTerm: /(?-u:\b)sync_low(?-u:\b)/;
     Production {
         lhs: 500,
         production: &[ParseType::T(91)],
     },
-    // 87 - TriTerm: /\btri\b/;
+    // 87 - TriTerm: /(?-u:\b)tri(?-u:\b)/;
     Production {
         lhs: 503,
         production: &[ParseType::T(92)],
     },
-    // 88 - TypeTerm: /\btype\b/;
+    // 88 - TypeTerm: /(?-u:\b)type(?-u:\b)/;
     Production {
         lhs: 508,
         production: &[ParseType::T(93)],
     },
-    // 89 - U32Term: /\bu32\b/;
+    // 89 - U32Term: /(?-u:\b)u32(?-u:\b)/;
     Production {
         lhs: 511,
         production: &[ParseType::T(94)],
     },
-    // 90 - U64Term: /\bu64\b/;
+    // 90 - U64Term: /(?-u:\b)u64(?-u:\b)/;
     Production {
         lhs: 514,
         production: &[ParseType::T(95)],
     },
-    // 91 - VarTerm: /\bvar\b/;
+    // 91 - VarTerm: /(?-u:\b)var(?-u:\b)/;
     Production {
         lhs: 522,
         production: &[ParseType::T(96)],

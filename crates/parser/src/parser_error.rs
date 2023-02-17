@@ -54,8 +54,8 @@ impl From<ParolError> for ParserError {
                     source,
                 } => ParserError::UnexpectedToken {
                     cause,
-                    input: FileSource(input).into(),
-                    error_location: Location(error_location).into(),
+                    input: FileSource(*input).into(),
+                    error_location: Location(*error_location).into(),
                     unexpected_tokens: UnexpectedTokens(unexpected_tokens).into(),
                     expected_tokens,
                     source: source.map(|x| x.into()),
