@@ -33,9 +33,18 @@ pub struct Lock {
     pub version: Version,
     pub url: Url,
     pub revision: String,
-    pub dependencies: Vec<(String, Uuid)>,
+    pub dependencies: Vec<LockDependency>,
     #[serde(skip)]
     used: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LockDependency {
+    pub name: String,
+    pub version: Version,
+    pub url: Url,
+    pub revision: String,
 }
 
 impl Lockfile {
@@ -77,7 +86,7 @@ impl Lockfile {
 
         let mut name_table = HashSet::new();
         let mut uuid_table = HashSet::new();
-        ret.gen_locks(metadata, &mut name_table, &mut uuid_table)?;
+        ret.gen_locks(metadata, &mut name_table, &mut uuid_table, true)?;
 
         Ok(ret)
     }
@@ -99,7 +108,7 @@ impl Lockfile {
                 lock.used = false;
             }
         }
-        self.gen_locks(metadata, &mut name_table, &mut uuid_table)?;
+        self.gen_locks(metadata, &mut name_table, &mut uuid_table, true)?;
 
         // Drop unused locks
         for locks in self.lock_table.values_mut() {
@@ -152,17 +161,20 @@ impl Lockfile {
         metadata: &Metadata,
         name_table: &mut HashSet<String>,
         uuid_table: &mut HashSet<Uuid>,
+        root: bool,
     ) -> Result<(), MetadataError> {
+        // breadth first search because root has top priority of name
+        let mut dependencies_metadata = Vec::new();
         for (url, dep) in &metadata.dependencies {
-            let entries = self.resolve_dependency(url, dep)?;
-
-            for (release, name) in entries {
-                let uuid = Self::gen_uuid(url, &release.revision)?;
+            for (release, name) in self.resolve_dependency(url, dep)? {
                 let metadata = self.get_metadata(url, &release.revision)?;
                 let mut name = name.unwrap_or(metadata.project.name.clone());
 
                 // avoid name conflict by adding suffix
                 if name_table.contains(&name) {
+                    if root {
+                        return Err(MetadataError::NameConflict(name.clone()));
+                    }
                     let mut suffix = 0;
                     loop {
                         let new_name = format!("{name}_{suffix}");
@@ -177,17 +189,22 @@ impl Lockfile {
 
                 let mut dependencies = Vec::new();
                 for (url, dep) in &metadata.dependencies {
-                    let entries = self.resolve_dependency(url, dep)?;
-                    for (release, name) in entries {
-                        let uuid = Self::gen_uuid(url, &release.revision)?;
+                    for (release, name) in self.resolve_dependency(url, dep)? {
                         let metadata = self.get_metadata(url, &release.revision)?;
                         let name = name.unwrap_or(metadata.project.name.clone());
                         // project local name is not required to check name_table
 
-                        dependencies.push((name.clone(), uuid));
+                        let dependency = LockDependency {
+                            name: name.clone(),
+                            version: release.version.clone(),
+                            url: url.clone(),
+                            revision: release.revision.clone(),
+                        };
+                        dependencies.push(dependency);
                     }
                 }
 
+                let uuid = Self::gen_uuid(url, &release.revision)?;
                 if !uuid_table.contains(&uuid) {
                     let lock = Lock {
                         name: name.clone(),
@@ -208,9 +225,13 @@ impl Lockfile {
                     self.modified = true;
 
                     uuid_table.insert(uuid);
-                    self.gen_locks(&metadata, name_table, uuid_table)?;
+                    dependencies_metadata.push(metadata);
                 }
             }
+        }
+
+        for metadata in dependencies_metadata {
+            self.gen_locks(&metadata, name_table, uuid_table, false)?;
         }
 
         Ok(())

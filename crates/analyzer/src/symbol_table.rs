@@ -162,6 +162,7 @@ impl ResolveError {
 #[derive(Clone, Default, Debug)]
 pub struct SymbolTable {
     table: HashMap<StrId, Vec<Symbol>>,
+    project_local_table: HashMap<StrId, HashMap<StrId, StrId>>,
 }
 
 impl SymbolTable {
@@ -186,6 +187,18 @@ impl SymbolTable {
         let mut full_path = Vec::new();
         let mut namespace = namespace.clone();
         let mut inner = false;
+
+        let mut path = path.clone();
+
+        // replace project local name
+        let prj = namespace.paths[0];
+        let path_head = path.0[0];
+        if let Some(map) = self.project_local_table.get(&prj) {
+            if let Some(id) = map.get(&path_head) {
+                path.0[0] = *id;
+            }
+        }
+
         for name in path.as_slice() {
             let mut max_depth = 0;
             ret = None;
@@ -307,6 +320,15 @@ impl SymbolTable {
             }
         }
     }
+
+    pub fn add_project_local(&mut self, prj: StrId, from: StrId, to: StrId) {
+        self.project_local_table
+            .entry(prj)
+            .and_modify(|x| {
+                x.insert(from, to);
+            })
+            .or_insert(HashMap::from([(from, to)]));
+    }
 }
 
 impl fmt::Display for SymbolTable {
@@ -382,6 +404,10 @@ pub fn drop(file_path: PathId) {
 
 pub fn add_reference(target: TokenId, token: &Token) {
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_reference(target, token))
+}
+
+pub fn add_project_local(prj: StrId, from: StrId, to: StrId) {
+    SYMBOL_TABLE.with(|f| f.borrow_mut().add_project_local(prj, from, to))
 }
 
 #[cfg(test)]
