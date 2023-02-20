@@ -55,6 +55,18 @@ impl Git {
     pub fn clone(url: &Url, path: &Path) -> Result<Self, MetadataError> {
         let current_dir = path.parent().unwrap();
         let target = path.file_name().unwrap();
+
+        // Adjust path separator for local file path on Windows
+        let url = if cfg!(windows) {
+            if url.scheme() == "file" {
+                url.as_str().replace("/", "\\")
+            } else {
+                url.to_string()
+            }
+        } else {
+            url.to_string()
+        };
+
         if !path.exists() {
             let output = Command::new(GIT_COMMAND)
                 .arg("clone")
