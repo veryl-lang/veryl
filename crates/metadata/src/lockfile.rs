@@ -204,7 +204,7 @@ impl Lockfile {
                 // avoid name conflict by adding suffix
                 if name_table.contains(&name) {
                     if root {
-                        return Err(MetadataError::NameConflict(name.clone()));
+                        return Err(MetadataError::NameConflict(name));
                     }
                     let mut suffix = 0;
                     loop {
