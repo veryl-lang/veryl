@@ -100,7 +100,11 @@ fn create_project(root: &Path, name: &str, toml: &str, publish: bool) -> Metadat
     let path = root.join(name);
     fs::create_dir(&path).unwrap();
     let toml_path = path.join("Veryl.toml");
-    fs::write(&toml_path, &toml.replace("{}", &root.to_string_lossy())).unwrap();
+    fs::write(
+        &toml_path,
+        &toml.replace("{}", &root.to_string_lossy().replace("\\", '/')),
+    )
+    .unwrap();
     let git_ignore_path = path.join(".gitignore");
     fs::write(&git_ignore_path, GIT_IGNORE).unwrap();
     let git = Git::init(&path).unwrap();
