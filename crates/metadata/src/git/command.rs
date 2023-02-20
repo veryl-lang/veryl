@@ -59,7 +59,7 @@ impl Git {
         // Adjust path separator for local file path on Windows
         let url = if cfg!(windows) {
             if url.scheme() == "file" {
-                url.as_str().replace("/", "\\")
+                url.as_str().replace('/', "\\")
             } else {
                 url.to_string()
             }

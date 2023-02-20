@@ -95,7 +95,7 @@ impl Lockfile {
         for locks in self.lock_table.values_mut() {
             for lock in locks {
                 name_table.insert(lock.name.clone());
-                uuid_table.insert(lock.uuid.clone());
+                uuid_table.insert(lock.uuid);
                 lock.used = false;
             }
         }
