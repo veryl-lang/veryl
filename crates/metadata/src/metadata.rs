@@ -227,12 +227,16 @@ impl Metadata {
             fs::create_dir(&base_dst)?;
         }
 
-        if self.lockfile_path.exists() {
+        let modified = if self.lockfile_path.exists() {
             let mut lockfile = Lockfile::load(&self.lockfile_path)?;
-            lockfile.update(self, false)?;
+            let modified = lockfile.update(self, false)?;
             self.lockfile = lockfile;
+            modified
         } else {
             self.lockfile = Lockfile::new(self)?;
+            true
+        };
+        if modified {
             self.lockfile.save(&self.lockfile_path)?;
         }
 

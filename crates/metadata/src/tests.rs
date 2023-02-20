@@ -224,20 +224,30 @@ fn bump_version_with_commit() {
 fn lockfile() {
     let (metadata, _tempdir) = create_metadata_multi();
     let lockfile = Lockfile::new(&metadata).unwrap();
-    let projects = &lockfile.projects;
-    let sub1 = projects.iter().find(|x| x.1.name == "sub1");
-    let sub2 = projects.iter().find(|x| x.1.name == "sub2");
-    let sub2_0 = projects.iter().find(|x| x.1.name == "sub2_0");
-    let sub3_2 = projects.iter().find(|x| x.1.name == "sub3_2");
-    let sub3_3 = projects.iter().find(|x| x.1.name == "sub3_3");
+    let tbl = &lockfile.lock_table;
+    let sub1 = tbl
+        .iter()
+        .find_map(|(_, x)| x.iter().find(|x| x.name == "sub1"));
+    let sub2 = tbl
+        .iter()
+        .find_map(|(_, x)| x.iter().find(|x| x.name == "sub2"));
+    let sub2_0 = tbl
+        .iter()
+        .find_map(|(_, x)| x.iter().find(|x| x.name == "sub2_0"));
+    let sub3_2 = tbl
+        .iter()
+        .find_map(|(_, x)| x.iter().find(|x| x.name == "sub3_2"));
+    let sub3_3 = tbl
+        .iter()
+        .find_map(|(_, x)| x.iter().find(|x| x.name == "sub3_3"));
     assert!(sub1.is_some());
     assert!(sub2.is_some());
     assert!(sub2_0.is_some());
     assert!(sub3_2.is_some());
     assert!(sub3_3.is_some());
-    assert_eq!(sub1.unwrap().1.version, Version::parse("0.1.1").unwrap());
-    assert_eq!(sub2.unwrap().1.version, Version::parse("0.1.1").unwrap());
-    assert_eq!(sub2_0.unwrap().1.version, Version::parse("0.1.1").unwrap());
-    assert_eq!(sub3_2.unwrap().1.version, Version::parse("0.2.0").unwrap());
-    assert_eq!(sub3_3.unwrap().1.version, Version::parse("1.0.0").unwrap());
+    assert_eq!(sub1.unwrap().version, Version::parse("0.1.1").unwrap());
+    assert_eq!(sub2.unwrap().version, Version::parse("0.1.1").unwrap());
+    assert_eq!(sub2_0.unwrap().version, Version::parse("0.1.1").unwrap());
+    assert_eq!(sub3_2.unwrap().version, Version::parse("0.2.0").unwrap());
+    assert_eq!(sub3_3.unwrap().version, Version::parse("1.0.0").unwrap());
 }
