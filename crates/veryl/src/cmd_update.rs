@@ -16,9 +16,16 @@ impl CmdUpdate {
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
         let now = Instant::now();
 
-        let mut lockfile = Lockfile::load(&metadata.lockfile_path)?;
-        lockfile.update(metadata, true)?;
-        lockfile.save(&metadata.lockfile_path)?;
+        if metadata.lockfile_path.exists() {
+            let mut lockfile = Lockfile::load(&metadata.lockfile_path)?;
+            let modified = lockfile.update(metadata, true)?;
+            if modified {
+                lockfile.save(&metadata.lockfile_path)?;
+            }
+        } else {
+            let mut lockfile = Lockfile::new(metadata)?;
+            lockfile.save(&metadata.lockfile_path)?;
+        }
 
         let elapsed_time = now.elapsed();
         debug!("Elapsed time ({} milliseconds)", elapsed_time.as_millis());
