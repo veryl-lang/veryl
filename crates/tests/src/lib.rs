@@ -98,7 +98,7 @@ mod emitter {
 
         if name == "25_dependency" {
             let paths = metadata.paths::<&str>(&[]).unwrap();
-            let cache_dir = Metadata::cache_dir();
+            let cache_dir = Metadata::cache_dir().canonicalize().unwrap();
             for path in paths {
                 if path.src.starts_with(&cache_dir) {
                     let input = fs::read_to_string(&path.src).unwrap();
