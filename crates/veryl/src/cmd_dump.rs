@@ -16,10 +16,10 @@ impl CmdDump {
         Self { opt }
     }
 
-    pub fn exec(&self, metadata: &Metadata) -> Result<bool> {
+    pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
         let now = Instant::now();
 
-        let paths = metadata.paths(&self.opt.files, false)?;
+        let paths = metadata.paths(&self.opt.files)?;
 
         let mut contexts = Vec::new();
 

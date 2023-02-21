@@ -13,5 +13,7 @@ target        = {type = "directory", path = "testcases/sv"}
 indent_width = 4
 
 [dependencies]
-veryl_sample1 = {git = "https://github.com/dalance/veryl_sample", version = "0.1.0"}
-veryl_sample2 = {git = "https://github.com/dalance/veryl_sample", version = "0.2.0"}
+"https://github.com/dalance/veryl_sample" = [
+    {version = "0.2.1", name = "veryl_sample1"},
+    {version = "0.3.0", name = "veryl_sample2"},
+]

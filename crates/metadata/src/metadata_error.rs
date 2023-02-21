@@ -63,4 +63,8 @@ pub enum MetadataError {
     #[diagnostic(code(MetadataError::GitSpec), help(""))]
     #[error("no version/rev/tag/branch specification of {0}")]
     GitSpec(Url),
+
+    #[diagnostic(code(MetadataError::NameConflict), help(""))]
+    #[error("project name \"{0}\" is used multiply in dependencies")]
+    NameConflict(String),
 }

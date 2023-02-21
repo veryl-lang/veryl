@@ -52,7 +52,7 @@ impl Backend {
                     symbol_table::drop(path);
                     namespace_table::drop(path);
                 }
-                let analyzer = Analyzer::new(&[""], metadata);
+                let analyzer = Analyzer::new(&"", metadata);
                 let mut errors = analyzer.analyze_pass1(&text, path, &x.veryl);
                 errors.append(&mut analyzer.analyze_pass2(&text, path, &x.veryl));
                 errors.append(&mut analyzer.analyze_pass3(&text, path, &x.veryl));
@@ -274,7 +274,7 @@ impl LanguageServer for Backend {
         }
 
         if let Ok(metadata_path) = Metadata::search_from(uri) {
-            if let Ok(metadata) = Metadata::load(metadata_path) {
+            if let Ok(mut metadata) = Metadata::load(metadata_path) {
                 self.metadata_map.insert(uri.to_string(), metadata.clone());
                 self.on_change(
                     TextDocumentItem {
@@ -286,7 +286,7 @@ impl LanguageServer for Backend {
                 )
                 .await;
 
-                if let Ok(paths) = metadata.paths::<&str>(&[], false) {
+                if let Ok(paths) = metadata.paths::<&str>(&[]) {
                     for path in &paths {
                         self.background_analyze(path, &metadata).await;
                     }
