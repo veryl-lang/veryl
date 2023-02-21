@@ -919,23 +919,22 @@ veryl_sample3 = {git = &quot;https://github.com/dalance/veryl_sample&quot;, tag 
 veryl_sample4 = {git = &quot;https://github.com/dalance/veryl_sample&quot;, branch = &quot;branch&quot;}
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="dependencies"><a class="header" href="#dependencies">Dependencies</a></h1>
-<p>If you want to add other Veryl projects to dependencies of your project, you can add them to <code>[dependencies]</code> section in <code>Veryl.toml</code>.</p>
+<p>If you want to add other Veryl projects to dependencies of your project, you can add them to <code>[dependencies]</code> section in <code>Veryl.toml</code>.
+The left hand side of entry is path to the dependency, and the right hand side is version.</p>
 <pre><code class="language-toml">[dependencies]
-veryl_sample = {git = &quot;https://github.com/dalance/veryl_sample&quot;, version = &quot;0.1.0&quot;}
+&quot;https://github.com/dalance/veryl_sample&quot; = &quot;0.1.0&quot;
 </code></pre>
-<p>Each entry of <code>[dependencies]</code> has the key which is used as dependency namespace, and the value which specifies the path to the dependency.
-In the above example, </p>
-<ul>
-<li><code>veryl_sample</code> – the dependency’s namespace</li>
-<li><code>https://github.com/dalance/veryl_sample</code> – the git URL to get the dependency</li>
-<li><code>0.1.0</code> – the version requirement of the dependency</li>
-</ul>
-<p>We recommend to use <code>version</code> if it is available because it can represent breaking changes between versions.
-If not, you can use <code>rev</code>, <code>tag</code> and <code>branch</code> instead of <code>version</code>.</p>
+<p>By default, the namespace of the dependency is the same as the project name of the dependency.
+If you want to specify namespace, you can use <code>name</code> field.</p>
 <pre><code class="language-toml">[dependencies]
-veryl_sample1 = {git = &quot;https://github.com/dalance/veryl_sample&quot;, rev = &quot;9e9a30a&quot;}
-veryl_sample2 = {git = &quot;https://github.com/dalance/veryl_sample&quot;, tag = &quot;v0.4&quot;}
-veryl_sample3 = {git = &quot;https://github.com/dalance/veryl_sample&quot;, branch = &quot;branch&quot;}
+&quot;https://github.com/dalance/veryl_sample&quot; = {version = &quot;0.1.0&quot;, name = &quot;veryl_sample_alt&quot;}
+</code></pre>
+<p>If you want to use many versions of the same dependency path, you can specify each name.</p>
+<pre><code class="language-toml">[dependencies]
+&quot;https://github.com/dalance/veryl_sample&quot; = [
+    {version = &quot;0.1.0&quot;, name = &quot;veryl_sample1&quot;},
+    {version = &quot;0.2.0&quot;, name = &quot;veryl_sample2&quot;},
+]
 </code></pre>
 <h2 id="usage-of-dependency"><a class="header" href="#usage-of-dependency">Usage of dependency</a></h2>
 <p>After adding dependencies to <code>Veryl.toml</code>, you can use <code>moudle</code>, <code>interface</code> and <code>package</code> in the dependencies.
