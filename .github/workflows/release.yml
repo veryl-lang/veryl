@@ -39,7 +39,7 @@ jobs:
     - name: Release
       uses: softprops/action-gh-release@v1
       with:
-        body: '[Changelog](https://github.com/dalance/veryl/blob/master/CHANGELOG.md)'
+        generate_release_notes: true
         files: "*.zip\n*.rpm"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
