@@ -51,12 +51,21 @@ pub struct Analyzer {
 }
 
 impl Analyzer {
-    pub fn new<T: AsRef<str>>(project_paths: &[T], metadata: &Metadata) -> Self {
-        let mut ids = Vec::new();
-        for path in project_paths {
-            ids.push(resource_table::insert_str(path.as_ref()));
-        }
+    pub fn new<T: AsRef<str>>(project_name: &T, metadata: &Metadata) -> Self {
+        let ids = vec![resource_table::insert_str(project_name.as_ref())];
         namespace_table::set_default(&ids);
+        for locks in metadata.lockfile.lock_table.values() {
+            for lock in locks {
+                let prj = resource_table::insert_str(&lock.name);
+                for lock_dep in &lock.dependencies {
+                    let from = resource_table::insert_str(&lock_dep.name);
+                    let to = metadata.lockfile.lock_table.get(&lock_dep.url).unwrap();
+                    let to = to.iter().find(|x| x.version == lock_dep.version).unwrap();
+                    let to = resource_table::insert_str(&to.name);
+                    symbol_table::add_project_local(prj, from, to);
+                }
+            }
+        }
         Analyzer {
             lint_opt: metadata.lint.clone(),
         }

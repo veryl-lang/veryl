@@ -7,7 +7,7 @@ use git_repository::remote::ref_map::Options;
 use git_repository::remote::Direction;
 use git_repository::worktree::index;
 use git_repository::Repository;
-use log::info;
+use log::debug;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use thiserror::Error;
@@ -130,7 +130,7 @@ impl Git {
             let mut repo = git_repository::prepare_clone(git_url, path)?;
             let (mut repo, _) = repo.fetch_then_checkout(Discard, &AtomicBool::new(false))?;
             let (repo, _) = repo.main_worktree(Discard, &AtomicBool::new(false))?;
-            info!("Cloned repository ({})", url);
+            debug!("Cloned repository ({})", url);
             repo
         };
 
@@ -148,7 +148,7 @@ impl Git {
         let prepare = connect.prepare_fetch(Options::default())?;
         let _outcome = prepare.receive(&AtomicBool::new(false))?;
 
-        info!(
+        debug!(
             "Fetched repository ({})",
             self.repo.work_dir().unwrap().to_string_lossy()
         );
@@ -187,7 +187,7 @@ impl Git {
             Default::default(),
         )?;
 
-        info!(
+        debug!(
             "Checkouted repository ({})",
             self.repo.work_dir().unwrap().to_string_lossy()
         );

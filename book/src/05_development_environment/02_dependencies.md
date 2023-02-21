@@ -1,27 +1,29 @@
 # Dependencies
 
 If you want to add other Veryl projects to dependencies of your project, you can add them to `[dependencies]` section in `Veryl.toml`.
+The left hand side of entry is path to the dependency, and the right hand side is version.
 
 ```toml
 [dependencies]
-veryl_sample = {git = "https://github.com/dalance/veryl_sample", version = "0.1.0"}
+"https://github.com/dalance/veryl_sample" = "0.1.0"
 ```
 
-Each entry of `[dependencies]` has the key which is used as dependency namespace, and the value which specifies the path to the dependency.
-In the above example, 
-
-* `veryl_sample` -- the dependency's namespace
-* `https://github.com/dalance/veryl_sample` -- the git URL to get the dependency
-* `0.1.0` -- the version requirement of the dependency
-
-We recommend to use `version` if it is available because it can represent breaking changes between versions.
-If not, you can use `rev`, `tag` and `branch` instead of `version`.
+By default, the namespace of the dependency is the same as the project name of the dependency.
+If you want to specify namespace, you can use `name` field.
 
 ```toml
 [dependencies]
-veryl_sample1 = {git = "https://github.com/dalance/veryl_sample", rev = "9e9a30a"}
-veryl_sample2 = {git = "https://github.com/dalance/veryl_sample", tag = "v0.4"}
-veryl_sample3 = {git = "https://github.com/dalance/veryl_sample", branch = "branch"}
+"https://github.com/dalance/veryl_sample" = {version = "0.1.0", name = "veryl_sample_alt"}
+```
+
+If you want to use many versions of the same dependency path, you can specify each name.
+
+```toml
+[dependencies]
+"https://github.com/dalance/veryl_sample" = [
+    {version = "0.1.0", name = "veryl_sample1"},
+    {version = "0.2.0", name = "veryl_sample2"},
+]
 ```
 
 ## Usage of dependency

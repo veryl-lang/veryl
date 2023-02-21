@@ -1,5 +1,5 @@
 use crate::metadata_error::MetadataError;
-use log::info;
+use log::debug;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use thiserror::Error;
@@ -55,6 +55,7 @@ impl Git {
     pub fn clone(url: &Url, path: &Path) -> Result<Self, MetadataError> {
         let current_dir = path.parent().unwrap();
         let target = path.file_name().unwrap();
+
         if !path.exists() {
             let output = Command::new(GIT_COMMAND)
                 .arg("clone")
@@ -67,7 +68,7 @@ impl Git {
                 let msg = format!("failed to clone repository: {}", url.as_str());
                 return Err(GitCommandError { msg, context }.into());
             }
-            info!("Cloned repository ({})", url);
+            debug!("Cloned repository ({})", url);
         }
 
         Ok(Git {
@@ -89,7 +90,7 @@ impl Git {
             return Err(GitCommandError { msg, context }.into());
         }
 
-        info!("Fetched repository ({})", self.path.to_string_lossy());
+        debug!("Fetched repository ({})", self.path.to_string_lossy());
 
         Ok(())
     }
@@ -115,7 +116,7 @@ impl Git {
             return Err(GitCommandError { msg, context }.into());
         }
 
-        info!(
+        debug!(
             "Checkouted repository ({} @ {})",
             self.path.to_string_lossy(),
             dst
