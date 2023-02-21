@@ -150,13 +150,4 @@ Available configurations is [here](./03_publish_project.md).
 ## The `[dependencies]` section
 
 The `[dependencies]` section contains library dependencies.
-The git URL of a dependency are specified by `git` key.
-`rev`, `tag`, and `branch` key can be used to specify the specific version.
-
-```toml
-[dependencies]
-veryl_sample1 = {git = "https://github.com/dalance/veryl_sample"}
-veryl_sample2 = {git = "https://github.com/dalance/veryl_sample", rev = "9e9a30a"}
-veryl_sample3 = {git = "https://github.com/dalance/veryl_sample", tag = "v0.4"}
-veryl_sample4 = {git = "https://github.com/dalance/veryl_sample", branch = "branch"}
-```
+Available configurations is [here](./02_dependencies.md).
