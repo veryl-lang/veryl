@@ -714,13 +714,13 @@ pub trait VerylWalker {
         before!(self, hierarchical_identifier, arg);
         self.identifier(&arg.identifier);
         for x in &arg.hierarchical_identifier_list {
-            self.range(&x.range);
+            self.select(&x.select);
         }
         for x in &arg.hierarchical_identifier_list0 {
             self.dot(&x.dot);
             self.identifier(&x.identifier);
             for x in &x.hierarchical_identifier_list0_list {
-                self.range(&x.range);
+                self.select(&x.select);
             }
         }
         after!(self, hierarchical_identifier, arg);
@@ -753,18 +753,18 @@ pub trait VerylWalker {
                     self.identifier(&x.identifier);
                 }
                 for x in &x.expression_identifier_group_list0 {
-                    self.range(&x.range);
+                    self.select(&x.select);
                 }
             }
             ExpressionIdentifierGroup::ExpressionIdentifierGroupList1ExpressionIdentifierGroupList2(x) => {
                 for x in &x.expression_identifier_group_list1 {
-                    self.range(&x.range);
+                    self.select(&x.select);
                 }
                 for x in &x.expression_identifier_group_list2 {
                     self.dot(&x.dot);
                     self.identifier(&x.identifier);
                     for x in &x.expression_identifier_group_list2_list {
-                        self.range(&x.range);
+                        self.select(&x.select);
                     }
                 }
             }
@@ -1082,29 +1082,29 @@ pub trait VerylWalker {
         after!(self, type_expression, arg);
     }
 
-    /// Semantic action for non-terminal 'Range'
-    fn range(&mut self, arg: &Range) {
-        before!(self, range, arg);
+    /// Semantic action for non-terminal 'Select'
+    fn select(&mut self, arg: &Select) {
+        before!(self, select, arg);
         self.l_bracket(&arg.l_bracket);
         self.expression(&arg.expression);
-        if let Some(ref x) = arg.range_opt {
-            self.range_operator(&x.range_operator);
+        if let Some(ref x) = arg.select_opt {
+            self.select_operator(&x.select_operator);
             self.expression(&x.expression);
         }
         self.r_bracket(&arg.r_bracket);
-        after!(self, range, arg);
+        after!(self, select, arg);
     }
 
-    /// Semantic action for non-terminal 'RangeOperator'
-    fn range_operator(&mut self, arg: &RangeOperator) {
-        before!(self, range_operator, arg);
+    /// Semantic action for non-terminal 'SelectOperator'
+    fn select_operator(&mut self, arg: &SelectOperator) {
+        before!(self, select_operator, arg);
         match arg {
-            RangeOperator::Colon(x) => self.colon(&x.colon),
-            RangeOperator::PlusColon(x) => self.plus_colon(&x.plus_colon),
-            RangeOperator::MinusColon(x) => self.minus_colon(&x.minus_colon),
-            RangeOperator::Step(x) => self.step(&x.step),
+            SelectOperator::Colon(x) => self.colon(&x.colon),
+            SelectOperator::PlusColon(x) => self.plus_colon(&x.plus_colon),
+            SelectOperator::MinusColon(x) => self.minus_colon(&x.minus_colon),
+            SelectOperator::Step(x) => self.step(&x.step),
         }
-        after!(self, range_operator, arg);
+        after!(self, select_operator, arg);
     }
 
     /// Semantic action for non-terminal 'Width'

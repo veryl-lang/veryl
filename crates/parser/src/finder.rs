@@ -40,7 +40,7 @@ impl VerylWalker for Finder {
         self.identifier(&arg.identifier);
         self.in_group = false;
         for x in &arg.hierarchical_identifier_list {
-            self.range(&x.range);
+            self.select(&x.select);
         }
         for x in &arg.hierarchical_identifier_list0 {
             self.dot(&x.dot);
@@ -48,7 +48,7 @@ impl VerylWalker for Finder {
             self.identifier(&x.identifier);
             self.in_group = false;
             for x in &x.hierarchical_identifier_list0_list {
-                self.range(&x.range);
+                self.select(&x.select);
             }
         }
         if !self.hit {
@@ -95,12 +95,12 @@ impl VerylWalker for Finder {
                     self.in_group = false;
                 }
                 for x in &x.expression_identifier_group_list0 {
-                    self.range(&x.range);
+                    self.select(&x.select);
                 }
             }
             ExpressionIdentifierGroup::ExpressionIdentifierGroupList1ExpressionIdentifierGroupList2(x) => {
                 for x in &x.expression_identifier_group_list1 {
-                    self.range(&x.range);
+                    self.select(&x.select);
                 }
                 for x in &x.expression_identifier_group_list2 {
                     self.dot(&x.dot);
@@ -108,7 +108,7 @@ impl VerylWalker for Finder {
                     self.identifier(&x.identifier);
                     self.in_group = false;
                     for x in &x.expression_identifier_group_list2_list {
-                        self.range(&x.range);
+                        self.select(&x.select);
                     }
                 }
             }

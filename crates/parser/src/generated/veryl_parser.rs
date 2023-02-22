@@ -781,25 +781,25 @@ pub const NON_TERMINALS: &[&str; 542] = &[
     /* 442 */ "RParen",
     /* 443 */ "RParenTerm",
     /* 444 */ "RParenToken",
-    /* 445 */ "Range",
-    /* 446 */ "RangeOperator",
-    /* 447 */ "RangeOpt",
-    /* 448 */ "RealNumber",
-    /* 449 */ "Ref",
-    /* 450 */ "RefTerm",
-    /* 451 */ "RefToken",
-    /* 452 */ "Repeat",
-    /* 453 */ "RepeatTerm",
-    /* 454 */ "RepeatToken",
-    /* 455 */ "Return",
-    /* 456 */ "ReturnStatement",
-    /* 457 */ "ReturnTerm",
-    /* 458 */ "ReturnToken",
-    /* 459 */ "ScalarType",
-    /* 460 */ "ScalarTypeGroup",
-    /* 461 */ "ScalarTypeList",
-    /* 462 */ "ScopedIdentifier",
-    /* 463 */ "ScopedIdentifierList",
+    /* 445 */ "RealNumber",
+    /* 446 */ "Ref",
+    /* 447 */ "RefTerm",
+    /* 448 */ "RefToken",
+    /* 449 */ "Repeat",
+    /* 450 */ "RepeatTerm",
+    /* 451 */ "RepeatToken",
+    /* 452 */ "Return",
+    /* 453 */ "ReturnStatement",
+    /* 454 */ "ReturnTerm",
+    /* 455 */ "ReturnToken",
+    /* 456 */ "ScalarType",
+    /* 457 */ "ScalarTypeGroup",
+    /* 458 */ "ScalarTypeList",
+    /* 459 */ "ScopedIdentifier",
+    /* 460 */ "ScopedIdentifierList",
+    /* 461 */ "Select",
+    /* 462 */ "SelectOperator",
+    /* 463 */ "SelectOpt",
     /* 464 */ "Semicolon",
     /* 465 */ "SemicolonTerm",
     /* 466 */ "SemicolonToken",
@@ -24113,108 +24113,79 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 542] = &[
         transitions: &[],
         k: 0,
     },
-    /* 445 - "Range" */
-    LookaheadDFA {
-        states: &[Some(399)],
-        transitions: &[],
-        k: 0,
-    },
-    /* 446 - "RangeOperator" */
-    LookaheadDFA {
-        states: &[None, Some(402), Some(403), Some(404), Some(405)],
-        transitions: &[
-            DFATransition(0, 12, 3),
-            DFATransition(0, 14, 2),
-            DFATransition(0, 29, 1),
-            DFATransition(0, 87, 4),
-        ],
-        k: 1,
-    },
-    /* 447 - "RangeOpt" */
-    LookaheadDFA {
-        states: &[None, Some(400), Some(401)],
-        transitions: &[
-            DFATransition(0, 12, 1),
-            DFATransition(0, 14, 1),
-            DFATransition(0, 29, 1),
-            DFATransition(0, 42, 2),
-            DFATransition(0, 87, 1),
-        ],
-        k: 1,
-    },
-    /* 448 - "RealNumber" */
+    /* 445 - "RealNumber" */
     LookaheadDFA {
         states: &[None, Some(287), Some(288)],
         transitions: &[DFATransition(0, 7, 2), DFATransition(0, 8, 1)],
         k: 1,
     },
-    /* 449 - "Ref" */
+    /* 446 - "Ref" */
     LookaheadDFA {
         states: &[Some(267)],
         transitions: &[],
         k: 0,
     },
-    /* 450 - "RefTerm" */
+    /* 447 - "RefTerm" */
     LookaheadDFA {
         states: &[Some(78)],
         transitions: &[],
         k: 0,
     },
-    /* 451 - "RefToken" */
+    /* 448 - "RefToken" */
     LookaheadDFA {
         states: &[Some(174)],
         transitions: &[],
         k: 0,
     },
-    /* 452 - "Repeat" */
+    /* 449 - "Repeat" */
     LookaheadDFA {
         states: &[Some(268)],
         transitions: &[],
         k: 0,
     },
-    /* 453 - "RepeatTerm" */
+    /* 450 - "RepeatTerm" */
     LookaheadDFA {
         states: &[Some(79)],
         transitions: &[],
         k: 0,
     },
-    /* 454 - "RepeatToken" */
+    /* 451 - "RepeatToken" */
     LookaheadDFA {
         states: &[Some(175)],
         transitions: &[],
         k: 0,
     },
-    /* 455 - "Return" */
+    /* 452 - "Return" */
     LookaheadDFA {
         states: &[Some(269)],
         transitions: &[],
         k: 0,
     },
-    /* 456 - "ReturnStatement" */
+    /* 453 - "ReturnStatement" */
     LookaheadDFA {
         states: &[Some(466)],
         transitions: &[],
         k: 0,
     },
-    /* 457 - "ReturnTerm" */
+    /* 454 - "ReturnTerm" */
     LookaheadDFA {
         states: &[Some(80)],
         transitions: &[],
         k: 0,
     },
-    /* 458 - "ReturnToken" */
+    /* 455 - "ReturnToken" */
     LookaheadDFA {
         states: &[Some(176)],
         transitions: &[],
         k: 0,
     },
-    /* 459 - "ScalarType" */
+    /* 456 - "ScalarType" */
     LookaheadDFA {
         states: &[Some(427)],
         transitions: &[],
         k: 0,
     },
-    /* 460 - "ScalarTypeGroup" */
+    /* 457 - "ScalarTypeGroup" */
     LookaheadDFA {
         states: &[None, Some(428), Some(429)],
         transitions: &[
@@ -24231,7 +24202,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 542] = &[
         ],
         k: 1,
     },
-    /* 461 - "ScalarTypeList" */
+    /* 458 - "ScalarTypeList" */
     LookaheadDFA {
         states: &[None, Some(430), Some(431)],
         transitions: &[
@@ -24250,13 +24221,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 542] = &[
         ],
         k: 1,
     },
-    /* 462 - "ScopedIdentifier" */
+    /* 459 - "ScopedIdentifier" */
     LookaheadDFA {
         states: &[Some(296)],
         transitions: &[],
         k: 0,
     },
-    /* 463 - "ScopedIdentifierList" */
+    /* 460 - "ScopedIdentifierList" */
     LookaheadDFA {
         states: &[None, Some(297), Some(298)],
         transitions: &[
@@ -24293,6 +24264,35 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 542] = &[
             DFATransition(0, 71, 2),
             DFATransition(0, 84, 2),
             DFATransition(0, 87, 2),
+        ],
+        k: 1,
+    },
+    /* 461 - "Select" */
+    LookaheadDFA {
+        states: &[Some(399)],
+        transitions: &[],
+        k: 0,
+    },
+    /* 462 - "SelectOperator" */
+    LookaheadDFA {
+        states: &[None, Some(402), Some(403), Some(404), Some(405)],
+        transitions: &[
+            DFATransition(0, 12, 3),
+            DFATransition(0, 14, 2),
+            DFATransition(0, 29, 1),
+            DFATransition(0, 87, 4),
+        ],
+        k: 1,
+    },
+    /* 463 - "SelectOpt" */
+    LookaheadDFA {
+        states: &[None, Some(400), Some(401)],
+        transitions: &[
+            DFATransition(0, 12, 1),
+            DFATransition(0, 14, 1),
+            DFATransition(0, 29, 1),
+            DFATransition(0, 42, 2),
+            DFATransition(0, 87, 1),
         ],
         k: 1,
     },
@@ -25580,17 +25580,17 @@ pub const PRODUCTIONS: &[Production; 765] = &[
     },
     // 78 - RefTerm: /(?-u:\b)ref(?-u:\b)/;
     Production {
-        lhs: 450,
+        lhs: 447,
         production: &[ParseType::T(83)],
     },
     // 79 - RepeatTerm: /(?-u:\b)repeat(?-u:\b)/;
     Production {
-        lhs: 453,
+        lhs: 450,
         production: &[ParseType::T(84)],
     },
     // 80 - ReturnTerm: /(?-u:\b)return(?-u:\b)/;
     Production {
-        lhs: 457,
+        lhs: 454,
         production: &[ParseType::T(85)],
     },
     // 81 - SignedTerm: /(?-u:\b)signed(?-u:\b)/;
@@ -26060,18 +26060,18 @@ pub const PRODUCTIONS: &[Production; 765] = &[
     },
     // 174 - RefToken: RefTerm : crate::veryl_token::Token  Comments;
     Production {
-        lhs: 451,
-        production: &[ParseType::N(82), ParseType::N(450)],
+        lhs: 448,
+        production: &[ParseType::N(82), ParseType::N(447)],
     },
     // 175 - RepeatToken: RepeatTerm : crate::veryl_token::Token  Comments;
     Production {
-        lhs: 454,
-        production: &[ParseType::N(82), ParseType::N(453)],
+        lhs: 451,
+        production: &[ParseType::N(82), ParseType::N(450)],
     },
     // 176 - ReturnToken: ReturnTerm : crate::veryl_token::Token  Comments;
     Production {
-        lhs: 458,
-        production: &[ParseType::N(82), ParseType::N(457)],
+        lhs: 455,
+        production: &[ParseType::N(82), ParseType::N(454)],
     },
     // 177 - SignedToken: SignedTerm : crate::veryl_token::Token  Comments;
     Production {
@@ -26525,18 +26525,18 @@ pub const PRODUCTIONS: &[Production; 765] = &[
     },
     // 267 - Ref: RefToken : crate::veryl_token::VerylToken ;
     Production {
-        lhs: 449,
-        production: &[ParseType::N(451)],
+        lhs: 446,
+        production: &[ParseType::N(448)],
     },
     // 268 - Repeat: RepeatToken : crate::veryl_token::VerylToken ;
     Production {
-        lhs: 452,
-        production: &[ParseType::N(454)],
+        lhs: 449,
+        production: &[ParseType::N(451)],
     },
     // 269 - Return: ReturnToken : crate::veryl_token::VerylToken ;
     Production {
-        lhs: 455,
-        production: &[ParseType::N(458)],
+        lhs: 452,
+        production: &[ParseType::N(455)],
     },
     // 270 - Signed: SignedToken : crate::veryl_token::VerylToken ;
     Production {
@@ -26606,7 +26606,7 @@ pub const PRODUCTIONS: &[Production; 765] = &[
     // 283 - Number: RealNumber;
     Production {
         lhs: 366,
-        production: &[ParseType::N(448)],
+        production: &[ParseType::N(445)],
     },
     // 284 - IntegralNumber: Based;
     Production {
@@ -26625,12 +26625,12 @@ pub const PRODUCTIONS: &[Production; 765] = &[
     },
     // 287 - RealNumber: FixedPoint;
     Production {
-        lhs: 448,
+        lhs: 445,
         production: &[ParseType::N(180)],
     },
     // 288 - RealNumber: Exponent;
     Production {
-        lhs: 448,
+        lhs: 445,
         production: &[ParseType::N(126)],
     },
     // 289 - HierarchicalIdentifier: Identifier HierarchicalIdentifierList /* Vec */ HierarchicalIdentifierList0 /* Vec */;
@@ -26648,10 +26648,10 @@ pub const PRODUCTIONS: &[Production; 765] = &[
             ParseType::N(102),
         ],
     },
-    // 291 - HierarchicalIdentifierList0List: Range HierarchicalIdentifierList0List;
+    // 291 - HierarchicalIdentifierList0List: Select HierarchicalIdentifierList0List;
     Production {
         lhs: 206,
-        production: &[ParseType::N(206), ParseType::N(445)],
+        production: &[ParseType::N(206), ParseType::N(461)],
     },
     // 292 - HierarchicalIdentifierList0List: ;
     Production {
@@ -26663,10 +26663,10 @@ pub const PRODUCTIONS: &[Production; 765] = &[
         lhs: 205,
         production: &[],
     },
-    // 294 - HierarchicalIdentifierList: Range HierarchicalIdentifierList;
+    // 294 - HierarchicalIdentifierList: Select HierarchicalIdentifierList;
     Production {
         lhs: 204,
-        production: &[ParseType::N(204), ParseType::N(445)],
+        production: &[ParseType::N(204), ParseType::N(461)],
     },
     // 295 - HierarchicalIdentifierList: ;
     Production {
@@ -26675,17 +26675,17 @@ pub const PRODUCTIONS: &[Production; 765] = &[
     },
     // 296 - ScopedIdentifier: Identifier ScopedIdentifierList /* Vec */;
     Production {
-        lhs: 462,
-        production: &[ParseType::N(463), ParseType::N(213)],
+        lhs: 459,
+        production: &[ParseType::N(460), ParseType::N(213)],
     },
     // 297 - ScopedIdentifierList: ColonColon Identifier ScopedIdentifierList;
     Production {
-        lhs: 463,
-        production: &[ParseType::N(463), ParseType::N(213), ParseType::N(74)],
+        lhs: 460,
+        production: &[ParseType::N(460), ParseType::N(213), ParseType::N(74)],
     },
     // 298 - ScopedIdentifierList: ;
     Production {
-        lhs: 463,
+        lhs: 460,
         production: &[],
     },
     // 299 - ExpressionIdentifier: ExpressionIdentifierOpt /* Option */ Identifier ExpressionIdentifierGroup;
@@ -26703,10 +26703,10 @@ pub const PRODUCTIONS: &[Production; 765] = &[
             ParseType::N(74),
         ],
     },
-    // 301 - ExpressionIdentifierGroupList0: Range ExpressionIdentifierGroupList0;
+    // 301 - ExpressionIdentifierGroupList0: Select ExpressionIdentifierGroupList0;
     Production {
         lhs: 165,
-        production: &[ParseType::N(165), ParseType::N(445)],
+        production: &[ParseType::N(165), ParseType::N(461)],
     },
     // 302 - ExpressionIdentifierGroupList0: ;
     Production {
@@ -26738,10 +26738,10 @@ pub const PRODUCTIONS: &[Production; 765] = &[
             ParseType::N(102),
         ],
     },
-    // 307 - ExpressionIdentifierGroupList2List: Range ExpressionIdentifierGroupList2List;
+    // 307 - ExpressionIdentifierGroupList2List: Select ExpressionIdentifierGroupList2List;
     Production {
         lhs: 168,
-        production: &[ParseType::N(168), ParseType::N(445)],
+        production: &[ParseType::N(168), ParseType::N(461)],
     },
     // 308 - ExpressionIdentifierGroupList2List: ;
     Production {
@@ -26753,10 +26753,10 @@ pub const PRODUCTIONS: &[Production; 765] = &[
         lhs: 167,
         production: &[],
     },
-    // 310 - ExpressionIdentifierGroupList1: Range ExpressionIdentifierGroupList1;
+    // 310 - ExpressionIdentifierGroupList1: Select ExpressionIdentifierGroupList1;
     Production {
         lhs: 166,
-        production: &[ParseType::N(166), ParseType::N(445)],
+        production: &[ParseType::N(166), ParseType::N(461)],
     },
     // 311 - ExpressionIdentifierGroupList1: ;
     Production {
@@ -26956,7 +26956,7 @@ pub const PRODUCTIONS: &[Production; 765] = &[
     // 350 - Expression11List: As ScopedIdentifier Expression11List;
     Production {
         lhs: 158,
-        production: &[ParseType::N(158), ParseType::N(462), ParseType::N(28)],
+        production: &[ParseType::N(158), ParseType::N(459), ParseType::N(28)],
     },
     // 351 - Expression11List: ;
     Production {
@@ -27141,7 +27141,7 @@ pub const PRODUCTIONS: &[Production; 765] = &[
     // 387 - ConcatenationItemOpt: Repeat Expression;
     Production {
         lhs: 86,
-        production: &[ParseType::N(135), ParseType::N(452)],
+        production: &[ParseType::N(135), ParseType::N(449)],
     },
     // 388 - ConcatenationItemOpt: ;
     Production {
@@ -27230,7 +27230,7 @@ pub const PRODUCTIONS: &[Production; 765] = &[
     // 397 - TypeExpression: ScalarType;
     Production {
         lhs: 506,
-        production: &[ParseType::N(459)],
+        production: &[ParseType::N(456)],
     },
     // 398 - TypeExpression: Type LParen Expression RParen;
     Production {
@@ -27242,44 +27242,44 @@ pub const PRODUCTIONS: &[Production; 765] = &[
             ParseType::N(505),
         ],
     },
-    // 399 - Range: LBracket Expression RangeOpt /* Option */ RBracket;
+    // 399 - Select: LBracket Expression SelectOpt /* Option */ RBracket;
     Production {
-        lhs: 445,
+        lhs: 461,
         production: &[
             ParseType::N(439),
-            ParseType::N(447),
+            ParseType::N(463),
             ParseType::N(135),
             ParseType::N(304),
         ],
     },
-    // 400 - RangeOpt: RangeOperator Expression;
+    // 400 - SelectOpt: SelectOperator Expression;
     Production {
-        lhs: 447,
-        production: &[ParseType::N(135), ParseType::N(446)],
+        lhs: 463,
+        production: &[ParseType::N(135), ParseType::N(462)],
     },
-    // 401 - RangeOpt: ;
+    // 401 - SelectOpt: ;
     Production {
-        lhs: 447,
+        lhs: 463,
         production: &[],
     },
-    // 402 - RangeOperator: Colon;
+    // 402 - SelectOperator: Colon;
     Production {
-        lhs: 446,
+        lhs: 462,
         production: &[ParseType::N(73)],
     },
-    // 403 - RangeOperator: PlusColon;
+    // 403 - SelectOperator: PlusColon;
     Production {
-        lhs: 446,
+        lhs: 462,
         production: &[ParseType::N(416)],
     },
-    // 404 - RangeOperator: MinusColon;
+    // 404 - SelectOperator: MinusColon;
     Production {
-        lhs: 446,
+        lhs: 462,
         production: &[ParseType::N(321)],
     },
-    // 405 - RangeOperator: Step;
+    // 405 - SelectOperator: Step;
     Production {
-        lhs: 446,
+        lhs: 462,
         production: &[ParseType::N(476)],
     },
     // 406 - Width: LAngle Expression WidthList /* Vec */ RAngle;
@@ -27375,7 +27375,7 @@ pub const PRODUCTIONS: &[Production; 765] = &[
     // 422 - VariableTypeGroup: ScopedIdentifier;
     Production {
         lhs: 525,
-        production: &[ParseType::N(462)],
+        production: &[ParseType::N(459)],
     },
     // 423 - VariableTypeOpt: Width;
     Production {
@@ -27399,33 +27399,33 @@ pub const PRODUCTIONS: &[Production; 765] = &[
     },
     // 427 - ScalarType: ScalarTypeList /* Vec */ ScalarTypeGroup;
     Production {
-        lhs: 459,
-        production: &[ParseType::N(460), ParseType::N(461)],
+        lhs: 456,
+        production: &[ParseType::N(457), ParseType::N(458)],
     },
     // 428 - ScalarTypeGroup: VariableType;
     Production {
-        lhs: 460,
+        lhs: 457,
         production: &[ParseType::N(524)],
     },
     // 429 - ScalarTypeGroup: FixedType;
     Production {
-        lhs: 460,
+        lhs: 457,
         production: &[ParseType::N(183)],
     },
     // 430 - ScalarTypeList: TypeModifier ScalarTypeList;
     Production {
-        lhs: 461,
-        production: &[ParseType::N(461), ParseType::N(507)],
+        lhs: 458,
+        production: &[ParseType::N(458), ParseType::N(507)],
     },
     // 431 - ScalarTypeList: ;
     Production {
-        lhs: 461,
+        lhs: 458,
         production: &[],
     },
     // 432 - ArrayType: ScalarType ArrayTypeOpt /* Option */;
     Production {
         lhs: 26,
-        production: &[ParseType::N(27), ParseType::N(459)],
+        production: &[ParseType::N(27), ParseType::N(456)],
     },
     // 433 - ArrayTypeOpt: Array;
     Production {
@@ -27455,7 +27455,7 @@ pub const PRODUCTIONS: &[Production; 765] = &[
     // 438 - Statement: ReturnStatement;
     Production {
         lhs: 475,
-        production: &[ParseType::N(456)],
+        production: &[ParseType::N(453)],
     },
     // 439 - Statement: ForStatement;
     Production {
@@ -27640,8 +27640,8 @@ pub const PRODUCTIONS: &[Production; 765] = &[
     },
     // 466 - ReturnStatement: Return Expression Semicolon;
     Production {
-        lhs: 456,
-        production: &[ParseType::N(464), ParseType::N(135), ParseType::N(455)],
+        lhs: 453,
+        production: &[ParseType::N(464), ParseType::N(135), ParseType::N(452)],
     },
     // 467 - ForStatement: For Identifier Colon ScalarType In Expression DotDot Expression ForStatementOpt /* Option */ LBrace ForStatementList /* Vec */ RBrace;
     Production {
@@ -27655,7 +27655,7 @@ pub const PRODUCTIONS: &[Production; 765] = &[
             ParseType::N(103),
             ParseType::N(135),
             ParseType::N(241),
-            ParseType::N(459),
+            ParseType::N(456),
             ParseType::N(73),
             ParseType::N(213),
             ParseType::N(184),
@@ -28034,7 +28034,7 @@ pub const PRODUCTIONS: &[Production; 765] = &[
             ParseType::N(436),
             ParseType::N(118),
             ParseType::N(301),
-            ParseType::N(459),
+            ParseType::N(456),
             ParseType::N(73),
             ParseType::N(213),
             ParseType::N(111),
@@ -28169,7 +28169,7 @@ pub const PRODUCTIONS: &[Production; 765] = &[
     // 556 - StructItem: Identifier Colon ScalarType;
     Production {
         lhs: 490,
-        production: &[ParseType::N(459), ParseType::N(73), ParseType::N(213)],
+        production: &[ParseType::N(456), ParseType::N(73), ParseType::N(213)],
     },
     // 557 - InstDeclaration: Inst Identifier Colon ScopedIdentifier InstDeclarationOpt /* Option */ InstDeclarationOpt0 /* Option */ InstDeclarationOpt1 /* Option */ Semicolon;
     Production {
@@ -28179,7 +28179,7 @@ pub const PRODUCTIONS: &[Production; 765] = &[
             ParseType::N(254),
             ParseType::N(253),
             ParseType::N(252),
-            ParseType::N(462),
+            ParseType::N(459),
             ParseType::N(73),
             ParseType::N(213),
             ParseType::N(250),
@@ -28583,7 +28583,7 @@ pub const PRODUCTIONS: &[Production; 765] = &[
     // 634 - Direction: Ref;
     Production {
         lhs: 98,
-        production: &[ParseType::N(449)],
+        production: &[ParseType::N(446)],
     },
     // 635 - Direction: Modport;
     Production {
@@ -28597,7 +28597,7 @@ pub const PRODUCTIONS: &[Production; 765] = &[
             ParseType::N(436),
             ParseType::N(194),
             ParseType::N(301),
-            ParseType::N(459),
+            ParseType::N(456),
             ParseType::N(324),
             ParseType::N(196),
             ParseType::N(195),

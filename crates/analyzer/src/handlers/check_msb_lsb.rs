@@ -12,9 +12,9 @@ pub struct CheckMsbLsb<'a> {
     text: &'a str,
     point: HandlerPoint,
     identifier_path: Vec<SymbolPathNamespace>,
-    range_dimension: Vec<usize>,
+    select_dimension: Vec<usize>,
     in_expression_identifier: bool,
-    in_range: bool,
+    in_select: bool,
 }
 
 impl<'a> CheckMsbLsb<'a> {
@@ -24,9 +24,9 @@ impl<'a> CheckMsbLsb<'a> {
             text,
             point: HandlerPoint::Before,
             identifier_path: Vec::new(),
-            range_dimension: Vec::new(),
+            select_dimension: Vec::new(),
             in_expression_identifier: false,
-            in_range: false,
+            in_select: false,
         }
     }
 }
@@ -40,7 +40,7 @@ impl<'a> Handler for CheckMsbLsb<'a> {
 impl<'a> VerylGrammarTrait for CheckMsbLsb<'a> {
     fn lsb(&mut self, arg: &Lsb) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            if !(self.in_expression_identifier && self.in_range) {
+            if !(self.in_expression_identifier && self.in_select) {
                 self.errors
                     .push(AnalyzerError::invalid_lsb(self.text, &arg.lsb_token));
             }
@@ -50,17 +50,17 @@ impl<'a> VerylGrammarTrait for CheckMsbLsb<'a> {
 
     fn msb(&mut self, arg: &Msb) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            if self.in_expression_identifier && self.in_range {
+            if self.in_expression_identifier && self.in_select {
                 let resolved = if let Ok(x) =
                     symbol_table::resolve(self.identifier_path.last().unwrap().clone())
                 {
                     if let Some(x) = x.found {
                         if let SymbolKind::Variable(x) = x.kind {
-                            let range_dimension = *self.range_dimension.last().unwrap();
-                            let expression = if range_dimension >= x.r#type.array.len() {
-                                &x.r#type.width[range_dimension - x.r#type.array.len()]
+                            let select_dimension = *self.select_dimension.last().unwrap();
+                            let expression = if select_dimension >= x.r#type.array.len() {
+                                &x.r#type.width[select_dimension - x.r#type.array.len()]
                             } else {
-                                &x.r#type.array[range_dimension]
+                                &x.r#type.array[select_dimension]
                             };
                             msb_table::insert(arg.msb_token.token.id, expression);
                             true
@@ -98,15 +98,15 @@ impl<'a> VerylGrammarTrait for CheckMsbLsb<'a> {
         Ok(())
     }
 
-    fn range(&mut self, _arg: &Range) -> Result<(), ParolError> {
+    fn select(&mut self, _arg: &Select) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                self.in_range = true;
+                self.in_select = true;
             }
             HandlerPoint::After => {
-                self.in_range = false;
+                self.in_select = false;
                 if self.in_expression_identifier {
-                    *self.range_dimension.last_mut().unwrap() += 1;
+                    *self.select_dimension.last_mut().unwrap() += 1;
                 }
             }
         }
@@ -121,12 +121,12 @@ impl<'a> VerylGrammarTrait for CheckMsbLsb<'a> {
                 let symbol_path = SymbolPath::default();
                 self.identifier_path
                     .push(SymbolPathNamespace(symbol_path, namespace));
-                self.range_dimension.push(0);
+                self.select_dimension.push(0);
                 self.in_expression_identifier = true;
             }
             HandlerPoint::After => {
                 self.identifier_path.pop();
-                self.range_dimension.pop();
+                self.select_dimension.pop();
                 self.in_expression_identifier = false;
             }
         }

@@ -432,13 +432,13 @@ impl VerylWalker for Formatter {
         }
     }
 
-    /// Semantic action for non-terminal 'RangeOperator'
-    fn range_operator(&mut self, arg: &RangeOperator) {
+    /// Semantic action for non-terminal 'SelectOperator'
+    fn select_operator(&mut self, arg: &SelectOperator) {
         match arg {
-            RangeOperator::Colon(x) => self.colon(&x.colon),
-            RangeOperator::PlusColon(x) => self.plus_colon(&x.plus_colon),
-            RangeOperator::MinusColon(x) => self.minus_colon(&x.minus_colon),
-            RangeOperator::Step(x) => {
+            SelectOperator::Colon(x) => self.colon(&x.colon),
+            SelectOperator::PlusColon(x) => self.plus_colon(&x.plus_colon),
+            SelectOperator::MinusColon(x) => self.minus_colon(&x.minus_colon),
+            SelectOperator::Step(x) => {
                 self.space(1);
                 self.step(&x.step);
                 self.space(1);

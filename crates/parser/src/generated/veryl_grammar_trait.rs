@@ -1561,13 +1561,13 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'Range'
-    fn range(&mut self, _arg: &Range) -> Result<()> {
+    /// Semantic action for non-terminal 'Select'
+    fn select(&mut self, _arg: &Select) -> Result<()> {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'RangeOperator'
-    fn range_operator(&mut self, _arg: &RangeOperator) -> Result<()> {
+    /// Semantic action for non-terminal 'SelectOperator'
+    fn select_operator(&mut self, _arg: &SelectOperator) -> Result<()> {
         Ok(())
     }
 
@@ -2319,48 +2319,48 @@ pub struct TypeExpressionTypeLParenExpressionRParen {
 ///
 /// Type derived for production 402
 ///
-/// RangeOperator: Colon;
+/// SelectOperator: Colon;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct RangeOperatorColon {
+pub struct SelectOperatorColon {
     pub colon: Box<Colon>,
 }
 
 ///
 /// Type derived for production 403
 ///
-/// RangeOperator: PlusColon;
+/// SelectOperator: PlusColon;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct RangeOperatorPlusColon {
+pub struct SelectOperatorPlusColon {
     pub plus_colon: Box<PlusColon>,
 }
 
 ///
 /// Type derived for production 404
 ///
-/// RangeOperator: MinusColon;
+/// SelectOperator: MinusColon;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct RangeOperatorMinusColon {
+pub struct SelectOperatorMinusColon {
     pub minus_colon: Box<MinusColon>,
 }
 
 ///
 /// Type derived for production 405
 ///
-/// RangeOperator: Step;
+/// SelectOperator: Step;
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct RangeOperatorStep {
+pub struct SelectOperatorStep {
     pub step: Box<Step>,
 }
 
@@ -5535,7 +5535,7 @@ pub struct ExpressionIdentifierGroupList {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ExpressionIdentifierGroupList0 {
-    pub range: Box<Range>,
+    pub select: Box<Select>,
 }
 
 ///
@@ -5545,7 +5545,7 @@ pub struct ExpressionIdentifierGroupList0 {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ExpressionIdentifierGroupList1 {
-    pub range: Box<Range>,
+    pub select: Box<Select>,
 }
 
 ///
@@ -5567,7 +5567,7 @@ pub struct ExpressionIdentifierGroupList2 {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ExpressionIdentifierGroupList2List {
-    pub range: Box<Range>,
+    pub select: Box<Select>,
 }
 
 ///
@@ -5970,7 +5970,7 @@ pub struct HierarchicalIdentifier {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct HierarchicalIdentifierList {
-    pub range: Box<Range>,
+    pub select: Box<Select>,
 }
 
 ///
@@ -5992,7 +5992,7 @@ pub struct HierarchicalIdentifierList0 {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct HierarchicalIdentifierList0List {
-    pub range: Box<Range>,
+    pub select: Box<Select>,
 }
 
 ///
@@ -8604,42 +8604,6 @@ pub struct RParenToken {
 }
 
 ///
-/// Type derived for non-terminal Range
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct Range {
-    pub l_bracket: Box<LBracket>,
-    pub expression: Box<Expression>,
-    pub range_opt: Option<Box<RangeOpt>>,
-    pub r_bracket: Box<RBracket>,
-}
-
-///
-/// Type derived for non-terminal RangeOperator
-///
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub enum RangeOperator {
-    Colon(RangeOperatorColon),
-    PlusColon(RangeOperatorPlusColon),
-    MinusColon(RangeOperatorMinusColon),
-    Step(RangeOperatorStep),
-}
-
-///
-/// Type derived for non-terminal RangeOpt
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct RangeOpt {
-    pub range_operator: Box<RangeOperator>,
-    pub expression: Box<Expression>,
-}
-
-///
 /// Type derived for non-terminal RealNumber
 ///
 #[allow(dead_code)]
@@ -8805,6 +8769,42 @@ pub struct ScopedIdentifier {
 pub struct ScopedIdentifierList {
     pub colon_colon: Box<ColonColon>,
     pub identifier: Box<Identifier>,
+}
+
+///
+/// Type derived for non-terminal Select
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Select {
+    pub l_bracket: Box<LBracket>,
+    pub expression: Box<Expression>,
+    pub select_opt: Option<Box<SelectOpt>>,
+    pub r_bracket: Box<RBracket>,
+}
+
+///
+/// Type derived for non-terminal SelectOperator
+///
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub enum SelectOperator {
+    Colon(SelectOperatorColon),
+    PlusColon(SelectOperatorPlusColon),
+    MinusColon(SelectOperatorMinusColon),
+    Step(SelectOperatorStep),
+}
+
+///
+/// Type derived for non-terminal SelectOpt
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct SelectOpt {
+    pub select_operator: Box<SelectOperator>,
+    pub expression: Box<Expression>,
 }
 
 ///
@@ -10092,9 +10092,6 @@ pub enum ASTType {
     RParen(RParen),
     RParenTerm(RParenTerm),
     RParenToken(RParenToken),
-    Range(Range),
-    RangeOperator(RangeOperator),
-    RangeOpt(Option<Box<RangeOpt>>),
     RealNumber(RealNumber),
     Ref(Ref),
     RefTerm(RefTerm),
@@ -10111,6 +10108,9 @@ pub enum ASTType {
     ScalarTypeList(Vec<ScalarTypeList>),
     ScopedIdentifier(ScopedIdentifier),
     ScopedIdentifierList(Vec<ScopedIdentifierList>),
+    Select(Select),
+    SelectOperator(SelectOperator),
+    SelectOpt(Option<Box<SelectOpt>>),
     Semicolon(Semicolon),
     SemicolonTerm(SemicolonTerm),
     SemicolonToken(SemicolonToken),
@@ -17509,12 +17509,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 291:
     ///
-    /// HierarchicalIdentifierList0List /* Vec<T>::Push */: Range HierarchicalIdentifierList0List;
+    /// HierarchicalIdentifierList0List /* Vec<T>::Push */: Select HierarchicalIdentifierList0List;
     ///
     #[parol_runtime::function_name::named]
     fn hierarchical_identifier_list0_list_0(
         &mut self,
-        _range: &ParseTreeStackEntry<'t>,
+        _select: &ParseTreeStackEntry<'t>,
         _hierarchical_identifier_list0_list: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
@@ -17526,9 +17526,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             HierarchicalIdentifierList0List,
             context
         );
-        let range = pop_item!(self, range, Range, context);
+        let select = pop_item!(self, select, Select, context);
         let hierarchical_identifier_list0_list_0_built = HierarchicalIdentifierList0List {
-            range: Box::new(range),
+            select: Box::new(select),
         };
         // Add an element to the vector
         hierarchical_identifier_list0_list.push(hierarchical_identifier_list0_list_0_built);
@@ -17579,12 +17579,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 294:
     ///
-    /// HierarchicalIdentifierList /* Vec<T>::Push */: Range HierarchicalIdentifierList;
+    /// HierarchicalIdentifierList /* Vec<T>::Push */: Select HierarchicalIdentifierList;
     ///
     #[parol_runtime::function_name::named]
     fn hierarchical_identifier_list_0(
         &mut self,
-        _range: &ParseTreeStackEntry<'t>,
+        _select: &ParseTreeStackEntry<'t>,
         _hierarchical_identifier_list: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
@@ -17596,9 +17596,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             HierarchicalIdentifierList,
             context
         );
-        let range = pop_item!(self, range, Range, context);
+        let select = pop_item!(self, select, Select, context);
         let hierarchical_identifier_list_0_built = HierarchicalIdentifierList {
-            range: Box::new(range),
+            select: Box::new(select),
         };
         // Add an element to the vector
         hierarchical_identifier_list.push(hierarchical_identifier_list_0_built);
@@ -17789,12 +17789,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 301:
     ///
-    /// ExpressionIdentifierGroupList0 /* Vec<T>::Push */: Range ExpressionIdentifierGroupList0;
+    /// ExpressionIdentifierGroupList0 /* Vec<T>::Push */: Select ExpressionIdentifierGroupList0;
     ///
     #[parol_runtime::function_name::named]
     fn expression_identifier_group_list0_0(
         &mut self,
-        _range: &ParseTreeStackEntry<'t>,
+        _select: &ParseTreeStackEntry<'t>,
         _expression_identifier_group_list0: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
@@ -17806,9 +17806,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             ExpressionIdentifierGroupList0,
             context
         );
-        let range = pop_item!(self, range, Range, context);
+        let select = pop_item!(self, select, Select, context);
         let expression_identifier_group_list0_0_built = ExpressionIdentifierGroupList0 {
-            range: Box::new(range),
+            select: Box::new(select),
         };
         // Add an element to the vector
         expression_identifier_group_list0.push(expression_identifier_group_list0_0_built);
@@ -17978,12 +17978,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 307:
     ///
-    /// ExpressionIdentifierGroupList2List /* Vec<T>::Push */: Range ExpressionIdentifierGroupList2List;
+    /// ExpressionIdentifierGroupList2List /* Vec<T>::Push */: Select ExpressionIdentifierGroupList2List;
     ///
     #[parol_runtime::function_name::named]
     fn expression_identifier_group_list2_list_0(
         &mut self,
-        _range: &ParseTreeStackEntry<'t>,
+        _select: &ParseTreeStackEntry<'t>,
         _expression_identifier_group_list2_list: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
@@ -17995,9 +17995,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             ExpressionIdentifierGroupList2List,
             context
         );
-        let range = pop_item!(self, range, Range, context);
+        let select = pop_item!(self, select, Select, context);
         let expression_identifier_group_list2_list_0_built = ExpressionIdentifierGroupList2List {
-            range: Box::new(range),
+            select: Box::new(select),
         };
         // Add an element to the vector
         expression_identifier_group_list2_list.push(expression_identifier_group_list2_list_0_built);
@@ -18050,12 +18050,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 310:
     ///
-    /// ExpressionIdentifierGroupList1 /* Vec<T>::Push */: Range ExpressionIdentifierGroupList1;
+    /// ExpressionIdentifierGroupList1 /* Vec<T>::Push */: Select ExpressionIdentifierGroupList1;
     ///
     #[parol_runtime::function_name::named]
     fn expression_identifier_group_list1_0(
         &mut self,
-        _range: &ParseTreeStackEntry<'t>,
+        _select: &ParseTreeStackEntry<'t>,
         _expression_identifier_group_list1: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
@@ -18067,9 +18067,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             ExpressionIdentifierGroupList1,
             context
         );
-        let range = pop_item!(self, range, Range, context);
+        let select = pop_item!(self, select, Select, context);
         let expression_identifier_group_list1_0_built = ExpressionIdentifierGroupList1 {
-            range: Box::new(range),
+            select: Box::new(select),
         };
         // Add an element to the vector
         expression_identifier_group_list1.push(expression_identifier_group_list1_0_built);
@@ -20175,56 +20175,56 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 399:
     ///
-    /// Range: LBracket Expression RangeOpt /* Option */ RBracket;
+    /// Select: LBracket Expression SelectOpt /* Option */ RBracket;
     ///
     #[parol_runtime::function_name::named]
-    fn range(
+    fn select(
         &mut self,
         _l_bracket: &ParseTreeStackEntry<'t>,
         _expression: &ParseTreeStackEntry<'t>,
-        _range_opt: &ParseTreeStackEntry<'t>,
+        _select_opt: &ParseTreeStackEntry<'t>,
         _r_bracket: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let r_bracket = pop_item!(self, r_bracket, RBracket, context);
-        let range_opt = pop_item!(self, range_opt, RangeOpt, context);
+        let select_opt = pop_item!(self, select_opt, SelectOpt, context);
         let expression = pop_item!(self, expression, Expression, context);
         let l_bracket = pop_item!(self, l_bracket, LBracket, context);
-        let range_built = Range {
+        let select_built = Select {
             l_bracket: Box::new(l_bracket),
             expression: Box::new(expression),
-            range_opt,
+            select_opt,
             r_bracket: Box::new(r_bracket),
         };
         // Calling user action here
-        self.user_grammar.range(&range_built)?;
-        self.push(ASTType::Range(range_built), context);
+        self.user_grammar.select(&select_built)?;
+        self.push(ASTType::Select(select_built), context);
         Ok(())
     }
 
     /// Semantic action for production 400:
     ///
-    /// RangeOpt /* Option<T>::Some */: RangeOperator Expression;
+    /// SelectOpt /* Option<T>::Some */: SelectOperator Expression;
     ///
     #[parol_runtime::function_name::named]
-    fn range_opt_0(
+    fn select_opt_0(
         &mut self,
-        _range_operator: &ParseTreeStackEntry<'t>,
+        _select_operator: &ParseTreeStackEntry<'t>,
         _expression: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let expression = pop_item!(self, expression, Expression, context);
-        let range_operator = pop_item!(self, range_operator, RangeOperator, context);
-        let range_opt_0_built = RangeOpt {
-            range_operator: Box::new(range_operator),
+        let select_operator = pop_item!(self, select_operator, SelectOperator, context);
+        let select_opt_0_built = SelectOpt {
+            select_operator: Box::new(select_operator),
             expression: Box::new(expression),
         };
         self.push(
-            ASTType::RangeOpt(Some(Box::new(range_opt_0_built))),
+            ASTType::SelectOpt(Some(Box::new(select_opt_0_built))),
             context,
         );
         Ok(())
@@ -20232,22 +20232,22 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 401:
     ///
-    /// RangeOpt /* Option<T>::None */: ;
+    /// SelectOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn range_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn select_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::RangeOpt(None), context);
+        self.push(ASTType::SelectOpt(None), context);
         Ok(())
     }
 
     /// Semantic action for production 402:
     ///
-    /// RangeOperator: Colon;
+    /// SelectOperator: Colon;
     ///
     #[parol_runtime::function_name::named]
-    fn range_operator_0(
+    fn select_operator_0(
         &mut self,
         _colon: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
@@ -20255,22 +20255,23 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let colon = pop_item!(self, colon, Colon, context);
-        let range_operator_0_built = RangeOperatorColon {
+        let select_operator_0_built = SelectOperatorColon {
             colon: Box::new(colon),
         };
-        let range_operator_0_built = RangeOperator::Colon(range_operator_0_built);
+        let select_operator_0_built = SelectOperator::Colon(select_operator_0_built);
         // Calling user action here
-        self.user_grammar.range_operator(&range_operator_0_built)?;
-        self.push(ASTType::RangeOperator(range_operator_0_built), context);
+        self.user_grammar
+            .select_operator(&select_operator_0_built)?;
+        self.push(ASTType::SelectOperator(select_operator_0_built), context);
         Ok(())
     }
 
     /// Semantic action for production 403:
     ///
-    /// RangeOperator: PlusColon;
+    /// SelectOperator: PlusColon;
     ///
     #[parol_runtime::function_name::named]
-    fn range_operator_1(
+    fn select_operator_1(
         &mut self,
         _plus_colon: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
@@ -20278,22 +20279,23 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let plus_colon = pop_item!(self, plus_colon, PlusColon, context);
-        let range_operator_1_built = RangeOperatorPlusColon {
+        let select_operator_1_built = SelectOperatorPlusColon {
             plus_colon: Box::new(plus_colon),
         };
-        let range_operator_1_built = RangeOperator::PlusColon(range_operator_1_built);
+        let select_operator_1_built = SelectOperator::PlusColon(select_operator_1_built);
         // Calling user action here
-        self.user_grammar.range_operator(&range_operator_1_built)?;
-        self.push(ASTType::RangeOperator(range_operator_1_built), context);
+        self.user_grammar
+            .select_operator(&select_operator_1_built)?;
+        self.push(ASTType::SelectOperator(select_operator_1_built), context);
         Ok(())
     }
 
     /// Semantic action for production 404:
     ///
-    /// RangeOperator: MinusColon;
+    /// SelectOperator: MinusColon;
     ///
     #[parol_runtime::function_name::named]
-    fn range_operator_2(
+    fn select_operator_2(
         &mut self,
         _minus_colon: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
@@ -20301,22 +20303,23 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let minus_colon = pop_item!(self, minus_colon, MinusColon, context);
-        let range_operator_2_built = RangeOperatorMinusColon {
+        let select_operator_2_built = SelectOperatorMinusColon {
             minus_colon: Box::new(minus_colon),
         };
-        let range_operator_2_built = RangeOperator::MinusColon(range_operator_2_built);
+        let select_operator_2_built = SelectOperator::MinusColon(select_operator_2_built);
         // Calling user action here
-        self.user_grammar.range_operator(&range_operator_2_built)?;
-        self.push(ASTType::RangeOperator(range_operator_2_built), context);
+        self.user_grammar
+            .select_operator(&select_operator_2_built)?;
+        self.push(ASTType::SelectOperator(select_operator_2_built), context);
         Ok(())
     }
 
     /// Semantic action for production 405:
     ///
-    /// RangeOperator: Step;
+    /// SelectOperator: Step;
     ///
     #[parol_runtime::function_name::named]
-    fn range_operator_3(
+    fn select_operator_3(
         &mut self,
         _step: &ParseTreeStackEntry<'t>,
         _parse_tree: &Tree<ParseTreeType<'t>>,
@@ -20324,13 +20327,14 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let step = pop_item!(self, step, Step, context);
-        let range_operator_3_built = RangeOperatorStep {
+        let select_operator_3_built = SelectOperatorStep {
             step: Box::new(step),
         };
-        let range_operator_3_built = RangeOperator::Step(range_operator_3_built);
+        let select_operator_3_built = SelectOperator::Step(select_operator_3_built);
         // Calling user action here
-        self.user_grammar.range_operator(&range_operator_3_built)?;
-        self.push(ASTType::RangeOperator(range_operator_3_built), context);
+        self.user_grammar
+            .select_operator(&select_operator_3_built)?;
+        self.push(ASTType::SelectOperator(select_operator_3_built), context);
         Ok(())
     }
 
@@ -29962,19 +29966,19 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[3],
                 parse_tree,
             ),
-            399 => self.range(
+            399 => self.select(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 parse_tree,
             ),
-            400 => self.range_opt_0(&children[0], &children[1], parse_tree),
-            401 => self.range_opt_1(parse_tree),
-            402 => self.range_operator_0(&children[0], parse_tree),
-            403 => self.range_operator_1(&children[0], parse_tree),
-            404 => self.range_operator_2(&children[0], parse_tree),
-            405 => self.range_operator_3(&children[0], parse_tree),
+            400 => self.select_opt_0(&children[0], &children[1], parse_tree),
+            401 => self.select_opt_1(parse_tree),
+            402 => self.select_operator_0(&children[0], parse_tree),
+            403 => self.select_operator_1(&children[0], parse_tree),
+            404 => self.select_operator_2(&children[0], parse_tree),
+            405 => self.select_operator_3(&children[0], parse_tree),
             406 => self.width(
                 &children[0],
                 &children[1],

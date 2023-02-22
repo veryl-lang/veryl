@@ -345,9 +345,9 @@ RealNumber: FixedPoint
 // Complex Identifier
 // ----------------------------------------------------------------------------
 
-HierarchicalIdentifier: Identifier { Range } { Dot Identifier { Range } };
+HierarchicalIdentifier: Identifier { Select } { Dot Identifier { Select } };
 ScopedIdentifier      : Identifier { ColonColon Identifier };
-ExpressionIdentifier  : [ Dollar ] Identifier ( ColonColon Identifier { ColonColon Identifier } { Range } | ( { Range } { Dot Identifier { Range } } ) );
+ExpressionIdentifier  : [ Dollar ] Identifier ( ColonColon Identifier { ColonColon Identifier } { Select } | ( { Select } { Dot Identifier { Select } } ) );
 
 // ----------------------------------------------------------------------------
 // Expression
@@ -396,16 +396,16 @@ TypeExpression: ScalarType
               ;
 
 // ----------------------------------------------------------------------------
-// Range / Width / Array
+// Select / Width / Array
 // ----------------------------------------------------------------------------
 
-Range: LBracket Expression [ RangeOperator Expression ] RBracket;
+Select: LBracket Expression [ SelectOperator Expression ] RBracket;
 
-RangeOperator: Colon
-             | PlusColon
-             | MinusColon
-             | Step
-             ;
+SelectOperator: Colon
+              | PlusColon
+              | MinusColon
+              | Step
+              ;
 
 Width: LAngle Expression { Comma Expression } RAngle;
 
