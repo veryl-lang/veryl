@@ -1376,7 +1376,7 @@ checksum = "77c027aa996ef6a7761dbd52dacdcf656e98d71c7fda6f3a3e1dc31abaa593be"
 dependencies = [
  "git-command",
  "git-config-value",
- "nix 0.26.2",
+ "nix",
  "parking_lot 0.12.1",
  "thiserror",
 ]
@@ -2385,17 +2385,6 @@ checksum = "e4a24736216ec316047a1fc4252e27dabb04218aa4a3f37c6e7ddbf1f9782b54"
 
 [[package]]
 name = "nix"
-version = "0.24.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa52e972a9a719cecb6864fb88568781eb706bac2cd1d4f04a648542dbf78069"
-dependencies = [
- "bitflags",
- "cfg-if",
- "libc",
-]
-
-[[package]]
-name = "nix"
 version = "0.26.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bfdda3d196821d6af13126e40375cdf7da646a96114af134d5f417a9a1dc8e1a"
@@ -2800,9 +2789,9 @@ dependencies = [
 
 [[package]]
 name = "pprof"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e20150f965e0e4c925982b9356da71c84bcd56cb66ef4e894825837cbcf6613e"
+checksum = "196ded5d4be535690899a4631cc9f18cdc41b7ebf24a79400f46f48e49a11059"
 dependencies = [
  "backtrace",
  "cfg-if",
@@ -2810,7 +2799,7 @@ dependencies = [
  "inferno",
  "libc",
  "log",
- "nix 0.24.3",
+ "nix",
  "once_cell",
  "parking_lot 0.12.1",
  "smallvec",
