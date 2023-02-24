@@ -40,6 +40,7 @@ ColonColonTerm        : '::'                                                    
 ColonTerm             : ':'                                                                                   : Token;
 CommaTerm             : ','                                                                                   : Token;
 DollarTerm            : '$'                                                                                   : Token;
+DotDotEquTerm         : '..='                                                                                 : Token;
 DotDotTerm            : '..'                                                                                  : Token;
 DotTerm               : '.'                                                                                   : Token;
 EquTerm               : '='                                                                                   : Token;
@@ -137,27 +138,28 @@ Operator10Token        : Operator10Term        : Token Comments;
 Operator11Token        : Operator11Term        : Token Comments;
 UnaryOperatorToken     : UnaryOperatorTerm     : Token Comments;
 
-ColonToken     : ColonTerm     : Token Comments;
-ColonColonToken: ColonColonTerm: Token Comments;
-CommaToken     : CommaTerm     : Token Comments;
-DollarToken    : DollarTerm    : Token Comments;
-DotDotToken    : DotDotTerm    : Token Comments;
-DotToken       : DotTerm       : Token Comments;
-EquToken       : EquTerm       : Token Comments;
-HashToken      : HashTerm      : Token Comments;
-LAngleToken    : LAngleTerm    : Token Comments;
-LBraceToken    : LBraceTerm    : Token Comments;
-LBracketToken  : LBracketTerm  : Token Comments;
-LParenToken    : LParenTerm    : Token Comments;
-MinusColonToken: MinusColonTerm: Token Comments;
-MinusGTToken   : MinusGTTerm   : Token Comments;
-PlusColonToken : PlusColonTerm : Token Comments;
-RAngleToken    : RAngleTerm    : Token Comments;
-RBraceToken    : RBraceTerm    : Token Comments;
-RBracketToken  : RBracketTerm  : Token Comments;
-RParenToken    : RParenTerm    : Token Comments;
-SemicolonToken : SemicolonTerm : Token Comments;
-StarToken      : StarTerm      : Token Comments;
+ColonToken       : ColonTerm       : Token Comments;
+ColonColonToken  : ColonColonTerm  : Token Comments;
+CommaToken       : CommaTerm       : Token Comments;
+DollarToken      : DollarTerm      : Token Comments;
+DotDotToken      : DotDotTerm      : Token Comments;
+DotDotEquToken   : DotDotEquTerm   : Token Comments;
+DotToken         : DotTerm         : Token Comments;
+EquToken         : EquTerm         : Token Comments;
+HashToken        : HashTerm        : Token Comments;
+LAngleToken      : LAngleTerm      : Token Comments;
+LBraceToken      : LBraceTerm      : Token Comments;
+LBracketToken    : LBracketTerm    : Token Comments;
+LParenToken      : LParenTerm      : Token Comments;
+MinusColonToken  : MinusColonTerm  : Token Comments;
+MinusGTToken     : MinusGTTerm     : Token Comments;
+PlusColonToken   : PlusColonTerm   : Token Comments;
+RAngleToken      : RAngleTerm      : Token Comments;
+RBraceToken      : RBraceTerm      : Token Comments;
+RBracketToken    : RBracketTerm    : Token Comments;
+RParenToken      : RParenTerm      : Token Comments;
+SemicolonToken   : SemicolonTerm   : Token Comments;
+StarToken        : StarTerm        : Token Comments;
 
 AlwaysCombToken: AlwaysCombTerm: Token Comments;
 AlwaysFfToken  : AlwaysFfTerm  : Token Comments;
@@ -246,27 +248,28 @@ Operator11        : Operator11Token        : VerylToken;
 UnaryOperator     : UnaryOperatorToken     : VerylToken;
 
 // Symbol
-Colon     : ColonToken     : VerylToken;
-ColonColon: ColonColonToken: VerylToken;
-Comma     : CommaToken     : VerylToken;
-Dollar    : DollarToken    : VerylToken;
-DotDot    : DotDotToken    : VerylToken;
-Dot       : DotToken       : VerylToken;
-Equ       : EquToken       : VerylToken;
-Hash      : HashToken      : VerylToken;
-LAngle    : LAngleToken    : VerylToken;
-LBrace    : LBraceToken    : VerylToken;
-LBracket  : LBracketToken  : VerylToken;
-LParen    : LParenToken    : VerylToken;
-MinusColon: MinusColonToken: VerylToken;
-MinusGT   : MinusGTToken   : VerylToken;
-PlusColon : PlusColonToken : VerylToken;
-RAngle    : RAngleToken    : VerylToken;
-RBrace    : RBraceToken    : VerylToken;
-RBracket  : RBracketToken  : VerylToken;
-RParen    : RParenToken    : VerylToken;
-Semicolon : SemicolonToken : VerylToken;
-Star      : StarToken      : VerylToken;
+Colon       : ColonToken       : VerylToken;
+ColonColon  : ColonColonToken  : VerylToken;
+Comma       : CommaToken       : VerylToken;
+Dollar      : DollarToken      : VerylToken;
+DotDot      : DotDotToken      : VerylToken;
+DotDotEqu   : DotDotEquToken   : VerylToken;
+Dot         : DotToken         : VerylToken;
+Equ         : EquToken         : VerylToken;
+Hash        : HashToken        : VerylToken;
+LAngle      : LAngleToken      : VerylToken;
+LBrace      : LBraceToken      : VerylToken;
+LBracket    : LBracketToken    : VerylToken;
+LParen      : LParenToken      : VerylToken;
+MinusColon  : MinusColonToken  : VerylToken;
+MinusGT     : MinusGTToken     : VerylToken;
+PlusColon   : PlusColonToken   : VerylToken;
+RAngle      : RAngleToken      : VerylToken;
+RBrace      : RBraceToken      : VerylToken;
+RBracket    : RBracketToken    : VerylToken;
+RParen      : RParenToken      : VerylToken;
+Semicolon   : SemicolonToken   : VerylToken;
+Star        : StarToken        : VerylToken;
 
 // Keyword
 AlwaysComb: AlwaysCombToken: VerylToken;
@@ -396,7 +399,7 @@ TypeExpression: ScalarType
               ;
 
 // ----------------------------------------------------------------------------
-// Select / Width / Array
+// Select / Width / Array / Range
 // ----------------------------------------------------------------------------
 
 Select: LBracket Expression [ SelectOperator Expression ] RBracket;
@@ -410,6 +413,12 @@ SelectOperator: Colon
 Width: LAngle Expression { Comma Expression } RAngle;
 
 Array: LBracket Expression { Comma Expression } RBracket;
+
+Range: Expression [ RangeOperator Expression ];
+
+RangeOperator: DotDot
+             | DotDotEqu
+             ;
 
 // ----------------------------------------------------------------------------
 // ScalarType / ArrayType
@@ -445,7 +454,7 @@ IfResetStatement: IfReset LBrace { Statement } RBrace { Else If Expression LBrac
 
 ReturnStatement: Return Expression Semicolon;
 
-ForStatement: For Identifier Colon ScalarType In Expression DotDot Expression [ Step AssignmentOperator Expression ] LBrace { Statement } RBrace;
+ForStatement: For Identifier Colon ScalarType In Range [ Step AssignmentOperator Expression ] LBrace { Statement } RBrace;
 
 CaseStatement: Case Expression LBrace { CaseItem } RBrace;
 
@@ -582,7 +591,7 @@ ModuleDeclaration: Module Identifier [ WithParameter ] [ PortDeclaration ] LBrac
 
 ModuleIfDeclaration: If Expression ModuleNamedBlock { Else If Expression ModuleOptionalNamedBlock } [ Else ModuleOptionalNamedBlock ];
 
-ModuleForDeclaration: For Identifier In Expression DotDot Expression [ Step AssignmentOperator Expression ] ModuleNamedBlock;
+ModuleForDeclaration: For Identifier In Range [ Step AssignmentOperator Expression ] ModuleNamedBlock;
 
 ModuleNamedBlock: Colon Identifier LBrace { ModuleGroup } RBrace;
 
@@ -613,7 +622,7 @@ InterfaceDeclaration: Interface Identifier [ WithParameter ] LBrace { InterfaceG
 
 InterfaceIfDeclaration: If Expression InterfaceNamedBlock { Else If Expression InterfaceOptionalNamedBlock } [ Else InterfaceOptionalNamedBlock ];
 
-InterfaceForDeclaration: For Identifier In Expression DotDot Expression [ Step AssignmentOperator Expression ] InterfaceNamedBlock;
+InterfaceForDeclaration: For Identifier In Range [ Step AssignmentOperator Expression ] InterfaceNamedBlock;
 
 InterfaceNamedBlock: Colon Identifier LBrace { InterfaceGroup } RBrace;
 

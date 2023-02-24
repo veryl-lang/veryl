@@ -922,14 +922,25 @@ impl VerylWalker for Emitter {
         self.space(1);
         self.str("=");
         self.space(1);
-        self.expression(&arg.expression);
+        self.expression(&arg.range.expression);
         self.str(";");
         self.space(1);
         self.identifier(&arg.identifier);
         self.space(1);
-        self.str("<");
+        if let Some(ref x) = arg.range.range_opt {
+            match &*x.range_operator {
+                RangeOperator::DotDot(_) => self.str("<"),
+                RangeOperator::DotDotEqu(_) => self.str("<="),
+            }
+        } else {
+            self.str("<=");
+        }
         self.space(1);
-        self.expression(&arg.expression0);
+        if let Some(ref x) = arg.range.range_opt {
+            self.expression(&x.expression);
+        } else {
+            self.expression(&arg.range.expression);
+        }
         self.str(";");
         self.space(1);
         if let Some(ref x) = arg.for_statement_opt {
@@ -1885,14 +1896,25 @@ impl VerylWalker for Emitter {
         self.space(1);
         self.str("=");
         self.space(1);
-        self.expression(&arg.expression);
+        self.expression(&arg.range.expression);
         self.str(";");
         self.space(1);
         self.identifier(&arg.identifier);
         self.space(1);
-        self.str("<");
+        if let Some(ref x) = arg.range.range_opt {
+            match &*x.range_operator {
+                RangeOperator::DotDot(_) => self.str("<"),
+                RangeOperator::DotDotEqu(_) => self.str("<="),
+            }
+        } else {
+            self.str("<=");
+        }
         self.space(1);
-        self.expression(&arg.expression0);
+        if let Some(ref x) = arg.range.range_opt {
+            self.expression(&x.expression);
+        } else {
+            self.expression(&arg.range.expression);
+        }
         self.str(";");
         self.space(1);
         if let Some(ref x) = arg.module_for_declaration_opt {
@@ -2064,14 +2086,25 @@ impl VerylWalker for Emitter {
         self.space(1);
         self.str("=");
         self.space(1);
-        self.expression(&arg.expression);
+        self.expression(&arg.range.expression);
         self.str(";");
         self.space(1);
         self.identifier(&arg.identifier);
         self.space(1);
-        self.str("<");
+        if let Some(ref x) = arg.range.range_opt {
+            match &*x.range_operator {
+                RangeOperator::DotDot(_) => self.str("<"),
+                RangeOperator::DotDotEqu(_) => self.str("<="),
+            }
+        } else {
+            self.str("<=");
+        }
         self.space(1);
-        self.expression(&arg.expression0);
+        if let Some(ref x) = arg.range.range_opt {
+            self.expression(&x.expression);
+        } else {
+            self.expression(&arg.range.expression);
+        }
         self.str(";");
         self.space(1);
         if let Some(ref x) = arg.interface_for_declaration_opt {

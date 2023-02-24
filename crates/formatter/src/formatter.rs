@@ -627,9 +627,7 @@ impl VerylWalker for Formatter {
         self.space(1);
         self.r#in(&arg.r#in);
         self.space(1);
-        self.expression(&arg.expression);
-        self.dot_dot(&arg.dot_dot);
-        self.expression(&arg.expression0);
+        self.range(&arg.range);
         self.space(1);
         if let Some(ref x) = arg.for_statement_opt {
             self.step(&x.step);
@@ -1417,9 +1415,7 @@ impl VerylWalker for Formatter {
         self.space(1);
         self.r#in(&arg.r#in);
         self.space(1);
-        self.expression(&arg.expression);
-        self.dot_dot(&arg.dot_dot);
-        self.expression(&arg.expression0);
+        self.range(&arg.range);
         self.space(1);
         if let Some(ref x) = arg.module_for_declaration_opt {
             self.step(&x.step);
@@ -1566,9 +1562,7 @@ impl VerylWalker for Formatter {
         self.space(1);
         self.r#in(&arg.r#in);
         self.space(1);
-        self.expression(&arg.expression);
-        self.dot_dot(&arg.dot_dot);
-        self.expression(&arg.expression0);
+        self.range(&arg.range);
         self.space(1);
         if let Some(ref x) = arg.interface_for_declaration_opt {
             self.step(&x.step);

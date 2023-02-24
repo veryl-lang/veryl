@@ -175,6 +175,7 @@ token_with_comments!(ColonColon);
 token_with_comments!(Comma);
 token_with_comments!(Dollar);
 token_with_comments!(DotDot);
+token_with_comments!(DotDotEqu);
 token_with_comments!(Dot);
 token_with_comments!(Equ);
 token_with_comments!(Hash);
