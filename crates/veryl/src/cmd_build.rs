@@ -34,11 +34,7 @@ impl CmdBuild {
             let input = fs::read_to_string(&path.src)
                 .into_diagnostic()
                 .wrap_err("")?;
-            let elapsed_time = now.elapsed();
-            debug!("Elapsed time ({} milliseconds)", elapsed_time.as_millis());
             let parser = Parser::parse(&input, &path.src)?;
-            let elapsed_time = now.elapsed();
-            debug!("Elapsed time ({} milliseconds)", elapsed_time.as_millis());
 
             let analyzer = Analyzer::new(&path.prj, metadata);
             let mut errors = analyzer.analyze_pass1(&input, &path.src, &parser.veryl);
