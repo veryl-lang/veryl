@@ -594,7 +594,7 @@ ArrayType: ScalarType [ Array ];
 // Statement
 // ----------------------------------------------------------------------------
 
-Statement: AssignmentStatement
+Statement: IdentifierStatement
          | IfStatement
          | IfResetStatement
          | ReturnStatement
@@ -602,7 +602,9 @@ Statement: AssignmentStatement
          | CaseStatement
          ;
 
-AssignmentStatement: HierarchicalIdentifier ( Equ | AssignmentOperator ) Expression Semicolon;
+IdentifierStatement: ExpressionIdentifier ( FunctionCall | Assignment ) Semicolon;
+
+Assignment: ( Equ | AssignmentOperator ) Expression;
 
 IfStatement: If Expression LBrace { Statement } RBrace { Else If Expression LBrace { Statement } RBrace } [ Else LBrace { Statement } RBrace ];
 
