@@ -505,19 +505,17 @@ impl VerylWalker for Formatter {
         }
     }
 
-    /// Semantic action for non-terminal 'AssignmentStatement'
-    fn assignment_statement(&mut self, arg: &AssignmentStatement) {
-        self.hierarchical_identifier(&arg.hierarchical_identifier);
+    /// Semantic action for non-terminal 'Assignment'
+    fn assignment(&mut self, arg: &Assignment) {
         self.space(1);
-        match &*arg.assignment_statement_group {
-            AssignmentStatementGroup::Equ(x) => self.equ(&x.equ),
-            AssignmentStatementGroup::AssignmentOperator(x) => {
+        match &*arg.assignment_group {
+            AssignmentGroup::Equ(x) => self.equ(&x.equ),
+            AssignmentGroup::AssignmentOperator(x) => {
                 self.assignment_operator(&x.assignment_operator)
             }
         }
         self.space(1);
         self.expression(&arg.expression);
-        self.semicolon(&arg.semicolon);
     }
 
     /// Semantic action for non-terminal 'IfStatement'

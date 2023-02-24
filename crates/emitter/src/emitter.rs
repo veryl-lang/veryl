@@ -36,6 +36,7 @@ pub struct Emitter {
     enum_name: Option<String>,
     file_scope_import: Vec<String>,
     attribute: Vec<AttributeType>,
+    assignment_lefthand_side: Option<ExpressionIdentifier>,
 }
 
 impl Default for Emitter {
@@ -62,6 +63,7 @@ impl Default for Emitter {
             enum_name: None,
             file_scope_import: Vec::new(),
             attribute: Vec::new(),
+            assignment_lefthand_side: None,
         }
     }
 }
@@ -761,15 +763,29 @@ impl VerylWalker for Emitter {
         self.signed = false;
     }
 
-    /// Semantic action for non-terminal 'AssignmentStatement'
-    fn assignment_statement(&mut self, arg: &AssignmentStatement) {
-        self.hierarchical_identifier(&arg.hierarchical_identifier);
+    /// Semantic action for non-terminal 'IdentifierStatement'
+    fn identifier_statement(&mut self, arg: &IdentifierStatement) {
+        self.expression_identifier(&arg.expression_identifier);
+        self.assignment_lefthand_side = Some(*arg.expression_identifier.clone());
+        match &*arg.identifier_statement_group {
+            IdentifierStatementGroup::FunctionCall(x) => {
+                self.function_call(&x.function_call);
+            }
+            IdentifierStatementGroup::Assignment(x) => {
+                self.assignment(&x.assignment);
+            }
+        }
+        self.semicolon(&arg.semicolon);
+    }
+
+    /// Semantic action for non-terminal 'Assignment'
+    fn assignment(&mut self, arg: &Assignment) {
         self.space(1);
         if self.in_always_ff {
             self.str("<");
-            match &*arg.assignment_statement_group {
-                AssignmentStatementGroup::Equ(x) => self.equ(&x.equ),
-                AssignmentStatementGroup::AssignmentOperator(x) => {
+            match &*arg.assignment_group {
+                AssignmentGroup::Equ(x) => self.equ(&x.equ),
+                AssignmentGroup::AssignmentOperator(x) => {
                     let token = format!(
                         "{}",
                         x.assignment_operator.assignment_operator_token.token.text
@@ -778,15 +794,14 @@ impl VerylWalker for Emitter {
                     let token = &token[0..token.len() - 1];
                     self.str("=");
                     self.space(1);
-                    self.hierarchical_identifier(&arg.hierarchical_identifier);
+                    let identifier = self.assignment_lefthand_side.take().unwrap();
+                    self.expression_identifier(&identifier);
                     self.space(1);
                     self.str(token);
                 }
             }
             self.space(1);
-            if let AssignmentStatementGroup::AssignmentOperator(_) =
-                &*arg.assignment_statement_group
-            {
+            if let AssignmentGroup::AssignmentOperator(_) = &*arg.assignment_group {
                 self.str("(");
                 self.expression(&arg.expression);
                 self.str(")");
@@ -794,16 +809,15 @@ impl VerylWalker for Emitter {
                 self.expression(&arg.expression);
             }
         } else {
-            match &*arg.assignment_statement_group {
-                AssignmentStatementGroup::Equ(x) => self.equ(&x.equ),
-                AssignmentStatementGroup::AssignmentOperator(x) => {
+            match &*arg.assignment_group {
+                AssignmentGroup::Equ(x) => self.equ(&x.equ),
+                AssignmentGroup::AssignmentOperator(x) => {
                     self.assignment_operator(&x.assignment_operator)
                 }
             }
             self.space(1);
             self.expression(&arg.expression);
         }
-        self.semicolon(&arg.semicolon);
     }
 
     /// Semantic action for non-terminal 'IfStatement'

@@ -446,21 +446,33 @@ impl VerylWalker for Aligner {
         self.aligns[align_kind::ARRAY].finish_item();
     }
 
-    /// Semantic action for non-terminal 'AssignmentStatement'
-    fn assignment_statement(&mut self, arg: &AssignmentStatement) {
+    /// Semantic action for non-terminal 'IdentifierStatement'
+    fn identifier_statement(&mut self, arg: &IdentifierStatement) {
         self.aligns[align_kind::IDENTIFIER].start_item();
-        self.hierarchical_identifier(&arg.hierarchical_identifier);
+        self.expression_identifier(&arg.expression_identifier);
         self.aligns[align_kind::IDENTIFIER].finish_item();
+        match &*arg.identifier_statement_group {
+            IdentifierStatementGroup::FunctionCall(x) => {
+                self.function_call(&x.function_call);
+            }
+            IdentifierStatementGroup::Assignment(x) => {
+                self.assignment(&x.assignment);
+            }
+        }
+        self.semicolon(&arg.semicolon);
+    }
+
+    /// Semantic action for non-terminal 'Assignment'
+    fn assignment(&mut self, arg: &Assignment) {
         self.aligns[align_kind::ASSIGNMENT].start_item();
-        match &*arg.assignment_statement_group {
-            AssignmentStatementGroup::Equ(x) => self.equ(&x.equ),
-            AssignmentStatementGroup::AssignmentOperator(x) => {
+        match &*arg.assignment_group {
+            AssignmentGroup::Equ(x) => self.equ(&x.equ),
+            AssignmentGroup::AssignmentOperator(x) => {
                 self.assignment_operator(&x.assignment_operator)
             }
         }
         self.aligns[align_kind::ASSIGNMENT].finish_item();
         self.expression(&arg.expression);
-        self.semicolon(&arg.semicolon);
     }
 
     /// Semantic action for non-terminal 'CaseItem'
