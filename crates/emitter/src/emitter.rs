@@ -395,18 +395,18 @@ impl VerylWalker for Emitter {
                     self.identifier(&x.identifier);
                 }
                 for x in &x.expression_identifier_group_list0 {
-                    self.range(&x.range);
+                    self.select(&x.select);
                 }
             }
             ExpressionIdentifierGroup::ExpressionIdentifierGroupList1ExpressionIdentifierGroupList2(x) => {
                 for x in &x.expression_identifier_group_list1 {
-                    self.range(&x.range);
+                    self.select(&x.select);
                 }
                 for x in &x.expression_identifier_group_list2 {
                     self.dot(&x.dot);
                     self.identifier(&x.identifier);
                     for x in &x.expression_identifier_group_list2_list {
-                        self.range(&x.range);
+                        self.select(&x.select);
                     }
                 }
             }
@@ -655,13 +655,13 @@ impl VerylWalker for Emitter {
         self.token(&arg.r_brace.r_brace_token.replace("))"));
     }
 
-    /// Semantic action for non-terminal 'Range'
-    fn range(&mut self, arg: &Range) {
+    /// Semantic action for non-terminal 'Select'
+    fn select(&mut self, arg: &Select) {
         self.l_bracket(&arg.l_bracket);
         self.expression(&arg.expression);
-        if let Some(ref x) = arg.range_opt {
-            match &*x.range_operator {
-                RangeOperator::Step(_) => {
+        if let Some(ref x) = arg.select_opt {
+            match &*x.select_operator {
+                SelectOperator::Step(_) => {
                     self.str("*(");
                     self.expression(&x.expression);
                     self.str(")+:(");
@@ -669,7 +669,7 @@ impl VerylWalker for Emitter {
                     self.str(")");
                 }
                 _ => {
-                    self.range_operator(&x.range_operator);
+                    self.select_operator(&x.select_operator);
                     self.expression(&x.expression);
                 }
             }
@@ -922,14 +922,25 @@ impl VerylWalker for Emitter {
         self.space(1);
         self.str("=");
         self.space(1);
-        self.expression(&arg.expression);
+        self.expression(&arg.range.expression);
         self.str(";");
         self.space(1);
         self.identifier(&arg.identifier);
         self.space(1);
-        self.str("<");
+        if let Some(ref x) = arg.range.range_opt {
+            match &*x.range_operator {
+                RangeOperator::DotDot(_) => self.str("<"),
+                RangeOperator::DotDotEqu(_) => self.str("<="),
+            }
+        } else {
+            self.str("<=");
+        }
         self.space(1);
-        self.expression(&arg.expression0);
+        if let Some(ref x) = arg.range.range_opt {
+            self.expression(&x.expression);
+        } else {
+            self.expression(&arg.range.expression);
+        }
         self.str(";");
         self.space(1);
         if let Some(ref x) = arg.for_statement_opt {
@@ -1885,14 +1896,25 @@ impl VerylWalker for Emitter {
         self.space(1);
         self.str("=");
         self.space(1);
-        self.expression(&arg.expression);
+        self.expression(&arg.range.expression);
         self.str(";");
         self.space(1);
         self.identifier(&arg.identifier);
         self.space(1);
-        self.str("<");
+        if let Some(ref x) = arg.range.range_opt {
+            match &*x.range_operator {
+                RangeOperator::DotDot(_) => self.str("<"),
+                RangeOperator::DotDotEqu(_) => self.str("<="),
+            }
+        } else {
+            self.str("<=");
+        }
         self.space(1);
-        self.expression(&arg.expression0);
+        if let Some(ref x) = arg.range.range_opt {
+            self.expression(&x.expression);
+        } else {
+            self.expression(&arg.range.expression);
+        }
         self.str(";");
         self.space(1);
         if let Some(ref x) = arg.module_for_declaration_opt {
@@ -2064,14 +2086,25 @@ impl VerylWalker for Emitter {
         self.space(1);
         self.str("=");
         self.space(1);
-        self.expression(&arg.expression);
+        self.expression(&arg.range.expression);
         self.str(";");
         self.space(1);
         self.identifier(&arg.identifier);
         self.space(1);
-        self.str("<");
+        if let Some(ref x) = arg.range.range_opt {
+            match &*x.range_operator {
+                RangeOperator::DotDot(_) => self.str("<"),
+                RangeOperator::DotDotEqu(_) => self.str("<="),
+            }
+        } else {
+            self.str("<=");
+        }
         self.space(1);
-        self.expression(&arg.expression0);
+        if let Some(ref x) = arg.range.range_opt {
+            self.expression(&x.expression);
+        } else {
+            self.expression(&arg.range.expression);
+        }
         self.str(";");
         self.space(1);
         if let Some(ref x) = arg.interface_for_declaration_opt {

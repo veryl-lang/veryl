@@ -432,13 +432,13 @@ impl VerylWalker for Formatter {
         }
     }
 
-    /// Semantic action for non-terminal 'RangeOperator'
-    fn range_operator(&mut self, arg: &RangeOperator) {
+    /// Semantic action for non-terminal 'SelectOperator'
+    fn select_operator(&mut self, arg: &SelectOperator) {
         match arg {
-            RangeOperator::Colon(x) => self.colon(&x.colon),
-            RangeOperator::PlusColon(x) => self.plus_colon(&x.plus_colon),
-            RangeOperator::MinusColon(x) => self.minus_colon(&x.minus_colon),
-            RangeOperator::Step(x) => {
+            SelectOperator::Colon(x) => self.colon(&x.colon),
+            SelectOperator::PlusColon(x) => self.plus_colon(&x.plus_colon),
+            SelectOperator::MinusColon(x) => self.minus_colon(&x.minus_colon),
+            SelectOperator::Step(x) => {
                 self.space(1);
                 self.step(&x.step);
                 self.space(1);
@@ -627,9 +627,7 @@ impl VerylWalker for Formatter {
         self.space(1);
         self.r#in(&arg.r#in);
         self.space(1);
-        self.expression(&arg.expression);
-        self.dot_dot(&arg.dot_dot);
-        self.expression(&arg.expression0);
+        self.range(&arg.range);
         self.space(1);
         if let Some(ref x) = arg.for_statement_opt {
             self.step(&x.step);
@@ -1417,9 +1415,7 @@ impl VerylWalker for Formatter {
         self.space(1);
         self.r#in(&arg.r#in);
         self.space(1);
-        self.expression(&arg.expression);
-        self.dot_dot(&arg.dot_dot);
-        self.expression(&arg.expression0);
+        self.range(&arg.range);
         self.space(1);
         if let Some(ref x) = arg.module_for_declaration_opt {
             self.step(&x.step);
@@ -1566,9 +1562,7 @@ impl VerylWalker for Formatter {
         self.space(1);
         self.r#in(&arg.r#in);
         self.space(1);
-        self.expression(&arg.expression);
-        self.dot_dot(&arg.dot_dot);
-        self.expression(&arg.expression0);
+        self.range(&arg.range);
         self.space(1);
         if let Some(ref x) = arg.interface_for_declaration_opt {
             self.step(&x.step);

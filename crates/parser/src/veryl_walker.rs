@@ -202,6 +202,13 @@ pub trait VerylWalker {
         after!(self, dot_dot, arg);
     }
 
+    /// Semantic action for non-terminal 'DotDotEqu'
+    fn dot_dot_equ(&mut self, arg: &DotDotEqu) {
+        before!(self, dot_dot_equ, arg);
+        self.veryl_token(&arg.dot_dot_equ_token);
+        after!(self, dot_dot_equ, arg);
+    }
+
     /// Semantic action for non-terminal 'Dot'
     fn dot(&mut self, arg: &Dot) {
         before!(self, dot, arg);
@@ -714,13 +721,13 @@ pub trait VerylWalker {
         before!(self, hierarchical_identifier, arg);
         self.identifier(&arg.identifier);
         for x in &arg.hierarchical_identifier_list {
-            self.range(&x.range);
+            self.select(&x.select);
         }
         for x in &arg.hierarchical_identifier_list0 {
             self.dot(&x.dot);
             self.identifier(&x.identifier);
             for x in &x.hierarchical_identifier_list0_list {
-                self.range(&x.range);
+                self.select(&x.select);
             }
         }
         after!(self, hierarchical_identifier, arg);
@@ -753,18 +760,18 @@ pub trait VerylWalker {
                     self.identifier(&x.identifier);
                 }
                 for x in &x.expression_identifier_group_list0 {
-                    self.range(&x.range);
+                    self.select(&x.select);
                 }
             }
             ExpressionIdentifierGroup::ExpressionIdentifierGroupList1ExpressionIdentifierGroupList2(x) => {
                 for x in &x.expression_identifier_group_list1 {
-                    self.range(&x.range);
+                    self.select(&x.select);
                 }
                 for x in &x.expression_identifier_group_list2 {
                     self.dot(&x.dot);
                     self.identifier(&x.identifier);
                     for x in &x.expression_identifier_group_list2_list {
-                        self.range(&x.range);
+                        self.select(&x.select);
                     }
                 }
             }
@@ -1082,29 +1089,29 @@ pub trait VerylWalker {
         after!(self, type_expression, arg);
     }
 
-    /// Semantic action for non-terminal 'Range'
-    fn range(&mut self, arg: &Range) {
-        before!(self, range, arg);
+    /// Semantic action for non-terminal 'Select'
+    fn select(&mut self, arg: &Select) {
+        before!(self, select, arg);
         self.l_bracket(&arg.l_bracket);
         self.expression(&arg.expression);
-        if let Some(ref x) = arg.range_opt {
-            self.range_operator(&x.range_operator);
+        if let Some(ref x) = arg.select_opt {
+            self.select_operator(&x.select_operator);
             self.expression(&x.expression);
         }
         self.r_bracket(&arg.r_bracket);
-        after!(self, range, arg);
+        after!(self, select, arg);
     }
 
-    /// Semantic action for non-terminal 'RangeOperator'
-    fn range_operator(&mut self, arg: &RangeOperator) {
-        before!(self, range_operator, arg);
+    /// Semantic action for non-terminal 'SelectOperator'
+    fn select_operator(&mut self, arg: &SelectOperator) {
+        before!(self, select_operator, arg);
         match arg {
-            RangeOperator::Colon(x) => self.colon(&x.colon),
-            RangeOperator::PlusColon(x) => self.plus_colon(&x.plus_colon),
-            RangeOperator::MinusColon(x) => self.minus_colon(&x.minus_colon),
-            RangeOperator::Step(x) => self.step(&x.step),
+            SelectOperator::Colon(x) => self.colon(&x.colon),
+            SelectOperator::PlusColon(x) => self.plus_colon(&x.plus_colon),
+            SelectOperator::MinusColon(x) => self.minus_colon(&x.minus_colon),
+            SelectOperator::Step(x) => self.step(&x.step),
         }
-        after!(self, range_operator, arg);
+        after!(self, select_operator, arg);
     }
 
     /// Semantic action for non-terminal 'Width'
@@ -1131,6 +1138,27 @@ pub trait VerylWalker {
         }
         self.r_bracket(&arg.r_bracket);
         after!(self, array, arg);
+    }
+
+    /// Semantic action for non-terminal 'Range'
+    fn range(&mut self, arg: &Range) {
+        before!(self, range, arg);
+        self.expression(&arg.expression);
+        if let Some(ref x) = arg.range_opt {
+            self.range_operator(&x.range_operator);
+            self.expression(&x.expression);
+        }
+        after!(self, range, arg);
+    }
+
+    /// Semantic action for non-terminal 'RangeOperator'
+    fn range_operator(&mut self, arg: &RangeOperator) {
+        before!(self, range_operator, arg);
+        match arg {
+            RangeOperator::DotDot(x) => self.dot_dot(&x.dot_dot),
+            RangeOperator::DotDotEqu(x) => self.dot_dot_equ(&x.dot_dot_equ),
+        }
+        after!(self, range_operator, arg);
     }
 
     /// Semantic action for non-terminal 'FixedType'
@@ -1302,9 +1330,7 @@ pub trait VerylWalker {
         self.colon(&arg.colon);
         self.scalar_type(&arg.scalar_type);
         self.r#in(&arg.r#in);
-        self.expression(&arg.expression);
-        self.dot_dot(&arg.dot_dot);
-        self.expression(&arg.expression0);
+        self.range(&arg.range);
         if let Some(ref x) = arg.for_statement_opt {
             self.step(&x.step);
             self.assignment_operator(&x.assignment_operator);
@@ -2029,9 +2055,7 @@ pub trait VerylWalker {
         self.r#for(&arg.r#for);
         self.identifier(&arg.identifier);
         self.r#in(&arg.r#in);
-        self.expression(&arg.expression);
-        self.dot_dot(&arg.dot_dot);
-        self.expression(&arg.expression0);
+        self.range(&arg.range);
         if let Some(ref x) = arg.module_for_declaration_opt {
             self.step(&x.step);
             self.assignment_operator(&x.assignment_operator);
@@ -2162,9 +2186,7 @@ pub trait VerylWalker {
         self.r#for(&arg.r#for);
         self.identifier(&arg.identifier);
         self.r#in(&arg.r#in);
-        self.expression(&arg.expression);
-        self.dot_dot(&arg.dot_dot);
-        self.expression(&arg.expression0);
+        self.range(&arg.range);
         if let Some(ref x) = arg.interface_for_declaration_opt {
             self.step(&x.step);
             self.assignment_operator(&x.assignment_operator);
