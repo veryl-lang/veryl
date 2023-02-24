@@ -140,6 +140,22 @@ impl Emitter {
         self.adjust_line = true;
     }
 
+    fn newline_list(&mut self, i: usize) {
+        if i == 0 {
+            self.newline_push();
+        } else {
+            self.newline();
+        }
+    }
+
+    fn newline_list_post(&mut self, is_empty: bool) {
+        if !is_empty {
+            self.newline_pop();
+        } else {
+            self.newline();
+        }
+    }
+
     fn space(&mut self, repeat: usize) {
         self.str(&" ".repeat(repeat));
     }
@@ -799,14 +815,11 @@ impl VerylWalker for Emitter {
         self.str(")");
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token.replace("begin"));
-        self.newline_push();
         for (i, x) in arg.if_statement_list.iter().enumerate() {
-            if i != 0 {
-                self.newline();
-            }
+            self.newline_list(i);
             self.statement(&x.statement);
         }
-        self.newline_pop();
+        self.newline_list_post(arg.if_statement_list.is_empty());
         self.token(&arg.r_brace.r_brace_token.replace("end"));
         for x in &arg.if_statement_list0 {
             self.space(1);
@@ -819,14 +832,11 @@ impl VerylWalker for Emitter {
             self.str(")");
             self.space(1);
             self.token_will_push(&x.l_brace.l_brace_token.replace("begin"));
-            self.newline_push();
             for (i, x) in x.if_statement_list0_list.iter().enumerate() {
-                if i != 0 {
-                    self.newline();
-                }
+                self.newline_list(i);
                 self.statement(&x.statement);
             }
-            self.newline_pop();
+            self.newline_list_post(x.if_statement_list0_list.is_empty());
             self.token(&x.r_brace.r_brace_token.replace("end"));
         }
         if let Some(ref x) = arg.if_statement_opt {
@@ -834,14 +844,11 @@ impl VerylWalker for Emitter {
             self.r#else(&x.r#else);
             self.space(1);
             self.token_will_push(&x.l_brace.l_brace_token.replace("begin"));
-            self.newline_push();
             for (i, x) in x.if_statement_opt_list.iter().enumerate() {
-                if i != 0 {
-                    self.newline();
-                }
+                self.newline_list(i);
                 self.statement(&x.statement);
             }
-            self.newline_pop();
+            self.newline_list_post(x.if_statement_opt_list.is_empty());
             self.token(&x.r_brace.r_brace_token.replace("end"));
         }
     }
@@ -856,14 +863,11 @@ impl VerylWalker for Emitter {
         self.str(")");
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token.replace("begin"));
-        self.newline_push();
         for (i, x) in arg.if_reset_statement_list.iter().enumerate() {
-            if i != 0 {
-                self.newline();
-            }
+            self.newline_list(i);
             self.statement(&x.statement);
         }
-        self.newline_pop();
+        self.newline_list_post(arg.if_reset_statement_list.is_empty());
         self.token(&arg.r_brace.r_brace_token.replace("end"));
         for x in &arg.if_reset_statement_list0 {
             self.space(1);
@@ -876,14 +880,11 @@ impl VerylWalker for Emitter {
             self.str(")");
             self.space(1);
             self.token_will_push(&x.l_brace.l_brace_token.replace("begin"));
-            self.newline_push();
             for (i, x) in x.if_reset_statement_list0_list.iter().enumerate() {
-                if i != 0 {
-                    self.newline();
-                }
+                self.newline_list(i);
                 self.statement(&x.statement);
             }
-            self.newline_pop();
+            self.newline_list_post(x.if_reset_statement_list0_list.is_empty());
             self.token(&x.r_brace.r_brace_token.replace("end"));
         }
         if let Some(ref x) = arg.if_reset_statement_opt {
@@ -891,14 +892,11 @@ impl VerylWalker for Emitter {
             self.r#else(&x.r#else);
             self.space(1);
             self.token_will_push(&x.l_brace.l_brace_token.replace("begin"));
-            self.newline_push();
             for (i, x) in x.if_reset_statement_opt_list.iter().enumerate() {
-                if i != 0 {
-                    self.newline();
-                }
+                self.newline_list(i);
                 self.statement(&x.statement);
             }
-            self.newline_pop();
+            self.newline_list_post(x.if_reset_statement_opt_list.is_empty());
             self.token(&x.r_brace.r_brace_token.replace("end"));
         }
     }
@@ -956,14 +954,11 @@ impl VerylWalker for Emitter {
         self.str(")");
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token.replace("begin"));
-        self.newline_push();
         for (i, x) in arg.for_statement_list.iter().enumerate() {
-            if i != 0 {
-                self.newline();
-            }
+            self.newline_list(i);
             self.statement(&x.statement);
         }
-        self.newline_pop();
+        self.newline_list_post(arg.for_statement_list.is_empty());
         self.token(&arg.r_brace.r_brace_token.replace("end"));
     }
 
@@ -974,14 +969,11 @@ impl VerylWalker for Emitter {
         self.str("(");
         self.expression(&arg.expression);
         self.token_will_push(&arg.l_brace.l_brace_token.replace(")"));
-        self.newline_push();
         for (i, x) in arg.case_statement_list.iter().enumerate() {
-            if i != 0 {
-                self.newline();
-            }
+            self.newline_list(i);
             self.case_item(&x.case_item);
         }
-        self.newline_pop();
+        self.newline_list_post(arg.case_statement_list.is_empty());
         self.token(&arg.r_brace.r_brace_token.replace("endcase"));
     }
 
@@ -997,14 +989,11 @@ impl VerylWalker for Emitter {
             CaseItemGroup0::Statement(x) => self.statement(&x.statement),
             CaseItemGroup0::LBraceCaseItemGroup0ListRBrace(x) => {
                 self.token_will_push(&x.l_brace.l_brace_token.replace("begin"));
-                self.newline_push();
                 for (i, x) in x.case_item_group0_list.iter().enumerate() {
-                    if i != 0 {
-                        self.newline();
-                    }
+                    self.newline_list(i);
                     self.statement(&x.statement);
                 }
-                self.newline_pop();
+                self.newline_list_post(x.case_item_group0_list.is_empty());
                 self.token(&x.r_brace.r_brace_token.replace("end"));
             }
         }
@@ -1141,14 +1130,11 @@ impl VerylWalker for Emitter {
         self.r_paren(&arg.r_paren);
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token.replace("begin"));
-        self.newline_push();
         for (i, x) in arg.always_ff_declaration_list.iter().enumerate() {
-            if i != 0 {
-                self.newline();
-            }
+            self.newline_list(i);
             self.statement(&x.statement);
         }
-        self.newline_pop();
+        self.newline_list_post(arg.always_ff_declaration_list.is_empty());
         self.token(&arg.r_brace.r_brace_token.replace("end"));
         self.in_always_ff = false;
     }
@@ -1220,14 +1206,11 @@ impl VerylWalker for Emitter {
         self.always_comb(&arg.always_comb);
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token.replace("begin"));
-        self.newline_push();
         for (i, x) in arg.always_comb_declaration_list.iter().enumerate() {
-            if i != 0 {
-                self.newline();
-            }
+            self.newline_list(i);
             self.statement(&x.statement);
         }
-        self.newline_pop();
+        self.newline_list_post(arg.always_comb_declaration_list.is_empty());
         self.token(&arg.r_brace.r_brace_token.replace("end"));
     }
 
@@ -1410,6 +1393,32 @@ impl VerylWalker for Emitter {
         self.scalar_type(&arg.scalar_type);
         self.space(1);
         self.identifier(&arg.identifier);
+    }
+
+    /// Semantic action for non-terminal 'InitialDeclaration'
+    fn initial_declaration(&mut self, arg: &InitialDeclaration) {
+        self.initial(&arg.initial);
+        self.space(1);
+        self.token_will_push(&arg.l_brace.l_brace_token.replace("begin"));
+        for (i, x) in arg.initial_declaration_list.iter().enumerate() {
+            self.newline_list(i);
+            self.statement(&x.statement);
+        }
+        self.newline_list_post(arg.initial_declaration_list.is_empty());
+        self.token(&arg.r_brace.r_brace_token.replace("end"));
+    }
+
+    /// Semantic action for non-terminal 'FinalDeclaration'
+    fn final_declaration(&mut self, arg: &FinalDeclaration) {
+        self.r#final(&arg.r#final);
+        self.space(1);
+        self.token_will_push(&arg.l_brace.l_brace_token.replace("begin"));
+        for (i, x) in arg.final_declaration_list.iter().enumerate() {
+            self.newline_list(i);
+            self.statement(&x.statement);
+        }
+        self.newline_list_post(arg.final_declaration_list.is_empty());
+        self.token(&arg.r_brace.r_brace_token.replace("end"));
     }
 
     /// Semantic action for non-terminal 'InstDeclaration'
@@ -1763,14 +1772,11 @@ impl VerylWalker for Emitter {
         self.token(&arg.minus_g_t.minus_g_t_token.replace(""));
         self.str(";");
         self.token_will_push(&arg.l_brace.l_brace_token.replace(""));
-        self.newline_push();
         for (i, x) in arg.function_declaration_list.iter().enumerate() {
-            if i != 0 {
-                self.newline();
-            }
+            self.newline_list(i);
             self.function_item(&x.function_item);
         }
-        self.newline_pop();
+        self.newline_list_post(arg.function_declaration_list.is_empty());
         if arg.function_declaration_opt.is_some() {
             self.str("endfunction");
             self.newline_pop();
@@ -1842,14 +1848,11 @@ impl VerylWalker for Emitter {
             self.port_declaration(&x.port_declaration);
         }
         self.token_will_push(&arg.l_brace.l_brace_token.replace(";"));
-        self.newline_push();
         for (i, x) in arg.module_declaration_list.iter().enumerate() {
-            if i != 0 {
-                self.newline();
-            }
+            self.newline_list(i);
             self.module_group(&x.module_group);
         }
-        self.newline_pop();
+        self.newline_list_post(arg.module_declaration_list.is_empty());
         self.token(&arg.r_brace.r_brace_token.replace("endmodule"));
     }
 
@@ -1947,14 +1950,11 @@ impl VerylWalker for Emitter {
         self.identifier(&arg.identifier);
         self.default_block = Some(arg.identifier.identifier_token.text());
         self.token_will_push(&arg.l_brace.l_brace_token.replace(""));
-        self.newline_push();
         for (i, x) in arg.module_named_block_list.iter().enumerate() {
-            if i != 0 {
-                self.newline();
-            }
+            self.newline_list(i);
             self.module_group(&x.module_group);
         }
-        self.newline_pop();
+        self.newline_list_post(arg.module_named_block_list.is_empty());
         self.token(&arg.r_brace.r_brace_token.replace("end"));
     }
 
@@ -1972,14 +1972,11 @@ impl VerylWalker for Emitter {
             self.str(&name);
         }
         self.token_will_push(&arg.l_brace.l_brace_token.replace(""));
-        self.newline_push();
         for (i, x) in arg.module_optional_named_block_list.iter().enumerate() {
-            if i != 0 {
-                self.newline();
-            }
+            self.newline_list(i);
             self.module_group(&x.module_group);
         }
-        self.newline_pop();
+        self.newline_list_post(arg.module_optional_named_block_list.is_empty());
         self.token(&arg.r_brace.r_brace_token.replace("end"));
     }
 
@@ -2032,14 +2029,11 @@ impl VerylWalker for Emitter {
             self.with_parameter(&x.with_parameter);
         }
         self.token_will_push(&arg.l_brace.l_brace_token.replace(";"));
-        self.newline_push();
         for (i, x) in arg.interface_declaration_list.iter().enumerate() {
-            if i != 0 {
-                self.newline();
-            }
+            self.newline_list(i);
             self.interface_group(&x.interface_group);
         }
-        self.newline_pop();
+        self.newline_list_post(arg.interface_declaration_list.is_empty());
         self.token(&arg.r_brace.r_brace_token.replace("endinterface"));
     }
 
@@ -2137,14 +2131,11 @@ impl VerylWalker for Emitter {
         self.identifier(&arg.identifier);
         self.default_block = Some(arg.identifier.identifier_token.text());
         self.token_will_push(&arg.l_brace.l_brace_token.replace(""));
-        self.newline_push();
         for (i, x) in arg.interface_named_block_list.iter().enumerate() {
-            if i != 0 {
-                self.newline();
-            }
+            self.newline_list(i);
             self.interface_group(&x.interface_group);
         }
-        self.newline_pop();
+        self.newline_list_post(arg.interface_named_block_list.is_empty());
         self.token(&arg.r_brace.r_brace_token.replace("end"));
     }
 
@@ -2162,14 +2153,11 @@ impl VerylWalker for Emitter {
             self.str(&name);
         }
         self.token_will_push(&arg.l_brace.l_brace_token.replace(""));
-        self.newline_push();
         for (i, x) in arg.interface_optional_named_block_list.iter().enumerate() {
-            if i != 0 {
-                self.newline();
-            }
+            self.newline_list(i);
             self.interface_group(&x.interface_group);
         }
-        self.newline_pop();
+        self.newline_list_post(arg.interface_optional_named_block_list.is_empty());
         self.token(&arg.r_brace.r_brace_token.replace("end"));
     }
 
@@ -2205,19 +2193,18 @@ impl VerylWalker for Emitter {
         }
         self.identifier(&arg.identifier);
         self.token_will_push(&arg.l_brace.l_brace_token.replace(";"));
-        self.newline_push();
-        let file_scope_import = self.file_scope_import.clone();
-        for x in &file_scope_import {
-            self.str(x);
-            self.newline();
-        }
         for (i, x) in arg.package_declaration_list.iter().enumerate() {
-            if i != 0 {
-                self.newline();
+            self.newline_list(i);
+            if i == 0 {
+                let file_scope_import = self.file_scope_import.clone();
+                for x in &file_scope_import {
+                    self.str(x);
+                    self.newline();
+                }
             }
             self.package_group(&x.package_group);
         }
-        self.newline_pop();
+        self.newline_list_post(arg.package_declaration_list.is_empty());
         self.token(&arg.r_brace.r_brace_token.replace("endpackage"));
     }
 

@@ -28,7 +28,6 @@ module veryl_testcase_Module14;
 endmodule
 
 module veryl_testcase_Module14B;
-
 endmodule
 
 module veryl_testcase_Module14C (
@@ -36,12 +35,10 @@ module veryl_testcase_Module14C (
     input int unsigned bb  ,
     input int unsigned bbbb
 );
-
 endmodule
 
 interface veryl_testcase_InterfaceA #(
     parameter int unsigned a = 1,
     parameter int unsigned b = 1
 );
-
 endinterface
