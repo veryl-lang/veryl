@@ -11,6 +11,8 @@ pub struct CheckStatement<'a> {
     in_always_ff: bool,
     in_always_comb: bool,
     in_function: bool,
+    in_initial: bool,
+    in_final: bool,
     statement_depth_in_always_ff: usize,
 }
 
@@ -37,9 +39,22 @@ impl<'a> VerylGrammarTrait for CheckStatement<'a> {
         Ok(())
     }
 
+    fn assignment_statement(&mut self, arg: &AssignmentStatement) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            if self.in_initial || self.in_final {
+                self.errors.push(AnalyzerError::invalid_statement(
+                    "assignment",
+                    self.text,
+                    &arg.hierarchical_identifier.identifier.identifier_token,
+                ));
+            }
+        }
+        Ok(())
+    }
+
     fn if_reset_statement(&mut self, arg: &IfResetStatement) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            if self.in_always_comb || self.in_function {
+            if !self.in_always_ff {
                 self.errors.push(AnalyzerError::invalid_statement(
                     "if_reset",
                     self.text,
@@ -60,7 +75,7 @@ impl<'a> VerylGrammarTrait for CheckStatement<'a> {
 
     fn return_statement(&mut self, arg: &ReturnStatement) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            if self.in_always_ff || self.in_always_comb {
+            if !self.in_function {
                 self.errors.push(AnalyzerError::invalid_statement(
                     "return",
                     self.text,
@@ -86,6 +101,22 @@ impl<'a> VerylGrammarTrait for CheckStatement<'a> {
         match self.point {
             HandlerPoint::Before => self.in_always_comb = true,
             HandlerPoint::After => self.in_always_comb = false,
+        }
+        Ok(())
+    }
+
+    fn initial_declaration(&mut self, _arg: &InitialDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => self.in_initial = true,
+            HandlerPoint::After => self.in_initial = false,
+        }
+        Ok(())
+    }
+
+    fn final_declaration(&mut self, _arg: &FinalDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => self.in_final = true,
+            HandlerPoint::After => self.in_final = false,
         }
         Ok(())
     }
