@@ -1412,6 +1412,38 @@ impl VerylWalker for Emitter {
         self.identifier(&arg.identifier);
     }
 
+    /// Semantic action for non-terminal 'InitialDeclaration'
+    fn initial_declaration(&mut self, arg: &InitialDeclaration) {
+        self.initial(&arg.initial);
+        self.space(1);
+        self.token_will_push(&arg.l_brace.l_brace_token.replace("begin"));
+        self.newline_push();
+        for (i, x) in arg.initial_declaration_list.iter().enumerate() {
+            if i != 0 {
+                self.newline();
+            }
+            self.statement(&x.statement);
+        }
+        self.newline_pop();
+        self.token(&arg.r_brace.r_brace_token.replace("end"));
+    }
+
+    /// Semantic action for non-terminal 'FinalDeclaration'
+    fn final_declaration(&mut self, arg: &FinalDeclaration) {
+        self.r#final(&arg.r#final);
+        self.space(1);
+        self.token_will_push(&arg.l_brace.l_brace_token.replace("begin"));
+        self.newline_push();
+        for (i, x) in arg.final_declaration_list.iter().enumerate() {
+            if i != 0 {
+                self.newline();
+            }
+            self.statement(&x.statement);
+        }
+        self.newline_pop();
+        self.token(&arg.r_brace.r_brace_token.replace("end"));
+    }
+
     /// Semantic action for non-terminal 'InstDeclaration'
     fn inst_declaration(&mut self, arg: &InstDeclaration) {
         if arg.inst_declaration_opt1.is_none() {

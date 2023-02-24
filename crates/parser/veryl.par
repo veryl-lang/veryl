@@ -69,6 +69,7 @@ EnumTerm              : /(?-u:\b)enum(?-u:\b)/                                  
 ExportTerm            : /(?-u:\b)export(?-u:\b)/                                                              : Token;
 F32Term               : /(?-u:\b)f32(?-u:\b)/                                                                 : Token;
 F64Term               : /(?-u:\b)f64(?-u:\b)/                                                                 : Token;
+FinalTerm             : /(?-u:\b)final(?-u:\b)/                                                               : Token;
 ForTerm               : /(?-u:\b)for(?-u:\b)/                                                                 : Token;
 FunctionTerm          : /(?-u:\b)function(?-u:\b)/                                                            : Token;
 I32Term               : /(?-u:\b)i32(?-u:\b)/                                                                 : Token;
@@ -76,6 +77,7 @@ I64Term               : /(?-u:\b)i64(?-u:\b)/                                   
 IfResetTerm           : /(?-u:\b)if_reset(?-u:\b)/                                                            : Token;
 IfTerm                : /(?-u:\b)if(?-u:\b)/                                                                  : Token;
 ImportTerm            : /(?-u:\b)import(?-u:\b)/                                                              : Token;
+InitialTerm           : /(?-u:\b)initial(?-u:\b)/                                                             : Token;
 InoutTerm             : /(?-u:\b)inout(?-u:\b)/                                                               : Token;
 InputTerm             : /(?-u:\b)input(?-u:\b)/                                                               : Token;
 InstTerm              : /(?-u:\b)inst(?-u:\b)/                                                                : Token;
@@ -175,6 +177,7 @@ EnumToken      : EnumTerm      : Token Comments;
 ExportToken    : ExportTerm    : Token Comments;
 F32Token       : F32Term       : Token Comments;
 F64Token       : F64Term       : Token Comments;
+FinalToken     : FinalTerm     : Token Comments;
 ForToken       : ForTerm       : Token Comments;
 FunctionToken  : FunctionTerm  : Token Comments;
 I32Token       : I32Term       : Token Comments;
@@ -182,6 +185,7 @@ I64Token       : I64Term       : Token Comments;
 IfResetToken   : IfResetTerm   : Token Comments;
 IfToken        : IfTerm        : Token Comments;
 ImportToken    : ImportTerm    : Token Comments;
+InitialToken   : InitialTerm   : Token Comments;
 InoutToken     : InoutTerm     : Token Comments;
 InputToken     : InputTerm     : Token Comments;
 InstToken      : InstTerm      : Token Comments;
@@ -286,6 +290,7 @@ Enum      : EnumToken      : VerylToken;
 Export    : ExportToken    : VerylToken;
 F32       : F32Token       : VerylToken;
 F64       : F64Token       : VerylToken;
+Final     : FinalToken     : VerylToken;
 For       : ForToken       : VerylToken;
 Function  : FunctionToken  : VerylToken;
 I32       : I32Token       : VerylToken;
@@ -294,6 +299,7 @@ If        : IfToken        : VerylToken;
 IfReset   : IfResetToken   : VerylToken;
 Import    : ImportToken    : VerylToken;
 In        : InToken        : VerylToken;
+Initial   : InitialToken   : VerylToken;
 Inout     : InoutToken     : VerylToken;
 Input     : InputToken     : VerylToken;
 Inst      : InstToken      : VerylToken;
@@ -514,6 +520,10 @@ StructGroup: { Attribute } ( LBrace StructList RBrace | StructItem );
 
 StructItem: Identifier Colon ScalarType;
 
+InitialDeclaration: Initial LBrace { Statement } RBrace;
+
+FinalDeclaration: Final LBrace { Statement } RBrace;
+
 // ----------------------------------------------------------------------------
 // InstDeclaration
 // ----------------------------------------------------------------------------
@@ -612,6 +622,8 @@ ModuleItem: VarDeclaration
           | StructDeclaration
           | ModuleNamedBlock
           | ImportDeclaration
+          | InitialDeclaration
+          | FinalDeclaration
           ;
 
 // ----------------------------------------------------------------------------
@@ -640,6 +652,8 @@ InterfaceItem: VarDeclaration
              | InterfaceNamedBlock
              | FunctionDeclaration
              | ImportDeclaration
+             | InitialDeclaration
+             | FinalDeclaration
              ;
 
 // ----------------------------------------------------------------------------
@@ -657,6 +671,8 @@ PackageItem: VarDeclaration
            | FunctionDeclaration
            | ImportDeclaration
            | ExportDeclaration
+           | InitialDeclaration
+           | FinalDeclaration
            ;
 
 // ----------------------------------------------------------------------------
