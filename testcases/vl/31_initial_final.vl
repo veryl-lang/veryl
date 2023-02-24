@@ -1,11 +1,5 @@
 module Module31 {
-    initial {
+    initial {}
 
-
-    }
-
-    final {
-
-
-    }
+    final {}
 }

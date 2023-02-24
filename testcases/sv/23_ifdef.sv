@@ -36,14 +36,11 @@ module veryl_testcase_Module23 #(
 endmodule
 `ifdef DEFINE_A
 module veryl_testcase_Module23_A;
-
 endmodule
 `endif
 `ifndef DEFINE_A
 module veryl_testcase_Module23_B;
-
 endmodule
 module veryl_testcase_Module23_C;
-
 endmodule
 `endif
