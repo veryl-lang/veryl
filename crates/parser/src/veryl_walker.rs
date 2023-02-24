@@ -1241,7 +1241,7 @@ pub trait VerylWalker {
     fn statement(&mut self, arg: &Statement) {
         before!(self, statement, arg);
         match arg {
-            Statement::AssignmentStatement(x) => self.assignment_statement(&x.assignment_statement),
+            Statement::IdentifierStatement(x) => self.identifier_statement(&x.identifier_statement),
             Statement::IfStatement(x) => self.if_statement(&x.if_statement),
             Statement::IfResetStatement(x) => self.if_reset_statement(&x.if_reset_statement),
             Statement::ReturnStatement(x) => self.return_statement(&x.return_statement),
@@ -1251,19 +1251,33 @@ pub trait VerylWalker {
         after!(self, statement, arg);
     }
 
-    /// Semantic action for non-terminal 'AssignmentStatement'
-    fn assignment_statement(&mut self, arg: &AssignmentStatement) {
-        before!(self, assignment_statement, arg);
-        self.hierarchical_identifier(&arg.hierarchical_identifier);
-        match &*arg.assignment_statement_group {
-            AssignmentStatementGroup::Equ(x) => self.equ(&x.equ),
-            AssignmentStatementGroup::AssignmentOperator(x) => {
+    /// Semantic action for non-terminal 'IdentifierStatement'
+    fn identifier_statement(&mut self, arg: &IdentifierStatement) {
+        before!(self, identifier_statement, arg);
+        self.expression_identifier(&arg.expression_identifier);
+        match &*arg.identifier_statement_group {
+            IdentifierStatementGroup::FunctionCall(x) => {
+                self.function_call(&x.function_call);
+            }
+            IdentifierStatementGroup::Assignment(x) => {
+                self.assignment(&x.assignment);
+            }
+        }
+        self.semicolon(&arg.semicolon);
+        after!(self, identifier_statement, arg);
+    }
+
+    /// Semantic action for non-terminal 'Assignment'
+    fn assignment(&mut self, arg: &Assignment) {
+        before!(self, assignment, arg);
+        match &*arg.assignment_group {
+            AssignmentGroup::Equ(x) => self.equ(&x.equ),
+            AssignmentGroup::AssignmentOperator(x) => {
                 self.assignment_operator(&x.assignment_operator)
             }
         }
         self.expression(&arg.expression);
-        self.semicolon(&arg.semicolon);
-        after!(self, assignment_statement, arg);
+        after!(self, assignment, arg);
     }
 
     /// Semantic action for non-terminal 'IfStatement'

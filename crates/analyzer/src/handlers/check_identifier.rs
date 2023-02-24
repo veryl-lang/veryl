@@ -191,17 +191,17 @@ impl<'a> Handler for CheckIdentifier<'a> {
 }
 
 impl<'a> VerylGrammarTrait for CheckIdentifier<'a> {
-    fn assignment_statement(&mut self, arg: &AssignmentStatement) -> Result<(), ParolError> {
+    fn identifier_statement(&mut self, arg: &IdentifierStatement) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if self.in_always_comb {
                 self.check(
-                    &arg.hierarchical_identifier.identifier.identifier_token,
+                    &arg.expression_identifier.identifier.identifier_token,
                     Kind::Wire,
                 );
             }
             if self.in_always_ff {
                 self.check(
-                    &arg.hierarchical_identifier.identifier.identifier_token,
+                    &arg.expression_identifier.identifier.identifier_token,
                     Kind::Reg,
                 );
             }
