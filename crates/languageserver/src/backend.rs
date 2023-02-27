@@ -2,6 +2,7 @@ use dashmap::DashMap;
 use ropey::Rope;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicI32, Ordering};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
@@ -22,6 +23,7 @@ pub struct Backend {
     parser_map: DashMap<String, Parser>,
     metadata_map: DashMap<String, Metadata>,
     cache_dir: PathBuf,
+    lsp_token: AtomicI32,
 }
 
 struct TextDocumentItem {
@@ -38,6 +40,7 @@ impl Backend {
             parser_map: DashMap::new(),
             metadata_map: DashMap::new(),
             cache_dir: Metadata::cache_dir(),
+            lsp_token: AtomicI32::new(0),
         }
     }
 
@@ -191,6 +194,61 @@ impl Backend {
             ..Default::default()
         }
     }
+
+    async fn progress_start(&self, msg: &str) {
+        self.lsp_token.fetch_add(1, Ordering::Relaxed);
+        let token = NumberOrString::Number(self.lsp_token.load(Ordering::Relaxed));
+        let begin = WorkDoneProgressBegin {
+            title: msg.to_string(),
+            cancellable: Some(false),
+            message: None,
+            percentage: Some(100),
+        };
+
+        self.client
+            .send_request::<request::WorkDoneProgressCreate>(WorkDoneProgressCreateParams {
+                token: token.clone(),
+            })
+            .await
+            .unwrap();
+
+        self.client
+            .send_notification::<notification::Progress>(ProgressParams {
+                token,
+                value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(begin)),
+            })
+            .await;
+    }
+
+    async fn progress_report(&self, msg: &str, pcnt: u32) {
+        let token = NumberOrString::Number(self.lsp_token.load(Ordering::Relaxed));
+        let report = WorkDoneProgressReport {
+            cancellable: Some(false),
+            message: Some(msg.to_string()),
+            percentage: Some(pcnt),
+        };
+
+        self.client
+            .send_notification::<notification::Progress>(ProgressParams {
+                token,
+                value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(report)),
+            })
+            .await;
+    }
+
+    async fn progress_done(&self, msg: &str) {
+        let token = NumberOrString::Number(self.lsp_token.load(Ordering::Relaxed));
+        let end = WorkDoneProgressEnd {
+            message: Some(msg.to_string()),
+        };
+
+        self.client
+            .send_notification::<notification::Progress>(ProgressParams {
+                token,
+                value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(end)),
+            })
+            .await;
+    }
 }
 
 mod semantic_legend {
@@ -287,9 +345,18 @@ impl LanguageServer for Backend {
                 .await;
 
                 if let Ok(paths) = metadata.paths::<&str>(&[]) {
-                    for path in &paths {
+                    self.progress_start("background analyze").await;
+                    let total = paths.len();
+                    for (i, path) in paths.iter().enumerate() {
+                        let pcnt = i * 100 / total;
                         self.background_analyze(path, &metadata).await;
+                        self.progress_report(
+                            &format!("{}", path.src.file_name().unwrap().to_string_lossy()),
+                            pcnt as u32,
+                        )
+                        .await;
                     }
+                    self.progress_done("background analyze done").await;
                 }
             }
         }
