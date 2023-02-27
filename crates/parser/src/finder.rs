@@ -9,7 +9,9 @@ pub struct Finder {
     pub token: Option<Token>,
     pub token_group: Vec<Token>,
     hit: bool,
+    group_hit: bool,
     in_group: bool,
+    lock_group: bool,
 }
 
 impl Finder {
@@ -27,15 +29,16 @@ impl VerylWalker for Finder {
         {
             self.token = Some(arg.token);
             self.hit = true;
+            self.group_hit = true;
         }
-        if self.in_group {
+        if self.in_group && !self.lock_group {
             self.token_group.push(arg.token);
         }
     }
 
     /// Semantic action for non-terminal 'HierarchicalIdentifier'
     fn hierarchical_identifier(&mut self, arg: &HierarchicalIdentifier) {
-        self.hit = false;
+        self.group_hit = false;
         self.in_group = true;
         self.identifier(&arg.identifier);
         self.in_group = false;
@@ -51,14 +54,16 @@ impl VerylWalker for Finder {
                 self.select(&x.select);
             }
         }
-        if !self.hit {
+        if self.group_hit {
+            self.lock_group = true;
+        } else if !self.lock_group {
             self.token_group.clear();
         }
     }
 
     /// Semantic action for non-terminal 'ScopedIdentifier'
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) {
-        self.hit = false;
+        self.group_hit = false;
         self.in_group = true;
         self.identifier(&arg.identifier);
         self.in_group = false;
@@ -68,14 +73,16 @@ impl VerylWalker for Finder {
             self.identifier(&x.identifier);
             self.in_group = false;
         }
-        if !self.hit {
+        if self.group_hit {
+            self.lock_group = true;
+        } else if !self.lock_group {
             self.token_group.clear();
         }
     }
 
     /// Semantic action for non-terminal 'ExpressionIdentifier'
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) {
-        self.hit = false;
+        self.group_hit = false;
         if let Some(ref x) = arg.expression_identifier_opt {
             self.dollar(&x.dollar);
         }
@@ -113,8 +120,22 @@ impl VerylWalker for Finder {
                 }
             }
         }
-        if !self.hit {
+        if self.group_hit {
+            self.lock_group = true;
+        } else if !self.lock_group {
             self.token_group.clear();
+        }
+    }
+
+    /// Semantic action for non-terminal 'Veryl'
+    fn veryl(&mut self, arg: &Veryl) {
+        self.hit = false;
+        self.lock_group = false;
+        self.token_group.clear();
+
+        self.start(&arg.start);
+        for x in &arg.veryl_list {
+            self.description_group(&x.description_group);
         }
     }
 }
