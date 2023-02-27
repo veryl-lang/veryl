@@ -30,7 +30,7 @@ veryl-parser   = {version = "0.5.0", path = "../parser"}
 walkdir        = "2.3.2"
 
 [dev-dependencies]
-tempfile       = "3.3"
+tempfile       = "3.4"
 
 [features]
 default      = ["git-command"]
