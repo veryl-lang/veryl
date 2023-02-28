@@ -2583,9 +2583,9 @@ dependencies = [
 
 [[package]]
 name = "parol"
-version = "0.17.0"
+version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e672d03152a838921ce0d1853a454a416c73ab9f0ba7cb395e6882a74114ee6"
+checksum = "db4c8dc3bd9dd5a4b4f68b5d10a227d1db1154f2b5025bb81062d125a8d2c6b9"
 dependencies = [
  "anyhow",
  "cfg-if",
@@ -2597,7 +2597,7 @@ dependencies = [
  "id_tree_layout",
  "owo-colors",
  "parol-macros",
- "parol_runtime",
+ "parol_runtime 0.14.0",
  "rand",
  "rand_regex",
  "rayon",
@@ -2619,6 +2619,25 @@ name = "parol_runtime"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d86bc25759ccf7be8e0612cccbc9a3da42e78fb89e9b9e588ed62b9e7027480"
+dependencies = [
+ "anyhow",
+ "codespan-reporting",
+ "derive_builder",
+ "function_name",
+ "id_tree",
+ "id_tree_layout",
+ "log",
+ "once_cell",
+ "parol-macros",
+ "regex-automata 0.2.0",
+ "thiserror",
+]
+
+[[package]]
+name = "parol_runtime"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f922a01af482a9dbdca9a3d7ae102cee45f3e496ce3f10f6c7d798819a56f60"
 dependencies = [
  "anyhow",
  "codespan-reporting",
@@ -4189,7 +4208,7 @@ dependencies = [
  "miette",
  "once_cell",
  "parol",
- "parol_runtime",
+ "parol_runtime 0.13.0",
  "paste",
  "regex",
  "thiserror",
