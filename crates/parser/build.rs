@@ -35,6 +35,7 @@ fn main() {
             .enable_auto_generation()
             .user_type_name("VerylGrammar")
             .user_trait_module_name("veryl_grammar")
+            .trim_parse_tree()
             .generate_parser()
         {
             {
