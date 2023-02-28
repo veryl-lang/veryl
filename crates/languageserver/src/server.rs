@@ -1,3 +1,4 @@
+use crate::keyword::KEYWORDS;
 use async_channel::{Receiver, Sender};
 use dashmap::DashMap;
 use futures::executor::block_on;
@@ -157,10 +158,10 @@ impl Server {
 
 impl Server {
     fn did_open(&mut self, url: &Url, text: &str, version: i32) {
-        self.on_change(url, text, version);
+        if let Some(mut metadata) = self.get_metadata(url) {
+            self.on_change(&metadata.project.name, url, text, version);
 
-        if !url.as_str().contains(&self.cache_dir) {
-            if let Some(mut metadata) = self.get_metadata(url) {
+            if !url.as_str().contains(&self.cache_dir) {
                 if let Ok(paths) = metadata.paths::<&str>(&[]) {
                     let total = paths.len();
                     let task = BackgroundTask {
@@ -172,73 +173,50 @@ impl Server {
                     self.background_tasks.push_back(task);
                 }
             }
+        } else {
+            self.on_change(&"", url, text, version);
         }
     }
 
     fn did_change(&mut self, url: &Url, text: &str, version: i32) {
-        self.on_change(url, text, version);
+        if let Some(metadata) = self.get_metadata(url) {
+            self.on_change(&metadata.project.name, url, text, version);
+        } else {
+            self.on_change(&"", url, text, version);
+        }
     }
 
     fn completion(
         &mut self,
-        _url: &Url,
-        _line: usize,
-        _column: usize,
+        url: &Url,
+        line: usize,
+        column: usize,
         context: &Option<CompletionContext>,
     ) {
-        if let Some(context) = context {
-            if let CompletionTriggerKind::TRIGGER_CHARACTER = context.trigger_kind {
-                let trigger = context.trigger_character.as_ref().unwrap();
-                let res = match trigger.as_str() {
-                    "<" => {
-                        let items = vec![
-                            completion_item_operator("=", "less than equal"),
-                            completion_item_operator(":", "less than"),
-                            completion_item_operator("<<", "arithmetic left shift"),
-                            completion_item_operator("<<=", "arithmetic left shift assignment"),
-                            completion_item_operator("<", "logical left shift"),
-                            completion_item_operator("<=", "logical left shift assignment"),
-                        ];
-                        Some(CompletionResponse::Array(items))
-                    }
-                    ">" => {
-                        let items = vec![
-                            completion_item_operator("=", "greater than equal"),
-                            completion_item_operator(":", "greater than"),
-                            completion_item_operator(">>", "arithmetic right shift"),
-                            completion_item_operator(">>=", "arithmetic right shift assignment"),
-                            completion_item_operator(">", "logical right shift"),
-                            completion_item_operator(">=", "logical right shift assignment"),
-                        ];
-                        Some(CompletionResponse::Array(items))
-                    }
-                    "=" => {
-                        let items = vec![
-                            completion_item_operator("=", "logical equality"),
-                            completion_item_operator("==", "case equality"),
-                            completion_item_operator("=?", "wildcard equality"),
-                        ];
-                        Some(CompletionResponse::Array(items))
-                    }
-                    "!" => {
-                        let items = vec![
-                            completion_item_operator("=", "logical inequality"),
-                            completion_item_operator("==", "case inequality"),
-                            completion_item_operator("=?", "wildcard inequality"),
-                        ];
-                        Some(CompletionResponse::Array(items))
-                    }
-                    _ => None,
-                };
-
-                self.snd
-                    .send_blocking(MsgFromServer::Completion(res))
-                    .unwrap();
-                return;
+        let ret = if let Some(context) = context {
+            match context.trigger_kind {
+                CompletionTriggerKind::TRIGGER_CHARACTER => completion_operator(
+                    line,
+                    column,
+                    context.trigger_character.as_ref().unwrap().as_str(),
+                ),
+                CompletionTriggerKind::INVOKED => {
+                    let mut items = if let Some(metadata) = self.get_metadata(url) {
+                        completion_toplevel_entity(&metadata, line, column)
+                    } else {
+                        vec![]
+                    };
+                    items.append(&mut completion_keyword(line, column));
+                    Some(CompletionResponse::Array(items))
+                }
+                _ => None,
             }
-        }
+        } else {
+            None
+        };
+
         self.snd
-            .send_blocking(MsgFromServer::Completion(None))
+            .send_blocking(MsgFromServer::Completion(ret))
             .unwrap();
     }
 
@@ -450,24 +428,22 @@ impl Server {
     fn formatting(&mut self, url: &Url) {
         let path = url.as_str();
 
-        if let Ok(metadata_path) = Metadata::search_from(path) {
-            if let Ok(metadata) = Metadata::load(metadata_path) {
-                if let Some(rope) = self.document_map.get(path) {
-                    let line = rope.len_lines() as u32;
-                    if let Some(parser) = self.parser_map.get(path) {
-                        let mut formatter = Formatter::new(&metadata);
-                        formatter.format(&parser.veryl);
+        if let Some(metadata) = self.get_metadata(url) {
+            if let Some(rope) = self.document_map.get(path) {
+                let line = rope.len_lines() as u32;
+                if let Some(parser) = self.parser_map.get(path) {
+                    let mut formatter = Formatter::new(&metadata);
+                    formatter.format(&parser.veryl);
 
-                        let text_edit = TextEdit {
-                            range: Range::new(Position::new(0, 0), Position::new(line, u32::MAX)),
-                            new_text: formatter.as_str().to_string(),
-                        };
+                    let text_edit = TextEdit {
+                        range: Range::new(Position::new(0, 0), Position::new(line, u32::MAX)),
+                        new_text: formatter.as_str().to_string(),
+                    };
 
-                        self.snd
-                            .send_blocking(MsgFromServer::Formatting(Some(vec![text_edit])))
-                            .unwrap();
-                        return;
-                    }
+                    self.snd
+                        .send_blocking(MsgFromServer::Formatting(Some(vec![text_edit])))
+                        .unwrap();
+                    return;
                 }
             }
         }
@@ -574,7 +550,7 @@ impl Server {
         None
     }
 
-    fn on_change(&mut self, url: &Url, text: &str, version: i32) {
+    fn on_change(&mut self, prj: &str, url: &Url, text: &str, version: i32) {
         let path = url.as_str();
         let rope = Rope::from_str(text);
 
@@ -590,7 +566,7 @@ impl Server {
                         symbol_table::drop(path);
                         namespace_table::drop(path);
                     }
-                    let analyzer = Analyzer::new(&"", &metadata);
+                    let analyzer = Analyzer::new(&prj, &metadata);
                     let mut errors = analyzer.analyze_pass1(text, path, &x.veryl);
                     errors.append(&mut analyzer.analyze_pass2(text, path, &x.veryl));
                     errors.append(&mut analyzer.analyze_pass3(text, path, &x.veryl));
@@ -703,13 +679,167 @@ fn to_location(token: &Token) -> Location {
     Location { uri, range }
 }
 
-fn completion_item_operator(label: &str, detail: &str) -> CompletionItem {
+fn completion_item_operator(
+    line: usize,
+    column: usize,
+    label: &str,
+    detail: &str,
+) -> CompletionItem {
+    let line = (line - 1) as u32;
+    let character = (column - 1) as u32;
+    let start = Position { line, character };
+    let end = Position { line, character };
+    let text_edit = CompletionTextEdit::Edit(TextEdit {
+        range: Range { start, end },
+        new_text: label.to_string(),
+    });
     CompletionItem {
         label: label.to_string(),
         kind: Some(CompletionItemKind::OPERATOR),
         detail: Some(detail.to_string()),
+        text_edit: Some(text_edit),
         ..Default::default()
     }
+}
+
+fn completion_operator(line: usize, column: usize, trigger: &str) -> Option<CompletionResponse> {
+    let l = line;
+    let c = column;
+    match trigger {
+        "<" => {
+            let items = vec![
+                completion_item_operator(l, c, "=", "less than equal"),
+                completion_item_operator(l, c, ":", "less than"),
+                completion_item_operator(l, c, "<<", "arithmetic left shift"),
+                completion_item_operator(l, c, "<<=", "arithmetic left shift assignment"),
+                completion_item_operator(l, c, "<", "logical left shift"),
+                completion_item_operator(l, c, "<=", "logical left shift assignment"),
+            ];
+            Some(CompletionResponse::Array(items))
+        }
+        ">" => {
+            let items = vec![
+                completion_item_operator(l, c, "=", "greater than equal"),
+                completion_item_operator(l, c, ":", "greater than"),
+                completion_item_operator(l, c, ">>", "arithmetic right shift"),
+                completion_item_operator(l, c, ">>=", "arithmetic right shift assignment"),
+                completion_item_operator(l, c, ">", "logical right shift"),
+                completion_item_operator(l, c, ">=", "logical right shift assignment"),
+            ];
+            Some(CompletionResponse::Array(items))
+        }
+        "=" => {
+            let items = vec![
+                completion_item_operator(l, c, "=", "logical equality"),
+                completion_item_operator(l, c, "==", "case equality"),
+                completion_item_operator(l, c, "=?", "wildcard equality"),
+            ];
+            Some(CompletionResponse::Array(items))
+        }
+        "!" => {
+            let items = vec![
+                completion_item_operator(l, c, "=", "logical inequality"),
+                completion_item_operator(l, c, "==", "case inequality"),
+                completion_item_operator(l, c, "=?", "wildcard inequality"),
+            ];
+            Some(CompletionResponse::Array(items))
+        }
+        _ => None,
+    }
+}
+
+fn completion_toplevel_entity(
+    metadata: &Metadata,
+    line: usize,
+    column: usize,
+) -> Vec<CompletionItem> {
+    let mut items = Vec::new();
+    let line = (line - 1) as u32;
+    let character = (column - 1) as u32;
+    let start = Position { line, character };
+    let end = Position { line, character };
+
+    let prj = resource_table::get_str_id(&metadata.project.name).unwrap();
+
+    for symbol in symbol_table::get_all() {
+        if symbol.namespace.paths.len() == 1 {
+            //&& symbol.namespace.paths[0] == prj {
+            let prefix = if symbol.namespace.paths[0] == prj {
+                "".to_string()
+            } else {
+                format!("{}::", symbol.namespace.paths[0])
+            };
+            let (new_text, kind) = match symbol.kind {
+                veryl_analyzer::symbol::SymbolKind::Module(ref x) => {
+                    let mut ports = String::new();
+                    for port in &x.ports {
+                        ports.push_str(&format!("{}, ", port.name));
+                    }
+                    let text = format!("{}{} ({});", prefix, symbol.token.text, ports);
+                    (text, Some(CompletionItemKind::CLASS))
+                }
+                veryl_analyzer::symbol::SymbolKind::Interface(_) => {
+                    let text = format!("{}{} ();", prefix, symbol.token.text);
+                    (text, Some(CompletionItemKind::INTERFACE))
+                }
+                veryl_analyzer::symbol::SymbolKind::Package => {
+                    let text = format!("{}{}::", prefix, symbol.token.text);
+                    (text, Some(CompletionItemKind::MODULE))
+                }
+                _ => {
+                    let text = format!("{}{}", prefix, symbol.token.text);
+                    (text, None)
+                }
+            };
+
+            let label = format!("{}{}", prefix, symbol.token.text);
+            let detail = Some(format!("{}", symbol.kind));
+
+            let text_edit = CompletionTextEdit::Edit(TextEdit {
+                range: Range { start, end },
+                new_text,
+            });
+
+            let item = CompletionItem {
+                label,
+                kind,
+                detail,
+                text_edit: Some(text_edit),
+                ..Default::default()
+            };
+            items.push(item);
+        }
+    }
+
+    items
+}
+
+fn completion_keyword(line: usize, column: usize) -> Vec<CompletionItem> {
+    let line = (line - 1) as u32;
+    let character = (column - 1) as u32;
+    let start = Position { line, character };
+    let end = Position { line, character };
+
+    let mut items = Vec::new();
+    for keyword in KEYWORDS {
+        let new_text = keyword.to_string();
+
+        let text_edit = CompletionTextEdit::Edit(TextEdit {
+            range: Range { start, end },
+            new_text,
+        });
+
+        let item = CompletionItem {
+            label: keyword.to_string(),
+            kind: Some(CompletionItemKind::KEYWORD),
+            detail: None,
+            text_edit: Some(text_edit),
+            ..Default::default()
+        };
+        items.push(item);
+    }
+
+    items
 }
 
 pub mod semantic_legend {

@@ -329,6 +329,10 @@ impl SymbolTable {
             })
             .or_insert(HashMap::from([(from, to)]));
     }
+
+    pub fn get_project_local(&self, prj: StrId) -> Option<HashMap<StrId, StrId>> {
+        self.project_local_table.get(&prj).cloned()
+    }
 }
 
 impl fmt::Display for SymbolTable {
@@ -408,6 +412,10 @@ pub fn add_reference(target: TokenId, token: &Token) {
 
 pub fn add_project_local(prj: StrId, from: StrId, to: StrId) {
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_project_local(prj, from, to))
+}
+
+pub fn get_project_local(prj: StrId) -> Option<HashMap<StrId, StrId>> {
+    SYMBOL_TABLE.with(|f| f.borrow().get_project_local(prj))
 }
 
 #[cfg(test)]
