@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl-analyzer"
-version               = "0.5.1"
+version               = "0.5.2"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -16,8 +16,8 @@ edition               = "2021"
 Inflector      = "0.11.4"
 miette         = {workspace = true}
 thiserror      = {workspace = true}
-veryl-metadata = {version = "0.5.1", path = "../metadata"}
-veryl-parser   = {version = "0.5.1", path = "../parser"}
+veryl-metadata = {version = "0.5.2", path = "../metadata"}
+veryl-parser   = {version = "0.5.2", path = "../parser"}
 
 [dev-dependencies]
 toml = {workspace = true}

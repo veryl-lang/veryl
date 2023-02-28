@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl-ls"
-version               = "0.5.1"
+version               = "0.5.2"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -24,7 +24,7 @@ miette            = {workspace = true}
 serde_json        = {workspace = true}
 tokio             = {version = "1.25.0", features = ["full"]}
 tower-lsp         = "0.18.0"
-veryl-analyzer    = {version = "0.5.1", path = "../analyzer"}
-veryl-formatter   = {version = "0.5.1", path = "../formatter"}
-veryl-metadata    = {version = "0.5.1", path = "../metadata"}
-veryl-parser      = {version = "0.5.1", path = "../parser"}
+veryl-analyzer    = {version = "0.5.2", path = "../analyzer"}
+veryl-formatter   = {version = "0.5.2", path = "../formatter"}
+veryl-metadata    = {version = "0.5.2", path = "../metadata"}
+veryl-parser      = {version = "0.5.2", path = "../parser"}
