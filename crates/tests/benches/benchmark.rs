@@ -24,7 +24,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function("analyze", |b| {
         b.iter(|| {
             let parser = Parser::parse(black_box(&text), &"").unwrap();
-            let prj = vec![&metadata.project.name];
+            let prj = &metadata.project.name;
             let analyzer = Analyzer::new(&prj, black_box(&metadata));
             analyzer.analyze_pass1(black_box(&text), &"", &parser.veryl);
             analyzer.analyze_pass2(black_box(&text), &"", &parser.veryl);
