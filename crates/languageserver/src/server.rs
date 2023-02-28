@@ -174,7 +174,7 @@ impl Server {
                 }
             }
         } else {
-            self.on_change(&"", url, text, version);
+            self.on_change("", url, text, version);
         }
     }
 
@@ -182,7 +182,7 @@ impl Server {
         if let Some(metadata) = self.get_metadata(url) {
             self.on_change(&metadata.project.name, url, text, version);
         } else {
-            self.on_change(&"", url, text, version);
+            self.on_change("", url, text, version);
         }
     }
 

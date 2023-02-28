@@ -24,10 +24,10 @@ fn main() {
                 let keyword = line.split_ascii_whitespace().nth(2).unwrap();
                 let keyword = keyword.replace("/(?-u:\\b)", "");
                 let keyword = keyword.replace("(?-u:\\b)/", "");
-                keywords.push_str(&format!("    \"{}\",\n", keyword));
+                keywords.push_str(&format!("    \"{keyword}\",\n"));
             }
         }
-        keywords.push_str(&"];");
+        keywords.push_str("];\n");
         fs::write(&exp_file, keywords).unwrap();
     }
 }
