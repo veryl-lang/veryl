@@ -3,6 +3,7 @@
 use tower_lsp::{LspService, Server};
 
 mod backend;
+mod keyword;
 mod server;
 use backend::Backend;
 

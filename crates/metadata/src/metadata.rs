@@ -198,6 +198,22 @@ impl Metadata {
         Ok(())
     }
 
+    pub fn update_lockfile(&mut self) -> Result<(), MetadataError> {
+        let modified = if self.lockfile_path.exists() {
+            let mut lockfile = Lockfile::load(&self.lockfile_path)?;
+            let modified = lockfile.update(self, false)?;
+            self.lockfile = lockfile;
+            modified
+        } else {
+            self.lockfile = Lockfile::new(self)?;
+            true
+        };
+        if modified {
+            self.lockfile.save(&self.lockfile_path)?;
+        }
+        Ok(())
+    }
+
     pub fn paths<T: AsRef<Path>>(&mut self, files: &[T]) -> Result<Vec<PathPair>, MetadataError> {
         let base = self.metadata_path.parent().unwrap();
 
@@ -227,18 +243,7 @@ impl Metadata {
             fs::create_dir(&base_dst)?;
         }
 
-        let modified = if self.lockfile_path.exists() {
-            let mut lockfile = Lockfile::load(&self.lockfile_path)?;
-            let modified = lockfile.update(self, false)?;
-            self.lockfile = lockfile;
-            modified
-        } else {
-            self.lockfile = Lockfile::new(self)?;
-            true
-        };
-        if modified {
-            self.lockfile.save(&self.lockfile_path)?;
-        }
+        self.update_lockfile()?;
 
         let mut deps = self.lockfile.paths(&base_dst)?;
         ret.append(&mut deps);
