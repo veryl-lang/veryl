@@ -1,0 +1,7 @@
+module Module32 {
+    var a: logic;
+    var b: logic;
+
+    assign a = inside 1 + 2 / 3 {0, 0..10, 1..=10};
+    assign b = outside 1 * 2 - 1 {0, 0..10, 1..=10};
+}

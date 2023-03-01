@@ -673,6 +673,42 @@ impl VerylWalker for Emitter {
         self.token(&arg.r_brace.r_brace_token.replace("))"));
     }
 
+    /// Semantic action for non-terminal 'InsideExpression'
+    fn inside_expression(&mut self, arg: &InsideExpression) {
+        self.str("(");
+        self.expression(&arg.expression);
+        self.space(1);
+        self.inside(&arg.inside);
+        self.space(1);
+        self.l_brace(&arg.l_brace);
+        self.range_list(&arg.range_list);
+        self.r_brace(&arg.r_brace);
+        self.str(")");
+    }
+
+    /// Semantic action for non-terminal 'OutsideExpression'
+    fn outside_expression(&mut self, arg: &OutsideExpression) {
+        self.str("!(");
+        self.expression(&arg.expression);
+        self.space(1);
+        self.token(&arg.outside.outside_token.replace("inside"));
+        self.space(1);
+        self.l_brace(&arg.l_brace);
+        self.range_list(&arg.range_list);
+        self.r_brace(&arg.r_brace);
+        self.str(")");
+    }
+
+    /// Semantic action for non-terminal 'RangeList'
+    fn range_list(&mut self, arg: &RangeList) {
+        self.range_item(&arg.range_item);
+        for x in &arg.range_list_list {
+            self.comma(&x.comma);
+            self.space(1);
+            self.range_item(&x.range_item);
+        }
+    }
+
     /// Semantic action for non-terminal 'Select'
     fn select(&mut self, arg: &Select) {
         self.l_bracket(&arg.l_bracket);
@@ -721,6 +757,28 @@ impl VerylWalker for Emitter {
             self.str("-1");
         }
         self.r_bracket(&arg.r_bracket);
+    }
+
+    /// Semantic action for non-terminal 'Range'
+    fn range(&mut self, arg: &Range) {
+        if let Some(ref x) = arg.range_opt {
+            self.str("[");
+            self.expression(&arg.expression);
+            self.str(":");
+            match &*x.range_operator {
+                RangeOperator::DotDot(_) => {
+                    self.str("(");
+                    self.expression(&x.expression);
+                    self.str(")-1");
+                }
+                RangeOperator::DotDotEqu(_) => {
+                    self.expression(&x.expression);
+                }
+            }
+            self.str("]");
+        } else {
+            self.expression(&arg.expression);
+        }
     }
 
     /// Semantic action for non-terminal 'VariableType'

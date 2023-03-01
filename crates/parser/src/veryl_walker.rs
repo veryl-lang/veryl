@@ -503,6 +503,13 @@ pub trait VerylWalker {
         after!(self, input, arg);
     }
 
+    /// Semantic action for non-terminal 'Inside'
+    fn inside(&mut self, arg: &Inside) {
+        before!(self, inside, arg);
+        self.veryl_token(&arg.inside_token);
+        after!(self, inside, arg);
+    }
+
     /// Semantic action for non-terminal 'Inst'
     fn inst(&mut self, arg: &Inst) {
         before!(self, inst, arg);
@@ -571,6 +578,13 @@ pub trait VerylWalker {
         before!(self, output, arg);
         self.veryl_token(&arg.output_token);
         after!(self, output, arg);
+    }
+
+    /// Semantic action for non-terminal 'Outside'
+    fn outside(&mut self, arg: &Outside) {
+        before!(self, outside, arg);
+        self.veryl_token(&arg.outside_token);
+        after!(self, outside, arg);
     }
 
     /// Semantic action for non-terminal 'Package'
@@ -978,6 +992,12 @@ pub trait VerylWalker {
                 FactorGroup::Msb(x) => self.msb(&x.msb),
                 FactorGroup::Lsb(x) => self.lsb(&x.lsb),
             },
+            Factor::InsideExpression(x) => {
+                self.inside_expression(&x.inside_expression);
+            }
+            Factor::OutsideExpression(x) => {
+                self.outside_expression(&x.outside_expression);
+            }
         }
         after!(self, factor, arg);
     }
@@ -1101,6 +1121,49 @@ pub trait VerylWalker {
             }
         }
         after!(self, type_expression, arg);
+    }
+
+    /// Semantic action for non-terminal 'InsideExpression'
+    fn inside_expression(&mut self, arg: &InsideExpression) {
+        before!(self, inside_expression, arg);
+        self.inside(&arg.inside);
+        self.expression(&arg.expression);
+        self.l_brace(&arg.l_brace);
+        self.range_list(&arg.range_list);
+        self.r_brace(&arg.r_brace);
+        after!(self, inside_expression, arg);
+    }
+
+    /// Semantic action for non-terminal 'OutsideExpression'
+    fn outside_expression(&mut self, arg: &OutsideExpression) {
+        before!(self, outside_expression, arg);
+        self.outside(&arg.outside);
+        self.expression(&arg.expression);
+        self.l_brace(&arg.l_brace);
+        self.range_list(&arg.range_list);
+        self.r_brace(&arg.r_brace);
+        after!(self, outside_expression, arg);
+    }
+
+    /// Semantic action for non-terminal 'RangeList'
+    fn range_list(&mut self, arg: &RangeList) {
+        before!(self, range_list, arg);
+        self.range_item(&arg.range_item);
+        for x in &arg.range_list_list {
+            self.comma(&x.comma);
+            self.range_item(&x.range_item);
+        }
+        if let Some(ref x) = arg.range_list_opt {
+            self.comma(&x.comma);
+        }
+        after!(self, range_list, arg);
+    }
+
+    /// Semantic action for non-terminal 'RangeItem'
+    fn range_item(&mut self, arg: &RangeItem) {
+        before!(self, range_item, arg);
+        self.range(&arg.range);
+        after!(self, range_item, arg);
     }
 
     /// Semantic action for non-terminal 'Select'
