@@ -86,6 +86,7 @@ impl LanguageServer for Backend {
                     ),
                     all_commit_characters: None,
                     work_done_progress_options: WorkDoneProgressOptions::default(),
+                    completion_item: None,
                 }),
                 ..ServerCapabilities::default()
             },
