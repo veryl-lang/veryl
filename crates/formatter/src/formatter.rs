@@ -446,6 +446,41 @@ impl VerylWalker for Formatter {
         }
     }
 
+    /// Semantic action for non-terminal 'InsideExpression'
+    fn inside_expression(&mut self, arg: &InsideExpression) {
+        self.inside(&arg.inside);
+        self.space(1);
+        self.expression(&arg.expression);
+        self.space(1);
+        self.l_brace(&arg.l_brace);
+        self.range_list(&arg.range_list);
+        self.r_brace(&arg.r_brace);
+    }
+
+    /// Semantic action for non-terminal 'OutsideExpression'
+    fn outside_expression(&mut self, arg: &OutsideExpression) {
+        self.outside(&arg.outside);
+        self.space(1);
+        self.expression(&arg.expression);
+        self.space(1);
+        self.l_brace(&arg.l_brace);
+        self.range_list(&arg.range_list);
+        self.r_brace(&arg.r_brace);
+    }
+
+    /// Semantic action for non-terminal 'RangeList'
+    fn range_list(&mut self, arg: &RangeList) {
+        self.range_item(&arg.range_item);
+        for x in &arg.range_list_list {
+            self.comma(&x.comma);
+            self.space(1);
+            self.range_item(&x.range_item);
+        }
+        if let Some(ref x) = arg.range_list_opt {
+            self.comma(&x.comma);
+        }
+    }
+
     /// Semantic action for non-terminal 'SelectOperator'
     fn select_operator(&mut self, arg: &SelectOperator) {
         match arg {
