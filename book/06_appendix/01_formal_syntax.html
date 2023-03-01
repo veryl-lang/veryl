@@ -230,6 +230,7 @@ ImportTerm            : /(?-u:\b)import(?-u:\b)/                                
 InitialTerm           : /(?-u:\b)initial(?-u:\b)/                                                             : Token;
 InoutTerm             : /(?-u:\b)inout(?-u:\b)/                                                               : Token;
 InputTerm             : /(?-u:\b)input(?-u:\b)/                                                               : Token;
+InsideTerm            : /(?-u:\b)inside(?-u:\b)/                                                              : Token;
 InstTerm              : /(?-u:\b)inst(?-u:\b)/                                                                : Token;
 InterfaceTerm         : /(?-u:\b)interface(?-u:\b)/                                                           : Token;
 InTerm                : /(?-u:\b)in(?-u:\b)/                                                                  : Token;
@@ -241,6 +242,7 @@ ModuleTerm            : /(?-u:\b)module(?-u:\b)/                                
 MsbTerm               : /(?-u:\b)msb(?-u:\b)/                                                                 : Token;
 NegedgeTerm           : /(?-u:\b)negedge(?-u:\b)/                                                             : Token;
 OutputTerm            : /(?-u:\b)output(?-u:\b)/                                                              : Token;
+OutsideTerm           : /(?-u:\b)outside(?-u:\b)/                                                             : Token;
 PackageTerm           : /(?-u:\b)package(?-u:\b)/                                                             : Token;
 ParameterTerm         : /(?-u:\b)parameter(?-u:\b)/                                                           : Token;
 PosedgeTerm           : /(?-u:\b)posedge(?-u:\b)/                                                             : Token;
@@ -338,6 +340,7 @@ ImportToken    : ImportTerm    : Token Comments;
 InitialToken   : InitialTerm   : Token Comments;
 InoutToken     : InoutTerm     : Token Comments;
 InputToken     : InputTerm     : Token Comments;
+InsideToken    : InsideTerm    : Token Comments;
 InstToken      : InstTerm      : Token Comments;
 InterfaceToken : InterfaceTerm : Token Comments;
 InToken        : InTerm        : Token Comments;
@@ -349,6 +352,7 @@ ModuleToken    : ModuleTerm    : Token Comments;
 MsbToken       : MsbTerm       : Token Comments;
 NegedgeToken   : NegedgeTerm   : Token Comments;
 OutputToken    : OutputTerm    : Token Comments;
+OutsideToken   : OutsideTerm   : Token Comments;
 PackageToken   : PackageTerm   : Token Comments;
 ParameterToken : ParameterTerm : Token Comments;
 PosedgeToken   : PosedgeTerm   : Token Comments;
@@ -452,6 +456,7 @@ In        : InToken        : VerylToken;
 Initial   : InitialToken   : VerylToken;
 Inout     : InoutToken     : VerylToken;
 Input     : InputToken     : VerylToken;
+Inside    : InsideToken    : VerylToken;
 Inst      : InstToken      : VerylToken;
 Interface : InterfaceToken : VerylToken;
 Localparam: LocalparamToken: VerylToken;
@@ -462,6 +467,7 @@ Module    : ModuleToken    : VerylToken;
 Msb       : MsbToken       : VerylToken;
 Negedge   : NegedgeToken   : VerylToken;
 Output    : OutputToken    : VerylToken;
+Outside   : OutsideToken   : VerylToken;
 Package   : PackageToken   : VerylToken;
 Parameter : ParameterToken : VerylToken;
 Posedge   : PosedgeToken   : VerylToken;
@@ -534,6 +540,8 @@ Factor: Number
       | CaseExpression
       | StringLiteral
       | ( Msb | Lsb )
+      | InsideExpression
+      | OutsideExpression
       ;
 
 FunctionCall: LParen [ ArgumentList ] RParen;
@@ -553,6 +561,14 @@ CaseExpression: Case Expression LBrace Expression Colon Expression Comma { Expre
 TypeExpression: ScalarType
               | Type LParen Expression RParen
               ;
+
+InsideExpression: Inside Expression LBrace RangeList RBrace;
+
+OutsideExpression: Outside Expression LBrace RangeList RBrace;
+
+RangeList: RangeItem { Comma RangeItem } [ Comma ];
+
+RangeItem: Range;
 
 // ----------------------------------------------------------------------------
 // Select / Width / Array / Range
