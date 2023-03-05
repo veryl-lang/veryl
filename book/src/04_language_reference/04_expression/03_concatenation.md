@@ -1,10 +1,10 @@
 # Concatenation
 
-```veryl
-# module ModuleA {
-# always_comb {
-a = {b[10:0], c[4:3]};
-a = {b[10:0] repeat 10, c repeat 4};
-# }
-# }
+```veryl,playground
+module ModuleA {
+    var a: logic<10>;
+    var b: logic<10>;
+    var _c: logic = {a[9:0], b[4:3]};
+    var _d: logic = {a[9:0] repeat 10, b repeat 4};
+}
 ```
