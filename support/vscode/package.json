@@ -79,7 +79,8 @@
     "test": "node ./out/test/runTest.js",
     "deploy:linux-x64": "vsce publish --target linux-x64",
     "deploy:win32-x64": "vsce publish --target win32-x64",
-    "deploy:darwin-x64": "vsce publish --target darwin-x64"
+    "deploy:darwin-x64": "vsce publish --target darwin-x64",
+    "deploy:darwin-arm64": "vsce publish --target darwin-arm64"
   },
   "devDependencies": {
     "@types/glob": "^8.0.0",
