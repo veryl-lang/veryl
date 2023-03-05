@@ -41,6 +41,9 @@ For example, put the following code to `src/hello.vl`.
 
 ```veryl,playground
 module ModuleA {
+    initial {
+        $display("Hello, world!");
+    }
 }
 ```
 

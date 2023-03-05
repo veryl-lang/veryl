@@ -1,10 +1,8 @@
 # Function Call
 
-```veryl
-# module ModuleA {
-# always_comb {
-a = FunctionA (1, 1);
-a = $clog2 (10);
-# }
-# }
+```veryl,playground
+module ModuleA {
+    var _a: logic = PackageA::FunctionA(1, 1);
+    var _b: logic = $clog2(1, 1);
+}
 ```
