@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl-emitter"
-version               = "0.5.3"
+version               = "0.5.4"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -14,6 +14,6 @@ edition               = "2021"
 
 [dependencies]
 serde          = {workspace = true}
-veryl-analyzer = {version = "0.5.3", path = "../analyzer"}
-veryl-metadata = {version = "0.5.3", path = "../metadata"}
-veryl-parser   = {version = "0.5.3", path = "../parser"}
+veryl-analyzer = {version = "0.5.4", path = "../analyzer"}
+veryl-metadata = {version = "0.5.4", path = "../metadata"}
+veryl-parser   = {version = "0.5.4", path = "../parser"}
