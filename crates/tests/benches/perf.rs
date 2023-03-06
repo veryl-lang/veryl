@@ -1,7 +1,7 @@
 use std::{fs::File, os::raw::c_int, path::Path};
 
 use criterion::profiler::Profiler;
-use pprof::ProfilerGuard;
+use pprof::{ProfilerGuard, ProfilerGuardBuilder};
 
 /// Small custom profiler that can be used with Criterion to create a flamegraph for benchmarks.
 /// Also see [the Criterion documentation on this][custom-profiler].
@@ -52,7 +52,13 @@ impl<'a> FlamegraphProfiler<'a> {
 
 impl<'a> Profiler for FlamegraphProfiler<'a> {
     fn start_profiling(&mut self, _benchmark_id: &str, _benchmark_dir: &Path) {
-        self.active_profiler = Some(ProfilerGuard::new(self.frequency).unwrap());
+        self.active_profiler = Some(
+            ProfilerGuardBuilder::default()
+                .frequency(self.frequency)
+                .blocklist(&["libc", "libgcc", "pthread", "vdso"])
+                .build()
+                .unwrap(),
+        );
     }
 
     fn stop_profiling(&mut self, _benchmark_id: &str, benchmark_dir: &Path) {
