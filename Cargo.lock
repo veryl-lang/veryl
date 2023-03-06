@@ -2619,9 +2619,9 @@ dependencies = [
 
 [[package]]
 name = "parol"
-version = "0.18.1"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db4c8dc3bd9dd5a4b4f68b5d10a227d1db1154f2b5025bb81062d125a8d2c6b9"
+checksum = "8db89ef4207488a374dcfd5ebf59c09f7ce9452f0ca3bb7953682e55baac8e03"
 dependencies = [
  "anyhow",
  "cfg-if",
@@ -2629,17 +2629,19 @@ dependencies = [
  "derive_builder",
  "env_logger",
  "function_name",
- "id_tree",
- "id_tree_layout",
  "owo-colors",
  "parol-macros",
- "parol_runtime",
+ "parol_runtime 0.15.0",
  "rand",
  "rand_regex",
  "rayon",
  "regex",
  "regex-syntax",
+ "serde",
+ "serde_json",
  "syn",
+ "syntree",
+ "syntree_layout",
  "thiserror",
  "ume",
 ]
@@ -2666,6 +2668,25 @@ dependencies = [
  "once_cell",
  "parol-macros",
  "regex-automata 0.2.0",
+ "thiserror",
+]
+
+[[package]]
+name = "parol_runtime"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24adbbfbf194862426becb8b772d095c87ab576c7f395a7e15cee32a4cb4b825"
+dependencies = [
+ "anyhow",
+ "codespan-reporting",
+ "derive_builder",
+ "function_name",
+ "log",
+ "once_cell",
+ "parol-macros",
+ "regex-automata 0.2.0",
+ "syntree",
+ "syntree_layout",
  "thiserror",
 ]
 
@@ -3573,6 +3594,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "syntree"
+version = "0.14.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "372e1c75bb54830ab200dbff8a10bb0d44ff183d8cfdfb9f7ce55ad5862fc719"
+
+[[package]]
+name = "syntree_layout"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c4dcc044568a0f9708c87b9dd79f1d8e5fb2086a831ead7ef044c9a48bd756b"
+dependencies = [
+ "anyhow",
+ "syntree",
+ "thiserror",
+ "xml_writer",
+]
+
+[[package]]
 name = "tempfile"
 version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4226,7 +4265,7 @@ dependencies = [
  "miette",
  "once_cell",
  "parol",
- "parol_runtime",
+ "parol_runtime 0.14.0",
  "paste",
  "regex",
  "thiserror",
