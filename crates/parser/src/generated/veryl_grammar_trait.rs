@@ -10,11 +10,10 @@
 #![allow(clippy::upper_case_acronyms)]
 
 use parol_runtime::derive_builder::Builder;
-use parol_runtime::id_tree::Tree;
 use parol_runtime::log::trace;
 #[allow(unused_imports)]
 use parol_runtime::parol_macros::{pop_and_reverse_item, pop_item};
-use parol_runtime::parser::{ParseTreeStackEntry, ParseTreeType, UserActionsTrait};
+use parol_runtime::parser::{ParseTreeType, UserActionsTrait};
 use parol_runtime::{ParserError, Result};
 use std::marker::PhantomData;
 
@@ -10882,15 +10881,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// CommentsTerm: "(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+" : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn comments_term(
-        &mut self,
-        comments_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn comments_term(&mut self, comments_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comments_term = comments_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let comments_term_built = CommentsTerm { comments_term };
@@ -10905,15 +10900,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// StringLiteralTerm: "\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}" : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn string_literal_term(
-        &mut self,
-        string_literal_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn string_literal_term(&mut self, string_literal_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let string_literal_term = string_literal_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let string_literal_term_built = StringLiteralTerm {
@@ -10934,15 +10925,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ExponentTerm: /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn exponent_term(
-        &mut self,
-        exponent_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn exponent_term(&mut self, exponent_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let exponent_term = exponent_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let exponent_term_built = ExponentTerm { exponent_term };
@@ -10957,15 +10944,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// FixedPointTerm: /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn fixed_point_term(
-        &mut self,
-        fixed_point_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn fixed_point_term(&mut self, fixed_point_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let fixed_point_term = fixed_point_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let fixed_point_term_built = FixedPointTerm { fixed_point_term };
@@ -10981,15 +10964,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// BasedTerm: /[0-9]+(?:_[0-9]+)*'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn based_term(
-        &mut self,
-        based_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn based_term(&mut self, based_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let based_term = based_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let based_term_built = BasedTerm { based_term };
@@ -11004,15 +10983,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// BaseLessTerm: /[0-9]+(?:_[0-9]+)*/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn base_less_term(
-        &mut self,
-        base_less_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn base_less_term(&mut self, base_less_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let base_less_term = base_less_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let base_less_term_built = BaseLessTerm { base_less_term };
@@ -11027,15 +11002,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AllBitTerm: /'[01xzXZ]/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn all_bit_term(
-        &mut self,
-        all_bit_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn all_bit_term(&mut self, all_bit_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let all_bit_term = all_bit_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let all_bit_term_built = AllBitTerm { all_bit_term };
@@ -11050,15 +11021,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// MinusColonTerm: '-:' : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn minus_colon_term(
-        &mut self,
-        minus_colon_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn minus_colon_term(&mut self, minus_colon_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let minus_colon_term = minus_colon_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let minus_colon_term_built = MinusColonTerm { minus_colon_term };
@@ -11074,15 +11041,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// MinusGTTerm: '->' : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn minus_g_t_term(
-        &mut self,
-        minus_g_t_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn minus_g_t_term(&mut self, minus_g_t_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let minus_g_t_term = minus_g_t_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let minus_g_t_term_built = MinusGTTerm { minus_g_t_term };
@@ -11097,15 +11060,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// PlusColonTerm: '+:' : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn plus_colon_term(
-        &mut self,
-        plus_colon_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn plus_colon_term(&mut self, plus_colon_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let plus_colon_term = plus_colon_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let plus_colon_term_built = PlusColonTerm { plus_colon_term };
@@ -11122,13 +11081,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn assignment_operator_term(
         &mut self,
-        assignment_operator_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
+        assignment_operator_term: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let assignment_operator_term = assignment_operator_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let assignment_operator_term_built = AssignmentOperatorTerm {
@@ -11149,15 +11107,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Operator11Term: "\*\*" : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn operator11_term(
-        &mut self,
-        operator11_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn operator11_term(&mut self, operator11_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator11_term = operator11_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let operator11_term_built = Operator11Term { operator11_term };
@@ -11172,15 +11126,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Operator10Term: "/|%" : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn operator10_term(
-        &mut self,
-        operator10_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn operator10_term(&mut self, operator10_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator10_term = operator10_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let operator10_term_built = Operator10Term { operator10_term };
@@ -11195,15 +11145,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Operator09Term: "\+|-" : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn operator09_term(
-        &mut self,
-        operator09_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn operator09_term(&mut self, operator09_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator09_term = operator09_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let operator09_term_built = Operator09Term { operator09_term };
@@ -11218,15 +11164,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Operator08Term: "<<<|>>>|<<|>>" : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn operator08_term(
-        &mut self,
-        operator08_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn operator08_term(&mut self, operator08_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator08_term = operator08_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let operator08_term_built = Operator08Term { operator08_term };
@@ -11241,15 +11183,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Operator07Term: "<=|>=|<:|>:" : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn operator07_term(
-        &mut self,
-        operator07_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn operator07_term(&mut self, operator07_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator07_term = operator07_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let operator07_term_built = Operator07Term { operator07_term };
@@ -11264,15 +11202,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Operator06Term: "===|==\?|!==|!=\?|==|!=" : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn operator06_term(
-        &mut self,
-        operator06_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn operator06_term(&mut self, operator06_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator06_term = operator06_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let operator06_term_built = Operator06Term { operator06_term };
@@ -11287,15 +11221,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Operator02Term: "&&" : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn operator02_term(
-        &mut self,
-        operator02_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn operator02_term(&mut self, operator02_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator02_term = operator02_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let operator02_term_built = Operator02Term { operator02_term };
@@ -11310,15 +11240,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Operator01Term: "\|\|" : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn operator01_term(
-        &mut self,
-        operator01_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn operator01_term(&mut self, operator01_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator01_term = operator01_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let operator01_term_built = Operator01Term { operator01_term };
@@ -11333,15 +11259,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Operator05Term: "&" : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn operator05_term(
-        &mut self,
-        operator05_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn operator05_term(&mut self, operator05_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator05_term = operator05_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let operator05_term_built = Operator05Term { operator05_term };
@@ -11356,15 +11278,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Operator04Term: "\^~|\^|~\^" : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn operator04_term(
-        &mut self,
-        operator04_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn operator04_term(&mut self, operator04_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator04_term = operator04_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let operator04_term_built = Operator04Term { operator04_term };
@@ -11379,15 +11297,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Operator03Term: "\|" : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn operator03_term(
-        &mut self,
-        operator03_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn operator03_term(&mut self, operator03_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator03_term = operator03_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let operator03_term_built = Operator03Term { operator03_term };
@@ -11402,15 +11316,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// UnaryOperatorTerm: "~&|~\||!|~" : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn unary_operator_term(
-        &mut self,
-        unary_operator_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn unary_operator_term(&mut self, unary_operator_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let unary_operator_term = unary_operator_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let unary_operator_term_built = UnaryOperatorTerm {
@@ -11431,15 +11341,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ColonColonTerm: '::' : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn colon_colon_term(
-        &mut self,
-        colon_colon_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn colon_colon_term(&mut self, colon_colon_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let colon_colon_term = colon_colon_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let colon_colon_term_built = ColonColonTerm { colon_colon_term };
@@ -11455,15 +11361,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ColonTerm: ':' : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn colon_term(
-        &mut self,
-        colon_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn colon_term(&mut self, colon_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let colon_term = colon_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let colon_term_built = ColonTerm { colon_term };
@@ -11478,15 +11380,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// CommaTerm: ',' : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn comma_term(
-        &mut self,
-        comma_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn comma_term(&mut self, comma_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comma_term = comma_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let comma_term_built = CommaTerm { comma_term };
@@ -11501,15 +11399,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// DollarTerm: '$' : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn dollar_term(
-        &mut self,
-        dollar_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn dollar_term(&mut self, dollar_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let dollar_term = dollar_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let dollar_term_built = DollarTerm { dollar_term };
@@ -11524,15 +11418,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// DotDotEquTerm: '..=' : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn dot_dot_equ_term(
-        &mut self,
-        dot_dot_equ_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn dot_dot_equ_term(&mut self, dot_dot_equ_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let dot_dot_equ_term = dot_dot_equ_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let dot_dot_equ_term_built = DotDotEquTerm { dot_dot_equ_term };
@@ -11548,15 +11438,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// DotDotTerm: '..' : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn dot_dot_term(
-        &mut self,
-        dot_dot_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn dot_dot_term(&mut self, dot_dot_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let dot_dot_term = dot_dot_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let dot_dot_term_built = DotDotTerm { dot_dot_term };
@@ -11571,15 +11457,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// DotTerm: '.' : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn dot_term(
-        &mut self,
-        dot_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn dot_term(&mut self, dot_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let dot_term = dot_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let dot_term_built = DotTerm { dot_term };
@@ -11594,15 +11476,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// EquTerm: '=' : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn equ_term(
-        &mut self,
-        equ_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn equ_term(&mut self, equ_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let equ_term = equ_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let equ_term_built = EquTerm { equ_term };
@@ -11617,15 +11495,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// HashTerm: '#' : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn hash_term(
-        &mut self,
-        hash_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn hash_term(&mut self, hash_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let hash_term = hash_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let hash_term_built = HashTerm { hash_term };
@@ -11640,15 +11514,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// LAngleTerm: '<' : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn l_angle_term(
-        &mut self,
-        l_angle_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn l_angle_term(&mut self, l_angle_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let l_angle_term = l_angle_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let l_angle_term_built = LAngleTerm { l_angle_term };
@@ -11663,15 +11533,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// LBraceTerm: '{' : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn l_brace_term(
-        &mut self,
-        l_brace_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn l_brace_term(&mut self, l_brace_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let l_brace_term = l_brace_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let l_brace_term_built = LBraceTerm { l_brace_term };
@@ -11686,15 +11552,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// LBracketTerm: '[' : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn l_bracket_term(
-        &mut self,
-        l_bracket_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn l_bracket_term(&mut self, l_bracket_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let l_bracket_term = l_bracket_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let l_bracket_term_built = LBracketTerm { l_bracket_term };
@@ -11709,15 +11571,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// LParenTerm: '(' : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn l_paren_term(
-        &mut self,
-        l_paren_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn l_paren_term(&mut self, l_paren_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let l_paren_term = l_paren_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let l_paren_term_built = LParenTerm { l_paren_term };
@@ -11732,15 +11590,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// RAngleTerm: '>' : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn r_angle_term(
-        &mut self,
-        r_angle_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn r_angle_term(&mut self, r_angle_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let r_angle_term = r_angle_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let r_angle_term_built = RAngleTerm { r_angle_term };
@@ -11755,15 +11609,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// RBraceTerm: '}' : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn r_brace_term(
-        &mut self,
-        r_brace_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn r_brace_term(&mut self, r_brace_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let r_brace_term = r_brace_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let r_brace_term_built = RBraceTerm { r_brace_term };
@@ -11778,15 +11628,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// RBracketTerm: ']' : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn r_bracket_term(
-        &mut self,
-        r_bracket_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn r_bracket_term(&mut self, r_bracket_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let r_bracket_term = r_bracket_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let r_bracket_term_built = RBracketTerm { r_bracket_term };
@@ -11801,15 +11647,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// RParenTerm: ')' : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn r_paren_term(
-        &mut self,
-        r_paren_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn r_paren_term(&mut self, r_paren_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let r_paren_term = r_paren_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let r_paren_term_built = RParenTerm { r_paren_term };
@@ -11824,15 +11666,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// SemicolonTerm: ';' : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn semicolon_term(
-        &mut self,
-        semicolon_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn semicolon_term(&mut self, semicolon_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let semicolon_term = semicolon_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let semicolon_term_built = SemicolonTerm { semicolon_term };
@@ -11847,15 +11685,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// StarTerm: '*' : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn star_term(
-        &mut self,
-        star_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn star_term(&mut self, star_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let star_term = star_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let star_term_built = StarTerm { star_term };
@@ -11870,15 +11704,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AlwaysCombTerm: /(?-u:\b)always_comb(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn always_comb_term(
-        &mut self,
-        always_comb_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn always_comb_term(&mut self, always_comb_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let always_comb_term = always_comb_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let always_comb_term_built = AlwaysCombTerm { always_comb_term };
@@ -11894,15 +11724,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AlwaysFfTerm: /(?-u:\b)always_ff(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn always_ff_term(
-        &mut self,
-        always_ff_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn always_ff_term(&mut self, always_ff_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let always_ff_term = always_ff_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let always_ff_term_built = AlwaysFfTerm { always_ff_term };
@@ -11917,15 +11743,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AssignTerm: /(?-u:\b)assign(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn assign_term(
-        &mut self,
-        assign_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn assign_term(&mut self, assign_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let assign_term = assign_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let assign_term_built = AssignTerm { assign_term };
@@ -11940,15 +11762,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AsyncHighTerm: /(?-u:\b)async_high(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn async_high_term(
-        &mut self,
-        async_high_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn async_high_term(&mut self, async_high_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let async_high_term = async_high_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let async_high_term_built = AsyncHighTerm { async_high_term };
@@ -11963,15 +11781,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AsyncLowTerm: /(?-u:\b)async_low(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn async_low_term(
-        &mut self,
-        async_low_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn async_low_term(&mut self, async_low_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let async_low_term = async_low_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let async_low_term_built = AsyncLowTerm { async_low_term };
@@ -11986,15 +11800,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AsTerm: /(?-u:\b)as(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn as_term(
-        &mut self,
-        as_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn as_term(&mut self, as_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let as_term = as_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let as_term_built = AsTerm { as_term };
@@ -12009,15 +11819,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// BitTerm: /(?-u:\b)bit(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn bit_term(
-        &mut self,
-        bit_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn bit_term(&mut self, bit_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let bit_term = bit_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let bit_term_built = BitTerm { bit_term };
@@ -12032,15 +11838,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// CaseTerm: /(?-u:\b)case(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn case_term(
-        &mut self,
-        case_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn case_term(&mut self, case_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let case_term = case_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let case_term_built = CaseTerm { case_term };
@@ -12055,15 +11857,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// DefaultTerm: /(?-u:\b)default(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn default_term(
-        &mut self,
-        default_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn default_term(&mut self, default_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let default_term = default_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let default_term_built = DefaultTerm { default_term };
@@ -12078,15 +11876,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ElseTerm: /(?-u:\b)else(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn else_term(
-        &mut self,
-        else_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn else_term(&mut self, else_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let else_term = else_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let else_term_built = ElseTerm { else_term };
@@ -12101,15 +11895,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// EnumTerm: /(?-u:\b)enum(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn enum_term(
-        &mut self,
-        enum_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn enum_term(&mut self, enum_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let enum_term = enum_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let enum_term_built = EnumTerm { enum_term };
@@ -12124,15 +11914,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ExportTerm: /(?-u:\b)export(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn export_term(
-        &mut self,
-        export_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn export_term(&mut self, export_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let export_term = export_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let export_term_built = ExportTerm { export_term };
@@ -12147,15 +11933,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// F32Term: /(?-u:\b)f32(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn f32_term(
-        &mut self,
-        f32_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn f32_term(&mut self, f32_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let f32_term = f32_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let f32_term_built = F32Term { f32_term };
@@ -12170,15 +11952,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// F64Term: /(?-u:\b)f64(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn f64_term(
-        &mut self,
-        f64_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn f64_term(&mut self, f64_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let f64_term = f64_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let f64_term_built = F64Term { f64_term };
@@ -12193,15 +11971,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// FinalTerm: /(?-u:\b)final(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn final_term(
-        &mut self,
-        final_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn final_term(&mut self, final_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let final_term = final_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let final_term_built = FinalTerm { final_term };
@@ -12216,15 +11990,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ForTerm: /(?-u:\b)for(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn for_term(
-        &mut self,
-        for_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn for_term(&mut self, for_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let for_term = for_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let for_term_built = ForTerm { for_term };
@@ -12239,15 +12009,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// FunctionTerm: /(?-u:\b)function(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn function_term(
-        &mut self,
-        function_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn function_term(&mut self, function_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let function_term = function_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let function_term_built = FunctionTerm { function_term };
@@ -12262,15 +12028,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// I32Term: /(?-u:\b)i32(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn i32_term(
-        &mut self,
-        i32_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn i32_term(&mut self, i32_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let i32_term = i32_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let i32_term_built = I32Term { i32_term };
@@ -12285,15 +12047,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// I64Term: /(?-u:\b)i64(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn i64_term(
-        &mut self,
-        i64_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn i64_term(&mut self, i64_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let i64_term = i64_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let i64_term_built = I64Term { i64_term };
@@ -12308,15 +12066,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// IfResetTerm: /(?-u:\b)if_reset(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn if_reset_term(
-        &mut self,
-        if_reset_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn if_reset_term(&mut self, if_reset_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let if_reset_term = if_reset_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let if_reset_term_built = IfResetTerm { if_reset_term };
@@ -12331,15 +12085,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// IfTerm: /(?-u:\b)if(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn if_term(
-        &mut self,
-        if_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn if_term(&mut self, if_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let if_term = if_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let if_term_built = IfTerm { if_term };
@@ -12354,15 +12104,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ImportTerm: /(?-u:\b)import(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn import_term(
-        &mut self,
-        import_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn import_term(&mut self, import_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let import_term = import_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let import_term_built = ImportTerm { import_term };
@@ -12377,15 +12123,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InitialTerm: /(?-u:\b)initial(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn initial_term(
-        &mut self,
-        initial_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn initial_term(&mut self, initial_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let initial_term = initial_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let initial_term_built = InitialTerm { initial_term };
@@ -12400,15 +12142,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InoutTerm: /(?-u:\b)inout(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn inout_term(
-        &mut self,
-        inout_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn inout_term(&mut self, inout_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let inout_term = inout_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let inout_term_built = InoutTerm { inout_term };
@@ -12423,15 +12161,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InputTerm: /(?-u:\b)input(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn input_term(
-        &mut self,
-        input_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn input_term(&mut self, input_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let input_term = input_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let input_term_built = InputTerm { input_term };
@@ -12446,15 +12180,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InsideTerm: /(?-u:\b)inside(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn inside_term(
-        &mut self,
-        inside_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn inside_term(&mut self, inside_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let inside_term = inside_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let inside_term_built = InsideTerm { inside_term };
@@ -12469,15 +12199,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InstTerm: /(?-u:\b)inst(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn inst_term(
-        &mut self,
-        inst_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn inst_term(&mut self, inst_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let inst_term = inst_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let inst_term_built = InstTerm { inst_term };
@@ -12492,15 +12218,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InterfaceTerm: /(?-u:\b)interface(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_term(
-        &mut self,
-        interface_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn interface_term(&mut self, interface_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let interface_term = interface_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let interface_term_built = InterfaceTerm { interface_term };
@@ -12515,15 +12237,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InTerm: /(?-u:\b)in(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn in_term(
-        &mut self,
-        in_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn in_term(&mut self, in_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let in_term = in_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let in_term_built = InTerm { in_term };
@@ -12538,15 +12256,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// LocalparamTerm: /(?-u:\b)localparam(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn localparam_term(
-        &mut self,
-        localparam_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn localparam_term(&mut self, localparam_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let localparam_term = localparam_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let localparam_term_built = LocalparamTerm { localparam_term };
@@ -12561,15 +12275,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// LogicTerm: /(?-u:\b)logic(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn logic_term(
-        &mut self,
-        logic_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn logic_term(&mut self, logic_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let logic_term = logic_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let logic_term_built = LogicTerm { logic_term };
@@ -12584,15 +12294,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// LsbTerm: /(?-u:\b)lsb(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn lsb_term(
-        &mut self,
-        lsb_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn lsb_term(&mut self, lsb_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let lsb_term = lsb_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let lsb_term_built = LsbTerm { lsb_term };
@@ -12607,15 +12313,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModportTerm: /(?-u:\b)modport(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn modport_term(
-        &mut self,
-        modport_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn modport_term(&mut self, modport_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let modport_term = modport_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let modport_term_built = ModportTerm { modport_term };
@@ -12630,15 +12332,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleTerm: /(?-u:\b)module(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn module_term(
-        &mut self,
-        module_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn module_term(&mut self, module_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let module_term = module_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let module_term_built = ModuleTerm { module_term };
@@ -12653,15 +12351,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// MsbTerm: /(?-u:\b)msb(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn msb_term(
-        &mut self,
-        msb_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn msb_term(&mut self, msb_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let msb_term = msb_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let msb_term_built = MsbTerm { msb_term };
@@ -12676,15 +12370,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// NegedgeTerm: /(?-u:\b)negedge(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn negedge_term(
-        &mut self,
-        negedge_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn negedge_term(&mut self, negedge_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let negedge_term = negedge_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let negedge_term_built = NegedgeTerm { negedge_term };
@@ -12699,15 +12389,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// OutputTerm: /(?-u:\b)output(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn output_term(
-        &mut self,
-        output_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn output_term(&mut self, output_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let output_term = output_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let output_term_built = OutputTerm { output_term };
@@ -12722,15 +12408,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// OutsideTerm: /(?-u:\b)outside(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn outside_term(
-        &mut self,
-        outside_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn outside_term(&mut self, outside_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let outside_term = outside_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let outside_term_built = OutsideTerm { outside_term };
@@ -12745,15 +12427,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// PackageTerm: /(?-u:\b)package(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn package_term(
-        &mut self,
-        package_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn package_term(&mut self, package_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let package_term = package_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let package_term_built = PackageTerm { package_term };
@@ -12768,15 +12446,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ParameterTerm: /(?-u:\b)parameter(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn parameter_term(
-        &mut self,
-        parameter_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn parameter_term(&mut self, parameter_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let parameter_term = parameter_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let parameter_term_built = ParameterTerm { parameter_term };
@@ -12791,15 +12465,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// PosedgeTerm: /(?-u:\b)posedge(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn posedge_term(
-        &mut self,
-        posedge_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn posedge_term(&mut self, posedge_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let posedge_term = posedge_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let posedge_term_built = PosedgeTerm { posedge_term };
@@ -12814,15 +12484,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// RefTerm: /(?-u:\b)ref(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn ref_term(
-        &mut self,
-        ref_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn ref_term(&mut self, ref_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let ref_term = ref_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let ref_term_built = RefTerm { ref_term };
@@ -12837,15 +12503,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// RepeatTerm: /(?-u:\b)repeat(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn repeat_term(
-        &mut self,
-        repeat_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn repeat_term(&mut self, repeat_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let repeat_term = repeat_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let repeat_term_built = RepeatTerm { repeat_term };
@@ -12860,15 +12522,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ReturnTerm: /(?-u:\b)return(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn return_term(
-        &mut self,
-        return_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn return_term(&mut self, return_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let return_term = return_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let return_term_built = ReturnTerm { return_term };
@@ -12883,15 +12541,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// SignedTerm: /(?-u:\b)signed(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn signed_term(
-        &mut self,
-        signed_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn signed_term(&mut self, signed_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let signed_term = signed_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let signed_term_built = SignedTerm { signed_term };
@@ -12906,15 +12560,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// StepTerm: /(?-u:\b)step(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn step_term(
-        &mut self,
-        step_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn step_term(&mut self, step_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let step_term = step_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let step_term_built = StepTerm { step_term };
@@ -12929,15 +12579,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// StringTerm: /(?-u:\b)string(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn string_term(
-        &mut self,
-        string_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn string_term(&mut self, string_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let string_term = string_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let string_term_built = StringTerm { string_term };
@@ -12952,15 +12598,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// StructTerm: /(?-u:\b)struct(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn struct_term(
-        &mut self,
-        struct_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn struct_term(&mut self, struct_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let struct_term = struct_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let struct_term_built = StructTerm { struct_term };
@@ -12975,15 +12617,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// SyncHighTerm: /(?-u:\b)sync_high(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn sync_high_term(
-        &mut self,
-        sync_high_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn sync_high_term(&mut self, sync_high_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let sync_high_term = sync_high_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let sync_high_term_built = SyncHighTerm { sync_high_term };
@@ -12998,15 +12636,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// SyncLowTerm: /(?-u:\b)sync_low(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn sync_low_term(
-        &mut self,
-        sync_low_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn sync_low_term(&mut self, sync_low_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let sync_low_term = sync_low_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let sync_low_term_built = SyncLowTerm { sync_low_term };
@@ -13021,15 +12655,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// TriTerm: /(?-u:\b)tri(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn tri_term(
-        &mut self,
-        tri_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn tri_term(&mut self, tri_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let tri_term = tri_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let tri_term_built = TriTerm { tri_term };
@@ -13044,15 +12674,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// TypeTerm: /(?-u:\b)type(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn type_term(
-        &mut self,
-        type_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn type_term(&mut self, type_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let type_term = type_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let type_term_built = TypeTerm { type_term };
@@ -13067,15 +12693,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// U32Term: /(?-u:\b)u32(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn u32_term(
-        &mut self,
-        u32_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn u32_term(&mut self, u32_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let u32_term = u32_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let u32_term_built = U32Term { u32_term };
@@ -13090,15 +12712,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// U64Term: /(?-u:\b)u64(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn u64_term(
-        &mut self,
-        u64_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn u64_term(&mut self, u64_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let u64_term = u64_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let u64_term_built = U64Term { u64_term };
@@ -13113,15 +12731,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// VarTerm: /(?-u:\b)var(?-u:\b)/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn var_term(
-        &mut self,
-        var_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn var_term(&mut self, var_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let var_term = var_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let var_term_built = VarTerm { var_term };
@@ -13136,15 +12750,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// IdentifierTerm: /[a-zA-Z_][0-9a-zA-Z_]*/ : Token;
     ///
     #[parol_runtime::function_name::named]
-    fn identifier_term(
-        &mut self,
-        identifier_term: &ParseTreeStackEntry<'t>,
-        parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn identifier_term(&mut self, identifier_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let identifier_term = identifier_term
-            .token(parse_tree)?
+            .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
         let identifier_term_built = IdentifierTerm { identifier_term };
@@ -13159,11 +12769,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Comments: CommentsOpt /* Option */;
     ///
     #[parol_runtime::function_name::named]
-    fn comments(
-        &mut self,
-        _comments_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn comments(&mut self, _comments_opt: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comments_opt = pop_item!(self, comments_opt, CommentsOpt, context);
@@ -13179,11 +12785,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// CommentsOpt /* Option<T>::Some */: CommentsTerm;
     ///
     #[parol_runtime::function_name::named]
-    fn comments_opt_0(
-        &mut self,
-        _comments_term: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn comments_opt_0(&mut self, _comments_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comments_term = pop_item!(self, comments_term, CommentsTerm, context);
@@ -13202,7 +12804,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// CommentsOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn comments_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn comments_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::CommentsOpt(None), context);
@@ -13214,11 +12816,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// StartToken: Comments;
     ///
     #[parol_runtime::function_name::named]
-    fn start_token(
-        &mut self,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn start_token(&mut self, _comments: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
@@ -13238,9 +12836,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn string_literal_token(
         &mut self,
-        _string_literal_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _string_literal_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13269,9 +12866,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn exponent_token(
         &mut self,
-        _exponent_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _exponent_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13296,9 +12892,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn fixed_point_token(
         &mut self,
-        _fixed_point_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _fixed_point_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13324,9 +12919,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn based_token(
         &mut self,
-        _based_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _based_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13351,9 +12945,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn base_less_token(
         &mut self,
-        _base_less_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _base_less_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13378,9 +12971,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn all_bit_token(
         &mut self,
-        _all_bit_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _all_bit_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13405,9 +12997,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn assignment_operator_token(
         &mut self,
-        _assignment_operator_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _assignment_operator_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13441,9 +13032,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn operator01_token(
         &mut self,
-        _operator01_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _operator01_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13469,9 +13059,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn operator02_token(
         &mut self,
-        _operator02_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _operator02_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13497,9 +13086,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn operator03_token(
         &mut self,
-        _operator03_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _operator03_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13525,9 +13113,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn operator04_token(
         &mut self,
-        _operator04_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _operator04_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13553,9 +13140,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn operator05_token(
         &mut self,
-        _operator05_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _operator05_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13581,9 +13167,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn operator06_token(
         &mut self,
-        _operator06_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _operator06_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13609,9 +13194,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn operator07_token(
         &mut self,
-        _operator07_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _operator07_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13637,9 +13221,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn operator08_token(
         &mut self,
-        _operator08_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _operator08_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13665,9 +13248,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn operator09_token(
         &mut self,
-        _operator09_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _operator09_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13693,9 +13275,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn operator10_token(
         &mut self,
-        _operator10_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _operator10_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13721,9 +13302,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn operator11_token(
         &mut self,
-        _operator11_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _operator11_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13749,9 +13329,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn unary_operator_token(
         &mut self,
-        _unary_operator_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _unary_operator_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13780,9 +13359,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn colon_token(
         &mut self,
-        _colon_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _colon_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13807,9 +13385,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn colon_colon_token(
         &mut self,
-        _colon_colon_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _colon_colon_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13835,9 +13412,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn comma_token(
         &mut self,
-        _comma_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _comma_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13862,9 +13438,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn dollar_token(
         &mut self,
-        _dollar_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _dollar_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13889,9 +13464,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn dot_dot_token(
         &mut self,
-        _dot_dot_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _dot_dot_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13916,9 +13490,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn dot_dot_equ_token(
         &mut self,
-        _dot_dot_equ_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _dot_dot_equ_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13944,9 +13517,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn dot_token(
         &mut self,
-        _dot_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _dot_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13971,9 +13543,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn equ_token(
         &mut self,
-        _equ_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _equ_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -13998,9 +13569,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn hash_token(
         &mut self,
-        _hash_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _hash_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14025,9 +13595,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn l_angle_token(
         &mut self,
-        _l_angle_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _l_angle_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14052,9 +13621,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn l_brace_token(
         &mut self,
-        _l_brace_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _l_brace_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14079,9 +13647,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn l_bracket_token(
         &mut self,
-        _l_bracket_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _l_bracket_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14106,9 +13673,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn l_paren_token(
         &mut self,
-        _l_paren_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _l_paren_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14133,9 +13699,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn minus_colon_token(
         &mut self,
-        _minus_colon_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _minus_colon_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14161,9 +13726,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn minus_g_t_token(
         &mut self,
-        _minus_g_t_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _minus_g_t_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14188,9 +13752,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn plus_colon_token(
         &mut self,
-        _plus_colon_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _plus_colon_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14216,9 +13779,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn r_angle_token(
         &mut self,
-        _r_angle_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _r_angle_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14243,9 +13805,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn r_brace_token(
         &mut self,
-        _r_brace_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _r_brace_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14270,9 +13831,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn r_bracket_token(
         &mut self,
-        _r_bracket_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _r_bracket_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14297,9 +13857,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn r_paren_token(
         &mut self,
-        _r_paren_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _r_paren_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14324,9 +13883,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn semicolon_token(
         &mut self,
-        _semicolon_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _semicolon_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14351,9 +13909,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn star_token(
         &mut self,
-        _star_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _star_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14378,9 +13935,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn always_comb_token(
         &mut self,
-        _always_comb_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _always_comb_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14406,9 +13962,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn always_ff_token(
         &mut self,
-        _always_ff_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _always_ff_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14433,9 +13988,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn as_token(
         &mut self,
-        _as_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _as_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14460,9 +14014,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn assign_token(
         &mut self,
-        _assign_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _assign_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14487,9 +14040,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn async_high_token(
         &mut self,
-        _async_high_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _async_high_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14515,9 +14067,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn async_low_token(
         &mut self,
-        _async_low_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _async_low_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14542,9 +14093,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn bit_token(
         &mut self,
-        _bit_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _bit_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14569,9 +14119,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn case_token(
         &mut self,
-        _case_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _case_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14596,9 +14145,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn default_token(
         &mut self,
-        _default_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _default_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14623,9 +14171,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn else_token(
         &mut self,
-        _else_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _else_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14650,9 +14197,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn enum_token(
         &mut self,
-        _enum_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _enum_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14677,9 +14223,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn export_token(
         &mut self,
-        _export_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _export_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14704,9 +14249,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn f32_token(
         &mut self,
-        _f32_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _f32_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14731,9 +14275,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn f64_token(
         &mut self,
-        _f64_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _f64_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14758,9 +14301,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn final_token(
         &mut self,
-        _final_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _final_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14785,9 +14327,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn for_token(
         &mut self,
-        _for_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _for_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14812,9 +14353,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn function_token(
         &mut self,
-        _function_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _function_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14839,9 +14379,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn i32_token(
         &mut self,
-        _i32_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _i32_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14866,9 +14405,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn i64_token(
         &mut self,
-        _i64_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _i64_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14893,9 +14431,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn if_reset_token(
         &mut self,
-        _if_reset_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _if_reset_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14920,9 +14457,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn if_token(
         &mut self,
-        _if_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _if_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14947,9 +14483,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn import_token(
         &mut self,
-        _import_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _import_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -14974,9 +14509,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn initial_token(
         &mut self,
-        _initial_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _initial_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15001,9 +14535,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn inout_token(
         &mut self,
-        _inout_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _inout_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15028,9 +14561,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn input_token(
         &mut self,
-        _input_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _input_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15055,9 +14587,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn inside_token(
         &mut self,
-        _inside_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _inside_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15082,9 +14613,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn inst_token(
         &mut self,
-        _inst_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _inst_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15109,9 +14639,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn interface_token(
         &mut self,
-        _interface_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _interface_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15136,9 +14665,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn in_token(
         &mut self,
-        _in_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _in_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15163,9 +14691,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn localparam_token(
         &mut self,
-        _localparam_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _localparam_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15191,9 +14718,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn logic_token(
         &mut self,
-        _logic_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _logic_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15218,9 +14744,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn lsb_token(
         &mut self,
-        _lsb_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _lsb_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15245,9 +14770,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn modport_token(
         &mut self,
-        _modport_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _modport_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15272,9 +14796,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn module_token(
         &mut self,
-        _module_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _module_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15299,9 +14822,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn msb_token(
         &mut self,
-        _msb_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _msb_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15326,9 +14848,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn negedge_token(
         &mut self,
-        _negedge_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _negedge_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15353,9 +14874,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn output_token(
         &mut self,
-        _output_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _output_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15380,9 +14900,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn outside_token(
         &mut self,
-        _outside_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _outside_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15407,9 +14926,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn package_token(
         &mut self,
-        _package_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _package_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15434,9 +14952,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn parameter_token(
         &mut self,
-        _parameter_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _parameter_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15461,9 +14978,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn posedge_token(
         &mut self,
-        _posedge_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _posedge_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15488,9 +15004,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn ref_token(
         &mut self,
-        _ref_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _ref_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15515,9 +15030,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn repeat_token(
         &mut self,
-        _repeat_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _repeat_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15542,9 +15056,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn return_token(
         &mut self,
-        _return_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _return_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15569,9 +15082,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn signed_token(
         &mut self,
-        _signed_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _signed_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15596,9 +15108,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn step_token(
         &mut self,
-        _step_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _step_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15623,9 +15134,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn string_token(
         &mut self,
-        _string_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _string_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15650,9 +15160,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn struct_token(
         &mut self,
-        _struct_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _struct_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15677,9 +15186,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn sync_high_token(
         &mut self,
-        _sync_high_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _sync_high_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15704,9 +15212,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn sync_low_token(
         &mut self,
-        _sync_low_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _sync_low_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15731,9 +15238,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn tri_token(
         &mut self,
-        _tri_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _tri_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15758,9 +15264,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn type_token(
         &mut self,
-        _type_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _type_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15785,9 +15290,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn u32_token(
         &mut self,
-        _u32_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _u32_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15812,9 +15316,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn u64_token(
         &mut self,
-        _u64_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _u64_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15839,9 +15342,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn var_token(
         &mut self,
-        _var_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _var_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15866,9 +15368,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn identifier_token(
         &mut self,
-        _identifier_term: &ParseTreeStackEntry<'t>,
-        _comments: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _identifier_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -15892,11 +15393,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Start: StartToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn start(
-        &mut self,
-        _start_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn start(&mut self, _start_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let start_token = pop_item!(self, start_token, StartToken, context);
@@ -15916,11 +15413,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// StringLiteral: StringLiteralToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn string_literal(
-        &mut self,
-        _string_literal_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn string_literal(&mut self, _string_literal_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let string_literal_token =
@@ -15941,11 +15434,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Exponent: ExponentToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn exponent(
-        &mut self,
-        _exponent_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn exponent(&mut self, _exponent_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let exponent_token = pop_item!(self, exponent_token, ExponentToken, context);
@@ -15965,11 +15454,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// FixedPoint: FixedPointToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn fixed_point(
-        &mut self,
-        _fixed_point_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn fixed_point(&mut self, _fixed_point_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let fixed_point_token = pop_item!(self, fixed_point_token, FixedPointToken, context);
@@ -15989,11 +15474,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Based: BasedToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn based(
-        &mut self,
-        _based_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn based(&mut self, _based_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let based_token = pop_item!(self, based_token, BasedToken, context);
@@ -16013,11 +15494,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// BaseLess: BaseLessToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn base_less(
-        &mut self,
-        _base_less_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn base_less(&mut self, _base_less_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let base_less_token = pop_item!(self, base_less_token, BaseLessToken, context);
@@ -16037,11 +15514,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AllBit: AllBitToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn all_bit(
-        &mut self,
-        _all_bit_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn all_bit(&mut self, _all_bit_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let all_bit_token = pop_item!(self, all_bit_token, AllBitToken, context);
@@ -16063,8 +15536,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn assignment_operator(
         &mut self,
-        _assignment_operator_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _assignment_operator_token: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -16094,11 +15566,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Operator01: Operator01Token : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn operator01(
-        &mut self,
-        _operator01_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn operator01(&mut self, _operator01_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator01_token = pop_item!(self, operator01_token, Operator01Token, context);
@@ -16118,11 +15586,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Operator02: Operator02Token : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn operator02(
-        &mut self,
-        _operator02_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn operator02(&mut self, _operator02_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator02_token = pop_item!(self, operator02_token, Operator02Token, context);
@@ -16142,11 +15606,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Operator03: Operator03Token : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn operator03(
-        &mut self,
-        _operator03_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn operator03(&mut self, _operator03_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator03_token = pop_item!(self, operator03_token, Operator03Token, context);
@@ -16166,11 +15626,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Operator04: Operator04Token : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn operator04(
-        &mut self,
-        _operator04_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn operator04(&mut self, _operator04_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator04_token = pop_item!(self, operator04_token, Operator04Token, context);
@@ -16190,11 +15646,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Operator05: Operator05Token : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn operator05(
-        &mut self,
-        _operator05_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn operator05(&mut self, _operator05_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator05_token = pop_item!(self, operator05_token, Operator05Token, context);
@@ -16214,11 +15666,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Operator06: Operator06Token : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn operator06(
-        &mut self,
-        _operator06_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn operator06(&mut self, _operator06_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator06_token = pop_item!(self, operator06_token, Operator06Token, context);
@@ -16238,11 +15686,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Operator07: Operator07Token : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn operator07(
-        &mut self,
-        _operator07_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn operator07(&mut self, _operator07_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator07_token = pop_item!(self, operator07_token, Operator07Token, context);
@@ -16262,11 +15706,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Operator08: Operator08Token : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn operator08(
-        &mut self,
-        _operator08_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn operator08(&mut self, _operator08_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator08_token = pop_item!(self, operator08_token, Operator08Token, context);
@@ -16286,11 +15726,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Operator09: Operator09Token : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn operator09(
-        &mut self,
-        _operator09_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn operator09(&mut self, _operator09_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator09_token = pop_item!(self, operator09_token, Operator09Token, context);
@@ -16310,11 +15746,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Operator10: Operator10Token : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn operator10(
-        &mut self,
-        _operator10_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn operator10(&mut self, _operator10_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator10_token = pop_item!(self, operator10_token, Operator10Token, context);
@@ -16334,11 +15766,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Operator11: Operator11Token : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn operator11(
-        &mut self,
-        _operator11_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn operator11(&mut self, _operator11_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator11_token = pop_item!(self, operator11_token, Operator11Token, context);
@@ -16358,11 +15786,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// UnaryOperator: UnaryOperatorToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn unary_operator(
-        &mut self,
-        _unary_operator_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn unary_operator(&mut self, _unary_operator_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let unary_operator_token =
@@ -16383,11 +15807,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Colon: ColonToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn colon(
-        &mut self,
-        _colon_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn colon(&mut self, _colon_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let colon_token = pop_item!(self, colon_token, ColonToken, context);
@@ -16407,11 +15827,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ColonColon: ColonColonToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn colon_colon(
-        &mut self,
-        _colon_colon_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn colon_colon(&mut self, _colon_colon_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let colon_colon_token = pop_item!(self, colon_colon_token, ColonColonToken, context);
@@ -16431,11 +15847,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Comma: CommaToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn comma(
-        &mut self,
-        _comma_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn comma(&mut self, _comma_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comma_token = pop_item!(self, comma_token, CommaToken, context);
@@ -16455,11 +15867,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Dollar: DollarToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn dollar(
-        &mut self,
-        _dollar_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn dollar(&mut self, _dollar_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let dollar_token = pop_item!(self, dollar_token, DollarToken, context);
@@ -16479,11 +15887,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// DotDot: DotDotToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn dot_dot(
-        &mut self,
-        _dot_dot_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn dot_dot(&mut self, _dot_dot_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let dot_dot_token = pop_item!(self, dot_dot_token, DotDotToken, context);
@@ -16503,11 +15907,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// DotDotEqu: DotDotEquToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn dot_dot_equ(
-        &mut self,
-        _dot_dot_equ_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn dot_dot_equ(&mut self, _dot_dot_equ_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let dot_dot_equ_token = pop_item!(self, dot_dot_equ_token, DotDotEquToken, context);
@@ -16527,11 +15927,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Dot: DotToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn dot(
-        &mut self,
-        _dot_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn dot(&mut self, _dot_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let dot_token = pop_item!(self, dot_token, DotToken, context);
@@ -16551,11 +15947,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Equ: EquToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn equ(
-        &mut self,
-        _equ_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn equ(&mut self, _equ_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let equ_token = pop_item!(self, equ_token, EquToken, context);
@@ -16575,11 +15967,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Hash: HashToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn hash(
-        &mut self,
-        _hash_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn hash(&mut self, _hash_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let hash_token = pop_item!(self, hash_token, HashToken, context);
@@ -16599,11 +15987,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// LAngle: LAngleToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn l_angle(
-        &mut self,
-        _l_angle_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn l_angle(&mut self, _l_angle_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let l_angle_token = pop_item!(self, l_angle_token, LAngleToken, context);
@@ -16623,11 +16007,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// LBrace: LBraceToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn l_brace(
-        &mut self,
-        _l_brace_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn l_brace(&mut self, _l_brace_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let l_brace_token = pop_item!(self, l_brace_token, LBraceToken, context);
@@ -16647,11 +16027,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// LBracket: LBracketToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn l_bracket(
-        &mut self,
-        _l_bracket_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn l_bracket(&mut self, _l_bracket_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let l_bracket_token = pop_item!(self, l_bracket_token, LBracketToken, context);
@@ -16671,11 +16047,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// LParen: LParenToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn l_paren(
-        &mut self,
-        _l_paren_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn l_paren(&mut self, _l_paren_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let l_paren_token = pop_item!(self, l_paren_token, LParenToken, context);
@@ -16695,11 +16067,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// MinusColon: MinusColonToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn minus_colon(
-        &mut self,
-        _minus_colon_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn minus_colon(&mut self, _minus_colon_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let minus_colon_token = pop_item!(self, minus_colon_token, MinusColonToken, context);
@@ -16719,11 +16087,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// MinusGT: MinusGTToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn minus_g_t(
-        &mut self,
-        _minus_g_t_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn minus_g_t(&mut self, _minus_g_t_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let minus_g_t_token = pop_item!(self, minus_g_t_token, MinusGTToken, context);
@@ -16743,11 +16107,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// PlusColon: PlusColonToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn plus_colon(
-        &mut self,
-        _plus_colon_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn plus_colon(&mut self, _plus_colon_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let plus_colon_token = pop_item!(self, plus_colon_token, PlusColonToken, context);
@@ -16767,11 +16127,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// RAngle: RAngleToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn r_angle(
-        &mut self,
-        _r_angle_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn r_angle(&mut self, _r_angle_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let r_angle_token = pop_item!(self, r_angle_token, RAngleToken, context);
@@ -16791,11 +16147,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// RBrace: RBraceToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn r_brace(
-        &mut self,
-        _r_brace_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn r_brace(&mut self, _r_brace_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let r_brace_token = pop_item!(self, r_brace_token, RBraceToken, context);
@@ -16815,11 +16167,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// RBracket: RBracketToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn r_bracket(
-        &mut self,
-        _r_bracket_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn r_bracket(&mut self, _r_bracket_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let r_bracket_token = pop_item!(self, r_bracket_token, RBracketToken, context);
@@ -16839,11 +16187,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// RParen: RParenToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn r_paren(
-        &mut self,
-        _r_paren_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn r_paren(&mut self, _r_paren_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let r_paren_token = pop_item!(self, r_paren_token, RParenToken, context);
@@ -16863,11 +16207,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Semicolon: SemicolonToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn semicolon(
-        &mut self,
-        _semicolon_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn semicolon(&mut self, _semicolon_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let semicolon_token = pop_item!(self, semicolon_token, SemicolonToken, context);
@@ -16887,11 +16227,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Star: StarToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn star(
-        &mut self,
-        _star_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn star(&mut self, _star_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let star_token = pop_item!(self, star_token, StarToken, context);
@@ -16911,11 +16247,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AlwaysComb: AlwaysCombToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn always_comb(
-        &mut self,
-        _always_comb_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn always_comb(&mut self, _always_comb_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let always_comb_token = pop_item!(self, always_comb_token, AlwaysCombToken, context);
@@ -16935,11 +16267,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AlwaysFf: AlwaysFfToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn always_ff(
-        &mut self,
-        _always_ff_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn always_ff(&mut self, _always_ff_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let always_ff_token = pop_item!(self, always_ff_token, AlwaysFfToken, context);
@@ -16959,11 +16287,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// As: AsToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn r#as(
-        &mut self,
-        _as_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn r#as(&mut self, _as_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let as_token = pop_item!(self, as_token, AsToken, context);
@@ -16983,11 +16307,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Assign: AssignToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn assign(
-        &mut self,
-        _assign_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn assign(&mut self, _assign_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let assign_token = pop_item!(self, assign_token, AssignToken, context);
@@ -17007,11 +16327,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AsyncHigh: AsyncHighToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn async_high(
-        &mut self,
-        _async_high_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn async_high(&mut self, _async_high_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let async_high_token = pop_item!(self, async_high_token, AsyncHighToken, context);
@@ -17031,11 +16347,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AsyncLow: AsyncLowToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn async_low(
-        &mut self,
-        _async_low_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn async_low(&mut self, _async_low_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let async_low_token = pop_item!(self, async_low_token, AsyncLowToken, context);
@@ -17055,11 +16367,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Bit: BitToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn bit(
-        &mut self,
-        _bit_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn bit(&mut self, _bit_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let bit_token = pop_item!(self, bit_token, BitToken, context);
@@ -17079,11 +16387,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Case: CaseToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn case(
-        &mut self,
-        _case_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn case(&mut self, _case_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let case_token = pop_item!(self, case_token, CaseToken, context);
@@ -17103,11 +16407,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Defaul: DefaultToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn defaul(
-        &mut self,
-        _default_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn defaul(&mut self, _default_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let default_token = pop_item!(self, default_token, DefaultToken, context);
@@ -17127,11 +16427,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Else: ElseToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn r#else(
-        &mut self,
-        _else_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn r#else(&mut self, _else_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let else_token = pop_item!(self, else_token, ElseToken, context);
@@ -17151,11 +16447,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Enum: EnumToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn r#enum(
-        &mut self,
-        _enum_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn r#enum(&mut self, _enum_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let enum_token = pop_item!(self, enum_token, EnumToken, context);
@@ -17175,11 +16467,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Export: ExportToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn export(
-        &mut self,
-        _export_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn export(&mut self, _export_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let export_token = pop_item!(self, export_token, ExportToken, context);
@@ -17199,11 +16487,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// F32: F32Token : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn f32(
-        &mut self,
-        _f32_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn f32(&mut self, _f32_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let f32_token = pop_item!(self, f32_token, F32Token, context);
@@ -17223,11 +16507,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// F64: F64Token : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn f64(
-        &mut self,
-        _f64_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn f64(&mut self, _f64_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let f64_token = pop_item!(self, f64_token, F64Token, context);
@@ -17247,11 +16527,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Final: FinalToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn r#final(
-        &mut self,
-        _final_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn r#final(&mut self, _final_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let final_token = pop_item!(self, final_token, FinalToken, context);
@@ -17271,11 +16547,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// For: ForToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn r#for(
-        &mut self,
-        _for_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn r#for(&mut self, _for_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let for_token = pop_item!(self, for_token, ForToken, context);
@@ -17295,11 +16567,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Function: FunctionToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn function(
-        &mut self,
-        _function_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn function(&mut self, _function_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let function_token = pop_item!(self, function_token, FunctionToken, context);
@@ -17319,11 +16587,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// I32: I32Token : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn i32(
-        &mut self,
-        _i32_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn i32(&mut self, _i32_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let i32_token = pop_item!(self, i32_token, I32Token, context);
@@ -17343,11 +16607,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// I64: I64Token : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn i64(
-        &mut self,
-        _i64_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn i64(&mut self, _i64_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let i64_token = pop_item!(self, i64_token, I64Token, context);
@@ -17367,11 +16627,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// If: IfToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn r#if(
-        &mut self,
-        _if_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn r#if(&mut self, _if_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let if_token = pop_item!(self, if_token, IfToken, context);
@@ -17391,11 +16647,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// IfReset: IfResetToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn if_reset(
-        &mut self,
-        _if_reset_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn if_reset(&mut self, _if_reset_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let if_reset_token = pop_item!(self, if_reset_token, IfResetToken, context);
@@ -17415,11 +16667,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Import: ImportToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn import(
-        &mut self,
-        _import_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn import(&mut self, _import_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let import_token = pop_item!(self, import_token, ImportToken, context);
@@ -17439,11 +16687,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// In: InToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn r#in(
-        &mut self,
-        _in_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn r#in(&mut self, _in_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let in_token = pop_item!(self, in_token, InToken, context);
@@ -17463,11 +16707,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Initial: InitialToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn initial(
-        &mut self,
-        _initial_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn initial(&mut self, _initial_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let initial_token = pop_item!(self, initial_token, InitialToken, context);
@@ -17487,11 +16727,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Inout: InoutToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn inout(
-        &mut self,
-        _inout_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn inout(&mut self, _inout_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let inout_token = pop_item!(self, inout_token, InoutToken, context);
@@ -17511,11 +16747,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Input: InputToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn input(
-        &mut self,
-        _input_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn input(&mut self, _input_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let input_token = pop_item!(self, input_token, InputToken, context);
@@ -17535,11 +16767,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Inside: InsideToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn inside(
-        &mut self,
-        _inside_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn inside(&mut self, _inside_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let inside_token = pop_item!(self, inside_token, InsideToken, context);
@@ -17559,11 +16787,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Inst: InstToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn inst(
-        &mut self,
-        _inst_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn inst(&mut self, _inst_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let inst_token = pop_item!(self, inst_token, InstToken, context);
@@ -17583,11 +16807,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Interface: InterfaceToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn interface(
-        &mut self,
-        _interface_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn interface(&mut self, _interface_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let interface_token = pop_item!(self, interface_token, InterfaceToken, context);
@@ -17607,11 +16827,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Localparam: LocalparamToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn localparam(
-        &mut self,
-        _localparam_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn localparam(&mut self, _localparam_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let localparam_token = pop_item!(self, localparam_token, LocalparamToken, context);
@@ -17631,11 +16847,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Logic: LogicToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn logic(
-        &mut self,
-        _logic_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn logic(&mut self, _logic_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let logic_token = pop_item!(self, logic_token, LogicToken, context);
@@ -17655,11 +16867,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Lsb: LsbToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn lsb(
-        &mut self,
-        _lsb_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn lsb(&mut self, _lsb_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let lsb_token = pop_item!(self, lsb_token, LsbToken, context);
@@ -17679,11 +16887,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Modport: ModportToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn modport(
-        &mut self,
-        _modport_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn modport(&mut self, _modport_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let modport_token = pop_item!(self, modport_token, ModportToken, context);
@@ -17703,11 +16907,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Module: ModuleToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn module(
-        &mut self,
-        _module_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn module(&mut self, _module_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let module_token = pop_item!(self, module_token, ModuleToken, context);
@@ -17727,11 +16927,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Msb: MsbToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn msb(
-        &mut self,
-        _msb_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn msb(&mut self, _msb_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let msb_token = pop_item!(self, msb_token, MsbToken, context);
@@ -17751,11 +16947,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Negedge: NegedgeToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn negedge(
-        &mut self,
-        _negedge_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn negedge(&mut self, _negedge_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let negedge_token = pop_item!(self, negedge_token, NegedgeToken, context);
@@ -17775,11 +16967,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Output: OutputToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn output(
-        &mut self,
-        _output_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn output(&mut self, _output_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let output_token = pop_item!(self, output_token, OutputToken, context);
@@ -17799,11 +16987,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Outside: OutsideToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn outside(
-        &mut self,
-        _outside_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn outside(&mut self, _outside_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let outside_token = pop_item!(self, outside_token, OutsideToken, context);
@@ -17823,11 +17007,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Package: PackageToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn package(
-        &mut self,
-        _package_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn package(&mut self, _package_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let package_token = pop_item!(self, package_token, PackageToken, context);
@@ -17847,11 +17027,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Parameter: ParameterToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn parameter(
-        &mut self,
-        _parameter_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn parameter(&mut self, _parameter_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let parameter_token = pop_item!(self, parameter_token, ParameterToken, context);
@@ -17871,11 +17047,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Posedge: PosedgeToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn posedge(
-        &mut self,
-        _posedge_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn posedge(&mut self, _posedge_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let posedge_token = pop_item!(self, posedge_token, PosedgeToken, context);
@@ -17895,11 +17067,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Ref: RefToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn r#ref(
-        &mut self,
-        _ref_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn r#ref(&mut self, _ref_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let ref_token = pop_item!(self, ref_token, RefToken, context);
@@ -17919,11 +17087,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Repeat: RepeatToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn repeat(
-        &mut self,
-        _repeat_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn repeat(&mut self, _repeat_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let repeat_token = pop_item!(self, repeat_token, RepeatToken, context);
@@ -17943,11 +17107,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Return: ReturnToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn r#return(
-        &mut self,
-        _return_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn r#return(&mut self, _return_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let return_token = pop_item!(self, return_token, ReturnToken, context);
@@ -17967,11 +17127,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Signed: SignedToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn signed(
-        &mut self,
-        _signed_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn signed(&mut self, _signed_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let signed_token = pop_item!(self, signed_token, SignedToken, context);
@@ -17991,11 +17147,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Step: StepToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn step(
-        &mut self,
-        _step_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn step(&mut self, _step_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let step_token = pop_item!(self, step_token, StepToken, context);
@@ -18015,11 +17167,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Strin: StringToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn strin(
-        &mut self,
-        _string_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn strin(&mut self, _string_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let string_token = pop_item!(self, string_token, StringToken, context);
@@ -18039,11 +17187,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Struct: StructToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn r#struct(
-        &mut self,
-        _struct_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn r#struct(&mut self, _struct_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let struct_token = pop_item!(self, struct_token, StructToken, context);
@@ -18063,11 +17207,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// SyncHigh: SyncHighToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn sync_high(
-        &mut self,
-        _sync_high_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn sync_high(&mut self, _sync_high_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let sync_high_token = pop_item!(self, sync_high_token, SyncHighToken, context);
@@ -18087,11 +17227,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// SyncLow: SyncLowToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn sync_low(
-        &mut self,
-        _sync_low_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn sync_low(&mut self, _sync_low_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let sync_low_token = pop_item!(self, sync_low_token, SyncLowToken, context);
@@ -18111,11 +17247,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Tri: TriToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn tri(
-        &mut self,
-        _tri_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn tri(&mut self, _tri_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let tri_token = pop_item!(self, tri_token, TriToken, context);
@@ -18135,11 +17267,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Type: TypeToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn r#type(
-        &mut self,
-        _type_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn r#type(&mut self, _type_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let type_token = pop_item!(self, type_token, TypeToken, context);
@@ -18159,11 +17287,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// U32: U32Token : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn u32(
-        &mut self,
-        _u32_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn u32(&mut self, _u32_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let u32_token = pop_item!(self, u32_token, U32Token, context);
@@ -18183,11 +17307,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// U64: U64Token : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn u64(
-        &mut self,
-        _u64_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn u64(&mut self, _u64_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let u64_token = pop_item!(self, u64_token, U64Token, context);
@@ -18207,11 +17327,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Var: VarToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn var(
-        &mut self,
-        _var_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn var(&mut self, _var_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let var_token = pop_item!(self, var_token, VarToken, context);
@@ -18231,11 +17347,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Identifier: IdentifierToken : VerylToken;
     ///
     #[parol_runtime::function_name::named]
-    fn identifier(
-        &mut self,
-        _identifier_token: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn identifier(&mut self, _identifier_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let identifier_token = pop_item!(self, identifier_token, IdentifierToken, context);
@@ -18255,11 +17367,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Number: IntegralNumber;
     ///
     #[parol_runtime::function_name::named]
-    fn number_0(
-        &mut self,
-        _integral_number: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn number_0(&mut self, _integral_number: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let integral_number = pop_item!(self, integral_number, IntegralNumber, context);
@@ -18278,11 +17386,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Number: RealNumber;
     ///
     #[parol_runtime::function_name::named]
-    fn number_1(
-        &mut self,
-        _real_number: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn number_1(&mut self, _real_number: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let real_number = pop_item!(self, real_number, RealNumber, context);
@@ -18301,11 +17405,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// IntegralNumber: Based;
     ///
     #[parol_runtime::function_name::named]
-    fn integral_number_0(
-        &mut self,
-        _based: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn integral_number_0(&mut self, _based: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let based = pop_item!(self, based, Based, context);
@@ -18325,11 +17425,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// IntegralNumber: BaseLess;
     ///
     #[parol_runtime::function_name::named]
-    fn integral_number_1(
-        &mut self,
-        _base_less: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn integral_number_1(&mut self, _base_less: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let base_less = pop_item!(self, base_less, BaseLess, context);
@@ -18349,11 +17445,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// IntegralNumber: AllBit;
     ///
     #[parol_runtime::function_name::named]
-    fn integral_number_2(
-        &mut self,
-        _all_bit: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn integral_number_2(&mut self, _all_bit: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let all_bit = pop_item!(self, all_bit, AllBit, context);
@@ -18373,11 +17465,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// RealNumber: FixedPoint;
     ///
     #[parol_runtime::function_name::named]
-    fn real_number_0(
-        &mut self,
-        _fixed_point: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn real_number_0(&mut self, _fixed_point: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let fixed_point = pop_item!(self, fixed_point, FixedPoint, context);
@@ -18396,11 +17484,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// RealNumber: Exponent;
     ///
     #[parol_runtime::function_name::named]
-    fn real_number_1(
-        &mut self,
-        _exponent: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn real_number_1(&mut self, _exponent: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let exponent = pop_item!(self, exponent, Exponent, context);
@@ -18421,10 +17505,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn hierarchical_identifier(
         &mut self,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _hierarchical_identifier_list: &ParseTreeStackEntry<'t>,
-        _hierarchical_identifier_list0: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _identifier: &ParseTreeType<'t>,
+        _hierarchical_identifier_list: &ParseTreeType<'t>,
+        _hierarchical_identifier_list0: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -18463,11 +17546,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn hierarchical_identifier_list0_0(
         &mut self,
-        _dot: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _hierarchical_identifier_list0_list: &ParseTreeStackEntry<'t>,
-        _hierarchical_identifier_list0: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _dot: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+        _hierarchical_identifier_list0_list: &ParseTreeType<'t>,
+        _hierarchical_identifier_list0: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -18506,9 +17588,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn hierarchical_identifier_list0_list_0(
         &mut self,
-        _select: &ParseTreeStackEntry<'t>,
-        _hierarchical_identifier_list0_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _select: &ParseTreeType<'t>,
+        _hierarchical_identifier_list0_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -18536,10 +17617,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// HierarchicalIdentifierList0List /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn hierarchical_identifier_list0_list_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn hierarchical_identifier_list0_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let hierarchical_identifier_list0_list_1_built = Vec::new();
@@ -18555,10 +17633,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// HierarchicalIdentifierList0 /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn hierarchical_identifier_list0_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn hierarchical_identifier_list0_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let hierarchical_identifier_list0_1_built = Vec::new();
@@ -18576,9 +17651,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn hierarchical_identifier_list_0(
         &mut self,
-        _select: &ParseTreeStackEntry<'t>,
-        _hierarchical_identifier_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _select: &ParseTreeType<'t>,
+        _hierarchical_identifier_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -18606,10 +17680,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// HierarchicalIdentifierList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn hierarchical_identifier_list_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn hierarchical_identifier_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let hierarchical_identifier_list_1_built = Vec::new();
@@ -18627,9 +17698,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn scoped_identifier(
         &mut self,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _scoped_identifier_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _identifier: &ParseTreeType<'t>,
+        _scoped_identifier_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -18654,10 +17724,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn scoped_identifier_list_0(
         &mut self,
-        _colon_colon: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _scoped_identifier_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _colon_colon: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+        _scoped_identifier_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -18683,7 +17752,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ScopedIdentifierList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn scoped_identifier_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn scoped_identifier_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let scoped_identifier_list_1_built = Vec::new();
@@ -18701,10 +17770,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression_identifier(
         &mut self,
-        _expression_identifier_opt: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _expression_identifier_group: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _expression_identifier_opt: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+        _expression_identifier_group: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -18743,11 +17811,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression_identifier_group_0(
         &mut self,
-        _colon_colon: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _expression_identifier_group_list: &ParseTreeStackEntry<'t>,
-        _expression_identifier_group_list0: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _colon_colon: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+        _expression_identifier_group_list: &ParseTreeType<'t>,
+        _expression_identifier_group_list0: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -18786,9 +17853,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression_identifier_group_list0_0(
         &mut self,
-        _select: &ParseTreeStackEntry<'t>,
-        _expression_identifier_group_list0: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _select: &ParseTreeType<'t>,
+        _expression_identifier_group_list0: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -18816,10 +17882,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ExpressionIdentifierGroupList0 /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn expression_identifier_group_list0_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn expression_identifier_group_list0_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let expression_identifier_group_list0_1_built = Vec::new();
@@ -18837,10 +17900,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression_identifier_group_list_0(
         &mut self,
-        _colon_colon: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _expression_identifier_group_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _colon_colon: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+        _expression_identifier_group_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -18870,10 +17932,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ExpressionIdentifierGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn expression_identifier_group_list_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn expression_identifier_group_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let expression_identifier_group_list_1_built = Vec::new();
@@ -18891,9 +17950,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression_identifier_group_1(
         &mut self,
-        _expression_identifier_group_list1: &ParseTreeStackEntry<'t>,
-        _expression_identifier_group_list2: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _expression_identifier_group_list1: &ParseTreeType<'t>,
+        _expression_identifier_group_list2: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -18932,11 +17990,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression_identifier_group_list2_0(
         &mut self,
-        _dot: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _expression_identifier_group_list2_list: &ParseTreeStackEntry<'t>,
-        _expression_identifier_group_list2: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _dot: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+        _expression_identifier_group_list2_list: &ParseTreeType<'t>,
+        _expression_identifier_group_list2: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -18975,9 +18032,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression_identifier_group_list2_list_0(
         &mut self,
-        _select: &ParseTreeStackEntry<'t>,
-        _expression_identifier_group_list2_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _select: &ParseTreeType<'t>,
+        _expression_identifier_group_list2_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -19005,10 +18061,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ExpressionIdentifierGroupList2List /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn expression_identifier_group_list2_list_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn expression_identifier_group_list2_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let expression_identifier_group_list2_list_1_built = Vec::new();
@@ -19026,10 +18079,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ExpressionIdentifierGroupList2 /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn expression_identifier_group_list2_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn expression_identifier_group_list2_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let expression_identifier_group_list2_1_built = Vec::new();
@@ -19047,9 +18097,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression_identifier_group_list1_0(
         &mut self,
-        _select: &ParseTreeStackEntry<'t>,
-        _expression_identifier_group_list1: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _select: &ParseTreeType<'t>,
+        _expression_identifier_group_list1: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -19077,10 +18126,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ExpressionIdentifierGroupList1 /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn expression_identifier_group_list1_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn expression_identifier_group_list1_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let expression_identifier_group_list1_1_built = Vec::new();
@@ -19096,11 +18142,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ExpressionIdentifierOpt /* Option<T>::Some */: Dollar;
     ///
     #[parol_runtime::function_name::named]
-    fn expression_identifier_opt_0(
-        &mut self,
-        _dollar: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn expression_identifier_opt_0(&mut self, _dollar: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let dollar = pop_item!(self, dollar, Dollar, context);
@@ -19119,7 +18161,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ExpressionIdentifierOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn expression_identifier_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn expression_identifier_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::ExpressionIdentifierOpt(None), context);
@@ -19133,9 +18175,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression(
         &mut self,
-        _expression01: &ParseTreeStackEntry<'t>,
-        _expression_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _expression01: &ParseTreeType<'t>,
+        _expression_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -19158,10 +18199,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression_list_0(
         &mut self,
-        _operator01: &ParseTreeStackEntry<'t>,
-        _expression01: &ParseTreeStackEntry<'t>,
-        _expression_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _operator01: &ParseTreeType<'t>,
+        _expression01: &ParseTreeType<'t>,
+        _expression_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -19183,7 +18223,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ExpressionList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn expression_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn expression_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let expression_list_1_built = Vec::new();
@@ -19198,9 +18238,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression01(
         &mut self,
-        _expression02: &ParseTreeStackEntry<'t>,
-        _expression01_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _expression02: &ParseTreeType<'t>,
+        _expression01_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -19224,10 +18263,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression01_list_0(
         &mut self,
-        _operator02: &ParseTreeStackEntry<'t>,
-        _expression02: &ParseTreeStackEntry<'t>,
-        _expression01_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _operator02: &ParseTreeType<'t>,
+        _expression02: &ParseTreeType<'t>,
+        _expression01_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -19249,7 +18287,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Expression01List /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn expression01_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn expression01_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let expression01_list_1_built = Vec::new();
@@ -19267,9 +18305,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression02(
         &mut self,
-        _expression03: &ParseTreeStackEntry<'t>,
-        _expression02_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _expression03: &ParseTreeType<'t>,
+        _expression02_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -19293,10 +18330,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression02_list_0(
         &mut self,
-        _operator03: &ParseTreeStackEntry<'t>,
-        _expression03: &ParseTreeStackEntry<'t>,
-        _expression02_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _operator03: &ParseTreeType<'t>,
+        _expression03: &ParseTreeType<'t>,
+        _expression02_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -19318,7 +18354,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Expression02List /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn expression02_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn expression02_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let expression02_list_1_built = Vec::new();
@@ -19336,9 +18372,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression03(
         &mut self,
-        _expression04: &ParseTreeStackEntry<'t>,
-        _expression03_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _expression04: &ParseTreeType<'t>,
+        _expression03_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -19362,10 +18397,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression03_list_0(
         &mut self,
-        _operator04: &ParseTreeStackEntry<'t>,
-        _expression04: &ParseTreeStackEntry<'t>,
-        _expression03_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _operator04: &ParseTreeType<'t>,
+        _expression04: &ParseTreeType<'t>,
+        _expression03_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -19387,7 +18421,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Expression03List /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn expression03_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn expression03_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let expression03_list_1_built = Vec::new();
@@ -19405,9 +18439,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression04(
         &mut self,
-        _expression05: &ParseTreeStackEntry<'t>,
-        _expression04_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _expression05: &ParseTreeType<'t>,
+        _expression04_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -19431,10 +18464,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression04_list_0(
         &mut self,
-        _operator05: &ParseTreeStackEntry<'t>,
-        _expression05: &ParseTreeStackEntry<'t>,
-        _expression04_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _operator05: &ParseTreeType<'t>,
+        _expression05: &ParseTreeType<'t>,
+        _expression04_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -19456,7 +18488,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Expression04List /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn expression04_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn expression04_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let expression04_list_1_built = Vec::new();
@@ -19474,9 +18506,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression05(
         &mut self,
-        _expression06: &ParseTreeStackEntry<'t>,
-        _expression05_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _expression06: &ParseTreeType<'t>,
+        _expression05_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -19500,10 +18531,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression05_list_0(
         &mut self,
-        _operator06: &ParseTreeStackEntry<'t>,
-        _expression06: &ParseTreeStackEntry<'t>,
-        _expression05_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _operator06: &ParseTreeType<'t>,
+        _expression06: &ParseTreeType<'t>,
+        _expression05_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -19525,7 +18555,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Expression05List /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn expression05_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn expression05_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let expression05_list_1_built = Vec::new();
@@ -19543,9 +18573,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression06(
         &mut self,
-        _expression07: &ParseTreeStackEntry<'t>,
-        _expression06_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _expression07: &ParseTreeType<'t>,
+        _expression06_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -19569,10 +18598,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression06_list_0(
         &mut self,
-        _operator07: &ParseTreeStackEntry<'t>,
-        _expression07: &ParseTreeStackEntry<'t>,
-        _expression06_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _operator07: &ParseTreeType<'t>,
+        _expression07: &ParseTreeType<'t>,
+        _expression06_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -19594,7 +18622,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Expression06List /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn expression06_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn expression06_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let expression06_list_1_built = Vec::new();
@@ -19612,9 +18640,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression07(
         &mut self,
-        _expression08: &ParseTreeStackEntry<'t>,
-        _expression07_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _expression08: &ParseTreeType<'t>,
+        _expression07_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -19638,10 +18665,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression07_list_0(
         &mut self,
-        _operator08: &ParseTreeStackEntry<'t>,
-        _expression08: &ParseTreeStackEntry<'t>,
-        _expression07_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _operator08: &ParseTreeType<'t>,
+        _expression08: &ParseTreeType<'t>,
+        _expression07_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -19663,7 +18689,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Expression07List /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn expression07_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn expression07_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let expression07_list_1_built = Vec::new();
@@ -19681,9 +18707,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression08(
         &mut self,
-        _expression09: &ParseTreeStackEntry<'t>,
-        _expression08_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _expression09: &ParseTreeType<'t>,
+        _expression08_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -19707,10 +18732,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression08_list_0(
         &mut self,
-        _operator09: &ParseTreeStackEntry<'t>,
-        _expression09: &ParseTreeStackEntry<'t>,
-        _expression08_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _operator09: &ParseTreeType<'t>,
+        _expression09: &ParseTreeType<'t>,
+        _expression08_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -19732,7 +18756,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Expression08List /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn expression08_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn expression08_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let expression08_list_1_built = Vec::new();
@@ -19750,9 +18774,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression09(
         &mut self,
-        _expression10: &ParseTreeStackEntry<'t>,
-        _expression09_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _expression10: &ParseTreeType<'t>,
+        _expression09_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -19776,10 +18799,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression09_list_0(
         &mut self,
-        _expression09_list_group: &ParseTreeStackEntry<'t>,
-        _expression10: &ParseTreeStackEntry<'t>,
-        _expression09_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _expression09_list_group: &ParseTreeType<'t>,
+        _expression10: &ParseTreeType<'t>,
+        _expression09_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -19806,11 +18828,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Expression09ListGroup: Operator10;
     ///
     #[parol_runtime::function_name::named]
-    fn expression09_list_group_0(
-        &mut self,
-        _operator10: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn expression09_list_group_0(&mut self, _operator10: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator10 = pop_item!(self, operator10, Operator10, context);
@@ -19831,11 +18849,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Expression09ListGroup: Star;
     ///
     #[parol_runtime::function_name::named]
-    fn expression09_list_group_1(
-        &mut self,
-        _star: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn expression09_list_group_1(&mut self, _star: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let star = pop_item!(self, star, Star, context);
@@ -19856,7 +18870,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Expression09List /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn expression09_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn expression09_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let expression09_list_1_built = Vec::new();
@@ -19874,9 +18888,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression10(
         &mut self,
-        _expression11: &ParseTreeStackEntry<'t>,
-        _expression10_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _expression11: &ParseTreeType<'t>,
+        _expression10_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -19900,10 +18913,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression10_list_0(
         &mut self,
-        _operator11: &ParseTreeStackEntry<'t>,
-        _expression11: &ParseTreeStackEntry<'t>,
-        _expression10_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _operator11: &ParseTreeType<'t>,
+        _expression11: &ParseTreeType<'t>,
+        _expression10_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -19925,7 +18937,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Expression10List /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn expression10_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn expression10_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let expression10_list_1_built = Vec::new();
@@ -19943,9 +18955,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression11(
         &mut self,
-        _expression12: &ParseTreeStackEntry<'t>,
-        _expression11_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _expression12: &ParseTreeType<'t>,
+        _expression11_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -19969,10 +18980,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression11_list_0(
         &mut self,
-        _as: &ParseTreeStackEntry<'t>,
-        _scoped_identifier: &ParseTreeStackEntry<'t>,
-        _expression11_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _as: &ParseTreeType<'t>,
+        _scoped_identifier: &ParseTreeType<'t>,
+        _expression11_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -19994,7 +19004,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Expression11List /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn expression11_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn expression11_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let expression11_list_1_built = Vec::new();
@@ -20012,9 +19022,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression12(
         &mut self,
-        _expression12_list: &ParseTreeStackEntry<'t>,
-        _factor: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _expression12_list: &ParseTreeType<'t>,
+        _factor: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -20038,9 +19047,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn expression12_list_0(
         &mut self,
-        _expression12_list_group: &ParseTreeStackEntry<'t>,
-        _expression12_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _expression12_list_group: &ParseTreeType<'t>,
+        _expression12_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -20065,11 +19073,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Expression12ListGroup: UnaryOperator;
     ///
     #[parol_runtime::function_name::named]
-    fn expression12_list_group_0(
-        &mut self,
-        _unary_operator: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn expression12_list_group_0(&mut self, _unary_operator: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let unary_operator = pop_item!(self, unary_operator, UnaryOperator, context);
@@ -20090,11 +19094,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Expression12ListGroup: Operator09;
     ///
     #[parol_runtime::function_name::named]
-    fn expression12_list_group_1(
-        &mut self,
-        _operator09: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn expression12_list_group_1(&mut self, _operator09: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator09 = pop_item!(self, operator09, Operator09, context);
@@ -20115,11 +19115,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Expression12ListGroup: Operator05;
     ///
     #[parol_runtime::function_name::named]
-    fn expression12_list_group_2(
-        &mut self,
-        _operator05: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn expression12_list_group_2(&mut self, _operator05: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator05 = pop_item!(self, operator05, Operator05, context);
@@ -20140,11 +19136,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Expression12ListGroup: Operator03;
     ///
     #[parol_runtime::function_name::named]
-    fn expression12_list_group_3(
-        &mut self,
-        _operator03: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn expression12_list_group_3(&mut self, _operator03: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator03 = pop_item!(self, operator03, Operator03, context);
@@ -20165,11 +19157,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Expression12ListGroup: Operator04;
     ///
     #[parol_runtime::function_name::named]
-    fn expression12_list_group_4(
-        &mut self,
-        _operator04: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn expression12_list_group_4(&mut self, _operator04: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let operator04 = pop_item!(self, operator04, Operator04, context);
@@ -20190,7 +19178,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Expression12List /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn expression12_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn expression12_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let expression12_list_1_built = Vec::new();
@@ -20206,11 +19194,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Factor: Number;
     ///
     #[parol_runtime::function_name::named]
-    fn factor_0(
-        &mut self,
-        _number: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn factor_0(&mut self, _number: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let number = pop_item!(self, number, Number, context);
@@ -20231,9 +19215,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn factor_1(
         &mut self,
-        _expression_identifier: &ParseTreeStackEntry<'t>,
-        _factor_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _expression_identifier: &ParseTreeType<'t>,
+        _factor_opt: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -20258,10 +19241,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn factor_2(
         &mut self,
-        _l_paren: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _r_paren: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _l_paren: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
+        _r_paren: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -20287,10 +19269,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn factor_3(
         &mut self,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _concatenation_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _l_brace: &ParseTreeType<'t>,
+        _concatenation_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -20314,11 +19295,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Factor: IfExpression;
     ///
     #[parol_runtime::function_name::named]
-    fn factor_4(
-        &mut self,
-        _if_expression: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn factor_4(&mut self, _if_expression: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let if_expression = pop_item!(self, if_expression, IfExpression, context);
@@ -20337,11 +19314,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Factor: CaseExpression;
     ///
     #[parol_runtime::function_name::named]
-    fn factor_5(
-        &mut self,
-        _case_expression: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn factor_5(&mut self, _case_expression: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let case_expression = pop_item!(self, case_expression, CaseExpression, context);
@@ -20360,11 +19333,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Factor: StringLiteral;
     ///
     #[parol_runtime::function_name::named]
-    fn factor_6(
-        &mut self,
-        _string_literal: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn factor_6(&mut self, _string_literal: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let string_literal = pop_item!(self, string_literal, StringLiteral, context);
@@ -20383,11 +19352,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Factor: FactorGroup;
     ///
     #[parol_runtime::function_name::named]
-    fn factor_7(
-        &mut self,
-        _factor_group: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn factor_7(&mut self, _factor_group: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let factor_group = pop_item!(self, factor_group, FactorGroup, context);
@@ -20406,11 +19371,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// FactorGroup: Msb;
     ///
     #[parol_runtime::function_name::named]
-    fn factor_group_0(
-        &mut self,
-        _msb: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn factor_group_0(&mut self, _msb: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let msb = pop_item!(self, msb, Msb, context);
@@ -20425,11 +19386,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// FactorGroup: Lsb;
     ///
     #[parol_runtime::function_name::named]
-    fn factor_group_1(
-        &mut self,
-        _lsb: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn factor_group_1(&mut self, _lsb: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let lsb = pop_item!(self, lsb, Lsb, context);
@@ -20444,11 +19401,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Factor: InsideExpression;
     ///
     #[parol_runtime::function_name::named]
-    fn factor_8(
-        &mut self,
-        _inside_expression: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn factor_8(&mut self, _inside_expression: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let inside_expression = pop_item!(self, inside_expression, InsideExpression, context);
@@ -20467,11 +19420,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Factor: OutsideExpression;
     ///
     #[parol_runtime::function_name::named]
-    fn factor_9(
-        &mut self,
-        _outside_expression: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn factor_9(&mut self, _outside_expression: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let outside_expression = pop_item!(self, outside_expression, OutsideExpression, context);
@@ -20490,11 +19439,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// FactorOpt /* Option<T>::Some */: FunctionCall;
     ///
     #[parol_runtime::function_name::named]
-    fn factor_opt_0(
-        &mut self,
-        _function_call: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn factor_opt_0(&mut self, _function_call: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let function_call = pop_item!(self, function_call, FunctionCall, context);
@@ -20513,7 +19458,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// FactorOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn factor_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn factor_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::FactorOpt(None), context);
@@ -20527,10 +19472,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn function_call(
         &mut self,
-        _l_paren: &ParseTreeStackEntry<'t>,
-        _function_call_opt: &ParseTreeStackEntry<'t>,
-        _r_paren: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _l_paren: &ParseTreeType<'t>,
+        _function_call_opt: &ParseTreeType<'t>,
+        _r_paren: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -20553,11 +19497,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// FunctionCallOpt /* Option<T>::Some */: ArgumentList;
     ///
     #[parol_runtime::function_name::named]
-    fn function_call_opt_0(
-        &mut self,
-        _argument_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn function_call_opt_0(&mut self, _argument_list: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let argument_list = pop_item!(self, argument_list, ArgumentList, context);
@@ -20576,7 +19516,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// FunctionCallOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn function_call_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn function_call_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::FunctionCallOpt(None), context);
@@ -20590,10 +19530,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn argument_list(
         &mut self,
-        _argument_item: &ParseTreeStackEntry<'t>,
-        _argument_list_list: &ParseTreeStackEntry<'t>,
-        _argument_list_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _argument_item: &ParseTreeType<'t>,
+        _argument_list_list: &ParseTreeType<'t>,
+        _argument_list_opt: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -20619,10 +19558,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn argument_list_list_0(
         &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _argument_item: &ParseTreeStackEntry<'t>,
-        _argument_list_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _comma: &ParseTreeType<'t>,
+        _argument_item: &ParseTreeType<'t>,
+        _argument_list_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -20644,7 +19582,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ArgumentListList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn argument_list_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn argument_list_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let argument_list_list_1_built = Vec::new();
@@ -20660,11 +19598,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ArgumentListOpt /* Option<T>::Some */: Comma;
     ///
     #[parol_runtime::function_name::named]
-    fn argument_list_opt_0(
-        &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn argument_list_opt_0(&mut self, _comma: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comma = pop_item!(self, comma, Comma, context);
@@ -20683,7 +19617,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ArgumentListOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn argument_list_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn argument_list_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::ArgumentListOpt(None), context);
@@ -20695,11 +19629,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ArgumentItem: Expression;
     ///
     #[parol_runtime::function_name::named]
-    fn argument_item(
-        &mut self,
-        _expression: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn argument_item(&mut self, _expression: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let expression = pop_item!(self, expression, Expression, context);
@@ -20719,10 +19649,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn concatenation_list(
         &mut self,
-        _concatenation_item: &ParseTreeStackEntry<'t>,
-        _concatenation_list_list: &ParseTreeStackEntry<'t>,
-        _concatenation_list_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _concatenation_item: &ParseTreeType<'t>,
+        _concatenation_list_list: &ParseTreeType<'t>,
+        _concatenation_list_opt: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -20757,10 +19686,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn concatenation_list_list_0(
         &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _concatenation_item: &ParseTreeStackEntry<'t>,
-        _concatenation_list_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _comma: &ParseTreeType<'t>,
+        _concatenation_item: &ParseTreeType<'t>,
+        _concatenation_list_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -20790,7 +19718,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ConcatenationListList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn concatenation_list_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn concatenation_list_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let concatenation_list_list_1_built = Vec::new();
@@ -20806,11 +19734,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ConcatenationListOpt /* Option<T>::Some */: Comma;
     ///
     #[parol_runtime::function_name::named]
-    fn concatenation_list_opt_0(
-        &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn concatenation_list_opt_0(&mut self, _comma: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comma = pop_item!(self, comma, Comma, context);
@@ -20829,7 +19753,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ConcatenationListOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn concatenation_list_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn concatenation_list_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::ConcatenationListOpt(None), context);
@@ -20843,9 +19767,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn concatenation_item(
         &mut self,
-        _expression: &ParseTreeStackEntry<'t>,
-        _concatenation_item_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _expression: &ParseTreeType<'t>,
+        _concatenation_item_opt: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -20873,9 +19796,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn concatenation_item_opt_0(
         &mut self,
-        _repeat: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _repeat: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -20897,7 +19819,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ConcatenationItemOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn concatenation_item_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn concatenation_item_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::ConcatenationItemOpt(None), context);
@@ -20911,17 +19833,16 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn if_expression(
         &mut self,
-        _if: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _expression0: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _if_expression_list: &ParseTreeStackEntry<'t>,
-        _else: &ParseTreeStackEntry<'t>,
-        _l_brace0: &ParseTreeStackEntry<'t>,
-        _expression1: &ParseTreeStackEntry<'t>,
-        _r_brace0: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _if: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _expression0: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
+        _if_expression_list: &ParseTreeType<'t>,
+        _else: &ParseTreeType<'t>,
+        _l_brace0: &ParseTreeType<'t>,
+        _expression1: &ParseTreeType<'t>,
+        _r_brace0: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -20961,14 +19882,13 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn if_expression_list_0(
         &mut self,
-        _else: &ParseTreeStackEntry<'t>,
-        _if: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _expression0: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _if_expression_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _else: &ParseTreeType<'t>,
+        _if: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _expression0: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
+        _if_expression_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -20998,7 +19918,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// IfExpressionList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn if_expression_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn if_expression_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let if_expression_list_1_built = Vec::new();
@@ -21016,20 +19936,19 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn case_expression(
         &mut self,
-        _case: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _expression0: &ParseTreeStackEntry<'t>,
-        _colon: &ParseTreeStackEntry<'t>,
-        _expression1: &ParseTreeStackEntry<'t>,
-        _comma: &ParseTreeStackEntry<'t>,
-        _case_expression_list: &ParseTreeStackEntry<'t>,
-        _defaul: &ParseTreeStackEntry<'t>,
-        _colon0: &ParseTreeStackEntry<'t>,
-        _expression2: &ParseTreeStackEntry<'t>,
-        _case_expression_opt: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _case: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _expression0: &ParseTreeType<'t>,
+        _colon: &ParseTreeType<'t>,
+        _expression1: &ParseTreeType<'t>,
+        _comma: &ParseTreeType<'t>,
+        _case_expression_list: &ParseTreeType<'t>,
+        _defaul: &ParseTreeType<'t>,
+        _colon0: &ParseTreeType<'t>,
+        _expression2: &ParseTreeType<'t>,
+        _case_expression_opt: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -21075,12 +19994,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn case_expression_list_0(
         &mut self,
-        _expression: &ParseTreeStackEntry<'t>,
-        _colon: &ParseTreeStackEntry<'t>,
-        _expression0: &ParseTreeStackEntry<'t>,
-        _comma: &ParseTreeStackEntry<'t>,
-        _case_expression_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _expression: &ParseTreeType<'t>,
+        _colon: &ParseTreeType<'t>,
+        _expression0: &ParseTreeType<'t>,
+        _comma: &ParseTreeType<'t>,
+        _case_expression_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -21107,7 +20025,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// CaseExpressionList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn case_expression_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn case_expression_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let case_expression_list_1_built = Vec::new();
@@ -21123,11 +20041,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// CaseExpressionOpt /* Option<T>::Some */: Comma;
     ///
     #[parol_runtime::function_name::named]
-    fn case_expression_opt_0(
-        &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn case_expression_opt_0(&mut self, _comma: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comma = pop_item!(self, comma, Comma, context);
@@ -21146,7 +20060,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// CaseExpressionOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn case_expression_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn case_expression_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::CaseExpressionOpt(None), context);
@@ -21158,11 +20072,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// TypeExpression: ScalarType;
     ///
     #[parol_runtime::function_name::named]
-    fn type_expression_0(
-        &mut self,
-        _scalar_type: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn type_expression_0(&mut self, _scalar_type: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let scalar_type = pop_item!(self, scalar_type, ScalarType, context);
@@ -21184,11 +20094,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn type_expression_1(
         &mut self,
-        _type: &ParseTreeStackEntry<'t>,
-        _l_paren: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _r_paren: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _type: &ParseTreeType<'t>,
+        _l_paren: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
+        _r_paren: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -21218,12 +20127,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn inside_expression(
         &mut self,
-        _inside: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _range_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _inside: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _range_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -21253,12 +20161,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn outside_expression(
         &mut self,
-        _outside: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _range_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _outside: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _range_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -21291,10 +20198,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn range_list(
         &mut self,
-        _range_item: &ParseTreeStackEntry<'t>,
-        _range_list_list: &ParseTreeStackEntry<'t>,
-        _range_list_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _range_item: &ParseTreeType<'t>,
+        _range_list_list: &ParseTreeType<'t>,
+        _range_list_opt: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -21319,10 +20225,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn range_list_list_0(
         &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _range_item: &ParseTreeStackEntry<'t>,
-        _range_list_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _comma: &ParseTreeType<'t>,
+        _range_item: &ParseTreeType<'t>,
+        _range_list_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -21344,7 +20249,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// RangeListList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn range_list_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn range_list_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let range_list_list_1_built = Vec::new();
@@ -21357,11 +20262,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// RangeListOpt /* Option<T>::Some */: Comma;
     ///
     #[parol_runtime::function_name::named]
-    fn range_list_opt_0(
-        &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn range_list_opt_0(&mut self, _comma: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comma = pop_item!(self, comma, Comma, context);
@@ -21380,7 +20281,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// RangeListOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn range_list_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn range_list_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::RangeListOpt(None), context);
@@ -21392,11 +20293,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// RangeItem: Range;
     ///
     #[parol_runtime::function_name::named]
-    fn range_item(
-        &mut self,
-        _range: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn range_item(&mut self, _range: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let range = pop_item!(self, range, Range, context);
@@ -21416,11 +20313,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn select(
         &mut self,
-        _l_bracket: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _select_opt: &ParseTreeStackEntry<'t>,
-        _r_bracket: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _l_bracket: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
+        _select_opt: &ParseTreeType<'t>,
+        _r_bracket: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -21447,9 +20343,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn select_opt_0(
         &mut self,
-        _select_operator: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _select_operator: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -21471,7 +20366,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// SelectOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn select_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn select_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::SelectOpt(None), context);
@@ -21483,11 +20378,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// SelectOperator: Colon;
     ///
     #[parol_runtime::function_name::named]
-    fn select_operator_0(
-        &mut self,
-        _colon: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn select_operator_0(&mut self, _colon: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let colon = pop_item!(self, colon, Colon, context);
@@ -21507,11 +20398,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// SelectOperator: PlusColon;
     ///
     #[parol_runtime::function_name::named]
-    fn select_operator_1(
-        &mut self,
-        _plus_colon: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn select_operator_1(&mut self, _plus_colon: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let plus_colon = pop_item!(self, plus_colon, PlusColon, context);
@@ -21531,11 +20418,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// SelectOperator: MinusColon;
     ///
     #[parol_runtime::function_name::named]
-    fn select_operator_2(
-        &mut self,
-        _minus_colon: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn select_operator_2(&mut self, _minus_colon: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let minus_colon = pop_item!(self, minus_colon, MinusColon, context);
@@ -21555,11 +20438,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// SelectOperator: Step;
     ///
     #[parol_runtime::function_name::named]
-    fn select_operator_3(
-        &mut self,
-        _step: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn select_operator_3(&mut self, _step: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let step = pop_item!(self, step, Step, context);
@@ -21581,11 +20460,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn width(
         &mut self,
-        _l_angle: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _width_list: &ParseTreeStackEntry<'t>,
-        _r_angle: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _l_angle: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
+        _width_list: &ParseTreeType<'t>,
+        _r_angle: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -21612,10 +20490,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn width_list_0(
         &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _width_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _comma: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
+        _width_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -21637,7 +20514,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// WidthList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn width_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn width_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let width_list_1_built = Vec::new();
@@ -21652,11 +20529,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn array(
         &mut self,
-        _l_bracket: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _array_list: &ParseTreeStackEntry<'t>,
-        _r_bracket: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _l_bracket: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
+        _array_list: &ParseTreeType<'t>,
+        _r_bracket: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -21683,10 +20559,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn array_list_0(
         &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _array_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _comma: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
+        _array_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -21708,7 +20583,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ArrayList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn array_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn array_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let array_list_1_built = Vec::new();
@@ -21723,9 +20598,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn range(
         &mut self,
-        _expression: &ParseTreeStackEntry<'t>,
-        _range_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _expression: &ParseTreeType<'t>,
+        _range_opt: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -21748,9 +20622,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn range_opt_0(
         &mut self,
-        _range_operator: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _range_operator: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -21772,7 +20645,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// RangeOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn range_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn range_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::RangeOpt(None), context);
@@ -21784,11 +20657,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// RangeOperator: DotDot;
     ///
     #[parol_runtime::function_name::named]
-    fn range_operator_0(
-        &mut self,
-        _dot_dot: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn range_operator_0(&mut self, _dot_dot: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let dot_dot = pop_item!(self, dot_dot, DotDot, context);
@@ -21807,11 +20676,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// RangeOperator: DotDotEqu;
     ///
     #[parol_runtime::function_name::named]
-    fn range_operator_1(
-        &mut self,
-        _dot_dot_equ: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn range_operator_1(&mut self, _dot_dot_equ: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let dot_dot_equ = pop_item!(self, dot_dot_equ, DotDotEqu, context);
@@ -21830,11 +20695,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// FixedType: U32;
     ///
     #[parol_runtime::function_name::named]
-    fn fixed_type_0(
-        &mut self,
-        _u32: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn fixed_type_0(&mut self, _u32: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let u32 = pop_item!(self, u32, U32, context);
@@ -21851,11 +20712,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// FixedType: U64;
     ///
     #[parol_runtime::function_name::named]
-    fn fixed_type_1(
-        &mut self,
-        _u64: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn fixed_type_1(&mut self, _u64: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let u64 = pop_item!(self, u64, U64, context);
@@ -21872,11 +20729,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// FixedType: I32;
     ///
     #[parol_runtime::function_name::named]
-    fn fixed_type_2(
-        &mut self,
-        _i32: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn fixed_type_2(&mut self, _i32: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let i32 = pop_item!(self, i32, I32, context);
@@ -21893,11 +20746,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// FixedType: I64;
     ///
     #[parol_runtime::function_name::named]
-    fn fixed_type_3(
-        &mut self,
-        _i64: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn fixed_type_3(&mut self, _i64: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let i64 = pop_item!(self, i64, I64, context);
@@ -21914,11 +20763,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// FixedType: F32;
     ///
     #[parol_runtime::function_name::named]
-    fn fixed_type_4(
-        &mut self,
-        _f32: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn fixed_type_4(&mut self, _f32: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let f32 = pop_item!(self, f32, F32, context);
@@ -21935,11 +20780,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// FixedType: F64;
     ///
     #[parol_runtime::function_name::named]
-    fn fixed_type_5(
-        &mut self,
-        _f64: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn fixed_type_5(&mut self, _f64: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let f64 = pop_item!(self, f64, F64, context);
@@ -21956,11 +20797,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// FixedType: Strin;
     ///
     #[parol_runtime::function_name::named]
-    fn fixed_type_6(
-        &mut self,
-        _strin: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn fixed_type_6(&mut self, _strin: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let strin = pop_item!(self, strin, Strin, context);
@@ -21981,9 +20818,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn variable_type(
         &mut self,
-        _variable_type_group: &ParseTreeStackEntry<'t>,
-        _variable_type_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _variable_type_group: &ParseTreeType<'t>,
+        _variable_type_opt: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -22004,11 +20840,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// VariableTypeGroup: Logic;
     ///
     #[parol_runtime::function_name::named]
-    fn variable_type_group_0(
-        &mut self,
-        _logic: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn variable_type_group_0(&mut self, _logic: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let logic = pop_item!(self, logic, Logic, context);
@@ -22028,11 +20860,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// VariableTypeGroup: Bit;
     ///
     #[parol_runtime::function_name::named]
-    fn variable_type_group_1(
-        &mut self,
-        _bit: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn variable_type_group_1(&mut self, _bit: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let bit = pop_item!(self, bit, Bit, context);
@@ -22050,11 +20878,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// VariableTypeGroup: ScopedIdentifier;
     ///
     #[parol_runtime::function_name::named]
-    fn variable_type_group_2(
-        &mut self,
-        _scoped_identifier: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn variable_type_group_2(&mut self, _scoped_identifier: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let scoped_identifier = pop_item!(self, scoped_identifier, ScopedIdentifier, context);
@@ -22075,11 +20899,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// VariableTypeOpt /* Option<T>::Some */: Width;
     ///
     #[parol_runtime::function_name::named]
-    fn variable_type_opt_0(
-        &mut self,
-        _width: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn variable_type_opt_0(&mut self, _width: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let width = pop_item!(self, width, Width, context);
@@ -22098,7 +20918,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// VariableTypeOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn variable_type_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn variable_type_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::VariableTypeOpt(None), context);
@@ -22110,11 +20930,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// TypeModifier: Tri;
     ///
     #[parol_runtime::function_name::named]
-    fn type_modifier_0(
-        &mut self,
-        _tri: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn type_modifier_0(&mut self, _tri: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let tri = pop_item!(self, tri, Tri, context);
@@ -22131,11 +20947,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// TypeModifier: Signed;
     ///
     #[parol_runtime::function_name::named]
-    fn type_modifier_1(
-        &mut self,
-        _signed: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn type_modifier_1(&mut self, _signed: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let signed = pop_item!(self, signed, Signed, context);
@@ -22156,9 +20968,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn scalar_type(
         &mut self,
-        _scalar_type_list: &ParseTreeStackEntry<'t>,
-        _scalar_type_group: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _scalar_type_list: &ParseTreeType<'t>,
+        _scalar_type_group: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -22180,11 +20991,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ScalarTypeGroup: VariableType;
     ///
     #[parol_runtime::function_name::named]
-    fn scalar_type_group_0(
-        &mut self,
-        _variable_type: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn scalar_type_group_0(&mut self, _variable_type: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let variable_type = pop_item!(self, variable_type, VariableType, context);
@@ -22201,11 +21008,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ScalarTypeGroup: FixedType;
     ///
     #[parol_runtime::function_name::named]
-    fn scalar_type_group_1(
-        &mut self,
-        _fixed_type: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn scalar_type_group_1(&mut self, _fixed_type: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let fixed_type = pop_item!(self, fixed_type, FixedType, context);
@@ -22224,9 +21027,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn scalar_type_list_0(
         &mut self,
-        _type_modifier: &ParseTreeStackEntry<'t>,
-        _scalar_type_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _type_modifier: &ParseTreeType<'t>,
+        _scalar_type_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -22246,7 +21048,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ScalarTypeList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn scalar_type_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn scalar_type_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let scalar_type_list_1_built = Vec::new();
@@ -22261,9 +21063,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn array_type(
         &mut self,
-        _scalar_type: &ParseTreeStackEntry<'t>,
-        _array_type_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _scalar_type: &ParseTreeType<'t>,
+        _array_type_opt: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -22284,11 +21085,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ArrayTypeOpt /* Option<T>::Some */: Array;
     ///
     #[parol_runtime::function_name::named]
-    fn array_type_opt_0(
-        &mut self,
-        _array: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn array_type_opt_0(&mut self, _array: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let array = pop_item!(self, array, Array, context);
@@ -22307,7 +21104,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ArrayTypeOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn array_type_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn array_type_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::ArrayTypeOpt(None), context);
@@ -22319,11 +21116,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Statement: IdentifierStatement;
     ///
     #[parol_runtime::function_name::named]
-    fn statement_0(
-        &mut self,
-        _identifier_statement: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn statement_0(&mut self, _identifier_statement: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let identifier_statement =
@@ -22343,11 +21136,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Statement: IfStatement;
     ///
     #[parol_runtime::function_name::named]
-    fn statement_1(
-        &mut self,
-        _if_statement: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn statement_1(&mut self, _if_statement: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let if_statement = pop_item!(self, if_statement, IfStatement, context);
@@ -22366,11 +21155,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Statement: IfResetStatement;
     ///
     #[parol_runtime::function_name::named]
-    fn statement_2(
-        &mut self,
-        _if_reset_statement: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn statement_2(&mut self, _if_reset_statement: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let if_reset_statement = pop_item!(self, if_reset_statement, IfResetStatement, context);
@@ -22389,11 +21174,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Statement: ReturnStatement;
     ///
     #[parol_runtime::function_name::named]
-    fn statement_3(
-        &mut self,
-        _return_statement: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn statement_3(&mut self, _return_statement: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let return_statement = pop_item!(self, return_statement, ReturnStatement, context);
@@ -22412,11 +21193,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Statement: ForStatement;
     ///
     #[parol_runtime::function_name::named]
-    fn statement_4(
-        &mut self,
-        _for_statement: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn statement_4(&mut self, _for_statement: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let for_statement = pop_item!(self, for_statement, ForStatement, context);
@@ -22435,11 +21212,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Statement: CaseStatement;
     ///
     #[parol_runtime::function_name::named]
-    fn statement_5(
-        &mut self,
-        _case_statement: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn statement_5(&mut self, _case_statement: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let case_statement = pop_item!(self, case_statement, CaseStatement, context);
@@ -22460,10 +21233,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn identifier_statement(
         &mut self,
-        _expression_identifier: &ParseTreeStackEntry<'t>,
-        _identifier_statement_group: &ParseTreeStackEntry<'t>,
-        _semicolon: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _expression_identifier: &ParseTreeType<'t>,
+        _identifier_statement_group: &ParseTreeType<'t>,
+        _semicolon: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -22496,11 +21268,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// IdentifierStatementGroup: FunctionCall;
     ///
     #[parol_runtime::function_name::named]
-    fn identifier_statement_group_0(
-        &mut self,
-        _function_call: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn identifier_statement_group_0(&mut self, _function_call: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let function_call = pop_item!(self, function_call, FunctionCall, context);
@@ -22521,11 +21289,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// IdentifierStatementGroup: Assignment;
     ///
     #[parol_runtime::function_name::named]
-    fn identifier_statement_group_1(
-        &mut self,
-        _assignment: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn identifier_statement_group_1(&mut self, _assignment: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let assignment = pop_item!(self, assignment, Assignment, context);
@@ -22548,9 +21312,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn assignment(
         &mut self,
-        _assignment_group: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _assignment_group: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -22571,11 +21334,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AssignmentGroup: Equ;
     ///
     #[parol_runtime::function_name::named]
-    fn assignment_group_0(
-        &mut self,
-        _equ: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn assignment_group_0(&mut self, _equ: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let equ = pop_item!(self, equ, Equ, context);
@@ -22590,11 +21349,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AssignmentGroup: AssignmentOperator;
     ///
     #[parol_runtime::function_name::named]
-    fn assignment_group_1(
-        &mut self,
-        _assignment_operator: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn assignment_group_1(&mut self, _assignment_operator: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let assignment_operator = pop_item!(self, assignment_operator, AssignmentOperator, context);
@@ -22614,14 +21369,13 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn if_statement(
         &mut self,
-        _if: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _if_statement_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _if_statement_list0: &ParseTreeStackEntry<'t>,
-        _if_statement_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _if: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _if_statement_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
+        _if_statement_list0: &ParseTreeType<'t>,
+        _if_statement_opt: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -22656,14 +21410,13 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn if_statement_list0_0(
         &mut self,
-        _else: &ParseTreeStackEntry<'t>,
-        _if: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _if_statement_list0_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _if_statement_list0: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _else: &ParseTreeType<'t>,
+        _if: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _if_statement_list0_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
+        _if_statement_list0: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -22696,9 +21449,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn if_statement_list0_list_0(
         &mut self,
-        _statement: &ParseTreeStackEntry<'t>,
-        _if_statement_list0_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _statement: &ParseTreeType<'t>,
+        _if_statement_list0_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -22722,7 +21474,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// IfStatementList0List /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn if_statement_list0_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn if_statement_list0_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let if_statement_list0_list_1_built = Vec::new();
@@ -22738,7 +21490,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// IfStatementList0 /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn if_statement_list0_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn if_statement_list0_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let if_statement_list0_1_built = Vec::new();
@@ -22756,9 +21508,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn if_statement_list_0(
         &mut self,
-        _statement: &ParseTreeStackEntry<'t>,
-        _if_statement_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _statement: &ParseTreeType<'t>,
+        _if_statement_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -22778,7 +21529,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// IfStatementList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn if_statement_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn if_statement_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let if_statement_list_1_built = Vec::new();
@@ -22793,11 +21544,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn if_statement_opt_0(
         &mut self,
-        _else: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _if_statement_opt_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _else: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _if_statement_opt_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -22826,9 +21576,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn if_statement_opt_list_0(
         &mut self,
-        _statement: &ParseTreeStackEntry<'t>,
-        _if_statement_opt_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _statement: &ParseTreeType<'t>,
+        _if_statement_opt_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -22849,7 +21598,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// IfStatementOptList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn if_statement_opt_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn if_statement_opt_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let if_statement_opt_list_1_built = Vec::new();
@@ -22865,7 +21614,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// IfStatementOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn if_statement_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn if_statement_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::IfStatementOpt(None), context);
@@ -22879,13 +21628,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn if_reset_statement(
         &mut self,
-        _if_reset: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _if_reset_statement_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _if_reset_statement_list0: &ParseTreeStackEntry<'t>,
-        _if_reset_statement_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _if_reset: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _if_reset_statement_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
+        _if_reset_statement_list0: &ParseTreeType<'t>,
+        _if_reset_statement_opt: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -22924,14 +21672,13 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn if_reset_statement_list0_0(
         &mut self,
-        _else: &ParseTreeStackEntry<'t>,
-        _if: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _if_reset_statement_list0_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _if_reset_statement_list0: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _else: &ParseTreeType<'t>,
+        _if: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _if_reset_statement_list0_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
+        _if_reset_statement_list0: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -22976,9 +21723,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn if_reset_statement_list0_list_0(
         &mut self,
-        _statement: &ParseTreeStackEntry<'t>,
-        _if_reset_statement_list0_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _statement: &ParseTreeType<'t>,
+        _if_reset_statement_list0_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -23006,10 +21752,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// IfResetStatementList0List /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn if_reset_statement_list0_list_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn if_reset_statement_list0_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let if_reset_statement_list0_list_1_built = Vec::new();
@@ -23025,7 +21768,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// IfResetStatementList0 /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn if_reset_statement_list0_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn if_reset_statement_list0_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let if_reset_statement_list0_1_built = Vec::new();
@@ -23043,9 +21786,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn if_reset_statement_list_0(
         &mut self,
-        _statement: &ParseTreeStackEntry<'t>,
-        _if_reset_statement_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _statement: &ParseTreeType<'t>,
+        _if_reset_statement_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -23069,7 +21811,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// IfResetStatementList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn if_reset_statement_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn if_reset_statement_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let if_reset_statement_list_1_built = Vec::new();
@@ -23087,11 +21829,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn if_reset_statement_opt_0(
         &mut self,
-        _else: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _if_reset_statement_opt_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _else: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _if_reset_statement_opt_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -23124,9 +21865,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn if_reset_statement_opt_list_0(
         &mut self,
-        _statement: &ParseTreeStackEntry<'t>,
-        _if_reset_statement_opt_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _statement: &ParseTreeType<'t>,
+        _if_reset_statement_opt_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -23154,10 +21894,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// IfResetStatementOptList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn if_reset_statement_opt_list_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn if_reset_statement_opt_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let if_reset_statement_opt_list_1_built = Vec::new();
@@ -23173,7 +21910,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// IfResetStatementOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn if_reset_statement_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn if_reset_statement_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::IfResetStatementOpt(None), context);
@@ -23187,10 +21924,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn return_statement(
         &mut self,
-        _return: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _semicolon: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _return: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
+        _semicolon: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -23216,17 +21952,16 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn for_statement(
         &mut self,
-        _for: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _colon: &ParseTreeStackEntry<'t>,
-        _scalar_type: &ParseTreeStackEntry<'t>,
-        _in: &ParseTreeStackEntry<'t>,
-        _range: &ParseTreeStackEntry<'t>,
-        _for_statement_opt: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _for_statement_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _for: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+        _colon: &ParseTreeType<'t>,
+        _scalar_type: &ParseTreeType<'t>,
+        _in: &ParseTreeType<'t>,
+        _range: &ParseTreeType<'t>,
+        _for_statement_opt: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _for_statement_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -23266,9 +22001,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn for_statement_list_0(
         &mut self,
-        _statement: &ParseTreeStackEntry<'t>,
-        _for_statement_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _statement: &ParseTreeType<'t>,
+        _for_statement_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -23288,7 +22022,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ForStatementList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn for_statement_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn for_statement_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let for_statement_list_1_built = Vec::new();
@@ -23306,10 +22040,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn for_statement_opt_0(
         &mut self,
-        _step: &ParseTreeStackEntry<'t>,
-        _assignment_operator: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _step: &ParseTreeType<'t>,
+        _assignment_operator: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -23333,7 +22066,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ForStatementOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn for_statement_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn for_statement_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::ForStatementOpt(None), context);
@@ -23347,12 +22080,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn case_statement(
         &mut self,
-        _case: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _case_statement_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _case: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _case_statement_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -23382,9 +22114,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn case_statement_list_0(
         &mut self,
-        _case_item: &ParseTreeStackEntry<'t>,
-        _case_statement_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _case_item: &ParseTreeType<'t>,
+        _case_statement_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -23405,7 +22136,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// CaseStatementList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn case_statement_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn case_statement_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let case_statement_list_1_built = Vec::new();
@@ -23423,10 +22154,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn case_item(
         &mut self,
-        _case_item_group: &ParseTreeStackEntry<'t>,
-        _colon: &ParseTreeStackEntry<'t>,
-        _case_item_group0: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _case_item_group: &ParseTreeType<'t>,
+        _colon: &ParseTreeType<'t>,
+        _case_item_group0: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -23449,11 +22179,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// CaseItemGroup0: Statement;
     ///
     #[parol_runtime::function_name::named]
-    fn case_item_group0_0(
-        &mut self,
-        _statement: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn case_item_group0_0(&mut self, _statement: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let statement = pop_item!(self, statement, Statement, context);
@@ -23472,10 +22198,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn case_item_group0_1(
         &mut self,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _case_item_group0_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _l_brace: &ParseTreeType<'t>,
+        _case_item_group0_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -23501,9 +22226,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn case_item_group0_list_0(
         &mut self,
-        _statement: &ParseTreeStackEntry<'t>,
-        _case_item_group0_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _statement: &ParseTreeType<'t>,
+        _case_item_group0_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -23524,7 +22248,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// CaseItemGroup0List /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn case_item_group0_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn case_item_group0_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let case_item_group0_list_1_built = Vec::new();
@@ -23540,11 +22264,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// CaseItemGroup: Expression;
     ///
     #[parol_runtime::function_name::named]
-    fn case_item_group_0(
-        &mut self,
-        _expression: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn case_item_group_0(&mut self, _expression: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let expression = pop_item!(self, expression, Expression, context);
@@ -23561,11 +22281,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// CaseItemGroup: Defaul;
     ///
     #[parol_runtime::function_name::named]
-    fn case_item_group_1(
-        &mut self,
-        _defaul: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn case_item_group_1(&mut self, _defaul: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let defaul = pop_item!(self, defaul, Defaul, context);
@@ -23584,12 +22300,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn attribute(
         &mut self,
-        _hash: &ParseTreeStackEntry<'t>,
-        _l_bracket: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _attribute_opt: &ParseTreeStackEntry<'t>,
-        _r_bracket: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _hash: &ParseTreeType<'t>,
+        _l_bracket: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+        _attribute_opt: &ParseTreeType<'t>,
+        _r_bracket: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -23618,10 +22333,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn attribute_opt_0(
         &mut self,
-        _l_paren: &ParseTreeStackEntry<'t>,
-        _attribute_list: &ParseTreeStackEntry<'t>,
-        _r_paren: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _l_paren: &ParseTreeType<'t>,
+        _attribute_list: &ParseTreeType<'t>,
+        _r_paren: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -23645,7 +22359,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AttributeOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn attribute_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn attribute_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::AttributeOpt(None), context);
@@ -23659,10 +22373,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn attribute_list(
         &mut self,
-        _attribute_item: &ParseTreeStackEntry<'t>,
-        _attribute_list_list: &ParseTreeStackEntry<'t>,
-        _attribute_list_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _attribute_item: &ParseTreeType<'t>,
+        _attribute_list_list: &ParseTreeType<'t>,
+        _attribute_list_opt: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -23688,10 +22401,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn attribute_list_list_0(
         &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _attribute_item: &ParseTreeStackEntry<'t>,
-        _attribute_list_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _comma: &ParseTreeType<'t>,
+        _attribute_item: &ParseTreeType<'t>,
+        _attribute_list_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -23714,7 +22426,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AttributeListList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn attribute_list_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn attribute_list_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let attribute_list_list_1_built = Vec::new();
@@ -23730,11 +22442,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AttributeListOpt /* Option<T>::Some */: Comma;
     ///
     #[parol_runtime::function_name::named]
-    fn attribute_list_opt_0(
-        &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn attribute_list_opt_0(&mut self, _comma: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comma = pop_item!(self, comma, Comma, context);
@@ -23753,7 +22461,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AttributeListOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn attribute_list_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn attribute_list_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::AttributeListOpt(None), context);
@@ -23765,11 +22473,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AttributeItem: Identifier;
     ///
     #[parol_runtime::function_name::named]
-    fn attribute_item_0(
-        &mut self,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn attribute_item_0(&mut self, _identifier: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let identifier = pop_item!(self, identifier, Identifier, context);
@@ -23788,11 +22492,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AttributeItem: StringLiteral;
     ///
     #[parol_runtime::function_name::named]
-    fn attribute_item_1(
-        &mut self,
-        _string_literal: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn attribute_item_1(&mut self, _string_literal: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let string_literal = pop_item!(self, string_literal, StringLiteral, context);
@@ -23813,13 +22513,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn var_declaration(
         &mut self,
-        _var: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _colon: &ParseTreeStackEntry<'t>,
-        _array_type: &ParseTreeStackEntry<'t>,
-        _var_declaration_opt: &ParseTreeStackEntry<'t>,
-        _semicolon: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _var: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+        _colon: &ParseTreeType<'t>,
+        _array_type: &ParseTreeType<'t>,
+        _var_declaration_opt: &ParseTreeType<'t>,
+        _semicolon: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -23850,9 +22549,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn var_declaration_opt_0(
         &mut self,
-        _equ: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _equ: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -23874,7 +22572,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// VarDeclarationOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn var_declaration_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn var_declaration_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::VarDeclarationOpt(None), context);
@@ -23888,12 +22586,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn localparam_declaration(
         &mut self,
-        _localparam: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _colon: &ParseTreeStackEntry<'t>,
-        _localparam_declaration_group: &ParseTreeStackEntry<'t>,
-        _semicolon: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _localparam: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+        _colon: &ParseTreeType<'t>,
+        _localparam_declaration_group: &ParseTreeType<'t>,
+        _semicolon: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -23931,10 +22628,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn localparam_declaration_group_0(
         &mut self,
-        _array_type: &ParseTreeStackEntry<'t>,
-        _equ: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _array_type: &ParseTreeType<'t>,
+        _equ: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -23965,10 +22661,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn localparam_declaration_group_1(
         &mut self,
-        _type: &ParseTreeStackEntry<'t>,
-        _equ: &ParseTreeStackEntry<'t>,
-        _type_expression: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _type: &ParseTreeType<'t>,
+        _equ: &ParseTreeType<'t>,
+        _type_expression: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -23997,15 +22692,14 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn always_ff_declaration(
         &mut self,
-        _always_ff: &ParseTreeStackEntry<'t>,
-        _l_paren: &ParseTreeStackEntry<'t>,
-        _always_ff_clock: &ParseTreeStackEntry<'t>,
-        _always_ff_declaration_opt: &ParseTreeStackEntry<'t>,
-        _r_paren: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _always_ff_declaration_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _always_ff: &ParseTreeType<'t>,
+        _l_paren: &ParseTreeType<'t>,
+        _always_ff_clock: &ParseTreeType<'t>,
+        _always_ff_declaration_opt: &ParseTreeType<'t>,
+        _r_paren: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _always_ff_declaration_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -24054,9 +22748,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn always_ff_declaration_list_0(
         &mut self,
-        _statement: &ParseTreeStackEntry<'t>,
-        _always_ff_declaration_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _statement: &ParseTreeType<'t>,
+        _always_ff_declaration_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -24084,10 +22777,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AlwaysFfDeclarationList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn always_ff_declaration_list_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn always_ff_declaration_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let always_ff_declaration_list_1_built = Vec::new();
@@ -24105,9 +22795,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn always_ff_declaration_opt_0(
         &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _always_ff_reset: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _comma: &ParseTreeType<'t>,
+        _always_ff_reset: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -24129,7 +22818,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AlwaysFfDeclarationOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn always_ff_declaration_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn always_ff_declaration_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::AlwaysFfDeclarationOpt(None), context);
@@ -24143,9 +22832,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn always_ff_clock(
         &mut self,
-        _always_ff_clock_opt: &ParseTreeStackEntry<'t>,
-        _hierarchical_identifier: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _always_ff_clock_opt: &ParseTreeType<'t>,
+        _hierarchical_identifier: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -24173,8 +22861,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn always_ff_clock_opt_0(
         &mut self,
-        _always_ff_clock_opt_group: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _always_ff_clock_opt_group: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -24199,11 +22886,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AlwaysFfClockOptGroup: Posedge;
     ///
     #[parol_runtime::function_name::named]
-    fn always_ff_clock_opt_group_0(
-        &mut self,
-        _posedge: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn always_ff_clock_opt_group_0(&mut self, _posedge: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let posedge = pop_item!(self, posedge, Posedge, context);
@@ -24224,11 +22907,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AlwaysFfClockOptGroup: Negedge;
     ///
     #[parol_runtime::function_name::named]
-    fn always_ff_clock_opt_group_1(
-        &mut self,
-        _negedge: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn always_ff_clock_opt_group_1(&mut self, _negedge: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let negedge = pop_item!(self, negedge, Negedge, context);
@@ -24249,7 +22928,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AlwaysFfClockOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn always_ff_clock_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn always_ff_clock_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::AlwaysFfClockOpt(None), context);
@@ -24263,9 +22942,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn always_ff_reset(
         &mut self,
-        _always_ff_reset_opt: &ParseTreeStackEntry<'t>,
-        _hierarchical_identifier: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _always_ff_reset_opt: &ParseTreeType<'t>,
+        _hierarchical_identifier: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -24293,8 +22971,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn always_ff_reset_opt_0(
         &mut self,
-        _always_ff_reset_opt_group: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _always_ff_reset_opt_group: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -24319,11 +22996,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AlwaysFfResetOptGroup: AsyncLow;
     ///
     #[parol_runtime::function_name::named]
-    fn always_ff_reset_opt_group_0(
-        &mut self,
-        _async_low: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn always_ff_reset_opt_group_0(&mut self, _async_low: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let async_low = pop_item!(self, async_low, AsyncLow, context);
@@ -24344,11 +23017,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AlwaysFfResetOptGroup: AsyncHigh;
     ///
     #[parol_runtime::function_name::named]
-    fn always_ff_reset_opt_group_1(
-        &mut self,
-        _async_high: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn always_ff_reset_opt_group_1(&mut self, _async_high: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let async_high = pop_item!(self, async_high, AsyncHigh, context);
@@ -24369,11 +23038,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AlwaysFfResetOptGroup: SyncLow;
     ///
     #[parol_runtime::function_name::named]
-    fn always_ff_reset_opt_group_2(
-        &mut self,
-        _sync_low: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn always_ff_reset_opt_group_2(&mut self, _sync_low: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let sync_low = pop_item!(self, sync_low, SyncLow, context);
@@ -24394,11 +23059,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AlwaysFfResetOptGroup: SyncHigh;
     ///
     #[parol_runtime::function_name::named]
-    fn always_ff_reset_opt_group_3(
-        &mut self,
-        _sync_high: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn always_ff_reset_opt_group_3(&mut self, _sync_high: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let sync_high = pop_item!(self, sync_high, SyncHigh, context);
@@ -24419,7 +23080,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AlwaysFfResetOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn always_ff_reset_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn always_ff_reset_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::AlwaysFfResetOpt(None), context);
@@ -24433,11 +23094,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn always_comb_declaration(
         &mut self,
-        _always_comb: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _always_comb_declaration_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _always_comb: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _always_comb_declaration_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -24473,9 +23133,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn always_comb_declaration_list_0(
         &mut self,
-        _statement: &ParseTreeStackEntry<'t>,
-        _always_comb_declaration_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _statement: &ParseTreeType<'t>,
+        _always_comb_declaration_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -24503,10 +23162,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// AlwaysCombDeclarationList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn always_comb_declaration_list_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn always_comb_declaration_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let always_comb_declaration_list_1_built = Vec::new();
@@ -24524,12 +23180,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn assign_declaration(
         &mut self,
-        _assign: &ParseTreeStackEntry<'t>,
-        _hierarchical_identifier: &ParseTreeStackEntry<'t>,
-        _equ: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _semicolon: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _assign: &ParseTreeType<'t>,
+        _hierarchical_identifier: &ParseTreeType<'t>,
+        _equ: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
+        _semicolon: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -24567,12 +23222,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn modport_declaration(
         &mut self,
-        _modport: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _modport_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _modport: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _modport_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -24605,10 +23259,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn modport_list(
         &mut self,
-        _modport_group: &ParseTreeStackEntry<'t>,
-        _modport_list_list: &ParseTreeStackEntry<'t>,
-        _modport_list_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _modport_group: &ParseTreeType<'t>,
+        _modport_list_list: &ParseTreeType<'t>,
+        _modport_list_opt: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -24634,10 +23287,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn modport_list_list_0(
         &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _modport_group: &ParseTreeStackEntry<'t>,
-        _modport_list_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _comma: &ParseTreeType<'t>,
+        _modport_group: &ParseTreeType<'t>,
+        _modport_list_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -24659,7 +23311,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModportListList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn modport_list_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn modport_list_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let modport_list_list_1_built = Vec::new();
@@ -24672,11 +23324,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModportListOpt /* Option<T>::Some */: Comma;
     ///
     #[parol_runtime::function_name::named]
-    fn modport_list_opt_0(
-        &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn modport_list_opt_0(&mut self, _comma: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comma = pop_item!(self, comma, Comma, context);
@@ -24695,7 +23343,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModportListOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn modport_list_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn modport_list_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::ModportListOpt(None), context);
@@ -24709,9 +23357,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn modport_group(
         &mut self,
-        _modport_group_list: &ParseTreeStackEntry<'t>,
-        _modport_group_group: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _modport_group_list: &ParseTreeType<'t>,
+        _modport_group_group: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -24735,10 +23382,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn modport_group_group_0(
         &mut self,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _modport_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _l_brace: &ParseTreeType<'t>,
+        _modport_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -24764,11 +23410,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModportGroupGroup: ModportItem;
     ///
     #[parol_runtime::function_name::named]
-    fn modport_group_group_1(
-        &mut self,
-        _modport_item: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn modport_group_group_1(&mut self, _modport_item: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let modport_item = pop_item!(self, modport_item, ModportItem, context);
@@ -24791,9 +23433,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn modport_group_list_0(
         &mut self,
-        _attribute: &ParseTreeStackEntry<'t>,
-        _modport_group_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _attribute: &ParseTreeType<'t>,
+        _modport_group_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -24813,7 +23454,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModportGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn modport_group_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn modport_group_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let modport_group_list_1_built = Vec::new();
@@ -24831,10 +23472,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn modport_item(
         &mut self,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _colon: &ParseTreeStackEntry<'t>,
-        _direction: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _identifier: &ParseTreeType<'t>,
+        _colon: &ParseTreeType<'t>,
+        _direction: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -24859,14 +23499,13 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn enum_declaration(
         &mut self,
-        _enum: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _colon: &ParseTreeStackEntry<'t>,
-        _scalar_type: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _enum_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _enum: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+        _colon: &ParseTreeType<'t>,
+        _scalar_type: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _enum_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -24900,10 +23539,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn enum_list(
         &mut self,
-        _enum_group: &ParseTreeStackEntry<'t>,
-        _enum_list_list: &ParseTreeStackEntry<'t>,
-        _enum_list_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _enum_group: &ParseTreeType<'t>,
+        _enum_list_list: &ParseTreeType<'t>,
+        _enum_list_opt: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -24928,10 +23566,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn enum_list_list_0(
         &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _enum_group: &ParseTreeStackEntry<'t>,
-        _enum_list_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _comma: &ParseTreeType<'t>,
+        _enum_group: &ParseTreeType<'t>,
+        _enum_list_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -24953,7 +23590,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// EnumListList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn enum_list_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn enum_list_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let enum_list_list_1_built = Vec::new();
@@ -24966,11 +23603,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// EnumListOpt /* Option<T>::Some */: Comma;
     ///
     #[parol_runtime::function_name::named]
-    fn enum_list_opt_0(
-        &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn enum_list_opt_0(&mut self, _comma: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comma = pop_item!(self, comma, Comma, context);
@@ -24989,7 +23622,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// EnumListOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn enum_list_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn enum_list_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::EnumListOpt(None), context);
@@ -25003,9 +23636,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn enum_group(
         &mut self,
-        _enum_group_list: &ParseTreeStackEntry<'t>,
-        _enum_group_group: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _enum_group_list: &ParseTreeType<'t>,
+        _enum_group_group: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -25028,10 +23660,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn enum_group_group_0(
         &mut self,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _enum_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _l_brace: &ParseTreeType<'t>,
+        _enum_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -25054,11 +23685,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// EnumGroupGroup: EnumItem;
     ///
     #[parol_runtime::function_name::named]
-    fn enum_group_group_1(
-        &mut self,
-        _enum_item: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn enum_group_group_1(&mut self, _enum_item: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let enum_item = pop_item!(self, enum_item, EnumItem, context);
@@ -25077,9 +23704,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn enum_group_list_0(
         &mut self,
-        _attribute: &ParseTreeStackEntry<'t>,
-        _enum_group_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _attribute: &ParseTreeType<'t>,
+        _enum_group_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -25099,7 +23725,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// EnumGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn enum_group_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn enum_group_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let enum_group_list_1_built = Vec::new();
@@ -25114,9 +23740,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn enum_item(
         &mut self,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _enum_item_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _identifier: &ParseTreeType<'t>,
+        _enum_item_opt: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -25139,9 +23764,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn enum_item_opt_0(
         &mut self,
-        _equ: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _equ: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -25163,7 +23787,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// EnumItemOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn enum_item_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn enum_item_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::EnumItemOpt(None), context);
@@ -25177,12 +23801,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn struct_declaration(
         &mut self,
-        _struct: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _struct_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _struct: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _struct_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -25215,10 +23838,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn struct_list(
         &mut self,
-        _struct_group: &ParseTreeStackEntry<'t>,
-        _struct_list_list: &ParseTreeStackEntry<'t>,
-        _struct_list_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _struct_group: &ParseTreeType<'t>,
+        _struct_list_list: &ParseTreeType<'t>,
+        _struct_list_opt: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -25244,10 +23866,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn struct_list_list_0(
         &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _struct_group: &ParseTreeStackEntry<'t>,
-        _struct_list_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _comma: &ParseTreeType<'t>,
+        _struct_group: &ParseTreeType<'t>,
+        _struct_list_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -25269,7 +23890,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// StructListList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn struct_list_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn struct_list_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let struct_list_list_1_built = Vec::new();
@@ -25282,11 +23903,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// StructListOpt /* Option<T>::Some */: Comma;
     ///
     #[parol_runtime::function_name::named]
-    fn struct_list_opt_0(
-        &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn struct_list_opt_0(&mut self, _comma: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comma = pop_item!(self, comma, Comma, context);
@@ -25305,7 +23922,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// StructListOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn struct_list_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn struct_list_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::StructListOpt(None), context);
@@ -25319,9 +23936,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn struct_group(
         &mut self,
-        _struct_group_list: &ParseTreeStackEntry<'t>,
-        _struct_group_group: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _struct_group_list: &ParseTreeType<'t>,
+        _struct_group_group: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -25345,10 +23961,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn struct_group_group_0(
         &mut self,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _struct_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _l_brace: &ParseTreeType<'t>,
+        _struct_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -25374,11 +23989,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// StructGroupGroup: StructItem;
     ///
     #[parol_runtime::function_name::named]
-    fn struct_group_group_1(
-        &mut self,
-        _struct_item: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn struct_group_group_1(&mut self, _struct_item: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let struct_item = pop_item!(self, struct_item, StructItem, context);
@@ -25400,9 +24011,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn struct_group_list_0(
         &mut self,
-        _attribute: &ParseTreeStackEntry<'t>,
-        _struct_group_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _attribute: &ParseTreeType<'t>,
+        _struct_group_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -25422,7 +24032,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// StructGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn struct_group_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn struct_group_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let struct_group_list_1_built = Vec::new();
@@ -25437,10 +24047,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn struct_item(
         &mut self,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _colon: &ParseTreeStackEntry<'t>,
-        _scalar_type: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _identifier: &ParseTreeType<'t>,
+        _colon: &ParseTreeType<'t>,
+        _scalar_type: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -25465,11 +24074,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn initial_declaration(
         &mut self,
-        _initial: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _initial_declaration_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _initial: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _initial_declaration_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -25505,9 +24113,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn initial_declaration_list_0(
         &mut self,
-        _statement: &ParseTreeStackEntry<'t>,
-        _initial_declaration_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _statement: &ParseTreeType<'t>,
+        _initial_declaration_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -25535,7 +24142,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InitialDeclarationList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn initial_declaration_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn initial_declaration_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let initial_declaration_list_1_built = Vec::new();
@@ -25553,11 +24160,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn final_declaration(
         &mut self,
-        _final: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _final_declaration_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _final: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _final_declaration_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -25586,9 +24192,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn final_declaration_list_0(
         &mut self,
-        _statement: &ParseTreeStackEntry<'t>,
-        _final_declaration_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _statement: &ParseTreeType<'t>,
+        _final_declaration_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -25612,7 +24217,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// FinalDeclarationList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn final_declaration_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn final_declaration_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let final_declaration_list_1_built = Vec::new();
@@ -25630,15 +24235,14 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn inst_declaration(
         &mut self,
-        _inst: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _colon: &ParseTreeStackEntry<'t>,
-        _scoped_identifier: &ParseTreeStackEntry<'t>,
-        _inst_declaration_opt: &ParseTreeStackEntry<'t>,
-        _inst_declaration_opt0: &ParseTreeStackEntry<'t>,
-        _inst_declaration_opt1: &ParseTreeStackEntry<'t>,
-        _semicolon: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _inst: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+        _colon: &ParseTreeType<'t>,
+        _scoped_identifier: &ParseTreeType<'t>,
+        _inst_declaration_opt: &ParseTreeType<'t>,
+        _inst_declaration_opt0: &ParseTreeType<'t>,
+        _inst_declaration_opt1: &ParseTreeType<'t>,
+        _semicolon: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -25677,10 +24281,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn inst_declaration_opt1_0(
         &mut self,
-        _l_paren: &ParseTreeStackEntry<'t>,
-        _inst_declaration_opt2: &ParseTreeStackEntry<'t>,
-        _r_paren: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _l_paren: &ParseTreeType<'t>,
+        _inst_declaration_opt2: &ParseTreeType<'t>,
+        _r_paren: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -25705,11 +24308,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InstDeclarationOpt2 /* Option<T>::Some */: InstPortList;
     ///
     #[parol_runtime::function_name::named]
-    fn inst_declaration_opt2_0(
-        &mut self,
-        _inst_port_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn inst_declaration_opt2_0(&mut self, _inst_port_list: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let inst_port_list = pop_item!(self, inst_port_list, InstPortList, context);
@@ -25728,7 +24327,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InstDeclarationOpt2 /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn inst_declaration_opt2_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn inst_declaration_opt2_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::InstDeclarationOpt2(None), context);
@@ -25740,7 +24339,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InstDeclarationOpt1 /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn inst_declaration_opt1_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn inst_declaration_opt1_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::InstDeclarationOpt1(None), context);
@@ -25752,11 +24351,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InstDeclarationOpt0 /* Option<T>::Some */: InstParameter;
     ///
     #[parol_runtime::function_name::named]
-    fn inst_declaration_opt0_0(
-        &mut self,
-        _inst_parameter: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn inst_declaration_opt0_0(&mut self, _inst_parameter: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let inst_parameter = pop_item!(self, inst_parameter, InstParameter, context);
@@ -25775,7 +24370,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InstDeclarationOpt0 /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn inst_declaration_opt0_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn inst_declaration_opt0_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::InstDeclarationOpt0(None), context);
@@ -25787,11 +24382,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InstDeclarationOpt /* Option<T>::Some */: Array;
     ///
     #[parol_runtime::function_name::named]
-    fn inst_declaration_opt_0(
-        &mut self,
-        _array: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn inst_declaration_opt_0(&mut self, _array: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let array = pop_item!(self, array, Array, context);
@@ -25810,7 +24401,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InstDeclarationOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn inst_declaration_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn inst_declaration_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::InstDeclarationOpt(None), context);
@@ -25824,11 +24415,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn inst_parameter(
         &mut self,
-        _hash: &ParseTreeStackEntry<'t>,
-        _l_paren: &ParseTreeStackEntry<'t>,
-        _inst_parameter_opt: &ParseTreeStackEntry<'t>,
-        _r_paren: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _hash: &ParseTreeType<'t>,
+        _l_paren: &ParseTreeType<'t>,
+        _inst_parameter_opt: &ParseTreeType<'t>,
+        _r_paren: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -25853,11 +24443,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InstParameterOpt /* Option<T>::Some */: InstParameterList;
     ///
     #[parol_runtime::function_name::named]
-    fn inst_parameter_opt_0(
-        &mut self,
-        _inst_parameter_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn inst_parameter_opt_0(&mut self, _inst_parameter_list: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let inst_parameter_list = pop_item!(self, inst_parameter_list, InstParameterList, context);
@@ -25876,7 +24462,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InstParameterOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn inst_parameter_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn inst_parameter_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::InstParameterOpt(None), context);
@@ -25890,10 +24476,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn inst_parameter_list(
         &mut self,
-        _inst_parameter_group: &ParseTreeStackEntry<'t>,
-        _inst_parameter_list_list: &ParseTreeStackEntry<'t>,
-        _inst_parameter_list_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _inst_parameter_group: &ParseTreeType<'t>,
+        _inst_parameter_list_list: &ParseTreeType<'t>,
+        _inst_parameter_list_opt: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -25929,10 +24514,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn inst_parameter_list_list_0(
         &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _inst_parameter_group: &ParseTreeStackEntry<'t>,
-        _inst_parameter_list_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _comma: &ParseTreeType<'t>,
+        _inst_parameter_group: &ParseTreeType<'t>,
+        _inst_parameter_list_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -25963,7 +24547,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InstParameterListList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn inst_parameter_list_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn inst_parameter_list_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let inst_parameter_list_list_1_built = Vec::new();
@@ -25979,11 +24563,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InstParameterListOpt /* Option<T>::Some */: Comma;
     ///
     #[parol_runtime::function_name::named]
-    fn inst_parameter_list_opt_0(
-        &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn inst_parameter_list_opt_0(&mut self, _comma: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comma = pop_item!(self, comma, Comma, context);
@@ -26002,7 +24582,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InstParameterListOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn inst_parameter_list_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn inst_parameter_list_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::InstParameterListOpt(None), context);
@@ -26016,9 +24596,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn inst_parameter_group(
         &mut self,
-        _inst_parameter_group_list: &ParseTreeStackEntry<'t>,
-        _inst_parameter_group_group: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _inst_parameter_group_list: &ParseTreeType<'t>,
+        _inst_parameter_group_group: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -26055,10 +24634,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn inst_parameter_group_group_0(
         &mut self,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _inst_parameter_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _l_brace: &ParseTreeType<'t>,
+        _inst_parameter_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -26089,8 +24667,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn inst_parameter_group_group_1(
         &mut self,
-        _inst_parameter_item: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _inst_parameter_item: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -26114,9 +24691,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn inst_parameter_group_list_0(
         &mut self,
-        _attribute: &ParseTreeStackEntry<'t>,
-        _inst_parameter_group_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _attribute: &ParseTreeType<'t>,
+        _inst_parameter_group_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -26144,7 +24720,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InstParameterGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn inst_parameter_group_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn inst_parameter_group_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let inst_parameter_group_list_1_built = Vec::new();
@@ -26162,9 +24738,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn inst_parameter_item(
         &mut self,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _inst_parameter_item_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _identifier: &ParseTreeType<'t>,
+        _inst_parameter_item_opt: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -26192,9 +24767,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn inst_parameter_item_opt_0(
         &mut self,
-        _colon: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _colon: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -26216,7 +24790,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InstParameterItemOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn inst_parameter_item_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn inst_parameter_item_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::InstParameterItemOpt(None), context);
@@ -26230,10 +24804,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn inst_port_list(
         &mut self,
-        _inst_port_group: &ParseTreeStackEntry<'t>,
-        _inst_port_list_list: &ParseTreeStackEntry<'t>,
-        _inst_port_list_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _inst_port_group: &ParseTreeType<'t>,
+        _inst_port_list_list: &ParseTreeType<'t>,
+        _inst_port_list_opt: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -26259,10 +24832,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn inst_port_list_list_0(
         &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _inst_port_group: &ParseTreeStackEntry<'t>,
-        _inst_port_list_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _comma: &ParseTreeType<'t>,
+        _inst_port_group: &ParseTreeType<'t>,
+        _inst_port_list_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -26285,7 +24857,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InstPortListList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn inst_port_list_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn inst_port_list_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let inst_port_list_list_1_built = Vec::new();
@@ -26301,11 +24873,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InstPortListOpt /* Option<T>::Some */: Comma;
     ///
     #[parol_runtime::function_name::named]
-    fn inst_port_list_opt_0(
-        &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn inst_port_list_opt_0(&mut self, _comma: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comma = pop_item!(self, comma, Comma, context);
@@ -26324,7 +24892,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InstPortListOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn inst_port_list_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn inst_port_list_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::InstPortListOpt(None), context);
@@ -26338,9 +24906,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn inst_port_group(
         &mut self,
-        _inst_port_group_list: &ParseTreeStackEntry<'t>,
-        _inst_port_group_group: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _inst_port_group_list: &ParseTreeType<'t>,
+        _inst_port_group_group: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -26365,10 +24932,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn inst_port_group_group_0(
         &mut self,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _inst_port_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _l_brace: &ParseTreeType<'t>,
+        _inst_port_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -26394,11 +24960,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InstPortGroupGroup: InstPortItem;
     ///
     #[parol_runtime::function_name::named]
-    fn inst_port_group_group_1(
-        &mut self,
-        _inst_port_item: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn inst_port_group_group_1(&mut self, _inst_port_item: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let inst_port_item = pop_item!(self, inst_port_item, InstPortItem, context);
@@ -26421,9 +24983,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn inst_port_group_list_0(
         &mut self,
-        _attribute: &ParseTreeStackEntry<'t>,
-        _inst_port_group_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _attribute: &ParseTreeType<'t>,
+        _inst_port_group_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -26444,7 +25005,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InstPortGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn inst_port_group_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn inst_port_group_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let inst_port_group_list_1_built = Vec::new();
@@ -26462,9 +25023,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn inst_port_item(
         &mut self,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _inst_port_item_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _identifier: &ParseTreeType<'t>,
+        _inst_port_item_opt: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -26487,9 +25047,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn inst_port_item_opt_0(
         &mut self,
-        _colon: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _colon: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -26511,7 +25070,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InstPortItemOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn inst_port_item_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn inst_port_item_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::InstPortItemOpt(None), context);
@@ -26525,11 +25084,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn with_parameter(
         &mut self,
-        _hash: &ParseTreeStackEntry<'t>,
-        _l_paren: &ParseTreeStackEntry<'t>,
-        _with_parameter_opt: &ParseTreeStackEntry<'t>,
-        _r_paren: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _hash: &ParseTreeType<'t>,
+        _l_paren: &ParseTreeType<'t>,
+        _with_parameter_opt: &ParseTreeType<'t>,
+        _r_paren: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -26554,11 +25112,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// WithParameterOpt /* Option<T>::Some */: WithParameterList;
     ///
     #[parol_runtime::function_name::named]
-    fn with_parameter_opt_0(
-        &mut self,
-        _with_parameter_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn with_parameter_opt_0(&mut self, _with_parameter_list: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let with_parameter_list = pop_item!(self, with_parameter_list, WithParameterList, context);
@@ -26577,7 +25131,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// WithParameterOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn with_parameter_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn with_parameter_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::WithParameterOpt(None), context);
@@ -26591,10 +25145,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn with_parameter_list(
         &mut self,
-        _with_parameter_group: &ParseTreeStackEntry<'t>,
-        _with_parameter_list_list: &ParseTreeStackEntry<'t>,
-        _with_parameter_list_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _with_parameter_group: &ParseTreeType<'t>,
+        _with_parameter_list_list: &ParseTreeType<'t>,
+        _with_parameter_list_opt: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -26630,10 +25183,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn with_parameter_list_list_0(
         &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _with_parameter_group: &ParseTreeStackEntry<'t>,
-        _with_parameter_list_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _comma: &ParseTreeType<'t>,
+        _with_parameter_group: &ParseTreeType<'t>,
+        _with_parameter_list_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -26664,7 +25216,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// WithParameterListList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn with_parameter_list_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn with_parameter_list_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let with_parameter_list_list_1_built = Vec::new();
@@ -26680,11 +25232,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// WithParameterListOpt /* Option<T>::Some */: Comma;
     ///
     #[parol_runtime::function_name::named]
-    fn with_parameter_list_opt_0(
-        &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn with_parameter_list_opt_0(&mut self, _comma: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comma = pop_item!(self, comma, Comma, context);
@@ -26703,7 +25251,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// WithParameterListOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn with_parameter_list_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn with_parameter_list_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::WithParameterListOpt(None), context);
@@ -26717,9 +25265,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn with_parameter_group(
         &mut self,
-        _with_parameter_group_list: &ParseTreeStackEntry<'t>,
-        _with_parameter_group_group: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _with_parameter_group_list: &ParseTreeType<'t>,
+        _with_parameter_group_group: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -26756,10 +25303,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn with_parameter_group_group_0(
         &mut self,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _with_parameter_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _l_brace: &ParseTreeType<'t>,
+        _with_parameter_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -26790,8 +25336,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn with_parameter_group_group_1(
         &mut self,
-        _with_parameter_item: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _with_parameter_item: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -26815,9 +25360,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn with_parameter_group_list_0(
         &mut self,
-        _attribute: &ParseTreeStackEntry<'t>,
-        _with_parameter_group_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _attribute: &ParseTreeType<'t>,
+        _with_parameter_group_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -26845,7 +25389,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// WithParameterGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn with_parameter_group_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn with_parameter_group_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let with_parameter_group_list_1_built = Vec::new();
@@ -26863,11 +25407,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn with_parameter_item(
         &mut self,
-        _with_parameter_item_group: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _colon: &ParseTreeStackEntry<'t>,
-        _with_parameter_item_group0: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _with_parameter_item_group: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+        _colon: &ParseTreeType<'t>,
+        _with_parameter_item_group0: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -26908,10 +25451,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn with_parameter_item_group0_0(
         &mut self,
-        _array_type: &ParseTreeStackEntry<'t>,
-        _equ: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _array_type: &ParseTreeType<'t>,
+        _equ: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -26939,10 +25481,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn with_parameter_item_group0_1(
         &mut self,
-        _type: &ParseTreeStackEntry<'t>,
-        _equ: &ParseTreeStackEntry<'t>,
-        _type_expression: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _type: &ParseTreeType<'t>,
+        _equ: &ParseTreeType<'t>,
+        _type_expression: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -26968,11 +25509,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// WithParameterItemGroup: Parameter;
     ///
     #[parol_runtime::function_name::named]
-    fn with_parameter_item_group_0(
-        &mut self,
-        _parameter: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn with_parameter_item_group_0(&mut self, _parameter: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let parameter = pop_item!(self, parameter, Parameter, context);
@@ -26993,11 +25530,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// WithParameterItemGroup: Localparam;
     ///
     #[parol_runtime::function_name::named]
-    fn with_parameter_item_group_1(
-        &mut self,
-        _localparam: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn with_parameter_item_group_1(&mut self, _localparam: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let localparam = pop_item!(self, localparam, Localparam, context);
@@ -27020,10 +25553,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn port_declaration(
         &mut self,
-        _l_paren: &ParseTreeStackEntry<'t>,
-        _port_declaration_opt: &ParseTreeStackEntry<'t>,
-        _r_paren: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _l_paren: &ParseTreeType<'t>,
+        _port_declaration_opt: &ParseTreeType<'t>,
+        _r_paren: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -27048,11 +25580,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// PortDeclarationOpt /* Option<T>::Some */: PortDeclarationList;
     ///
     #[parol_runtime::function_name::named]
-    fn port_declaration_opt_0(
-        &mut self,
-        _port_declaration_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn port_declaration_opt_0(&mut self, _port_declaration_list: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let port_declaration_list =
@@ -27072,7 +25600,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// PortDeclarationOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn port_declaration_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn port_declaration_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::PortDeclarationOpt(None), context);
@@ -27086,10 +25614,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn port_declaration_list(
         &mut self,
-        _port_declaration_group: &ParseTreeStackEntry<'t>,
-        _port_declaration_list_list: &ParseTreeStackEntry<'t>,
-        _port_declaration_list_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _port_declaration_group: &ParseTreeType<'t>,
+        _port_declaration_list_list: &ParseTreeType<'t>,
+        _port_declaration_list_opt: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -27129,10 +25656,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn port_declaration_list_list_0(
         &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _port_declaration_group: &ParseTreeStackEntry<'t>,
-        _port_declaration_list_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _comma: &ParseTreeType<'t>,
+        _port_declaration_group: &ParseTreeType<'t>,
+        _port_declaration_list_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -27163,10 +25689,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// PortDeclarationListList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn port_declaration_list_list_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn port_declaration_list_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let port_declaration_list_list_1_built = Vec::new();
@@ -27182,11 +25705,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// PortDeclarationListOpt /* Option<T>::Some */: Comma;
     ///
     #[parol_runtime::function_name::named]
-    fn port_declaration_list_opt_0(
-        &mut self,
-        _comma: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn port_declaration_list_opt_0(&mut self, _comma: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comma = pop_item!(self, comma, Comma, context);
@@ -27205,7 +25724,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// PortDeclarationListOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn port_declaration_list_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn port_declaration_list_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::PortDeclarationListOpt(None), context);
@@ -27219,9 +25738,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn port_declaration_group(
         &mut self,
-        _port_declaration_group_list: &ParseTreeStackEntry<'t>,
-        _port_declaration_group_group: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _port_declaration_group_list: &ParseTreeType<'t>,
+        _port_declaration_group_group: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -27258,10 +25776,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn port_declaration_group_group_0(
         &mut self,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _port_declaration_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _l_brace: &ParseTreeType<'t>,
+        _port_declaration_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -27293,8 +25810,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn port_declaration_group_group_1(
         &mut self,
-        _port_declaration_item: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _port_declaration_item: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -27319,9 +25835,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn port_declaration_group_list_0(
         &mut self,
-        _attribute: &ParseTreeStackEntry<'t>,
-        _port_declaration_group_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _attribute: &ParseTreeType<'t>,
+        _port_declaration_group_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -27349,10 +25864,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// PortDeclarationGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn port_declaration_group_list_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn port_declaration_group_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let port_declaration_group_list_1_built = Vec::new();
@@ -27370,10 +25882,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn port_declaration_item(
         &mut self,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _colon: &ParseTreeStackEntry<'t>,
-        _port_declaration_item_group: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _identifier: &ParseTreeType<'t>,
+        _colon: &ParseTreeType<'t>,
+        _port_declaration_item_group: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -27407,9 +25918,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn port_declaration_item_group_0(
         &mut self,
-        _direction: &ParseTreeStackEntry<'t>,
-        _array_type: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _direction: &ParseTreeType<'t>,
+        _array_type: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -27435,9 +25945,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn port_declaration_item_group_1(
         &mut self,
-        _interface: &ParseTreeStackEntry<'t>,
-        _port_declaration_item_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _interface: &ParseTreeType<'t>,
+        _port_declaration_item_opt: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -27469,11 +25978,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// PortDeclarationItemOpt /* Option<T>::Some */: Array;
     ///
     #[parol_runtime::function_name::named]
-    fn port_declaration_item_opt_0(
-        &mut self,
-        _array: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn port_declaration_item_opt_0(&mut self, _array: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let array = pop_item!(self, array, Array, context);
@@ -27492,7 +25997,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// PortDeclarationItemOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn port_declaration_item_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn port_declaration_item_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::PortDeclarationItemOpt(None), context);
@@ -27504,11 +26009,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Direction: Input;
     ///
     #[parol_runtime::function_name::named]
-    fn direction_0(
-        &mut self,
-        _input: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn direction_0(&mut self, _input: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let input = pop_item!(self, input, Input, context);
@@ -27527,11 +26028,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Direction: Output;
     ///
     #[parol_runtime::function_name::named]
-    fn direction_1(
-        &mut self,
-        _output: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn direction_1(&mut self, _output: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let output = pop_item!(self, output, Output, context);
@@ -27550,11 +26047,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Direction: Inout;
     ///
     #[parol_runtime::function_name::named]
-    fn direction_2(
-        &mut self,
-        _inout: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn direction_2(&mut self, _inout: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let inout = pop_item!(self, inout, Inout, context);
@@ -27573,11 +26066,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Direction: Ref;
     ///
     #[parol_runtime::function_name::named]
-    fn direction_3(
-        &mut self,
-        _ref: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn direction_3(&mut self, _ref: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let r#ref = pop_item!(self, r#ref, Ref, context);
@@ -27596,11 +26085,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Direction: Modport;
     ///
     #[parol_runtime::function_name::named]
-    fn direction_4(
-        &mut self,
-        _modport: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn direction_4(&mut self, _modport: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let modport = pop_item!(self, modport, Modport, context);
@@ -27621,16 +26106,15 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn function_declaration(
         &mut self,
-        _function: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _function_declaration_opt: &ParseTreeStackEntry<'t>,
-        _function_declaration_opt0: &ParseTreeStackEntry<'t>,
-        _minus_g_t: &ParseTreeStackEntry<'t>,
-        _scalar_type: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _function_declaration_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _function: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+        _function_declaration_opt: &ParseTreeType<'t>,
+        _function_declaration_opt0: &ParseTreeType<'t>,
+        _minus_g_t: &ParseTreeType<'t>,
+        _scalar_type: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _function_declaration_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -27686,9 +26170,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn function_declaration_list_0(
         &mut self,
-        _function_item: &ParseTreeStackEntry<'t>,
-        _function_declaration_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _function_item: &ParseTreeType<'t>,
+        _function_declaration_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -27716,7 +26199,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// FunctionDeclarationList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn function_declaration_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn function_declaration_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let function_declaration_list_1_built = Vec::new();
@@ -27732,11 +26215,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// FunctionDeclarationOpt0 /* Option<T>::Some */: PortDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn function_declaration_opt0_0(
-        &mut self,
-        _port_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn function_declaration_opt0_0(&mut self, _port_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let port_declaration = pop_item!(self, port_declaration, PortDeclaration, context);
@@ -27755,7 +26234,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// FunctionDeclarationOpt0 /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn function_declaration_opt0_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn function_declaration_opt0_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::FunctionDeclarationOpt0(None), context);
@@ -27767,11 +26246,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// FunctionDeclarationOpt /* Option<T>::Some */: WithParameter;
     ///
     #[parol_runtime::function_name::named]
-    fn function_declaration_opt_0(
-        &mut self,
-        _with_parameter: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn function_declaration_opt_0(&mut self, _with_parameter: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let with_parameter = pop_item!(self, with_parameter, WithParameter, context);
@@ -27790,7 +26265,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// FunctionDeclarationOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn function_declaration_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn function_declaration_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::FunctionDeclarationOpt(None), context);
@@ -27802,11 +26277,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// FunctionItem: VarDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn function_item_0(
-        &mut self,
-        _var_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn function_item_0(&mut self, _var_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let var_declaration = pop_item!(self, var_declaration, VarDeclaration, context);
@@ -27825,11 +26296,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// FunctionItem: Statement;
     ///
     #[parol_runtime::function_name::named]
-    fn function_item_1(
-        &mut self,
-        _statement: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn function_item_1(&mut self, _statement: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let statement = pop_item!(self, statement, Statement, context);
@@ -27850,12 +26317,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn import_declaration(
         &mut self,
-        _import: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _colon_colon: &ParseTreeStackEntry<'t>,
-        _import_declaration_group: &ParseTreeStackEntry<'t>,
-        _semicolon: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _import: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+        _colon_colon: &ParseTreeType<'t>,
+        _import_declaration_group: &ParseTreeType<'t>,
+        _semicolon: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -27891,11 +26357,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ImportDeclarationGroup: Identifier;
     ///
     #[parol_runtime::function_name::named]
-    fn import_declaration_group_0(
-        &mut self,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn import_declaration_group_0(&mut self, _identifier: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let identifier = pop_item!(self, identifier, Identifier, context);
@@ -27916,11 +26378,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ImportDeclarationGroup: Star;
     ///
     #[parol_runtime::function_name::named]
-    fn import_declaration_group_1(
-        &mut self,
-        _star: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn import_declaration_group_1(&mut self, _star: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let star = pop_item!(self, star, Star, context);
@@ -27943,12 +26401,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn export_declaration(
         &mut self,
-        _export: &ParseTreeStackEntry<'t>,
-        _export_declaration_group: &ParseTreeStackEntry<'t>,
-        _colon_colon: &ParseTreeStackEntry<'t>,
-        _export_declaration_group0: &ParseTreeStackEntry<'t>,
-        _semicolon: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _export: &ParseTreeType<'t>,
+        _export_declaration_group: &ParseTreeType<'t>,
+        _colon_colon: &ParseTreeType<'t>,
+        _export_declaration_group0: &ParseTreeType<'t>,
+        _semicolon: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -27989,11 +26446,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ExportDeclarationGroup0: Identifier;
     ///
     #[parol_runtime::function_name::named]
-    fn export_declaration_group0_0(
-        &mut self,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn export_declaration_group0_0(&mut self, _identifier: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let identifier = pop_item!(self, identifier, Identifier, context);
@@ -28014,11 +26467,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ExportDeclarationGroup0: Star;
     ///
     #[parol_runtime::function_name::named]
-    fn export_declaration_group0_1(
-        &mut self,
-        _star: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn export_declaration_group0_1(&mut self, _star: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let star = pop_item!(self, star, Star, context);
@@ -28039,11 +26488,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ExportDeclarationGroup: Identifier;
     ///
     #[parol_runtime::function_name::named]
-    fn export_declaration_group_0(
-        &mut self,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn export_declaration_group_0(&mut self, _identifier: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let identifier = pop_item!(self, identifier, Identifier, context);
@@ -28064,11 +26509,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ExportDeclarationGroup: Star;
     ///
     #[parol_runtime::function_name::named]
-    fn export_declaration_group_1(
-        &mut self,
-        _star: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn export_declaration_group_1(&mut self, _star: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let star = pop_item!(self, star, Star, context);
@@ -28091,14 +26532,13 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn module_declaration(
         &mut self,
-        _module: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _module_declaration_opt: &ParseTreeStackEntry<'t>,
-        _module_declaration_opt0: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _module_declaration_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _module: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+        _module_declaration_opt: &ParseTreeType<'t>,
+        _module_declaration_opt0: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _module_declaration_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -28146,9 +26586,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn module_declaration_list_0(
         &mut self,
-        _module_group: &ParseTreeStackEntry<'t>,
-        _module_declaration_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _module_group: &ParseTreeType<'t>,
+        _module_declaration_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -28176,7 +26615,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleDeclarationList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn module_declaration_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn module_declaration_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let module_declaration_list_1_built = Vec::new();
@@ -28192,11 +26631,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleDeclarationOpt0 /* Option<T>::Some */: PortDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn module_declaration_opt0_0(
-        &mut self,
-        _port_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn module_declaration_opt0_0(&mut self, _port_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let port_declaration = pop_item!(self, port_declaration, PortDeclaration, context);
@@ -28215,7 +26650,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleDeclarationOpt0 /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn module_declaration_opt0_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn module_declaration_opt0_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::ModuleDeclarationOpt0(None), context);
@@ -28227,11 +26662,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleDeclarationOpt /* Option<T>::Some */: WithParameter;
     ///
     #[parol_runtime::function_name::named]
-    fn module_declaration_opt_0(
-        &mut self,
-        _with_parameter: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn module_declaration_opt_0(&mut self, _with_parameter: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let with_parameter = pop_item!(self, with_parameter, WithParameter, context);
@@ -28250,7 +26681,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleDeclarationOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn module_declaration_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn module_declaration_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::ModuleDeclarationOpt(None), context);
@@ -28264,12 +26695,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn module_if_declaration(
         &mut self,
-        _if: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _module_named_block: &ParseTreeStackEntry<'t>,
-        _module_if_declaration_list: &ParseTreeStackEntry<'t>,
-        _module_if_declaration_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _if: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
+        _module_named_block: &ParseTreeType<'t>,
+        _module_if_declaration_list: &ParseTreeType<'t>,
+        _module_if_declaration_opt: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -28312,12 +26742,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn module_if_declaration_list_0(
         &mut self,
-        _else: &ParseTreeStackEntry<'t>,
-        _if: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _module_optional_named_block: &ParseTreeStackEntry<'t>,
-        _module_if_declaration_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _else: &ParseTreeType<'t>,
+        _if: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
+        _module_optional_named_block: &ParseTreeType<'t>,
+        _module_if_declaration_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -28356,10 +26785,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleIfDeclarationList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn module_if_declaration_list_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn module_if_declaration_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let module_if_declaration_list_1_built = Vec::new();
@@ -28377,9 +26803,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn module_if_declaration_opt_0(
         &mut self,
-        _else: &ParseTreeStackEntry<'t>,
-        _module_optional_named_block: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _else: &ParseTreeType<'t>,
+        _module_optional_named_block: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -28406,7 +26831,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleIfDeclarationOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn module_if_declaration_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn module_if_declaration_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::ModuleIfDeclarationOpt(None), context);
@@ -28420,13 +26845,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn module_for_declaration(
         &mut self,
-        _for: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _in: &ParseTreeStackEntry<'t>,
-        _range: &ParseTreeStackEntry<'t>,
-        _module_for_declaration_opt: &ParseTreeStackEntry<'t>,
-        _module_named_block: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _for: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+        _in: &ParseTreeType<'t>,
+        _range: &ParseTreeType<'t>,
+        _module_for_declaration_opt: &ParseTreeType<'t>,
+        _module_named_block: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -28466,10 +26890,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn module_for_declaration_opt_0(
         &mut self,
-        _step: &ParseTreeStackEntry<'t>,
-        _assignment_operator: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _step: &ParseTreeType<'t>,
+        _assignment_operator: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -28493,10 +26916,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleForDeclarationOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn module_for_declaration_opt_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn module_for_declaration_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::ModuleForDeclarationOpt(None), context);
@@ -28510,12 +26930,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn module_named_block(
         &mut self,
-        _colon: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _module_named_block_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _colon: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _module_named_block_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -28546,9 +26965,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn module_named_block_list_0(
         &mut self,
-        _module_group: &ParseTreeStackEntry<'t>,
-        _module_named_block_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _module_group: &ParseTreeType<'t>,
+        _module_named_block_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -28572,7 +26990,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleNamedBlockList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn module_named_block_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn module_named_block_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let module_named_block_list_1_built = Vec::new();
@@ -28590,11 +27008,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn module_optional_named_block(
         &mut self,
-        _module_optional_named_block_opt: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _module_optional_named_block_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _module_optional_named_block_opt: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _module_optional_named_block_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -28635,9 +27052,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn module_optional_named_block_list_0(
         &mut self,
-        _module_group: &ParseTreeStackEntry<'t>,
-        _module_optional_named_block_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _module_group: &ParseTreeType<'t>,
+        _module_optional_named_block_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -28665,10 +27081,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleOptionalNamedBlockList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn module_optional_named_block_list_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn module_optional_named_block_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let module_optional_named_block_list_1_built = Vec::new();
@@ -28686,9 +27099,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn module_optional_named_block_opt_0(
         &mut self,
-        _colon: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _colon: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -28712,10 +27124,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleOptionalNamedBlockOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn module_optional_named_block_opt_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn module_optional_named_block_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::ModuleOptionalNamedBlockOpt(None), context);
@@ -28729,9 +27138,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn module_group(
         &mut self,
-        _module_group_list: &ParseTreeStackEntry<'t>,
-        _module_group_group: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _module_group_list: &ParseTreeType<'t>,
+        _module_group_group: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -28755,10 +27163,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn module_group_group_0(
         &mut self,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _module_group_group_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _l_brace: &ParseTreeType<'t>,
+        _module_group_group_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -28787,9 +27194,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn module_group_group_list_0(
         &mut self,
-        _module_group: &ParseTreeStackEntry<'t>,
-        _module_group_group_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _module_group: &ParseTreeType<'t>,
+        _module_group_group_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -28813,7 +27219,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleGroupGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn module_group_group_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn module_group_group_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let module_group_group_list_1_built = Vec::new();
@@ -28829,11 +27235,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleGroupGroup: ModuleItem;
     ///
     #[parol_runtime::function_name::named]
-    fn module_group_group_1(
-        &mut self,
-        _module_item: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn module_group_group_1(&mut self, _module_item: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let module_item = pop_item!(self, module_item, ModuleItem, context);
@@ -28855,9 +27257,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn module_group_list_0(
         &mut self,
-        _attribute: &ParseTreeStackEntry<'t>,
-        _module_group_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _attribute: &ParseTreeType<'t>,
+        _module_group_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -28877,7 +27278,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn module_group_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn module_group_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let module_group_list_1_built = Vec::new();
@@ -28890,11 +27291,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleItem: VarDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn module_item_0(
-        &mut self,
-        _var_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn module_item_0(&mut self, _var_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let var_declaration = pop_item!(self, var_declaration, VarDeclaration, context);
@@ -28913,11 +27310,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleItem: InstDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn module_item_1(
-        &mut self,
-        _inst_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn module_item_1(&mut self, _inst_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let inst_declaration = pop_item!(self, inst_declaration, InstDeclaration, context);
@@ -28936,11 +27329,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleItem: LocalparamDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn module_item_2(
-        &mut self,
-        _localparam_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn module_item_2(&mut self, _localparam_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let localparam_declaration =
@@ -28960,11 +27349,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleItem: AlwaysFfDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn module_item_3(
-        &mut self,
-        _always_ff_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn module_item_3(&mut self, _always_ff_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let always_ff_declaration =
@@ -28984,11 +27369,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleItem: AlwaysCombDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn module_item_4(
-        &mut self,
-        _always_comb_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn module_item_4(&mut self, _always_comb_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let always_comb_declaration = pop_item!(
@@ -29012,11 +27393,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleItem: AssignDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn module_item_5(
-        &mut self,
-        _assign_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn module_item_5(&mut self, _assign_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let assign_declaration = pop_item!(self, assign_declaration, AssignDeclaration, context);
@@ -29035,11 +27412,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleItem: FunctionDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn module_item_6(
-        &mut self,
-        _function_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn module_item_6(&mut self, _function_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let function_declaration =
@@ -29059,11 +27432,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleItem: ModuleIfDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn module_item_7(
-        &mut self,
-        _module_if_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn module_item_7(&mut self, _module_if_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let module_if_declaration =
@@ -29083,11 +27452,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleItem: ModuleForDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn module_item_8(
-        &mut self,
-        _module_for_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn module_item_8(&mut self, _module_for_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let module_for_declaration =
@@ -29107,11 +27472,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleItem: EnumDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn module_item_9(
-        &mut self,
-        _enum_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn module_item_9(&mut self, _enum_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let enum_declaration = pop_item!(self, enum_declaration, EnumDeclaration, context);
@@ -29130,11 +27491,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleItem: StructDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn module_item_10(
-        &mut self,
-        _struct_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn module_item_10(&mut self, _struct_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let struct_declaration = pop_item!(self, struct_declaration, StructDeclaration, context);
@@ -29153,11 +27510,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleItem: ModuleNamedBlock;
     ///
     #[parol_runtime::function_name::named]
-    fn module_item_11(
-        &mut self,
-        _module_named_block: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn module_item_11(&mut self, _module_named_block: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let module_named_block = pop_item!(self, module_named_block, ModuleNamedBlock, context);
@@ -29176,11 +27529,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleItem: ImportDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn module_item_12(
-        &mut self,
-        _import_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn module_item_12(&mut self, _import_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let import_declaration = pop_item!(self, import_declaration, ImportDeclaration, context);
@@ -29199,11 +27548,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleItem: InitialDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn module_item_13(
-        &mut self,
-        _initial_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn module_item_13(&mut self, _initial_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let initial_declaration = pop_item!(self, initial_declaration, InitialDeclaration, context);
@@ -29222,11 +27567,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// ModuleItem: FinalDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn module_item_14(
-        &mut self,
-        _final_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn module_item_14(&mut self, _final_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let final_declaration = pop_item!(self, final_declaration, FinalDeclaration, context);
@@ -29247,13 +27588,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn interface_declaration(
         &mut self,
-        _interface: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _interface_declaration_opt: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _interface_declaration_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _interface: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+        _interface_declaration_opt: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _interface_declaration_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -29298,9 +27638,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn interface_declaration_list_0(
         &mut self,
-        _interface_group: &ParseTreeStackEntry<'t>,
-        _interface_declaration_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _interface_group: &ParseTreeType<'t>,
+        _interface_declaration_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -29328,10 +27667,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InterfaceDeclarationList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_declaration_list_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn interface_declaration_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let interface_declaration_list_1_built = Vec::new();
@@ -29347,11 +27683,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InterfaceDeclarationOpt /* Option<T>::Some */: WithParameter;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_declaration_opt_0(
-        &mut self,
-        _with_parameter: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn interface_declaration_opt_0(&mut self, _with_parameter: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let with_parameter = pop_item!(self, with_parameter, WithParameter, context);
@@ -29370,7 +27702,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InterfaceDeclarationOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_declaration_opt_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn interface_declaration_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::InterfaceDeclarationOpt(None), context);
@@ -29384,12 +27716,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn interface_if_declaration(
         &mut self,
-        _if: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _interface_named_block: &ParseTreeStackEntry<'t>,
-        _interface_if_declaration_list: &ParseTreeStackEntry<'t>,
-        _interface_if_declaration_opt: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _if: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
+        _interface_named_block: &ParseTreeType<'t>,
+        _interface_if_declaration_list: &ParseTreeType<'t>,
+        _interface_if_declaration_opt: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -29433,12 +27764,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn interface_if_declaration_list_0(
         &mut self,
-        _else: &ParseTreeStackEntry<'t>,
-        _if: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _interface_optional_named_block: &ParseTreeStackEntry<'t>,
-        _interface_if_declaration_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _else: &ParseTreeType<'t>,
+        _if: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
+        _interface_optional_named_block: &ParseTreeType<'t>,
+        _interface_if_declaration_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -29477,10 +27807,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InterfaceIfDeclarationList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_if_declaration_list_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn interface_if_declaration_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let interface_if_declaration_list_1_built = Vec::new();
@@ -29498,9 +27825,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn interface_if_declaration_opt_0(
         &mut self,
-        _else: &ParseTreeStackEntry<'t>,
-        _interface_optional_named_block: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _else: &ParseTreeType<'t>,
+        _interface_optional_named_block: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -29529,10 +27855,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InterfaceIfDeclarationOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_if_declaration_opt_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn interface_if_declaration_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::InterfaceIfDeclarationOpt(None), context);
@@ -29546,13 +27869,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn interface_for_declaration(
         &mut self,
-        _for: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _in: &ParseTreeStackEntry<'t>,
-        _range: &ParseTreeStackEntry<'t>,
-        _interface_for_declaration_opt: &ParseTreeStackEntry<'t>,
-        _interface_named_block: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _for: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+        _in: &ParseTreeType<'t>,
+        _range: &ParseTreeType<'t>,
+        _interface_for_declaration_opt: &ParseTreeType<'t>,
+        _interface_named_block: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -29593,10 +27915,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn interface_for_declaration_opt_0(
         &mut self,
-        _step: &ParseTreeStackEntry<'t>,
-        _assignment_operator: &ParseTreeStackEntry<'t>,
-        _expression: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _step: &ParseTreeType<'t>,
+        _assignment_operator: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -29622,10 +27943,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InterfaceForDeclarationOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_for_declaration_opt_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn interface_for_declaration_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::InterfaceForDeclarationOpt(None), context);
@@ -29639,12 +27957,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn interface_named_block(
         &mut self,
-        _colon: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _interface_named_block_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _colon: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _interface_named_block_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -29682,9 +27999,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn interface_named_block_list_0(
         &mut self,
-        _interface_group: &ParseTreeStackEntry<'t>,
-        _interface_named_block_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _interface_group: &ParseTreeType<'t>,
+        _interface_named_block_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -29712,10 +28028,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InterfaceNamedBlockList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_named_block_list_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn interface_named_block_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let interface_named_block_list_1_built = Vec::new();
@@ -29733,11 +28046,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn interface_optional_named_block(
         &mut self,
-        _interface_optional_named_block_opt: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _interface_optional_named_block_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _interface_optional_named_block_opt: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _interface_optional_named_block_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -29778,9 +28090,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn interface_optional_named_block_list_0(
         &mut self,
-        _interface_group: &ParseTreeStackEntry<'t>,
-        _interface_optional_named_block_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _interface_group: &ParseTreeType<'t>,
+        _interface_optional_named_block_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -29808,10 +28119,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InterfaceOptionalNamedBlockList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_optional_named_block_list_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn interface_optional_named_block_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let interface_optional_named_block_list_1_built = Vec::new();
@@ -29829,9 +28137,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn interface_optional_named_block_opt_0(
         &mut self,
-        _colon: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _colon: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -29855,10 +28162,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InterfaceOptionalNamedBlockOpt /* Option<T>::None */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_optional_named_block_opt_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn interface_optional_named_block_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         self.push(ASTType::InterfaceOptionalNamedBlockOpt(None), context);
@@ -29872,9 +28176,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn interface_group(
         &mut self,
-        _interface_group_list: &ParseTreeStackEntry<'t>,
-        _interface_group_group: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _interface_group_list: &ParseTreeType<'t>,
+        _interface_group_group: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -29899,10 +28202,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn interface_group_group_0(
         &mut self,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _interface_group_group_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _l_brace: &ParseTreeType<'t>,
+        _interface_group_group_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -29936,9 +28238,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn interface_group_group_list_0(
         &mut self,
-        _interface_group: &ParseTreeStackEntry<'t>,
-        _interface_group_group_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _interface_group: &ParseTreeType<'t>,
+        _interface_group_group_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -29966,10 +28267,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InterfaceGroupGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_group_group_list_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn interface_group_group_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let interface_group_group_list_1_built = Vec::new();
@@ -29985,11 +28283,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InterfaceGroupGroup: InterfaceItem;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_group_group_1(
-        &mut self,
-        _interface_item: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn interface_group_group_1(&mut self, _interface_item: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let interface_item = pop_item!(self, interface_item, InterfaceItem, context);
@@ -30012,9 +28306,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn interface_group_list_0(
         &mut self,
-        _attribute: &ParseTreeStackEntry<'t>,
-        _interface_group_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _attribute: &ParseTreeType<'t>,
+        _interface_group_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -30035,7 +28328,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InterfaceGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_group_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn interface_group_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let interface_group_list_1_built = Vec::new();
@@ -30051,11 +28344,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InterfaceItem: VarDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_item_0(
-        &mut self,
-        _var_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn interface_item_0(&mut self, _var_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let var_declaration = pop_item!(self, var_declaration, VarDeclaration, context);
@@ -30074,11 +28363,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InterfaceItem: LocalparamDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_item_1(
-        &mut self,
-        _localparam_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn interface_item_1(&mut self, _localparam_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let localparam_declaration =
@@ -30098,11 +28383,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InterfaceItem: ModportDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_item_2(
-        &mut self,
-        _modport_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn interface_item_2(&mut self, _modport_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let modport_declaration = pop_item!(self, modport_declaration, ModportDeclaration, context);
@@ -30121,11 +28402,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InterfaceItem: InterfaceIfDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_item_3(
-        &mut self,
-        _interface_if_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn interface_item_3(&mut self, _interface_if_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let interface_if_declaration = pop_item!(
@@ -30149,11 +28426,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InterfaceItem: InterfaceForDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_item_4(
-        &mut self,
-        _interface_for_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn interface_item_4(&mut self, _interface_for_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let interface_for_declaration = pop_item!(
@@ -30177,11 +28450,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InterfaceItem: EnumDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_item_5(
-        &mut self,
-        _enum_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn interface_item_5(&mut self, _enum_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let enum_declaration = pop_item!(self, enum_declaration, EnumDeclaration, context);
@@ -30200,11 +28469,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InterfaceItem: StructDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_item_6(
-        &mut self,
-        _struct_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn interface_item_6(&mut self, _struct_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let struct_declaration = pop_item!(self, struct_declaration, StructDeclaration, context);
@@ -30223,11 +28488,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InterfaceItem: InterfaceNamedBlock;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_item_7(
-        &mut self,
-        _interface_named_block: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn interface_item_7(&mut self, _interface_named_block: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let interface_named_block =
@@ -30247,11 +28508,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InterfaceItem: FunctionDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_item_8(
-        &mut self,
-        _function_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn interface_item_8(&mut self, _function_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let function_declaration =
@@ -30271,11 +28528,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InterfaceItem: ImportDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_item_9(
-        &mut self,
-        _import_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn interface_item_9(&mut self, _import_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let import_declaration = pop_item!(self, import_declaration, ImportDeclaration, context);
@@ -30294,11 +28547,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InterfaceItem: InitialDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_item_10(
-        &mut self,
-        _initial_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn interface_item_10(&mut self, _initial_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let initial_declaration = pop_item!(self, initial_declaration, InitialDeclaration, context);
@@ -30317,11 +28566,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// InterfaceItem: FinalDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn interface_item_11(
-        &mut self,
-        _final_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn interface_item_11(&mut self, _final_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let final_declaration = pop_item!(self, final_declaration, FinalDeclaration, context);
@@ -30342,12 +28587,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn package_declaration(
         &mut self,
-        _package: &ParseTreeStackEntry<'t>,
-        _identifier: &ParseTreeStackEntry<'t>,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _package_declaration_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _package: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _package_declaration_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -30385,9 +28629,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn package_declaration_list_0(
         &mut self,
-        _package_group: &ParseTreeStackEntry<'t>,
-        _package_declaration_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _package_group: &ParseTreeType<'t>,
+        _package_declaration_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -30415,7 +28658,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// PackageDeclarationList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn package_declaration_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn package_declaration_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let package_declaration_list_1_built = Vec::new();
@@ -30433,9 +28676,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn package_group(
         &mut self,
-        _package_group_list: &ParseTreeStackEntry<'t>,
-        _package_group_group: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _package_group_list: &ParseTreeType<'t>,
+        _package_group_group: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -30459,10 +28701,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn package_group_group_0(
         &mut self,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _package_group_group_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _l_brace: &ParseTreeType<'t>,
+        _package_group_group_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -30495,9 +28736,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn package_group_group_list_0(
         &mut self,
-        _package_group: &ParseTreeStackEntry<'t>,
-        _package_group_group_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _package_group: &ParseTreeType<'t>,
+        _package_group_group_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -30525,7 +28765,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// PackageGroupGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn package_group_group_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn package_group_group_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let package_group_group_list_1_built = Vec::new();
@@ -30541,11 +28781,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// PackageGroupGroup: PackageItem;
     ///
     #[parol_runtime::function_name::named]
-    fn package_group_group_1(
-        &mut self,
-        _package_item: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn package_group_group_1(&mut self, _package_item: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let package_item = pop_item!(self, package_item, PackageItem, context);
@@ -30568,9 +28804,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn package_group_list_0(
         &mut self,
-        _attribute: &ParseTreeStackEntry<'t>,
-        _package_group_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _attribute: &ParseTreeType<'t>,
+        _package_group_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -30590,7 +28825,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// PackageGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn package_group_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn package_group_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let package_group_list_1_built = Vec::new();
@@ -30606,11 +28841,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// PackageItem: VarDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn package_item_0(
-        &mut self,
-        _var_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn package_item_0(&mut self, _var_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let var_declaration = pop_item!(self, var_declaration, VarDeclaration, context);
@@ -30629,11 +28860,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// PackageItem: LocalparamDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn package_item_1(
-        &mut self,
-        _localparam_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn package_item_1(&mut self, _localparam_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let localparam_declaration =
@@ -30653,11 +28880,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// PackageItem: EnumDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn package_item_2(
-        &mut self,
-        _enum_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn package_item_2(&mut self, _enum_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let enum_declaration = pop_item!(self, enum_declaration, EnumDeclaration, context);
@@ -30676,11 +28899,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// PackageItem: StructDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn package_item_3(
-        &mut self,
-        _struct_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn package_item_3(&mut self, _struct_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let struct_declaration = pop_item!(self, struct_declaration, StructDeclaration, context);
@@ -30699,11 +28918,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// PackageItem: FunctionDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn package_item_4(
-        &mut self,
-        _function_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn package_item_4(&mut self, _function_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let function_declaration =
@@ -30723,11 +28938,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// PackageItem: ImportDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn package_item_5(
-        &mut self,
-        _import_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn package_item_5(&mut self, _import_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let import_declaration = pop_item!(self, import_declaration, ImportDeclaration, context);
@@ -30746,11 +28957,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// PackageItem: ExportDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn package_item_6(
-        &mut self,
-        _export_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn package_item_6(&mut self, _export_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let export_declaration = pop_item!(self, export_declaration, ExportDeclaration, context);
@@ -30769,11 +28976,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// PackageItem: InitialDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn package_item_7(
-        &mut self,
-        _initial_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn package_item_7(&mut self, _initial_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let initial_declaration = pop_item!(self, initial_declaration, InitialDeclaration, context);
@@ -30792,11 +28995,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// PackageItem: FinalDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn package_item_8(
-        &mut self,
-        _final_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn package_item_8(&mut self, _final_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let final_declaration = pop_item!(self, final_declaration, FinalDeclaration, context);
@@ -30817,9 +29016,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn description_group(
         &mut self,
-        _description_group_list: &ParseTreeStackEntry<'t>,
-        _description_group_group: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _description_group_list: &ParseTreeType<'t>,
+        _description_group_group: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -30849,10 +29047,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn description_group_group_0(
         &mut self,
-        _l_brace: &ParseTreeStackEntry<'t>,
-        _description_group_group_list: &ParseTreeStackEntry<'t>,
-        _r_brace: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _l_brace: &ParseTreeType<'t>,
+        _description_group_group_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -30888,9 +29085,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn description_group_group_list_0(
         &mut self,
-        _description_group: &ParseTreeStackEntry<'t>,
-        _description_group_group_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _description_group: &ParseTreeType<'t>,
+        _description_group_group_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -30918,10 +29114,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// DescriptionGroupGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn description_group_group_list_1(
-        &mut self,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn description_group_group_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let description_group_group_list_1_built = Vec::new();
@@ -30937,11 +29130,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// DescriptionGroupGroup: DescriptionItem;
     ///
     #[parol_runtime::function_name::named]
-    fn description_group_group_1(
-        &mut self,
-        _description_item: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn description_group_group_1(&mut self, _description_item: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let description_item = pop_item!(self, description_item, DescriptionItem, context);
@@ -30964,9 +29153,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn description_group_list_0(
         &mut self,
-        _attribute: &ParseTreeStackEntry<'t>,
-        _description_group_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _attribute: &ParseTreeType<'t>,
+        _description_group_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -30990,7 +29178,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// DescriptionGroupList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn description_group_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn description_group_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let description_group_list_1_built = Vec::new();
@@ -31006,11 +29194,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// DescriptionItem: ModuleDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn description_item_0(
-        &mut self,
-        _module_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn description_item_0(&mut self, _module_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let module_declaration = pop_item!(self, module_declaration, ModuleDeclaration, context);
@@ -31030,11 +29214,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// DescriptionItem: InterfaceDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn description_item_1(
-        &mut self,
-        _interface_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn description_item_1(&mut self, _interface_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let interface_declaration =
@@ -31056,11 +29236,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// DescriptionItem: PackageDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn description_item_2(
-        &mut self,
-        _package_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn description_item_2(&mut self, _package_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let package_declaration = pop_item!(self, package_declaration, PackageDeclaration, context);
@@ -31081,11 +29257,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// DescriptionItem: ImportDeclaration;
     ///
     #[parol_runtime::function_name::named]
-    fn description_item_3(
-        &mut self,
-        _import_declaration: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn description_item_3(&mut self, _import_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let import_declaration = pop_item!(self, import_declaration, ImportDeclaration, context);
@@ -31105,12 +29277,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// Veryl: Start VerylList /* Vec */;
     ///
     #[parol_runtime::function_name::named]
-    fn veryl(
-        &mut self,
-        _start: &ParseTreeStackEntry<'t>,
-        _veryl_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
-    ) -> Result<()> {
+    fn veryl(&mut self, _start: &ParseTreeType<'t>, _veryl_list: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let veryl_list = pop_and_reverse_item!(self, veryl_list, VerylList, context);
@@ -31132,9 +29299,8 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     #[parol_runtime::function_name::named]
     fn veryl_list_0(
         &mut self,
-        _description_group: &ParseTreeStackEntry<'t>,
-        _veryl_list: &ParseTreeStackEntry<'t>,
-        _parse_tree: &Tree<ParseTreeType<'t>>,
+        _description_group: &ParseTreeType<'t>,
+        _veryl_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
@@ -31154,7 +29320,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     /// VerylList /* Vec<T>::New */: ;
     ///
     #[parol_runtime::function_name::named]
-    fn veryl_list_1(&mut self, _parse_tree: &Tree<ParseTreeType<'t>>) -> Result<()> {
+    fn veryl_list_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let veryl_list_1_built = Vec::new();
@@ -31170,451 +29336,432 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
     fn call_semantic_action_for_production_number(
         &mut self,
         prod_num: usize,
-        children: &[ParseTreeStackEntry<'t>],
-        parse_tree: &Tree<ParseTreeType<'t>>,
+        children: &[ParseTreeType<'t>],
     ) -> Result<()> {
         match prod_num {
-            0 => self.comments_term(&children[0], parse_tree),
-            1 => self.string_literal_term(&children[0], parse_tree),
-            2 => self.exponent_term(&children[0], parse_tree),
-            3 => self.fixed_point_term(&children[0], parse_tree),
-            4 => self.based_term(&children[0], parse_tree),
-            5 => self.base_less_term(&children[0], parse_tree),
-            6 => self.all_bit_term(&children[0], parse_tree),
-            7 => self.minus_colon_term(&children[0], parse_tree),
-            8 => self.minus_g_t_term(&children[0], parse_tree),
-            9 => self.plus_colon_term(&children[0], parse_tree),
-            10 => self.assignment_operator_term(&children[0], parse_tree),
-            11 => self.operator11_term(&children[0], parse_tree),
-            12 => self.operator10_term(&children[0], parse_tree),
-            13 => self.operator09_term(&children[0], parse_tree),
-            14 => self.operator08_term(&children[0], parse_tree),
-            15 => self.operator07_term(&children[0], parse_tree),
-            16 => self.operator06_term(&children[0], parse_tree),
-            17 => self.operator02_term(&children[0], parse_tree),
-            18 => self.operator01_term(&children[0], parse_tree),
-            19 => self.operator05_term(&children[0], parse_tree),
-            20 => self.operator04_term(&children[0], parse_tree),
-            21 => self.operator03_term(&children[0], parse_tree),
-            22 => self.unary_operator_term(&children[0], parse_tree),
-            23 => self.colon_colon_term(&children[0], parse_tree),
-            24 => self.colon_term(&children[0], parse_tree),
-            25 => self.comma_term(&children[0], parse_tree),
-            26 => self.dollar_term(&children[0], parse_tree),
-            27 => self.dot_dot_equ_term(&children[0], parse_tree),
-            28 => self.dot_dot_term(&children[0], parse_tree),
-            29 => self.dot_term(&children[0], parse_tree),
-            30 => self.equ_term(&children[0], parse_tree),
-            31 => self.hash_term(&children[0], parse_tree),
-            32 => self.l_angle_term(&children[0], parse_tree),
-            33 => self.l_brace_term(&children[0], parse_tree),
-            34 => self.l_bracket_term(&children[0], parse_tree),
-            35 => self.l_paren_term(&children[0], parse_tree),
-            36 => self.r_angle_term(&children[0], parse_tree),
-            37 => self.r_brace_term(&children[0], parse_tree),
-            38 => self.r_bracket_term(&children[0], parse_tree),
-            39 => self.r_paren_term(&children[0], parse_tree),
-            40 => self.semicolon_term(&children[0], parse_tree),
-            41 => self.star_term(&children[0], parse_tree),
-            42 => self.always_comb_term(&children[0], parse_tree),
-            43 => self.always_ff_term(&children[0], parse_tree),
-            44 => self.assign_term(&children[0], parse_tree),
-            45 => self.async_high_term(&children[0], parse_tree),
-            46 => self.async_low_term(&children[0], parse_tree),
-            47 => self.as_term(&children[0], parse_tree),
-            48 => self.bit_term(&children[0], parse_tree),
-            49 => self.case_term(&children[0], parse_tree),
-            50 => self.default_term(&children[0], parse_tree),
-            51 => self.else_term(&children[0], parse_tree),
-            52 => self.enum_term(&children[0], parse_tree),
-            53 => self.export_term(&children[0], parse_tree),
-            54 => self.f32_term(&children[0], parse_tree),
-            55 => self.f64_term(&children[0], parse_tree),
-            56 => self.final_term(&children[0], parse_tree),
-            57 => self.for_term(&children[0], parse_tree),
-            58 => self.function_term(&children[0], parse_tree),
-            59 => self.i32_term(&children[0], parse_tree),
-            60 => self.i64_term(&children[0], parse_tree),
-            61 => self.if_reset_term(&children[0], parse_tree),
-            62 => self.if_term(&children[0], parse_tree),
-            63 => self.import_term(&children[0], parse_tree),
-            64 => self.initial_term(&children[0], parse_tree),
-            65 => self.inout_term(&children[0], parse_tree),
-            66 => self.input_term(&children[0], parse_tree),
-            67 => self.inside_term(&children[0], parse_tree),
-            68 => self.inst_term(&children[0], parse_tree),
-            69 => self.interface_term(&children[0], parse_tree),
-            70 => self.in_term(&children[0], parse_tree),
-            71 => self.localparam_term(&children[0], parse_tree),
-            72 => self.logic_term(&children[0], parse_tree),
-            73 => self.lsb_term(&children[0], parse_tree),
-            74 => self.modport_term(&children[0], parse_tree),
-            75 => self.module_term(&children[0], parse_tree),
-            76 => self.msb_term(&children[0], parse_tree),
-            77 => self.negedge_term(&children[0], parse_tree),
-            78 => self.output_term(&children[0], parse_tree),
-            79 => self.outside_term(&children[0], parse_tree),
-            80 => self.package_term(&children[0], parse_tree),
-            81 => self.parameter_term(&children[0], parse_tree),
-            82 => self.posedge_term(&children[0], parse_tree),
-            83 => self.ref_term(&children[0], parse_tree),
-            84 => self.repeat_term(&children[0], parse_tree),
-            85 => self.return_term(&children[0], parse_tree),
-            86 => self.signed_term(&children[0], parse_tree),
-            87 => self.step_term(&children[0], parse_tree),
-            88 => self.string_term(&children[0], parse_tree),
-            89 => self.struct_term(&children[0], parse_tree),
-            90 => self.sync_high_term(&children[0], parse_tree),
-            91 => self.sync_low_term(&children[0], parse_tree),
-            92 => self.tri_term(&children[0], parse_tree),
-            93 => self.type_term(&children[0], parse_tree),
-            94 => self.u32_term(&children[0], parse_tree),
-            95 => self.u64_term(&children[0], parse_tree),
-            96 => self.var_term(&children[0], parse_tree),
-            97 => self.identifier_term(&children[0], parse_tree),
-            98 => self.comments(&children[0], parse_tree),
-            99 => self.comments_opt_0(&children[0], parse_tree),
-            100 => self.comments_opt_1(parse_tree),
-            101 => self.start_token(&children[0], parse_tree),
-            102 => self.string_literal_token(&children[0], &children[1], parse_tree),
-            103 => self.exponent_token(&children[0], &children[1], parse_tree),
-            104 => self.fixed_point_token(&children[0], &children[1], parse_tree),
-            105 => self.based_token(&children[0], &children[1], parse_tree),
-            106 => self.base_less_token(&children[0], &children[1], parse_tree),
-            107 => self.all_bit_token(&children[0], &children[1], parse_tree),
-            108 => self.assignment_operator_token(&children[0], &children[1], parse_tree),
-            109 => self.operator01_token(&children[0], &children[1], parse_tree),
-            110 => self.operator02_token(&children[0], &children[1], parse_tree),
-            111 => self.operator03_token(&children[0], &children[1], parse_tree),
-            112 => self.operator04_token(&children[0], &children[1], parse_tree),
-            113 => self.operator05_token(&children[0], &children[1], parse_tree),
-            114 => self.operator06_token(&children[0], &children[1], parse_tree),
-            115 => self.operator07_token(&children[0], &children[1], parse_tree),
-            116 => self.operator08_token(&children[0], &children[1], parse_tree),
-            117 => self.operator09_token(&children[0], &children[1], parse_tree),
-            118 => self.operator10_token(&children[0], &children[1], parse_tree),
-            119 => self.operator11_token(&children[0], &children[1], parse_tree),
-            120 => self.unary_operator_token(&children[0], &children[1], parse_tree),
-            121 => self.colon_token(&children[0], &children[1], parse_tree),
-            122 => self.colon_colon_token(&children[0], &children[1], parse_tree),
-            123 => self.comma_token(&children[0], &children[1], parse_tree),
-            124 => self.dollar_token(&children[0], &children[1], parse_tree),
-            125 => self.dot_dot_token(&children[0], &children[1], parse_tree),
-            126 => self.dot_dot_equ_token(&children[0], &children[1], parse_tree),
-            127 => self.dot_token(&children[0], &children[1], parse_tree),
-            128 => self.equ_token(&children[0], &children[1], parse_tree),
-            129 => self.hash_token(&children[0], &children[1], parse_tree),
-            130 => self.l_angle_token(&children[0], &children[1], parse_tree),
-            131 => self.l_brace_token(&children[0], &children[1], parse_tree),
-            132 => self.l_bracket_token(&children[0], &children[1], parse_tree),
-            133 => self.l_paren_token(&children[0], &children[1], parse_tree),
-            134 => self.minus_colon_token(&children[0], &children[1], parse_tree),
-            135 => self.minus_g_t_token(&children[0], &children[1], parse_tree),
-            136 => self.plus_colon_token(&children[0], &children[1], parse_tree),
-            137 => self.r_angle_token(&children[0], &children[1], parse_tree),
-            138 => self.r_brace_token(&children[0], &children[1], parse_tree),
-            139 => self.r_bracket_token(&children[0], &children[1], parse_tree),
-            140 => self.r_paren_token(&children[0], &children[1], parse_tree),
-            141 => self.semicolon_token(&children[0], &children[1], parse_tree),
-            142 => self.star_token(&children[0], &children[1], parse_tree),
-            143 => self.always_comb_token(&children[0], &children[1], parse_tree),
-            144 => self.always_ff_token(&children[0], &children[1], parse_tree),
-            145 => self.as_token(&children[0], &children[1], parse_tree),
-            146 => self.assign_token(&children[0], &children[1], parse_tree),
-            147 => self.async_high_token(&children[0], &children[1], parse_tree),
-            148 => self.async_low_token(&children[0], &children[1], parse_tree),
-            149 => self.bit_token(&children[0], &children[1], parse_tree),
-            150 => self.case_token(&children[0], &children[1], parse_tree),
-            151 => self.default_token(&children[0], &children[1], parse_tree),
-            152 => self.else_token(&children[0], &children[1], parse_tree),
-            153 => self.enum_token(&children[0], &children[1], parse_tree),
-            154 => self.export_token(&children[0], &children[1], parse_tree),
-            155 => self.f32_token(&children[0], &children[1], parse_tree),
-            156 => self.f64_token(&children[0], &children[1], parse_tree),
-            157 => self.final_token(&children[0], &children[1], parse_tree),
-            158 => self.for_token(&children[0], &children[1], parse_tree),
-            159 => self.function_token(&children[0], &children[1], parse_tree),
-            160 => self.i32_token(&children[0], &children[1], parse_tree),
-            161 => self.i64_token(&children[0], &children[1], parse_tree),
-            162 => self.if_reset_token(&children[0], &children[1], parse_tree),
-            163 => self.if_token(&children[0], &children[1], parse_tree),
-            164 => self.import_token(&children[0], &children[1], parse_tree),
-            165 => self.initial_token(&children[0], &children[1], parse_tree),
-            166 => self.inout_token(&children[0], &children[1], parse_tree),
-            167 => self.input_token(&children[0], &children[1], parse_tree),
-            168 => self.inside_token(&children[0], &children[1], parse_tree),
-            169 => self.inst_token(&children[0], &children[1], parse_tree),
-            170 => self.interface_token(&children[0], &children[1], parse_tree),
-            171 => self.in_token(&children[0], &children[1], parse_tree),
-            172 => self.localparam_token(&children[0], &children[1], parse_tree),
-            173 => self.logic_token(&children[0], &children[1], parse_tree),
-            174 => self.lsb_token(&children[0], &children[1], parse_tree),
-            175 => self.modport_token(&children[0], &children[1], parse_tree),
-            176 => self.module_token(&children[0], &children[1], parse_tree),
-            177 => self.msb_token(&children[0], &children[1], parse_tree),
-            178 => self.negedge_token(&children[0], &children[1], parse_tree),
-            179 => self.output_token(&children[0], &children[1], parse_tree),
-            180 => self.outside_token(&children[0], &children[1], parse_tree),
-            181 => self.package_token(&children[0], &children[1], parse_tree),
-            182 => self.parameter_token(&children[0], &children[1], parse_tree),
-            183 => self.posedge_token(&children[0], &children[1], parse_tree),
-            184 => self.ref_token(&children[0], &children[1], parse_tree),
-            185 => self.repeat_token(&children[0], &children[1], parse_tree),
-            186 => self.return_token(&children[0], &children[1], parse_tree),
-            187 => self.signed_token(&children[0], &children[1], parse_tree),
-            188 => self.step_token(&children[0], &children[1], parse_tree),
-            189 => self.string_token(&children[0], &children[1], parse_tree),
-            190 => self.struct_token(&children[0], &children[1], parse_tree),
-            191 => self.sync_high_token(&children[0], &children[1], parse_tree),
-            192 => self.sync_low_token(&children[0], &children[1], parse_tree),
-            193 => self.tri_token(&children[0], &children[1], parse_tree),
-            194 => self.type_token(&children[0], &children[1], parse_tree),
-            195 => self.u32_token(&children[0], &children[1], parse_tree),
-            196 => self.u64_token(&children[0], &children[1], parse_tree),
-            197 => self.var_token(&children[0], &children[1], parse_tree),
-            198 => self.identifier_token(&children[0], &children[1], parse_tree),
-            199 => self.start(&children[0], parse_tree),
-            200 => self.string_literal(&children[0], parse_tree),
-            201 => self.exponent(&children[0], parse_tree),
-            202 => self.fixed_point(&children[0], parse_tree),
-            203 => self.based(&children[0], parse_tree),
-            204 => self.base_less(&children[0], parse_tree),
-            205 => self.all_bit(&children[0], parse_tree),
-            206 => self.assignment_operator(&children[0], parse_tree),
-            207 => self.operator01(&children[0], parse_tree),
-            208 => self.operator02(&children[0], parse_tree),
-            209 => self.operator03(&children[0], parse_tree),
-            210 => self.operator04(&children[0], parse_tree),
-            211 => self.operator05(&children[0], parse_tree),
-            212 => self.operator06(&children[0], parse_tree),
-            213 => self.operator07(&children[0], parse_tree),
-            214 => self.operator08(&children[0], parse_tree),
-            215 => self.operator09(&children[0], parse_tree),
-            216 => self.operator10(&children[0], parse_tree),
-            217 => self.operator11(&children[0], parse_tree),
-            218 => self.unary_operator(&children[0], parse_tree),
-            219 => self.colon(&children[0], parse_tree),
-            220 => self.colon_colon(&children[0], parse_tree),
-            221 => self.comma(&children[0], parse_tree),
-            222 => self.dollar(&children[0], parse_tree),
-            223 => self.dot_dot(&children[0], parse_tree),
-            224 => self.dot_dot_equ(&children[0], parse_tree),
-            225 => self.dot(&children[0], parse_tree),
-            226 => self.equ(&children[0], parse_tree),
-            227 => self.hash(&children[0], parse_tree),
-            228 => self.l_angle(&children[0], parse_tree),
-            229 => self.l_brace(&children[0], parse_tree),
-            230 => self.l_bracket(&children[0], parse_tree),
-            231 => self.l_paren(&children[0], parse_tree),
-            232 => self.minus_colon(&children[0], parse_tree),
-            233 => self.minus_g_t(&children[0], parse_tree),
-            234 => self.plus_colon(&children[0], parse_tree),
-            235 => self.r_angle(&children[0], parse_tree),
-            236 => self.r_brace(&children[0], parse_tree),
-            237 => self.r_bracket(&children[0], parse_tree),
-            238 => self.r_paren(&children[0], parse_tree),
-            239 => self.semicolon(&children[0], parse_tree),
-            240 => self.star(&children[0], parse_tree),
-            241 => self.always_comb(&children[0], parse_tree),
-            242 => self.always_ff(&children[0], parse_tree),
-            243 => self.r#as(&children[0], parse_tree),
-            244 => self.assign(&children[0], parse_tree),
-            245 => self.async_high(&children[0], parse_tree),
-            246 => self.async_low(&children[0], parse_tree),
-            247 => self.bit(&children[0], parse_tree),
-            248 => self.case(&children[0], parse_tree),
-            249 => self.defaul(&children[0], parse_tree),
-            250 => self.r#else(&children[0], parse_tree),
-            251 => self.r#enum(&children[0], parse_tree),
-            252 => self.export(&children[0], parse_tree),
-            253 => self.f32(&children[0], parse_tree),
-            254 => self.f64(&children[0], parse_tree),
-            255 => self.r#final(&children[0], parse_tree),
-            256 => self.r#for(&children[0], parse_tree),
-            257 => self.function(&children[0], parse_tree),
-            258 => self.i32(&children[0], parse_tree),
-            259 => self.i64(&children[0], parse_tree),
-            260 => self.r#if(&children[0], parse_tree),
-            261 => self.if_reset(&children[0], parse_tree),
-            262 => self.import(&children[0], parse_tree),
-            263 => self.r#in(&children[0], parse_tree),
-            264 => self.initial(&children[0], parse_tree),
-            265 => self.inout(&children[0], parse_tree),
-            266 => self.input(&children[0], parse_tree),
-            267 => self.inside(&children[0], parse_tree),
-            268 => self.inst(&children[0], parse_tree),
-            269 => self.interface(&children[0], parse_tree),
-            270 => self.localparam(&children[0], parse_tree),
-            271 => self.logic(&children[0], parse_tree),
-            272 => self.lsb(&children[0], parse_tree),
-            273 => self.modport(&children[0], parse_tree),
-            274 => self.module(&children[0], parse_tree),
-            275 => self.msb(&children[0], parse_tree),
-            276 => self.negedge(&children[0], parse_tree),
-            277 => self.output(&children[0], parse_tree),
-            278 => self.outside(&children[0], parse_tree),
-            279 => self.package(&children[0], parse_tree),
-            280 => self.parameter(&children[0], parse_tree),
-            281 => self.posedge(&children[0], parse_tree),
-            282 => self.r#ref(&children[0], parse_tree),
-            283 => self.repeat(&children[0], parse_tree),
-            284 => self.r#return(&children[0], parse_tree),
-            285 => self.signed(&children[0], parse_tree),
-            286 => self.step(&children[0], parse_tree),
-            287 => self.strin(&children[0], parse_tree),
-            288 => self.r#struct(&children[0], parse_tree),
-            289 => self.sync_high(&children[0], parse_tree),
-            290 => self.sync_low(&children[0], parse_tree),
-            291 => self.tri(&children[0], parse_tree),
-            292 => self.r#type(&children[0], parse_tree),
-            293 => self.u32(&children[0], parse_tree),
-            294 => self.u64(&children[0], parse_tree),
-            295 => self.var(&children[0], parse_tree),
-            296 => self.identifier(&children[0], parse_tree),
-            297 => self.number_0(&children[0], parse_tree),
-            298 => self.number_1(&children[0], parse_tree),
-            299 => self.integral_number_0(&children[0], parse_tree),
-            300 => self.integral_number_1(&children[0], parse_tree),
-            301 => self.integral_number_2(&children[0], parse_tree),
-            302 => self.real_number_0(&children[0], parse_tree),
-            303 => self.real_number_1(&children[0], parse_tree),
-            304 => {
-                self.hierarchical_identifier(&children[0], &children[1], &children[2], parse_tree)
-            }
+            0 => self.comments_term(&children[0]),
+            1 => self.string_literal_term(&children[0]),
+            2 => self.exponent_term(&children[0]),
+            3 => self.fixed_point_term(&children[0]),
+            4 => self.based_term(&children[0]),
+            5 => self.base_less_term(&children[0]),
+            6 => self.all_bit_term(&children[0]),
+            7 => self.minus_colon_term(&children[0]),
+            8 => self.minus_g_t_term(&children[0]),
+            9 => self.plus_colon_term(&children[0]),
+            10 => self.assignment_operator_term(&children[0]),
+            11 => self.operator11_term(&children[0]),
+            12 => self.operator10_term(&children[0]),
+            13 => self.operator09_term(&children[0]),
+            14 => self.operator08_term(&children[0]),
+            15 => self.operator07_term(&children[0]),
+            16 => self.operator06_term(&children[0]),
+            17 => self.operator02_term(&children[0]),
+            18 => self.operator01_term(&children[0]),
+            19 => self.operator05_term(&children[0]),
+            20 => self.operator04_term(&children[0]),
+            21 => self.operator03_term(&children[0]),
+            22 => self.unary_operator_term(&children[0]),
+            23 => self.colon_colon_term(&children[0]),
+            24 => self.colon_term(&children[0]),
+            25 => self.comma_term(&children[0]),
+            26 => self.dollar_term(&children[0]),
+            27 => self.dot_dot_equ_term(&children[0]),
+            28 => self.dot_dot_term(&children[0]),
+            29 => self.dot_term(&children[0]),
+            30 => self.equ_term(&children[0]),
+            31 => self.hash_term(&children[0]),
+            32 => self.l_angle_term(&children[0]),
+            33 => self.l_brace_term(&children[0]),
+            34 => self.l_bracket_term(&children[0]),
+            35 => self.l_paren_term(&children[0]),
+            36 => self.r_angle_term(&children[0]),
+            37 => self.r_brace_term(&children[0]),
+            38 => self.r_bracket_term(&children[0]),
+            39 => self.r_paren_term(&children[0]),
+            40 => self.semicolon_term(&children[0]),
+            41 => self.star_term(&children[0]),
+            42 => self.always_comb_term(&children[0]),
+            43 => self.always_ff_term(&children[0]),
+            44 => self.assign_term(&children[0]),
+            45 => self.async_high_term(&children[0]),
+            46 => self.async_low_term(&children[0]),
+            47 => self.as_term(&children[0]),
+            48 => self.bit_term(&children[0]),
+            49 => self.case_term(&children[0]),
+            50 => self.default_term(&children[0]),
+            51 => self.else_term(&children[0]),
+            52 => self.enum_term(&children[0]),
+            53 => self.export_term(&children[0]),
+            54 => self.f32_term(&children[0]),
+            55 => self.f64_term(&children[0]),
+            56 => self.final_term(&children[0]),
+            57 => self.for_term(&children[0]),
+            58 => self.function_term(&children[0]),
+            59 => self.i32_term(&children[0]),
+            60 => self.i64_term(&children[0]),
+            61 => self.if_reset_term(&children[0]),
+            62 => self.if_term(&children[0]),
+            63 => self.import_term(&children[0]),
+            64 => self.initial_term(&children[0]),
+            65 => self.inout_term(&children[0]),
+            66 => self.input_term(&children[0]),
+            67 => self.inside_term(&children[0]),
+            68 => self.inst_term(&children[0]),
+            69 => self.interface_term(&children[0]),
+            70 => self.in_term(&children[0]),
+            71 => self.localparam_term(&children[0]),
+            72 => self.logic_term(&children[0]),
+            73 => self.lsb_term(&children[0]),
+            74 => self.modport_term(&children[0]),
+            75 => self.module_term(&children[0]),
+            76 => self.msb_term(&children[0]),
+            77 => self.negedge_term(&children[0]),
+            78 => self.output_term(&children[0]),
+            79 => self.outside_term(&children[0]),
+            80 => self.package_term(&children[0]),
+            81 => self.parameter_term(&children[0]),
+            82 => self.posedge_term(&children[0]),
+            83 => self.ref_term(&children[0]),
+            84 => self.repeat_term(&children[0]),
+            85 => self.return_term(&children[0]),
+            86 => self.signed_term(&children[0]),
+            87 => self.step_term(&children[0]),
+            88 => self.string_term(&children[0]),
+            89 => self.struct_term(&children[0]),
+            90 => self.sync_high_term(&children[0]),
+            91 => self.sync_low_term(&children[0]),
+            92 => self.tri_term(&children[0]),
+            93 => self.type_term(&children[0]),
+            94 => self.u32_term(&children[0]),
+            95 => self.u64_term(&children[0]),
+            96 => self.var_term(&children[0]),
+            97 => self.identifier_term(&children[0]),
+            98 => self.comments(&children[0]),
+            99 => self.comments_opt_0(&children[0]),
+            100 => self.comments_opt_1(),
+            101 => self.start_token(&children[0]),
+            102 => self.string_literal_token(&children[0], &children[1]),
+            103 => self.exponent_token(&children[0], &children[1]),
+            104 => self.fixed_point_token(&children[0], &children[1]),
+            105 => self.based_token(&children[0], &children[1]),
+            106 => self.base_less_token(&children[0], &children[1]),
+            107 => self.all_bit_token(&children[0], &children[1]),
+            108 => self.assignment_operator_token(&children[0], &children[1]),
+            109 => self.operator01_token(&children[0], &children[1]),
+            110 => self.operator02_token(&children[0], &children[1]),
+            111 => self.operator03_token(&children[0], &children[1]),
+            112 => self.operator04_token(&children[0], &children[1]),
+            113 => self.operator05_token(&children[0], &children[1]),
+            114 => self.operator06_token(&children[0], &children[1]),
+            115 => self.operator07_token(&children[0], &children[1]),
+            116 => self.operator08_token(&children[0], &children[1]),
+            117 => self.operator09_token(&children[0], &children[1]),
+            118 => self.operator10_token(&children[0], &children[1]),
+            119 => self.operator11_token(&children[0], &children[1]),
+            120 => self.unary_operator_token(&children[0], &children[1]),
+            121 => self.colon_token(&children[0], &children[1]),
+            122 => self.colon_colon_token(&children[0], &children[1]),
+            123 => self.comma_token(&children[0], &children[1]),
+            124 => self.dollar_token(&children[0], &children[1]),
+            125 => self.dot_dot_token(&children[0], &children[1]),
+            126 => self.dot_dot_equ_token(&children[0], &children[1]),
+            127 => self.dot_token(&children[0], &children[1]),
+            128 => self.equ_token(&children[0], &children[1]),
+            129 => self.hash_token(&children[0], &children[1]),
+            130 => self.l_angle_token(&children[0], &children[1]),
+            131 => self.l_brace_token(&children[0], &children[1]),
+            132 => self.l_bracket_token(&children[0], &children[1]),
+            133 => self.l_paren_token(&children[0], &children[1]),
+            134 => self.minus_colon_token(&children[0], &children[1]),
+            135 => self.minus_g_t_token(&children[0], &children[1]),
+            136 => self.plus_colon_token(&children[0], &children[1]),
+            137 => self.r_angle_token(&children[0], &children[1]),
+            138 => self.r_brace_token(&children[0], &children[1]),
+            139 => self.r_bracket_token(&children[0], &children[1]),
+            140 => self.r_paren_token(&children[0], &children[1]),
+            141 => self.semicolon_token(&children[0], &children[1]),
+            142 => self.star_token(&children[0], &children[1]),
+            143 => self.always_comb_token(&children[0], &children[1]),
+            144 => self.always_ff_token(&children[0], &children[1]),
+            145 => self.as_token(&children[0], &children[1]),
+            146 => self.assign_token(&children[0], &children[1]),
+            147 => self.async_high_token(&children[0], &children[1]),
+            148 => self.async_low_token(&children[0], &children[1]),
+            149 => self.bit_token(&children[0], &children[1]),
+            150 => self.case_token(&children[0], &children[1]),
+            151 => self.default_token(&children[0], &children[1]),
+            152 => self.else_token(&children[0], &children[1]),
+            153 => self.enum_token(&children[0], &children[1]),
+            154 => self.export_token(&children[0], &children[1]),
+            155 => self.f32_token(&children[0], &children[1]),
+            156 => self.f64_token(&children[0], &children[1]),
+            157 => self.final_token(&children[0], &children[1]),
+            158 => self.for_token(&children[0], &children[1]),
+            159 => self.function_token(&children[0], &children[1]),
+            160 => self.i32_token(&children[0], &children[1]),
+            161 => self.i64_token(&children[0], &children[1]),
+            162 => self.if_reset_token(&children[0], &children[1]),
+            163 => self.if_token(&children[0], &children[1]),
+            164 => self.import_token(&children[0], &children[1]),
+            165 => self.initial_token(&children[0], &children[1]),
+            166 => self.inout_token(&children[0], &children[1]),
+            167 => self.input_token(&children[0], &children[1]),
+            168 => self.inside_token(&children[0], &children[1]),
+            169 => self.inst_token(&children[0], &children[1]),
+            170 => self.interface_token(&children[0], &children[1]),
+            171 => self.in_token(&children[0], &children[1]),
+            172 => self.localparam_token(&children[0], &children[1]),
+            173 => self.logic_token(&children[0], &children[1]),
+            174 => self.lsb_token(&children[0], &children[1]),
+            175 => self.modport_token(&children[0], &children[1]),
+            176 => self.module_token(&children[0], &children[1]),
+            177 => self.msb_token(&children[0], &children[1]),
+            178 => self.negedge_token(&children[0], &children[1]),
+            179 => self.output_token(&children[0], &children[1]),
+            180 => self.outside_token(&children[0], &children[1]),
+            181 => self.package_token(&children[0], &children[1]),
+            182 => self.parameter_token(&children[0], &children[1]),
+            183 => self.posedge_token(&children[0], &children[1]),
+            184 => self.ref_token(&children[0], &children[1]),
+            185 => self.repeat_token(&children[0], &children[1]),
+            186 => self.return_token(&children[0], &children[1]),
+            187 => self.signed_token(&children[0], &children[1]),
+            188 => self.step_token(&children[0], &children[1]),
+            189 => self.string_token(&children[0], &children[1]),
+            190 => self.struct_token(&children[0], &children[1]),
+            191 => self.sync_high_token(&children[0], &children[1]),
+            192 => self.sync_low_token(&children[0], &children[1]),
+            193 => self.tri_token(&children[0], &children[1]),
+            194 => self.type_token(&children[0], &children[1]),
+            195 => self.u32_token(&children[0], &children[1]),
+            196 => self.u64_token(&children[0], &children[1]),
+            197 => self.var_token(&children[0], &children[1]),
+            198 => self.identifier_token(&children[0], &children[1]),
+            199 => self.start(&children[0]),
+            200 => self.string_literal(&children[0]),
+            201 => self.exponent(&children[0]),
+            202 => self.fixed_point(&children[0]),
+            203 => self.based(&children[0]),
+            204 => self.base_less(&children[0]),
+            205 => self.all_bit(&children[0]),
+            206 => self.assignment_operator(&children[0]),
+            207 => self.operator01(&children[0]),
+            208 => self.operator02(&children[0]),
+            209 => self.operator03(&children[0]),
+            210 => self.operator04(&children[0]),
+            211 => self.operator05(&children[0]),
+            212 => self.operator06(&children[0]),
+            213 => self.operator07(&children[0]),
+            214 => self.operator08(&children[0]),
+            215 => self.operator09(&children[0]),
+            216 => self.operator10(&children[0]),
+            217 => self.operator11(&children[0]),
+            218 => self.unary_operator(&children[0]),
+            219 => self.colon(&children[0]),
+            220 => self.colon_colon(&children[0]),
+            221 => self.comma(&children[0]),
+            222 => self.dollar(&children[0]),
+            223 => self.dot_dot(&children[0]),
+            224 => self.dot_dot_equ(&children[0]),
+            225 => self.dot(&children[0]),
+            226 => self.equ(&children[0]),
+            227 => self.hash(&children[0]),
+            228 => self.l_angle(&children[0]),
+            229 => self.l_brace(&children[0]),
+            230 => self.l_bracket(&children[0]),
+            231 => self.l_paren(&children[0]),
+            232 => self.minus_colon(&children[0]),
+            233 => self.minus_g_t(&children[0]),
+            234 => self.plus_colon(&children[0]),
+            235 => self.r_angle(&children[0]),
+            236 => self.r_brace(&children[0]),
+            237 => self.r_bracket(&children[0]),
+            238 => self.r_paren(&children[0]),
+            239 => self.semicolon(&children[0]),
+            240 => self.star(&children[0]),
+            241 => self.always_comb(&children[0]),
+            242 => self.always_ff(&children[0]),
+            243 => self.r#as(&children[0]),
+            244 => self.assign(&children[0]),
+            245 => self.async_high(&children[0]),
+            246 => self.async_low(&children[0]),
+            247 => self.bit(&children[0]),
+            248 => self.case(&children[0]),
+            249 => self.defaul(&children[0]),
+            250 => self.r#else(&children[0]),
+            251 => self.r#enum(&children[0]),
+            252 => self.export(&children[0]),
+            253 => self.f32(&children[0]),
+            254 => self.f64(&children[0]),
+            255 => self.r#final(&children[0]),
+            256 => self.r#for(&children[0]),
+            257 => self.function(&children[0]),
+            258 => self.i32(&children[0]),
+            259 => self.i64(&children[0]),
+            260 => self.r#if(&children[0]),
+            261 => self.if_reset(&children[0]),
+            262 => self.import(&children[0]),
+            263 => self.r#in(&children[0]),
+            264 => self.initial(&children[0]),
+            265 => self.inout(&children[0]),
+            266 => self.input(&children[0]),
+            267 => self.inside(&children[0]),
+            268 => self.inst(&children[0]),
+            269 => self.interface(&children[0]),
+            270 => self.localparam(&children[0]),
+            271 => self.logic(&children[0]),
+            272 => self.lsb(&children[0]),
+            273 => self.modport(&children[0]),
+            274 => self.module(&children[0]),
+            275 => self.msb(&children[0]),
+            276 => self.negedge(&children[0]),
+            277 => self.output(&children[0]),
+            278 => self.outside(&children[0]),
+            279 => self.package(&children[0]),
+            280 => self.parameter(&children[0]),
+            281 => self.posedge(&children[0]),
+            282 => self.r#ref(&children[0]),
+            283 => self.repeat(&children[0]),
+            284 => self.r#return(&children[0]),
+            285 => self.signed(&children[0]),
+            286 => self.step(&children[0]),
+            287 => self.strin(&children[0]),
+            288 => self.r#struct(&children[0]),
+            289 => self.sync_high(&children[0]),
+            290 => self.sync_low(&children[0]),
+            291 => self.tri(&children[0]),
+            292 => self.r#type(&children[0]),
+            293 => self.u32(&children[0]),
+            294 => self.u64(&children[0]),
+            295 => self.var(&children[0]),
+            296 => self.identifier(&children[0]),
+            297 => self.number_0(&children[0]),
+            298 => self.number_1(&children[0]),
+            299 => self.integral_number_0(&children[0]),
+            300 => self.integral_number_1(&children[0]),
+            301 => self.integral_number_2(&children[0]),
+            302 => self.real_number_0(&children[0]),
+            303 => self.real_number_1(&children[0]),
+            304 => self.hierarchical_identifier(&children[0], &children[1], &children[2]),
             305 => self.hierarchical_identifier_list0_0(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
-                parse_tree,
             ),
-            306 => {
-                self.hierarchical_identifier_list0_list_0(&children[0], &children[1], parse_tree)
-            }
-            307 => self.hierarchical_identifier_list0_list_1(parse_tree),
-            308 => self.hierarchical_identifier_list0_1(parse_tree),
-            309 => self.hierarchical_identifier_list_0(&children[0], &children[1], parse_tree),
-            310 => self.hierarchical_identifier_list_1(parse_tree),
-            311 => self.scoped_identifier(&children[0], &children[1], parse_tree),
-            312 => {
-                self.scoped_identifier_list_0(&children[0], &children[1], &children[2], parse_tree)
-            }
-            313 => self.scoped_identifier_list_1(parse_tree),
-            314 => self.expression_identifier(&children[0], &children[1], &children[2], parse_tree),
+            306 => self.hierarchical_identifier_list0_list_0(&children[0], &children[1]),
+            307 => self.hierarchical_identifier_list0_list_1(),
+            308 => self.hierarchical_identifier_list0_1(),
+            309 => self.hierarchical_identifier_list_0(&children[0], &children[1]),
+            310 => self.hierarchical_identifier_list_1(),
+            311 => self.scoped_identifier(&children[0], &children[1]),
+            312 => self.scoped_identifier_list_0(&children[0], &children[1], &children[2]),
+            313 => self.scoped_identifier_list_1(),
+            314 => self.expression_identifier(&children[0], &children[1], &children[2]),
             315 => self.expression_identifier_group_0(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
-                parse_tree,
             ),
-            316 => self.expression_identifier_group_list0_0(&children[0], &children[1], parse_tree),
-            317 => self.expression_identifier_group_list0_1(parse_tree),
-            318 => self.expression_identifier_group_list_0(
-                &children[0],
-                &children[1],
-                &children[2],
-                parse_tree,
-            ),
-            319 => self.expression_identifier_group_list_1(parse_tree),
-            320 => self.expression_identifier_group_1(&children[0], &children[1], parse_tree),
+            316 => self.expression_identifier_group_list0_0(&children[0], &children[1]),
+            317 => self.expression_identifier_group_list0_1(),
+            318 => {
+                self.expression_identifier_group_list_0(&children[0], &children[1], &children[2])
+            }
+            319 => self.expression_identifier_group_list_1(),
+            320 => self.expression_identifier_group_1(&children[0], &children[1]),
             321 => self.expression_identifier_group_list2_0(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
-                parse_tree,
             ),
-            322 => self.expression_identifier_group_list2_list_0(
-                &children[0],
-                &children[1],
-                parse_tree,
-            ),
-            323 => self.expression_identifier_group_list2_list_1(parse_tree),
-            324 => self.expression_identifier_group_list2_1(parse_tree),
-            325 => self.expression_identifier_group_list1_0(&children[0], &children[1], parse_tree),
-            326 => self.expression_identifier_group_list1_1(parse_tree),
-            327 => self.expression_identifier_opt_0(&children[0], parse_tree),
-            328 => self.expression_identifier_opt_1(parse_tree),
-            329 => self.expression(&children[0], &children[1], parse_tree),
-            330 => self.expression_list_0(&children[0], &children[1], &children[2], parse_tree),
-            331 => self.expression_list_1(parse_tree),
-            332 => self.expression01(&children[0], &children[1], parse_tree),
-            333 => self.expression01_list_0(&children[0], &children[1], &children[2], parse_tree),
-            334 => self.expression01_list_1(parse_tree),
-            335 => self.expression02(&children[0], &children[1], parse_tree),
-            336 => self.expression02_list_0(&children[0], &children[1], &children[2], parse_tree),
-            337 => self.expression02_list_1(parse_tree),
-            338 => self.expression03(&children[0], &children[1], parse_tree),
-            339 => self.expression03_list_0(&children[0], &children[1], &children[2], parse_tree),
-            340 => self.expression03_list_1(parse_tree),
-            341 => self.expression04(&children[0], &children[1], parse_tree),
-            342 => self.expression04_list_0(&children[0], &children[1], &children[2], parse_tree),
-            343 => self.expression04_list_1(parse_tree),
-            344 => self.expression05(&children[0], &children[1], parse_tree),
-            345 => self.expression05_list_0(&children[0], &children[1], &children[2], parse_tree),
-            346 => self.expression05_list_1(parse_tree),
-            347 => self.expression06(&children[0], &children[1], parse_tree),
-            348 => self.expression06_list_0(&children[0], &children[1], &children[2], parse_tree),
-            349 => self.expression06_list_1(parse_tree),
-            350 => self.expression07(&children[0], &children[1], parse_tree),
-            351 => self.expression07_list_0(&children[0], &children[1], &children[2], parse_tree),
-            352 => self.expression07_list_1(parse_tree),
-            353 => self.expression08(&children[0], &children[1], parse_tree),
-            354 => self.expression08_list_0(&children[0], &children[1], &children[2], parse_tree),
-            355 => self.expression08_list_1(parse_tree),
-            356 => self.expression09(&children[0], &children[1], parse_tree),
-            357 => self.expression09_list_0(&children[0], &children[1], &children[2], parse_tree),
-            358 => self.expression09_list_group_0(&children[0], parse_tree),
-            359 => self.expression09_list_group_1(&children[0], parse_tree),
-            360 => self.expression09_list_1(parse_tree),
-            361 => self.expression10(&children[0], &children[1], parse_tree),
-            362 => self.expression10_list_0(&children[0], &children[1], &children[2], parse_tree),
-            363 => self.expression10_list_1(parse_tree),
-            364 => self.expression11(&children[0], &children[1], parse_tree),
-            365 => self.expression11_list_0(&children[0], &children[1], &children[2], parse_tree),
-            366 => self.expression11_list_1(parse_tree),
-            367 => self.expression12(&children[0], &children[1], parse_tree),
-            368 => self.expression12_list_0(&children[0], &children[1], parse_tree),
-            369 => self.expression12_list_group_0(&children[0], parse_tree),
-            370 => self.expression12_list_group_1(&children[0], parse_tree),
-            371 => self.expression12_list_group_2(&children[0], parse_tree),
-            372 => self.expression12_list_group_3(&children[0], parse_tree),
-            373 => self.expression12_list_group_4(&children[0], parse_tree),
-            374 => self.expression12_list_1(parse_tree),
-            375 => self.factor_0(&children[0], parse_tree),
-            376 => self.factor_1(&children[0], &children[1], parse_tree),
-            377 => self.factor_2(&children[0], &children[1], &children[2], parse_tree),
-            378 => self.factor_3(&children[0], &children[1], &children[2], parse_tree),
-            379 => self.factor_4(&children[0], parse_tree),
-            380 => self.factor_5(&children[0], parse_tree),
-            381 => self.factor_6(&children[0], parse_tree),
-            382 => self.factor_7(&children[0], parse_tree),
-            383 => self.factor_group_0(&children[0], parse_tree),
-            384 => self.factor_group_1(&children[0], parse_tree),
-            385 => self.factor_8(&children[0], parse_tree),
-            386 => self.factor_9(&children[0], parse_tree),
-            387 => self.factor_opt_0(&children[0], parse_tree),
-            388 => self.factor_opt_1(parse_tree),
-            389 => self.function_call(&children[0], &children[1], &children[2], parse_tree),
-            390 => self.function_call_opt_0(&children[0], parse_tree),
-            391 => self.function_call_opt_1(parse_tree),
-            392 => self.argument_list(&children[0], &children[1], &children[2], parse_tree),
-            393 => self.argument_list_list_0(&children[0], &children[1], &children[2], parse_tree),
-            394 => self.argument_list_list_1(parse_tree),
-            395 => self.argument_list_opt_0(&children[0], parse_tree),
-            396 => self.argument_list_opt_1(parse_tree),
-            397 => self.argument_item(&children[0], parse_tree),
-            398 => self.concatenation_list(&children[0], &children[1], &children[2], parse_tree),
-            399 => {
-                self.concatenation_list_list_0(&children[0], &children[1], &children[2], parse_tree)
-            }
-            400 => self.concatenation_list_list_1(parse_tree),
-            401 => self.concatenation_list_opt_0(&children[0], parse_tree),
-            402 => self.concatenation_list_opt_1(parse_tree),
-            403 => self.concatenation_item(&children[0], &children[1], parse_tree),
-            404 => self.concatenation_item_opt_0(&children[0], &children[1], parse_tree),
-            405 => self.concatenation_item_opt_1(parse_tree),
+            322 => self.expression_identifier_group_list2_list_0(&children[0], &children[1]),
+            323 => self.expression_identifier_group_list2_list_1(),
+            324 => self.expression_identifier_group_list2_1(),
+            325 => self.expression_identifier_group_list1_0(&children[0], &children[1]),
+            326 => self.expression_identifier_group_list1_1(),
+            327 => self.expression_identifier_opt_0(&children[0]),
+            328 => self.expression_identifier_opt_1(),
+            329 => self.expression(&children[0], &children[1]),
+            330 => self.expression_list_0(&children[0], &children[1], &children[2]),
+            331 => self.expression_list_1(),
+            332 => self.expression01(&children[0], &children[1]),
+            333 => self.expression01_list_0(&children[0], &children[1], &children[2]),
+            334 => self.expression01_list_1(),
+            335 => self.expression02(&children[0], &children[1]),
+            336 => self.expression02_list_0(&children[0], &children[1], &children[2]),
+            337 => self.expression02_list_1(),
+            338 => self.expression03(&children[0], &children[1]),
+            339 => self.expression03_list_0(&children[0], &children[1], &children[2]),
+            340 => self.expression03_list_1(),
+            341 => self.expression04(&children[0], &children[1]),
+            342 => self.expression04_list_0(&children[0], &children[1], &children[2]),
+            343 => self.expression04_list_1(),
+            344 => self.expression05(&children[0], &children[1]),
+            345 => self.expression05_list_0(&children[0], &children[1], &children[2]),
+            346 => self.expression05_list_1(),
+            347 => self.expression06(&children[0], &children[1]),
+            348 => self.expression06_list_0(&children[0], &children[1], &children[2]),
+            349 => self.expression06_list_1(),
+            350 => self.expression07(&children[0], &children[1]),
+            351 => self.expression07_list_0(&children[0], &children[1], &children[2]),
+            352 => self.expression07_list_1(),
+            353 => self.expression08(&children[0], &children[1]),
+            354 => self.expression08_list_0(&children[0], &children[1], &children[2]),
+            355 => self.expression08_list_1(),
+            356 => self.expression09(&children[0], &children[1]),
+            357 => self.expression09_list_0(&children[0], &children[1], &children[2]),
+            358 => self.expression09_list_group_0(&children[0]),
+            359 => self.expression09_list_group_1(&children[0]),
+            360 => self.expression09_list_1(),
+            361 => self.expression10(&children[0], &children[1]),
+            362 => self.expression10_list_0(&children[0], &children[1], &children[2]),
+            363 => self.expression10_list_1(),
+            364 => self.expression11(&children[0], &children[1]),
+            365 => self.expression11_list_0(&children[0], &children[1], &children[2]),
+            366 => self.expression11_list_1(),
+            367 => self.expression12(&children[0], &children[1]),
+            368 => self.expression12_list_0(&children[0], &children[1]),
+            369 => self.expression12_list_group_0(&children[0]),
+            370 => self.expression12_list_group_1(&children[0]),
+            371 => self.expression12_list_group_2(&children[0]),
+            372 => self.expression12_list_group_3(&children[0]),
+            373 => self.expression12_list_group_4(&children[0]),
+            374 => self.expression12_list_1(),
+            375 => self.factor_0(&children[0]),
+            376 => self.factor_1(&children[0], &children[1]),
+            377 => self.factor_2(&children[0], &children[1], &children[2]),
+            378 => self.factor_3(&children[0], &children[1], &children[2]),
+            379 => self.factor_4(&children[0]),
+            380 => self.factor_5(&children[0]),
+            381 => self.factor_6(&children[0]),
+            382 => self.factor_7(&children[0]),
+            383 => self.factor_group_0(&children[0]),
+            384 => self.factor_group_1(&children[0]),
+            385 => self.factor_8(&children[0]),
+            386 => self.factor_9(&children[0]),
+            387 => self.factor_opt_0(&children[0]),
+            388 => self.factor_opt_1(),
+            389 => self.function_call(&children[0], &children[1], &children[2]),
+            390 => self.function_call_opt_0(&children[0]),
+            391 => self.function_call_opt_1(),
+            392 => self.argument_list(&children[0], &children[1], &children[2]),
+            393 => self.argument_list_list_0(&children[0], &children[1], &children[2]),
+            394 => self.argument_list_list_1(),
+            395 => self.argument_list_opt_0(&children[0]),
+            396 => self.argument_list_opt_1(),
+            397 => self.argument_item(&children[0]),
+            398 => self.concatenation_list(&children[0], &children[1], &children[2]),
+            399 => self.concatenation_list_list_0(&children[0], &children[1], &children[2]),
+            400 => self.concatenation_list_list_1(),
+            401 => self.concatenation_list_opt_0(&children[0]),
+            402 => self.concatenation_list_opt_1(),
+            403 => self.concatenation_item(&children[0], &children[1]),
+            404 => self.concatenation_item_opt_0(&children[0], &children[1]),
+            405 => self.concatenation_item_opt_1(),
             406 => self.if_expression(
                 &children[0],
                 &children[1],
@@ -31626,7 +29773,6 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[7],
                 &children[8],
                 &children[9],
-                parse_tree,
             ),
             407 => self.if_expression_list_0(
                 &children[0],
@@ -31636,9 +29782,8 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 &children[5],
                 &children[6],
-                parse_tree,
             ),
-            408 => self.if_expression_list_1(parse_tree),
+            408 => self.if_expression_list_1(),
             409 => self.case_expression(
                 &children[0],
                 &children[1],
@@ -31653,7 +29798,6 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[10],
                 &children[11],
                 &children[12],
-                parse_tree,
             ),
             410 => self.case_expression_list_0(
                 &children[0],
@@ -31661,26 +29805,18 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[2],
                 &children[3],
                 &children[4],
-                parse_tree,
             ),
-            411 => self.case_expression_list_1(parse_tree),
-            412 => self.case_expression_opt_0(&children[0], parse_tree),
-            413 => self.case_expression_opt_1(parse_tree),
-            414 => self.type_expression_0(&children[0], parse_tree),
-            415 => self.type_expression_1(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                parse_tree,
-            ),
+            411 => self.case_expression_list_1(),
+            412 => self.case_expression_opt_0(&children[0]),
+            413 => self.case_expression_opt_1(),
+            414 => self.type_expression_0(&children[0]),
+            415 => self.type_expression_1(&children[0], &children[1], &children[2], &children[3]),
             416 => self.inside_expression(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
-                parse_tree,
             ),
             417 => self.outside_expression(
                 &children[0],
@@ -31688,85 +29824,66 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[2],
                 &children[3],
                 &children[4],
-                parse_tree,
             ),
-            418 => self.range_list(&children[0], &children[1], &children[2], parse_tree),
-            419 => self.range_list_list_0(&children[0], &children[1], &children[2], parse_tree),
-            420 => self.range_list_list_1(parse_tree),
-            421 => self.range_list_opt_0(&children[0], parse_tree),
-            422 => self.range_list_opt_1(parse_tree),
-            423 => self.range_item(&children[0], parse_tree),
-            424 => self.select(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                parse_tree,
-            ),
-            425 => self.select_opt_0(&children[0], &children[1], parse_tree),
-            426 => self.select_opt_1(parse_tree),
-            427 => self.select_operator_0(&children[0], parse_tree),
-            428 => self.select_operator_1(&children[0], parse_tree),
-            429 => self.select_operator_2(&children[0], parse_tree),
-            430 => self.select_operator_3(&children[0], parse_tree),
-            431 => self.width(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                parse_tree,
-            ),
-            432 => self.width_list_0(&children[0], &children[1], &children[2], parse_tree),
-            433 => self.width_list_1(parse_tree),
-            434 => self.array(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                parse_tree,
-            ),
-            435 => self.array_list_0(&children[0], &children[1], &children[2], parse_tree),
-            436 => self.array_list_1(parse_tree),
-            437 => self.range(&children[0], &children[1], parse_tree),
-            438 => self.range_opt_0(&children[0], &children[1], parse_tree),
-            439 => self.range_opt_1(parse_tree),
-            440 => self.range_operator_0(&children[0], parse_tree),
-            441 => self.range_operator_1(&children[0], parse_tree),
-            442 => self.fixed_type_0(&children[0], parse_tree),
-            443 => self.fixed_type_1(&children[0], parse_tree),
-            444 => self.fixed_type_2(&children[0], parse_tree),
-            445 => self.fixed_type_3(&children[0], parse_tree),
-            446 => self.fixed_type_4(&children[0], parse_tree),
-            447 => self.fixed_type_5(&children[0], parse_tree),
-            448 => self.fixed_type_6(&children[0], parse_tree),
-            449 => self.variable_type(&children[0], &children[1], parse_tree),
-            450 => self.variable_type_group_0(&children[0], parse_tree),
-            451 => self.variable_type_group_1(&children[0], parse_tree),
-            452 => self.variable_type_group_2(&children[0], parse_tree),
-            453 => self.variable_type_opt_0(&children[0], parse_tree),
-            454 => self.variable_type_opt_1(parse_tree),
-            455 => self.type_modifier_0(&children[0], parse_tree),
-            456 => self.type_modifier_1(&children[0], parse_tree),
-            457 => self.scalar_type(&children[0], &children[1], parse_tree),
-            458 => self.scalar_type_group_0(&children[0], parse_tree),
-            459 => self.scalar_type_group_1(&children[0], parse_tree),
-            460 => self.scalar_type_list_0(&children[0], &children[1], parse_tree),
-            461 => self.scalar_type_list_1(parse_tree),
-            462 => self.array_type(&children[0], &children[1], parse_tree),
-            463 => self.array_type_opt_0(&children[0], parse_tree),
-            464 => self.array_type_opt_1(parse_tree),
-            465 => self.statement_0(&children[0], parse_tree),
-            466 => self.statement_1(&children[0], parse_tree),
-            467 => self.statement_2(&children[0], parse_tree),
-            468 => self.statement_3(&children[0], parse_tree),
-            469 => self.statement_4(&children[0], parse_tree),
-            470 => self.statement_5(&children[0], parse_tree),
-            471 => self.identifier_statement(&children[0], &children[1], &children[2], parse_tree),
-            472 => self.identifier_statement_group_0(&children[0], parse_tree),
-            473 => self.identifier_statement_group_1(&children[0], parse_tree),
-            474 => self.assignment(&children[0], &children[1], parse_tree),
-            475 => self.assignment_group_0(&children[0], parse_tree),
-            476 => self.assignment_group_1(&children[0], parse_tree),
+            418 => self.range_list(&children[0], &children[1], &children[2]),
+            419 => self.range_list_list_0(&children[0], &children[1], &children[2]),
+            420 => self.range_list_list_1(),
+            421 => self.range_list_opt_0(&children[0]),
+            422 => self.range_list_opt_1(),
+            423 => self.range_item(&children[0]),
+            424 => self.select(&children[0], &children[1], &children[2], &children[3]),
+            425 => self.select_opt_0(&children[0], &children[1]),
+            426 => self.select_opt_1(),
+            427 => self.select_operator_0(&children[0]),
+            428 => self.select_operator_1(&children[0]),
+            429 => self.select_operator_2(&children[0]),
+            430 => self.select_operator_3(&children[0]),
+            431 => self.width(&children[0], &children[1], &children[2], &children[3]),
+            432 => self.width_list_0(&children[0], &children[1], &children[2]),
+            433 => self.width_list_1(),
+            434 => self.array(&children[0], &children[1], &children[2], &children[3]),
+            435 => self.array_list_0(&children[0], &children[1], &children[2]),
+            436 => self.array_list_1(),
+            437 => self.range(&children[0], &children[1]),
+            438 => self.range_opt_0(&children[0], &children[1]),
+            439 => self.range_opt_1(),
+            440 => self.range_operator_0(&children[0]),
+            441 => self.range_operator_1(&children[0]),
+            442 => self.fixed_type_0(&children[0]),
+            443 => self.fixed_type_1(&children[0]),
+            444 => self.fixed_type_2(&children[0]),
+            445 => self.fixed_type_3(&children[0]),
+            446 => self.fixed_type_4(&children[0]),
+            447 => self.fixed_type_5(&children[0]),
+            448 => self.fixed_type_6(&children[0]),
+            449 => self.variable_type(&children[0], &children[1]),
+            450 => self.variable_type_group_0(&children[0]),
+            451 => self.variable_type_group_1(&children[0]),
+            452 => self.variable_type_group_2(&children[0]),
+            453 => self.variable_type_opt_0(&children[0]),
+            454 => self.variable_type_opt_1(),
+            455 => self.type_modifier_0(&children[0]),
+            456 => self.type_modifier_1(&children[0]),
+            457 => self.scalar_type(&children[0], &children[1]),
+            458 => self.scalar_type_group_0(&children[0]),
+            459 => self.scalar_type_group_1(&children[0]),
+            460 => self.scalar_type_list_0(&children[0], &children[1]),
+            461 => self.scalar_type_list_1(),
+            462 => self.array_type(&children[0], &children[1]),
+            463 => self.array_type_opt_0(&children[0]),
+            464 => self.array_type_opt_1(),
+            465 => self.statement_0(&children[0]),
+            466 => self.statement_1(&children[0]),
+            467 => self.statement_2(&children[0]),
+            468 => self.statement_3(&children[0]),
+            469 => self.statement_4(&children[0]),
+            470 => self.statement_5(&children[0]),
+            471 => self.identifier_statement(&children[0], &children[1], &children[2]),
+            472 => self.identifier_statement_group_0(&children[0]),
+            473 => self.identifier_statement_group_1(&children[0]),
+            474 => self.assignment(&children[0], &children[1]),
+            475 => self.assignment_group_0(&children[0]),
+            476 => self.assignment_group_1(&children[0]),
             477 => self.if_statement(
                 &children[0],
                 &children[1],
@@ -31775,7 +29892,6 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 &children[5],
                 &children[6],
-                parse_tree,
             ),
             478 => self.if_statement_list0_0(
                 &children[0],
@@ -31785,23 +29901,16 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 &children[5],
                 &children[6],
-                parse_tree,
             ),
-            479 => self.if_statement_list0_list_0(&children[0], &children[1], parse_tree),
-            480 => self.if_statement_list0_list_1(parse_tree),
-            481 => self.if_statement_list0_1(parse_tree),
-            482 => self.if_statement_list_0(&children[0], &children[1], parse_tree),
-            483 => self.if_statement_list_1(parse_tree),
-            484 => self.if_statement_opt_0(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                parse_tree,
-            ),
-            485 => self.if_statement_opt_list_0(&children[0], &children[1], parse_tree),
-            486 => self.if_statement_opt_list_1(parse_tree),
-            487 => self.if_statement_opt_1(parse_tree),
+            479 => self.if_statement_list0_list_0(&children[0], &children[1]),
+            480 => self.if_statement_list0_list_1(),
+            481 => self.if_statement_list0_1(),
+            482 => self.if_statement_list_0(&children[0], &children[1]),
+            483 => self.if_statement_list_1(),
+            484 => self.if_statement_opt_0(&children[0], &children[1], &children[2], &children[3]),
+            485 => self.if_statement_opt_list_0(&children[0], &children[1]),
+            486 => self.if_statement_opt_list_1(),
+            487 => self.if_statement_opt_1(),
             488 => self.if_reset_statement(
                 &children[0],
                 &children[1],
@@ -31809,7 +29918,6 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[3],
                 &children[4],
                 &children[5],
-                parse_tree,
             ),
             489 => self.if_reset_statement_list0_0(
                 &children[0],
@@ -31819,24 +29927,22 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 &children[5],
                 &children[6],
-                parse_tree,
             ),
-            490 => self.if_reset_statement_list0_list_0(&children[0], &children[1], parse_tree),
-            491 => self.if_reset_statement_list0_list_1(parse_tree),
-            492 => self.if_reset_statement_list0_1(parse_tree),
-            493 => self.if_reset_statement_list_0(&children[0], &children[1], parse_tree),
-            494 => self.if_reset_statement_list_1(parse_tree),
+            490 => self.if_reset_statement_list0_list_0(&children[0], &children[1]),
+            491 => self.if_reset_statement_list0_list_1(),
+            492 => self.if_reset_statement_list0_1(),
+            493 => self.if_reset_statement_list_0(&children[0], &children[1]),
+            494 => self.if_reset_statement_list_1(),
             495 => self.if_reset_statement_opt_0(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
-                parse_tree,
             ),
-            496 => self.if_reset_statement_opt_list_0(&children[0], &children[1], parse_tree),
-            497 => self.if_reset_statement_opt_list_1(parse_tree),
-            498 => self.if_reset_statement_opt_1(parse_tree),
-            499 => self.return_statement(&children[0], &children[1], &children[2], parse_tree),
+            496 => self.if_reset_statement_opt_list_0(&children[0], &children[1]),
+            497 => self.if_reset_statement_opt_list_1(),
+            498 => self.if_reset_statement_opt_1(),
+            499 => self.return_statement(&children[0], &children[1], &children[2]),
             500 => self.for_statement(
                 &children[0],
                 &children[1],
@@ -31848,46 +29954,43 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[7],
                 &children[8],
                 &children[9],
-                parse_tree,
             ),
-            501 => self.for_statement_list_0(&children[0], &children[1], parse_tree),
-            502 => self.for_statement_list_1(parse_tree),
-            503 => self.for_statement_opt_0(&children[0], &children[1], &children[2], parse_tree),
-            504 => self.for_statement_opt_1(parse_tree),
+            501 => self.for_statement_list_0(&children[0], &children[1]),
+            502 => self.for_statement_list_1(),
+            503 => self.for_statement_opt_0(&children[0], &children[1], &children[2]),
+            504 => self.for_statement_opt_1(),
             505 => self.case_statement(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
-                parse_tree,
             ),
-            506 => self.case_statement_list_0(&children[0], &children[1], parse_tree),
-            507 => self.case_statement_list_1(parse_tree),
-            508 => self.case_item(&children[0], &children[1], &children[2], parse_tree),
-            509 => self.case_item_group0_0(&children[0], parse_tree),
-            510 => self.case_item_group0_1(&children[0], &children[1], &children[2], parse_tree),
-            511 => self.case_item_group0_list_0(&children[0], &children[1], parse_tree),
-            512 => self.case_item_group0_list_1(parse_tree),
-            513 => self.case_item_group_0(&children[0], parse_tree),
-            514 => self.case_item_group_1(&children[0], parse_tree),
+            506 => self.case_statement_list_0(&children[0], &children[1]),
+            507 => self.case_statement_list_1(),
+            508 => self.case_item(&children[0], &children[1], &children[2]),
+            509 => self.case_item_group0_0(&children[0]),
+            510 => self.case_item_group0_1(&children[0], &children[1], &children[2]),
+            511 => self.case_item_group0_list_0(&children[0], &children[1]),
+            512 => self.case_item_group0_list_1(),
+            513 => self.case_item_group_0(&children[0]),
+            514 => self.case_item_group_1(&children[0]),
             515 => self.attribute(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
-                parse_tree,
             ),
-            516 => self.attribute_opt_0(&children[0], &children[1], &children[2], parse_tree),
-            517 => self.attribute_opt_1(parse_tree),
-            518 => self.attribute_list(&children[0], &children[1], &children[2], parse_tree),
-            519 => self.attribute_list_list_0(&children[0], &children[1], &children[2], parse_tree),
-            520 => self.attribute_list_list_1(parse_tree),
-            521 => self.attribute_list_opt_0(&children[0], parse_tree),
-            522 => self.attribute_list_opt_1(parse_tree),
-            523 => self.attribute_item_0(&children[0], parse_tree),
-            524 => self.attribute_item_1(&children[0], parse_tree),
+            516 => self.attribute_opt_0(&children[0], &children[1], &children[2]),
+            517 => self.attribute_opt_1(),
+            518 => self.attribute_list(&children[0], &children[1], &children[2]),
+            519 => self.attribute_list_list_0(&children[0], &children[1], &children[2]),
+            520 => self.attribute_list_list_1(),
+            521 => self.attribute_list_opt_0(&children[0]),
+            522 => self.attribute_list_opt_1(),
+            523 => self.attribute_item_0(&children[0]),
+            524 => self.attribute_item_1(&children[0]),
             525 => self.var_declaration(
                 &children[0],
                 &children[1],
@@ -31895,30 +29998,18 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[3],
                 &children[4],
                 &children[5],
-                parse_tree,
             ),
-            526 => self.var_declaration_opt_0(&children[0], &children[1], parse_tree),
-            527 => self.var_declaration_opt_1(parse_tree),
+            526 => self.var_declaration_opt_0(&children[0], &children[1]),
+            527 => self.var_declaration_opt_1(),
             528 => self.localparam_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
-                parse_tree,
             ),
-            529 => self.localparam_declaration_group_0(
-                &children[0],
-                &children[1],
-                &children[2],
-                parse_tree,
-            ),
-            530 => self.localparam_declaration_group_1(
-                &children[0],
-                &children[1],
-                &children[2],
-                parse_tree,
-            ),
+            529 => self.localparam_declaration_group_0(&children[0], &children[1], &children[2]),
+            530 => self.localparam_declaration_group_1(&children[0], &children[1], &children[2]),
             531 => self.always_ff_declaration(
                 &children[0],
                 &children[1],
@@ -31928,40 +30019,34 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[5],
                 &children[6],
                 &children[7],
-                parse_tree,
             ),
-            532 => self.always_ff_declaration_list_0(&children[0], &children[1], parse_tree),
-            533 => self.always_ff_declaration_list_1(parse_tree),
-            534 => self.always_ff_declaration_opt_0(&children[0], &children[1], parse_tree),
-            535 => self.always_ff_declaration_opt_1(parse_tree),
-            536 => self.always_ff_clock(&children[0], &children[1], parse_tree),
-            537 => self.always_ff_clock_opt_0(&children[0], parse_tree),
-            538 => self.always_ff_clock_opt_group_0(&children[0], parse_tree),
-            539 => self.always_ff_clock_opt_group_1(&children[0], parse_tree),
-            540 => self.always_ff_clock_opt_1(parse_tree),
-            541 => self.always_ff_reset(&children[0], &children[1], parse_tree),
-            542 => self.always_ff_reset_opt_0(&children[0], parse_tree),
-            543 => self.always_ff_reset_opt_group_0(&children[0], parse_tree),
-            544 => self.always_ff_reset_opt_group_1(&children[0], parse_tree),
-            545 => self.always_ff_reset_opt_group_2(&children[0], parse_tree),
-            546 => self.always_ff_reset_opt_group_3(&children[0], parse_tree),
-            547 => self.always_ff_reset_opt_1(parse_tree),
-            548 => self.always_comb_declaration(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                parse_tree,
-            ),
-            549 => self.always_comb_declaration_list_0(&children[0], &children[1], parse_tree),
-            550 => self.always_comb_declaration_list_1(parse_tree),
+            532 => self.always_ff_declaration_list_0(&children[0], &children[1]),
+            533 => self.always_ff_declaration_list_1(),
+            534 => self.always_ff_declaration_opt_0(&children[0], &children[1]),
+            535 => self.always_ff_declaration_opt_1(),
+            536 => self.always_ff_clock(&children[0], &children[1]),
+            537 => self.always_ff_clock_opt_0(&children[0]),
+            538 => self.always_ff_clock_opt_group_0(&children[0]),
+            539 => self.always_ff_clock_opt_group_1(&children[0]),
+            540 => self.always_ff_clock_opt_1(),
+            541 => self.always_ff_reset(&children[0], &children[1]),
+            542 => self.always_ff_reset_opt_0(&children[0]),
+            543 => self.always_ff_reset_opt_group_0(&children[0]),
+            544 => self.always_ff_reset_opt_group_1(&children[0]),
+            545 => self.always_ff_reset_opt_group_2(&children[0]),
+            546 => self.always_ff_reset_opt_group_3(&children[0]),
+            547 => self.always_ff_reset_opt_1(),
+            548 => {
+                self.always_comb_declaration(&children[0], &children[1], &children[2], &children[3])
+            }
+            549 => self.always_comb_declaration_list_0(&children[0], &children[1]),
+            550 => self.always_comb_declaration_list_1(),
             551 => self.assign_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
-                parse_tree,
             ),
             552 => self.modport_declaration(
                 &children[0],
@@ -31969,19 +30054,18 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[2],
                 &children[3],
                 &children[4],
-                parse_tree,
             ),
-            553 => self.modport_list(&children[0], &children[1], &children[2], parse_tree),
-            554 => self.modport_list_list_0(&children[0], &children[1], &children[2], parse_tree),
-            555 => self.modport_list_list_1(parse_tree),
-            556 => self.modport_list_opt_0(&children[0], parse_tree),
-            557 => self.modport_list_opt_1(parse_tree),
-            558 => self.modport_group(&children[0], &children[1], parse_tree),
-            559 => self.modport_group_group_0(&children[0], &children[1], &children[2], parse_tree),
-            560 => self.modport_group_group_1(&children[0], parse_tree),
-            561 => self.modport_group_list_0(&children[0], &children[1], parse_tree),
-            562 => self.modport_group_list_1(parse_tree),
-            563 => self.modport_item(&children[0], &children[1], &children[2], parse_tree),
+            553 => self.modport_list(&children[0], &children[1], &children[2]),
+            554 => self.modport_list_list_0(&children[0], &children[1], &children[2]),
+            555 => self.modport_list_list_1(),
+            556 => self.modport_list_opt_0(&children[0]),
+            557 => self.modport_list_opt_1(),
+            558 => self.modport_group(&children[0], &children[1]),
+            559 => self.modport_group_group_0(&children[0], &children[1], &children[2]),
+            560 => self.modport_group_group_1(&children[0]),
+            561 => self.modport_group_list_0(&children[0], &children[1]),
+            562 => self.modport_group_list_1(),
+            563 => self.modport_item(&children[0], &children[1], &children[2]),
             564 => self.enum_declaration(
                 &children[0],
                 &children[1],
@@ -31990,58 +30074,44 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 &children[5],
                 &children[6],
-                parse_tree,
             ),
-            565 => self.enum_list(&children[0], &children[1], &children[2], parse_tree),
-            566 => self.enum_list_list_0(&children[0], &children[1], &children[2], parse_tree),
-            567 => self.enum_list_list_1(parse_tree),
-            568 => self.enum_list_opt_0(&children[0], parse_tree),
-            569 => self.enum_list_opt_1(parse_tree),
-            570 => self.enum_group(&children[0], &children[1], parse_tree),
-            571 => self.enum_group_group_0(&children[0], &children[1], &children[2], parse_tree),
-            572 => self.enum_group_group_1(&children[0], parse_tree),
-            573 => self.enum_group_list_0(&children[0], &children[1], parse_tree),
-            574 => self.enum_group_list_1(parse_tree),
-            575 => self.enum_item(&children[0], &children[1], parse_tree),
-            576 => self.enum_item_opt_0(&children[0], &children[1], parse_tree),
-            577 => self.enum_item_opt_1(parse_tree),
+            565 => self.enum_list(&children[0], &children[1], &children[2]),
+            566 => self.enum_list_list_0(&children[0], &children[1], &children[2]),
+            567 => self.enum_list_list_1(),
+            568 => self.enum_list_opt_0(&children[0]),
+            569 => self.enum_list_opt_1(),
+            570 => self.enum_group(&children[0], &children[1]),
+            571 => self.enum_group_group_0(&children[0], &children[1], &children[2]),
+            572 => self.enum_group_group_1(&children[0]),
+            573 => self.enum_group_list_0(&children[0], &children[1]),
+            574 => self.enum_group_list_1(),
+            575 => self.enum_item(&children[0], &children[1]),
+            576 => self.enum_item_opt_0(&children[0], &children[1]),
+            577 => self.enum_item_opt_1(),
             578 => self.struct_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
-                parse_tree,
             ),
-            579 => self.struct_list(&children[0], &children[1], &children[2], parse_tree),
-            580 => self.struct_list_list_0(&children[0], &children[1], &children[2], parse_tree),
-            581 => self.struct_list_list_1(parse_tree),
-            582 => self.struct_list_opt_0(&children[0], parse_tree),
-            583 => self.struct_list_opt_1(parse_tree),
-            584 => self.struct_group(&children[0], &children[1], parse_tree),
-            585 => self.struct_group_group_0(&children[0], &children[1], &children[2], parse_tree),
-            586 => self.struct_group_group_1(&children[0], parse_tree),
-            587 => self.struct_group_list_0(&children[0], &children[1], parse_tree),
-            588 => self.struct_group_list_1(parse_tree),
-            589 => self.struct_item(&children[0], &children[1], &children[2], parse_tree),
-            590 => self.initial_declaration(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                parse_tree,
-            ),
-            591 => self.initial_declaration_list_0(&children[0], &children[1], parse_tree),
-            592 => self.initial_declaration_list_1(parse_tree),
-            593 => self.final_declaration(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                parse_tree,
-            ),
-            594 => self.final_declaration_list_0(&children[0], &children[1], parse_tree),
-            595 => self.final_declaration_list_1(parse_tree),
+            579 => self.struct_list(&children[0], &children[1], &children[2]),
+            580 => self.struct_list_list_0(&children[0], &children[1], &children[2]),
+            581 => self.struct_list_list_1(),
+            582 => self.struct_list_opt_0(&children[0]),
+            583 => self.struct_list_opt_1(),
+            584 => self.struct_group(&children[0], &children[1]),
+            585 => self.struct_group_group_0(&children[0], &children[1], &children[2]),
+            586 => self.struct_group_group_1(&children[0]),
+            587 => self.struct_group_list_0(&children[0], &children[1]),
+            588 => self.struct_group_list_1(),
+            589 => self.struct_item(&children[0], &children[1], &children[2]),
+            590 => self.initial_declaration(&children[0], &children[1], &children[2], &children[3]),
+            591 => self.initial_declaration_list_0(&children[0], &children[1]),
+            592 => self.initial_declaration_list_1(),
+            593 => self.final_declaration(&children[0], &children[1], &children[2], &children[3]),
+            594 => self.final_declaration_list_0(&children[0], &children[1]),
+            595 => self.final_declaration_list_1(),
             596 => self.inst_declaration(
                 &children[0],
                 &children[1],
@@ -32051,148 +30121,85 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[5],
                 &children[6],
                 &children[7],
-                parse_tree,
             ),
-            597 => {
-                self.inst_declaration_opt1_0(&children[0], &children[1], &children[2], parse_tree)
-            }
-            598 => self.inst_declaration_opt2_0(&children[0], parse_tree),
-            599 => self.inst_declaration_opt2_1(parse_tree),
-            600 => self.inst_declaration_opt1_1(parse_tree),
-            601 => self.inst_declaration_opt0_0(&children[0], parse_tree),
-            602 => self.inst_declaration_opt0_1(parse_tree),
-            603 => self.inst_declaration_opt_0(&children[0], parse_tree),
-            604 => self.inst_declaration_opt_1(parse_tree),
-            605 => self.inst_parameter(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                parse_tree,
-            ),
-            606 => self.inst_parameter_opt_0(&children[0], parse_tree),
-            607 => self.inst_parameter_opt_1(parse_tree),
-            608 => self.inst_parameter_list(&children[0], &children[1], &children[2], parse_tree),
-            609 => self.inst_parameter_list_list_0(
-                &children[0],
-                &children[1],
-                &children[2],
-                parse_tree,
-            ),
-            610 => self.inst_parameter_list_list_1(parse_tree),
-            611 => self.inst_parameter_list_opt_0(&children[0], parse_tree),
-            612 => self.inst_parameter_list_opt_1(parse_tree),
-            613 => self.inst_parameter_group(&children[0], &children[1], parse_tree),
-            614 => self.inst_parameter_group_group_0(
-                &children[0],
-                &children[1],
-                &children[2],
-                parse_tree,
-            ),
-            615 => self.inst_parameter_group_group_1(&children[0], parse_tree),
-            616 => self.inst_parameter_group_list_0(&children[0], &children[1], parse_tree),
-            617 => self.inst_parameter_group_list_1(parse_tree),
-            618 => self.inst_parameter_item(&children[0], &children[1], parse_tree),
-            619 => self.inst_parameter_item_opt_0(&children[0], &children[1], parse_tree),
-            620 => self.inst_parameter_item_opt_1(parse_tree),
-            621 => self.inst_port_list(&children[0], &children[1], &children[2], parse_tree),
-            622 => self.inst_port_list_list_0(&children[0], &children[1], &children[2], parse_tree),
-            623 => self.inst_port_list_list_1(parse_tree),
-            624 => self.inst_port_list_opt_0(&children[0], parse_tree),
-            625 => self.inst_port_list_opt_1(parse_tree),
-            626 => self.inst_port_group(&children[0], &children[1], parse_tree),
-            627 => {
-                self.inst_port_group_group_0(&children[0], &children[1], &children[2], parse_tree)
-            }
-            628 => self.inst_port_group_group_1(&children[0], parse_tree),
-            629 => self.inst_port_group_list_0(&children[0], &children[1], parse_tree),
-            630 => self.inst_port_group_list_1(parse_tree),
-            631 => self.inst_port_item(&children[0], &children[1], parse_tree),
-            632 => self.inst_port_item_opt_0(&children[0], &children[1], parse_tree),
-            633 => self.inst_port_item_opt_1(parse_tree),
-            634 => self.with_parameter(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                parse_tree,
-            ),
-            635 => self.with_parameter_opt_0(&children[0], parse_tree),
-            636 => self.with_parameter_opt_1(parse_tree),
-            637 => self.with_parameter_list(&children[0], &children[1], &children[2], parse_tree),
-            638 => self.with_parameter_list_list_0(
-                &children[0],
-                &children[1],
-                &children[2],
-                parse_tree,
-            ),
-            639 => self.with_parameter_list_list_1(parse_tree),
-            640 => self.with_parameter_list_opt_0(&children[0], parse_tree),
-            641 => self.with_parameter_list_opt_1(parse_tree),
-            642 => self.with_parameter_group(&children[0], &children[1], parse_tree),
-            643 => self.with_parameter_group_group_0(
-                &children[0],
-                &children[1],
-                &children[2],
-                parse_tree,
-            ),
-            644 => self.with_parameter_group_group_1(&children[0], parse_tree),
-            645 => self.with_parameter_group_list_0(&children[0], &children[1], parse_tree),
-            646 => self.with_parameter_group_list_1(parse_tree),
-            647 => self.with_parameter_item(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                parse_tree,
-            ),
-            648 => self.with_parameter_item_group0_0(
-                &children[0],
-                &children[1],
-                &children[2],
-                parse_tree,
-            ),
-            649 => self.with_parameter_item_group0_1(
-                &children[0],
-                &children[1],
-                &children[2],
-                parse_tree,
-            ),
-            650 => self.with_parameter_item_group_0(&children[0], parse_tree),
-            651 => self.with_parameter_item_group_1(&children[0], parse_tree),
-            652 => self.port_declaration(&children[0], &children[1], &children[2], parse_tree),
-            653 => self.port_declaration_opt_0(&children[0], parse_tree),
-            654 => self.port_declaration_opt_1(parse_tree),
-            655 => self.port_declaration_list(&children[0], &children[1], &children[2], parse_tree),
-            656 => self.port_declaration_list_list_0(
-                &children[0],
-                &children[1],
-                &children[2],
-                parse_tree,
-            ),
-            657 => self.port_declaration_list_list_1(parse_tree),
-            658 => self.port_declaration_list_opt_0(&children[0], parse_tree),
-            659 => self.port_declaration_list_opt_1(parse_tree),
-            660 => self.port_declaration_group(&children[0], &children[1], parse_tree),
-            661 => self.port_declaration_group_group_0(
-                &children[0],
-                &children[1],
-                &children[2],
-                parse_tree,
-            ),
-            662 => self.port_declaration_group_group_1(&children[0], parse_tree),
-            663 => self.port_declaration_group_list_0(&children[0], &children[1], parse_tree),
-            664 => self.port_declaration_group_list_1(parse_tree),
-            665 => self.port_declaration_item(&children[0], &children[1], &children[2], parse_tree),
-            666 => self.port_declaration_item_group_0(&children[0], &children[1], parse_tree),
-            667 => self.port_declaration_item_group_1(&children[0], &children[1], parse_tree),
-            668 => self.port_declaration_item_opt_0(&children[0], parse_tree),
-            669 => self.port_declaration_item_opt_1(parse_tree),
-            670 => self.direction_0(&children[0], parse_tree),
-            671 => self.direction_1(&children[0], parse_tree),
-            672 => self.direction_2(&children[0], parse_tree),
-            673 => self.direction_3(&children[0], parse_tree),
-            674 => self.direction_4(&children[0], parse_tree),
+            597 => self.inst_declaration_opt1_0(&children[0], &children[1], &children[2]),
+            598 => self.inst_declaration_opt2_0(&children[0]),
+            599 => self.inst_declaration_opt2_1(),
+            600 => self.inst_declaration_opt1_1(),
+            601 => self.inst_declaration_opt0_0(&children[0]),
+            602 => self.inst_declaration_opt0_1(),
+            603 => self.inst_declaration_opt_0(&children[0]),
+            604 => self.inst_declaration_opt_1(),
+            605 => self.inst_parameter(&children[0], &children[1], &children[2], &children[3]),
+            606 => self.inst_parameter_opt_0(&children[0]),
+            607 => self.inst_parameter_opt_1(),
+            608 => self.inst_parameter_list(&children[0], &children[1], &children[2]),
+            609 => self.inst_parameter_list_list_0(&children[0], &children[1], &children[2]),
+            610 => self.inst_parameter_list_list_1(),
+            611 => self.inst_parameter_list_opt_0(&children[0]),
+            612 => self.inst_parameter_list_opt_1(),
+            613 => self.inst_parameter_group(&children[0], &children[1]),
+            614 => self.inst_parameter_group_group_0(&children[0], &children[1], &children[2]),
+            615 => self.inst_parameter_group_group_1(&children[0]),
+            616 => self.inst_parameter_group_list_0(&children[0], &children[1]),
+            617 => self.inst_parameter_group_list_1(),
+            618 => self.inst_parameter_item(&children[0], &children[1]),
+            619 => self.inst_parameter_item_opt_0(&children[0], &children[1]),
+            620 => self.inst_parameter_item_opt_1(),
+            621 => self.inst_port_list(&children[0], &children[1], &children[2]),
+            622 => self.inst_port_list_list_0(&children[0], &children[1], &children[2]),
+            623 => self.inst_port_list_list_1(),
+            624 => self.inst_port_list_opt_0(&children[0]),
+            625 => self.inst_port_list_opt_1(),
+            626 => self.inst_port_group(&children[0], &children[1]),
+            627 => self.inst_port_group_group_0(&children[0], &children[1], &children[2]),
+            628 => self.inst_port_group_group_1(&children[0]),
+            629 => self.inst_port_group_list_0(&children[0], &children[1]),
+            630 => self.inst_port_group_list_1(),
+            631 => self.inst_port_item(&children[0], &children[1]),
+            632 => self.inst_port_item_opt_0(&children[0], &children[1]),
+            633 => self.inst_port_item_opt_1(),
+            634 => self.with_parameter(&children[0], &children[1], &children[2], &children[3]),
+            635 => self.with_parameter_opt_0(&children[0]),
+            636 => self.with_parameter_opt_1(),
+            637 => self.with_parameter_list(&children[0], &children[1], &children[2]),
+            638 => self.with_parameter_list_list_0(&children[0], &children[1], &children[2]),
+            639 => self.with_parameter_list_list_1(),
+            640 => self.with_parameter_list_opt_0(&children[0]),
+            641 => self.with_parameter_list_opt_1(),
+            642 => self.with_parameter_group(&children[0], &children[1]),
+            643 => self.with_parameter_group_group_0(&children[0], &children[1], &children[2]),
+            644 => self.with_parameter_group_group_1(&children[0]),
+            645 => self.with_parameter_group_list_0(&children[0], &children[1]),
+            646 => self.with_parameter_group_list_1(),
+            647 => self.with_parameter_item(&children[0], &children[1], &children[2], &children[3]),
+            648 => self.with_parameter_item_group0_0(&children[0], &children[1], &children[2]),
+            649 => self.with_parameter_item_group0_1(&children[0], &children[1], &children[2]),
+            650 => self.with_parameter_item_group_0(&children[0]),
+            651 => self.with_parameter_item_group_1(&children[0]),
+            652 => self.port_declaration(&children[0], &children[1], &children[2]),
+            653 => self.port_declaration_opt_0(&children[0]),
+            654 => self.port_declaration_opt_1(),
+            655 => self.port_declaration_list(&children[0], &children[1], &children[2]),
+            656 => self.port_declaration_list_list_0(&children[0], &children[1], &children[2]),
+            657 => self.port_declaration_list_list_1(),
+            658 => self.port_declaration_list_opt_0(&children[0]),
+            659 => self.port_declaration_list_opt_1(),
+            660 => self.port_declaration_group(&children[0], &children[1]),
+            661 => self.port_declaration_group_group_0(&children[0], &children[1], &children[2]),
+            662 => self.port_declaration_group_group_1(&children[0]),
+            663 => self.port_declaration_group_list_0(&children[0], &children[1]),
+            664 => self.port_declaration_group_list_1(),
+            665 => self.port_declaration_item(&children[0], &children[1], &children[2]),
+            666 => self.port_declaration_item_group_0(&children[0], &children[1]),
+            667 => self.port_declaration_item_group_1(&children[0], &children[1]),
+            668 => self.port_declaration_item_opt_0(&children[0]),
+            669 => self.port_declaration_item_opt_1(),
+            670 => self.direction_0(&children[0]),
+            671 => self.direction_1(&children[0]),
+            672 => self.direction_2(&children[0]),
+            673 => self.direction_3(&children[0]),
+            674 => self.direction_4(&children[0]),
             675 => self.function_declaration(
                 &children[0],
                 &children[1],
@@ -32203,38 +30210,35 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[6],
                 &children[7],
                 &children[8],
-                parse_tree,
             ),
-            676 => self.function_declaration_list_0(&children[0], &children[1], parse_tree),
-            677 => self.function_declaration_list_1(parse_tree),
-            678 => self.function_declaration_opt0_0(&children[0], parse_tree),
-            679 => self.function_declaration_opt0_1(parse_tree),
-            680 => self.function_declaration_opt_0(&children[0], parse_tree),
-            681 => self.function_declaration_opt_1(parse_tree),
-            682 => self.function_item_0(&children[0], parse_tree),
-            683 => self.function_item_1(&children[0], parse_tree),
+            676 => self.function_declaration_list_0(&children[0], &children[1]),
+            677 => self.function_declaration_list_1(),
+            678 => self.function_declaration_opt0_0(&children[0]),
+            679 => self.function_declaration_opt0_1(),
+            680 => self.function_declaration_opt_0(&children[0]),
+            681 => self.function_declaration_opt_1(),
+            682 => self.function_item_0(&children[0]),
+            683 => self.function_item_1(&children[0]),
             684 => self.import_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
-                parse_tree,
             ),
-            685 => self.import_declaration_group_0(&children[0], parse_tree),
-            686 => self.import_declaration_group_1(&children[0], parse_tree),
+            685 => self.import_declaration_group_0(&children[0]),
+            686 => self.import_declaration_group_1(&children[0]),
             687 => self.export_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
-                parse_tree,
             ),
-            688 => self.export_declaration_group0_0(&children[0], parse_tree),
-            689 => self.export_declaration_group0_1(&children[0], parse_tree),
-            690 => self.export_declaration_group_0(&children[0], parse_tree),
-            691 => self.export_declaration_group_1(&children[0], parse_tree),
+            688 => self.export_declaration_group0_0(&children[0]),
+            689 => self.export_declaration_group0_1(&children[0]),
+            690 => self.export_declaration_group_0(&children[0]),
+            691 => self.export_declaration_group_1(&children[0]),
             692 => self.module_declaration(
                 &children[0],
                 &children[1],
@@ -32243,21 +30247,19 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 &children[5],
                 &children[6],
-                parse_tree,
             ),
-            693 => self.module_declaration_list_0(&children[0], &children[1], parse_tree),
-            694 => self.module_declaration_list_1(parse_tree),
-            695 => self.module_declaration_opt0_0(&children[0], parse_tree),
-            696 => self.module_declaration_opt0_1(parse_tree),
-            697 => self.module_declaration_opt_0(&children[0], parse_tree),
-            698 => self.module_declaration_opt_1(parse_tree),
+            693 => self.module_declaration_list_0(&children[0], &children[1]),
+            694 => self.module_declaration_list_1(),
+            695 => self.module_declaration_opt0_0(&children[0]),
+            696 => self.module_declaration_opt0_1(),
+            697 => self.module_declaration_opt_0(&children[0]),
+            698 => self.module_declaration_opt_1(),
             699 => self.module_if_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
-                parse_tree,
             ),
             700 => self.module_if_declaration_list_0(
                 &children[0],
@@ -32265,11 +30267,10 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[2],
                 &children[3],
                 &children[4],
-                parse_tree,
             ),
-            701 => self.module_if_declaration_list_1(parse_tree),
-            702 => self.module_if_declaration_opt_0(&children[0], &children[1], parse_tree),
-            703 => self.module_if_declaration_opt_1(parse_tree),
+            701 => self.module_if_declaration_list_1(),
+            702 => self.module_if_declaration_opt_0(&children[0], &children[1]),
+            703 => self.module_if_declaration_opt_1(),
             704 => self.module_for_declaration(
                 &children[0],
                 &children[1],
@@ -32277,58 +30278,50 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[3],
                 &children[4],
                 &children[5],
-                parse_tree,
             ),
-            705 => self.module_for_declaration_opt_0(
-                &children[0],
-                &children[1],
-                &children[2],
-                parse_tree,
-            ),
-            706 => self.module_for_declaration_opt_1(parse_tree),
+            705 => self.module_for_declaration_opt_0(&children[0], &children[1], &children[2]),
+            706 => self.module_for_declaration_opt_1(),
             707 => self.module_named_block(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
-                parse_tree,
             ),
-            708 => self.module_named_block_list_0(&children[0], &children[1], parse_tree),
-            709 => self.module_named_block_list_1(parse_tree),
+            708 => self.module_named_block_list_0(&children[0], &children[1]),
+            709 => self.module_named_block_list_1(),
             710 => self.module_optional_named_block(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
-                parse_tree,
             ),
-            711 => self.module_optional_named_block_list_0(&children[0], &children[1], parse_tree),
-            712 => self.module_optional_named_block_list_1(parse_tree),
-            713 => self.module_optional_named_block_opt_0(&children[0], &children[1], parse_tree),
-            714 => self.module_optional_named_block_opt_1(parse_tree),
-            715 => self.module_group(&children[0], &children[1], parse_tree),
-            716 => self.module_group_group_0(&children[0], &children[1], &children[2], parse_tree),
-            717 => self.module_group_group_list_0(&children[0], &children[1], parse_tree),
-            718 => self.module_group_group_list_1(parse_tree),
-            719 => self.module_group_group_1(&children[0], parse_tree),
-            720 => self.module_group_list_0(&children[0], &children[1], parse_tree),
-            721 => self.module_group_list_1(parse_tree),
-            722 => self.module_item_0(&children[0], parse_tree),
-            723 => self.module_item_1(&children[0], parse_tree),
-            724 => self.module_item_2(&children[0], parse_tree),
-            725 => self.module_item_3(&children[0], parse_tree),
-            726 => self.module_item_4(&children[0], parse_tree),
-            727 => self.module_item_5(&children[0], parse_tree),
-            728 => self.module_item_6(&children[0], parse_tree),
-            729 => self.module_item_7(&children[0], parse_tree),
-            730 => self.module_item_8(&children[0], parse_tree),
-            731 => self.module_item_9(&children[0], parse_tree),
-            732 => self.module_item_10(&children[0], parse_tree),
-            733 => self.module_item_11(&children[0], parse_tree),
-            734 => self.module_item_12(&children[0], parse_tree),
-            735 => self.module_item_13(&children[0], parse_tree),
-            736 => self.module_item_14(&children[0], parse_tree),
+            711 => self.module_optional_named_block_list_0(&children[0], &children[1]),
+            712 => self.module_optional_named_block_list_1(),
+            713 => self.module_optional_named_block_opt_0(&children[0], &children[1]),
+            714 => self.module_optional_named_block_opt_1(),
+            715 => self.module_group(&children[0], &children[1]),
+            716 => self.module_group_group_0(&children[0], &children[1], &children[2]),
+            717 => self.module_group_group_list_0(&children[0], &children[1]),
+            718 => self.module_group_group_list_1(),
+            719 => self.module_group_group_1(&children[0]),
+            720 => self.module_group_list_0(&children[0], &children[1]),
+            721 => self.module_group_list_1(),
+            722 => self.module_item_0(&children[0]),
+            723 => self.module_item_1(&children[0]),
+            724 => self.module_item_2(&children[0]),
+            725 => self.module_item_3(&children[0]),
+            726 => self.module_item_4(&children[0]),
+            727 => self.module_item_5(&children[0]),
+            728 => self.module_item_6(&children[0]),
+            729 => self.module_item_7(&children[0]),
+            730 => self.module_item_8(&children[0]),
+            731 => self.module_item_9(&children[0]),
+            732 => self.module_item_10(&children[0]),
+            733 => self.module_item_11(&children[0]),
+            734 => self.module_item_12(&children[0]),
+            735 => self.module_item_13(&children[0]),
+            736 => self.module_item_14(&children[0]),
             737 => self.interface_declaration(
                 &children[0],
                 &children[1],
@@ -32336,19 +30329,17 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[3],
                 &children[4],
                 &children[5],
-                parse_tree,
             ),
-            738 => self.interface_declaration_list_0(&children[0], &children[1], parse_tree),
-            739 => self.interface_declaration_list_1(parse_tree),
-            740 => self.interface_declaration_opt_0(&children[0], parse_tree),
-            741 => self.interface_declaration_opt_1(parse_tree),
+            738 => self.interface_declaration_list_0(&children[0], &children[1]),
+            739 => self.interface_declaration_list_1(),
+            740 => self.interface_declaration_opt_0(&children[0]),
+            741 => self.interface_declaration_opt_1(),
             742 => self.interface_if_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
-                parse_tree,
             ),
             743 => self.interface_if_declaration_list_0(
                 &children[0],
@@ -32356,11 +30347,10 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[2],
                 &children[3],
                 &children[4],
-                parse_tree,
             ),
-            744 => self.interface_if_declaration_list_1(parse_tree),
-            745 => self.interface_if_declaration_opt_0(&children[0], &children[1], parse_tree),
-            746 => self.interface_if_declaration_opt_1(parse_tree),
+            744 => self.interface_if_declaration_list_1(),
+            745 => self.interface_if_declaration_opt_0(&children[0], &children[1]),
+            746 => self.interface_if_declaration_opt_1(),
             747 => self.interface_for_declaration(
                 &children[0],
                 &children[1],
@@ -32368,103 +30358,86 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[3],
                 &children[4],
                 &children[5],
-                parse_tree,
             ),
-            748 => self.interface_for_declaration_opt_0(
-                &children[0],
-                &children[1],
-                &children[2],
-                parse_tree,
-            ),
-            749 => self.interface_for_declaration_opt_1(parse_tree),
+            748 => self.interface_for_declaration_opt_0(&children[0], &children[1], &children[2]),
+            749 => self.interface_for_declaration_opt_1(),
             750 => self.interface_named_block(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
-                parse_tree,
             ),
-            751 => self.interface_named_block_list_0(&children[0], &children[1], parse_tree),
-            752 => self.interface_named_block_list_1(parse_tree),
+            751 => self.interface_named_block_list_0(&children[0], &children[1]),
+            752 => self.interface_named_block_list_1(),
             753 => self.interface_optional_named_block(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
-                parse_tree,
             ),
-            754 => {
-                self.interface_optional_named_block_list_0(&children[0], &children[1], parse_tree)
-            }
-            755 => self.interface_optional_named_block_list_1(parse_tree),
-            756 => {
-                self.interface_optional_named_block_opt_0(&children[0], &children[1], parse_tree)
-            }
-            757 => self.interface_optional_named_block_opt_1(parse_tree),
-            758 => self.interface_group(&children[0], &children[1], parse_tree),
-            759 => {
-                self.interface_group_group_0(&children[0], &children[1], &children[2], parse_tree)
-            }
-            760 => self.interface_group_group_list_0(&children[0], &children[1], parse_tree),
-            761 => self.interface_group_group_list_1(parse_tree),
-            762 => self.interface_group_group_1(&children[0], parse_tree),
-            763 => self.interface_group_list_0(&children[0], &children[1], parse_tree),
-            764 => self.interface_group_list_1(parse_tree),
-            765 => self.interface_item_0(&children[0], parse_tree),
-            766 => self.interface_item_1(&children[0], parse_tree),
-            767 => self.interface_item_2(&children[0], parse_tree),
-            768 => self.interface_item_3(&children[0], parse_tree),
-            769 => self.interface_item_4(&children[0], parse_tree),
-            770 => self.interface_item_5(&children[0], parse_tree),
-            771 => self.interface_item_6(&children[0], parse_tree),
-            772 => self.interface_item_7(&children[0], parse_tree),
-            773 => self.interface_item_8(&children[0], parse_tree),
-            774 => self.interface_item_9(&children[0], parse_tree),
-            775 => self.interface_item_10(&children[0], parse_tree),
-            776 => self.interface_item_11(&children[0], parse_tree),
+            754 => self.interface_optional_named_block_list_0(&children[0], &children[1]),
+            755 => self.interface_optional_named_block_list_1(),
+            756 => self.interface_optional_named_block_opt_0(&children[0], &children[1]),
+            757 => self.interface_optional_named_block_opt_1(),
+            758 => self.interface_group(&children[0], &children[1]),
+            759 => self.interface_group_group_0(&children[0], &children[1], &children[2]),
+            760 => self.interface_group_group_list_0(&children[0], &children[1]),
+            761 => self.interface_group_group_list_1(),
+            762 => self.interface_group_group_1(&children[0]),
+            763 => self.interface_group_list_0(&children[0], &children[1]),
+            764 => self.interface_group_list_1(),
+            765 => self.interface_item_0(&children[0]),
+            766 => self.interface_item_1(&children[0]),
+            767 => self.interface_item_2(&children[0]),
+            768 => self.interface_item_3(&children[0]),
+            769 => self.interface_item_4(&children[0]),
+            770 => self.interface_item_5(&children[0]),
+            771 => self.interface_item_6(&children[0]),
+            772 => self.interface_item_7(&children[0]),
+            773 => self.interface_item_8(&children[0]),
+            774 => self.interface_item_9(&children[0]),
+            775 => self.interface_item_10(&children[0]),
+            776 => self.interface_item_11(&children[0]),
             777 => self.package_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
-                parse_tree,
             ),
-            778 => self.package_declaration_list_0(&children[0], &children[1], parse_tree),
-            779 => self.package_declaration_list_1(parse_tree),
-            780 => self.package_group(&children[0], &children[1], parse_tree),
-            781 => self.package_group_group_0(&children[0], &children[1], &children[2], parse_tree),
-            782 => self.package_group_group_list_0(&children[0], &children[1], parse_tree),
-            783 => self.package_group_group_list_1(parse_tree),
-            784 => self.package_group_group_1(&children[0], parse_tree),
-            785 => self.package_group_list_0(&children[0], &children[1], parse_tree),
-            786 => self.package_group_list_1(parse_tree),
-            787 => self.package_item_0(&children[0], parse_tree),
-            788 => self.package_item_1(&children[0], parse_tree),
-            789 => self.package_item_2(&children[0], parse_tree),
-            790 => self.package_item_3(&children[0], parse_tree),
-            791 => self.package_item_4(&children[0], parse_tree),
-            792 => self.package_item_5(&children[0], parse_tree),
-            793 => self.package_item_6(&children[0], parse_tree),
-            794 => self.package_item_7(&children[0], parse_tree),
-            795 => self.package_item_8(&children[0], parse_tree),
-            796 => self.description_group(&children[0], &children[1], parse_tree),
-            797 => {
-                self.description_group_group_0(&children[0], &children[1], &children[2], parse_tree)
-            }
-            798 => self.description_group_group_list_0(&children[0], &children[1], parse_tree),
-            799 => self.description_group_group_list_1(parse_tree),
-            800 => self.description_group_group_1(&children[0], parse_tree),
-            801 => self.description_group_list_0(&children[0], &children[1], parse_tree),
-            802 => self.description_group_list_1(parse_tree),
-            803 => self.description_item_0(&children[0], parse_tree),
-            804 => self.description_item_1(&children[0], parse_tree),
-            805 => self.description_item_2(&children[0], parse_tree),
-            806 => self.description_item_3(&children[0], parse_tree),
-            807 => self.veryl(&children[0], &children[1], parse_tree),
-            808 => self.veryl_list_0(&children[0], &children[1], parse_tree),
-            809 => self.veryl_list_1(parse_tree),
+            778 => self.package_declaration_list_0(&children[0], &children[1]),
+            779 => self.package_declaration_list_1(),
+            780 => self.package_group(&children[0], &children[1]),
+            781 => self.package_group_group_0(&children[0], &children[1], &children[2]),
+            782 => self.package_group_group_list_0(&children[0], &children[1]),
+            783 => self.package_group_group_list_1(),
+            784 => self.package_group_group_1(&children[0]),
+            785 => self.package_group_list_0(&children[0], &children[1]),
+            786 => self.package_group_list_1(),
+            787 => self.package_item_0(&children[0]),
+            788 => self.package_item_1(&children[0]),
+            789 => self.package_item_2(&children[0]),
+            790 => self.package_item_3(&children[0]),
+            791 => self.package_item_4(&children[0]),
+            792 => self.package_item_5(&children[0]),
+            793 => self.package_item_6(&children[0]),
+            794 => self.package_item_7(&children[0]),
+            795 => self.package_item_8(&children[0]),
+            796 => self.description_group(&children[0], &children[1]),
+            797 => self.description_group_group_0(&children[0], &children[1], &children[2]),
+            798 => self.description_group_group_list_0(&children[0], &children[1]),
+            799 => self.description_group_group_list_1(),
+            800 => self.description_group_group_1(&children[0]),
+            801 => self.description_group_list_0(&children[0], &children[1]),
+            802 => self.description_group_list_1(),
+            803 => self.description_item_0(&children[0]),
+            804 => self.description_item_1(&children[0]),
+            805 => self.description_item_2(&children[0]),
+            806 => self.description_item_3(&children[0]),
+            807 => self.veryl(&children[0], &children[1]),
+            808 => self.veryl_list_0(&children[0], &children[1]),
+            809 => self.veryl_list_1(),
             _ => Err(ParserError::InternalError(format!(
                 "Unhandled production number: {}",
                 prod_num

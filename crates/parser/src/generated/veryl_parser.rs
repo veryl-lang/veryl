@@ -4,13 +4,12 @@
 // lost after next build.
 // ---------------------------------------------------------
 
-use parol_runtime::id_tree::Tree;
 use parol_runtime::once_cell::sync::Lazy;
 #[allow(unused_imports)]
 use parol_runtime::parser::{
     DFATransition, LLKParser, LookaheadDFA, ParseTreeType, ParseType, Production,
 };
-use parol_runtime::ParolError;
+use parol_runtime::{ParolError, ParseTree};
 use parol_runtime::{TokenStream, Tokenizer};
 use std::cell::RefCell;
 use std::path::Path;
@@ -35657,7 +35656,7 @@ pub fn parse<'t, T>(
     input: &'t str,
     file_name: T,
     user_actions: &mut VerylGrammar,
-) -> Result<Tree<ParseTreeType<'t>>, ParolError>
+) -> Result<ParseTree<'t>, ParolError>
 where
     T: AsRef<Path>,
 {
@@ -35673,9 +35672,5 @@ where
         RefCell::new(TokenStream::new(input, file_name, &TOKENIZERS, MAX_K).unwrap());
     // Initialize wrapper
     let mut user_actions = VerylGrammarAuto::new(user_actions);
-    let result = llk_parser.parse(token_stream, &mut user_actions);
-    match result {
-        Ok(()) => Ok(llk_parser.parse_tree),
-        Err(e) => Err(e),
-    }
+    llk_parser.parse(token_stream, &mut user_actions)
 }

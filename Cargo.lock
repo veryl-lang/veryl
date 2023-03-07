@@ -1919,30 +1919,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "id_tree"
-version = "1.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bcd9db8dd5be8bde5a2624ed4b2dfb74368fe7999eb9c4940fd3ca344b61071a"
-dependencies = [
- "serde",
- "serde_derive",
- "snowflake",
-]
-
-[[package]]
-name = "id_tree_layout"
-version = "2.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "142f4c1bc1d715957b02be1022312a491519cb69bbada92572e6e47af737dde3"
-dependencies = [
- "id_tree",
- "serde",
- "serde_derive",
- "serde_json",
- "xml_writer",
-]
-
-[[package]]
 name = "ident_case"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2619,9 +2595,9 @@ dependencies = [
 
 [[package]]
 name = "parol"
-version = "0.18.1"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db4c8dc3bd9dd5a4b4f68b5d10a227d1db1154f2b5025bb81062d125a8d2c6b9"
+checksum = "8db89ef4207488a374dcfd5ebf59c09f7ce9452f0ca3bb7953682e55baac8e03"
 dependencies = [
  "anyhow",
  "cfg-if",
@@ -2629,8 +2605,6 @@ dependencies = [
  "derive_builder",
  "env_logger",
  "function_name",
- "id_tree",
- "id_tree_layout",
  "owo-colors",
  "parol-macros",
  "parol_runtime",
@@ -2639,7 +2613,11 @@ dependencies = [
  "rayon",
  "regex",
  "regex-syntax",
+ "serde",
+ "serde_json",
  "syn",
+ "syntree",
+ "syntree_layout",
  "thiserror",
  "ume",
 ]
@@ -2652,20 +2630,20 @@ checksum = "bdd646301a99589f85ed580e3807ee2f7aa6529b900fd703f5a14716b7426b28"
 
 [[package]]
 name = "parol_runtime"
-version = "0.14.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f922a01af482a9dbdca9a3d7ae102cee45f3e496ce3f10f6c7d798819a56f60"
+checksum = "24adbbfbf194862426becb8b772d095c87ab576c7f395a7e15cee32a4cb4b825"
 dependencies = [
  "anyhow",
  "codespan-reporting",
  "derive_builder",
  "function_name",
- "id_tree",
- "id_tree_layout",
  "log",
  "once_cell",
  "parol-macros",
  "regex-automata 0.2.0",
+ "syntree",
+ "syntree_layout",
  "thiserror",
 ]
 
@@ -3420,16 +3398,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f67ad224767faa3c7d8b6d91985b78e70a1324408abcb1cfcc2be4c06bc06043"
 
 [[package]]
-name = "snowflake"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27207bb65232eda1f588cf46db2fee75c0808d557f6b3cf19a75f5d6d7c94df1"
-dependencies = [
- "serde",
- "serde_derive",
-]
-
-[[package]]
 name = "socket2"
 version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3570,6 +3538,24 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "syntree"
+version = "0.14.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "372e1c75bb54830ab200dbff8a10bb0d44ff183d8cfdfb9f7ce55ad5862fc719"
+
+[[package]]
+name = "syntree_layout"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c4dcc044568a0f9708c87b9dd79f1d8e5fb2086a831ead7ef044c9a48bd756b"
+dependencies = [
+ "anyhow",
+ "syntree",
+ "thiserror",
+ "xml_writer",
 ]
 
 [[package]]
