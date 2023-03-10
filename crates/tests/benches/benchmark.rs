@@ -20,9 +20,11 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("throughput");
     group.throughput(Throughput::Bytes(text.len() as u64));
-    group.bench_function("parse", |b| b.iter(|| Parser::parse(black_box(&text), &"")));
+    group.bench_function("parse", |b| {
+        b.iter_with_large_drop(|| Parser::parse(black_box(&text), &""))
+    });
     group.bench_function("analyze", |b| {
-        b.iter(|| {
+        b.iter_with_large_drop(|| {
             let parser = Parser::parse(black_box(&text), &"").unwrap();
             let prj = &metadata.project.name;
             let analyzer = Analyzer::new(&prj, black_box(&metadata));
@@ -32,7 +34,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         })
     });
     group.bench_function("format", |b| {
-        b.iter(|| {
+        b.iter_with_large_drop(|| {
             let parser = Parser::parse(black_box(&text), &"").unwrap();
             let mut formatter = Formatter::new(&metadata);
             formatter.format(&parser.veryl);
