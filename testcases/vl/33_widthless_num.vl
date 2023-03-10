@@ -1,0 +1,11 @@
+module Module33 {
+    localparam a0: u32 = 'b1;
+    localparam a1: u32 = 'b1010;
+    localparam a2: u32 = 'o1;
+    localparam a3: u32 = 'o1234;
+    localparam a4: u32 = 'd1;
+    localparam a5: u32 = 'd12345678;
+    localparam a6: u32 = 'h1;
+    localparam a7: u32 = 'hffffffff;
+    localparam a8: u32 = 'hffff_ffff_ffff_ffff_ffff_ffff_ffff_ffff_ffff_ffff_ffff_ffff_ffff;
+}

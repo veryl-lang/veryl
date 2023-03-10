@@ -290,6 +290,34 @@ impl VerylWalker for Emitter {
         self.token(arg);
     }
 
+    /// Semantic action for non-terminal 'Based'
+    fn based(&mut self, arg: &Based) {
+        let token = &arg.based_token;
+        let text = token.text();
+        let (width, tail) = text.split_once('\'').unwrap();
+        let base = &tail[0..1];
+        let number = &tail[1..];
+
+        if width == "" {
+            let base_num = match base {
+                "b" => 2,
+                "o" => 8,
+                "d" => 10,
+                "h" => 16,
+                _ => unreachable!(),
+            };
+
+            if let Some(actual_width) = strnum_bitwidth::bitwidth(&number, base_num) {
+                let text = format!("{actual_width}'{base}{number}");
+                self.veryl_token(&arg.based_token.replace(&text));
+            } else {
+                unreachable!()
+            }
+        } else {
+            self.veryl_token(&arg.based_token);
+        }
+    }
+
     /// Semantic action for non-terminal 'Comma'
     fn comma(&mut self, arg: &Comma) {
         if self.string.ends_with("`endif") {

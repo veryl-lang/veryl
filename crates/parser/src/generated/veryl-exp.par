@@ -10,7 +10,7 @@
 /*   1 */ StringLiteralTerm: "\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}" : Token;
 /*   2 */ ExponentTerm: /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/ : Token;
 /*   3 */ FixedPointTerm: /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/ : Token;
-/*   4 */ BasedTerm: /[0-9]+(?:_[0-9]+)*'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/ : Token;
+/*   4 */ BasedTerm: /(?:[0-9]+(?:_[0-9]+)*)?'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/ : Token;
 /*   5 */ BaseLessTerm: /[0-9]+(?:_[0-9]+)*/ : Token;
 /*   6 */ AllBitTerm: /'[01xzXZ]/ : Token;
 /*   7 */ MinusColonTerm: '-:' : Token;

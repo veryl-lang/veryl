@@ -39,6 +39,8 @@
 # }
 ```
 
+## Set all bits
+
 ```veryl
 # module A {
 # always_comb {
@@ -64,6 +66,20 @@
 # ;
 # }
 # }
+```
+
+## Widthless integer
+
+The bit width specification of integer can be omitted.
+If it is omitted, the appropriate width will be filled in the translated code.
+
+```veryl,playground
+module ModuleA {
+    localparam a0: u64 = 'b0101;
+    localparam a1: u64 = 'o01234567;
+    localparam a2: u64 = 'd0123456789;
+    localparam a3: u64 = 'h0123456789fffff;
+}
 ```
 
 ## Floating point
