@@ -298,7 +298,7 @@ impl VerylWalker for Emitter {
         let base = &tail[0..1];
         let number = &tail[1..];
 
-        if width == "" {
+        if width.is_empty() {
             let base_num = match base {
                 "b" => 2,
                 "o" => 8,
@@ -307,7 +307,7 @@ impl VerylWalker for Emitter {
                 _ => unreachable!(),
             };
 
-            if let Some(actual_width) = strnum_bitwidth::bitwidth(&number, base_num) {
+            if let Some(actual_width) = strnum_bitwidth::bitwidth(number, base_num) {
                 let text = format!("{actual_width}'{base}{number}");
                 self.veryl_token(&arg.based_token.replace(&text));
             } else {

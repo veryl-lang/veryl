@@ -38,7 +38,7 @@ impl<'a> VerylGrammarTrait for CheckNumber<'a> {
             let base = &tail[0..1];
             let number = &tail[1..];
 
-            let width: Option<usize> = if width == "" {
+            let width: Option<usize> = if width.is_empty() {
                 None
             } else {
                 Some(width.replace('_', "").parse().unwrap())
@@ -82,12 +82,10 @@ impl<'a> VerylGrammarTrait for CheckNumber<'a> {
                             .push(AnalyzerError::too_large_number(width, self.text, token));
                     }
                 }
-            } else {
-                if width.is_none() {
-                    // bitwidth calculation may be failed over 128bit.
-                    self.errors
-                        .push(AnalyzerError::too_large_number(128, self.text, token));
-                }
+            } else if width.is_none() {
+                // bitwidth calculation may be failed over 128bit.
+                self.errors
+                    .push(AnalyzerError::too_large_number(128, self.text, token));
             }
         }
 
