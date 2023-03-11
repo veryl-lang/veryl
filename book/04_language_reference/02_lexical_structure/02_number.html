@@ -167,6 +167,7 @@
 128'h0123456789abcdefxzABCDEFXZ
 128'h01_23_45_67_89_ab_cd_ef_xz_AB_CD_EF_XZ
 </code></pre>
+<h2 id="set-all-bits"><a class="header" href="#set-all-bits">Set all bits</a></h2>
 <pre><code class="language-veryl">// all 0
 '0
 
@@ -180,6 +181,16 @@
 // all z
 'z
 'Z
+</code></pre>
+<h2 id="widthless-integer"><a class="header" href="#widthless-integer">Widthless integer</a></h2>
+<p>The bit width specification of integer can be omitted.
+If it is omitted, the appropriate width will be filled in the translated code.</p>
+<pre class="playground"><code class="language-veryl">module ModuleA {
+    localparam a0: u64 = 'b0101;
+    localparam a1: u64 = 'o01234567;
+    localparam a2: u64 = 'd0123456789;
+    localparam a3: u64 = 'h0123456789fffff;
+}
 </code></pre>
 <h2 id="floating-point"><a class="header" href="#floating-point">Floating point</a></h2>
 <pre><code class="language-veryl">// floating point
