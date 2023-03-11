@@ -3473,6 +3473,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "strnum_bitwidth"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d68cbdc16c80c001ba4eec2130370b12b800c0bc87f50fe8040afae8171a509"
+
+[[package]]
 name = "strsim"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4138,6 +4144,7 @@ version = "0.5.5"
 dependencies = [
  "Inflector",
  "miette",
+ "strnum_bitwidth",
  "thiserror",
  "toml 0.7.2",
  "veryl-metadata",
@@ -4149,6 +4156,7 @@ name = "veryl-emitter"
 version = "0.5.5"
 dependencies = [
  "serde",
+ "strnum_bitwidth",
  "veryl-analyzer",
  "veryl-metadata",
  "veryl-parser",

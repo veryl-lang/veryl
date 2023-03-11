@@ -38,23 +38,22 @@ impl<'a> VerylGrammarTrait for CheckNumber<'a> {
             let base = &tail[0..1];
             let number = &tail[1..];
 
-            let width: usize = width.replace('_', "").parse().unwrap();
+            let width: Option<usize> = if width.is_empty() {
+                None
+            } else {
+                Some(width.replace('_', "").parse().unwrap())
+            };
             let number = number.replace('_', "");
             let number = number.trim_start_matches('0');
 
-            match base {
+            let base = match base {
                 "b" => {
                     if let Some(x) = number.chars().find(|x| !BINARY_CHARS.contains(x)) {
                         self.errors.push(AnalyzerError::invalid_number_character(
                             x, "binary", self.text, token,
                         ));
                     }
-
-                    let actual_width = number.chars().count();
-                    if actual_width > width {
-                        self.errors
-                            .push(AnalyzerError::too_large_number(width, self.text, token));
-                    }
+                    2
                 }
                 "o" => {
                     if let Some(x) = number.chars().find(|x| !OCTAL_CHARS.contains(x)) {
@@ -62,18 +61,7 @@ impl<'a> VerylGrammarTrait for CheckNumber<'a> {
                             x, "octal", self.text, token,
                         ));
                     }
-
-                    let mut actual_width = number.chars().count() * 3;
-                    match number.chars().next() {
-                        Some('1') => actual_width -= 2,
-                        Some('2') => actual_width -= 1,
-                        Some('3') => actual_width -= 1,
-                        _ => (),
-                    }
-                    if actual_width > width {
-                        self.errors
-                            .push(AnalyzerError::too_large_number(width, self.text, token));
-                    }
+                    8
                 }
                 "d" => {
                     if let Some(x) = number.chars().find(|x| !DECIMAL_CHARS.contains(x)) {
@@ -81,25 +69,23 @@ impl<'a> VerylGrammarTrait for CheckNumber<'a> {
                             x, "decimal", self.text, token,
                         ));
                     }
+                    10
                 }
-                "h" => {
-                    let mut actual_width = number.chars().count() * 4;
-                    match number.chars().next() {
-                        Some('1') => actual_width -= 3,
-                        Some('2') => actual_width -= 2,
-                        Some('3') => actual_width -= 2,
-                        Some('4') => actual_width -= 1,
-                        Some('5') => actual_width -= 1,
-                        Some('6') => actual_width -= 1,
-                        Some('7') => actual_width -= 1,
-                        _ => (),
-                    }
+                "h" => 16,
+                _ => unreachable!(),
+            };
+
+            if let Some(actual_width) = strnum_bitwidth::bitwidth(number, base) {
+                if let Some(width) = width {
                     if actual_width > width {
                         self.errors
                             .push(AnalyzerError::too_large_number(width, self.text, token));
                     }
                 }
-                _ => unreachable!(),
+            } else if width.is_none() {
+                // bitwidth calculation may be failed over 128bit.
+                self.errors
+                    .push(AnalyzerError::too_large_number(128, self.text, token));
             }
         }
 
