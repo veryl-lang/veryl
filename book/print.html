@@ -597,6 +597,15 @@ If it is omitted, the appropriate width will be filled in the translated code.</
     localparam a3: u64 = 'h0123456789fffff;
 }
 </code></pre>
+<h2 id="set-sized-bits"><a class="header" href="#set-sized-bits">Set sized bits</a></h2>
+<p>The bit width specification can be added to “set all bits”.</p>
+<pre class="playground"><code class="language-veryl">module ModuleA {
+    localparam a0: u64 = 1'0;
+    localparam a1: u64 = 2'1;
+    localparam a2: u64 = 3'x;
+    localparam a3: u64 = 4'z;
+}
+</code></pre>
 <h2 id="floating-point"><a class="header" href="#floating-point">Floating point</a></h2>
 <pre><code class="language-veryl">// floating point
 0123456789.0123456789
@@ -1298,8 +1307,8 @@ StringLiteralTerm     : &quot;\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^
 ExponentTerm          : /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/                   : Token;
 FixedPointTerm        : /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/                                              : Token;
 BasedTerm             : /(?:[0-9]+(?:_[0-9]+)*)?'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/                : Token;
+AllBitTerm            : /(?:[0-9]+(?:_[0-9]+)*)?'[01xzXZ]/                                                    : Token;
 BaseLessTerm          : /[0-9]+(?:_[0-9]+)*/                                                                  : Token;
-AllBitTerm            : /'[01xzXZ]/                                                                           : Token;
 MinusColonTerm        : '-:'                                                                                  : Token;
 MinusGTTerm           : '-&gt;'                                                                                  : Token;
 PlusColonTerm         : '+:'                                                                                  : Token;
