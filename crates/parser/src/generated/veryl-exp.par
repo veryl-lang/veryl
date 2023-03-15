@@ -11,8 +11,8 @@
 /*   2 */ ExponentTerm: /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/ : Token;
 /*   3 */ FixedPointTerm: /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/ : Token;
 /*   4 */ BasedTerm: /(?:[0-9]+(?:_[0-9]+)*)?'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/ : Token;
-/*   5 */ BaseLessTerm: /[0-9]+(?:_[0-9]+)*/ : Token;
-/*   6 */ AllBitTerm: /'[01xzXZ]/ : Token;
+/*   5 */ AllBitTerm: /(?:[0-9]+(?:_[0-9]+)*)?'[01xzXZ]/ : Token;
+/*   6 */ BaseLessTerm: /[0-9]+(?:_[0-9]+)*/ : Token;
 /*   7 */ MinusColonTerm: '-:' : Token;
 /*   8 */ MinusGTTerm: '->' : Token;
 /*   9 */ PlusColonTerm: '+:' : Token;
