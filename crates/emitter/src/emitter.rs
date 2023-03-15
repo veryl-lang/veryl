@@ -1682,7 +1682,11 @@ impl VerylWalker for Emitter {
         self.str("(");
         if let Some(ref x) = arg.inst_port_item_opt {
             self.token(&x.colon.colon_token.replace(""));
-            self.expression(&x.expression);
+            let mut stringifier = Stringifier::new();
+            stringifier.expression(&x.expression);
+            if stringifier.as_str() != "_" {
+                self.expression(&x.expression);
+            }
         } else {
             self.duplicated_token(&arg.identifier.identifier_token, 0);
         }

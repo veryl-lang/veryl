@@ -42,11 +42,13 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                         let is_single_identifier = SymbolPath::from(arg).as_slice().len() == 1;
                         if is_single_identifier {
                             let name = arg.identifier.identifier_token.text();
-                            self.errors.push(AnalyzerError::undefined_identifier(
-                                &name,
-                                self.text,
-                                &arg.identifier.identifier_token,
-                            ));
+                            if name != "_" {
+                                self.errors.push(AnalyzerError::undefined_identifier(
+                                    &name,
+                                    self.text,
+                                    &arg.identifier.identifier_token,
+                                ));
+                            }
                         }
                     }
                 }
@@ -85,11 +87,13 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                         let is_single_identifier = SymbolPath::from(arg).as_slice().len() == 1;
                         if is_single_identifier {
                             let name = arg.identifier.identifier_token.text();
-                            self.errors.push(AnalyzerError::undefined_identifier(
-                                &name,
-                                self.text,
-                                &arg.identifier.identifier_token,
-                            ));
+                            if name != "_" {
+                                self.errors.push(AnalyzerError::undefined_identifier(
+                                    &name,
+                                    self.text,
+                                    &arg.identifier.identifier_token,
+                                ));
+                            }
                         }
                     }
                 }
@@ -158,6 +162,36 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                         self.text,
                         &arg.scoped_identifier.identifier.identifier_token,
                     ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn inst_port_item(&mut self, arg: &InstPortItem) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            if arg.inst_port_item_opt.is_none() {
+                match symbol_table::resolve(arg.identifier.as_ref()) {
+                    Ok(symbol) => {
+                        if symbol.found.is_some() {
+                            for symbol in symbol.full_path {
+                                symbol_table::add_reference(
+                                    symbol.token.id,
+                                    &arg.identifier.identifier_token.token,
+                                );
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        let name = format!("{}", err.last_found.token.text);
+                        let member = format!("{}", err.not_found);
+                        self.errors.push(AnalyzerError::unknown_member(
+                            &name,
+                            &member,
+                            self.text,
+                            &arg.identifier.identifier_token,
+                        ));
+                    }
                 }
             }
         }

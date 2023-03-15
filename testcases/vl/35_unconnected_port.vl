@@ -1,0 +1,15 @@
+module Module35 {
+    var aa: logic;
+
+    inst xx: Module35B (
+        aa     ,
+        bb  : _,
+        bbbb: _,
+    );
+}
+
+module Module35B (
+    aa  : input u32,
+    bb  : input u32,
+    bbbb: input u32,
+) {}
