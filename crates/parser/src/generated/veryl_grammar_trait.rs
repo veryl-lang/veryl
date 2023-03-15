@@ -45,13 +45,13 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'BaseLessTerm'
-    fn base_less_term(&mut self, _arg: &BaseLessTerm) -> Result<()> {
+    /// Semantic action for non-terminal 'AllBitTerm'
+    fn all_bit_term(&mut self, _arg: &AllBitTerm) -> Result<()> {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'AllBitTerm'
-    fn all_bit_term(&mut self, _arg: &AllBitTerm) -> Result<()> {
+    /// Semantic action for non-terminal 'BaseLessTerm'
+    fn base_less_term(&mut self, _arg: &BaseLessTerm) -> Result<()> {
         Ok(())
     }
 
@@ -4015,7 +4015,7 @@ pub struct AllBit {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct AllBitTerm {
-    pub all_bit_term: crate::veryl_token::Token, /* '[01xzXZ] */
+    pub all_bit_term: crate::veryl_token::Token, /* (?:[0-9]+(?:_[0-9]+)*)?'[01xzXZ] */
 }
 
 ///
@@ -10980,6 +10980,25 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 5:
     ///
+    /// AllBitTerm: /(?:[0-9]+(?:_[0-9]+)*)?'[01xzXZ]/ : Token;
+    ///
+    #[parol_runtime::function_name::named]
+    fn all_bit_term(&mut self, all_bit_term: &ParseTreeType<'t>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let all_bit_term = all_bit_term
+            .token()?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let all_bit_term_built = AllBitTerm { all_bit_term };
+        // Calling user action here
+        self.user_grammar.all_bit_term(&all_bit_term_built)?;
+        self.push(ASTType::AllBitTerm(all_bit_term_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 6:
+    ///
     /// BaseLessTerm: /[0-9]+(?:_[0-9]+)*/ : Token;
     ///
     #[parol_runtime::function_name::named]
@@ -10994,25 +11013,6 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         // Calling user action here
         self.user_grammar.base_less_term(&base_less_term_built)?;
         self.push(ASTType::BaseLessTerm(base_less_term_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 6:
-    ///
-    /// AllBitTerm: /'[01xzXZ]/ : Token;
-    ///
-    #[parol_runtime::function_name::named]
-    fn all_bit_term(&mut self, all_bit_term: &ParseTreeType<'t>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let all_bit_term = all_bit_term
-            .token()?
-            .try_into()
-            .map_err(parol_runtime::ParolError::UserError)?;
-        let all_bit_term_built = AllBitTerm { all_bit_term };
-        // Calling user action here
-        self.user_grammar.all_bit_term(&all_bit_term_built)?;
-        self.push(ASTType::AllBitTerm(all_bit_term_built), context);
         Ok(())
     }
 
@@ -29344,8 +29344,8 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             2 => self.exponent_term(&children[0]),
             3 => self.fixed_point_term(&children[0]),
             4 => self.based_term(&children[0]),
-            5 => self.base_less_term(&children[0]),
-            6 => self.all_bit_term(&children[0]),
+            5 => self.all_bit_term(&children[0]),
+            6 => self.base_less_term(&children[0]),
             7 => self.minus_colon_term(&children[0]),
             8 => self.minus_g_t_term(&children[0]),
             9 => self.plus_colon_term(&children[0]),

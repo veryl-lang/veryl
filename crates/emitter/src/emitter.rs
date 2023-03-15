@@ -318,6 +318,20 @@ impl VerylWalker for Emitter {
         }
     }
 
+    /// Semantic action for non-terminal 'AllBit'
+    fn all_bit(&mut self, arg: &AllBit) {
+        let text = &arg.all_bit_token.text();
+        let (width, tail) = text.split_once('\'').unwrap();
+
+        if width.is_empty() {
+            self.veryl_token(&arg.all_bit_token);
+        } else {
+            let width: usize = width.parse().unwrap();
+            let text = format!("{width}'b{}", tail.repeat(width));
+            self.veryl_token(&arg.all_bit_token.replace(&text));
+        }
+    }
+
     /// Semantic action for non-terminal 'Comma'
     fn comma(&mut self, arg: &Comma) {
         if self.string.ends_with("`endif") {

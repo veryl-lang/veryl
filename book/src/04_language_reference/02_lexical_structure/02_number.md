@@ -82,6 +82,19 @@ module ModuleA {
 }
 ```
 
+## Set sized bits
+
+The bit width specification can be added to "set all bits".
+
+```veryl,playground
+module ModuleA {
+    localparam a0: u64 = 1'0;
+    localparam a1: u64 = 2'1;
+    localparam a2: u64 = 3'x;
+    localparam a3: u64 = 4'z;
+}
+```
+
 ## Floating point
 
 ```veryl

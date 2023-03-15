@@ -33,8 +33,8 @@ pub const TERMINALS: &[&str; 104] = &[
     /*   7 */ r###"[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*"###,
     /*   8 */ r###"[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*"###,
     /*   9 */ r###"(?:[0-9]+(?:_[0-9]+)*)?'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*"###,
-    /*  10 */ r###"[0-9]+(?:_[0-9]+)*"###,
-    /*  11 */ r###"'[01xzXZ]"###,
+    /*  10 */ r###"(?:[0-9]+(?:_[0-9]+)*)?'[01xzXZ]"###,
+    /*  11 */ r###"[0-9]+(?:_[0-9]+)*"###,
     /*  12 */ r###"\-:"###,
     /*  13 */ r###"\->"###,
     /*  14 */ r###"\+:"###,
@@ -140,8 +140,8 @@ pub const TERMINAL_NAMES: &[&str; 104] = &[
     /*   7 */ "ExponentTerm",
     /*   8 */ "FixedPointTerm",
     /*   9 */ "BasedTerm",
-    /*  10 */ "BaseLessTerm",
-    /*  11 */ "AllBitTerm",
+    /*  10 */ "AllBitTerm",
+    /*  11 */ "BaseLessTerm",
     /*  12 */ "MinusColon",
     /*  13 */ "MinusGT",
     /*  14 */ "PlusColon",
@@ -251,8 +251,8 @@ const SCANNER_0: (&[&str; 5], &[usize; 98]) = (
         7,   /* ExponentTerm */
         8,   /* FixedPointTerm */
         9,   /* BasedTerm */
-        10,  /* BaseLessTerm */
-        11,  /* AllBitTerm */
+        10,  /* AllBitTerm */
+        11,  /* BaseLessTerm */
         12,  /* MinusColon */
         13,  /* MinusGT */
         14,  /* PlusColon */
@@ -933,7 +933,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 572] = &[
     },
     /* 1 - "AllBitTerm" */
     LookaheadDFA {
-        states: &[Some(6)],
+        states: &[Some(5)],
         transitions: &[],
         k: 0,
     },
@@ -2579,7 +2579,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 572] = &[
     },
     /* 53 - "BaseLessTerm" */
     LookaheadDFA {
-        states: &[Some(5)],
+        states: &[Some(6)],
         transitions: &[],
         k: 0,
     },
@@ -25178,8 +25178,8 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 572] = &[
         states: &[None, Some(299), Some(300), Some(301)],
         transitions: &[
             DFATransition(0, 9, 1),
-            DFATransition(0, 10, 2),
-            DFATransition(0, 11, 3),
+            DFATransition(0, 10, 3),
+            DFATransition(0, 11, 2),
         ],
         k: 1,
     },
@@ -31278,14 +31278,14 @@ pub const PRODUCTIONS: &[Production; 810] = &[
         lhs: 56,
         production: &[ParseType::T(9)],
     },
-    // 5 - BaseLessTerm: /[0-9]+(?:_[0-9]+)*/;
-    Production {
-        lhs: 53,
-        production: &[ParseType::T(10)],
-    },
-    // 6 - AllBitTerm: /'[01xzXZ]/;
+    // 5 - AllBitTerm: /(?:[0-9]+(?:_[0-9]+)*)?'[01xzXZ]/;
     Production {
         lhs: 1,
+        production: &[ParseType::T(10)],
+    },
+    // 6 - BaseLessTerm: /[0-9]+(?:_[0-9]+)*/;
+    Production {
+        lhs: 53,
         production: &[ParseType::T(11)],
     },
     // 7 - MinusColonTerm: '-:';
