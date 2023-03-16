@@ -19,7 +19,7 @@ criterion = "0.4.0"
 pprof = {version = "0.11.1", features = ["flamegraph"]}
 
 [build-dependencies]
-walkdir = "2.3.2"
+walkdir = "2.3.3"
 
 [[bench]]
 name = "benchmark"
