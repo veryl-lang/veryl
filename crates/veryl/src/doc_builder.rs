@@ -414,7 +414,7 @@ fn format_doc_comment(text: &[StrId], single_line: bool) -> String {
     for t in text {
         let t = format!("{}", t);
         let t = t.trim_start_matches("///");
-        ret.push_str(&t);
+        ret.push_str(t);
         if single_line {
             break;
         }
