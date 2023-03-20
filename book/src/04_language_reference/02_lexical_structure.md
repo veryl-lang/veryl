@@ -29,6 +29,14 @@ comment
 */
 ```
 
+### Documentation comment
+
+Signle line comment starts with `///` is treated as documentation comment.
+
+```veryl,playground
+/// documentation comment
+```
+
 ## Identifier
 
 Identifier is composed with ASCII alphabet and number and `_`.

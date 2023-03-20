@@ -1,7 +1,10 @@
 [project]
-name    = "veryl_testcase"
-version = "0.1.6"
-license = "MIT"
+name        = "veryl_testcase"
+version     = "0.1.6"
+authors     = ["dalance@gmail.com"]
+description = "Testcases for test"
+license     = "MIT"
+repository  = "https://github.com/dalance/veryl"
 
 [build]
 clock_type    = "posedge"

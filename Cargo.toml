@@ -28,12 +28,14 @@ description = "A modern hardware description language"
 anyhow          = "1.0"
 clap            = {version = "4.1.9", features = ["derive"]}
 log             = "0.4.17"
+mdbook          = "0.4.28"
 miette          = {version = "5.6", features = ["fancy"]}
 regex           = "1.7.1"
 semver          = {version = "1.0", features = ["serde"]}
 serde           = {version = "1.0", features = ["derive"]}
 serde_json      = "1.0"
 strnum_bitwidth = "0.1.2"
+tempfile        = "3.4"
 thiserror       = "1.0"
 toml            = "0.7.3"
 url             = {version = "2.3", features = ["serde"]}

@@ -1,3 +1,4 @@
+use crate::doc_comment_table;
 use crate::resource_table::{self, PathId, StrId, TokenId};
 use crate::veryl_grammar_trait::*;
 use once_cell::sync::Lazy;
@@ -85,7 +86,14 @@ fn split_comment_token(token: Token) -> Vec<Token> {
         prev_pos = pos;
 
         let id = resource_table::new_token_id();
-        let text = resource_table::insert_str(&text[pos..pos + length]);
+        let text = &text[pos..pos + length];
+        let is_doc_comment = text.starts_with("///");
+        let text = resource_table::insert_str(text);
+
+        if is_doc_comment {
+            doc_comment_table::insert(token.file_path, line, text);
+        }
+
         let token = Token {
             id,
             text,

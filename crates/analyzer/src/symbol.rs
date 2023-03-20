@@ -16,10 +16,16 @@ pub struct Symbol {
     pub references: Vec<Token>,
     pub evaluated: Cell<Option<Evaluated>>,
     pub allow_unused: bool,
+    pub doc_comment: Vec<StrId>,
 }
 
 impl Symbol {
-    pub fn new(token: &Token, kind: SymbolKind, namespace: &Namespace) -> Self {
+    pub fn new(
+        token: &Token,
+        kind: SymbolKind,
+        namespace: &Namespace,
+        doc_comment: Vec<StrId>,
+    ) -> Self {
         Self {
             token: *token,
             kind,
@@ -27,6 +33,7 @@ impl Symbol {
             references: Vec::new(),
             evaluated: Cell::new(None),
             allow_unused: false,
+            doc_comment,
         }
     }
 
@@ -393,6 +400,7 @@ pub struct VariableProperty {
 
 #[derive(Debug, Clone)]
 pub struct PortProperty {
+    pub token: Token,
     pub r#type: Option<Type>,
     pub direction: Direction,
 }
@@ -412,17 +420,20 @@ impl fmt::Display for Port {
 
 impl From<&syntax_tree::PortDeclarationItem> for Port {
     fn from(value: &syntax_tree::PortDeclarationItem) -> Self {
+        let token = value.identifier.identifier_token.token;
         let property = match &*value.port_declaration_item_group {
             syntax_tree::PortDeclarationItemGroup::DirectionArrayType(x) => {
                 let r#type: Type = x.array_type.as_ref().into();
                 let direction: Direction = x.direction.as_ref().into();
                 PortProperty {
+                    token,
                     r#type: Some(r#type),
                     direction,
                 }
             }
             syntax_tree::PortDeclarationItemGroup::InterfacePortDeclarationItemOpt(_) => {
                 PortProperty {
+                    token,
                     r#type: None,
                     direction: Direction::Interface,
                 }
@@ -443,6 +454,7 @@ pub enum ParameterScope {
 
 #[derive(Debug, Clone)]
 pub struct ParameterProperty {
+    pub token: Token,
     pub r#type: Type,
     pub scope: ParameterScope,
     pub value: ParameterValue,
@@ -469,6 +481,7 @@ impl fmt::Display for Parameter {
 
 impl From<&syntax_tree::WithParameterItem> for Parameter {
     fn from(value: &syntax_tree::WithParameterItem) -> Self {
+        let token = value.identifier.identifier_token.token;
         let scope = match &*value.with_parameter_item_group {
             syntax_tree::WithParameterItemGroup::Parameter(_) => ParameterScope::Global,
             syntax_tree::WithParameterItemGroup::Localparam(_) => ParameterScope::Local,
@@ -477,6 +490,7 @@ impl From<&syntax_tree::WithParameterItem> for Parameter {
             syntax_tree::WithParameterItemGroup0::ArrayTypeEquExpression(x) => {
                 let r#type: Type = x.array_type.as_ref().into();
                 let property = ParameterProperty {
+                    token,
                     r#type,
                     scope,
                     value: ParameterValue::Expression(*x.expression.clone()),
@@ -494,6 +508,7 @@ impl From<&syntax_tree::WithParameterItem> for Parameter {
                     array: vec![],
                 };
                 let property = ParameterProperty {
+                    token,
                     r#type,
                     scope,
                     value: ParameterValue::TypeExpression(*x.type_expression.clone()),
