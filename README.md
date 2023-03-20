@@ -104,6 +104,9 @@ veryl check
 
 // Build target codes corresponding to the current project
 veryl build
+
+// Build the document corresponding to the current project
+veryl doc
 ```
 
 For detailed information, see [Document](https://dalance.github.io/veryl/book).
