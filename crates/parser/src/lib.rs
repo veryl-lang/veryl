@@ -1,3 +1,4 @@
+pub mod doc_comment_table;
 pub mod finder;
 pub mod generated;
 pub mod parser;

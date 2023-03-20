@@ -1,0 +1,29 @@
+/// Test module for doc comment
+///
+/// * list item0
+/// * list item1
+module Module36 #(
+    /// Data width
+    parameter  ParamA: u32 = 1,
+    localparam ParamB: u32 = 1,
+) (
+    i_clk  : input  logic        , /// Clock
+    i_rst_n: input  logic        , /// Reset
+    i_data : input  logic<ParamA>, /// Data input
+    o_data : output logic<ParamA>, /// Data output
+) {}
+
+/// Test interface for doc comment
+///
+/// * list item0
+/// * list item1
+interface Interface36 #(
+    parameter  ParamA: u32 = 1, /// Data width
+    localparam ParamB: u32 = 1,
+) {}
+
+/// Test package for doc comment
+///
+/// * list item0
+/// * list item1
+package Package36 {}

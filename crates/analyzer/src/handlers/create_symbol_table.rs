@@ -11,6 +11,8 @@ use crate::symbol::{
     VariableProperty,
 };
 use crate::symbol_table;
+use std::collections::HashSet;
+use veryl_parser::doc_comment_table;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::VerylToken;
@@ -26,6 +28,7 @@ pub struct CreateSymbolTable<'a> {
     default_block: Option<StrId>,
     for_identifier: Option<VerylToken>,
     anonymous_namespace: usize,
+    attribute_lines: HashSet<usize>,
 }
 
 impl<'a> CreateSymbolTable<'a> {
@@ -37,7 +40,29 @@ impl<'a> CreateSymbolTable<'a> {
     }
 
     fn insert_symbol(&mut self, token: &VerylToken, kind: SymbolKind) {
-        let mut symbol = Symbol::new(&token.token, kind, &self.namespace);
+        let file = token.token.file_path;
+        let line = token.token.line;
+        let doc_comment = if line == 0 {
+            vec![]
+        } else if let Some(doc_comment) = doc_comment_table::get(file, line) {
+            vec![doc_comment]
+        } else {
+            let mut candidate_line = line - 1;
+            while self.attribute_lines.contains(&candidate_line) {
+                if candidate_line == 0 {
+                    break;
+                }
+                candidate_line -= 1;
+            }
+            let mut ret = Vec::new();
+            while let Some(doc_comment) = doc_comment_table::get(file, candidate_line) {
+                ret.push(doc_comment);
+                candidate_line -= 1;
+            }
+            ret.reverse();
+            ret
+        };
+        let mut symbol = Symbol::new(&token.token, kind, &self.namespace, doc_comment);
 
         if allow_table::contains("unused_variable") {
             symbol.allow_unused = true;
@@ -64,6 +89,13 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             let id = arg.identifier_token.token.id;
             let file_path = arg.identifier_token.token.file_path;
             namespace_table::insert(id, file_path, &self.namespace);
+        }
+        Ok(())
+    }
+
+    fn attribute(&mut self, arg: &Attribute) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            self.attribute_lines.insert(arg.hash.hash_token.token.line);
         }
         Ok(())
     }
@@ -98,11 +130,13 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
     fn localparam_declaration(&mut self, arg: &LocalparamDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
+            let token = arg.identifier.identifier_token.token;
             let property = match &*arg.localparam_declaration_group {
                 LocalparamDeclarationGroup::ArrayTypeEquExpression(x) => {
                     let r#type: SymType = x.array_type.as_ref().into();
                     let value = ParameterValue::Expression(*x.expression.clone());
                     ParameterProperty {
+                        token,
                         r#type,
                         scope: ParameterScope::Local,
                         value,
@@ -117,6 +151,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     };
                     let value = ParameterValue::TypeExpression(*x.type_expression.clone());
                     ParameterProperty {
+                        token,
                         r#type,
                         scope: ParameterScope::Local,
                         value,
@@ -212,6 +247,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
     fn with_parameter_item(&mut self, arg: &WithParameterItem) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
+            let token = arg.identifier.identifier_token.token;
             let scope = match &*arg.with_parameter_item_group {
                 WithParameterItemGroup::Parameter(_) => ParameterScope::Global,
                 WithParameterItemGroup::Localparam(_) => ParameterScope::Local,
@@ -221,6 +257,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     let r#type: SymType = x.array_type.as_ref().into();
                     let value = ParameterValue::Expression(*x.expression.clone());
                     ParameterProperty {
+                        token,
                         r#type,
                         scope,
                         value,
@@ -235,6 +272,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     };
                     let value = ParameterValue::TypeExpression(*x.type_expression.clone());
                     ParameterProperty {
+                        token,
                         r#type,
                         scope,
                         value,
@@ -249,16 +287,19 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
     fn port_declaration_item(&mut self, arg: &PortDeclarationItem) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
+            let token = arg.identifier.identifier_token.token;
             let property = match &*arg.port_declaration_item_group {
                 PortDeclarationItemGroup::DirectionArrayType(x) => {
                     let r#type: SymType = x.array_type.as_ref().into();
                     let direction: SymDirection = x.direction.as_ref().into();
                     PortProperty {
+                        token,
                         r#type: Some(r#type),
                         direction,
                     }
                 }
                 PortDeclarationItemGroup::InterfacePortDeclarationItemOpt(_) => PortProperty {
+                    token,
                     r#type: None,
                     direction: SymDirection::Interface,
                 },

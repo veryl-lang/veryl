@@ -54,6 +54,13 @@ impl From<&[Token]> for SymbolPath {
     }
 }
 
+impl From<&Token> for SymbolPath {
+    fn from(value: &Token) -> Self {
+        let path = vec![value.text];
+        SymbolPath(path)
+    }
+}
+
 impl From<&syntax_tree::Identifier> for SymbolPath {
     fn from(value: &syntax_tree::Identifier) -> Self {
         let path = vec![value.identifier_token.token.text];
@@ -109,6 +116,13 @@ impl From<&syntax_tree::ExpressionIdentifier> for SymbolPath {
 
 #[derive(Clone, Default)]
 pub struct SymbolPathNamespace(pub SymbolPath, pub Namespace);
+
+impl From<&Token> for SymbolPathNamespace {
+    fn from(value: &Token) -> Self {
+        let namespace = namespace_table::get(value.id).unwrap();
+        SymbolPathNamespace(value.into(), namespace)
+    }
+}
 
 impl From<&syntax_tree::Identifier> for SymbolPathNamespace {
     fn from(value: &syntax_tree::Identifier) -> Self {

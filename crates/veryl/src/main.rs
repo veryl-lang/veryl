@@ -10,6 +10,7 @@ use veryl_metadata::Metadata;
 
 mod cmd_build;
 mod cmd_check;
+mod cmd_doc;
 mod cmd_dump;
 mod cmd_fmt;
 mod cmd_init;
@@ -17,6 +18,7 @@ mod cmd_metadata;
 mod cmd_new;
 mod cmd_publish;
 mod cmd_update;
+mod doc_builder;
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Opt
@@ -47,6 +49,7 @@ enum Commands {
     Build(OptBuild),
     Update(OptUpdate),
     Publish(OptPublish),
+    Doc(OptDoc),
     Metadata(OptMetadata),
     Dump(OptDump),
 }
@@ -99,6 +102,13 @@ pub struct OptPublish {
     /// Bump version
     #[arg(long)]
     pub bump: Option<BumpKind>,
+}
+
+/// Build the document corresponding to the current project
+#[derive(Args)]
+pub struct OptDoc {
+    /// Target files
+    pub files: Vec<PathBuf>,
 }
 
 #[derive(Clone, Copy, Default, Debug, ValueEnum)]
@@ -219,6 +229,7 @@ fn main() -> Result<ExitCode> {
         Commands::Build(x) => cmd_build::CmdBuild::new(x).exec(&mut metadata)?,
         Commands::Update(x) => cmd_update::CmdUpdate::new(x).exec(&mut metadata)?,
         Commands::Publish(x) => cmd_publish::CmdPublish::new(x).exec(&mut metadata)?,
+        Commands::Doc(x) => cmd_doc::CmdDoc::new(x).exec(&mut metadata)?,
         Commands::Metadata(x) => cmd_metadata::CmdMetadata::new(x).exec(&metadata)?,
         Commands::Dump(x) => cmd_dump::CmdDump::new(x).exec(&mut metadata)?,
     };
