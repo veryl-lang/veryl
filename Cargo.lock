@@ -2612,9 +2612,9 @@ dependencies = [
 
 [[package]]
 name = "parol"
-version = "0.19.0"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8db89ef4207488a374dcfd5ebf59c09f7ce9452f0ca3bb7953682e55baac8e03"
+checksum = "d6d598326ebcb398761c558526a80eb17b370dffb654cad35b21d1d10511efc5"
 dependencies = [
  "anyhow",
  "cfg-if",
@@ -2622,6 +2622,7 @@ dependencies = [
  "derive_builder",
  "env_logger",
  "function_name",
+ "num_cpus",
  "owo-colors",
  "parol-macros",
  "parol_runtime",
