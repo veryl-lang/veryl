@@ -25,7 +25,7 @@ pre-release-replacements = [
 [dependencies]
 clap            = {workspace = true}
 console         = "0.15.4"
-fern            = "0.6.1"
+fern            = "0.6.2"
 handlebars      = "4.3"
 log             = {workspace = true}
 mdbook          = {workspace = true}
