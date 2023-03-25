@@ -1113,6 +1113,13 @@ impl VerylWalker for Emitter {
         }
     }
 
+    /// Semantic action for non-terminal 'HashDelayStatement'
+    fn hash_delay_statement(&mut self, arg: &HashDelayStatement) {
+        self.hash(&arg.hash);
+        self.expression(&arg.expression);
+        self.semicolon(&arg.semicolon);
+    }
+
     /// Semantic action for non-terminal 'Attribute'
     fn attribute(&mut self, arg: &Attribute) {
         self.adjust_line = false;

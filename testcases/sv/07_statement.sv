@@ -52,6 +52,9 @@ module veryl_testcase_Module07;
             a  = i;
             aa = i + 1;
         end
+
+        #(1);
+        #(a);
     end
 
     always_ff @ (posedge clk) begin

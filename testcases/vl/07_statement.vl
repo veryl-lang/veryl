@@ -52,6 +52,9 @@ module Module07 {
             a  = i;
             aa = i + 1;
         }
+
+        #(1);
+        #(a);
     }
 
     always_ff (clk) {

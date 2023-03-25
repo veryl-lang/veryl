@@ -1310,6 +1310,7 @@ pub trait VerylWalker {
             Statement::ReturnStatement(x) => self.return_statement(&x.return_statement),
             Statement::ForStatement(x) => self.for_statement(&x.for_statement),
             Statement::CaseStatement(x) => self.case_statement(&x.case_statement),
+            Statement::HashDelayStatement(x) => self.hash_delay_statement(&x.hash_delay_statement),
         };
         after!(self, statement, arg);
     }
@@ -1467,6 +1468,15 @@ pub trait VerylWalker {
             }
         }
         after!(self, case_item, arg);
+    }
+
+    /// Semantic action for non-terminal 'HashDelayStatement'
+    fn hash_delay_statement(&mut self, arg: &HashDelayStatement) {
+        before!(self, hash_delay_statement, arg);
+        self.r#hash(&arg.r#hash);
+        self.expression(&arg.expression);
+        self.semicolon(&arg.semicolon);
+        after!(self, hash_delay_statement, arg);
     }
 
     /// Semantic action for non-terminal 'Attribute'
