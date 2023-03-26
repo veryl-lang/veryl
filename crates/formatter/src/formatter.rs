@@ -1016,7 +1016,7 @@ impl VerylWalker for Formatter {
         self.token_will_push(&arg.l_brace.l_brace_token);
         for (i, x) in arg.initial_declaration_list.iter().enumerate() {
             self.newline_list(i);
-            self.statement(&x.statement);
+            self.initial_item(&x.initial_item);
         }
         self.newline_list_post(arg.initial_declaration_list.is_empty());
         self.r_brace(&arg.r_brace);

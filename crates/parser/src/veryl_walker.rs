@@ -1778,10 +1778,20 @@ pub trait VerylWalker {
         self.initial(&arg.initial);
         self.l_brace(&arg.l_brace);
         for x in &arg.initial_declaration_list {
-            self.statement(&x.statement);
+            self.initial_item(&x.initial_item);
         }
         self.r_brace(&arg.r_brace);
         after!(self, initial_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'InitialItem'
+    fn initial_item(&mut self, arg: &InitialItem) {
+        before!(self, initial_item, arg);
+        match arg {
+            InitialItem::Statement(x) => self.statement(&x.statement),
+            InitialItem::Assignment(x) => self.assignment(&x.assignment),
+        };
+        after!(self, initial_item, arg);
     }
 
     /// Semantic action for non-terminal 'FinalDeclaration'

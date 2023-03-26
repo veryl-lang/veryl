@@ -538,7 +538,11 @@ StructGroup: { Attribute } ( LBrace StructList RBrace | StructItem );
 
 StructItem: Identifier Colon ScalarType;
 
-InitialDeclaration: Initial LBrace { Statement } RBrace;
+InitialDeclaration: Initial LBrace { InitialItem } RBrace;
+
+InitialItem: Statement
+            | Assignment
+            ;
 
 FinalDeclaration: Final LBrace { Statement } RBrace;
 

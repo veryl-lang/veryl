@@ -1,5 +1,8 @@
-module Module31 {
+module Module31 (
+    a: input logic<10>,
+) {
     initial {
+        a        = 1;
         $display("initial");
     }
 

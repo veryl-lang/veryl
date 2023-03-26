@@ -1870,6 +1870,11 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
+    /// Semantic action for non-terminal 'InitialItem'
+    fn initial_item(&mut self, _arg: &InitialItem) -> Result<()> {
+        Ok(())
+    }
+
     /// Semantic action for non-terminal 'FinalDeclaration'
     fn final_declaration(&mut self, _arg: &FinalDeclaration) -> Result<()> {
         Ok(())
@@ -3072,7 +3077,31 @@ pub struct StructGroupGroupStructItem {
 }
 
 ///
-/// Type derived for production 614
+/// Type derived for production 593
+///
+/// InitialItem: Statement;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct InitialItemStatement {
+    pub statement: Box<Statement>,
+}
+
+///
+/// Type derived for production 594
+///
+/// InitialItem: Assignment;
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct InitialItemAssignment {
+    pub assignment: Box<Assignment>,
+}
+
+///
+/// Type derived for production 616
 ///
 /// InstParameterGroupGroup: LBrace InstParameterList RBrace;
 ///
@@ -3086,7 +3115,7 @@ pub struct InstParameterGroupGroupLBraceInstParameterListRBrace {
 }
 
 ///
-/// Type derived for production 615
+/// Type derived for production 617
 ///
 /// InstParameterGroupGroup: InstParameterItem;
 ///
@@ -3098,7 +3127,7 @@ pub struct InstParameterGroupGroupInstParameterItem {
 }
 
 ///
-/// Type derived for production 627
+/// Type derived for production 629
 ///
 /// InstPortGroupGroup: LBrace InstPortList RBrace;
 ///
@@ -3112,7 +3141,7 @@ pub struct InstPortGroupGroupLBraceInstPortListRBrace {
 }
 
 ///
-/// Type derived for production 628
+/// Type derived for production 630
 ///
 /// InstPortGroupGroup: InstPortItem;
 ///
@@ -3124,7 +3153,7 @@ pub struct InstPortGroupGroupInstPortItem {
 }
 
 ///
-/// Type derived for production 643
+/// Type derived for production 645
 ///
 /// WithParameterGroupGroup: LBrace WithParameterList RBrace;
 ///
@@ -3138,7 +3167,7 @@ pub struct WithParameterGroupGroupLBraceWithParameterListRBrace {
 }
 
 ///
-/// Type derived for production 644
+/// Type derived for production 646
 ///
 /// WithParameterGroupGroup: WithParameterItem;
 ///
@@ -3150,7 +3179,7 @@ pub struct WithParameterGroupGroupWithParameterItem {
 }
 
 ///
-/// Type derived for production 648
+/// Type derived for production 650
 ///
 /// WithParameterItemGroup0: ArrayType Equ Expression;
 ///
@@ -3164,7 +3193,7 @@ pub struct WithParameterItemGroup0ArrayTypeEquExpression {
 }
 
 ///
-/// Type derived for production 649
+/// Type derived for production 651
 ///
 /// WithParameterItemGroup0: Type Equ TypeExpression;
 ///
@@ -3178,7 +3207,7 @@ pub struct WithParameterItemGroup0TypeEquTypeExpression {
 }
 
 ///
-/// Type derived for production 650
+/// Type derived for production 652
 ///
 /// WithParameterItemGroup: Parameter;
 ///
@@ -3190,7 +3219,7 @@ pub struct WithParameterItemGroupParameter {
 }
 
 ///
-/// Type derived for production 651
+/// Type derived for production 653
 ///
 /// WithParameterItemGroup: Localparam;
 ///
@@ -3202,7 +3231,7 @@ pub struct WithParameterItemGroupLocalparam {
 }
 
 ///
-/// Type derived for production 661
+/// Type derived for production 663
 ///
 /// PortDeclarationGroupGroup: LBrace PortDeclarationList RBrace;
 ///
@@ -3216,7 +3245,7 @@ pub struct PortDeclarationGroupGroupLBracePortDeclarationListRBrace {
 }
 
 ///
-/// Type derived for production 662
+/// Type derived for production 664
 ///
 /// PortDeclarationGroupGroup: PortDeclarationItem;
 ///
@@ -3228,7 +3257,7 @@ pub struct PortDeclarationGroupGroupPortDeclarationItem {
 }
 
 ///
-/// Type derived for production 666
+/// Type derived for production 668
 ///
 /// PortDeclarationItemGroup: Direction ArrayType;
 ///
@@ -3241,7 +3270,7 @@ pub struct PortDeclarationItemGroupDirectionArrayType {
 }
 
 ///
-/// Type derived for production 667
+/// Type derived for production 669
 ///
 /// PortDeclarationItemGroup: Interface PortDeclarationItemOpt /* Option */;
 ///
@@ -3254,7 +3283,7 @@ pub struct PortDeclarationItemGroupInterfacePortDeclarationItemOpt {
 }
 
 ///
-/// Type derived for production 670
+/// Type derived for production 672
 ///
 /// Direction: Input;
 ///
@@ -3266,7 +3295,7 @@ pub struct DirectionInput {
 }
 
 ///
-/// Type derived for production 671
+/// Type derived for production 673
 ///
 /// Direction: Output;
 ///
@@ -3278,7 +3307,7 @@ pub struct DirectionOutput {
 }
 
 ///
-/// Type derived for production 672
+/// Type derived for production 674
 ///
 /// Direction: Inout;
 ///
@@ -3290,7 +3319,7 @@ pub struct DirectionInout {
 }
 
 ///
-/// Type derived for production 673
+/// Type derived for production 675
 ///
 /// Direction: Ref;
 ///
@@ -3302,7 +3331,7 @@ pub struct DirectionRef {
 }
 
 ///
-/// Type derived for production 674
+/// Type derived for production 676
 ///
 /// Direction: Modport;
 ///
@@ -3314,7 +3343,7 @@ pub struct DirectionModport {
 }
 
 ///
-/// Type derived for production 682
+/// Type derived for production 684
 ///
 /// FunctionItem: VarDeclaration;
 ///
@@ -3326,7 +3355,7 @@ pub struct FunctionItemVarDeclaration {
 }
 
 ///
-/// Type derived for production 683
+/// Type derived for production 685
 ///
 /// FunctionItem: Statement;
 ///
@@ -3338,7 +3367,7 @@ pub struct FunctionItemStatement {
 }
 
 ///
-/// Type derived for production 685
+/// Type derived for production 687
 ///
 /// ImportDeclarationGroup: Identifier;
 ///
@@ -3350,7 +3379,7 @@ pub struct ImportDeclarationGroupIdentifier {
 }
 
 ///
-/// Type derived for production 686
+/// Type derived for production 688
 ///
 /// ImportDeclarationGroup: Star;
 ///
@@ -3362,7 +3391,7 @@ pub struct ImportDeclarationGroupStar {
 }
 
 ///
-/// Type derived for production 688
+/// Type derived for production 690
 ///
 /// ExportDeclarationGroup0: Identifier;
 ///
@@ -3374,7 +3403,7 @@ pub struct ExportDeclarationGroup0Identifier {
 }
 
 ///
-/// Type derived for production 689
+/// Type derived for production 691
 ///
 /// ExportDeclarationGroup0: Star;
 ///
@@ -3386,7 +3415,7 @@ pub struct ExportDeclarationGroup0Star {
 }
 
 ///
-/// Type derived for production 690
+/// Type derived for production 692
 ///
 /// ExportDeclarationGroup: Identifier;
 ///
@@ -3398,7 +3427,7 @@ pub struct ExportDeclarationGroupIdentifier {
 }
 
 ///
-/// Type derived for production 691
+/// Type derived for production 693
 ///
 /// ExportDeclarationGroup: Star;
 ///
@@ -3410,7 +3439,7 @@ pub struct ExportDeclarationGroupStar {
 }
 
 ///
-/// Type derived for production 716
+/// Type derived for production 718
 ///
 /// ModuleGroupGroup: LBrace ModuleGroupGroupList /* Vec */ RBrace;
 ///
@@ -3424,7 +3453,7 @@ pub struct ModuleGroupGroupLBraceModuleGroupGroupListRBrace {
 }
 
 ///
-/// Type derived for production 719
+/// Type derived for production 721
 ///
 /// ModuleGroupGroup: ModuleItem;
 ///
@@ -3436,7 +3465,7 @@ pub struct ModuleGroupGroupModuleItem {
 }
 
 ///
-/// Type derived for production 722
+/// Type derived for production 724
 ///
 /// ModuleItem: VarDeclaration;
 ///
@@ -3448,7 +3477,7 @@ pub struct ModuleItemVarDeclaration {
 }
 
 ///
-/// Type derived for production 723
+/// Type derived for production 725
 ///
 /// ModuleItem: InstDeclaration;
 ///
@@ -3460,7 +3489,7 @@ pub struct ModuleItemInstDeclaration {
 }
 
 ///
-/// Type derived for production 724
+/// Type derived for production 726
 ///
 /// ModuleItem: LocalparamDeclaration;
 ///
@@ -3472,7 +3501,7 @@ pub struct ModuleItemLocalparamDeclaration {
 }
 
 ///
-/// Type derived for production 725
+/// Type derived for production 727
 ///
 /// ModuleItem: AlwaysFfDeclaration;
 ///
@@ -3484,7 +3513,7 @@ pub struct ModuleItemAlwaysFfDeclaration {
 }
 
 ///
-/// Type derived for production 726
+/// Type derived for production 728
 ///
 /// ModuleItem: AlwaysCombDeclaration;
 ///
@@ -3496,7 +3525,7 @@ pub struct ModuleItemAlwaysCombDeclaration {
 }
 
 ///
-/// Type derived for production 727
+/// Type derived for production 729
 ///
 /// ModuleItem: AssignDeclaration;
 ///
@@ -3508,7 +3537,7 @@ pub struct ModuleItemAssignDeclaration {
 }
 
 ///
-/// Type derived for production 728
+/// Type derived for production 730
 ///
 /// ModuleItem: FunctionDeclaration;
 ///
@@ -3520,7 +3549,7 @@ pub struct ModuleItemFunctionDeclaration {
 }
 
 ///
-/// Type derived for production 729
+/// Type derived for production 731
 ///
 /// ModuleItem: ModuleIfDeclaration;
 ///
@@ -3532,7 +3561,7 @@ pub struct ModuleItemModuleIfDeclaration {
 }
 
 ///
-/// Type derived for production 730
+/// Type derived for production 732
 ///
 /// ModuleItem: ModuleForDeclaration;
 ///
@@ -3544,7 +3573,7 @@ pub struct ModuleItemModuleForDeclaration {
 }
 
 ///
-/// Type derived for production 731
+/// Type derived for production 733
 ///
 /// ModuleItem: EnumDeclaration;
 ///
@@ -3556,7 +3585,7 @@ pub struct ModuleItemEnumDeclaration {
 }
 
 ///
-/// Type derived for production 732
+/// Type derived for production 734
 ///
 /// ModuleItem: StructDeclaration;
 ///
@@ -3568,7 +3597,7 @@ pub struct ModuleItemStructDeclaration {
 }
 
 ///
-/// Type derived for production 733
+/// Type derived for production 735
 ///
 /// ModuleItem: ModuleNamedBlock;
 ///
@@ -3580,7 +3609,7 @@ pub struct ModuleItemModuleNamedBlock {
 }
 
 ///
-/// Type derived for production 734
+/// Type derived for production 736
 ///
 /// ModuleItem: ImportDeclaration;
 ///
@@ -3592,7 +3621,7 @@ pub struct ModuleItemImportDeclaration {
 }
 
 ///
-/// Type derived for production 735
+/// Type derived for production 737
 ///
 /// ModuleItem: InitialDeclaration;
 ///
@@ -3604,7 +3633,7 @@ pub struct ModuleItemInitialDeclaration {
 }
 
 ///
-/// Type derived for production 736
+/// Type derived for production 738
 ///
 /// ModuleItem: FinalDeclaration;
 ///
@@ -3616,7 +3645,7 @@ pub struct ModuleItemFinalDeclaration {
 }
 
 ///
-/// Type derived for production 759
+/// Type derived for production 761
 ///
 /// InterfaceGroupGroup: LBrace InterfaceGroupGroupList /* Vec */ RBrace;
 ///
@@ -3630,7 +3659,7 @@ pub struct InterfaceGroupGroupLBraceInterfaceGroupGroupListRBrace {
 }
 
 ///
-/// Type derived for production 762
+/// Type derived for production 764
 ///
 /// InterfaceGroupGroup: InterfaceItem;
 ///
@@ -3642,7 +3671,7 @@ pub struct InterfaceGroupGroupInterfaceItem {
 }
 
 ///
-/// Type derived for production 765
+/// Type derived for production 767
 ///
 /// InterfaceItem: VarDeclaration;
 ///
@@ -3654,7 +3683,7 @@ pub struct InterfaceItemVarDeclaration {
 }
 
 ///
-/// Type derived for production 766
+/// Type derived for production 768
 ///
 /// InterfaceItem: LocalparamDeclaration;
 ///
@@ -3666,7 +3695,7 @@ pub struct InterfaceItemLocalparamDeclaration {
 }
 
 ///
-/// Type derived for production 767
+/// Type derived for production 769
 ///
 /// InterfaceItem: ModportDeclaration;
 ///
@@ -3678,7 +3707,7 @@ pub struct InterfaceItemModportDeclaration {
 }
 
 ///
-/// Type derived for production 768
+/// Type derived for production 770
 ///
 /// InterfaceItem: InterfaceIfDeclaration;
 ///
@@ -3690,7 +3719,7 @@ pub struct InterfaceItemInterfaceIfDeclaration {
 }
 
 ///
-/// Type derived for production 769
+/// Type derived for production 771
 ///
 /// InterfaceItem: InterfaceForDeclaration;
 ///
@@ -3702,7 +3731,7 @@ pub struct InterfaceItemInterfaceForDeclaration {
 }
 
 ///
-/// Type derived for production 770
+/// Type derived for production 772
 ///
 /// InterfaceItem: EnumDeclaration;
 ///
@@ -3714,7 +3743,7 @@ pub struct InterfaceItemEnumDeclaration {
 }
 
 ///
-/// Type derived for production 771
+/// Type derived for production 773
 ///
 /// InterfaceItem: StructDeclaration;
 ///
@@ -3726,7 +3755,7 @@ pub struct InterfaceItemStructDeclaration {
 }
 
 ///
-/// Type derived for production 772
+/// Type derived for production 774
 ///
 /// InterfaceItem: InterfaceNamedBlock;
 ///
@@ -3738,7 +3767,7 @@ pub struct InterfaceItemInterfaceNamedBlock {
 }
 
 ///
-/// Type derived for production 773
+/// Type derived for production 775
 ///
 /// InterfaceItem: FunctionDeclaration;
 ///
@@ -3750,7 +3779,7 @@ pub struct InterfaceItemFunctionDeclaration {
 }
 
 ///
-/// Type derived for production 774
+/// Type derived for production 776
 ///
 /// InterfaceItem: ImportDeclaration;
 ///
@@ -3762,7 +3791,7 @@ pub struct InterfaceItemImportDeclaration {
 }
 
 ///
-/// Type derived for production 775
+/// Type derived for production 777
 ///
 /// InterfaceItem: InitialDeclaration;
 ///
@@ -3774,7 +3803,7 @@ pub struct InterfaceItemInitialDeclaration {
 }
 
 ///
-/// Type derived for production 776
+/// Type derived for production 778
 ///
 /// InterfaceItem: FinalDeclaration;
 ///
@@ -3786,7 +3815,7 @@ pub struct InterfaceItemFinalDeclaration {
 }
 
 ///
-/// Type derived for production 781
+/// Type derived for production 783
 ///
 /// PackageGroupGroup: LBrace PackageGroupGroupList /* Vec */ RBrace;
 ///
@@ -3800,7 +3829,7 @@ pub struct PackageGroupGroupLBracePackageGroupGroupListRBrace {
 }
 
 ///
-/// Type derived for production 784
+/// Type derived for production 786
 ///
 /// PackageGroupGroup: PackageItem;
 ///
@@ -3812,7 +3841,7 @@ pub struct PackageGroupGroupPackageItem {
 }
 
 ///
-/// Type derived for production 787
+/// Type derived for production 789
 ///
 /// PackageItem: VarDeclaration;
 ///
@@ -3824,7 +3853,7 @@ pub struct PackageItemVarDeclaration {
 }
 
 ///
-/// Type derived for production 788
+/// Type derived for production 790
 ///
 /// PackageItem: LocalparamDeclaration;
 ///
@@ -3836,7 +3865,7 @@ pub struct PackageItemLocalparamDeclaration {
 }
 
 ///
-/// Type derived for production 789
+/// Type derived for production 791
 ///
 /// PackageItem: EnumDeclaration;
 ///
@@ -3848,7 +3877,7 @@ pub struct PackageItemEnumDeclaration {
 }
 
 ///
-/// Type derived for production 790
+/// Type derived for production 792
 ///
 /// PackageItem: StructDeclaration;
 ///
@@ -3860,7 +3889,7 @@ pub struct PackageItemStructDeclaration {
 }
 
 ///
-/// Type derived for production 791
+/// Type derived for production 793
 ///
 /// PackageItem: FunctionDeclaration;
 ///
@@ -3872,7 +3901,7 @@ pub struct PackageItemFunctionDeclaration {
 }
 
 ///
-/// Type derived for production 792
+/// Type derived for production 794
 ///
 /// PackageItem: ImportDeclaration;
 ///
@@ -3884,7 +3913,7 @@ pub struct PackageItemImportDeclaration {
 }
 
 ///
-/// Type derived for production 793
+/// Type derived for production 795
 ///
 /// PackageItem: ExportDeclaration;
 ///
@@ -3896,7 +3925,7 @@ pub struct PackageItemExportDeclaration {
 }
 
 ///
-/// Type derived for production 794
+/// Type derived for production 796
 ///
 /// PackageItem: InitialDeclaration;
 ///
@@ -3908,7 +3937,7 @@ pub struct PackageItemInitialDeclaration {
 }
 
 ///
-/// Type derived for production 795
+/// Type derived for production 797
 ///
 /// PackageItem: FinalDeclaration;
 ///
@@ -3920,7 +3949,7 @@ pub struct PackageItemFinalDeclaration {
 }
 
 ///
-/// Type derived for production 797
+/// Type derived for production 799
 ///
 /// DescriptionGroupGroup: LBrace DescriptionGroupGroupList /* Vec */ RBrace;
 ///
@@ -3934,7 +3963,7 @@ pub struct DescriptionGroupGroupLBraceDescriptionGroupGroupListRBrace {
 }
 
 ///
-/// Type derived for production 800
+/// Type derived for production 802
 ///
 /// DescriptionGroupGroup: DescriptionItem;
 ///
@@ -3946,7 +3975,7 @@ pub struct DescriptionGroupGroupDescriptionItem {
 }
 
 ///
-/// Type derived for production 803
+/// Type derived for production 805
 ///
 /// DescriptionItem: ModuleDeclaration;
 ///
@@ -3958,7 +3987,7 @@ pub struct DescriptionItemModuleDeclaration {
 }
 
 ///
-/// Type derived for production 804
+/// Type derived for production 806
 ///
 /// DescriptionItem: InterfaceDeclaration;
 ///
@@ -3970,7 +3999,7 @@ pub struct DescriptionItemInterfaceDeclaration {
 }
 
 ///
-/// Type derived for production 805
+/// Type derived for production 807
 ///
 /// DescriptionItem: PackageDeclaration;
 ///
@@ -3982,7 +4011,7 @@ pub struct DescriptionItemPackageDeclaration {
 }
 
 ///
-/// Type derived for production 806
+/// Type derived for production 808
 ///
 /// DescriptionItem: ImportDeclaration;
 ///
@@ -6815,7 +6844,17 @@ pub struct InitialDeclaration {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct InitialDeclarationList {
-    pub statement: Box<Statement>,
+    pub initial_item: Box<InitialItem>,
+}
+
+///
+/// Type derived for non-terminal InitialItem
+///
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub enum InitialItem {
+    Statement(InitialItemStatement),
+    Assignment(InitialItemAssignment),
 }
 
 ///
@@ -10493,6 +10532,7 @@ pub enum ASTType {
     Initial(Initial),
     InitialDeclaration(InitialDeclaration),
     InitialDeclarationList(Vec<InitialDeclarationList>),
+    InitialItem(InitialItem),
     InitialTerm(InitialTerm),
     InitialToken(InitialToken),
     Inout(Inout),
@@ -10849,15 +10889,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     #[allow(dead_code)]
     fn pop(&mut self, context: &str) -> Option<ASTType> {
-        if !self.item_stack.is_empty() {
-            let item = self.item_stack.pop();
-            if let Some(ref item) = item {
-                trace!("pop     {}: {:?}", context, item);
-            }
-            item
-        } else {
-            None
+        let item = self.item_stack.pop();
+        if let Some(ref item) = item {
+            trace!("pop     {}: {:?}", context, item);
         }
+        item
     }
 
     #[allow(dead_code)]
@@ -24108,12 +24144,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 591:
     ///
-    /// InitialDeclarationList /* Vec<T>::Push */: Statement InitialDeclarationList;
+    /// InitialDeclarationList /* Vec<T>::Push */: InitialItem InitialDeclarationList;
     ///
     #[parol_runtime::function_name::named]
     fn initial_declaration_list_0(
         &mut self,
-        _statement: &ParseTreeType<'t>,
+        _initial_item: &ParseTreeType<'t>,
         _initial_declaration_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
@@ -24124,9 +24160,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             InitialDeclarationList,
             context
         );
-        let statement = pop_item!(self, statement, Statement, context);
+        let initial_item = pop_item!(self, initial_item, InitialItem, context);
         let initial_declaration_list_0_built = InitialDeclarationList {
-            statement: Box::new(statement),
+            initial_item: Box::new(initial_item),
         };
         // Add an element to the vector
         initial_declaration_list.push(initial_declaration_list_0_built);
@@ -24154,6 +24190,44 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
     }
 
     /// Semantic action for production 593:
+    ///
+    /// InitialItem: Statement;
+    ///
+    #[parol_runtime::function_name::named]
+    fn initial_item_0(&mut self, _statement: &ParseTreeType<'t>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let statement = pop_item!(self, statement, Statement, context);
+        let initial_item_0_built = InitialItemStatement {
+            statement: Box::new(statement),
+        };
+        let initial_item_0_built = InitialItem::Statement(initial_item_0_built);
+        // Calling user action here
+        self.user_grammar.initial_item(&initial_item_0_built)?;
+        self.push(ASTType::InitialItem(initial_item_0_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 594:
+    ///
+    /// InitialItem: Assignment;
+    ///
+    #[parol_runtime::function_name::named]
+    fn initial_item_1(&mut self, _assignment: &ParseTreeType<'t>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let assignment = pop_item!(self, assignment, Assignment, context);
+        let initial_item_1_built = InitialItemAssignment {
+            assignment: Box::new(assignment),
+        };
+        let initial_item_1_built = InitialItem::Assignment(initial_item_1_built);
+        // Calling user action here
+        self.user_grammar.initial_item(&initial_item_1_built)?;
+        self.push(ASTType::InitialItem(initial_item_1_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 595:
     ///
     /// FinalDeclaration: Final LBrace FinalDeclarationList /* Vec */ RBrace;
     ///
@@ -24185,7 +24259,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 594:
+    /// Semantic action for production 596:
     ///
     /// FinalDeclarationList /* Vec<T>::Push */: Statement FinalDeclarationList;
     ///
@@ -24212,7 +24286,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 595:
+    /// Semantic action for production 597:
     ///
     /// FinalDeclarationList /* Vec<T>::New */: ;
     ///
@@ -24228,7 +24302,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 596:
+    /// Semantic action for production 598:
     ///
     /// InstDeclaration: Inst Identifier Colon ScopedIdentifier InstDeclarationOpt /* Option */ InstDeclarationOpt0 /* Option */ InstDeclarationOpt1 /* Option */ Semicolon;
     ///
@@ -24274,7 +24348,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 597:
+    /// Semantic action for production 599:
     ///
     /// InstDeclarationOpt1 /* Option<T>::Some */: LParen InstDeclarationOpt2 /* Option */ RParen;
     ///
@@ -24303,7 +24377,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 598:
+    /// Semantic action for production 600:
     ///
     /// InstDeclarationOpt2 /* Option<T>::Some */: InstPortList;
     ///
@@ -24322,7 +24396,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 599:
+    /// Semantic action for production 601:
     ///
     /// InstDeclarationOpt2 /* Option<T>::None */: ;
     ///
@@ -24334,7 +24408,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 600:
+    /// Semantic action for production 602:
     ///
     /// InstDeclarationOpt1 /* Option<T>::None */: ;
     ///
@@ -24346,7 +24420,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 601:
+    /// Semantic action for production 603:
     ///
     /// InstDeclarationOpt0 /* Option<T>::Some */: InstParameter;
     ///
@@ -24365,7 +24439,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 602:
+    /// Semantic action for production 604:
     ///
     /// InstDeclarationOpt0 /* Option<T>::None */: ;
     ///
@@ -24377,7 +24451,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 603:
+    /// Semantic action for production 605:
     ///
     /// InstDeclarationOpt /* Option<T>::Some */: Array;
     ///
@@ -24396,7 +24470,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 604:
+    /// Semantic action for production 606:
     ///
     /// InstDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -24408,7 +24482,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 605:
+    /// Semantic action for production 607:
     ///
     /// InstParameter: Hash LParen InstParameterOpt /* Option */ RParen;
     ///
@@ -24438,7 +24512,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 606:
+    /// Semantic action for production 608:
     ///
     /// InstParameterOpt /* Option<T>::Some */: InstParameterList;
     ///
@@ -24457,7 +24531,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 607:
+    /// Semantic action for production 609:
     ///
     /// InstParameterOpt /* Option<T>::None */: ;
     ///
@@ -24469,7 +24543,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 608:
+    /// Semantic action for production 610:
     ///
     /// InstParameterList: InstParameterGroup InstParameterListList /* Vec */ InstParameterListOpt /* Option */;
     ///
@@ -24507,7 +24581,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 609:
+    /// Semantic action for production 611:
     ///
     /// InstParameterListList /* Vec<T>::Push */: Comma InstParameterGroup InstParameterListList;
     ///
@@ -24542,7 +24616,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 610:
+    /// Semantic action for production 612:
     ///
     /// InstParameterListList /* Vec<T>::New */: ;
     ///
@@ -24558,7 +24632,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 611:
+    /// Semantic action for production 613:
     ///
     /// InstParameterListOpt /* Option<T>::Some */: Comma;
     ///
@@ -24577,7 +24651,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 612:
+    /// Semantic action for production 614:
     ///
     /// InstParameterListOpt /* Option<T>::None */: ;
     ///
@@ -24589,7 +24663,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 613:
+    /// Semantic action for production 615:
     ///
     /// InstParameterGroup: InstParameterGroupList /* Vec */ InstParameterGroupGroup;
     ///
@@ -24627,7 +24701,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 614:
+    /// Semantic action for production 616:
     ///
     /// InstParameterGroupGroup: LBrace InstParameterList RBrace;
     ///
@@ -24660,7 +24734,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 615:
+    /// Semantic action for production 617:
     ///
     /// InstParameterGroupGroup: InstParameterItem;
     ///
@@ -24684,7 +24758,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 616:
+    /// Semantic action for production 618:
     ///
     /// InstParameterGroupList /* Vec<T>::Push */: Attribute InstParameterGroupList;
     ///
@@ -24715,7 +24789,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 617:
+    /// Semantic action for production 619:
     ///
     /// InstParameterGroupList /* Vec<T>::New */: ;
     ///
@@ -24731,7 +24805,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 618:
+    /// Semantic action for production 620:
     ///
     /// InstParameterItem: Identifier InstParameterItemOpt /* Option */;
     ///
@@ -24760,7 +24834,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 619:
+    /// Semantic action for production 621:
     ///
     /// InstParameterItemOpt /* Option<T>::Some */: Colon Expression;
     ///
@@ -24785,7 +24859,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 620:
+    /// Semantic action for production 622:
     ///
     /// InstParameterItemOpt /* Option<T>::None */: ;
     ///
@@ -24797,7 +24871,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 621:
+    /// Semantic action for production 623:
     ///
     /// InstPortList: InstPortGroup InstPortListList /* Vec */ InstPortListOpt /* Option */;
     ///
@@ -24825,7 +24899,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 622:
+    /// Semantic action for production 624:
     ///
     /// InstPortListList /* Vec<T>::Push */: Comma InstPortGroup InstPortListList;
     ///
@@ -24852,7 +24926,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 623:
+    /// Semantic action for production 625:
     ///
     /// InstPortListList /* Vec<T>::New */: ;
     ///
@@ -24868,7 +24942,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 624:
+    /// Semantic action for production 626:
     ///
     /// InstPortListOpt /* Option<T>::Some */: Comma;
     ///
@@ -24887,7 +24961,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 625:
+    /// Semantic action for production 627:
     ///
     /// InstPortListOpt /* Option<T>::None */: ;
     ///
@@ -24899,7 +24973,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 626:
+    /// Semantic action for production 628:
     ///
     /// InstPortGroup: InstPortGroupList /* Vec */ InstPortGroupGroup;
     ///
@@ -24925,7 +24999,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 627:
+    /// Semantic action for production 629:
     ///
     /// InstPortGroupGroup: LBrace InstPortList RBrace;
     ///
@@ -24955,7 +25029,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 628:
+    /// Semantic action for production 630:
     ///
     /// InstPortGroupGroup: InstPortItem;
     ///
@@ -24976,7 +25050,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 629:
+    /// Semantic action for production 631:
     ///
     /// InstPortGroupList /* Vec<T>::Push */: Attribute InstPortGroupList;
     ///
@@ -25000,7 +25074,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 630:
+    /// Semantic action for production 632:
     ///
     /// InstPortGroupList /* Vec<T>::New */: ;
     ///
@@ -25016,7 +25090,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 631:
+    /// Semantic action for production 633:
     ///
     /// InstPortItem: Identifier InstPortItemOpt /* Option */;
     ///
@@ -25040,7 +25114,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 632:
+    /// Semantic action for production 634:
     ///
     /// InstPortItemOpt /* Option<T>::Some */: Colon Expression;
     ///
@@ -25065,7 +25139,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 633:
+    /// Semantic action for production 635:
     ///
     /// InstPortItemOpt /* Option<T>::None */: ;
     ///
@@ -25077,7 +25151,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 634:
+    /// Semantic action for production 636:
     ///
     /// WithParameter: Hash LParen WithParameterOpt /* Option */ RParen;
     ///
@@ -25107,7 +25181,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 635:
+    /// Semantic action for production 637:
     ///
     /// WithParameterOpt /* Option<T>::Some */: WithParameterList;
     ///
@@ -25126,7 +25200,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 636:
+    /// Semantic action for production 638:
     ///
     /// WithParameterOpt /* Option<T>::None */: ;
     ///
@@ -25138,7 +25212,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 637:
+    /// Semantic action for production 639:
     ///
     /// WithParameterList: WithParameterGroup WithParameterListList /* Vec */ WithParameterListOpt /* Option */;
     ///
@@ -25176,7 +25250,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 638:
+    /// Semantic action for production 640:
     ///
     /// WithParameterListList /* Vec<T>::Push */: Comma WithParameterGroup WithParameterListList;
     ///
@@ -25211,7 +25285,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 639:
+    /// Semantic action for production 641:
     ///
     /// WithParameterListList /* Vec<T>::New */: ;
     ///
@@ -25227,7 +25301,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 640:
+    /// Semantic action for production 642:
     ///
     /// WithParameterListOpt /* Option<T>::Some */: Comma;
     ///
@@ -25246,7 +25320,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 641:
+    /// Semantic action for production 643:
     ///
     /// WithParameterListOpt /* Option<T>::None */: ;
     ///
@@ -25258,7 +25332,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 642:
+    /// Semantic action for production 644:
     ///
     /// WithParameterGroup: WithParameterGroupList /* Vec */ WithParameterGroupGroup;
     ///
@@ -25296,7 +25370,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 643:
+    /// Semantic action for production 645:
     ///
     /// WithParameterGroupGroup: LBrace WithParameterList RBrace;
     ///
@@ -25329,7 +25403,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 644:
+    /// Semantic action for production 646:
     ///
     /// WithParameterGroupGroup: WithParameterItem;
     ///
@@ -25353,7 +25427,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 645:
+    /// Semantic action for production 647:
     ///
     /// WithParameterGroupList /* Vec<T>::Push */: Attribute WithParameterGroupList;
     ///
@@ -25384,7 +25458,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 646:
+    /// Semantic action for production 648:
     ///
     /// WithParameterGroupList /* Vec<T>::New */: ;
     ///
@@ -25400,7 +25474,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 647:
+    /// Semantic action for production 649:
     ///
     /// WithParameterItem: WithParameterItemGroup Identifier Colon WithParameterItemGroup0;
     ///
@@ -25444,7 +25518,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 648:
+    /// Semantic action for production 650:
     ///
     /// WithParameterItemGroup0: ArrayType Equ Expression;
     ///
@@ -25474,7 +25548,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 649:
+    /// Semantic action for production 651:
     ///
     /// WithParameterItemGroup0: Type Equ TypeExpression;
     ///
@@ -25504,7 +25578,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 650:
+    /// Semantic action for production 652:
     ///
     /// WithParameterItemGroup: Parameter;
     ///
@@ -25525,7 +25599,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 651:
+    /// Semantic action for production 653:
     ///
     /// WithParameterItemGroup: Localparam;
     ///
@@ -25546,7 +25620,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 652:
+    /// Semantic action for production 654:
     ///
     /// PortDeclaration: LParen PortDeclarationOpt /* Option */ RParen;
     ///
@@ -25575,7 +25649,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 653:
+    /// Semantic action for production 655:
     ///
     /// PortDeclarationOpt /* Option<T>::Some */: PortDeclarationList;
     ///
@@ -25595,7 +25669,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 654:
+    /// Semantic action for production 656:
     ///
     /// PortDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -25607,7 +25681,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 655:
+    /// Semantic action for production 657:
     ///
     /// PortDeclarationList: PortDeclarationGroup PortDeclarationListList /* Vec */ PortDeclarationListOpt /* Option */;
     ///
@@ -25649,7 +25723,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 656:
+    /// Semantic action for production 658:
     ///
     /// PortDeclarationListList /* Vec<T>::Push */: Comma PortDeclarationGroup PortDeclarationListList;
     ///
@@ -25684,7 +25758,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 657:
+    /// Semantic action for production 659:
     ///
     /// PortDeclarationListList /* Vec<T>::New */: ;
     ///
@@ -25700,7 +25774,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 658:
+    /// Semantic action for production 660:
     ///
     /// PortDeclarationListOpt /* Option<T>::Some */: Comma;
     ///
@@ -25719,7 +25793,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 659:
+    /// Semantic action for production 661:
     ///
     /// PortDeclarationListOpt /* Option<T>::None */: ;
     ///
@@ -25731,7 +25805,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 660:
+    /// Semantic action for production 662:
     ///
     /// PortDeclarationGroup: PortDeclarationGroupList /* Vec */ PortDeclarationGroupGroup;
     ///
@@ -25769,7 +25843,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 661:
+    /// Semantic action for production 663:
     ///
     /// PortDeclarationGroupGroup: LBrace PortDeclarationList RBrace;
     ///
@@ -25803,7 +25877,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 662:
+    /// Semantic action for production 664:
     ///
     /// PortDeclarationGroupGroup: PortDeclarationItem;
     ///
@@ -25828,7 +25902,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 663:
+    /// Semantic action for production 665:
     ///
     /// PortDeclarationGroupList /* Vec<T>::Push */: Attribute PortDeclarationGroupList;
     ///
@@ -25859,7 +25933,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 664:
+    /// Semantic action for production 666:
     ///
     /// PortDeclarationGroupList /* Vec<T>::New */: ;
     ///
@@ -25875,7 +25949,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 665:
+    /// Semantic action for production 667:
     ///
     /// PortDeclarationItem: Identifier Colon PortDeclarationItemGroup;
     ///
@@ -25911,7 +25985,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 666:
+    /// Semantic action for production 668:
     ///
     /// PortDeclarationItemGroup: Direction ArrayType;
     ///
@@ -25938,7 +26012,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 667:
+    /// Semantic action for production 669:
     ///
     /// PortDeclarationItemGroup: Interface PortDeclarationItemOpt /* Option */;
     ///
@@ -25973,7 +26047,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 668:
+    /// Semantic action for production 670:
     ///
     /// PortDeclarationItemOpt /* Option<T>::Some */: Array;
     ///
@@ -25992,7 +26066,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 669:
+    /// Semantic action for production 671:
     ///
     /// PortDeclarationItemOpt /* Option<T>::None */: ;
     ///
@@ -26004,7 +26078,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 670:
+    /// Semantic action for production 672:
     ///
     /// Direction: Input;
     ///
@@ -26023,7 +26097,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 671:
+    /// Semantic action for production 673:
     ///
     /// Direction: Output;
     ///
@@ -26042,7 +26116,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 672:
+    /// Semantic action for production 674:
     ///
     /// Direction: Inout;
     ///
@@ -26061,7 +26135,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 673:
+    /// Semantic action for production 675:
     ///
     /// Direction: Ref;
     ///
@@ -26080,7 +26154,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 674:
+    /// Semantic action for production 676:
     ///
     /// Direction: Modport;
     ///
@@ -26099,7 +26173,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 675:
+    /// Semantic action for production 677:
     ///
     /// FunctionDeclaration: Function Identifier FunctionDeclarationOpt /* Option */ FunctionDeclarationOpt0 /* Option */ MinusGT ScalarType LBrace FunctionDeclarationList /* Vec */ RBrace;
     ///
@@ -26163,7 +26237,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 676:
+    /// Semantic action for production 678:
     ///
     /// FunctionDeclarationList /* Vec<T>::Push */: FunctionItem FunctionDeclarationList;
     ///
@@ -26194,7 +26268,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 677:
+    /// Semantic action for production 679:
     ///
     /// FunctionDeclarationList /* Vec<T>::New */: ;
     ///
@@ -26210,7 +26284,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 678:
+    /// Semantic action for production 680:
     ///
     /// FunctionDeclarationOpt0 /* Option<T>::Some */: PortDeclaration;
     ///
@@ -26229,7 +26303,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 679:
+    /// Semantic action for production 681:
     ///
     /// FunctionDeclarationOpt0 /* Option<T>::None */: ;
     ///
@@ -26241,7 +26315,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 680:
+    /// Semantic action for production 682:
     ///
     /// FunctionDeclarationOpt /* Option<T>::Some */: WithParameter;
     ///
@@ -26260,7 +26334,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 681:
+    /// Semantic action for production 683:
     ///
     /// FunctionDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -26272,7 +26346,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 682:
+    /// Semantic action for production 684:
     ///
     /// FunctionItem: VarDeclaration;
     ///
@@ -26291,7 +26365,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 683:
+    /// Semantic action for production 685:
     ///
     /// FunctionItem: Statement;
     ///
@@ -26310,7 +26384,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 684:
+    /// Semantic action for production 686:
     ///
     /// ImportDeclaration: Import Identifier ColonColon ImportDeclarationGroup Semicolon;
     ///
@@ -26352,7 +26426,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 685:
+    /// Semantic action for production 687:
     ///
     /// ImportDeclarationGroup: Identifier;
     ///
@@ -26373,7 +26447,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 686:
+    /// Semantic action for production 688:
     ///
     /// ImportDeclarationGroup: Star;
     ///
@@ -26394,7 +26468,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 687:
+    /// Semantic action for production 689:
     ///
     /// ExportDeclaration: Export ExportDeclarationGroup ColonColon ExportDeclarationGroup0 Semicolon;
     ///
@@ -26441,7 +26515,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 688:
+    /// Semantic action for production 690:
     ///
     /// ExportDeclarationGroup0: Identifier;
     ///
@@ -26462,7 +26536,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 689:
+    /// Semantic action for production 691:
     ///
     /// ExportDeclarationGroup0: Star;
     ///
@@ -26483,7 +26557,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 690:
+    /// Semantic action for production 692:
     ///
     /// ExportDeclarationGroup: Identifier;
     ///
@@ -26504,7 +26578,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 691:
+    /// Semantic action for production 693:
     ///
     /// ExportDeclarationGroup: Star;
     ///
@@ -26525,7 +26599,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 692:
+    /// Semantic action for production 694:
     ///
     /// ModuleDeclaration: Module Identifier ModuleDeclarationOpt /* Option */ ModuleDeclarationOpt0 /* Option */ LBrace ModuleDeclarationList /* Vec */ RBrace;
     ///
@@ -26579,7 +26653,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 693:
+    /// Semantic action for production 695:
     ///
     /// ModuleDeclarationList /* Vec<T>::Push */: ModuleGroup ModuleDeclarationList;
     ///
@@ -26610,7 +26684,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 694:
+    /// Semantic action for production 696:
     ///
     /// ModuleDeclarationList /* Vec<T>::New */: ;
     ///
@@ -26626,7 +26700,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 695:
+    /// Semantic action for production 697:
     ///
     /// ModuleDeclarationOpt0 /* Option<T>::Some */: PortDeclaration;
     ///
@@ -26645,7 +26719,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 696:
+    /// Semantic action for production 698:
     ///
     /// ModuleDeclarationOpt0 /* Option<T>::None */: ;
     ///
@@ -26657,7 +26731,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 697:
+    /// Semantic action for production 699:
     ///
     /// ModuleDeclarationOpt /* Option<T>::Some */: WithParameter;
     ///
@@ -26676,7 +26750,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 698:
+    /// Semantic action for production 700:
     ///
     /// ModuleDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -26688,7 +26762,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 699:
+    /// Semantic action for production 701:
     ///
     /// ModuleIfDeclaration: If Expression ModuleNamedBlock ModuleIfDeclarationList /* Vec */ ModuleIfDeclarationOpt /* Option */;
     ///
@@ -26735,7 +26809,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 700:
+    /// Semantic action for production 702:
     ///
     /// ModuleIfDeclarationList /* Vec<T>::Push */: Else If Expression ModuleOptionalNamedBlock ModuleIfDeclarationList;
     ///
@@ -26780,7 +26854,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 701:
+    /// Semantic action for production 703:
     ///
     /// ModuleIfDeclarationList /* Vec<T>::New */: ;
     ///
@@ -26796,7 +26870,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 702:
+    /// Semantic action for production 704:
     ///
     /// ModuleIfDeclarationOpt /* Option<T>::Some */: Else ModuleOptionalNamedBlock;
     ///
@@ -26826,7 +26900,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 703:
+    /// Semantic action for production 705:
     ///
     /// ModuleIfDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -26838,7 +26912,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 704:
+    /// Semantic action for production 706:
     ///
     /// ModuleForDeclaration: For Identifier In Range ModuleForDeclarationOpt /* Option */ ModuleNamedBlock;
     ///
@@ -26883,7 +26957,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 705:
+    /// Semantic action for production 707:
     ///
     /// ModuleForDeclarationOpt /* Option<T>::Some */: Step AssignmentOperator Expression;
     ///
@@ -26911,7 +26985,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 706:
+    /// Semantic action for production 708:
     ///
     /// ModuleForDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -26923,7 +26997,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 707:
+    /// Semantic action for production 709:
     ///
     /// ModuleNamedBlock: Colon Identifier LBrace ModuleNamedBlockList /* Vec */ RBrace;
     ///
@@ -26958,7 +27032,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 708:
+    /// Semantic action for production 710:
     ///
     /// ModuleNamedBlockList /* Vec<T>::Push */: ModuleGroup ModuleNamedBlockList;
     ///
@@ -26985,7 +27059,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 709:
+    /// Semantic action for production 711:
     ///
     /// ModuleNamedBlockList /* Vec<T>::New */: ;
     ///
@@ -27001,7 +27075,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 710:
+    /// Semantic action for production 712:
     ///
     /// ModuleOptionalNamedBlock: ModuleOptionalNamedBlockOpt /* Option */ LBrace ModuleOptionalNamedBlockList /* Vec */ RBrace;
     ///
@@ -27045,7 +27119,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 711:
+    /// Semantic action for production 713:
     ///
     /// ModuleOptionalNamedBlockList /* Vec<T>::Push */: ModuleGroup ModuleOptionalNamedBlockList;
     ///
@@ -27076,7 +27150,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 712:
+    /// Semantic action for production 714:
     ///
     /// ModuleOptionalNamedBlockList /* Vec<T>::New */: ;
     ///
@@ -27092,7 +27166,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 713:
+    /// Semantic action for production 715:
     ///
     /// ModuleOptionalNamedBlockOpt /* Option<T>::Some */: Colon Identifier;
     ///
@@ -27119,7 +27193,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 714:
+    /// Semantic action for production 716:
     ///
     /// ModuleOptionalNamedBlockOpt /* Option<T>::None */: ;
     ///
@@ -27131,7 +27205,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 715:
+    /// Semantic action for production 717:
     ///
     /// ModuleGroup: ModuleGroupList /* Vec */ ModuleGroupGroup;
     ///
@@ -27156,7 +27230,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 716:
+    /// Semantic action for production 718:
     ///
     /// ModuleGroupGroup: LBrace ModuleGroupGroupList /* Vec */ RBrace;
     ///
@@ -27187,7 +27261,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 717:
+    /// Semantic action for production 719:
     ///
     /// ModuleGroupGroupList /* Vec<T>::Push */: ModuleGroup ModuleGroupGroupList;
     ///
@@ -27214,7 +27288,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 718:
+    /// Semantic action for production 720:
     ///
     /// ModuleGroupGroupList /* Vec<T>::New */: ;
     ///
@@ -27230,7 +27304,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 719:
+    /// Semantic action for production 721:
     ///
     /// ModuleGroupGroup: ModuleItem;
     ///
@@ -27250,7 +27324,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 720:
+    /// Semantic action for production 722:
     ///
     /// ModuleGroupList /* Vec<T>::Push */: Attribute ModuleGroupList;
     ///
@@ -27273,7 +27347,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 721:
+    /// Semantic action for production 723:
     ///
     /// ModuleGroupList /* Vec<T>::New */: ;
     ///
@@ -27286,7 +27360,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 722:
+    /// Semantic action for production 724:
     ///
     /// ModuleItem: VarDeclaration;
     ///
@@ -27305,7 +27379,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 723:
+    /// Semantic action for production 725:
     ///
     /// ModuleItem: InstDeclaration;
     ///
@@ -27324,7 +27398,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 724:
+    /// Semantic action for production 726:
     ///
     /// ModuleItem: LocalparamDeclaration;
     ///
@@ -27344,7 +27418,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 725:
+    /// Semantic action for production 727:
     ///
     /// ModuleItem: AlwaysFfDeclaration;
     ///
@@ -27364,7 +27438,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 726:
+    /// Semantic action for production 728:
     ///
     /// ModuleItem: AlwaysCombDeclaration;
     ///
@@ -27388,7 +27462,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 727:
+    /// Semantic action for production 729:
     ///
     /// ModuleItem: AssignDeclaration;
     ///
@@ -27407,7 +27481,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 728:
+    /// Semantic action for production 730:
     ///
     /// ModuleItem: FunctionDeclaration;
     ///
@@ -27427,7 +27501,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 729:
+    /// Semantic action for production 731:
     ///
     /// ModuleItem: ModuleIfDeclaration;
     ///
@@ -27447,7 +27521,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 730:
+    /// Semantic action for production 732:
     ///
     /// ModuleItem: ModuleForDeclaration;
     ///
@@ -27467,7 +27541,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 731:
+    /// Semantic action for production 733:
     ///
     /// ModuleItem: EnumDeclaration;
     ///
@@ -27486,7 +27560,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 732:
+    /// Semantic action for production 734:
     ///
     /// ModuleItem: StructDeclaration;
     ///
@@ -27505,7 +27579,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 733:
+    /// Semantic action for production 735:
     ///
     /// ModuleItem: ModuleNamedBlock;
     ///
@@ -27524,7 +27598,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 734:
+    /// Semantic action for production 736:
     ///
     /// ModuleItem: ImportDeclaration;
     ///
@@ -27543,7 +27617,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 735:
+    /// Semantic action for production 737:
     ///
     /// ModuleItem: InitialDeclaration;
     ///
@@ -27562,7 +27636,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 736:
+    /// Semantic action for production 738:
     ///
     /// ModuleItem: FinalDeclaration;
     ///
@@ -27581,7 +27655,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 737:
+    /// Semantic action for production 739:
     ///
     /// InterfaceDeclaration: Interface Identifier InterfaceDeclarationOpt /* Option */ LBrace InterfaceDeclarationList /* Vec */ RBrace;
     ///
@@ -27631,7 +27705,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 738:
+    /// Semantic action for production 740:
     ///
     /// InterfaceDeclarationList /* Vec<T>::Push */: InterfaceGroup InterfaceDeclarationList;
     ///
@@ -27662,7 +27736,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 739:
+    /// Semantic action for production 741:
     ///
     /// InterfaceDeclarationList /* Vec<T>::New */: ;
     ///
@@ -27678,7 +27752,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 740:
+    /// Semantic action for production 742:
     ///
     /// InterfaceDeclarationOpt /* Option<T>::Some */: WithParameter;
     ///
@@ -27697,7 +27771,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 741:
+    /// Semantic action for production 743:
     ///
     /// InterfaceDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -27709,7 +27783,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 742:
+    /// Semantic action for production 744:
     ///
     /// InterfaceIfDeclaration: If Expression InterfaceNamedBlock InterfaceIfDeclarationList /* Vec */ InterfaceIfDeclarationOpt /* Option */;
     ///
@@ -27757,7 +27831,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 743:
+    /// Semantic action for production 745:
     ///
     /// InterfaceIfDeclarationList /* Vec<T>::Push */: Else If Expression InterfaceOptionalNamedBlock InterfaceIfDeclarationList;
     ///
@@ -27802,7 +27876,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 744:
+    /// Semantic action for production 746:
     ///
     /// InterfaceIfDeclarationList /* Vec<T>::New */: ;
     ///
@@ -27818,7 +27892,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 745:
+    /// Semantic action for production 747:
     ///
     /// InterfaceIfDeclarationOpt /* Option<T>::Some */: Else InterfaceOptionalNamedBlock;
     ///
@@ -27850,7 +27924,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 746:
+    /// Semantic action for production 748:
     ///
     /// InterfaceIfDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -27862,7 +27936,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 747:
+    /// Semantic action for production 749:
     ///
     /// InterfaceForDeclaration: For Identifier In Range InterfaceForDeclarationOpt /* Option */ InterfaceNamedBlock;
     ///
@@ -27908,7 +27982,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 748:
+    /// Semantic action for production 750:
     ///
     /// InterfaceForDeclarationOpt /* Option<T>::Some */: Step AssignmentOperator Expression;
     ///
@@ -27938,7 +28012,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 749:
+    /// Semantic action for production 751:
     ///
     /// InterfaceForDeclarationOpt /* Option<T>::None */: ;
     ///
@@ -27950,7 +28024,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 750:
+    /// Semantic action for production 752:
     ///
     /// InterfaceNamedBlock: Colon Identifier LBrace InterfaceNamedBlockList /* Vec */ RBrace;
     ///
@@ -27992,7 +28066,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 751:
+    /// Semantic action for production 753:
     ///
     /// InterfaceNamedBlockList /* Vec<T>::Push */: InterfaceGroup InterfaceNamedBlockList;
     ///
@@ -28023,7 +28097,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 752:
+    /// Semantic action for production 754:
     ///
     /// InterfaceNamedBlockList /* Vec<T>::New */: ;
     ///
@@ -28039,7 +28113,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 753:
+    /// Semantic action for production 755:
     ///
     /// InterfaceOptionalNamedBlock: InterfaceOptionalNamedBlockOpt /* Option */ LBrace InterfaceOptionalNamedBlockList /* Vec */ RBrace;
     ///
@@ -28083,7 +28157,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 754:
+    /// Semantic action for production 756:
     ///
     /// InterfaceOptionalNamedBlockList /* Vec<T>::Push */: InterfaceGroup InterfaceOptionalNamedBlockList;
     ///
@@ -28114,7 +28188,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 755:
+    /// Semantic action for production 757:
     ///
     /// InterfaceOptionalNamedBlockList /* Vec<T>::New */: ;
     ///
@@ -28130,7 +28204,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 756:
+    /// Semantic action for production 758:
     ///
     /// InterfaceOptionalNamedBlockOpt /* Option<T>::Some */: Colon Identifier;
     ///
@@ -28157,7 +28231,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 757:
+    /// Semantic action for production 759:
     ///
     /// InterfaceOptionalNamedBlockOpt /* Option<T>::None */: ;
     ///
@@ -28169,7 +28243,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 758:
+    /// Semantic action for production 760:
     ///
     /// InterfaceGroup: InterfaceGroupList /* Vec */ InterfaceGroupGroup;
     ///
@@ -28195,7 +28269,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 759:
+    /// Semantic action for production 761:
     ///
     /// InterfaceGroupGroup: LBrace InterfaceGroupGroupList /* Vec */ RBrace;
     ///
@@ -28231,7 +28305,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 760:
+    /// Semantic action for production 762:
     ///
     /// InterfaceGroupGroupList /* Vec<T>::Push */: InterfaceGroup InterfaceGroupGroupList;
     ///
@@ -28262,7 +28336,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 761:
+    /// Semantic action for production 763:
     ///
     /// InterfaceGroupGroupList /* Vec<T>::New */: ;
     ///
@@ -28278,7 +28352,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 762:
+    /// Semantic action for production 764:
     ///
     /// InterfaceGroupGroup: InterfaceItem;
     ///
@@ -28299,7 +28373,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 763:
+    /// Semantic action for production 765:
     ///
     /// InterfaceGroupList /* Vec<T>::Push */: Attribute InterfaceGroupList;
     ///
@@ -28323,7 +28397,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 764:
+    /// Semantic action for production 766:
     ///
     /// InterfaceGroupList /* Vec<T>::New */: ;
     ///
@@ -28339,7 +28413,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 765:
+    /// Semantic action for production 767:
     ///
     /// InterfaceItem: VarDeclaration;
     ///
@@ -28358,7 +28432,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 766:
+    /// Semantic action for production 768:
     ///
     /// InterfaceItem: LocalparamDeclaration;
     ///
@@ -28378,7 +28452,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 767:
+    /// Semantic action for production 769:
     ///
     /// InterfaceItem: ModportDeclaration;
     ///
@@ -28397,7 +28471,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 768:
+    /// Semantic action for production 770:
     ///
     /// InterfaceItem: InterfaceIfDeclaration;
     ///
@@ -28421,7 +28495,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 769:
+    /// Semantic action for production 771:
     ///
     /// InterfaceItem: InterfaceForDeclaration;
     ///
@@ -28445,7 +28519,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 770:
+    /// Semantic action for production 772:
     ///
     /// InterfaceItem: EnumDeclaration;
     ///
@@ -28464,7 +28538,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 771:
+    /// Semantic action for production 773:
     ///
     /// InterfaceItem: StructDeclaration;
     ///
@@ -28483,7 +28557,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 772:
+    /// Semantic action for production 774:
     ///
     /// InterfaceItem: InterfaceNamedBlock;
     ///
@@ -28503,7 +28577,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 773:
+    /// Semantic action for production 775:
     ///
     /// InterfaceItem: FunctionDeclaration;
     ///
@@ -28523,7 +28597,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 774:
+    /// Semantic action for production 776:
     ///
     /// InterfaceItem: ImportDeclaration;
     ///
@@ -28542,7 +28616,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 775:
+    /// Semantic action for production 777:
     ///
     /// InterfaceItem: InitialDeclaration;
     ///
@@ -28561,7 +28635,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 776:
+    /// Semantic action for production 778:
     ///
     /// InterfaceItem: FinalDeclaration;
     ///
@@ -28580,7 +28654,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 777:
+    /// Semantic action for production 779:
     ///
     /// PackageDeclaration: Package Identifier LBrace PackageDeclarationList /* Vec */ RBrace;
     ///
@@ -28622,7 +28696,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 778:
+    /// Semantic action for production 780:
     ///
     /// PackageDeclarationList /* Vec<T>::Push */: PackageGroup PackageDeclarationList;
     ///
@@ -28653,7 +28727,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 779:
+    /// Semantic action for production 781:
     ///
     /// PackageDeclarationList /* Vec<T>::New */: ;
     ///
@@ -28669,7 +28743,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 780:
+    /// Semantic action for production 782:
     ///
     /// PackageGroup: PackageGroupList /* Vec */ PackageGroupGroup;
     ///
@@ -28694,7 +28768,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 781:
+    /// Semantic action for production 783:
     ///
     /// PackageGroupGroup: LBrace PackageGroupGroupList /* Vec */ RBrace;
     ///
@@ -28729,7 +28803,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 782:
+    /// Semantic action for production 784:
     ///
     /// PackageGroupGroupList /* Vec<T>::Push */: PackageGroup PackageGroupGroupList;
     ///
@@ -28760,7 +28834,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 783:
+    /// Semantic action for production 785:
     ///
     /// PackageGroupGroupList /* Vec<T>::New */: ;
     ///
@@ -28776,7 +28850,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 784:
+    /// Semantic action for production 786:
     ///
     /// PackageGroupGroup: PackageItem;
     ///
@@ -28797,7 +28871,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 785:
+    /// Semantic action for production 787:
     ///
     /// PackageGroupList /* Vec<T>::Push */: Attribute PackageGroupList;
     ///
@@ -28820,7 +28894,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 786:
+    /// Semantic action for production 788:
     ///
     /// PackageGroupList /* Vec<T>::New */: ;
     ///
@@ -28836,7 +28910,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 787:
+    /// Semantic action for production 789:
     ///
     /// PackageItem: VarDeclaration;
     ///
@@ -28855,7 +28929,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 788:
+    /// Semantic action for production 790:
     ///
     /// PackageItem: LocalparamDeclaration;
     ///
@@ -28875,7 +28949,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 789:
+    /// Semantic action for production 791:
     ///
     /// PackageItem: EnumDeclaration;
     ///
@@ -28894,7 +28968,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 790:
+    /// Semantic action for production 792:
     ///
     /// PackageItem: StructDeclaration;
     ///
@@ -28913,7 +28987,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 791:
+    /// Semantic action for production 793:
     ///
     /// PackageItem: FunctionDeclaration;
     ///
@@ -28933,7 +29007,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 792:
+    /// Semantic action for production 794:
     ///
     /// PackageItem: ImportDeclaration;
     ///
@@ -28952,7 +29026,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 793:
+    /// Semantic action for production 795:
     ///
     /// PackageItem: ExportDeclaration;
     ///
@@ -28971,7 +29045,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 794:
+    /// Semantic action for production 796:
     ///
     /// PackageItem: InitialDeclaration;
     ///
@@ -28990,7 +29064,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 795:
+    /// Semantic action for production 797:
     ///
     /// PackageItem: FinalDeclaration;
     ///
@@ -29009,7 +29083,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 796:
+    /// Semantic action for production 798:
     ///
     /// DescriptionGroup: DescriptionGroupList /* Vec */ DescriptionGroupGroup;
     ///
@@ -29040,7 +29114,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 797:
+    /// Semantic action for production 799:
     ///
     /// DescriptionGroupGroup: LBrace DescriptionGroupGroupList /* Vec */ RBrace;
     ///
@@ -29078,7 +29152,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 798:
+    /// Semantic action for production 800:
     ///
     /// DescriptionGroupGroupList /* Vec<T>::Push */: DescriptionGroup DescriptionGroupGroupList;
     ///
@@ -29109,7 +29183,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 799:
+    /// Semantic action for production 801:
     ///
     /// DescriptionGroupGroupList /* Vec<T>::New */: ;
     ///
@@ -29125,7 +29199,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 800:
+    /// Semantic action for production 802:
     ///
     /// DescriptionGroupGroup: DescriptionItem;
     ///
@@ -29146,7 +29220,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 801:
+    /// Semantic action for production 803:
     ///
     /// DescriptionGroupList /* Vec<T>::Push */: Attribute DescriptionGroupList;
     ///
@@ -29173,7 +29247,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 802:
+    /// Semantic action for production 804:
     ///
     /// DescriptionGroupList /* Vec<T>::New */: ;
     ///
@@ -29189,7 +29263,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 803:
+    /// Semantic action for production 805:
     ///
     /// DescriptionItem: ModuleDeclaration;
     ///
@@ -29209,7 +29283,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 804:
+    /// Semantic action for production 806:
     ///
     /// DescriptionItem: InterfaceDeclaration;
     ///
@@ -29231,7 +29305,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 805:
+    /// Semantic action for production 807:
     ///
     /// DescriptionItem: PackageDeclaration;
     ///
@@ -29252,7 +29326,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 806:
+    /// Semantic action for production 808:
     ///
     /// DescriptionItem: ImportDeclaration;
     ///
@@ -29272,7 +29346,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 807:
+    /// Semantic action for production 809:
     ///
     /// Veryl: Start VerylList /* Vec */;
     ///
@@ -29292,7 +29366,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 808:
+    /// Semantic action for production 810:
     ///
     /// VerylList /* Vec<T>::Push */: DescriptionGroup VerylList;
     ///
@@ -29315,7 +29389,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 809:
+    /// Semantic action for production 811:
     ///
     /// VerylList /* Vec<T>::New */: ;
     ///
@@ -30109,10 +30183,12 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             590 => self.initial_declaration(&children[0], &children[1], &children[2], &children[3]),
             591 => self.initial_declaration_list_0(&children[0], &children[1]),
             592 => self.initial_declaration_list_1(),
-            593 => self.final_declaration(&children[0], &children[1], &children[2], &children[3]),
-            594 => self.final_declaration_list_0(&children[0], &children[1]),
-            595 => self.final_declaration_list_1(),
-            596 => self.inst_declaration(
+            593 => self.initial_item_0(&children[0]),
+            594 => self.initial_item_1(&children[0]),
+            595 => self.final_declaration(&children[0], &children[1], &children[2], &children[3]),
+            596 => self.final_declaration_list_0(&children[0], &children[1]),
+            597 => self.final_declaration_list_1(),
+            598 => self.inst_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -30122,85 +30198,85 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[6],
                 &children[7],
             ),
-            597 => self.inst_declaration_opt1_0(&children[0], &children[1], &children[2]),
-            598 => self.inst_declaration_opt2_0(&children[0]),
-            599 => self.inst_declaration_opt2_1(),
-            600 => self.inst_declaration_opt1_1(),
-            601 => self.inst_declaration_opt0_0(&children[0]),
-            602 => self.inst_declaration_opt0_1(),
-            603 => self.inst_declaration_opt_0(&children[0]),
-            604 => self.inst_declaration_opt_1(),
-            605 => self.inst_parameter(&children[0], &children[1], &children[2], &children[3]),
-            606 => self.inst_parameter_opt_0(&children[0]),
-            607 => self.inst_parameter_opt_1(),
-            608 => self.inst_parameter_list(&children[0], &children[1], &children[2]),
-            609 => self.inst_parameter_list_list_0(&children[0], &children[1], &children[2]),
-            610 => self.inst_parameter_list_list_1(),
-            611 => self.inst_parameter_list_opt_0(&children[0]),
-            612 => self.inst_parameter_list_opt_1(),
-            613 => self.inst_parameter_group(&children[0], &children[1]),
-            614 => self.inst_parameter_group_group_0(&children[0], &children[1], &children[2]),
-            615 => self.inst_parameter_group_group_1(&children[0]),
-            616 => self.inst_parameter_group_list_0(&children[0], &children[1]),
-            617 => self.inst_parameter_group_list_1(),
-            618 => self.inst_parameter_item(&children[0], &children[1]),
-            619 => self.inst_parameter_item_opt_0(&children[0], &children[1]),
-            620 => self.inst_parameter_item_opt_1(),
-            621 => self.inst_port_list(&children[0], &children[1], &children[2]),
-            622 => self.inst_port_list_list_0(&children[0], &children[1], &children[2]),
-            623 => self.inst_port_list_list_1(),
-            624 => self.inst_port_list_opt_0(&children[0]),
-            625 => self.inst_port_list_opt_1(),
-            626 => self.inst_port_group(&children[0], &children[1]),
-            627 => self.inst_port_group_group_0(&children[0], &children[1], &children[2]),
-            628 => self.inst_port_group_group_1(&children[0]),
-            629 => self.inst_port_group_list_0(&children[0], &children[1]),
-            630 => self.inst_port_group_list_1(),
-            631 => self.inst_port_item(&children[0], &children[1]),
-            632 => self.inst_port_item_opt_0(&children[0], &children[1]),
-            633 => self.inst_port_item_opt_1(),
-            634 => self.with_parameter(&children[0], &children[1], &children[2], &children[3]),
-            635 => self.with_parameter_opt_0(&children[0]),
-            636 => self.with_parameter_opt_1(),
-            637 => self.with_parameter_list(&children[0], &children[1], &children[2]),
-            638 => self.with_parameter_list_list_0(&children[0], &children[1], &children[2]),
-            639 => self.with_parameter_list_list_1(),
-            640 => self.with_parameter_list_opt_0(&children[0]),
-            641 => self.with_parameter_list_opt_1(),
-            642 => self.with_parameter_group(&children[0], &children[1]),
-            643 => self.with_parameter_group_group_0(&children[0], &children[1], &children[2]),
-            644 => self.with_parameter_group_group_1(&children[0]),
-            645 => self.with_parameter_group_list_0(&children[0], &children[1]),
-            646 => self.with_parameter_group_list_1(),
-            647 => self.with_parameter_item(&children[0], &children[1], &children[2], &children[3]),
-            648 => self.with_parameter_item_group0_0(&children[0], &children[1], &children[2]),
-            649 => self.with_parameter_item_group0_1(&children[0], &children[1], &children[2]),
-            650 => self.with_parameter_item_group_0(&children[0]),
-            651 => self.with_parameter_item_group_1(&children[0]),
-            652 => self.port_declaration(&children[0], &children[1], &children[2]),
-            653 => self.port_declaration_opt_0(&children[0]),
-            654 => self.port_declaration_opt_1(),
-            655 => self.port_declaration_list(&children[0], &children[1], &children[2]),
-            656 => self.port_declaration_list_list_0(&children[0], &children[1], &children[2]),
-            657 => self.port_declaration_list_list_1(),
-            658 => self.port_declaration_list_opt_0(&children[0]),
-            659 => self.port_declaration_list_opt_1(),
-            660 => self.port_declaration_group(&children[0], &children[1]),
-            661 => self.port_declaration_group_group_0(&children[0], &children[1], &children[2]),
-            662 => self.port_declaration_group_group_1(&children[0]),
-            663 => self.port_declaration_group_list_0(&children[0], &children[1]),
-            664 => self.port_declaration_group_list_1(),
-            665 => self.port_declaration_item(&children[0], &children[1], &children[2]),
-            666 => self.port_declaration_item_group_0(&children[0], &children[1]),
-            667 => self.port_declaration_item_group_1(&children[0], &children[1]),
-            668 => self.port_declaration_item_opt_0(&children[0]),
-            669 => self.port_declaration_item_opt_1(),
-            670 => self.direction_0(&children[0]),
-            671 => self.direction_1(&children[0]),
-            672 => self.direction_2(&children[0]),
-            673 => self.direction_3(&children[0]),
-            674 => self.direction_4(&children[0]),
-            675 => self.function_declaration(
+            599 => self.inst_declaration_opt1_0(&children[0], &children[1], &children[2]),
+            600 => self.inst_declaration_opt2_0(&children[0]),
+            601 => self.inst_declaration_opt2_1(),
+            602 => self.inst_declaration_opt1_1(),
+            603 => self.inst_declaration_opt0_0(&children[0]),
+            604 => self.inst_declaration_opt0_1(),
+            605 => self.inst_declaration_opt_0(&children[0]),
+            606 => self.inst_declaration_opt_1(),
+            607 => self.inst_parameter(&children[0], &children[1], &children[2], &children[3]),
+            608 => self.inst_parameter_opt_0(&children[0]),
+            609 => self.inst_parameter_opt_1(),
+            610 => self.inst_parameter_list(&children[0], &children[1], &children[2]),
+            611 => self.inst_parameter_list_list_0(&children[0], &children[1], &children[2]),
+            612 => self.inst_parameter_list_list_1(),
+            613 => self.inst_parameter_list_opt_0(&children[0]),
+            614 => self.inst_parameter_list_opt_1(),
+            615 => self.inst_parameter_group(&children[0], &children[1]),
+            616 => self.inst_parameter_group_group_0(&children[0], &children[1], &children[2]),
+            617 => self.inst_parameter_group_group_1(&children[0]),
+            618 => self.inst_parameter_group_list_0(&children[0], &children[1]),
+            619 => self.inst_parameter_group_list_1(),
+            620 => self.inst_parameter_item(&children[0], &children[1]),
+            621 => self.inst_parameter_item_opt_0(&children[0], &children[1]),
+            622 => self.inst_parameter_item_opt_1(),
+            623 => self.inst_port_list(&children[0], &children[1], &children[2]),
+            624 => self.inst_port_list_list_0(&children[0], &children[1], &children[2]),
+            625 => self.inst_port_list_list_1(),
+            626 => self.inst_port_list_opt_0(&children[0]),
+            627 => self.inst_port_list_opt_1(),
+            628 => self.inst_port_group(&children[0], &children[1]),
+            629 => self.inst_port_group_group_0(&children[0], &children[1], &children[2]),
+            630 => self.inst_port_group_group_1(&children[0]),
+            631 => self.inst_port_group_list_0(&children[0], &children[1]),
+            632 => self.inst_port_group_list_1(),
+            633 => self.inst_port_item(&children[0], &children[1]),
+            634 => self.inst_port_item_opt_0(&children[0], &children[1]),
+            635 => self.inst_port_item_opt_1(),
+            636 => self.with_parameter(&children[0], &children[1], &children[2], &children[3]),
+            637 => self.with_parameter_opt_0(&children[0]),
+            638 => self.with_parameter_opt_1(),
+            639 => self.with_parameter_list(&children[0], &children[1], &children[2]),
+            640 => self.with_parameter_list_list_0(&children[0], &children[1], &children[2]),
+            641 => self.with_parameter_list_list_1(),
+            642 => self.with_parameter_list_opt_0(&children[0]),
+            643 => self.with_parameter_list_opt_1(),
+            644 => self.with_parameter_group(&children[0], &children[1]),
+            645 => self.with_parameter_group_group_0(&children[0], &children[1], &children[2]),
+            646 => self.with_parameter_group_group_1(&children[0]),
+            647 => self.with_parameter_group_list_0(&children[0], &children[1]),
+            648 => self.with_parameter_group_list_1(),
+            649 => self.with_parameter_item(&children[0], &children[1], &children[2], &children[3]),
+            650 => self.with_parameter_item_group0_0(&children[0], &children[1], &children[2]),
+            651 => self.with_parameter_item_group0_1(&children[0], &children[1], &children[2]),
+            652 => self.with_parameter_item_group_0(&children[0]),
+            653 => self.with_parameter_item_group_1(&children[0]),
+            654 => self.port_declaration(&children[0], &children[1], &children[2]),
+            655 => self.port_declaration_opt_0(&children[0]),
+            656 => self.port_declaration_opt_1(),
+            657 => self.port_declaration_list(&children[0], &children[1], &children[2]),
+            658 => self.port_declaration_list_list_0(&children[0], &children[1], &children[2]),
+            659 => self.port_declaration_list_list_1(),
+            660 => self.port_declaration_list_opt_0(&children[0]),
+            661 => self.port_declaration_list_opt_1(),
+            662 => self.port_declaration_group(&children[0], &children[1]),
+            663 => self.port_declaration_group_group_0(&children[0], &children[1], &children[2]),
+            664 => self.port_declaration_group_group_1(&children[0]),
+            665 => self.port_declaration_group_list_0(&children[0], &children[1]),
+            666 => self.port_declaration_group_list_1(),
+            667 => self.port_declaration_item(&children[0], &children[1], &children[2]),
+            668 => self.port_declaration_item_group_0(&children[0], &children[1]),
+            669 => self.port_declaration_item_group_1(&children[0], &children[1]),
+            670 => self.port_declaration_item_opt_0(&children[0]),
+            671 => self.port_declaration_item_opt_1(),
+            672 => self.direction_0(&children[0]),
+            673 => self.direction_1(&children[0]),
+            674 => self.direction_2(&children[0]),
+            675 => self.direction_3(&children[0]),
+            676 => self.direction_4(&children[0]),
+            677 => self.function_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -30211,35 +30287,35 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[7],
                 &children[8],
             ),
-            676 => self.function_declaration_list_0(&children[0], &children[1]),
-            677 => self.function_declaration_list_1(),
-            678 => self.function_declaration_opt0_0(&children[0]),
-            679 => self.function_declaration_opt0_1(),
-            680 => self.function_declaration_opt_0(&children[0]),
-            681 => self.function_declaration_opt_1(),
-            682 => self.function_item_0(&children[0]),
-            683 => self.function_item_1(&children[0]),
-            684 => self.import_declaration(
+            678 => self.function_declaration_list_0(&children[0], &children[1]),
+            679 => self.function_declaration_list_1(),
+            680 => self.function_declaration_opt0_0(&children[0]),
+            681 => self.function_declaration_opt0_1(),
+            682 => self.function_declaration_opt_0(&children[0]),
+            683 => self.function_declaration_opt_1(),
+            684 => self.function_item_0(&children[0]),
+            685 => self.function_item_1(&children[0]),
+            686 => self.import_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
             ),
-            685 => self.import_declaration_group_0(&children[0]),
-            686 => self.import_declaration_group_1(&children[0]),
-            687 => self.export_declaration(
+            687 => self.import_declaration_group_0(&children[0]),
+            688 => self.import_declaration_group_1(&children[0]),
+            689 => self.export_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
             ),
-            688 => self.export_declaration_group0_0(&children[0]),
-            689 => self.export_declaration_group0_1(&children[0]),
-            690 => self.export_declaration_group_0(&children[0]),
-            691 => self.export_declaration_group_1(&children[0]),
-            692 => self.module_declaration(
+            690 => self.export_declaration_group0_0(&children[0]),
+            691 => self.export_declaration_group0_1(&children[0]),
+            692 => self.export_declaration_group_0(&children[0]),
+            693 => self.export_declaration_group_1(&children[0]),
+            694 => self.module_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -30248,81 +30324,30 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[5],
                 &children[6],
             ),
-            693 => self.module_declaration_list_0(&children[0], &children[1]),
-            694 => self.module_declaration_list_1(),
-            695 => self.module_declaration_opt0_0(&children[0]),
-            696 => self.module_declaration_opt0_1(),
-            697 => self.module_declaration_opt_0(&children[0]),
-            698 => self.module_declaration_opt_1(),
-            699 => self.module_if_declaration(
+            695 => self.module_declaration_list_0(&children[0], &children[1]),
+            696 => self.module_declaration_list_1(),
+            697 => self.module_declaration_opt0_0(&children[0]),
+            698 => self.module_declaration_opt0_1(),
+            699 => self.module_declaration_opt_0(&children[0]),
+            700 => self.module_declaration_opt_1(),
+            701 => self.module_if_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
             ),
-            700 => self.module_if_declaration_list_0(
+            702 => self.module_if_declaration_list_0(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
             ),
-            701 => self.module_if_declaration_list_1(),
-            702 => self.module_if_declaration_opt_0(&children[0], &children[1]),
-            703 => self.module_if_declaration_opt_1(),
-            704 => self.module_for_declaration(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-                &children[5],
-            ),
-            705 => self.module_for_declaration_opt_0(&children[0], &children[1], &children[2]),
-            706 => self.module_for_declaration_opt_1(),
-            707 => self.module_named_block(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-            ),
-            708 => self.module_named_block_list_0(&children[0], &children[1]),
-            709 => self.module_named_block_list_1(),
-            710 => self.module_optional_named_block(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-            ),
-            711 => self.module_optional_named_block_list_0(&children[0], &children[1]),
-            712 => self.module_optional_named_block_list_1(),
-            713 => self.module_optional_named_block_opt_0(&children[0], &children[1]),
-            714 => self.module_optional_named_block_opt_1(),
-            715 => self.module_group(&children[0], &children[1]),
-            716 => self.module_group_group_0(&children[0], &children[1], &children[2]),
-            717 => self.module_group_group_list_0(&children[0], &children[1]),
-            718 => self.module_group_group_list_1(),
-            719 => self.module_group_group_1(&children[0]),
-            720 => self.module_group_list_0(&children[0], &children[1]),
-            721 => self.module_group_list_1(),
-            722 => self.module_item_0(&children[0]),
-            723 => self.module_item_1(&children[0]),
-            724 => self.module_item_2(&children[0]),
-            725 => self.module_item_3(&children[0]),
-            726 => self.module_item_4(&children[0]),
-            727 => self.module_item_5(&children[0]),
-            728 => self.module_item_6(&children[0]),
-            729 => self.module_item_7(&children[0]),
-            730 => self.module_item_8(&children[0]),
-            731 => self.module_item_9(&children[0]),
-            732 => self.module_item_10(&children[0]),
-            733 => self.module_item_11(&children[0]),
-            734 => self.module_item_12(&children[0]),
-            735 => self.module_item_13(&children[0]),
-            736 => self.module_item_14(&children[0]),
-            737 => self.interface_declaration(
+            703 => self.module_if_declaration_list_1(),
+            704 => self.module_if_declaration_opt_0(&children[0], &children[1]),
+            705 => self.module_if_declaration_opt_1(),
+            706 => self.module_for_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -30330,28 +30355,50 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 &children[5],
             ),
-            738 => self.interface_declaration_list_0(&children[0], &children[1]),
-            739 => self.interface_declaration_list_1(),
-            740 => self.interface_declaration_opt_0(&children[0]),
-            741 => self.interface_declaration_opt_1(),
-            742 => self.interface_if_declaration(
+            707 => self.module_for_declaration_opt_0(&children[0], &children[1], &children[2]),
+            708 => self.module_for_declaration_opt_1(),
+            709 => self.module_named_block(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
             ),
-            743 => self.interface_if_declaration_list_0(
+            710 => self.module_named_block_list_0(&children[0], &children[1]),
+            711 => self.module_named_block_list_1(),
+            712 => self.module_optional_named_block(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
-                &children[4],
             ),
-            744 => self.interface_if_declaration_list_1(),
-            745 => self.interface_if_declaration_opt_0(&children[0], &children[1]),
-            746 => self.interface_if_declaration_opt_1(),
-            747 => self.interface_for_declaration(
+            713 => self.module_optional_named_block_list_0(&children[0], &children[1]),
+            714 => self.module_optional_named_block_list_1(),
+            715 => self.module_optional_named_block_opt_0(&children[0], &children[1]),
+            716 => self.module_optional_named_block_opt_1(),
+            717 => self.module_group(&children[0], &children[1]),
+            718 => self.module_group_group_0(&children[0], &children[1], &children[2]),
+            719 => self.module_group_group_list_0(&children[0], &children[1]),
+            720 => self.module_group_group_list_1(),
+            721 => self.module_group_group_1(&children[0]),
+            722 => self.module_group_list_0(&children[0], &children[1]),
+            723 => self.module_group_list_1(),
+            724 => self.module_item_0(&children[0]),
+            725 => self.module_item_1(&children[0]),
+            726 => self.module_item_2(&children[0]),
+            727 => self.module_item_3(&children[0]),
+            728 => self.module_item_4(&children[0]),
+            729 => self.module_item_5(&children[0]),
+            730 => self.module_item_6(&children[0]),
+            731 => self.module_item_7(&children[0]),
+            732 => self.module_item_8(&children[0]),
+            733 => self.module_item_9(&children[0]),
+            734 => self.module_item_10(&children[0]),
+            735 => self.module_item_11(&children[0]),
+            736 => self.module_item_12(&children[0]),
+            737 => self.module_item_13(&children[0]),
+            738 => self.module_item_14(&children[0]),
+            739 => self.interface_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -30359,85 +30406,114 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 &children[5],
             ),
-            748 => self.interface_for_declaration_opt_0(&children[0], &children[1], &children[2]),
-            749 => self.interface_for_declaration_opt_1(),
-            750 => self.interface_named_block(
+            740 => self.interface_declaration_list_0(&children[0], &children[1]),
+            741 => self.interface_declaration_list_1(),
+            742 => self.interface_declaration_opt_0(&children[0]),
+            743 => self.interface_declaration_opt_1(),
+            744 => self.interface_if_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
             ),
-            751 => self.interface_named_block_list_0(&children[0], &children[1]),
-            752 => self.interface_named_block_list_1(),
-            753 => self.interface_optional_named_block(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-            ),
-            754 => self.interface_optional_named_block_list_0(&children[0], &children[1]),
-            755 => self.interface_optional_named_block_list_1(),
-            756 => self.interface_optional_named_block_opt_0(&children[0], &children[1]),
-            757 => self.interface_optional_named_block_opt_1(),
-            758 => self.interface_group(&children[0], &children[1]),
-            759 => self.interface_group_group_0(&children[0], &children[1], &children[2]),
-            760 => self.interface_group_group_list_0(&children[0], &children[1]),
-            761 => self.interface_group_group_list_1(),
-            762 => self.interface_group_group_1(&children[0]),
-            763 => self.interface_group_list_0(&children[0], &children[1]),
-            764 => self.interface_group_list_1(),
-            765 => self.interface_item_0(&children[0]),
-            766 => self.interface_item_1(&children[0]),
-            767 => self.interface_item_2(&children[0]),
-            768 => self.interface_item_3(&children[0]),
-            769 => self.interface_item_4(&children[0]),
-            770 => self.interface_item_5(&children[0]),
-            771 => self.interface_item_6(&children[0]),
-            772 => self.interface_item_7(&children[0]),
-            773 => self.interface_item_8(&children[0]),
-            774 => self.interface_item_9(&children[0]),
-            775 => self.interface_item_10(&children[0]),
-            776 => self.interface_item_11(&children[0]),
-            777 => self.package_declaration(
+            745 => self.interface_if_declaration_list_0(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
             ),
-            778 => self.package_declaration_list_0(&children[0], &children[1]),
-            779 => self.package_declaration_list_1(),
-            780 => self.package_group(&children[0], &children[1]),
-            781 => self.package_group_group_0(&children[0], &children[1], &children[2]),
-            782 => self.package_group_group_list_0(&children[0], &children[1]),
-            783 => self.package_group_group_list_1(),
-            784 => self.package_group_group_1(&children[0]),
-            785 => self.package_group_list_0(&children[0], &children[1]),
-            786 => self.package_group_list_1(),
-            787 => self.package_item_0(&children[0]),
-            788 => self.package_item_1(&children[0]),
-            789 => self.package_item_2(&children[0]),
-            790 => self.package_item_3(&children[0]),
-            791 => self.package_item_4(&children[0]),
-            792 => self.package_item_5(&children[0]),
-            793 => self.package_item_6(&children[0]),
-            794 => self.package_item_7(&children[0]),
-            795 => self.package_item_8(&children[0]),
-            796 => self.description_group(&children[0], &children[1]),
-            797 => self.description_group_group_0(&children[0], &children[1], &children[2]),
-            798 => self.description_group_group_list_0(&children[0], &children[1]),
-            799 => self.description_group_group_list_1(),
-            800 => self.description_group_group_1(&children[0]),
-            801 => self.description_group_list_0(&children[0], &children[1]),
-            802 => self.description_group_list_1(),
-            803 => self.description_item_0(&children[0]),
-            804 => self.description_item_1(&children[0]),
-            805 => self.description_item_2(&children[0]),
-            806 => self.description_item_3(&children[0]),
-            807 => self.veryl(&children[0], &children[1]),
-            808 => self.veryl_list_0(&children[0], &children[1]),
-            809 => self.veryl_list_1(),
+            746 => self.interface_if_declaration_list_1(),
+            747 => self.interface_if_declaration_opt_0(&children[0], &children[1]),
+            748 => self.interface_if_declaration_opt_1(),
+            749 => self.interface_for_declaration(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                &children[4],
+                &children[5],
+            ),
+            750 => self.interface_for_declaration_opt_0(&children[0], &children[1], &children[2]),
+            751 => self.interface_for_declaration_opt_1(),
+            752 => self.interface_named_block(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                &children[4],
+            ),
+            753 => self.interface_named_block_list_0(&children[0], &children[1]),
+            754 => self.interface_named_block_list_1(),
+            755 => self.interface_optional_named_block(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+            ),
+            756 => self.interface_optional_named_block_list_0(&children[0], &children[1]),
+            757 => self.interface_optional_named_block_list_1(),
+            758 => self.interface_optional_named_block_opt_0(&children[0], &children[1]),
+            759 => self.interface_optional_named_block_opt_1(),
+            760 => self.interface_group(&children[0], &children[1]),
+            761 => self.interface_group_group_0(&children[0], &children[1], &children[2]),
+            762 => self.interface_group_group_list_0(&children[0], &children[1]),
+            763 => self.interface_group_group_list_1(),
+            764 => self.interface_group_group_1(&children[0]),
+            765 => self.interface_group_list_0(&children[0], &children[1]),
+            766 => self.interface_group_list_1(),
+            767 => self.interface_item_0(&children[0]),
+            768 => self.interface_item_1(&children[0]),
+            769 => self.interface_item_2(&children[0]),
+            770 => self.interface_item_3(&children[0]),
+            771 => self.interface_item_4(&children[0]),
+            772 => self.interface_item_5(&children[0]),
+            773 => self.interface_item_6(&children[0]),
+            774 => self.interface_item_7(&children[0]),
+            775 => self.interface_item_8(&children[0]),
+            776 => self.interface_item_9(&children[0]),
+            777 => self.interface_item_10(&children[0]),
+            778 => self.interface_item_11(&children[0]),
+            779 => self.package_declaration(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                &children[4],
+            ),
+            780 => self.package_declaration_list_0(&children[0], &children[1]),
+            781 => self.package_declaration_list_1(),
+            782 => self.package_group(&children[0], &children[1]),
+            783 => self.package_group_group_0(&children[0], &children[1], &children[2]),
+            784 => self.package_group_group_list_0(&children[0], &children[1]),
+            785 => self.package_group_group_list_1(),
+            786 => self.package_group_group_1(&children[0]),
+            787 => self.package_group_list_0(&children[0], &children[1]),
+            788 => self.package_group_list_1(),
+            789 => self.package_item_0(&children[0]),
+            790 => self.package_item_1(&children[0]),
+            791 => self.package_item_2(&children[0]),
+            792 => self.package_item_3(&children[0]),
+            793 => self.package_item_4(&children[0]),
+            794 => self.package_item_5(&children[0]),
+            795 => self.package_item_6(&children[0]),
+            796 => self.package_item_7(&children[0]),
+            797 => self.package_item_8(&children[0]),
+            798 => self.description_group(&children[0], &children[1]),
+            799 => self.description_group_group_0(&children[0], &children[1], &children[2]),
+            800 => self.description_group_group_list_0(&children[0], &children[1]),
+            801 => self.description_group_group_list_1(),
+            802 => self.description_group_group_1(&children[0]),
+            803 => self.description_group_list_0(&children[0], &children[1]),
+            804 => self.description_group_list_1(),
+            805 => self.description_item_0(&children[0]),
+            806 => self.description_item_1(&children[0]),
+            807 => self.description_item_2(&children[0]),
+            808 => self.description_item_3(&children[0]),
+            809 => self.veryl(&children[0], &children[1]),
+            810 => self.veryl_list_0(&children[0], &children[1]),
+            811 => self.veryl_list_1(),
             _ => Err(ParserError::InternalError(format!(
                 "Unhandled production number: {}",
                 prod_num

@@ -41,7 +41,7 @@ impl<'a> VerylGrammarTrait for CheckStatement<'a> {
 
     fn assignment(&mut self, arg: &Assignment) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            if self.in_initial || self.in_final {
+            if self.in_final {
                 let token = match &*arg.assignment_group {
                     AssignmentGroup::Equ(x) => &x.equ.equ_token,
                     AssignmentGroup::AssignmentOperator(x) => {

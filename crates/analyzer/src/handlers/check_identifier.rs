@@ -17,6 +17,7 @@ pub struct CheckIdentifier<'a> {
     point: HandlerPoint,
     in_always_comb: bool,
     in_always_ff: bool,
+    in_initial: bool,
 }
 
 enum Kind {
@@ -46,6 +47,7 @@ impl<'a> CheckIdentifier<'a> {
             point: HandlerPoint::Before,
             in_always_comb: false,
             in_always_ff: false,
+            in_initial: false,
         }
     }
 
@@ -199,7 +201,7 @@ impl<'a> VerylGrammarTrait for CheckIdentifier<'a> {
                     Kind::Wire,
                 );
             }
-            if self.in_always_ff {
+            if self.in_always_ff || self.in_initial {
                 self.check(
                     &arg.expression_identifier.identifier.identifier_token,
                     Kind::Reg,
@@ -289,6 +291,14 @@ impl<'a> VerylGrammarTrait for CheckIdentifier<'a> {
         match self.point {
             HandlerPoint::Before => self.in_always_comb = true,
             HandlerPoint::After => self.in_always_comb = false,
+        }
+        Ok(())
+    }
+
+    fn initial_declaration(&mut self, _arg: &InitialDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => self.in_initial = true,
+            HandlerPoint::After => self.in_initial = false,
         }
         Ok(())
     }

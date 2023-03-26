@@ -27,6 +27,7 @@ pub struct Emitter {
     single_line: bool,
     adjust_line: bool,
     in_always_ff: bool,
+    in_initial: bool,
     in_function: bool,
     in_generate: bool,
     in_direction_modport: bool,
@@ -54,6 +55,7 @@ impl Default for Emitter {
             single_line: false,
             adjust_line: false,
             in_always_ff: false,
+            in_initial: false,
             in_function: false,
             in_generate: false,
             in_direction_modport: false,
@@ -881,7 +883,7 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'Assignment'
     fn assignment(&mut self, arg: &Assignment) {
         self.space(1);
-        if self.in_always_ff {
+        if self.in_always_ff || self.in_initial {
             self.str("<");
             match &*arg.assignment_group {
                 AssignmentGroup::Equ(x) => self.equ(&x.equ),
@@ -1511,15 +1513,25 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'InitialDeclaration'
     fn initial_declaration(&mut self, arg: &InitialDeclaration) {
+        self.in_initial = true;
         self.initial(&arg.initial);
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token.replace("begin"));
         for (i, x) in arg.initial_declaration_list.iter().enumerate() {
             self.newline_list(i);
-            self.statement(&x.statement);
+            self.initial_item(&x.initial_item);
         }
         self.newline_list_post(arg.initial_declaration_list.is_empty());
         self.token(&arg.r_brace.r_brace_token.replace("end"));
+        self.in_initial = false;
+    }
+
+    /// Semantic action for non-terminal 'InitialItem'
+    fn initial_item(&mut self, arg: &InitialItem) {
+        match arg {
+            InitialItem::Statement(x) => self.statement(&x.statement),
+            InitialItem::Assignment(x) => self.assignment(&x.assignment),
+        };
     }
 
     /// Semantic action for non-terminal 'FinalDeclaration'
