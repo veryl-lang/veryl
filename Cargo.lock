@@ -206,9 +206,9 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bitflags"
-version = "2.0.2"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "487f1e0fcbe47deb8b0574e646def1c903389d95241dd1bbcc6ce4a715dfc0c1"
+checksum = "c70beb79cbb5ce9c4f8e20849978f34225931f665bb49efa6982875a4d5facb3"
 
 [[package]]
 name = "block-buffer"
@@ -354,7 +354,7 @@ version = "4.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42dfd32784433290c51d92c438bb72ea5063797fc3cc9a21a8c4346bebbb2098"
 dependencies = [
- "bitflags 2.0.2",
+ "bitflags 2.1.0",
  "clap_derive",
  "clap_lex 0.3.2",
  "is-terminal",
@@ -2629,11 +2629,10 @@ dependencies = [
 
 [[package]]
 name = "parol"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6d598326ebcb398761c558526a80eb17b370dffb654cad35b21d1d10511efc5"
+version = "0.21.0"
 dependencies = [
  "anyhow",
+ "bitflags 2.1.0",
  "cfg-if",
  "clap 4.1.11",
  "derive_builder",
@@ -2660,14 +2659,10 @@ dependencies = [
 [[package]]
 name = "parol-macros"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bdd646301a99589f85ed580e3807ee2f7aa6529b900fd703f5a14716b7426b28"
 
 [[package]]
 name = "parol_runtime"
-version = "0.15.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c323dcab7d4e3a0e279235b92c4eff94fd0e02934ef9efd29f8991d25c229a05"
+version = "0.16.0"
 dependencies = [
  "anyhow",
  "codespan-reporting",
@@ -3617,9 +3612,9 @@ dependencies = [
 
 [[package]]
 name = "syntree"
-version = "0.14.3"
+version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "372e1c75bb54830ab200dbff8a10bb0d44ff183d8cfdfb9f7ce55ad5862fc719"
+checksum = "d8a019a25d9135e907319cd33f02eeed4633388deea3a723b9242d062fa09486"
 
 [[package]]
 name = "syntree_layout"
