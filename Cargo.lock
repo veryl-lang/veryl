@@ -2700,9 +2700,9 @@ dependencies = [
 
 [[package]]
 name = "parol"
-version = "0.21.1"
+version = "0.21.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0694291bd6bac7551f2d8a94a88ae14f9a75aa27dc6fd7aaf624dc74bef4fd58"
+checksum = "8e450583fad61f73ff7dc69f3d467fd5da2e1d71758e083d664d78fa8939e744"
 dependencies = [
  "anyhow",
  "bitflags 2.1.0",
