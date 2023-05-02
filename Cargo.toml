@@ -29,7 +29,7 @@ anyhow          = "1.0"
 clap            = {version = "4.2.5", features = ["derive"]}
 log             = "0.4.17"
 mdbook          = "0.4.28"
-miette          = {version = "5.7", features = ["fancy"]}
+miette          = {version = "5.8", features = ["fancy"]}
 regex           = "1.8.1"
 semver          = {version = "1.0", features = ["serde"]}
 serde           = {version = "1.0", features = ["derive"]}
