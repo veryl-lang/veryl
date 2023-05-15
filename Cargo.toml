@@ -28,7 +28,7 @@ description = "A modern hardware description language"
 anyhow          = "1.0"
 clap            = {version = "4.2.7", features = ["derive"]}
 log             = "0.4.17"
-mdbook          = "0.4.28"
+mdbook          = "0.4.29"
 miette          = {version = "5.8", features = ["fancy"]}
 regex           = "1.8.1"
 semver          = {version = "1.0", features = ["serde"]}
