@@ -17,7 +17,7 @@ anyhow         = {workspace = true}
 clap           = {workspace = true}
 line-col       = "0.2.1"
 mdbook         = {workspace = true}
-pulldown-cmark = "0.9.2"
+pulldown-cmark = "0.9.3"
 regex          = {workspace = true}
 semver         = {workspace = true}
 serde_json     = {workspace = true}
