@@ -24,6 +24,6 @@ regex         = {workspace = true}
 thiserror     = {workspace = true}
 
 [build-dependencies]
-parol         =  {path = "../../../../parol/crates/parol", version = "0.21.0"}
+parol         =  {path = "../../../../parol/crates/parol", version = "0.21.4"}
 parol_runtime = {path = "../../../../parol/crates/parol_runtime", version = "0.16.0", features = ["auto_generation"]}
 walkdir       = "2.3.3"
