@@ -417,9 +417,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.3.1"
+version = "4.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4ed2379f8603fa2b7509891660e802b88c70a79a6427a70abb5968054de2c28"
+checksum = "401a4694d2bf92537b6867d94de48c4842089645fdcdf6c71865b175d836e9c2"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -447,14 +447,14 @@ version = "4.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1594fe2312ec4abf402076e407628f5c313e54c32ade058521df4ee34ecac8a8"
 dependencies = [
- "clap 4.3.1",
+ "clap 4.3.2",
 ]
 
 [[package]]
 name = "clap_derive"
-version = "4.3.1"
+version = "4.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59e9ef9a08ee1c0e1f2e162121665ac45ac3783b0f897db7244ae75ad9a8f65b"
+checksum = "b8cd2b2a819ad6eec39e8f1d6b53001af1e5469f8c177579cdaeb313115b825f"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -2392,7 +2392,7 @@ dependencies = [
  "ammonia",
  "anyhow",
  "chrono",
- "clap 4.3.1",
+ "clap 4.3.2",
  "clap_complete",
  "elasticlunr-rs",
  "env_logger",
@@ -2422,7 +2422,7 @@ name = "mdbook-veryl"
 version = "0.5.5"
 dependencies = [
  "anyhow",
- "clap 4.3.1",
+ "clap 4.3.2",
  "line-col",
  "mdbook",
  "pulldown-cmark",
@@ -2741,7 +2741,7 @@ dependencies = [
  "anyhow",
  "bitflags 2.3.1",
  "cfg-if",
- "clap 4.3.1",
+ "clap 4.3.2",
  "derive_builder",
  "env_logger",
  "function_name",
@@ -4321,7 +4321,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 name = "veryl"
 version = "0.5.5"
 dependencies = [
- "clap 4.3.1",
+ "clap 4.3.2",
  "console",
  "fern",
  "handlebars",
