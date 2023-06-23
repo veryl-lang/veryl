@@ -18,12 +18,12 @@ anyhow        = {workspace = true}
 bimap         = "0.6.3"
 miette        = {workspace = true}
 once_cell     = "1.18"
-parol_runtime = {version = "0.16.0", features = ["auto_generation"]}
+parol_runtime = {version = "0.17.0", features = ["auto_generation"]}
 paste         = "1.0"
 regex         = {workspace = true}
 thiserror     = {workspace = true}
 
 [build-dependencies]
-parol         = "0.21.5"
-parol_runtime = {version = "0.16.0", features = ["auto_generation"]}
+parol         = "0.22.0"
+parol_runtime = {version = "0.17.0", features = ["auto_generation"]}
 walkdir       = "2.3.3"
