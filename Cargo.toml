@@ -26,19 +26,19 @@ description = "A modern hardware description language"
 
 [workspace.dependencies]
 anyhow          = "1.0"
-clap            = {version = "4.1.11", features = ["derive"]}
-log             = "0.4.17"
-mdbook          = "0.4.28"
-miette          = {version = "5.6", features = ["fancy"]}
-regex           = "1.7.3"
+clap            = {version = "4.3.11", features = ["derive"]}
+log             = "0.4.19"
+mdbook          = "0.4.31"
+miette          = {version = "5.9", features = ["fancy"]}
+regex           = "1.8.4"
 semver          = {version = "1.0", features = ["serde"]}
 serde           = {version = "1.0", features = ["derive"]}
 serde_json      = "1.0"
 strnum_bitwidth = "0.1.2"
-tempfile        = "3.5"
+tempfile        = "3.6"
 thiserror       = "1.0"
-toml            = "0.7.3"
-url             = {version = "2.3", features = ["serde"]}
+toml            = "0.7.6"
+url             = {version = "2.4", features = ["serde"]}
 
 [workspace.metadata.release]
 tag = false
