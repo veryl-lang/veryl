@@ -425,9 +425,9 @@ dependencies = [
 
 [[package]]
 name = "clap_complete"
-version = "4.3.1"
+version = "4.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f6b5c519bab3ea61843a7923d074b04245624bb84a64a8c150f5deb014e388b"
+checksum = "5fc443334c81a804575546c5a8a79b4913b50e28d69232903604cada1de817ce"
 dependencies = [
  "clap",
 ]
@@ -2301,9 +2301,9 @@ dependencies = [
 
 [[package]]
 name = "mdbook"
-version = "0.4.31"
+version = "0.4.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b67ee4a744f36e6280792016c17e69921b51df357181d1eb17d620fcc3609f3"
+checksum = "9bdbb9ad3cd885a014d15e4b358e2dd3f68599e704fa679c6dcb06691359ad60"
 dependencies = [
  "ammonia",
  "anyhow",
@@ -2328,7 +2328,7 @@ dependencies = [
  "shlex",
  "tempfile",
  "tokio",
- "toml 0.5.11",
+ "toml",
  "topological-sort",
  "warp",
 ]
@@ -2485,10 +2485,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "notify"
-version = "5.2.0"
+name = "normpath"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "729f63e1ca555a43fe3efa4f3efdf4801c479da85b432242a7b726f353c88486"
+checksum = "ec60c60a693226186f5d6edf073232bfb6464ed97eb22cf3b01c1e8198fd97f5"
+dependencies = [
+ "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "notify"
+version = "6.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5738a2795d57ea20abec2d6d76c6081186709c0024187cd5977265eda6598b51"
 dependencies = [
  "bitflags 1.3.2",
  "crossbeam-channel",
@@ -2504,9 +2513,9 @@ dependencies = [
 
 [[package]]
 name = "notify-debouncer-mini"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e23e9fa24f094b143c1eb61f90ac6457de87be6987bc70746e0179f7dbc9007b"
+checksum = "e55ee272914f4563a2f8b8553eb6811f3c0caea81c756346bad15b7e3ef969f0"
 dependencies = [
  "crossbeam-channel",
  "notify",
@@ -2573,11 +2582,12 @@ checksum = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"
 
 [[package]]
 name = "opener"
-version = "0.5.2"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "293c15678e37254c15bd2f092314abb4e51d7fdde05c2021279c12631b54f005"
+checksum = "6c62dcb6174f9cb326eac248f07e955d5d559c272730b6c03e396b443b562788"
 dependencies = [
  "bstr",
+ "normpath",
  "winapi",
 ]
 
@@ -3838,15 +3848,6 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.5.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4f7f0dd8d50a853a531c426359045b1998f04219d88799810762cd4ad314234"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "toml"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c17e963a819c331dcacd7ab957d80bc2b9a9c1e71c804826d2f283dd65306542"
@@ -4228,7 +4229,7 @@ dependencies = [
  "miette",
  "strnum_bitwidth",
  "thiserror",
- "toml 0.7.6",
+ "toml",
  "veryl-metadata",
  "veryl-parser",
 ]
@@ -4286,7 +4287,7 @@ dependencies = [
  "spdx",
  "tempfile",
  "thiserror",
- "toml 0.7.6",
+ "toml",
  "url",
  "uuid",
  "veryl-parser",
