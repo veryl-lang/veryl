@@ -14,6 +14,7 @@ members = [
 exclude = [
 #    "crates/wasm",
 ]
+resolver = "2"
 
 [workspace.package]
 authors     = ["dalance@gmail.com"]
