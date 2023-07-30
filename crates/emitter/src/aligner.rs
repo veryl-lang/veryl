@@ -7,9 +7,9 @@ use veryl_parser::Stringifier;
 
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Hash)]
 pub struct Location {
-    pub line: usize,
-    pub column: usize,
-    pub length: usize,
+    pub line: u32,
+    pub column: u32,
+    pub length: u32,
     pub duplicated: Option<usize>,
 }
 
@@ -39,11 +39,11 @@ impl From<Token> for Location {
 pub struct Align {
     enable: bool,
     index: usize,
-    max_width: usize,
-    width: usize,
-    line: usize,
-    rest: Vec<(Location, usize)>,
-    additions: HashMap<Location, usize>,
+    max_width: u32,
+    width: u32,
+    line: u32,
+    rest: Vec<(Location, u32)>,
+    additions: HashMap<Location, u32>,
     last_location: Option<Location>,
 }
 
@@ -62,7 +62,7 @@ impl Align {
             if loc.line - self.line > 1 {
                 self.finish_group();
             }
-            self.max_width = usize::max(self.max_width, self.width);
+            self.max_width = u32::max(self.max_width, self.width);
             self.line = loc.line;
             self.rest.push((loc, self.width));
 
@@ -102,7 +102,7 @@ impl Align {
 
     fn space(&mut self, x: usize) {
         if self.enable {
-            self.width += x;
+            self.width += x as u32;
         }
     }
 }
@@ -120,7 +120,7 @@ mod align_kind {
 
 #[derive(Default)]
 pub struct Aligner {
-    pub additions: HashMap<Location, usize>,
+    pub additions: HashMap<Location, u32>,
     aligns: [Align; 8],
     in_type_expression: bool,
     build_opt: Build,

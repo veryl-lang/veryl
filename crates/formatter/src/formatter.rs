@@ -9,9 +9,9 @@ pub struct Formatter {
     format_opt: Format,
     string: String,
     indent: usize,
-    line: usize,
+    line: u32,
     aligner: Aligner,
-    last_newline: usize,
+    last_newline: u32,
     in_start_token: bool,
     consumed_next_newline: bool,
     single_line: bool,
@@ -135,7 +135,7 @@ impl Formatter {
         } else {
             &text
         };
-        self.last_newline = text.matches('\n').count();
+        self.last_newline = text.matches('\n').count() as u32;
         self.str(text);
         self.line = x.line;
     }
@@ -145,7 +145,7 @@ impl Formatter {
 
         let loc: Location = x.token.into();
         if let Some(width) = self.aligner.additions.get(&loc) {
-            self.space(*width);
+            self.space(*width as usize);
         }
 
         // temporary indent to adjust indent of comments with the next push

@@ -5,9 +5,9 @@ use veryl_parser::veryl_walker::VerylWalker;
 
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Hash)]
 pub struct Location {
-    pub line: usize,
-    pub column: usize,
-    pub length: usize,
+    pub line: u32,
+    pub column: u32,
+    pub length: u32,
 }
 
 impl From<&Token> for Location {
@@ -34,11 +34,11 @@ impl From<Token> for Location {
 pub struct Align {
     enable: bool,
     index: usize,
-    max_width: usize,
-    width: usize,
-    line: usize,
-    rest: Vec<(Location, usize)>,
-    additions: HashMap<Location, usize>,
+    max_width: u32,
+    width: u32,
+    line: u32,
+    rest: Vec<(Location, u32)>,
+    additions: HashMap<Location, u32>,
     last_location: Option<Location>,
 }
 
@@ -57,7 +57,7 @@ impl Align {
             if loc.line - self.line > 1 {
                 self.finish_group();
             }
-            self.max_width = usize::max(self.max_width, self.width);
+            self.max_width = u32::max(self.max_width, self.width);
             self.line = loc.line;
             self.rest.push((loc, self.width));
 
@@ -94,7 +94,7 @@ impl Align {
         }
     }
 
-    fn space(&mut self, x: usize) {
+    fn space(&mut self, x: u32) {
         if self.enable {
             self.width += x;
         }
@@ -114,7 +114,7 @@ mod align_kind {
 
 #[derive(Default)]
 pub struct Aligner {
-    pub additions: HashMap<Location, usize>,
+    pub additions: HashMap<Location, u32>,
     aligns: [Align; 8],
     in_type_expression: bool,
 }
@@ -147,11 +147,11 @@ impl Aligner {
         let loc: Location = token.token.into();
         self.additions
             .entry(loc)
-            .and_modify(|val| *val += width)
-            .or_insert(width);
+            .and_modify(|val| *val += width as u32)
+            .or_insert(width as u32);
     }
 
-    fn space(&mut self, repeat: usize) {
+    fn space(&mut self, repeat: u32) {
         for i in 0..self.aligns.len() {
             self.aligns[i].space(repeat);
         }
