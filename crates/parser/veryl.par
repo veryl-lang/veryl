@@ -504,6 +504,8 @@ VarDeclaration: Var Identifier Colon ArrayType [ Equ Expression ] Semicolon;
 
 LocalparamDeclaration: Localparam Identifier Colon ( ArrayType Equ Expression | Type Equ TypeExpression ) Semicolon;
 
+TypeDefDeclaration: Type Identifier Equ ArrayType Semicolon;
+
 AlwaysFfDeclaration: AlwaysFf LParen AlwaysFfClock [ Comma AlwaysFfReset ] RParen LBrace { Statement } RBrace;
 
 AlwaysFfClock: [ Posedge | Negedge ] HierarchicalIdentifier;
@@ -629,6 +631,7 @@ ModuleGroup: { Attribute } ( LBrace { ModuleGroup } RBrace | ModuleItem );
 
 ModuleItem: VarDeclaration
           | InstDeclaration
+          | TypeDefDeclaration
           | LocalparamDeclaration
           | AlwaysFfDeclaration
           | AlwaysCombDeclaration
@@ -684,6 +687,7 @@ PackageGroup: { Attribute } ( LBrace { PackageGroup } RBrace | PackageItem );
 
 PackageItem: VarDeclaration
            | LocalparamDeclaration
+           | TypeDefDeclaration
            | EnumDeclaration
            | StructDeclaration
            | FunctionDeclaration

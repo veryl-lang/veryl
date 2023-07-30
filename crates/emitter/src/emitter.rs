@@ -1225,6 +1225,21 @@ impl VerylWalker for Emitter {
         self.semicolon(&arg.semicolon);
     }
 
+    /// Semantic action for non-terminal 'LocalparamDeclaration'
+    fn type_def_declaration(&mut self, arg: &TypeDefDeclaration) {
+        self.str("typedef");
+        self.space(1);
+        self.scalar_type(&arg.array_type.scalar_type);
+        self.space(1);
+        self.identifier(&arg.identifier);
+
+        if let Some(ato) = &arg.array_type.array_type_opt {
+            self.space(1);
+            self.array(&ato.array);
+        }
+        self.semicolon(&arg.semicolon);
+    }
+
     /// Semantic action for non-terminal 'AlwaysFfDeclaration'
     fn always_ff_declaration(&mut self, arg: &AlwaysFfDeclaration) {
         self.in_always_ff = true;

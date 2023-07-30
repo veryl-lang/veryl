@@ -1545,6 +1545,16 @@ pub trait VerylWalker {
         after!(self, localparam_declaration, arg);
     }
 
+    /// Semantic action for non-terminal 'TypeDefDeclaration'
+    fn type_def_declaration(&mut self, arg: &TypeDefDeclaration) {
+        before!(self, type_def_declaration, arg);
+        self.r#type(&arg.r#type);
+        self.identifier(&arg.identifier);
+        self.equ(&arg.equ);
+        self.array_type(&arg.array_type);
+        self.semicolon(&arg.semicolon);
+        after!(self, type_def_declaration, arg);
+    }
     /// Semantic action for non-terminal 'AlwaysFfDeclaration'
     fn always_ff_declaration(&mut self, arg: &AlwaysFfDeclaration) {
         before!(self, always_ff_declaration, arg);
@@ -2236,6 +2246,9 @@ pub trait VerylWalker {
             ModuleItem::LocalparamDeclaration(x) => {
                 self.localparam_declaration(&x.localparam_declaration)
             }
+            ModuleItem::TypeDefDeclaration(x) => {
+                self.type_def_declaration(&x.type_def_declaration)
+            }
             ModuleItem::AlwaysFfDeclaration(x) => {
                 self.always_ff_declaration(&x.always_ff_declaration)
             }
@@ -2433,6 +2446,9 @@ pub trait VerylWalker {
             PackageItem::VarDeclaration(x) => self.var_declaration(&x.var_declaration),
             PackageItem::LocalparamDeclaration(x) => {
                 self.localparam_declaration(&x.localparam_declaration)
+            }
+            PackageItem::TypeDefDeclaration(x) => {
+                self.type_def_declaration(&x.type_def_declaration)
             }
             PackageItem::EnumDeclaration(x) => self.enum_declaration(&x.enum_declaration),
             PackageItem::StructDeclaration(x) => self.struct_declaration(&x.struct_declaration),
