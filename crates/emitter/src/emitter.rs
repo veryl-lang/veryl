@@ -2304,11 +2304,6 @@ impl VerylWalker for Emitter {
     fn package_declaration(&mut self, arg: &PackageDeclaration) {
         self.package(&arg.package);
         self.space(1);
-        // if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
-        //     if let Some(symbol) = symbol.found {
-        //         self.str(&format!("{}_", symbol.namespace).replace("::", "_"));
-        //     }
-        // }
         self.identifier(&arg.identifier);
         self.token_will_push(&arg.l_brace.l_brace_token.replace(";"));
         for (i, x) in arg.package_declaration_list.iter().enumerate() {
