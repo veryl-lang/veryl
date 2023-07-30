@@ -9,10 +9,10 @@ use regex::Regex;
 pub struct Token {
     pub id: TokenId,
     pub text: StrId,
-    pub line: usize,
-    pub column: usize,
-    pub length: usize,
-    pub pos: usize,
+    pub line: u32,
+    pub column: u32,
+    pub length: u32,
+    pub pos: u32,
     pub file_path: PathId,
 }
 
@@ -21,7 +21,7 @@ impl<'t> TryFrom<&parol_runtime::lexer::Token<'t>> for Token {
     fn try_from(x: &parol_runtime::lexer::Token<'t>) -> Result<Self, anyhow::Error> {
         let id = resource_table::new_token_id();
         let text = resource_table::insert_str(x.text());
-        let pos = x.location.scanner_switch_pos + x.location.offset - x.location.length;
+        let pos = x.location.scanner_switch_pos + x.location.offset - x.location.length as usize;
         let file_path = resource_table::insert_path(&x.location.file_name);
         Ok(Token {
             id,
@@ -29,7 +29,7 @@ impl<'t> TryFrom<&parol_runtime::lexer::Token<'t>> for Token {
             line: x.location.start_line,
             column: x.location.start_column,
             length: x.location.length,
-            pos,
+            pos: pos as u32,
             file_path,
         })
     }
@@ -37,13 +37,13 @@ impl<'t> TryFrom<&parol_runtime::lexer::Token<'t>> for Token {
 
 impl From<&Token> for miette::SourceSpan {
     fn from(x: &Token) -> Self {
-        (x.pos, x.length).into()
+        (x.pos as usize, x.length as usize).into()
     }
 }
 
 impl From<Token> for miette::SourceSpan {
     fn from(x: Token) -> Self {
-        (x.pos, x.length).into()
+        (x.pos as usize, x.length as usize).into()
     }
 }
 
@@ -59,7 +59,7 @@ impl VerylToken {
         let text = resource_table::insert_str(text);
         let mut ret = self.clone();
         ret.token.text = text;
-        ret.token.length = length;
+        ret.token.length = length as u32;
         ret
     }
 
@@ -80,13 +80,13 @@ fn split_comment_token(token: Token) -> Vec<Token> {
     for cap in COMMENT_REGEX.captures_iter(&text) {
         let cap = cap.get(0).unwrap();
         let pos = cap.start();
-        let length = cap.end() - pos;
+        let length = (cap.end() - pos) as u32;
 
-        line += text[prev_pos..pos].matches('\n').count();
+        line += text[prev_pos..(pos as usize)].matches('\n').count() as u32;
         prev_pos = pos;
 
         let id = resource_table::new_token_id();
-        let text = &text[pos..pos + length];
+        let text = &text[pos..pos + length as usize];
         let is_doc_comment = text.starts_with("///");
         let text = resource_table::insert_str(text);
 
@@ -99,8 +99,8 @@ fn split_comment_token(token: Token) -> Vec<Token> {
             text,
             line,
             column: 0,
-            length,
-            pos: pos + length,
+            length: length as u32,
+            pos: pos as u32 + length,
             file_path: token.file_path,
         };
         ret.push(token);
