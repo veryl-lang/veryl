@@ -67,20 +67,20 @@ impl CmdCheck {
                 .wrap_err("")?;
             let parser = Parser::parse(&input, &path.src)?;
 
-            let analyzer = Analyzer::new(&path.prj, metadata);
-            let mut errors = analyzer.analyze_pass1(&input, &path.src, &parser.veryl);
+            let analyzer = Analyzer::new(metadata);
+            let mut errors = analyzer.analyze_pass1(&path.prj, &input, &path.src, &parser.veryl);
             check_error = check_error.append(&mut errors).check_err()?;
 
             contexts.push((path, input, parser, analyzer));
         }
 
         for (path, input, parser, analyzer) in &contexts {
-            let mut errors = analyzer.analyze_pass2(input, &path.src, &parser.veryl);
+            let mut errors = analyzer.analyze_pass2(&path.prj, input, &path.src, &parser.veryl);
             check_error = check_error.append(&mut errors).check_err()?;
         }
 
         for (path, input, parser, analyzer) in &contexts {
-            let mut errors = analyzer.analyze_pass3(input, &path.src, &parser.veryl);
+            let mut errors = analyzer.analyze_pass3(&path.prj, input, &path.src, &parser.veryl);
             check_error = check_error.append(&mut errors).check_err()?;
         }
 
