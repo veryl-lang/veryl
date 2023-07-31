@@ -567,9 +567,9 @@ impl Server {
                         namespace_table::drop(path);
                     }
                     let analyzer = Analyzer::new(&metadata);
-                    let mut errors = analyzer.analyze_pass1(&prj, text, path, &x.veryl);
-                    errors.append(&mut analyzer.analyze_pass2(&prj, text, path, &x.veryl));
-                    errors.append(&mut analyzer.analyze_pass3(&prj, text, path, &x.veryl));
+                    let mut errors = analyzer.analyze_pass1(prj, text, path, &x.veryl);
+                    errors.append(&mut analyzer.analyze_pass2(prj, text, path, &x.veryl));
+                    errors.append(&mut analyzer.analyze_pass3(prj, text, path, &x.veryl));
                     let ret: Vec<_> = errors
                         .drain(0..)
                         .map(|x| {

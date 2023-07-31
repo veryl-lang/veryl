@@ -80,9 +80,9 @@ pub fn build(source: &str) -> Result {
 
             let analyzer = Analyzer::new(&metadata);
             let mut errors = Vec::new();
-            errors.append(&mut analyzer.analyze_pass1(&"project", source, "", &parser.veryl));
-            errors.append(&mut analyzer.analyze_pass2(&"project", source, "", &parser.veryl));
-            errors.append(&mut analyzer.analyze_pass3(&"project", source, "", &parser.veryl));
+            errors.append(&mut analyzer.analyze_pass1("project", source, "", &parser.veryl));
+            errors.append(&mut analyzer.analyze_pass2("project", source, "", &parser.veryl));
+            errors.append(&mut analyzer.analyze_pass3("project", source, "", &parser.veryl));
 
             let err = !errors.is_empty();
 
@@ -94,7 +94,7 @@ pub fn build(source: &str) -> Result {
                 text
             } else {
                 let mut emitter = Emitter::new(&metadata);
-                emitter.emit(&"project", &parser.veryl);
+                emitter.emit("project", &parser.veryl);
                 emitter.as_str().to_owned()
             };
 
