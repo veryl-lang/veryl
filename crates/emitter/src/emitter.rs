@@ -1,7 +1,7 @@
 use crate::aligner::{Aligner, Location};
-use veryl_analyzer::msb_table;
 use veryl_analyzer::symbol::SymbolKind;
 use veryl_analyzer::symbol_table;
+use veryl_analyzer::{msb_table, namespace_table};
 use veryl_metadata::{Build, BuiltinType, ClockType, Format, Metadata, ResetType};
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
@@ -80,7 +80,8 @@ impl Emitter {
         }
     }
 
-    pub fn emit(&mut self, input: &Veryl) {
+    pub fn emit(&mut self, project_name: &str, input: &Veryl) {
+        namespace_table::set_default(&[project_name.into()]);
         self.aligner.align(input);
         self.veryl(input);
     }
@@ -282,6 +283,59 @@ impl Emitter {
             .implicit_parameter_types
             .contains(&BuiltinType::Type)
     }
+
+    fn path_identifier(&mut self, arg: &[Identifier]) {
+        if let Ok(ref symbol) = symbol_table::resolve(arg) {
+            if let Some(ref symbol) = symbol.found {
+                match symbol.kind {
+                    SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package => {
+                        self.str(&format!("{}", symbol.namespace).replace("::", "_"));
+                        self.str(&format!("_{}", symbol.token.text));
+                    }
+                    SymbolKind::Parameter(_)
+                    | SymbolKind::Function(_)
+                    | SymbolKind::Struct
+                    | SymbolKind::Enum(_) => {
+                        if arg.len() > 1 {
+                            self.str(&format!("{}", symbol.namespace).replace("::", "_"));
+                            self.str(&format!("::{}", symbol.token.text));
+                        } else {
+                            self.identifier(&arg[0]);
+                        }
+                    }
+                    SymbolKind::EnumMember(_) => {
+                        if arg.len() > 2 {
+                            self.str(&format!("{}", symbol.namespace).replace("::", "_"));
+                            self.str(&format!("_{}", symbol.token.text));
+                        } else {
+                            self.identifier(&arg[0]);
+                            self.str("_");
+                            self.identifier(&arg[1]);
+                        }
+                    }
+                    SymbolKind::Modport(_) => {
+                        self.str(&format!("{}", symbol.namespace).replace("::", "_"));
+                        self.str(&format!(".{}", symbol.token.text));
+                    }
+                    _ => unreachable!(),
+                }
+                return;
+            }
+        }
+
+        // case at unresolved
+        for (i, x) in arg.iter().enumerate() {
+            if i != 0 {
+                if self.in_direction_modport {
+                    self.str(".");
+                } else {
+                    self.str("::");
+                }
+            }
+            dbg!("a");
+            self.identifier(x);
+        }
+    }
 }
 
 impl VerylWalker for Emitter {
@@ -413,15 +467,11 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ScopedIdentifier'
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) {
-        self.identifier(&arg.identifier);
+        let mut path = vec![arg.identifier.as_ref().clone()];
         for x in &arg.scoped_identifier_list {
-            if self.in_direction_modport {
-                self.str(".");
-            } else {
-                self.colon_colon(&x.colon_colon);
-            }
-            self.identifier(&x.identifier);
+            path.push(x.identifier.as_ref().clone());
         }
+        self.path_identifier(&path);
     }
 
     /// Semantic action for non-terminal 'ExpressionIdentifier'
@@ -430,35 +480,19 @@ impl VerylWalker for Emitter {
             self.dollar(&x.dollar);
         }
 
-        self.identifier(&arg.identifier);
-        let symbol = symbol_table::resolve(arg);
-        let is_enum_member = if let Ok(ref symbol) = symbol {
-            if let Some(ref symbol) = symbol.found {
-                matches!(symbol.kind, SymbolKind::EnumMember(_))
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-
         match &*arg.expression_identifier_group {
             ExpressionIdentifierGroup::ColonColonIdentifierExpressionIdentifierGroupListExpressionIdentifierGroupList0(x) => {
-                if is_enum_member {
-                    self.str("_");
-                } else {
-                    self.colon_colon(&x.colon_colon);
-                }
-                self.identifier(&x.identifier);
+                let mut path = vec![arg.identifier.as_ref().clone(), x.identifier.as_ref().clone()];
                 for x in &x.expression_identifier_group_list {
-                    self.colon_colon(&x.colon_colon);
-                    self.identifier(&x.identifier);
+                    path.push(x.identifier.as_ref().clone());
                 }
+                self.path_identifier(&path);
                 for x in &x.expression_identifier_group_list0 {
                     self.select(&x.select);
                 }
             }
             ExpressionIdentifierGroup::ExpressionIdentifierGroupList1ExpressionIdentifierGroupList2(x) => {
+                self.identifier(&arg.identifier);
                 for x in &x.expression_identifier_group_list1 {
                     self.select(&x.select);
                 }
@@ -1541,16 +1575,7 @@ impl VerylWalker for Emitter {
             self.single_line = true;
         }
         self.token(&arg.inst.inst_token.replace(""));
-        if let Ok(symbol) = symbol_table::resolve(arg.scoped_identifier.as_ref()) {
-            if let Some(symbol) = symbol.found {
-                self.str(&format!("{}_", symbol.namespace).replace("::", "_"));
-                self.str(&format!("{}", symbol.token.text));
-            } else {
-                self.scoped_identifier(&arg.scoped_identifier);
-            }
-        } else {
-            self.scoped_identifier(&arg.scoped_identifier);
-        }
+        self.scoped_identifier(&arg.scoped_identifier);
         self.space(1);
         if let Some(ref x) = arg.inst_declaration_opt0 {
             self.inst_parameter(&x.inst_parameter);

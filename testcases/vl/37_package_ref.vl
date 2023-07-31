@@ -1,0 +1,6 @@
+module Module37 {
+    var _a: u32 = Package37::A;
+}
+package Package37 {
+    localparam A: u32 = 1;
+}

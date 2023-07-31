@@ -22,7 +22,7 @@ pub fn make_app() -> Command {
 fn main() {
     let matches = make_app().get_matches();
 
-    let preprocessor = Veryl::default();
+    let preprocessor = Veryl;
 
     if let Some(sub_args) = matches.subcommand_matches("supports") {
         handle_supports(&preprocessor, sub_args);
