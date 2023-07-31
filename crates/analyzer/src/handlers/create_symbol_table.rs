@@ -7,8 +7,8 @@ use crate::symbol::Type as SymType;
 use crate::symbol::{
     EnumMemberProperty, EnumProperty, FunctionProperty, InstanceProperty, InterfaceProperty,
     ModportMember, ModportProperty, ModuleProperty, ParameterProperty, ParameterScope,
-    ParameterValue, PortProperty, StructMemberProperty, Symbol, SymbolKind, TypeKind,
-    VariableProperty, TypeDefProperty,
+    ParameterValue, PortProperty, StructMemberProperty, Symbol, SymbolKind, TypeDefProperty,
+    TypeKind, VariableProperty,
 };
 use crate::symbol_table;
 use std::collections::HashSet;
