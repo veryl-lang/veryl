@@ -584,7 +584,6 @@ impl VerylWalker for Aligner {
         self.semicolon(&arg.semicolon);
     }
 
-
     /// Semantic action for non-terminal 'AssignDeclaration'
     fn assign_declaration(&mut self, arg: &AssignDeclaration) {
         self.assign(&arg.assign);

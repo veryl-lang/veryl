@@ -2246,9 +2246,7 @@ pub trait VerylWalker {
             ModuleItem::LocalparamDeclaration(x) => {
                 self.localparam_declaration(&x.localparam_declaration)
             }
-            ModuleItem::TypeDefDeclaration(x) => {
-                self.type_def_declaration(&x.type_def_declaration)
-            }
+            ModuleItem::TypeDefDeclaration(x) => self.type_def_declaration(&x.type_def_declaration),
             ModuleItem::AlwaysFfDeclaration(x) => {
                 self.always_ff_declaration(&x.always_ff_declaration)
             }
