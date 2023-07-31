@@ -83,6 +83,12 @@ impl fmt::Display for TokenId {
     }
 }
 
+impl From<&str> for StrId {
+    fn from(x: &str) -> Self {
+        insert_str(x)
+    }
+}
+
 thread_local!(static STRING_TABLE: RefCell<GlobalTable<String, StrId>> = RefCell::new(GlobalTable::default()));
 thread_local!(static PATHBUF_TABLE: RefCell<GlobalTable<PathBuf, PathId>> = RefCell::new(GlobalTable::default()));
 thread_local!(static TOKEN_ID: RefCell<usize> = RefCell::new(0));

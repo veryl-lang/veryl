@@ -68,6 +68,16 @@ impl From<&syntax_tree::Identifier> for SymbolPath {
     }
 }
 
+impl From<&[syntax_tree::Identifier]> for SymbolPath {
+    fn from(value: &[syntax_tree::Identifier]) -> Self {
+        let mut path = Vec::new();
+        for x in value {
+            path.push(x.identifier_token.token.text);
+        }
+        SymbolPath(path)
+    }
+}
+
 impl From<&syntax_tree::HierarchicalIdentifier> for SymbolPath {
     fn from(value: &syntax_tree::HierarchicalIdentifier) -> Self {
         let mut path = Vec::new();
@@ -127,6 +137,13 @@ impl From<&Token> for SymbolPathNamespace {
 impl From<&syntax_tree::Identifier> for SymbolPathNamespace {
     fn from(value: &syntax_tree::Identifier) -> Self {
         let namespace = namespace_table::get(value.identifier_token.token.id).unwrap();
+        SymbolPathNamespace(value.into(), namespace)
+    }
+}
+
+impl From<&[syntax_tree::Identifier]> for SymbolPathNamespace {
+    fn from(value: &[syntax_tree::Identifier]) -> Self {
+        let namespace = namespace_table::get(value[0].identifier_token.token.id).unwrap();
         SymbolPathNamespace(value.into(), namespace)
     }
 }
@@ -480,8 +497,8 @@ mod tests {
     fn parse() {
         let metadata: Metadata = toml::from_str(&Metadata::create_default_toml("")).unwrap();
         let parser = Parser::parse(&CODE, &"").unwrap();
-        let analyzer = Analyzer::new(&"prj", &metadata);
-        analyzer.analyze_pass1(&CODE, &"", &parser.veryl);
+        let analyzer = Analyzer::new(&metadata);
+        analyzer.analyze_pass1(&"prj", &CODE, &"", &parser.veryl);
     }
 
     #[test]
