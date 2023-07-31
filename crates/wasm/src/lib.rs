@@ -78,11 +78,11 @@ pub fn build(source: &str) -> Result {
                 namespace_table::drop(path);
             }
 
-            let analyzer = Analyzer::new::<&str>(&"project", &metadata);
+            let analyzer = Analyzer::new(&metadata);
             let mut errors = Vec::new();
-            errors.append(&mut analyzer.analyze_pass1(source, "", &parser.veryl));
-            errors.append(&mut analyzer.analyze_pass2(source, "", &parser.veryl));
-            errors.append(&mut analyzer.analyze_pass3(source, "", &parser.veryl));
+            errors.append(&mut analyzer.analyze_pass1("project", source, "", &parser.veryl));
+            errors.append(&mut analyzer.analyze_pass2("project", source, "", &parser.veryl));
+            errors.append(&mut analyzer.analyze_pass3("project", source, "", &parser.veryl));
 
             let err = !errors.is_empty();
 
@@ -94,7 +94,7 @@ pub fn build(source: &str) -> Result {
                 text
             } else {
                 let mut emitter = Emitter::new(&metadata);
-                emitter.emit(&parser.veryl);
+                emitter.emit("project", &parser.veryl);
                 emitter.as_str().to_owned()
             };
 

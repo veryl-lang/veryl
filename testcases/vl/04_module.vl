@@ -10,7 +10,7 @@ module Module04 #(
     bb   : output logic    <10>,
     bbb  : inout  tri logic<10>,
     bbbb : interface,
-    bbbbb: modport Interface05::d,
+    bbbbb: modport Interface04::d,
 ) {
     // localparam declaration
     localparam c : u32 = 1;
@@ -20,4 +20,10 @@ module Module04 #(
     var _d  : logic        ;
     var _dd : logic<10>    ;
     var _ddd: bit  <10, 10>;
+}
+
+interface Interface04 {
+    modport d {
+        c: input,
+    }
 }
