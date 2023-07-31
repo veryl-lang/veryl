@@ -8,7 +8,7 @@ use crate::symbol::{
     EnumMemberProperty, EnumProperty, FunctionProperty, InstanceProperty, InterfaceProperty,
     ModportMember, ModportProperty, ModuleProperty, ParameterProperty, ParameterScope,
     ParameterValue, PortProperty, StructMemberProperty, Symbol, SymbolKind, TypeKind,
-    VariableProperty,
+    VariableProperty, TypeDefProperty,
 };
 use crate::symbol_table;
 use std::collections::HashSet;
@@ -214,6 +214,21 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 let kind = SymbolKind::Struct;
                 self.insert_symbol(&arg.identifier.identifier_token, kind);
 
+                let name = arg.identifier.identifier_token.token.text;
+                self.namespace.push(name)
+            }
+            HandlerPoint::After => self.namespace.pop(),
+        }
+        Ok(())
+    }
+
+    fn type_def_declaration(&mut self, arg: &TypeDefDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                let r#type = arg.array_type.as_ref().into();
+                let property = TypeDefProperty { r#type };
+                let kind = SymbolKind::TypeDef(property);
+                self.insert_symbol(&arg.identifier.identifier_token, kind);
                 let name = arg.identifier.identifier_token.token.text;
                 self.namespace.push(name)
             }

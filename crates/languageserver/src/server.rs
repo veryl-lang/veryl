@@ -275,6 +275,7 @@ impl Server {
                     veryl_analyzer::symbol::SymbolKind::EnumMember(_) => SymbolKind::ENUM_MEMBER,
                     veryl_analyzer::symbol::SymbolKind::Modport(_) => SymbolKind::INTERFACE,
                     veryl_analyzer::symbol::SymbolKind::Genvar => SymbolKind::VARIABLE,
+                    veryl_analyzer::symbol::SymbolKind::TypeDef(_) => SymbolKind::TYPE_PARAMETER,
                 };
                 let location = to_location(&symbol.token);
                 #[allow(deprecated)]

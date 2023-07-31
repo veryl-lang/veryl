@@ -295,6 +295,7 @@ impl Emitter {
                     SymbolKind::Parameter(_)
                     | SymbolKind::Function(_)
                     | SymbolKind::Struct
+                    | SymbolKind::TypeDef(_)
                     | SymbolKind::Enum(_) => {
                         if arg.len() > 1 {
                             self.str(&format!("{}", symbol.namespace).replace("::", "_"));
@@ -317,7 +318,12 @@ impl Emitter {
                         self.str(&format!("{}", symbol.namespace).replace("::", "_"));
                         self.str(&format!(".{}", symbol.token.text));
                     }
-                    _ => unreachable!(),
+                    SymbolKind::Port(_)
+                    | SymbolKind::Variable(_)
+                    | SymbolKind::Instance(_)
+                    | SymbolKind::Block
+                    | SymbolKind::StructMember(_)
+                    | SymbolKind::Genvar => unreachable!(),
                 }
                 return;
             }
@@ -333,6 +339,7 @@ impl Emitter {
                 }
             }
             dbg!("a");
+            dbg!(arg);
             self.identifier(x);
         }
     }
