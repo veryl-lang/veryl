@@ -1,11 +1,11 @@
-module veryl_testcase_Module38 (
-    veryl_testcase_Interface38.master mst,
-    veryl_testcase_Interface38.slave slv
+module veryl_testcase_Module39 (
+    veryl_testcase_Interface39.master mst,
+    veryl_testcase_Interface39.slave slv
 );
     assign mst.a = slv.a;
 endmodule
 
-interface veryl_testcase_Interface38;
+interface veryl_testcase_Interface39;
     logic a;
 
     modport master (
