@@ -323,6 +323,7 @@ impl Emitter {
                     | SymbolKind::Instance(_)
                     | SymbolKind::Block
                     | SymbolKind::StructMember(_)
+                    | SymbolKind::ModportMember
                     | SymbolKind::Genvar => unreachable!(),
                 }
                 return;
@@ -1266,7 +1267,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'LocalparamDeclaration'
     fn type_def_declaration(&mut self, arg: &TypeDefDeclaration) {
-        self.str("typedef");
+        self.token(&arg.r#type.type_token.replace("typedef"));
         self.space(1);
         self.scalar_type(&arg.array_type.scalar_type);
         self.space(1);
