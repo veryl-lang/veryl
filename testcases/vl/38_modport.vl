@@ -1,0 +1,18 @@
+module Module38 (
+    mst: modport Interface38::master,
+    slv: modport Interface38::slave ,
+) {
+    assign mst.a = slv.a;
+}
+
+interface Interface38 {
+    var a: logic;
+
+    modport master {
+        a: output,
+    }
+
+    modport slave {
+        a: input,
+    }
+}
