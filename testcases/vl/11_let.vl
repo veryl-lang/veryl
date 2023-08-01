@@ -8,7 +8,6 @@ module Module11 {
     var _c: logic<10> = 1;
 
     // assign declaration
-    assign b    = 1;
-    assign bb   = 1;
-    assign aa.a = 1;
+    assign b  = 1;
+    assign bb = 1;
 }
