@@ -231,16 +231,11 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
     }
 
     fn type_def_declaration(&mut self, arg: &TypeDefDeclaration) -> Result<(), ParolError> {
-        match self.point {
-            HandlerPoint::Before => {
-                let r#type = arg.array_type.as_ref().into();
-                let property = TypeDefProperty { r#type };
-                let kind = SymbolKind::TypeDef(property);
-                self.insert_symbol(&arg.identifier.identifier_token, kind);
-                let name = arg.identifier.identifier_token.token.text;
-                self.namespace.push(name)
-            }
-            HandlerPoint::After => self.namespace.pop(),
+        if let HandlerPoint::Before = self.point {
+            let r#type = arg.array_type.as_ref().into();
+            let property = TypeDefProperty { r#type };
+            let kind = SymbolKind::TypeDef(property);
+            self.insert_symbol(&arg.identifier.identifier_token, kind);
         }
         Ok(())
     }
