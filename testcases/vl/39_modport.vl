@@ -1,11 +1,11 @@
-module Module38 (
-    mst: modport Interface38::master,
-    slv: modport Interface38::slave ,
+module Module39 (
+    mst: modport Interface39::master,
+    slv: modport Interface39::slave ,
 ) {
     assign mst.a = slv.a;
 }
 
-interface Interface38 {
+interface Interface39 {
     var a: logic;
 
     modport master {
