@@ -332,7 +332,6 @@ impl Emitter {
                     self.str("::");
                 }
             }
-            dbg!("a");
             self.identifier(x);
         }
     }
