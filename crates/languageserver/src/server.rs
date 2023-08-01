@@ -276,6 +276,7 @@ impl Server {
                     veryl_analyzer::symbol::SymbolKind::Modport(_) => SymbolKind::INTERFACE,
                     veryl_analyzer::symbol::SymbolKind::Genvar => SymbolKind::VARIABLE,
                     veryl_analyzer::symbol::SymbolKind::TypeDef(_) => SymbolKind::TYPE_PARAMETER,
+                    veryl_analyzer::symbol::SymbolKind::ModportMember => SymbolKind::VARIABLE,
                 };
                 let location = to_location(&symbol.token);
                 #[allow(deprecated)]

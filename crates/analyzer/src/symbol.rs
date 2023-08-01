@@ -86,6 +86,7 @@ pub enum SymbolKind {
     EnumMember(EnumMemberProperty),
     Modport(ModportProperty),
     Genvar,
+    ModportMember,
 }
 
 impl SymbolKind {
@@ -107,6 +108,7 @@ impl SymbolKind {
             SymbolKind::EnumMember(_) => "enum member".to_string(),
             SymbolKind::Modport(_) => "modport".to_string(),
             SymbolKind::Genvar => "genvar".to_string(),
+            SymbolKind::ModportMember => "modport member".to_string(),
         }
     }
 }
@@ -191,12 +193,13 @@ impl fmt::Display for SymbolKind {
                 format!("modport ({} ports)", x.members.len())
             }
             SymbolKind::Genvar => "genvar".to_string(),
+            SymbolKind::ModportMember => "modport member".to_string(),
         };
         text.fmt(f)
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Direction {
     Input,
     Output,

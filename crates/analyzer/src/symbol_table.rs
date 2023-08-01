@@ -1,7 +1,7 @@
 use crate::evaluator::Evaluated;
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol::{Symbol, SymbolKind, TypeKind};
+use crate::symbol::{Direction, Symbol, SymbolKind, TypeKind};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
@@ -286,6 +286,17 @@ impl SymbolTable {
                                 namespace.push(*x);
                             }
                             inner = true;
+                        }
+                        SymbolKind::Port(ref x) if x.direction == Direction::Modport => {
+                            if let Some(ref x) = x.r#type {
+                                if let TypeKind::UserDefined(ref x) = x.kind {
+                                    namespace = Namespace::default();
+                                    for x in x {
+                                        namespace.push(*x);
+                                    }
+                                    inner = true;
+                                }
+                            }
                         }
                         _ => (),
                     }

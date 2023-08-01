@@ -168,13 +168,21 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         if let HandlerPoint::Before = self.point {
             let mut members = Vec::new();
             let items: Vec<ModportItem> = arg.modport_list.as_ref().into();
+
+            self.namespace
+                .push(arg.identifier.identifier_token.token.text);
+
             for item in items {
                 let member = ModportMember {
                     name: item.identifier.identifier_token.token.text,
                     direction: item.direction.as_ref().into(),
                 };
                 members.push(member);
+                self.insert_symbol(&item.identifier.identifier_token, SymbolKind::ModportMember);
             }
+
+            self.namespace.pop();
+
             let property = ModportProperty { members };
             let kind = SymbolKind::Modport(property);
             self.insert_symbol(&arg.identifier.identifier_token, kind);
