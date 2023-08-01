@@ -768,6 +768,16 @@ impl VerylWalker for Formatter {
         self.semicolon(&arg.semicolon);
     }
 
+    /// Semantic action for non-terminal 'TypeDefDeclaration'
+    fn type_def_declaration(&mut self, arg: &TypeDefDeclaration) {
+        self.r#type(&arg.r#type);
+        self.space(1);
+        self.equ(&arg.equ);
+        self.space(1);
+        self.array_type(&arg.array_type);
+        self.semicolon(&arg.semicolon);
+    }
+
     /// Semantic action for non-terminal 'AlwaysFfDeclaration'
     fn always_ff_declaration(&mut self, arg: &AlwaysFfDeclaration) {
         self.always_ff(&arg.always_ff);

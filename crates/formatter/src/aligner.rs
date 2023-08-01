@@ -535,6 +535,17 @@ impl VerylWalker for Aligner {
         self.semicolon(&arg.semicolon);
     }
 
+    /// Semantic action for non-terminal 'LocalparamDeclaration'
+    fn type_def_declaration(&mut self, arg: &TypeDefDeclaration) {
+        self.r#type(&arg.r#type);
+        self.aligns[align_kind::IDENTIFIER].start_item();
+        self.identifier(&arg.identifier);
+        self.aligns[align_kind::IDENTIFIER].finish_item();
+        self.equ(&arg.equ);
+        self.array_type(&arg.array_type);
+        self.semicolon(&arg.semicolon);
+    }
+
     /// Semantic action for non-terminal 'AssignDeclaration'
     fn assign_declaration(&mut self, arg: &AssignDeclaration) {
         self.assign(&arg.assign);
