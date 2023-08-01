@@ -9,7 +9,6 @@ module veryl_testcase_Module11;
     assign _c = 1;
 
     // assign declaration
-    assign b    = 1;
-    assign bb   = 1;
-    assign aa.a = 1;
+    assign b  = 1;
+    assign bb = 1;
 endmodule
