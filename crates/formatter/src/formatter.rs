@@ -772,6 +772,8 @@ impl VerylWalker for Formatter {
     fn type_def_declaration(&mut self, arg: &TypeDefDeclaration) {
         self.r#type(&arg.r#type);
         self.space(1);
+        self.identifier(&arg.identifier);
+        self.space(1);
         self.equ(&arg.equ);
         self.space(1);
         self.array_type(&arg.array_type);
