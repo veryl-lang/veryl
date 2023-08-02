@@ -2598,7 +2598,9 @@ dependencies = [
 
 [[package]]
 name = "parol"
-version = "0.22.1"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17b01fdccaa9cde804b64f570be2731489510b5f9cc29c5fc913b68855737d16"
 dependencies = [
  "anyhow",
  "bitflags 2.3.3",
@@ -2627,10 +2629,14 @@ dependencies = [
 [[package]]
 name = "parol-macros"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bdd646301a99589f85ed580e3807ee2f7aa6529b900fd703f5a14716b7426b28"
 
 [[package]]
 name = "parol_runtime"
-version = "0.17.1"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b2bdd74663e7b1808babac11e7621e40260b467bc7e005ecf0fd15c56350189"
 dependencies = [
  "anyhow",
  "codespan-reporting",
