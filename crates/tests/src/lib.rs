@@ -32,14 +32,14 @@ mod analyzer {
 
         let ret = Parser::parse(&input, &file).unwrap();
         let prj = &metadata.project.name;
-        let analyzer = Analyzer::new(&prj, &metadata);
-        let errors = analyzer.analyze_pass1(&input, &file, &ret.veryl);
+        let analyzer = Analyzer::new(&metadata);
+        let errors = analyzer.analyze_pass1(&prj, &input, &file, &ret.veryl);
         assert!(errors.is_empty());
 
-        let errors = analyzer.analyze_pass2(&input, &file, &ret.veryl);
+        let errors = analyzer.analyze_pass2(&prj, &input, &file, &ret.veryl);
         assert!(errors.is_empty());
 
-        let errors = analyzer.analyze_pass3(&input, &file, &ret.veryl);
+        let errors = analyzer.analyze_pass3(&prj, &input, &file, &ret.veryl);
         assert!(errors.is_empty());
     }
 
@@ -103,8 +103,8 @@ mod emitter {
                 if path.src.starts_with(&cache_dir) {
                     let input = fs::read_to_string(&path.src).unwrap();
                     let ret = Parser::parse(&input, &path.src).unwrap();
-                    let analyzer = Analyzer::new(&path.prj, &metadata);
-                    let _ = analyzer.analyze_pass1(&input, &path.src, &ret.veryl);
+                    let analyzer = Analyzer::new(&metadata);
+                    let _ = analyzer.analyze_pass1(&path.prj, &input, &path.src, &ret.veryl);
                 }
             }
         }
@@ -114,11 +114,11 @@ mod emitter {
 
         let ret = Parser::parse(&input, &file).unwrap();
         let prj = &metadata.project.name;
-        let analyzer = Analyzer::new(&prj, &metadata);
-        let _ = analyzer.analyze_pass1(&input, &file, &ret.veryl);
-        let _ = analyzer.analyze_pass2(&input, &file, &ret.veryl);
+        let analyzer = Analyzer::new(&metadata);
+        let _ = analyzer.analyze_pass1(&prj, &input, &file, &ret.veryl);
+        let _ = analyzer.analyze_pass2(&prj, &input, &file, &ret.veryl);
         let mut emitter = Emitter::new(&metadata);
-        emitter.emit(&ret.veryl);
+        emitter.emit(&prj, &ret.veryl);
 
         let file = format!("../../testcases/sv/{}.sv", name);
         let reference = fs::read_to_string(&file).unwrap();

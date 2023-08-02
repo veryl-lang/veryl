@@ -275,6 +275,7 @@ impl Server {
                     veryl_analyzer::symbol::SymbolKind::EnumMember(_) => SymbolKind::ENUM_MEMBER,
                     veryl_analyzer::symbol::SymbolKind::Modport(_) => SymbolKind::INTERFACE,
                     veryl_analyzer::symbol::SymbolKind::Genvar => SymbolKind::VARIABLE,
+                    veryl_analyzer::symbol::SymbolKind::ModportMember => SymbolKind::VARIABLE,
                 };
                 let location = to_location(&symbol.token);
                 #[allow(deprecated)]
@@ -525,8 +526,8 @@ impl Server {
                         symbol_table::drop(uri);
                         namespace_table::drop(uri);
                     }
-                    let analyzer = Analyzer::new(&path.prj, metadata);
-                    let _ = analyzer.analyze_pass1(&text, uri, &x.veryl);
+                    let analyzer = Analyzer::new(metadata);
+                    let _ = analyzer.analyze_pass1(&path.prj, &text, uri, &x.veryl);
 
                     block_on(
                         self.client
@@ -566,10 +567,10 @@ impl Server {
                         symbol_table::drop(path);
                         namespace_table::drop(path);
                     }
-                    let analyzer = Analyzer::new(&prj, &metadata);
-                    let mut errors = analyzer.analyze_pass1(text, path, &x.veryl);
-                    errors.append(&mut analyzer.analyze_pass2(text, path, &x.veryl));
-                    errors.append(&mut analyzer.analyze_pass3(text, path, &x.veryl));
+                    let analyzer = Analyzer::new(&metadata);
+                    let mut errors = analyzer.analyze_pass1(prj, text, path, &x.veryl);
+                    errors.append(&mut analyzer.analyze_pass2(prj, text, path, &x.veryl));
+                    errors.append(&mut analyzer.analyze_pass3(prj, text, path, &x.veryl));
                     let ret: Vec<_> = errors
                         .drain(0..)
                         .map(|x| {

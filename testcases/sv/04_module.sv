@@ -10,7 +10,7 @@ module veryl_testcase_Module04 #(
     output logic     [10-1:0] bb   ,
     inout  tri logic [10-1:0] bbb  ,
     interface bbbb ,
-    Interface05.d bbbbb
+    veryl_testcase_Interface04.d bbbbb
 );
     // localparam declaration
     localparam int unsigned     c  = 1;
@@ -21,3 +21,9 @@ module veryl_testcase_Module04 #(
     logic [10-1:0]         _dd ;
     bit   [10-1:0][10-1:0] _ddd;
 endmodule
+
+interface veryl_testcase_Interface04;
+    modport d (
+        input c
+    );
+endinterface

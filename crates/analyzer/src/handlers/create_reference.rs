@@ -40,19 +40,18 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                         }
                     } else {
                         let is_single_identifier = SymbolPath::from(arg).as_slice().len() == 1;
-                        if is_single_identifier {
-                            let name = arg.identifier.identifier_token.text();
-                            if name != "_" {
-                                self.errors.push(AnalyzerError::undefined_identifier(
-                                    &name,
-                                    self.text,
-                                    &arg.identifier.identifier_token,
-                                ));
-                            }
+                        let name = arg.identifier.identifier_token.text();
+                        if name != "_" || !is_single_identifier {
+                            self.errors.push(AnalyzerError::undefined_identifier(
+                                &name,
+                                self.text,
+                                &arg.identifier.identifier_token,
+                            ));
                         }
                     }
                 }
                 Err(err) => {
+                    // TODO check SV-side member to suppress error
                     let name = format!("{}", err.last_found.token.text);
                     let member = format!("{}", err.not_found);
                     self.errors.push(AnalyzerError::unknown_member(
