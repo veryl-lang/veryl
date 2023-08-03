@@ -28,7 +28,7 @@ pub struct CreateSymbolTable<'a> {
     default_block: Option<StrId>,
     for_identifier: Option<VerylToken>,
     anonymous_namespace: usize,
-    attribute_lines: HashSet<usize>,
+    attribute_lines: HashSet<u32>,
 }
 
 impl<'a> CreateSymbolTable<'a> {

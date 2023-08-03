@@ -4,8 +4,8 @@ use crate::veryl_walker::VerylWalker;
 
 #[derive(Default)]
 pub struct Finder {
-    pub line: usize,
-    pub column: usize,
+    pub line: u32,
+    pub column: u32,
     pub token: Option<Token>,
     pub token_group: Vec<Token>,
     hit: bool,
