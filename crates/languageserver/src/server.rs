@@ -669,9 +669,9 @@ fn demangle_unexpected_token(text: &str) -> String {
 }
 
 fn to_location(token: &Token) -> Location {
-    let line = token.line as u32 - 1;
-    let column = token.column as u32 - 1;
-    let length = token.length as u32;
+    let line = token.line - 1;
+    let column = token.column - 1;
+    let length = token.length;
     let uri = Url::parse(&token.file_path.to_string()).unwrap();
     let range = Range::new(
         Position::new(line, column),

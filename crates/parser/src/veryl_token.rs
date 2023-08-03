@@ -82,7 +82,7 @@ fn split_comment_token(token: Token) -> Vec<Token> {
         let pos = cap.start();
         let length = (cap.end() - pos) as u32;
 
-        line += text[prev_pos..(pos as usize)].matches('\n').count() as u32;
+        line += text[prev_pos..(pos)].matches('\n').count() as u32;
         prev_pos = pos;
 
         let id = resource_table::new_token_id();
@@ -99,7 +99,7 @@ fn split_comment_token(token: Token) -> Vec<Token> {
             text,
             line,
             column: 0,
-            length: length as u32,
+            length,
             pos: pos as u32 + length,
             file_path: token.file_path,
         };
