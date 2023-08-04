@@ -46,10 +46,12 @@ module A {
 
 ## Typedef
 
-The `type` keyword can be used to define a typedef to scalar or array types.
+The `type` keyword can be used to define a type alias to scalar or array types.
 
 ```veryl,playground
-type word_t = logic<16>;
-type regfile_t = word_t [16];
-type octbyte = bit<8> [8];
+module A {
+    type word_t = logic<16>;
+    type regfile_t = word_t [16];
+    type octbyte = bit<8> [8];
+}
 ```
