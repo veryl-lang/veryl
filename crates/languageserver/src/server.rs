@@ -225,8 +225,8 @@ impl Server {
 
         if let Some(parser) = self.parser_map.get(path) {
             let mut finder = Finder::new();
-            finder.line = line;
-            finder.column = column;
+            finder.line = line as u32;
+            finder.column = column as u32;
             finder.veryl(&parser.veryl);
 
             if let Some(token) = finder.token {
@@ -298,8 +298,8 @@ impl Server {
 
         if let Some(parser) = self.parser_map.get(path) {
             let mut finder = Finder::new();
-            finder.line = line;
-            finder.column = column;
+            finder.line = line as u32;
+            finder.column = column as u32;
             finder.veryl(&parser.veryl);
             if let Some(token) = finder.token {
                 if let Some(namespace) = namespace_table::get(token.id) {
@@ -333,8 +333,8 @@ impl Server {
         let mut ret = Vec::new();
         if let Some(parser) = self.parser_map.get(path) {
             let mut finder = Finder::new();
-            finder.line = line;
-            finder.column = column;
+            finder.line = line as u32;
+            finder.column = column as u32;
             finder.veryl(&parser.veryl);
             if let Some(token) = finder.token {
                 if let Some(namespace) = namespace_table::get(token.id) {
@@ -392,17 +392,17 @@ impl Server {
                 let token_line = token.line - 1;
                 let token_column = token.column - 1;
 
-                let delta_line = (token_line - line) as u32;
+                let delta_line = token_line - line;
                 let delta_start = if delta_line == 0 {
                     token_column - column
                 } else {
                     token_column
-                } as u32;
+                };
 
                 let semantic_token = SemanticToken {
                     delta_line,
                     delta_start,
-                    length: token.length as u32,
+                    length: token.length,
                     token_type,
                     token_modifiers_bitset: 0,
                 };
@@ -669,9 +669,9 @@ fn demangle_unexpected_token(text: &str) -> String {
 }
 
 fn to_location(token: &Token) -> Location {
-    let line = token.line as u32 - 1;
-    let column = token.column as u32 - 1;
-    let length = token.length as u32;
+    let line = token.line - 1;
+    let column = token.column - 1;
+    let length = token.length;
     let uri = Url::parse(&token.file_path.to_string()).unwrap();
     let range = Range::new(
         Position::new(line, column),
