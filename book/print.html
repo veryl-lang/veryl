@@ -722,6 +722,14 @@ Otherwise, it is assigned automatically.</p>
     assign a = EnumA::member_a;
 }
 </code></pre>
+<h2 id="typedef"><a class="header" href="#typedef">Typedef</a></h2>
+<p>The <code>type</code> keyword can be used to define a type alias to scalar or array types.</p>
+<pre class="playground"><code class="language-veryl">module A {
+    type word_t = logic&lt;16&gt;;
+    type regfile_t = word_t [16];
+    type octbyte = bit&lt;8&gt; [8];
+}
+</code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="array"><a class="header" href="#array">Array</a></h1>
 <p>Array can be defined by appending <code>[]</code> to any data type.
 The length of array can be specified by the value in <code>[]</code>.</p>
@@ -1817,6 +1825,8 @@ VarDeclaration: Var Identifier Colon ArrayType [ Equ Expression ] Semicolon;
 
 LocalparamDeclaration: Localparam Identifier Colon ( ArrayType Equ Expression | Type Equ TypeExpression ) Semicolon;
 
+TypeDefDeclaration: Type Identifier Equ ArrayType Semicolon;
+
 AlwaysFfDeclaration: AlwaysFf LParen AlwaysFfClock [ Comma AlwaysFfReset ] RParen LBrace { Statement } RBrace;
 
 AlwaysFfClock: [ Posedge | Negedge ] HierarchicalIdentifier;
@@ -1942,6 +1952,7 @@ ModuleGroup: { Attribute } ( LBrace { ModuleGroup } RBrace | ModuleItem );
 
 ModuleItem: VarDeclaration
           | InstDeclaration
+          | TypeDefDeclaration
           | LocalparamDeclaration
           | AlwaysFfDeclaration
           | AlwaysCombDeclaration
@@ -1997,6 +2008,7 @@ PackageGroup: { Attribute } ( LBrace { PackageGroup } RBrace | PackageItem );
 
 PackageItem: VarDeclaration
            | LocalparamDeclaration
+           | TypeDefDeclaration
            | EnumDeclaration
            | StructDeclaration
            | FunctionDeclaration

@@ -182,6 +182,14 @@ Otherwise, it is assigned automatically.</p>
     assign a = EnumA::member_a;
 }
 </code></pre>
+<h2 id="typedef"><a class="header" href="#typedef">Typedef</a></h2>
+<p>The <code>type</code> keyword can be used to define a type alias to scalar or array types.</p>
+<pre class="playground"><code class="language-veryl">module A {
+    type word_t = logic&lt;16&gt;;
+    type regfile_t = word_t [16];
+    type octbyte = bit&lt;8&gt; [8];
+}
+</code></pre>
 
                     </main>
 
