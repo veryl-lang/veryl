@@ -1,0 +1,18 @@
+module A {
+
+    enum EnumA: logic<2> {
+        member_a,
+
+        member_b,
+        member_c = 3,
+    }
+
+    var a: EnumA;
+
+    assign a = EnumA::member_a;
+    function is_a (
+        e: input EnumA,
+    ) -> logic {
+        return e == EnumA::member_a;
+    }
+}

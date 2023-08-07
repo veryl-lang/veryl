@@ -1496,9 +1496,8 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'EnumItem'
     fn enum_item(&mut self, arg: &EnumItem) {
-        self.str(&self.enum_name.clone().unwrap());
-        self.str("_");
-        self.identifier(&arg.identifier);
+        let prefix = format!("{}_", self.enum_name.clone().unwrap());
+        self.token(&arg.identifier.identifier_token.prefix(&prefix));
         if let Some(ref x) = arg.enum_item_opt {
             self.space(1);
             self.equ(&x.equ);
