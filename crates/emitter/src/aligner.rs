@@ -567,6 +567,23 @@ impl VerylWalker for Aligner {
         self.semicolon(&arg.semicolon);
     }
 
+    /// Semantic action for non-terminal 'TypeDefDeclaration'
+    fn type_def_declaration(&mut self, arg: &TypeDefDeclaration) {
+        self.r#type(&arg.r#type);
+        self.aligns[align_kind::TYPE].start_item();
+        self.scalar_type(&arg.array_type.scalar_type);
+        self.aligns[align_kind::TYPE].finish_item();
+        self.aligns[align_kind::IDENTIFIER].start_item();
+        self.identifier(&arg.identifier);
+        self.aligns[align_kind::IDENTIFIER].finish_item();
+        if let Some(ato) = &arg.array_type.array_type_opt {
+            self.aligns[align_kind::ARRAY].start_item();
+            self.array(&ato.array);
+            self.aligns[align_kind::ARRAY].finish_item();
+        }
+        self.semicolon(&arg.semicolon);
+    }
+
     /// Semantic action for non-terminal 'AssignDeclaration'
     fn assign_declaration(&mut self, arg: &AssignDeclaration) {
         self.assign(&arg.assign);

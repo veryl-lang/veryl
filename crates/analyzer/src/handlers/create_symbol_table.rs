@@ -7,8 +7,8 @@ use crate::symbol::Type as SymType;
 use crate::symbol::{
     EnumMemberProperty, EnumProperty, FunctionProperty, InstanceProperty, InterfaceProperty,
     ModportMember, ModportProperty, ModuleProperty, ParameterProperty, ParameterScope,
-    ParameterValue, PortProperty, StructMemberProperty, Symbol, SymbolKind, TypeKind,
-    VariableProperty,
+    ParameterValue, PortProperty, StructMemberProperty, Symbol, SymbolKind, TypeDefProperty,
+    TypeKind, VariableProperty,
 };
 use crate::symbol_table;
 use std::collections::HashSet;
@@ -226,6 +226,16 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 self.namespace.push(name)
             }
             HandlerPoint::After => self.namespace.pop(),
+        }
+        Ok(())
+    }
+
+    fn type_def_declaration(&mut self, arg: &TypeDefDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            let r#type = arg.array_type.as_ref().into();
+            let property = TypeDefProperty { r#type };
+            let kind = SymbolKind::TypeDef(property);
+            self.insert_symbol(&arg.identifier.identifier_token, kind);
         }
         Ok(())
     }

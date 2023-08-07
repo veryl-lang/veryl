@@ -43,3 +43,15 @@ module A {
     assign a = EnumA::member_a;
 }
 ```
+
+## Typedef
+
+The `type` keyword can be used to define a type alias to scalar or array types.
+
+```veryl,playground
+module A {
+    type word_t = logic<16>;
+    type regfile_t = word_t [16];
+    type octbyte = bit<8> [8];
+}
+```
