@@ -277,6 +277,7 @@ impl SymbolTable {
                             inner = true;
                         }
                         SymbolKind::Enum(_) => {
+                            namespace = ret.namespace.clone();
                             namespace.push(ret.token.text);
                             inner = true;
                         }

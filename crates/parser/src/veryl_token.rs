@@ -63,6 +63,16 @@ impl VerylToken {
         ret
     }
 
+    pub fn prefix(&self, text: &str) -> Self {
+        let text = format!("{}{}", text, self.token.text);
+        let length = text.len();
+        let text = resource_table::insert_str(&text);
+        let mut ret = self.clone();
+        ret.token.text = text;
+        ret.token.length = length as u32;
+        ret
+    }
+
     pub fn text(&self) -> String {
         resource_table::get_str_value(self.token.text).unwrap()
     }
