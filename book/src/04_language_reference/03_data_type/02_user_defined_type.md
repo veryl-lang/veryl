@@ -2,7 +2,7 @@
 
 ## Struct
 
-`struct` is composit data type.
+`struct` is composite data type.
 It can contain some fields, and these fields can be access through `.` operator.
 
 ```veryl,playground
@@ -41,6 +41,23 @@ module A {
     var a: EnumA;
 
     assign a = EnumA::member_a;
+}
+```
+## Union
+
+A Veryl `union` is a packed, untagged sum type and is transpiled to SystemVerilog's `packed union`.
+Each  union variant should have the same packed width as each other union variant.
+
+```veryl,playground
+module A {
+    union UnionA {
+        variant_a: logic<8>,
+        variant_b: logic<2, 4>,
+        variant_c: logic<4, 2>,
+        variant_d: logic<2, 2, 2>,
+    }
+    var a: UnionA;
+    assign a.variant_a = 8'haa;
 }
 ```
 

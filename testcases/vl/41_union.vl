@@ -1,0 +1,17 @@
+module Module41 {
+    enum Boolean: logic {
+        True = 1,
+        False = 0,
+    }
+
+    union A {
+        b: logic  ,
+        c: Boolean,
+    }
+
+    var foo  : A;
+    assign foo.b = 1'b0;
+
+    var bar  : A;
+    assign bar.c = Boolean::True;
+}

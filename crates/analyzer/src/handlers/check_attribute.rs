@@ -142,9 +142,9 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
         Ok(())
     }
 
-    fn struct_group(&mut self, arg: &StructGroup) -> Result<(), ParolError> {
+    fn struct_union_group(&mut self, arg: &StructUnionGroup) -> Result<(), ParolError> {
         if let HandlerPoint::After = self.point {
-            for x in &arg.struct_group_list {
+            for x in &arg.struct_union_group_list {
                 Self::allow_pop(&x.attribute);
             }
         }
