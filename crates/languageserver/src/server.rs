@@ -271,6 +271,8 @@ impl Server {
                     veryl_analyzer::symbol::SymbolKind::Package => SymbolKind::PACKAGE,
                     veryl_analyzer::symbol::SymbolKind::Struct => SymbolKind::STRUCT,
                     veryl_analyzer::symbol::SymbolKind::StructMember(_) => SymbolKind::VARIABLE,
+                    veryl_analyzer::symbol::SymbolKind::Union => SymbolKind::STRUCT,
+                    veryl_analyzer::symbol::SymbolKind::UnionMember(_) => SymbolKind::VARIABLE,
                     veryl_analyzer::symbol::SymbolKind::Enum(_) => SymbolKind::ENUM,
                     veryl_analyzer::symbol::SymbolKind::EnumMember(_) => SymbolKind::ENUM_MEMBER,
                     veryl_analyzer::symbol::SymbolKind::Modport(_) => SymbolKind::INTERFACE,

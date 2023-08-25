@@ -174,7 +174,7 @@ impl Metadata {
         self.project.version = bumped_version.clone();
 
         let toml = fs::read_to_string(&self.metadata_path)?;
-        let re = Regex::new(r##"version\s+=\s+"([^"]*)""##).unwrap();
+        let re = Regex::new(r#"version\s+=\s+"([^"]*)""#).unwrap();
         let caps = re
             .captures(&toml)
             .expect("safely unwrap because metadata is valid");

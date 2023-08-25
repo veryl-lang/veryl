@@ -90,7 +90,7 @@ struct ListItem {
     description: String,
 }
 
-const MODULE_TMPL: &str = r###"
+const MODULE_TMPL: &str = r#"
 ## {{name}}
 
 {{description}}
@@ -112,7 +112,7 @@ const MODULE_TMPL: &str = r###"
 {{this.description}}
 
 {{/each}}
-"###;
+"#;
 
 #[derive(Serialize)]
 struct ModuleData {
@@ -137,7 +137,7 @@ struct PortData {
     description: Option<String>,
 }
 
-const INTERFACE_TMPL: &str = r###"
+const INTERFACE_TMPL: &str = r#"
 ## {{name}}
 
 {{description}}
@@ -150,7 +150,7 @@ const INTERFACE_TMPL: &str = r###"
 {{this.description}}
 
 {{/each}}
-"###;
+"#;
 
 #[derive(Serialize)]
 struct InterfaceData {

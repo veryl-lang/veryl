@@ -967,54 +967,68 @@ impl VerylWalker for Formatter {
         }
     }
 
-    /// Semantic action for non-terminal 'StructDeclaration'
-    fn struct_declaration(&mut self, arg: &StructDeclaration) {
-        self.r#struct(&arg.r#struct);
+    /// Semantic action for non-terimanl 'StructUnion'
+    fn struct_union(&mut self, arg: &StructUnion) {
+        match arg {
+            StructUnion::Struct(x) => {
+                self.r#struct(&x.r#struct);
+            }
+            StructUnion::Union(x) => {
+                self.union(&x.union);
+            }
+        }
+    }
+
+    /// Semantic action for non-terminal 'StructUnionDeclaration'
+    fn struct_union_declaration(&mut self, arg: &StructUnionDeclaration) {
+        self.struct_union(&arg.struct_union);
         self.space(1);
         self.identifier(&arg.identifier);
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
-        self.struct_list(&arg.struct_list);
+        self.struct_union_list(&arg.struct_union_list);
         self.newline_pop();
         self.r_brace(&arg.r_brace);
     }
 
-    /// Semantic action for non-terminal 'StructList'
-    fn struct_list(&mut self, arg: &StructList) {
-        self.struct_group(&arg.struct_group);
-        for x in &arg.struct_list_list {
+    /// Semantic action for non-terminal 'StructUnionList'
+    fn struct_union_list(&mut self, arg: &StructUnionList) {
+        self.struct_union_group(&arg.struct_union_group);
+        for x in &arg.struct_union_list_list {
             self.comma(&x.comma);
             self.newline();
-            self.struct_group(&x.struct_group);
+            self.struct_union_group(&x.struct_union_group);
         }
-        if let Some(ref x) = arg.struct_list_opt {
+        if let Some(ref x) = arg.struct_union_list_opt {
             self.comma(&x.comma);
         } else {
             self.str(",");
         }
     }
 
-    /// Semantic action for non-terminal 'StructGroup'
-    fn struct_group(&mut self, arg: &StructGroup) {
-        for x in &arg.struct_group_list {
+    /// Semantic action for non-terminal 'StructUnionGroup'
+    fn struct_union_group(&mut self, arg: &StructUnionGroup) {
+        for x in &arg.struct_union_group_list {
             self.attribute(&x.attribute);
             self.newline();
         }
-        match &*arg.struct_group_group {
-            StructGroupGroup::LBraceStructListRBrace(x) => {
+        match &*arg.struct_union_group_group {
+            StructUnionGroupGroup::LBraceStructUnionListRBrace(x) => {
                 self.token_will_push(&x.l_brace.l_brace_token);
                 self.newline_push();
-                self.struct_list(&x.struct_list);
+                self.struct_union_list(&x.struct_union_list);
                 self.newline_pop();
                 self.r_brace(&x.r_brace);
             }
-            StructGroupGroup::StructItem(x) => self.struct_item(&x.struct_item),
+            StructUnionGroupGroup::StructUnionItem(x) => {
+                self.struct_union_item(&x.struct_union_item)
+            }
         }
     }
 
-    /// Semantic action for non-terminal 'StructItem'
-    fn struct_item(&mut self, arg: &StructItem) {
+    /// Semantic action for non-terminal 'StructUnionItem'
+    fn struct_union_item(&mut self, arg: &StructUnionItem) {
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
         self.space(1);
