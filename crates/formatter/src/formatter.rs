@@ -967,18 +967,6 @@ impl VerylWalker for Formatter {
         }
     }
 
-    /// Semantic action for non-terimanl 'StructUnion'
-    fn struct_union(&mut self, arg: &StructUnion) {
-        match arg {
-            StructUnion::Struct(x) => {
-                self.r#struct(&x.r#struct);
-            }
-            StructUnion::Union(x) => {
-                self.union(&x.union);
-            }
-        }
-    }
-
     /// Semantic action for non-terminal 'StructUnionDeclaration'
     fn struct_union_declaration(&mut self, arg: &StructUnionDeclaration) {
         self.struct_union(&arg.struct_union);
