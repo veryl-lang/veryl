@@ -63,8 +63,8 @@ impl VerylToken {
         ret
     }
 
-    pub fn prefix(&self, text: &str) -> Self {
-        let text = format!("{}{}", text, self.token.text);
+    pub fn append(&self, prefix: &str, postfix: &str) -> Self {
+        let text = format!("{}{}{}", prefix, self.token.text, postfix);
         let length = text.len();
         let text = resource_table::insert_str(&text);
         let mut ret = self.clone();

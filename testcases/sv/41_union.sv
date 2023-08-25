@@ -3,8 +3,8 @@ module veryl_testcase_Module41;
         Boolean_True = 1,
         Boolean_False = 0
     } Boolean;
-    typedef 
-    union packed {
+
+    typedef union packed {
         logic   b;
         Boolean c;
     } A;
