@@ -8,7 +8,7 @@ use crate::symbol::{
     EnumMemberProperty, EnumProperty, FunctionProperty, InstanceProperty, InterfaceProperty,
     ModportMember, ModportProperty, ModuleProperty, ParameterProperty, ParameterScope,
     ParameterValue, PortProperty, StructMemberProperty, Symbol, SymbolKind, TypeDefProperty,
-    TypeKind, VariableProperty,
+    TypeKind, UnionMemberProperty, VariableProperty,
 };
 use crate::symbol_table;
 use std::collections::HashSet;
@@ -29,6 +29,13 @@ pub struct CreateSymbolTable<'a> {
     for_identifier: Option<VerylToken>,
     anonymous_namespace: usize,
     attribute_lines: HashSet<u32>,
+    struct_or_union: Option<StructOrUnion>,
+}
+
+#[derive(Clone)]
+enum StructOrUnion {
+    InStruct,
+    InUnion,
 }
 
 impl<'a> CreateSymbolTable<'a> {
@@ -216,16 +223,28 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         Ok(())
     }
 
-    fn struct_declaration(&mut self, arg: &StructDeclaration) -> Result<(), ParolError> {
+    fn struct_union_declaration(&mut self, arg: &StructUnionDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                let kind = SymbolKind::Struct;
+                let kind = match &*arg.struct_union {
+                    StructUnion::Struct(_) => {
+                        self.struct_or_union = Some(StructOrUnion::InStruct);
+                        SymbolKind::Struct
+                    }
+                    StructUnion::Union(_) => {
+                        self.struct_or_union = Some(StructOrUnion::InUnion);
+                        SymbolKind::Union
+                    }
+                };
                 self.insert_symbol(&arg.identifier.identifier_token, kind);
 
                 let name = arg.identifier.identifier_token.token.text;
                 self.namespace.push(name)
             }
-            HandlerPoint::After => self.namespace.pop(),
+            HandlerPoint::After => {
+                self.struct_or_union = None;
+                self.namespace.pop()
+            }
         }
         Ok(())
     }
@@ -240,11 +259,19 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         Ok(())
     }
 
-    fn struct_item(&mut self, arg: &StructItem) -> Result<(), ParolError> {
+    fn struct_union_item(&mut self, arg: &StructUnionItem) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let r#type = arg.scalar_type.as_ref().into();
-            let property = StructMemberProperty { r#type };
-            let kind = SymbolKind::StructMember(property);
+            let kind = match self.struct_or_union.clone().unwrap() {
+                StructOrUnion::InStruct => {
+                    let property = StructMemberProperty { r#type };
+                    SymbolKind::StructMember(property)
+                }
+                StructOrUnion::InUnion => {
+                    let property = UnionMemberProperty { r#type };
+                    SymbolKind::UnionMember(property)
+                }
+            };
             self.insert_symbol(&arg.identifier.identifier_token, kind);
         }
         Ok(())

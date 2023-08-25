@@ -34,6 +34,7 @@ enum Kind {
     PortOutput,
     Reg,
     Struct,
+    Union,
     Wire,
 }
 
@@ -67,6 +68,7 @@ impl<'a> CheckIdentifier<'a> {
             Kind::PortOutput => &opt.prefix_port_output,
             Kind::Reg => &opt.prefix_reg,
             Kind::Struct => &opt.prefix_struct,
+            Kind::Union => &opt.prefix_union,
             Kind::Wire => &opt.prefix_wire,
         };
 
@@ -85,6 +87,7 @@ impl<'a> CheckIdentifier<'a> {
             Kind::PortOutput => &opt.case_port_output,
             Kind::Reg => &opt.case_reg,
             Kind::Struct => &opt.case_struct,
+            Kind::Union => &opt.case_union,
             Kind::Wire => &opt.case_wire,
         };
 
@@ -103,6 +106,7 @@ impl<'a> CheckIdentifier<'a> {
             Kind::PortOutput => &opt.re_required_port_output,
             Kind::Reg => &opt.re_required_reg,
             Kind::Struct => &opt.re_required_struct,
+            Kind::Union => &opt.re_required_union,
             Kind::Wire => &opt.re_required_wire,
         };
 
@@ -121,6 +125,7 @@ impl<'a> CheckIdentifier<'a> {
             Kind::PortOutput => &opt.re_forbidden_port_output,
             Kind::Reg => &opt.re_forbidden_reg,
             Kind::Struct => &opt.re_forbidden_struct,
+            Kind::Union => &opt.re_forbidden_union,
             Kind::Wire => &opt.re_forbidden_wire,
         };
 
@@ -230,8 +235,16 @@ impl<'a> VerylGrammarTrait for CheckIdentifier<'a> {
         Ok(())
     }
 
-    fn struct_declaration(&mut self, arg: &StructDeclaration) -> Result<(), ParolError> {
+    fn struct_union_declaration(&mut self, arg: &StructUnionDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
+            match &*arg.struct_union {
+                StructUnion::Struct(_) => {
+                    self.check(&arg.identifier.identifier_token, Kind::Struct);
+                }
+                StructUnion::Union(_) => {
+                    self.check(&arg.identifier.identifier_token, Kind::Union);
+                }
+            }
             self.check(&arg.identifier.identifier_token, Kind::Struct);
         }
         Ok(())
