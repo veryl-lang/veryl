@@ -259,6 +259,7 @@ TriTerm               : /(?-u:\b)tri(?-u:\b)/                                   
 TypeTerm              : /(?-u:\b)type(?-u:\b)/                                                                : Token;
 U32Term               : /(?-u:\b)u32(?-u:\b)/                                                                 : Token;
 U64Term               : /(?-u:\b)u64(?-u:\b)/                                                                 : Token;
+UnionTerm             : /(?-u:\b)union(?-u:\b)/                                                               : Token;
 VarTerm               : /(?-u:\b)var(?-u:\b)/                                                                 : Token;
 IdentifierTerm        : /[a-zA-Z_][0-9a-zA-Z_]*/                                                              : Token;
 
@@ -369,6 +370,7 @@ TriToken       : TriTerm       : Token Comments;
 TypeToken      : TypeTerm      : Token Comments;
 U32Token       : U32Term       : Token Comments;
 U64Token       : U64Term       : Token Comments;
+UnionToken     : UnionTerm     : Token Comments;
 VarToken       : VarTerm       : Token Comments;
 
 IdentifierToken: IdentifierTerm: Token Comments;
@@ -484,6 +486,7 @@ Tri       : TriToken       : VerylToken;
 Type      : TypeToken      : VerylToken;
 U32       : U32Token       : VerylToken;
 U64       : U64Token       : VerylToken;
+Union     : UnionToken     : VerylToken;
 Var       : VarToken       : VerylToken;
 
 // Identifier
@@ -682,13 +685,15 @@ EnumGroup: { Attribute } ( LBrace EnumList RBrace | EnumItem );
 
 EnumItem: Identifier [ Equ Expression ];
 
-StructDeclaration: Struct Identifier LBrace StructList RBrace;
+StructUnion: Struct | Union;
 
-StructList: StructGroup { Comma StructGroup } [ Comma ];
+StructUnionDeclaration: StructUnion Identifier LBrace StructUnionList RBrace;
 
-StructGroup: { Attribute } ( LBrace StructList RBrace | StructItem );
+StructUnionList: StructUnionGroup { Comma StructUnionGroup } [ Comma ];
 
-StructItem: Identifier Colon ScalarType;
+StructUnionGroup: { Attribute } ( LBrace StructUnionList RBrace | StructUnionItem );
+
+StructUnionItem: Identifier Colon ScalarType;
 
 InitialDeclaration: Initial LBrace { Statement } RBrace;
 
@@ -790,7 +795,7 @@ ModuleItem: VarDeclaration
           | ModuleIfDeclaration
           | ModuleForDeclaration
           | EnumDeclaration
-          | StructDeclaration
+          | StructUnionDeclaration
           | ModuleNamedBlock
           | ImportDeclaration
           | InitialDeclaration
@@ -819,7 +824,7 @@ InterfaceItem: VarDeclaration
              | InterfaceIfDeclaration
              | InterfaceForDeclaration
              | EnumDeclaration
-             | StructDeclaration
+             | StructUnionDeclaration
              | InterfaceNamedBlock
              | FunctionDeclaration
              | ImportDeclaration
@@ -839,7 +844,7 @@ PackageItem: VarDeclaration
            | LocalparamDeclaration
            | TypeDefDeclaration
            | EnumDeclaration
-           | StructDeclaration
+           | StructUnionDeclaration
            | FunctionDeclaration
            | ImportDeclaration
            | ExportDeclaration

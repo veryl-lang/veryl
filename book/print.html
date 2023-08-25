@@ -687,7 +687,7 @@ Variable of <code>type</code> can be defined as <code>parameter</code> or <code>
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="user-defined-type"><a class="header" href="#user-defined-type">User Defined Type</a></h1>
 <h2 id="struct"><a class="header" href="#struct">Struct</a></h2>
-<p><code>struct</code> is composit data type.
+<p><code>struct</code> is composite data type.
 It can contain some fields, and these fields can be access through <code>.</code> operator.</p>
 <pre class="playground"><code class="language-veryl">module ModuleA {
     struct StructA {
@@ -720,6 +720,20 @@ Otherwise, it is assigned automatically.</p>
     var a: EnumA;
 
     assign a = EnumA::member_a;
+}
+</code></pre>
+<h2 id="union"><a class="header" href="#union">Union</a></h2>
+<p>A Veryl <code>union</code> is a packed, untagged sum type and is transpiled to SystemVerilog’s <code>packed union</code>.
+Each  union variant should have the same packed width as each other union variant.</p>
+<pre class="playground"><code class="language-veryl">module A {
+    union UnionA {
+        variant_a: logic&lt;8&gt;,
+        variant_b: logic&lt;2, 4&gt;,
+        variant_c: logic&lt;4, 2&gt;,
+        variant_d: logic&lt;2, 2, 2&gt;,
+    }
+    var a: UnionA;
+    assign a.variant_a = 8'haa;
 }
 </code></pre>
 <h2 id="typedef"><a class="header" href="#typedef">Typedef</a></h2>
@@ -1430,6 +1444,7 @@ TriTerm               : /(?-u:\b)tri(?-u:\b)/                                   
 TypeTerm              : /(?-u:\b)type(?-u:\b)/                                                                : Token;
 U32Term               : /(?-u:\b)u32(?-u:\b)/                                                                 : Token;
 U64Term               : /(?-u:\b)u64(?-u:\b)/                                                                 : Token;
+UnionTerm             : /(?-u:\b)union(?-u:\b)/                                                               : Token;
 VarTerm               : /(?-u:\b)var(?-u:\b)/                                                                 : Token;
 IdentifierTerm        : /[a-zA-Z_][0-9a-zA-Z_]*/                                                              : Token;
 
@@ -1540,6 +1555,7 @@ TriToken       : TriTerm       : Token Comments;
 TypeToken      : TypeTerm      : Token Comments;
 U32Token       : U32Term       : Token Comments;
 U64Token       : U64Term       : Token Comments;
+UnionToken     : UnionTerm     : Token Comments;
 VarToken       : VarTerm       : Token Comments;
 
 IdentifierToken: IdentifierTerm: Token Comments;
@@ -1655,6 +1671,7 @@ Tri       : TriToken       : VerylToken;
 Type      : TypeToken      : VerylToken;
 U32       : U32Token       : VerylToken;
 U64       : U64Token       : VerylToken;
+Union     : UnionToken     : VerylToken;
 Var       : VarToken       : VerylToken;
 
 // Identifier
@@ -1853,13 +1870,15 @@ EnumGroup: { Attribute } ( LBrace EnumList RBrace | EnumItem );
 
 EnumItem: Identifier [ Equ Expression ];
 
-StructDeclaration: Struct Identifier LBrace StructList RBrace;
+StructUnion: Struct | Union;
 
-StructList: StructGroup { Comma StructGroup } [ Comma ];
+StructUnionDeclaration: StructUnion Identifier LBrace StructUnionList RBrace;
 
-StructGroup: { Attribute } ( LBrace StructList RBrace | StructItem );
+StructUnionList: StructUnionGroup { Comma StructUnionGroup } [ Comma ];
 
-StructItem: Identifier Colon ScalarType;
+StructUnionGroup: { Attribute } ( LBrace StructUnionList RBrace | StructUnionItem );
+
+StructUnionItem: Identifier Colon ScalarType;
 
 InitialDeclaration: Initial LBrace { Statement } RBrace;
 
@@ -1961,7 +1980,7 @@ ModuleItem: VarDeclaration
           | ModuleIfDeclaration
           | ModuleForDeclaration
           | EnumDeclaration
-          | StructDeclaration
+          | StructUnionDeclaration
           | ModuleNamedBlock
           | ImportDeclaration
           | InitialDeclaration
@@ -1990,7 +2009,7 @@ InterfaceItem: VarDeclaration
              | InterfaceIfDeclaration
              | InterfaceForDeclaration
              | EnumDeclaration
-             | StructDeclaration
+             | StructUnionDeclaration
              | InterfaceNamedBlock
              | FunctionDeclaration
              | ImportDeclaration
@@ -2010,7 +2029,7 @@ PackageItem: VarDeclaration
            | LocalparamDeclaration
            | TypeDefDeclaration
            | EnumDeclaration
-           | StructDeclaration
+           | StructUnionDeclaration
            | FunctionDeclaration
            | ImportDeclaration
            | ExportDeclaration
