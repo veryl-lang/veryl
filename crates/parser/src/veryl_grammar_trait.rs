@@ -75,7 +75,7 @@ impl From<&AttributeList> for Vec<AttributeItem> {
 
 list_to_item!(Modport);
 list_to_item!(Enum);
-list_to_item!(Struct);
+list_to_item!(StructUnion);
 list_to_item!(InstParameter);
 list_to_item!(InstPort);
 list_to_item!(WithParameter);

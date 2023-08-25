@@ -657,6 +657,13 @@ pub trait VerylWalker {
         after!(self, r#struct, arg);
     }
 
+    /// Semantic action for non-terminal 'Union'
+    fn union(&mut self, arg: &Union) {
+        before!(self, union, arg);
+        self.veryl_token(&arg.union_token);
+        after!(self, union, arg);
+    }
+
     /// Semantic action for non-terminal 'SyncHigh'
     fn sync_high(&mut self, arg: &SyncHigh) {
         before!(self, sync_high, arg);
@@ -1731,55 +1738,70 @@ pub trait VerylWalker {
         after!(self, enum_item, arg);
     }
 
-    /// Semantic action for non-terminal 'StructDeclaration'
-    fn struct_declaration(&mut self, arg: &StructDeclaration) {
-        before!(self, struct_declaration, arg);
-        self.r#struct(&arg.r#struct);
+    /// Semantic action for non-terminal 'StructUnionDeclaration'
+    fn struct_union_declaration(&mut self, arg: &StructUnionDeclaration) {
+        before!(self, struct_union_declaration, arg);
+        self.struct_union(&arg.struct_union);
         self.identifier(&arg.identifier);
         self.l_brace(&arg.l_brace);
-        self.struct_list(&arg.struct_list);
+        self.struct_union_list(&arg.struct_union_list);
         self.r_brace(&arg.r_brace);
-        after!(self, struct_declaration, arg);
+        after!(self, struct_union_declaration, arg);
+    }
+
+    fn struct_union(&mut self, arg: &StructUnion) {
+        before!(self, struct_union, arg);
+        match arg {
+            StructUnion::Struct(x) => {
+                self.r#struct(&x.r#struct);
+            }
+            StructUnion::Union(x) => {
+                self.union(&x.union);
+            }
+        }
+        after!(self, struct_union, arg);
     }
 
     /// Semantic action for non-terminal 'StructList'
-    fn struct_list(&mut self, arg: &StructList) {
-        before!(self, struct_list, arg);
-        self.struct_group(&arg.struct_group);
-        for x in &arg.struct_list_list {
+    fn struct_union_list(&mut self, arg: &StructUnionList) {
+        before!(self, struct_union_list, arg);
+        self.struct_union_group(&arg.struct_union_group);
+        for x in &arg.struct_union_list_list {
             self.comma(&x.comma);
-            self.struct_group(&x.struct_group);
+            self.struct_union_group(&x.struct_union_group);
         }
-        if let Some(ref x) = arg.struct_list_opt {
+        if let Some(ref x) = arg.struct_union_list_opt {
             self.comma(&x.comma);
         }
-        after!(self, struct_list, arg);
+        after!(self, struct_union_list, arg);
     }
 
-    /// Semantic action for non-terminal 'StructGroup'
-    fn struct_group(&mut self, arg: &StructGroup) {
-        before!(self, struct_group, arg);
-        for x in &arg.struct_group_list {
+    /// Semantic action for non-terminal 'struct_unionUnionGroup'
+    fn struct_union_group(&mut self, arg: &StructUnionGroup) {
+        before!(self, struct_union_group, arg);
+        for x in &arg.struct_union_group_list {
             self.attribute(&x.attribute);
         }
-        match &*arg.struct_group_group {
-            StructGroupGroup::LBraceStructListRBrace(x) => {
+        match &*arg.struct_union_group_group {
+            StructUnionGroupGroup::LBraceStructUnionListRBrace(x) => {
                 self.l_brace(&x.l_brace);
-                self.struct_list(&x.struct_list);
+                self.struct_union_list(&x.struct_union_list);
                 self.r_brace(&x.r_brace);
             }
-            StructGroupGroup::StructItem(x) => self.struct_item(&x.struct_item),
+            StructUnionGroupGroup::StructUnionItem(x) => {
+                self.struct_union_item(&x.struct_union_item)
+            }
         }
-        after!(self, struct_group, arg);
+        after!(self, struct_union_group, arg);
     }
 
-    /// Semantic action for non-terminal 'StructItem'
-    fn struct_item(&mut self, arg: &StructItem) {
-        before!(self, struct_item, arg);
+    /// Semantic action for non-terminal 'struct_unionUnionItem'
+    fn struct_union_item(&mut self, arg: &StructUnionItem) {
+        before!(self, struct_union_item, arg);
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
         self.scalar_type(&arg.scalar_type);
-        after!(self, struct_item, arg);
+        after!(self, struct_union_item, arg);
     }
 
     /// Semantic action for non-terminal 'InitialDeclaration'
@@ -2264,7 +2286,9 @@ pub trait VerylWalker {
                 self.module_for_declaration(&x.module_for_declaration)
             }
             ModuleItem::EnumDeclaration(x) => self.enum_declaration(&x.enum_declaration),
-            ModuleItem::StructDeclaration(x) => self.struct_declaration(&x.struct_declaration),
+            ModuleItem::StructUnionDeclaration(x) => {
+                self.struct_union_declaration(&x.struct_union_declaration)
+            }
             ModuleItem::ModuleNamedBlock(x) => self.module_named_block(&x.module_named_block),
             ModuleItem::ImportDeclaration(x) => self.import_declaration(&x.import_declaration),
             ModuleItem::InitialDeclaration(x) => self.initial_declaration(&x.initial_declaration),
@@ -2389,7 +2413,9 @@ pub trait VerylWalker {
                 self.interface_for_declaration(&x.interface_for_declaration)
             }
             InterfaceItem::EnumDeclaration(x) => self.enum_declaration(&x.enum_declaration),
-            InterfaceItem::StructDeclaration(x) => self.struct_declaration(&x.struct_declaration),
+            InterfaceItem::StructUnionDeclaration(x) => {
+                self.struct_union_declaration(&x.struct_union_declaration)
+            }
             InterfaceItem::InterfaceNamedBlock(x) => {
                 self.interface_named_block(&x.interface_named_block)
             }
@@ -2449,7 +2475,9 @@ pub trait VerylWalker {
                 self.type_def_declaration(&x.type_def_declaration)
             }
             PackageItem::EnumDeclaration(x) => self.enum_declaration(&x.enum_declaration),
-            PackageItem::StructDeclaration(x) => self.struct_declaration(&x.struct_declaration),
+            PackageItem::StructUnionDeclaration(x) => {
+                self.struct_union_declaration(&x.struct_union_declaration)
+            }
             PackageItem::FunctionDeclaration(x) => {
                 self.function_declaration(&x.function_declaration)
             }

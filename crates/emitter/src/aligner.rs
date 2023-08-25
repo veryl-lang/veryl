@@ -605,7 +605,7 @@ impl VerylWalker for Aligner {
     }
 
     /// Semantic action for non-terminal 'StructItem'
-    fn struct_item(&mut self, arg: &StructItem) {
+    fn struct_union_item(&mut self, arg: &StructUnionItem) {
         self.aligns[align_kind::IDENTIFIER].start_item();
         self.identifier(&arg.identifier);
         self.aligns[align_kind::IDENTIFIER].finish_item();

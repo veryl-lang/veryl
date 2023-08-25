@@ -1,4 +1,4 @@
-module A {
+module Module40 {
 
     enum EnumA: logic<2> {
         member_a,

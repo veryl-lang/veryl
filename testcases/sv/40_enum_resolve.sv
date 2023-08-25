@@ -1,4 +1,4 @@
-module veryl_testcase_A;
+module veryl_testcase_Module40;
     typedef 
     enum logic [2-1:0] {
         EnumA_member_a,

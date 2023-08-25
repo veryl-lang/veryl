@@ -81,6 +81,8 @@ pub enum SymbolKind {
     Package,
     Struct,
     StructMember(StructMemberProperty),
+    Union,
+    UnionMember(UnionMemberProperty),
     TypeDef(TypeDefProperty),
     Enum(EnumProperty),
     EnumMember(EnumMemberProperty),
@@ -103,6 +105,8 @@ impl SymbolKind {
             SymbolKind::Package => "package".to_string(),
             SymbolKind::Struct => "struct".to_string(),
             SymbolKind::StructMember(_) => "struct member".to_string(),
+            SymbolKind::Union => "union".to_string(),
+            SymbolKind::UnionMember(_) => "union member".to_string(),
             SymbolKind::TypeDef(_) => "typedef".to_string(),
             SymbolKind::Enum(_) => "enum".to_string(),
             SymbolKind::EnumMember(_) => "enum member".to_string(),
@@ -173,6 +177,10 @@ impl fmt::Display for SymbolKind {
             SymbolKind::Struct => "struct".to_string(),
             SymbolKind::StructMember(x) => {
                 format!("struct member ({})", x.r#type)
+            }
+            SymbolKind::Union => "union".to_string(),
+            SymbolKind::UnionMember(x) => {
+                format!("union member ({})", x.r#type)
             }
             SymbolKind::TypeDef(x) => {
                 format!("typedef alias ({})", x.r#type)
@@ -554,6 +562,11 @@ pub struct InstanceProperty {
 
 #[derive(Debug, Clone)]
 pub struct StructMemberProperty {
+    pub r#type: Type,
+}
+
+#[derive(Debug, Clone)]
+pub struct UnionMemberProperty {
     pub r#type: Type,
 }
 
