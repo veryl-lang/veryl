@@ -1499,7 +1499,7 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'EnumItem'
     fn enum_item(&mut self, arg: &EnumItem) {
         let prefix = format!("{}_", self.enum_name.clone().unwrap());
-        self.token(&arg.identifier.identifier_token.prefix(&prefix));
+        self.token(&arg.identifier.identifier_token.append(&prefix, ""));
         if let Some(ref x) = arg.enum_item_opt {
             self.space(1);
             self.equ(&x.equ);
@@ -1508,25 +1508,16 @@ impl VerylWalker for Emitter {
         }
     }
 
-    /// Semantic action for non-terminnal 'StructUnion'
-    fn struct_union(&mut self, arg: &StructUnion) {
-        match arg {
-            StructUnion::Struct(x) => {
-                self.r#struct(&x.r#struct);
-            }
-            StructUnion::Union(x) => {
-                self.union(&x.union);
-            }
-        }
-    }
-
     /// Semantic action for non-terminal 'StructUnionDeclaration'
     fn struct_union_declaration(&mut self, arg: &StructUnionDeclaration) {
-        self.str("typedef");
-        self.space(1);
-        self.struct_union(&arg.struct_union);
-        self.space(1);
-        self.str("packed");
+        match &*arg.struct_union {
+            StructUnion::Struct(ref x) => {
+                self.token(&x.r#struct.struct_token.append("typedef ", " packed"));
+            }
+            StructUnion::Union(ref x) => {
+                self.token(&x.union.union_token.append("typedef ", " packed"));
+            }
+        }
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
