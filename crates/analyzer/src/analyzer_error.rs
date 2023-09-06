@@ -425,7 +425,12 @@ impl AnalyzerError {
         )
     }
 
-    pub fn cyclic_type_dependency(source: &str, start: &str, end: &str, token: &VerylToken) -> Self {
+    pub fn cyclic_type_dependency(
+        source: &str,
+        start: &str,
+        end: &str,
+        token: &VerylToken,
+    ) -> Self {
         AnalyzerError::CyclicTypeDependency {
             start: start.into(),
             end: end.into(),

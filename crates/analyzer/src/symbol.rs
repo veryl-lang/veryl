@@ -2,7 +2,7 @@ use crate::evaluator::{Evaluated, Evaluator};
 use crate::namespace::Namespace;
 use std::cell::{Cell, RefCell};
 use std::fmt;
-use veryl_parser::resource_table::{StrId};
+use veryl_parser::resource_table::StrId;
 use veryl_parser::veryl_grammar_trait as syntax_tree;
 use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::VerylWalker;

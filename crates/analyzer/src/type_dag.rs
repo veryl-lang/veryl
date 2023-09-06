@@ -1,4 +1,4 @@
-use crate::{symbol::{Symbol, SymbolId}, AnalyzerError};
+use crate::symbol::{Symbol, SymbolId};
 use std::{cell::RefCell, collections::HashMap};
 
 use daggy::Dag;
@@ -36,8 +36,8 @@ impl TypeDag {
 
     fn insert_edge(&mut self, start: &Symbol, end: &Symbol) -> Result<(), DagError> {
         let s = self.insert_node(start);
-            let e = self.insert_node(end);
-            match self.dag.add_edge(s.into(), e.into(), ()) {
+        let e = self.insert_node(end);
+        match self.dag.add_edge(s.into(), e.into(), ()) {
             Ok(_) => Ok(()),
             Err(_) => Err(DagError::Cyclic(start.clone(), end.clone())),
         }

@@ -1,9 +1,19 @@
-use std::cell::RefCell;
-
-use veryl_parser::{veryl_token::VerylToken, resource_table, veryl_grammar_trait::{VerylGrammarTrait, StructUnionDeclaration, StructUnion, StructUnionItem, Identifier, TypeDefDeclaration, ScopedIdentifier, EnumDeclaration, VariableType, ScalarTypeGroup}, ParolError};
-use crate::{analyzer_error::AnalyzerError, symbol::Symbol, type_dag::{self }, symbol_table::{self, SymbolPathNamespace}};
+use crate::{
+    analyzer_error::AnalyzerError,
+    symbol::Symbol,
+    symbol_table::{self, SymbolPathNamespace},
+    type_dag::{self},
+};
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
-
+use veryl_parser::{
+    resource_table,
+    veryl_grammar_trait::{
+        EnumDeclaration, ScopedIdentifier, StructUnion, StructUnionDeclaration, TypeDefDeclaration,
+        VerylGrammarTrait,
+    },
+    veryl_token::VerylToken,
+    ParolError,
+};
 
 #[derive(Default)]
 pub struct CreateTypeDag<'a> {
@@ -16,7 +26,6 @@ pub struct CreateTypeDag<'a> {
     in_enum_declaration: bool,
     in_struct_union_declaration: bool,
 }
-
 
 #[derive(Clone)]
 enum StructOrUnion {
@@ -38,21 +47,18 @@ impl<'a> CreateTypeDag<'a> {
         let start = resource_table::get_str_value(s.token.text).unwrap();
         let end = resource_table::get_str_value(e.token.text).unwrap();
         match type_dag::insert_edge(s, e) {
-            Ok(_) => {},
-            Err(er) => {
-                match er {
-                    type_dag::DagError::Cyclic(_, e) => {
-                        let token: VerylToken = VerylToken {
-                            token: e.token,
-                            comments: vec![],
-                        };
-                        self.errors.push(
-                            AnalyzerError::cyclic_type_dependency(
-                                self.text, &start, &end, &token)
-                        );
-                    }
+            Ok(_) => {}
+            Err(er) => match er {
+                type_dag::DagError::Cyclic(_, e) => {
+                    let token: VerylToken = VerylToken {
+                        token: e.token,
+                        comments: vec![],
+                    };
+                    self.errors.push(AnalyzerError::cyclic_type_dependency(
+                        self.text, &start, &end, &token,
+                    ));
                 }
-            }
+            },
         }
     }
 }
@@ -78,12 +84,11 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
                 // Unused for now, but will be useful in the future
                 // to do this struct vs union chec
                 match &*arg.struct_union {
-                    StructUnion::Struct(_) =>
-                        self.struct_or_union = Some(StructOrUnion::InStruct),
-                    StructUnion::Union(_) =>
-                        self.struct_or_union = Some(StructOrUnion::InUnion),
+                    StructUnion::Struct(_) => self.struct_or_union = Some(StructOrUnion::InStruct),
+                    StructUnion::Union(_) => self.struct_or_union = Some(StructOrUnion::InUnion),
                 }
-                self.parent.push(resolve_to_symbol(arg.identifier.as_ref()).unwrap());
+                self.parent
+                    .push(resolve_to_symbol(arg.identifier.as_ref()).unwrap());
                 self.in_struct_union_declaration = true;
             }
             HandlerPoint::After => {
@@ -97,7 +102,8 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
     fn type_def_declaration(&mut self, arg: &TypeDefDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                self.parent.push(resolve_to_symbol(arg.identifier.as_ref()).unwrap());
+                self.parent
+                    .push(resolve_to_symbol(arg.identifier.as_ref()).unwrap());
                 self.in_type_def = true;
             }
             HandlerPoint::After => {
@@ -109,9 +115,7 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
     }
 
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
-        if self.in_type_def |
-           self.in_enum_declaration |
-           self.in_struct_union_declaration {
+        if self.in_type_def | self.in_enum_declaration | self.in_struct_union_declaration {
             if let HandlerPoint::Before = self.point {
                 let child = resolve_to_symbol(arg);
                 if let Some(child) = child {
@@ -128,7 +132,8 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
     fn enum_declaration(&mut self, arg: &EnumDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                self.parent.push(resolve_to_symbol(arg.identifier.as_ref()).unwrap());
+                self.parent
+                    .push(resolve_to_symbol(arg.identifier.as_ref()).unwrap());
                 self.in_enum_declaration = true;
             }
             HandlerPoint::After => {
@@ -138,5 +143,4 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
         }
         Ok(())
     }
-
 }
