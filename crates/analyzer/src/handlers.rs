@@ -11,6 +11,7 @@ pub mod check_statement;
 pub mod check_system_function;
 pub mod create_reference;
 pub mod create_symbol_table;
+pub mod create_type_dag;
 use check_attribute::*;
 use check_direction::*;
 use check_enum::*;
@@ -28,6 +29,8 @@ use create_symbol_table::*;
 use crate::analyzer_error::AnalyzerError;
 use veryl_metadata::Lint;
 use veryl_parser::veryl_walker::Handler;
+
+use self::create_type_dag::CreateTypeDag;
 
 pub struct Pass1Handlers<'a> {
     check_attribute: CheckAttribute<'a>,
@@ -88,6 +91,7 @@ pub struct Pass2Handlers<'a> {
     check_instance: CheckInstance<'a>,
     check_msb_lsb: CheckMsbLsb<'a>,
     create_reference: CreateReference<'a>,
+    create_type_dag: CreateTypeDag<'a>,
 }
 
 impl<'a> Pass2Handlers<'a> {
@@ -99,6 +103,7 @@ impl<'a> Pass2Handlers<'a> {
             check_instance: CheckInstance::new(text),
             check_msb_lsb: CheckMsbLsb::new(text),
             create_reference: CreateReference::new(text),
+            create_type_dag: CreateTypeDag::new(text),
         }
     }
 
@@ -110,6 +115,7 @@ impl<'a> Pass2Handlers<'a> {
             &mut self.check_instance as &mut dyn Handler,
             &mut self.check_msb_lsb as &mut dyn Handler,
             &mut self.create_reference as &mut dyn Handler,
+            &mut self.create_type_dag as &mut dyn Handler,
         ]
     }
 
@@ -121,6 +127,7 @@ impl<'a> Pass2Handlers<'a> {
         ret.append(&mut self.check_instance.errors);
         ret.append(&mut self.check_msb_lsb.errors);
         ret.append(&mut self.create_reference.errors);
+        ret.append(&mut self.create_type_dag.errors);
         ret
     }
 }
