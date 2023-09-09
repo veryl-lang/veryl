@@ -1,6 +1,9 @@
-use crate::{symbol::{Symbol, SymbolId}, symbol_table::{SymbolPathNamespace, self}};
-use std::{cell::RefCell, collections::HashMap};
+use crate::{
+    symbol::{Symbol, SymbolId},
+    symbol_table::{self, SymbolPathNamespace},
+};
 use bimap::BiMap;
+use std::{cell::RefCell, collections::HashMap};
 
 use daggy::Dag;
 use veryl_parser::veryl_token::VerylToken;
@@ -56,7 +59,12 @@ impl TypeDag {
         }
     }
 
-    fn insert_node(&mut self, path: &SymbolPathNamespace, id: &str, token: &VerylToken) -> Result<u32, DagError> {
+    fn insert_node(
+        &mut self,
+        path: &SymbolPathNamespace,
+        id: &str,
+        token: &VerylToken,
+    ) -> Result<u32, DagError> {
         let trinfo = TypeResolveInfo {
             path: path.clone(),
             name: id.into(),
@@ -89,18 +97,20 @@ impl TypeDag {
 
     fn get_symbol(&self, node: u32) -> Symbol {
         match self.paths.get(&node) {
-            Some(TypeResolveInfo { path, .. }) => {
-                match symbol_table::get(&path.0, &path.1) {
-                    Ok(rr) => {
-                        match rr.found {
-                            Some(sym) => sym,
-                            None => { unreachable!(); }
-                        }
+            Some(TypeResolveInfo { path, .. }) => match symbol_table::get(&path.0, &path.1) {
+                Ok(rr) => match rr.found {
+                    Some(sym) => sym,
+                    None => {
+                        unreachable!();
                     }
-                    Err(_) => { unreachable!(); }
+                },
+                Err(_) => {
+                    unreachable!();
                 }
             },
-            None => { panic!("Must insert node before accessing"); }
+            None => {
+                panic!("Must insert node before accessing");
+            }
         }
     }
 
@@ -138,7 +148,11 @@ pub fn insert_edge(start: u32, end: u32, context: Context) -> Result<(), DagErro
     TYPE_DAG.with(|f| f.borrow_mut().insert_edge(start, end, context))
 }
 
-pub fn insert_node(start: &SymbolPathNamespace, id: &str, token:  &VerylToken) -> Result<u32, DagError> {
+pub fn insert_node(
+    start: &SymbolPathNamespace,
+    id: &str,
+    token: &VerylToken,
+) -> Result<u32, DagError> {
     TYPE_DAG.with(|f| f.borrow_mut().insert_node(start, id, token))
 }
 

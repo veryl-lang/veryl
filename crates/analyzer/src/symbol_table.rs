@@ -1,7 +1,7 @@
 use crate::evaluator::Evaluated;
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol::{Direction, Symbol, SymbolKind, TypeKind, SymbolId};
+use crate::symbol::{Direction, Symbol, SymbolKind, TypeKind};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;

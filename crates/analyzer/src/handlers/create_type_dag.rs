@@ -3,7 +3,6 @@ use crate::{
     symbol_table::SymbolPathNamespace,
     type_dag::{self, Context, DagError, TypeResolveInfo},
 };
-use veryl_parser::{veryl_walker::{Handler, HandlerPoint}, veryl_grammar_trait::Identifier};
 use veryl_parser::{
     resource_table,
     veryl_grammar_trait::{
@@ -12,6 +11,10 @@ use veryl_parser::{
     },
     veryl_token::VerylToken,
     ParolError,
+};
+use veryl_parser::{
+    veryl_grammar_trait::Identifier,
+    veryl_walker::{Handler, HandlerPoint},
 };
 
 #[derive(Default)]
@@ -31,49 +34,53 @@ impl<'a> CreateTypeDag<'a> {
         }
     }
 
-    fn insert_node(&mut self, path: &SymbolPathNamespace, name: &str, token: &VerylToken) -> Option<u32> {
+    fn insert_node(
+        &mut self,
+        path: &SymbolPathNamespace,
+        name: &str,
+        token: &VerylToken,
+    ) -> Option<u32> {
         match type_dag::insert_node(path, &name, &token) {
             Ok(n) => Some(n),
             Err(e) => {
                 self.errors.push(self.to_analyzer_error(e));
                 None
-            },
+            }
         }
     }
 
     fn to_analyzer_error(&self, de: DagError) -> AnalyzerError {
-match de {
+        match de {
             DagError::Cyclic(s, e) => {
                 let token: VerylToken = VerylToken {
                     token: e.token,
                     comments: vec![],
                 };
-                let start = match resource_table::get_str_value(s.token.text,) {
+                let start = match resource_table::get_str_value(s.token.text) {
                     Some(s) => s,
                     None => "<unknown StrId>".into(),
                 };
-                let end = match resource_table::get_str_value(e.token.text,) {
+                let end = match resource_table::get_str_value(e.token.text) {
                     Some(s) => s,
                     None => "<unknown StrId>".into(),
                 };
-                AnalyzerError::cyclic_type_dependency(
-                    self.text, &start, &end, &token,
-                )
+                AnalyzerError::cyclic_type_dependency(self.text, &start, &end, &token)
             }
-            DagError::UnableToResolve(TypeResolveInfo
-                                      { path: _, name, token, }) => {
-                AnalyzerError::undefined_identifier(&name, self.text, &token)
-            }
+            DagError::UnableToResolve(TypeResolveInfo {
+                path: _,
+                name,
+                token,
+            }) => AnalyzerError::undefined_identifier(&name, self.text, &token),
         }
     }
 
     fn insert_edge(&mut self, s: u32, e: u32, edge: Context) {
         // Reversing this order to make traversal work
         match type_dag::insert_edge(e, s, edge) {
-            Ok(_) => {},
+            Ok(_) => {}
             Err(er) => {
                 self.errors.push(self.to_analyzer_error(er));
-            },
+            }
         }
     }
 }
@@ -88,7 +95,6 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
     fn veryl(&mut self, _arg: &veryl_parser::veryl_grammar_trait::Veryl) -> Result<(), ParolError> {
         if let HandlerPoint::After = self.point {
             // Evaluate DAG
-
         }
         Ok(())
     }
@@ -99,7 +105,7 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
                 let path: SymbolPathNamespace = arg.identifier.as_ref().into();
                 let name = arg.identifier.identifier_token.text();
                 let token = arg.identifier.identifier_token.clone();
-                self.parent  = self.insert_node(&path, &name, &token);
+                self.parent = self.insert_node(&path, &name, &token);
                 // Unused for now, but will be useful in the future
                 // to do this struct vs union chec
                 match &*arg.struct_union {
@@ -132,11 +138,10 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
         Ok(())
     }
 
-
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             match self.ctx {
-                Context::Irrelevant => {},
+                Context::Irrelevant => {}
                 _ => {
                     let path: SymbolPathNamespace = arg.into();
                     let name = to_string(arg);
@@ -145,7 +150,7 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
                     match (self.parent, child) {
                         (Some(parent), Some(child)) => {
                             self.insert_edge(parent, child, self.ctx);
-                        },
+                        }
                         _ => {}
                     }
                 }
