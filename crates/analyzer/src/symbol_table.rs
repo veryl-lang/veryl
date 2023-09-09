@@ -1,7 +1,7 @@
 use crate::evaluator::Evaluated;
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol::{Direction, Symbol, SymbolKind, TypeKind};
+use crate::symbol::{Direction, Symbol, SymbolKind, TypeKind, SymbolId};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
@@ -124,7 +124,7 @@ impl From<&syntax_tree::ExpressionIdentifier> for SymbolPath {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct SymbolPathNamespace(pub SymbolPath, pub Namespace);
 
 impl From<&Token> for SymbolPathNamespace {
@@ -207,6 +207,19 @@ impl SymbolTable {
         entry.push(symbol);
         true
     }
+
+    // fn update(&mut self, id: SymbolId, sym: Symbol,) -> Option<Symbol> {
+    //     for (_, symbols) in self.table.iter_mut() {
+    //         for symbol in symbols.iter_mut() {
+    //             if symbol.id == id {
+    //                 let rv = Some(sym);
+    //                 *symbol = sym;
+    //                 return rv;
+    //             }
+    //         }
+    //     }
+    //     None
+    // }
 
     pub fn get(
         &self,
@@ -436,6 +449,10 @@ pub fn resolve<T: Into<SymbolPathNamespace>>(path: T) -> Result<ResolveResult, R
     let SymbolPathNamespace(path, namespace) = path.into();
     SYMBOL_TABLE.with(|f| f.borrow().get(&path, &namespace))
 }
+
+// pub fn update(id: SymbolId, sym: Symbol) -> Option<Symbol> {
+//     SYMBOL_TABLE.with(|f| f.borrow_mut().update(id, sym));
+// }
 
 pub fn get_all() -> Vec<Symbol> {
     SYMBOL_TABLE.with(|f| f.borrow().get_all())

@@ -4220,6 +4220,7 @@ name = "veryl-analyzer"
 version = "0.5.5"
 dependencies = [
  "Inflector",
+ "bimap",
  "daggy",
  "miette",
  "strnum_bitwidth",

@@ -20,6 +20,7 @@ thiserror       = {workspace = true}
 veryl-metadata  = {version = "0.5.5", path = "../metadata"}
 veryl-parser    = {version = "0.5.5", path = "../parser"}
 daggy           = "0.8.0"
+bimap         = "0.6.3"
 
 [dev-dependencies]
 toml = {workspace = true}
