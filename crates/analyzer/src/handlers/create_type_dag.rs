@@ -1,7 +1,7 @@
 use crate::{
     analyzer_error::AnalyzerError,
     symbol_table::SymbolPathNamespace,
-    type_dag::{self, Context, DagError, TypeResolveInfo},
+    type_dag::{self, Context, DagError},
 };
 use veryl_parser::{
     resource_table,
@@ -40,7 +40,7 @@ impl<'a> CreateTypeDag<'a> {
         name: &str,
         token: &VerylToken,
     ) -> Option<u32> {
-        match type_dag::insert_node(path, &name, &token) {
+        match type_dag::insert_node(path, name, token) {
             Ok(n) => Some(n),
             Err(e) => {
                 self.errors.push(self.to_analyzer_error(e));
@@ -66,11 +66,10 @@ impl<'a> CreateTypeDag<'a> {
                 };
                 AnalyzerError::cyclic_type_dependency(self.text, &start, &end, &token)
             }
-            DagError::UnableToResolve(TypeResolveInfo {
-                path: _,
-                name,
-                token,
-            }) => AnalyzerError::undefined_identifier(&name, self.text, &token),
+            DagError::UnableToResolve(b) => {
+                let t = b.as_ref();
+                AnalyzerError::undefined_identifier(&t.name, self.text, &t.token)
+            }
         }
     }
 
@@ -147,11 +146,8 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
                     let name = to_string(arg);
                     let token = arg.identifier.identifier_token.clone();
                     let child = self.insert_node(&path, &name, &token);
-                    match (self.parent, child) {
-                        (Some(parent), Some(child)) => {
-                            self.insert_edge(parent, child, self.ctx);
-                        }
-                        _ => {}
+                    if let (Some(parent), Some(child)) = (self.parent, child) {
+                        self.insert_edge(parent, child, self.ctx);
                     }
                 }
             }

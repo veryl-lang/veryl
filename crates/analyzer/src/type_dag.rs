@@ -25,8 +25,9 @@ pub struct TypeResolveInfo {
     pub token: VerylToken,
 }
 
-#[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq)]
 pub enum Context {
+    #[default]
     Irrelevant,
     Struct,
     Union,
@@ -34,16 +35,10 @@ pub enum Context {
     TypeDef,
 }
 
-impl Default for Context {
-    fn default() -> Self {
-        Context::Irrelevant
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum DagError {
     Cyclic(Symbol, Symbol),
-    UnableToResolve(TypeResolveInfo),
+    UnableToResolve(Box<TypeResolveInfo>),
 }
 
 impl TypeDag {
@@ -75,11 +70,11 @@ impl TypeDag {
                 if let Some(sym) = rr.found {
                     sym
                 } else {
-                    return Err(DagError::UnableToResolve(trinfo));
+                    return Err(DagError::UnableToResolve(Box::new(trinfo)));
                 }
             }
             Err(_) => {
-                let e = DagError::UnableToResolve(trinfo);
+                let e = DagError::UnableToResolve(Box::new(trinfo));
                 return Err(e);
             }
         };
@@ -124,22 +119,6 @@ impl TypeDag {
             }
         }
     }
-
-    // fn evaluate(&self) {
-    //     fn rec_eval(td: &TypeDag, node: u32) -> Evaluated {
-    //         let nbors: Vec<(Context, u32)> = td.dag.children(
-    //             node.into()).iter(&td.dag)
-    //             .map(|(e, n)| (*td.dag.edge_weight(e).unwrap(), n.index() as u32))
-    //             .collect();
-    //         // Evaluate children
-    //         for (_, nbor) in nbors.iter() {
-    //             rec_eval(td, *nbor);
-    //         }
-    //         // Evaluate node
-    //         let node_sym = td.paths.get(&node).unwrap();
-    //         Evaluated::Unknown
-    //     }
-    // }
 }
 
 thread_local!(static TYPE_DAG: RefCell<TypeDag> = RefCell::new(TypeDag::new()));
@@ -155,10 +134,6 @@ pub fn insert_node(
 ) -> Result<u32, DagError> {
     TYPE_DAG.with(|f| f.borrow_mut().insert_node(start, id, token))
 }
-
-// pub fn evaluate() {
-//     let dag = TYPE_DAG.with(|f| f.borrow_mut());
-// }
 
 pub fn get_symbol(node: u32) -> Symbol {
     TYPE_DAG.with(|f| f.borrow().get_symbol(node))
