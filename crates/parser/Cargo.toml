@@ -26,4 +26,4 @@ thiserror     = {workspace = true}
 [build-dependencies]
 parol         =  "0.23.1"
 parol_runtime = {version = "0.18.0", features = ["auto_generation"]}
-walkdir       = "2.3.3"
+walkdir       = "2.4.0"
