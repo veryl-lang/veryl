@@ -208,19 +208,6 @@ impl SymbolTable {
         true
     }
 
-    // fn update(&mut self, id: SymbolId, sym: Symbol,) -> Option<Symbol> {
-    //     for (_, symbols) in self.table.iter_mut() {
-    //         for symbol in symbols.iter_mut() {
-    //             if symbol.id == id {
-    //                 let rv = Some(sym);
-    //                 *symbol = sym;
-    //                 return rv;
-    //             }
-    //         }
-    //     }
-    //     None
-    // }
-
     pub fn get(
         &self,
         path: &SymbolPath,
@@ -449,10 +436,6 @@ pub fn resolve<T: Into<SymbolPathNamespace>>(path: T) -> Result<ResolveResult, R
     let SymbolPathNamespace(path, namespace) = path.into();
     SYMBOL_TABLE.with(|f| f.borrow().get(&path, &namespace))
 }
-
-// pub fn update(id: SymbolId, sym: Symbol) -> Option<Symbol> {
-//     SYMBOL_TABLE.with(|f| f.borrow_mut().update(id, sym));
-// }
 
 pub fn get_all() -> Vec<Symbol> {
     SYMBOL_TABLE.with(|f| f.borrow().get_all())
