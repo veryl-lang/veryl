@@ -7,6 +7,21 @@ use veryl_parser::veryl_token::VerylToken;
 pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
+        code(cyclice_type_dependency),
+        help(""),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#cyclic_type_dependency")
+    )]
+    #[error("Cyclic dependency between {start} and {end}")]
+    CyclicTypeDependency {
+        start: String,
+        end: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+    #[diagnostic(
+        severity(Error),
         code(duplicated_identifier),
         help(""),
         url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#duplicated_identifier")
@@ -408,6 +423,20 @@ impl AnalyzerError {
                 .to_string_lossy(),
             source.to_string(),
         )
+    }
+
+    pub fn cyclic_type_dependency(
+        source: &str,
+        start: &str,
+        end: &str,
+        token: &VerylToken,
+    ) -> Self {
+        AnalyzerError::CyclicTypeDependency {
+            start: start.into(),
+            end: end.into(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.token.into(),
+        }
     }
 
     pub fn duplicated_identifier(identifier: &str, source: &str, token: &VerylToken) -> Self {

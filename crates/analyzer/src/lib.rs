@@ -8,5 +8,6 @@ pub mod namespace;
 pub mod namespace_table;
 pub mod symbol;
 pub mod symbol_table;
+pub mod type_dag;
 pub use analyzer::Analyzer;
 pub use analyzer_error::AnalyzerError;

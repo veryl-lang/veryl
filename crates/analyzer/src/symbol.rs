@@ -1,6 +1,6 @@
 use crate::evaluator::{Evaluated, Evaluator};
 use crate::namespace::Namespace;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::fmt;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::veryl_grammar_trait as syntax_tree;
@@ -8,9 +8,23 @@ use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::VerylWalker;
 use veryl_parser::Stringifier;
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SymbolId(usize);
+
+thread_local!(static SYMBOL_ID: RefCell<usize> = RefCell::new(0));
+
+pub fn new_symbol_id() -> SymbolId {
+    SYMBOL_ID.with(|f| {
+        let mut ret = f.borrow_mut();
+        *ret += 1;
+        SymbolId(*ret)
+    })
+}
+
 #[derive(Debug, Clone)]
 pub struct Symbol {
     pub token: Token,
+    pub id: SymbolId,
     pub kind: SymbolKind,
     pub namespace: Namespace,
     pub references: Vec<Token>,
@@ -28,6 +42,7 @@ impl Symbol {
     ) -> Self {
         Self {
             token: *token,
+            id: new_symbol_id(),
             kind,
             namespace: namespace.to_owned(),
             references: Vec::new(),

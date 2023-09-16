@@ -124,7 +124,7 @@ impl From<&syntax_tree::ExpressionIdentifier> for SymbolPath {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct SymbolPathNamespace(pub SymbolPath, pub Namespace);
 
 impl From<&Token> for SymbolPathNamespace {
