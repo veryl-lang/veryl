@@ -7,6 +7,20 @@ use veryl_parser::veryl_token::VerylToken;
 pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
+        code(assignment_to_input),
+        help(""),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#assignment_to_input")
+    )]
+    #[error("Assignment to input {identifier}")]
+    AssignmentToInput {
+        identifier: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+    #[diagnostic(
+        severity(Error),
         code(cyclice_type_dependency),
         help(""),
         url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#cyclic_type_dependency")
@@ -34,7 +48,20 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
     },
-
+    #[diagnostic(
+        severity(Error),
+        code(duplicated_assignment),
+        help(""),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#duplicated_assignment")
+    )]
+    #[error("{identifier} is assigned in multiple procedural blocks or assignment statements")]
+    DuplicatedAssignment {
+        identifier: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
     #[diagnostic(
         severity(Error),
         code(invalid_allow),
@@ -425,6 +452,14 @@ impl AnalyzerError {
         )
     }
 
+    pub fn assignment_to_input(source: &str, identifier: &str, token: &VerylToken) -> Self {
+        AnalyzerError::AssignmentToInput {
+            identifier: identifier.into(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.token.into(),
+        }
+    }
+
     pub fn cyclic_type_dependency(
         source: &str,
         start: &str,
@@ -441,6 +476,14 @@ impl AnalyzerError {
 
     pub fn duplicated_identifier(identifier: &str, source: &str, token: &VerylToken) -> Self {
         AnalyzerError::DuplicatedIdentifier {
+            identifier: identifier.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.token.into(),
+        }
+    }
+
+    pub fn duplicated_assignment(identifier: &str, source: &str, token: &VerylToken) -> Self {
+        AnalyzerError::DuplicatedAssignment {
             identifier: identifier.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),
