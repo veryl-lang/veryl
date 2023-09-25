@@ -622,14 +622,16 @@ fn to_diag(err: miette::ErrReport, rope: &Rope) -> Diagnostic {
 
     let (severity, message) = if let Some(x) = err.downcast_ref::<ParserError>() {
         let msg = match x {
-            ParserError::UnexpectedToken {
-                unexpected_tokens, ..
-            } => {
-                format!(
-                    "Syntax Error: {}",
-                    demangle_unexpected_token(&unexpected_tokens[0].to_string())
-                )
-            }
+            ParserError::SyntaxErrors { entries } => entries
+                .iter()
+                .map(|e| {
+                    format!(
+                        "Syntax Error: {}",
+                        demangle_unexpected_token(&e.unexpected_tokens[0].to_string())
+                    )
+                })
+                .collect::<Vec<String>>()
+                .join(", "),
             ParserError::ParserError(x) => {
                 format!("Syntax Error: {x}")
             }
