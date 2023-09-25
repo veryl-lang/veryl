@@ -4,22 +4,12 @@ use thiserror::Error;
 
 #[derive(Error, Diagnostic, Debug)]
 pub enum ParserError {
-    #[error("{cause}Expecting one of {expected_tokens}")]
+    #[error("Syntax error(s)")]
     #[diagnostic(
-        help("Syntax error in input prevents prediction of next production"),
-        code(ParserError::UnexpectedToken)
+        help("Syntax error(s) in input prevents prediction of next production"),
+        code(ParserError::SyntaxError)
     )]
-    UnexpectedToken {
-        cause: String,
-        #[source_code]
-        input: NamedSource,
-        #[label("Error location")]
-        error_location: SourceSpan,
-        #[related("Unexpected tokens")]
-        unexpected_tokens: Vec<UnexpectedToken>,
-        expected_tokens: TokenVec,
-        source: Option<anyhow::Error>,
-    },
+    SyntaxErrors { entries: Vec<SyntaxError> },
 
     #[error(transparent)]
     ParserError(#[from] parol_runtime::ParserError),
@@ -29,6 +19,17 @@ pub enum ParserError {
 
     #[error(transparent)]
     UserError(#[from] anyhow::Error),
+}
+
+#[derive(Error, Debug)]
+#[error("{cause}")]
+pub struct SyntaxError {
+    pub cause: String,
+    pub input: Option<NamedSource>,
+    pub error_location: SourceSpan,
+    pub unexpected_tokens: Vec<UnexpectedToken>,
+    pub expected_tokens: TokenVec,
+    pub source: Option<anyhow::Error>,
 }
 
 #[derive(Error, Diagnostic, Debug)]
@@ -45,20 +46,18 @@ impl From<ParolError> for ParserError {
     fn from(x: ParolError) -> ParserError {
         match x {
             ParolError::ParserError(x) => match x {
-                parol_runtime::ParserError::PredictionErrorWithExpectations {
-                    cause,
-                    input,
-                    error_location,
-                    unexpected_tokens,
-                    expected_tokens,
-                    source,
-                } => ParserError::UnexpectedToken {
-                    cause,
-                    input: FileSource(*input).into(),
-                    error_location: Location(*error_location).into(),
-                    unexpected_tokens: UnexpectedTokens(unexpected_tokens).into(),
-                    expected_tokens,
-                    source: source.map(|x| x.into()),
+                parol_runtime::ParserError::SyntaxErrors { entries } => ParserError::SyntaxErrors {
+                    entries: entries
+                        .into_iter()
+                        .map(|e| SyntaxError {
+                            cause: e.cause,
+                            input: e.input.map(|e| FileSource(*e).into()),
+                            error_location: Location(*e.error_location).into(),
+                            unexpected_tokens: UnexpectedTokens(e.unexpected_tokens).into(),
+                            expected_tokens: e.expected_tokens,
+                            source: e.source.map(|x| x.into()),
+                        })
+                        .collect::<Vec<SyntaxError>>(),
                 },
                 _ => ParserError::ParserError(x),
             },

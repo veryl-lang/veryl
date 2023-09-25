@@ -9,7 +9,6 @@ use parol_runtime::once_cell::sync::Lazy;
 use parol_runtime::parser::{LLKParser, LookaheadDFA, ParseTreeType, ParseType, Production, Trans};
 use parol_runtime::{ParolError, ParseTree, TerminalIndex};
 use parol_runtime::{TokenStream, Tokenizer};
-use std::cell::RefCell;
 use std::path::Path;
 
 use crate::veryl_grammar::VerylGrammar;
@@ -15067,9 +15066,11 @@ where
         NON_TERMINALS,
     );
     llk_parser.trim_parse_tree();
-    let token_stream =
-        RefCell::new(TokenStream::new(input, file_name, &TOKENIZERS, MAX_K).unwrap());
     // Initialize wrapper
     let mut user_actions = VerylGrammarAuto::new(user_actions);
-    llk_parser.parse(token_stream, &mut user_actions)
+
+    llk_parser.parse(
+        TokenStream::new(input, file_name, &TOKENIZERS, MAX_K).unwrap(),
+        &mut user_actions,
+    )
 }

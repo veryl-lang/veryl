@@ -2599,9 +2599,9 @@ dependencies = [
 
 [[package]]
 name = "parol"
-version = "0.23.1"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25b75c5586e75d764d36950232bbbb67653cb67af821564f206fbb865d10e958"
+checksum = "ce5e166b0d669920d8021dd6d7902ac09c3263f091cab05e99466b11d9479f7d"
 dependencies = [
  "anyhow",
  "bitflags 2.4.0",
@@ -2615,6 +2615,7 @@ dependencies = [
  "parol-macros",
  "parol_runtime",
  "rand",
+ "rand_regex",
  "regex",
  "regex-syntax",
  "serde",
@@ -2635,9 +2636,9 @@ checksum = "bdd646301a99589f85ed580e3807ee2f7aa6529b900fd703f5a14716b7426b28"
 
 [[package]]
 name = "parol_runtime"
-version = "0.18.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b2bdd74663e7b1808babac11e7621e40260b467bc7e005ecf0fd15c56350189"
+checksum = "92917ed9bff8b4c0ef11af62e3d3ff4ec022f5ec0919d948a2caf0cf99fa60a5"
 dependencies = [
  "anyhow",
  "codespan-reporting",
@@ -2646,6 +2647,7 @@ dependencies = [
  "log",
  "once_cell",
  "parol-macros",
+ "petgraph",
  "regex-automata",
  "syntree",
  "syntree_layout",
@@ -2963,6 +2965,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom",
+]
+
+[[package]]
+name = "rand_regex"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8276e2c4e37f1907c587794d9b8b3334e1d44f36e05f8c13d61c50c19c264ae2"
+dependencies = [
+ "rand",
+ "regex-syntax",
 ]
 
 [[package]]
