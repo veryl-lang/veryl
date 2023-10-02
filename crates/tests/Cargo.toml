@@ -16,7 +16,7 @@ veryl-parser    = {version = "0.5.5", path = "../parser"}
 criterion = "0.5.1"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-pprof = {version = "0.12.1", features = ["flamegraph"]}
+pprof = {version = "0.13.0", features = ["flamegraph"]}
 
 [build-dependencies]
 walkdir = "2.4.0"
