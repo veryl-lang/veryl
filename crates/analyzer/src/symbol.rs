@@ -9,7 +9,7 @@ use veryl_parser::veryl_walker::VerylWalker;
 use veryl_parser::Stringifier;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct SymbolId(usize);
+pub struct SymbolId(pub usize);
 
 thread_local!(static SYMBOL_ID: RefCell<usize> = RefCell::new(0));
 
