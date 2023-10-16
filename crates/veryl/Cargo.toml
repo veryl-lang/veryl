@@ -33,7 +33,7 @@ miette          = {workspace = true}
 regex           = {workspace = true}
 serde           = {workspace = true}
 serde_json      = {workspace = true}
-similar         = {version = "2.2.1", features = ["text", "inline"]}
+similar         = {version = "2.3.0", features = ["text", "inline"]}
 tempfile        = {workspace = true}
 thiserror       = {workspace = true}
 veryl-analyzer  = {version = "0.5.5", path = "../analyzer"}
