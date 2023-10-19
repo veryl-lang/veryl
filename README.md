@@ -26,7 +26,7 @@ If you have any idea, please open [Issue](https://github.com/dalance/veryl/issue
 Veryl is designed as a "SystemVerilog Alternative".
 There are some design concepts.
 
-* Symplified syntax
+* Simplified syntax
     * Based on SystemVerilog / Rust
     * Removed traditional Verilog syntax
 * Transpiler to SystemVerilog
