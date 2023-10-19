@@ -2315,7 +2315,7 @@ dependencies = [
 
 [[package]]
 name = "mdbook-veryl"
-version = "0.5.5"
+version = "0.5.6"
 dependencies = [
  "anyhow",
  "clap",
@@ -4191,7 +4191,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 
 [[package]]
 name = "veryl"
-version = "0.5.5"
+version = "0.5.6"
 dependencies = [
  "clap",
  "console",
@@ -4215,7 +4215,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-analyzer"
-version = "0.5.5"
+version = "0.5.6"
 dependencies = [
  "Inflector",
  "bimap",
@@ -4230,7 +4230,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-emitter"
-version = "0.5.5"
+version = "0.5.6"
 dependencies = [
  "serde",
  "strnum_bitwidth",
@@ -4241,7 +4241,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-formatter"
-version = "0.5.5"
+version = "0.5.6"
 dependencies = [
  "veryl-metadata",
  "veryl-parser",
@@ -4249,7 +4249,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-ls"
-version = "0.5.5"
+version = "0.5.6"
 dependencies = [
  "async-channel",
  "dashmap",
@@ -4268,7 +4268,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-metadata"
-version = "0.5.5"
+version = "0.5.6"
 dependencies = [
  "directories",
  "git-repository",
@@ -4290,7 +4290,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-parser"
-version = "0.5.5"
+version = "0.5.6"
 dependencies = [
  "anyhow",
  "bimap",
