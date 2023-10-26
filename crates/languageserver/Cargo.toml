@@ -17,7 +17,7 @@ exclude               = ["build.rs"]
 #crossbeam-channel = "0.5.6"
 async-channel     = "2.0"
 dashmap           = "5.5.3"
-futures           = "0.3.28"
+futures           = "0.3.29"
 glob              = "0.3.1"
 ropey             = "1.6.1"
 miette            = {workspace = true}
