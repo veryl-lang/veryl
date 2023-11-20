@@ -2636,7 +2636,7 @@ dependencies = [
  "num_cpus",
  "owo-colors",
  "parol-macros",
- "parol_runtime",
+ "parol_runtime 0.19.0",
  "rand",
  "rand_regex",
  "regex",
@@ -2672,6 +2672,26 @@ dependencies = [
  "parol-macros",
  "petgraph",
  "regex-automata 0.3.9",
+ "syntree",
+ "syntree_layout",
+ "thiserror",
+]
+
+[[package]]
+name = "parol_runtime"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1dee48c3d0637d296cbf848fb60421fac541e08dbecd52a29c45ffedee6b7258"
+dependencies = [
+ "anyhow",
+ "codespan-reporting",
+ "derive_builder",
+ "function_name",
+ "log",
+ "once_cell",
+ "parol-macros",
+ "petgraph",
+ "regex-automata 0.4.3",
  "syntree",
  "syntree_layout",
  "thiserror",
@@ -4329,7 +4349,7 @@ dependencies = [
  "miette",
  "once_cell",
  "parol",
- "parol_runtime",
+ "parol_runtime 0.20.0",
  "paste",
  "regex",
  "thiserror",
