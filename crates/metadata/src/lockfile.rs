@@ -344,7 +344,7 @@ impl Lockfile {
         git.checkout(None)?;
 
         let toml = path.join("Veryl.pub");
-        let mut pubfile = Pubfile::load(&toml)?;
+        let mut pubfile = Pubfile::load(toml)?;
 
         pubfile.releases.sort_by(|a, b| b.version.cmp(&a.version));
 
