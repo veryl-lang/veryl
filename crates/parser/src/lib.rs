@@ -15,8 +15,5 @@ pub use parol_runtime::ParolError;
 pub use parser::Parser;
 pub use parser_error::ParserError;
 pub use stringifier::Stringifier;
-mod derive_builder {
-    pub use parol_runtime::derive_builder::*;
-}
 #[cfg(test)]
 mod tests;
