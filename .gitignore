@@ -10,3 +10,5 @@ perf.data*
 veryl_testcase.*
 /dependencies/
 /doc/
+/book/po/messages.pot
+/book/po/*~

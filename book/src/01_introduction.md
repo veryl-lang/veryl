@@ -16,7 +16,8 @@ Veryl has symplified syntax based on SystemVerilog / Rust.
 
 SystemVerilog has very complicated syntax (see IEEE Std 1800-2017 Annex A).
 This causes difficulty of SystemVerilog tool implementation.
-So Veryl should have simple syntax to parse.
+Veryl keeps simple syntax to make tool implementation easier.
+So explicit syntax with keyword and symbol is adopted instead of context dependent syntax and shorthand notation.
 For example, "off-side rule" like Python, "automatic semicolon insertion" like ECMAScript / Go will not be supported.
 
 SystemVerilog has various syntax. Some syntaxes are inherited from Verilog, and some syntaxes are added from SystemVerilog.
@@ -47,7 +48,7 @@ Veryl will have them too from the beginning of development.
 
 The following tools are planed to support.
 
-* Semantic checker
-* Source code formatter
+* Linter
+* Formatter
 * Language server
 * Package manager

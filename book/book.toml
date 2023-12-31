@@ -5,10 +5,19 @@ multilingual = false
 src = "src"
 title = "The Veryl Hardware Description Language"
 
+[build]
+extra-watch-dirs = ["po"]
+
 [preprocessor.veryl]
+
+[preprocessor.gettext]
+after = ["links"]
 
 [output.html]
 curly-quotes = true
+additional-css = [
+  "theme/css/language-picker.css",
+]
 
 [output.html.fold]
 enable = true

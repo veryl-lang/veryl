@@ -9,7 +9,7 @@ The encoding of Veryl source code should be UTF-8.
 
 ## White Space
 
-` `, `\t` and `\n` are treated as white space.
+` `(white space), `\t` and `\n` are treated as white space.
 All of them are skipped by Veryl's parser.
 
 ## Comment
@@ -32,6 +32,7 @@ comment
 ### Documentation comment
 
 Signle line comment starts with `///` is treated as documentation comment.
+Documentation comment is used for document generation.
 
 ```veryl,playground
 /// documentation comment

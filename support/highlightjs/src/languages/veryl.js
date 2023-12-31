@@ -13,7 +13,7 @@ module.exports = function (hljs)
     case_insensitive: false,
     keywords:
       {
-        keyword: 'module interface function modport package enum struct parameter localparam posedge negedge async_high async_low sync_high sync_low always_ff always_comb assign return as var inst import export logic bit tri signed u32 u64 i32 i64 f32 f64 input output inout ref if if_reset else for in case for in step repeat initial final inside outside',
+        keyword: 'module interface function modport package enum struct parameter localparam posedge negedge async_high async_low sync_high sync_low always_ff always_comb assign return as var inst import export logic bit tri signed u32 u64 i32 i64 f32 f64 input output inout ref if if_reset else for in case for in step repeat initial final inside outside default',
         literal: ''
       },
     contains:

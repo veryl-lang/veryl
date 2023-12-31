@@ -1,5 +1,8 @@
 # Concatenation
 
+`{}` represents bit concatenation.
+In `{}`, `repeat` keyword can be used to repeat specified operand.
+
 ```veryl,playground
 module ModuleA {
     var a: logic<10>;

@@ -1,4 +1,4 @@
-# Source code structure
+# Source Code Structure
 
 Veryl's source code is composed by some `module`, `interface` and `package`.
 

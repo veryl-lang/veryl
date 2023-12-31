@@ -29,6 +29,7 @@ interface InterfaceA #(
 module ModuleA (
     i_clk     : input logic               ,
     i_rst     : input logic               ,
+    // port declaration by modport
     intf_a_mst: modport InterfaceA::master,
     intf_a_slv: modport InterfaceA::slave ,
 ) {
