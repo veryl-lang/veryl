@@ -220,6 +220,19 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="initial--final"><a class="header" href="#initial--final">Initial / Final</a></h1>
+<p>Statements in <code>initial</code> are executed at the beginning of simulation,
+<code>final</code> is the end.
+Both will be ignored logical synthesis, and can be used as debug or assertion.</p>
+<pre class="playground"><code class="language-veryl">module ModuleA {
+    initial {
+        $display(&quot;initial&quot;);
+    }
+
+    final {
+        $display(&quot;final&quot;);
+    }
+}
+</code></pre>
 
                     </main>
 

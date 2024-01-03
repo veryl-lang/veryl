@@ -224,11 +224,13 @@
 After <code>var</code>, variable name, <code>:</code>, and the type of the variable are followed.</p>
 <p>If there are unused variables, warning will be occured.
 Variable name starting with <code>_</code> means unused variable, and suppresses the warning.</p>
+<p>Variable declaration with assignment can be used too.</p>
 <pre class="playground"><code class="language-veryl">module ModuleA {
     var _a: logic        ;
     var _b: logic&lt;10&gt;    ;
     var _c: logic&lt;10, 10&gt;;
     var _d: u32          ;
+    var _e: logic        = 1;
 }
 </code></pre>
 

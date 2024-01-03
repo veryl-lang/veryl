@@ -222,11 +222,9 @@
                     <main>
                         <h1 id="the-veryl-hardware-description-language"><a class="header" href="#the-veryl-hardware-description-language">The Veryl Hardware Description Language</a></h1>
 <p><img src="https://github.com/dalance/veryl/raw/master/support/logo/veryl_wide.png" alt="Veryl" /></p>
-<p>Veryl is a modern hardware description language.</p>
-<h2 id="concepts"><a class="header" href="#concepts">Concepts</a></h2>
-<p>Veryl is designed as a “SystemVerilog Alternative”.
+<p>Veryl is a modern hardware description language which is designed as a “SystemVerilog Alternative”.
 There are some design concepts.</p>
-<h3 id="symplified-syntax"><a class="header" href="#symplified-syntax">Symplified Syntax</a></h3>
+<h2 id="symplified-syntax"><a class="header" href="#symplified-syntax">Symplified Syntax</a></h2>
 <p>Veryl has symplified syntax based on SystemVerilog / Rust.
 “Symplified” has two meanings. One is for parser, and another is for human.</p>
 <p>SystemVerilog has very complicated syntax (see IEEE Std 1800-2017 Annex A).
@@ -238,7 +236,7 @@ For example, “off-side rule” like Python, “automatic semicolon insertion�
 Additionally some syntaxes can be written, but cannot be used actually because major EDA tools don’t support them.
 So user should learn many syntaxes and whether each syntax can be used or not.
 Veryl will not support old Verilog style, unrecommended description, and so on.</p>
-<h3 id="transpiler-to-systemverilog"><a class="header" href="#transpiler-to-systemverilog">Transpiler to SystemVerilog</a></h3>
+<h2 id="transpiler-to-systemverilog"><a class="header" href="#transpiler-to-systemverilog">Transpiler to SystemVerilog</a></h2>
 <p>HDL alternative languages should be transpiler to the tradisional HDLs like Verilog / VHDL because major EDA tools support them.
 Veryl is a transpiler to SystemVerilog.</p>
 <p>Transpiler to Verilog has wide EDA tool support including OSS EDA tools.
@@ -249,7 +247,7 @@ For these reason, debugging the transpiled code becomes difficult.</p>
 So transpiled code will be human readable SystemVerilog.</p>
 <p>Additionally Veryl have interoperability with SystemVerilog.
 Veryl can use SystemVerilog’s module / interface / struct / enum in the code, and vice versa.</p>
-<h3 id="integrated-tools"><a class="header" href="#integrated-tools">Integrated Tools</a></h3>
+<h2 id="integrated-tools"><a class="header" href="#integrated-tools">Integrated Tools</a></h2>
 <p>Modern programming languages have development support tools like linter, formatter, and language server by default.
 Veryl will have them too from the beginning of development.</p>
 <p>The following tools are planed to support.</p>
@@ -1107,63 +1105,229 @@ The expression after <code>return</code> keyword is the return value of the func
 After <code>var</code>, variable name, <code>:</code>, and the type of the variable are followed.</p>
 <p>If there are unused variables, warning will be occured.
 Variable name starting with <code>_</code> means unused variable, and suppresses the warning.</p>
+<p>Variable declaration with assignment can be used too.</p>
 <pre class="playground"><code class="language-veryl">module ModuleA {
     var _a: logic        ;
     var _b: logic&lt;10&gt;    ;
     var _c: logic&lt;10, 10&gt;;
     var _d: u32          ;
+    var _e: logic        = 1;
 }
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="parameter"><a class="header" href="#parameter">Parameter</a></h1>
-<pre><code class="language-veryl">localparam param_a: u32 = 1;
+<p>Parameter can be declarated as the same as variable.
+<code>parameter</code> keyword can be used at module header, it can be overridden at instantiation.
+<code>localparam</code> keyword can be used in module, it can’t be overridden.</p>
+<pre class="playground"><code class="language-veryl">module ModuleA #(
+    parameter ParamA: u32 = 1,
+) {
+    localparam ParamB: u32 = 1;
+}
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="register"><a class="header" href="#register">Register</a></h1>
+<p>If a variable is assigned in <code>always_ff</code> declaration, it becomes register variable.
+Register variable will be mapped to flip-flop in synthesis phase.</p>
+<p><code>always_ff</code> has mandatory clock variable, optional reset variable, and <code>{}</code> block.
+Clock and reset are placed in <code>()</code>.</p>
+<p><code>if_reset</code> is a special keyword which can be used in <code>always_ff</code>.
+It means reset condition of the register variable.
+If <code>if_reset</code> is used, <code>always_ff</code> must have reset variable.
+<code>if_reset</code> can be conceal reset porality and synchronisity.
+The actual porality and synchronisity can be configured through <code>[build]</code> section of <code>Veryl.toml</code>.</p>
+<pre class="playground"><code class="language-veryl">module ModuleA (
+    i_clk: input logic,
+    i_rst: input logic,
+) {
+    var a: logic&lt;10&gt;;
+    var b: logic&lt;10&gt;;
+
+    always_ff (i_clk) {
+        a = 1;
+    }
+
+    always_ff (i_clk, i_rst) {
+        if_reset {
+            b = 0;
+        } else {
+            b = 1;
+        }
+    }
+}
+</code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="combinational"><a class="header" href="#combinational">Combinational</a></h1>
+<p>If a variable is assigned in <code>always_comb</code> declaration, it means combinational circuit.</p>
+<pre class="playground"><code class="language-veryl">module ModuleA {
+    var a: logic&lt;10&gt;;
+    var b: logic&lt;10&gt;;
+
+    always_comb {
+        b = a + 1;
+    }
+}
+</code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="assign"><a class="header" href="#assign">Assign</a></h1>
+<p><code>assign</code> declaration can assign expression to variable.</p>
+<pre class="playground"><code class="language-veryl">module ModuleA {
+    var a: logic&lt;10&gt;;
+
+    assign a = 1;
+}
+</code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="function"><a class="header" href="#function">Function</a></h1>
+<p>Function can be declared by <code>function</code> keyword.
+Arguments are placed in <code>()</code> and return type is placed after <code>-&gt;</code>.</p>
+<pre class="playground"><code class="language-veryl">module ModuleA {
+    var a: logic&lt;10&gt;;
+    var b: logic&lt;10&gt;;
+
+    function FunctionA (
+        a: input logic&lt;10&gt;
+    ) -&gt; logic&lt;10&gt; {
+        return a + 1;
+    }
+
+    assign b = FunctionA(a);
+}
+</code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="initial--final"><a class="header" href="#initial--final">Initial / Final</a></h1>
+<p>Statements in <code>initial</code> are executed at the beginning of simulation,
+<code>final</code> is the end.
+Both will be ignored logical synthesis, and can be used as debug or assertion.</p>
+<pre class="playground"><code class="language-veryl">module ModuleA {
+    initial {
+        $display(&quot;initial&quot;);
+    }
+
+    final {
+        $display(&quot;final&quot;);
+    }
+}
+</code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="attribute"><a class="header" href="#attribute">Attribute</a></h1>
+<p>Attribute can annotate some declarations like variable declaration.</p>
+<h2 id="sv-attribute"><a class="header" href="#sv-attribute">SV Attribute</a></h2>
+<p>SV attribute represents SystemVerilog attribute.
+It will be transpiled to SystemVerilog attribute <code>(*  *)</code>.</p>
+<pre class="playground"><code class="language-veryl">module ModuleA {
+    #[sv(&quot;ram_style=\&quot;block\&quot;&quot;)]
+    var _a: logic&lt;10&gt;;
+    #[sv(&quot;mark_debug=\&quot;true\&quot;&quot;)]
+    var _b: logic&lt;10&gt;;
+}
+</code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="generate"><a class="header" href="#generate">Generate</a></h1>
+<p>Declaration can be generated by <code>for</code> and <code>if</code>.
+Label which is shown by <code>:</code> is required to idenfity the generated declarations.</p>
+<pre class="playground"><code class="language-veryl">module ModuleA {
+    var a: logic&lt;10&gt;;
+
+    for i in 0..10 :label {
+        if i &gt;: 5 :label {
+            assign a[i] = i + 2;
+        } else { // label of else clause can be omit
+            assign a[i] = i + 2;
+        }
+    }
+}
+</code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="instantiation-1"><a class="header" href="#instantiation-1">Instantiation</a></h1>
+<p><code>inst</code> keyword represents instantiation of modula and interface.
+The name of instance is placed after <code>inst</code> keyword,
+and the type of instance is placed after <code>:</code>.
+Parameter override is <code>#()</code>, and port connection is <code>()</code>.</p>
+<pre class="playground"><code class="language-veryl">module ModuleA #(
+    parameter paramA: u32 = 1,
+) {
+    var a: logic&lt;10&gt;;
+    var b: logic&lt;10&gt;;
+
+    inst instB: ModuleB #(
+        paramA    , // Parameter assignment by name
+        paramB: 10,
+    ) (
+        a    , // Port connection by name
+        bb: b,
+    );
+}
+</code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="named-block"><a class="header" href="#named-block">Named Block</a></h1>
+<p>Label can be added to <code>{}</code> block.
+The named block has an individual namespace.</p>
+<pre class="playground"><code class="language-veryl">module ModuleA {
+    :labelA {
+        var _a: logic&lt;10&gt;;
+    }
+
+    :labelB {
+        var _a: logic&lt;10&gt;;
+    }
+}
+</code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="module-1"><a class="header" href="#module-1">Module</a></h1>
-<pre class="playground"><code class="language-veryl">module mux2to1 (
-    a  : input  logic,
-    b  : input  logic,
-    sel: input  logic,
-    y  : output logic,
+<p>Module is one of top level components in source code.
+Module has overridable parameters, connection ports, and internal logic.</p>
+<p>Overridable parameters can be declared in <code>#()</code>.
+Each parameter declaration is started by <code>parameter</code> keyword.
+After the keyword, an identifier, <code>:</code>, the type of the parameter, and a default value are placed.</p>
+<p>Connection ports can be declared in <code>()</code>.
+Each port declaration is constructed by an identifier, <code>:</code>, port direction, and the type of the port.
+The available port directions are:</p>
+<ul>
+<li><code>input</code>: input port</li>
+<li><code>output</code>: output port</li>
+<li><code>inout</code>: bi-directional port</li>
+<li><code>modport</code>: modport of interface</li>
+</ul>
+<pre class="playground"><code class="language-veryl">module ModuleA #(
+    parameter ParamA: u32 = 0,
+    parameter ParamB: u32 = 0,
+) (
+    a: input  logic,
+    b: input  logic,
+    c: input  logic,
+    x: output logic,
 ) {
     always_comb {
-        if sel {
-            y = a;
+        if c {
+            x = a;
         } else {
-            y = b;
+            x = b;
         }
     }
 }
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="interface-1"><a class="header" href="#interface-1">Interface</a></h1>
-<pre class="playground"><code class="language-veryl">interface simple_bus {
-    var req  : logic;
-    var gnt  : logic;
-    var addr : logic [8];
-    var data : logic [8];
-    var mode : logic [2];
-    var start: logic;
-    var rdy  : logic;
+<p>Interface is one of top level components in source code.
+Interface has overridable parameters, and interface definitions.</p>
+<p>Overridable parameters are the same as them of module.</p>
+<p>In interface definitions, <code>modport</code> can be declared. 
+<code>modport</code> can be used as bundled port connection at the port declaration of module.</p>
+<pre class="playground"><code class="language-veryl">interface InterfaceA #(
+    parameter ParamA: u32 = 0,
+    parameter ParamB: u32 = 0,
+) {
+    var a: logic;
+    var b: logic;
 
     modport master {
-        req  : output,
-        addr : output,
-        mode : output,
-        start: output,
-        gnt  : input ,
-        rdy  : input ,
-        data : ref   ,
+        a: output,
+        b: input ,
+    }
+
+    modport slave {
+        b: input ,
+        a: output,
     }
 }
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="package-1"><a class="header" href="#package-1">Package</a></h1>
+<p>Package is one of top level components in source code.
+Package can organize some declarations like parameter and function.</p>
+<p>To access an item in a package, <code>::</code> symbol can be used like <code>PackageA::ParamA</code>.</p>
+<pre class="playground"><code class="language-veryl">package PackageA {
+    localparam ParamA: u32 = 0;
+}
+</code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="development-environment"><a class="header" href="#development-environment">Development Environment</a></h1>
 <p>In this chapter, we’ll discuss about development environment including project configuration and development tools.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="project-configuration"><a class="header" href="#project-configuration">Project Configuration</a></h1>

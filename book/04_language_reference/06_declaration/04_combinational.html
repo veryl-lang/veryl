@@ -220,6 +220,16 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="combinational"><a class="header" href="#combinational">Combinational</a></h1>
+<p>If a variable is assigned in <code>always_comb</code> declaration, it means combinational circuit.</p>
+<pre class="playground"><code class="language-veryl">module ModuleA {
+    var a: logic&lt;10&gt;;
+    var b: logic&lt;10&gt;;
+
+    always_comb {
+        b = a + 1;
+    }
+}
+</code></pre>
 
                     </main>
 

@@ -220,23 +220,26 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="interface"><a class="header" href="#interface">Interface</a></h1>
-<pre class="playground"><code class="language-veryl">interface simple_bus {
-    var req  : logic;
-    var gnt  : logic;
-    var addr : logic [8];
-    var data : logic [8];
-    var mode : logic [2];
-    var start: logic;
-    var rdy  : logic;
+<p>Interface is one of top level components in source code.
+Interface has overridable parameters, and interface definitions.</p>
+<p>Overridable parameters are the same as them of module.</p>
+<p>In interface definitions, <code>modport</code> can be declared. 
+<code>modport</code> can be used as bundled port connection at the port declaration of module.</p>
+<pre class="playground"><code class="language-veryl">interface InterfaceA #(
+    parameter ParamA: u32 = 0,
+    parameter ParamB: u32 = 0,
+) {
+    var a: logic;
+    var b: logic;
 
     modport master {
-        req  : output,
-        addr : output,
-        mode : output,
-        start: output,
-        gnt  : input ,
-        rdy  : input ,
-        data : ref   ,
+        a: output,
+        b: input ,
+    }
+
+    modport slave {
+        b: input ,
+        a: output,
     }
 }
 </code></pre>
