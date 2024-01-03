@@ -1,7 +1,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: The Veryl Hardware Description Language\n"
-"POT-Creation-Date: 2023-12-31T12:12:50+09:00\n"
+"POT-Creation-Date: 2024-01-03T22:23:54+09:00\n"
 "PO-Revision-Date: 2023-12-28 23:02+0900\n"
 "Last-Translator: Naoya Hatta <dalance@gmail.com>\n"
 "Language-Team: Japanese\n"
@@ -181,7 +181,7 @@ msgstr "レジスタ"
 #: src/SUMMARY.md:42
 #: src/04_language_reference/06_declaration/04_combinational.md:1
 msgid "Combinational"
-msgstr "組み合わせ"
+msgstr "組み合わせ回路"
 
 #: src/SUMMARY.md:43 src/04_language_reference/06_declaration/05_assign.md:1
 msgid "Assign"
@@ -202,7 +202,7 @@ msgstr "アトリビュート"
 
 #: src/SUMMARY.md:47 src/04_language_reference/06_declaration/09_generate.md:1
 msgid "Generate"
-msgstr ""
+msgstr "生成"
 
 #: src/SUMMARY.md:49
 #: src/04_language_reference/06_declaration/11_named_block.md:1
@@ -230,12 +230,12 @@ msgstr "プロジェクトを公開する"
 msgid "Directory Layout"
 msgstr "ディレクトリ構成"
 
-#: src/SUMMARY.md:58 src/01_introduction.md:52
+#: src/SUMMARY.md:58 src/01_introduction.md:48
 #: src/05_development_environment/05_formatter.md:1
 msgid "Formatter"
 msgstr "フォーマッタ"
 
-#: src/SUMMARY.md:59 src/01_introduction.md:51
+#: src/SUMMARY.md:59 src/01_introduction.md:47
 #: src/05_development_environment/06_linter.md:1
 msgid "Linter"
 msgstr "リンタ"
@@ -266,7 +266,7 @@ msgstr "セマンティックエラー"
 
 #: src/01_introduction.md:1
 msgid "The Veryl Hardware Description Language"
-msgstr ""
+msgstr "ハードウェア記述言語 Veryl"
 
 #: src/01_introduction.md:3
 msgid ""
@@ -277,25 +277,18 @@ msgstr ""
 "png)"
 
 #: src/01_introduction.md:5
-msgid "Veryl is a modern hardware description language."
-msgstr ""
-
-#: src/01_introduction.md:7
-msgid "Concepts"
-msgstr "コンセプト"
-
-#: src/01_introduction.md:9
 msgid ""
-"Veryl is designed as a \"SystemVerilog Alternative\". There are some design "
-"concepts."
+"Veryl is a modern hardware description language which is designed as a "
+"\"SystemVerilog Alternative\". There are some design concepts."
 msgstr ""
-"Veryl は \"SystemVerilog の代替言語\" であり、いくつかの特徴があります。"
+"Veryl は \"SystemVerilog の代替言語\" として設計された最新のハードウェア記述言語です。"
+"以下のような特徴があります。"
 
-#: src/01_introduction.md:12
+#: src/01_introduction.md:8
 msgid "Symplified Syntax"
 msgstr "簡素な構文"
 
-#: src/01_introduction.md:14
+#: src/01_introduction.md:10
 msgid ""
 "Veryl has symplified syntax based on SystemVerilog / Rust. \"Symplified\" "
 "has two meanings. One is for parser, and another is for human."
@@ -304,7 +297,7 @@ msgstr ""
 "\"簡素\" とは2つの意味があります。1つはパーサにとって、もう1つは人間にとって"
 "です。"
 
-#: src/01_introduction.md:17
+#: src/01_introduction.md:13
 msgid ""
 "SystemVerilog has very complicated syntax (see IEEE Std 1800-2017 Annex A). "
 "This causes difficulty of SystemVerilog tool implementation. Veryl keeps "
@@ -320,7 +313,7 @@ msgstr ""
 "おける \"オフサイドルール\" や ECMAScript / Go における \"自動セミコロン挿入"
 "\"は採用されません。"
 
-#: src/01_introduction.md:23
+#: src/01_introduction.md:19
 msgid ""
 "SystemVerilog has various syntax. Some syntaxes are inherited from Verilog, "
 "and some syntaxes are added from SystemVerilog. Additionally some syntaxes "
@@ -335,11 +328,11 @@ msgstr ""
 "ユーザはそれぞれの構文が使用可能かどうかを学ぶ必要があります。Veryl は古い "
 "Verilog スタイルの構文や非推奨記述をサポートしません。"
 
-#: src/01_introduction.md:28
+#: src/01_introduction.md:24
 msgid "Transpiler to SystemVerilog"
 msgstr "SystemVerilog へのトランスパイラ"
 
-#: src/01_introduction.md:30
+#: src/01_introduction.md:26
 msgid ""
 "HDL alternative languages should be transpiler to the tradisional HDLs like "
 "Verilog / VHDL because major EDA tools support them. Veryl is a transpiler "
@@ -349,7 +342,7 @@ msgstr ""
 "統的な HDL へのトランスパイラである必要があります。Veryl は SystemVerilog へ"
 "のトランスパイラです。"
 
-#: src/01_introduction.md:33
+#: src/01_introduction.md:29
 msgid ""
 "Transpiler to Verilog has wide EDA tool support including OSS EDA tools. But "
 "even if there are rich data strucuture like `struct` / `interface` in HDL "
@@ -365,7 +358,7 @@ msgstr ""
 "らが展開された非常に長いコードになってしまいます。そのためトランスパイルされ"
 "たコードのデバッグは困難です。"
 
-#: src/01_introduction.md:38
+#: src/01_introduction.md:34
 msgid ""
 "Veryl will has almost all the same semantics as SystemVerilog. So transpiled "
 "code will be human readable SystemVerilog."
@@ -373,7 +366,7 @@ msgstr ""
 "Veryl は SystemVerilog とほとんど同じセマンティクスを持っています。そのためト"
 "ランスパイルされたコードは人間が読みやすい SystemVerilog になります。"
 
-#: src/01_introduction.md:41
+#: src/01_introduction.md:37
 msgid ""
 "Additionally Veryl have interoperability with SystemVerilog. Veryl can use "
 "SystemVerilog's module / interface / struct / enum in the code, and vice "
@@ -382,11 +375,11 @@ msgstr ""
 "さらに Veryl は SystemVerilog と相互運用可能です。Veryl では SystemVerilog "
 "の module / interface / struct / enum を使えますし、逆も可能です。"
 
-#: src/01_introduction.md:44
+#: src/01_introduction.md:40
 msgid "Integrated Tools"
 msgstr "ツール統合"
 
-#: src/01_introduction.md:46
+#: src/01_introduction.md:42
 msgid ""
 "Modern programming languages have development support tools like linter, "
 "formatter, and language server by default. Veryl will have them too from the "
@@ -395,15 +388,15 @@ msgstr ""
 "モダンなプログラミング言語ではリンタやフォーマッタ、言語サーバといったサポー"
 "トツールが標準で揃っています。Veryl でもそれらを最初からサポートします。"
 
-#: src/01_introduction.md:49
+#: src/01_introduction.md:45
 msgid "The following tools are planed to support."
 msgstr "以下のツールサポートが予定されています。"
 
-#: src/01_introduction.md:53
+#: src/01_introduction.md:49
 msgid "Language server"
 msgstr "言語サーバ"
 
-#: src/01_introduction.md:54
+#: src/01_introduction.md:50
 msgid "Package manager"
 msgstr "パッケージマネージャ"
 
@@ -1942,6 +1935,311 @@ msgstr ""
 "未使用の変数は警告が発生します。`_` で始まる変数名は未使用変数を意味し、警告"
 "を抑制します。"
 
+#: src/04_language_reference/06_declaration/01_variable.md:9
+msgid "Variable declaration with assignment can be used too."
+msgstr "変数宣言と同時に代入することもできます。"
+
+#: src/04_language_reference/06_declaration/02_parameter.md:3
+msgid ""
+"Parameter can be declarated as the same as variable. `parameter` keyword can "
+"be used at module header, it can be overridden at instantiation. "
+"`localparam` keyword can be used in module, it can't be overridden."
+msgstr ""
+"パラメータは変数と同時に宣言できます。`parameter` キーワードはモジュールヘッ"
+"ダで使用することができ、インスタンス時に上書きできます。`localparam` キーワー"
+"ドはモジュール内で使用することができ、上書きできません。"
+
+#: src/04_language_reference/06_declaration/03_register.md:3
+msgid ""
+"If a variable is assigned in `always_ff` declaration, it becomes register "
+"variable. Register variable will be mapped to flip-flop in synthesis phase."
+msgstr ""
+"レジスタ変数とは `always_ff` で代入される変数です。合成フェーズでフリップフ"
+"ロップにマップされます。"
+
+#: src/04_language_reference/06_declaration/03_register.md:6
+msgid ""
+"`always_ff` has mandatory clock variable, optional reset variable, and `{}` "
+"block. Clock and reset are placed in `()`."
+msgstr ""
+"`always_ff` は必須のクロック変数、オプションのリセット変数、`{}` ブロックをと"
+"ります。クロックとリセットは `()` に書きます。"
+
+#: src/04_language_reference/06_declaration/03_register.md:9
+msgid ""
+"`if_reset` is a special keyword which can be used in `always_ff`. It means "
+"reset condition of the register variable. If `if_reset` is used, `always_ff` "
+"must have reset variable. `if_reset` can be conceal reset porality and "
+"synchronisity. The actual porality and synchronisity can be configured "
+"through `[build]` section of `Veryl.toml`."
+msgstr ""
+"`if_reset` は `always_ff` に書ける特別なキーワードで、そのレジスタ変数のリ"
+"セット条件を示します。`if_reset` を使う場合は `always_ff` のリセット変数は必"
+"須です。これを使うことで、リセットの極性と同期性を隠ぺいすることができます。"
+"実際の極性と同期性は `Veryl.toml` の `[build]` セクションで設定できます。"
+
+#: src/04_language_reference/06_declaration/04_combinational.md:3
+msgid ""
+"If a variable is assigned in `always_comb` declaration, it means "
+"combinational circuit."
+msgstr "`always_comb` で代入される変数は組み合わせ回路を意味します。"
+
+#: src/04_language_reference/06_declaration/05_assign.md:3
+msgid "`assign` declaration can assign expression to variable."
+msgstr "`assign` 宣言で変数に式を代入することができます。"
+
+#: src/04_language_reference/06_declaration/06_function.md:3
+msgid ""
+"Function can be declared by `function` keyword. Arguments are placed in `()` "
+"and return type is placed after `->`."
+msgstr ""
+"関数は `function` キーワードで宣言できます。引数は `()` 内に書き、戻り値の型"
+"を `->` の後に書きます。"
+
+#: src/04_language_reference/06_declaration/07_initial_final.md:3
+msgid ""
+"Statements in `initial` are executed at the beginning of simulation, `final` "
+"is the end. Both will be ignored logical synthesis, and can be used as debug "
+"or assertion."
+msgstr ""
+"`initial` ブロック内の文はシミュレーション開始時に実行され、`final` は終了時"
+"です。どちらも論理合成では無視され、デバッグやアサーションに使うことができま"
+"す。"
+
+#: src/04_language_reference/06_declaration/07_initial_final.md:7
+msgid ""
+"```veryl,playground\n"
+"module ModuleA {\n"
+"    initial {\n"
+"        $display(\"initial\");\n"
+"    }\n"
+"\n"
+"    final {\n"
+"        $display(\"final\");\n"
+"    }\n"
+"}\n"
+"```"
+msgstr ""
+"```veryl,playground\n"
+"module ModuleA {\n"
+"    initial {\n"
+"        $display(\"initial\");\n"
+"    }\n"
+"\n"
+"    final {\n"
+"        $display(\"final\");\n"
+"    }\n"
+"}\n"
+"```"
+
+#: src/04_language_reference/06_declaration/08_attribute.md:3
+msgid "Attribute can annotate some declarations like variable declaration."
+msgstr ""
+"アトリビュートは変数宣言などいくつかの宣言に注釈を付けることができます。"
+
+#: src/04_language_reference/06_declaration/08_attribute.md:5
+msgid "SV Attribute"
+msgstr "SV アトリビュート"
+
+#: src/04_language_reference/06_declaration/08_attribute.md:7
+msgid ""
+"SV attribute represents SystemVerilog attribute. It will be transpiled to "
+"SystemVerilog attribute `(*  *)`."
+msgstr ""
+"SV アトリビュートは SystemVerilog のアトリビュートを表し、`(*  *)` という形式"
+"の SystemVerilog アトリビュートに変換されます。"
+
+#: src/04_language_reference/06_declaration/08_attribute.md:10
+msgid ""
+"```veryl,playground\n"
+"module ModuleA {\n"
+"    #[sv(\"ram_style=\\\"block\\\"\")]\n"
+"    var _a: logic<10>;\n"
+"    #[sv(\"mark_debug=\\\"true\\\"\")]\n"
+"    var _b: logic<10>;\n"
+"}\n"
+"```"
+msgstr ""
+"```veryl,playground\n"
+"module ModuleA {\n"
+"    #[sv(\"ram_style=\\\"block\\\"\")]\n"
+"    var _a: logic<10>;\n"
+"    #[sv(\"mark_debug=\\\"true\\\"\")]\n"
+"    var _b: logic<10>;\n"
+"}\n"
+"```"
+
+#: src/04_language_reference/06_declaration/09_generate.md:3
+msgid ""
+"Declaration can be generated by `for` and `if`. Label which is shown by `:` "
+"is required to idenfity the generated declarations."
+msgstr ""
+"宣言や `for` や `if` を使って生成することができます。`:` で示すラベルは生成さ"
+"れた複数の宣言を識別するのに必要です。"
+
+#: src/04_language_reference/06_declaration/09_generate.md:6
+msgid ""
+"```veryl,playground\n"
+"module ModuleA {\n"
+"    var a: logic<10>;\n"
+"\n"
+"    for i in 0..10 :label {\n"
+"        if i >: 5 :label {\n"
+"            assign a[i] = i + 2;\n"
+"        } else { // label of else clause can be omit\n"
+"            assign a[i] = i + 2;\n"
+"        }\n"
+"    }\n"
+"}\n"
+"```"
+msgstr ""
+"```veryl,playground\n"
+"module ModuleA {\n"
+"    var a: logic<10>;\n"
+"\n"
+"    for i in 0..10 :label {\n"
+"        if i >: 5 :label {\n"
+"            assign a[i] = i + 2;\n"
+"        } else { // else 句のラベルは省略可能\n"
+"            assign a[i] = i + 2;\n"
+"        }\n"
+"    }\n"
+"}\n"
+"```"
+
+#: src/04_language_reference/06_declaration/10_instantiation.md:3
+msgid ""
+"`inst` keyword represents instantiation of modula and interface. The name of "
+"instance is placed after `inst` keyword, and the type of instance is placed "
+"after `:`. Parameter override is `#()`, and port connection is `()`."
+msgstr ""
+"`inst` キーワードはモジュールやインターフェースのインスタンス化を表します。イ"
+"ンスタンスの名前は `inst` の後に、インスタンスの型は `:` の後に書きます。"
+"`#()` でパラメータオーバーライドを、`()` でポート接続を表します。"
+
+#: src/04_language_reference/06_declaration/10_instantiation.md:8
+msgid ""
+"```veryl,playground\n"
+"module ModuleA #(\n"
+"    parameter paramA: u32 = 1,\n"
+") {\n"
+"    var a: logic<10>;\n"
+"    var b: logic<10>;\n"
+"\n"
+"    inst instB: ModuleB #(\n"
+"        paramA    , // Parameter assignment by name\n"
+"        paramB: 10,\n"
+"    ) (\n"
+"        a    , // Port connection by name\n"
+"        bb: b,\n"
+"    );\n"
+"}\n"
+"```"
+msgstr ""
+"```veryl,playground\n"
+"module ModuleA #(\n"
+"    parameter paramA: u32 = 1,\n"
+") {\n"
+"    var a: logic<10>;\n"
+"    var b: logic<10>;\n"
+"\n"
+"    inst instB: ModuleB #(\n"
+"        paramA    , // 名前によるパラメータ代入\n"
+"        paramB: 10,\n"
+"    ) (\n"
+"        a    , // 名前によるポート接続\n"
+"        bb: b,\n"
+"    );\n"
+"}\n"
+"```"
+
+#: src/04_language_reference/06_declaration/11_named_block.md:3
+msgid ""
+"Label can be added to `{}` block. The named block has an individual "
+"namespace."
+msgstr ""
+"`{}` ブロックにラベルを付けることができます。そのような名前付きブロックは独立"
+"した名前空間を持ちます。"
+
+#: src/04_language_reference/07_module.md:3
+msgid ""
+"Module is one of top level components in source code. Module has overridable "
+"parameters, connection ports, and internal logic."
+msgstr ""
+"モジュールはソースコードの最上位コンポーネントの1つです。モジュールはオーバー"
+"ライド可能なパラメータ、接続ポート、内部ロジックを持ちます。"
+
+#: src/04_language_reference/07_module.md:6
+msgid ""
+"Overridable parameters can be declared in `#()`. Each parameter declaration "
+"is started by `parameter` keyword. After the keyword, an identifier, `:`, "
+"the type of the parameter, and a default value are placed."
+msgstr ""
+"オーバーライド可能なパラメータは `#()` 内で宣言できます。それぞれのパラメータ"
+"宣言は `parameter` キーワードで始まり、識別子、`:`、パラメータの型、デフォル"
+"ト値で構成されます。"
+
+#: src/04_language_reference/07_module.md:10
+msgid ""
+"Connection ports can be declared in `()`. Each port declaration is "
+"constructed by an identifier, `:`, port direction, and the type of the port. "
+"The available port directions are:"
+msgstr ""
+"接続ポートは `()` 内で宣言できます。それぞれのポート宣言は識別子、`:`、ポート"
+"の方向、ポートの型で構成されます。利用可能なポート方向は以下の通りです。"
+
+#: src/04_language_reference/07_module.md:14
+msgid "`input`: input port"
+msgstr "`input`：入力ポート"
+
+#: src/04_language_reference/07_module.md:15
+msgid "`output`: output port"
+msgstr "`output`：出力ポート"
+
+#: src/04_language_reference/07_module.md:16
+msgid "`inout`: bi-directional port"
+msgstr "`inout`：双方向ポート"
+
+#: src/04_language_reference/07_module.md:17
+msgid "`modport`: modport of interface"
+msgstr "`modport`：インターフェースのmodport"
+
+#: src/04_language_reference/08_interface.md:3
+msgid ""
+"Interface is one of top level components in source code. Interface has "
+"overridable parameters, and interface definitions."
+msgstr ""
+"インターフェースはソースコードの最上位コンポーネントの1つです。インターフェー"
+"スはオーバーライド可能なパラメータ、インターフェース定義を持ちます。"
+
+#: src/04_language_reference/08_interface.md:6
+msgid "Overridable parameters are the same as them of module."
+msgstr "オーバーライド可能なパラメータについてはモジュールと同じです。"
+
+#: src/04_language_reference/08_interface.md:8
+msgid ""
+"In interface definitions, `modport` can be declared.  `modport` can be used "
+"as bundled port connection at the port declaration of module."
+msgstr ""
+"インターフェース定義では `modport` を宣言することができます。`modport` はモ"
+"ジュールのポート宣言で、ポートを束ねて接続するために使うことができます。"
+
+#: src/04_language_reference/09_package.md:3
+msgid ""
+"Package is one of top level components in source code. Package can organize "
+"some declarations like parameter and function."
+msgstr ""
+"パッケージはソースコードの最上位コンポーネントの1つです。パッケージはパラメー"
+"タや関数などいくつかの宣言をまとめることができます。"
+
+#: src/04_language_reference/09_package.md:6
+msgid ""
+"To access an item in a package, `::` symbol can be used like `PackageA::"
+"ParamA`."
+msgstr ""
+"パッケージ内の要素にアクセスするには、`::` 記号を使って `PackageA::ParamA` の"
+"ようにします。"
+
 #: src/05_development_environment.md:3
 msgid ""
 "In this chapter, we'll discuss about development environment including "
@@ -2382,7 +2680,9 @@ msgstr "`[format]` セクション"
 msgid ""
 "The `[format]` section contains the configurations of code formatter. "
 "Available configurations is [here](./05_formatter.md)."
-msgstr "`[format]` セクションはコードフォーマッターの設定です。詳細は[こちら](./05_formatter.md)。"
+msgstr ""
+"`[format]` セクションはコードフォーマッターの設定です。詳細は[こちら]"
+"(./05_formatter.md)。"
 
 #: src/05_development_environment/01_project_configuration.md:140
 msgid "The `[lint]` section"
@@ -2392,7 +2692,8 @@ msgstr "`[lint]` セクション"
 msgid ""
 "The `[lint]` section contains the configurations of linter. Available "
 "configurations is [here](./06_linter.md)."
-msgstr "`[lint]` セクションはリンタの設定です。詳細は[こちら](./06_linter.md)。"
+msgstr ""
+"`[lint]` セクションはリンタの設定です。詳細は[こちら](./06_linter.md)。"
 
 #: src/05_development_environment/01_project_configuration.md:145
 msgid "The `[publish]` section"
@@ -2402,7 +2703,9 @@ msgstr "`[publish]` セクション"
 msgid ""
 "The `[publish]` section contains the configurations of publishing. Available "
 "configurations is [here](./03_publish_project.md)."
-msgstr "`[publish]` セクションはプロジェクト公開の設定です。詳細は[こちら](./03_publish_project.md)。"
+msgstr ""
+"`[publish]` セクションはプロジェクト公開の設定です。詳細は[こちら]"
+"(./03_publish_project.md)。"
 
 #: src/05_development_environment/01_project_configuration.md:150
 msgid "The `[dependencies]` section"
@@ -2413,7 +2716,8 @@ msgid ""
 "The `[dependencies]` section contains library dependencies. Available "
 "configurations is [here](./02_dependencies.md)."
 msgstr ""
-"`[dependencies]` セクションはライブラリの依存関係です。詳細は[こちら](./02_dependencies.md)。"
+"`[dependencies]` セクションはライブラリの依存関係です。詳細は[こちら]"
+"(./02_dependencies.md)。"
 
 #: src/05_development_environment/02_dependencies.md:3
 msgid ""
@@ -2421,9 +2725,9 @@ msgid ""
 "can add them to `[dependencies]` section in `Veryl.toml`. The left hand side "
 "of entry is path to the dependency, and the right hand side is version."
 msgstr ""
-"他の Veryl プロジェクトへの依存関係をプロジェクトに追加したい場合、"
-"`Veryl.toml` に `[dependencies]` セクションを追加します。"
-"エントリの左辺は依存関係へのパス、右辺はバージョンです。"
+"他の Veryl プロジェクトへの依存関係をプロジェクトに追加したい場合、`Veryl."
+"toml` に `[dependencies]` セクションを追加します。エントリの左辺は依存関係へ"
+"のパス、右辺はバージョンです。"
 
 #: src/05_development_environment/02_dependencies.md:6
 msgid ""
@@ -2443,8 +2747,8 @@ msgid ""
 "of the dependency. If you want to specify namespace, you can use `name` "
 "field."
 msgstr ""
-"デフォルトでは依存関係の名前空間はそのプロジェクト名と同じです。"
-"もし名前空間を指定したい場合は、 `name` フィールドを使います。"
+"デフォルトでは依存関係の名前空間はそのプロジェクト名と同じです。もし名前空間"
+"を指定したい場合は、 `name` フィールドを使います。"
 
 #: src/05_development_environment/02_dependencies.md:14
 msgid ""
@@ -2465,7 +2769,8 @@ msgid ""
 "If you want to use many versions of the same dependency path, you can "
 "specify each name."
 msgstr ""
-"同じ依存関係の複数のバージョンを使う場合は、以下のようにそれぞれの名前を指定できます。"
+"同じ依存関係の複数のバージョンを使う場合は、以下のようにそれぞれの名前を指定"
+"できます。"
 
 #: src/05_development_environment/02_dependencies.md:21
 msgid ""
@@ -2495,8 +2800,9 @@ msgid ""
 "and `package` in the dependencies. The following example uses `delay` module "
 "in the `veryl_sample` dependency."
 msgstr ""
-"`Veryl.toml` に依存関係を追加したあとは、その依存関係の `module`、`interface`、`package`"
-"を使うことができます。以下は `veryl_sample` の依存関係に含まれる `delay` モジュールを使った例です。"
+"`Veryl.toml` に依存関係を追加したあとは、その依存関係の `module`、"
+"`interface`、`package`を使うことができます。以下は `veryl_sample` の依存関係"
+"に含まれる `delay` モジュールを使った例です。"
 
 #: src/05_development_environment/02_dependencies.md:50
 msgid ""
@@ -2504,8 +2810,8 @@ msgid ""
 "doesn't use dependency resolution. Actually the module name becomes "
 "`veryl_samlle_delay`"
 msgstr ""
-"注：上記のコードのプレイボタンの結果は依存関係解決を行わないので正確ではありません。"
-"実際のモジュール名は `veryl_samlle_delay` になります。"
+"注：上記のコードのプレイボタンの結果は依存関係解決を行わないので正確ではあり"
+"ません。実際のモジュール名は `veryl_samlle_delay` になります。"
 
 #: src/05_development_environment/02_dependencies.md:53
 msgid "Version Requirement"
@@ -2519,10 +2825,10 @@ msgid ""
 "Versioning](https://semver.org/). A version is constructed from the "
 "following three parts."
 msgstr ""
-"`[dependencies]` セクションの `version` フィールドはバージョン要求を示します。"
-"例えば、`version = \"0.1.0\"` は `0.1.0` と互換性のある最新バージョンを意味します。"
-"互換性は[セマンティックバージョニング](https://semver.org/)で判定されます。"
-"バージョンは以下の3つの部分からなります。"
+"`[dependencies]` セクションの `version` フィールドはバージョン要求を示しま"
+"す。例えば、`version = \"0.1.0\"` は `0.1.0` と互換性のある最新バージョンを意"
+"味します。互換性は[セマンティックバージョニング](https://semver.org/)で判定さ"
+"れます。バージョンは以下の3つの部分からなります。"
 
 #: src/05_development_environment/02_dependencies.md:60
 msgid "`MAJOR` version when you make incompatible API changes"
@@ -2540,15 +2846,17 @@ msgstr "`パッチ` バージョンは互換性のあるバグ修正"
 #: src/05_development_environment/02_dependencies.md:64
 msgid ""
 "If `MAJOR` version is `0`, `MINOR` is interpreted as incompatible changes."
-msgstr "もし `メジャー` バージョンが `0` なら、`マイナー` が非互換変更と解釈されます。"
+msgstr ""
+"もし `メジャー` バージョンが `0` なら、`マイナー` が非互換変更と解釈されま"
+"す。"
 
 #: src/05_development_environment/02_dependencies.md:66
 msgid ""
 "If there are `0.1.0` and `0.1.1` and `0.2.0`, `0.1.1` will be selected. This "
 "is because"
 msgstr ""
-"バージョン `0.1.0`、`0.1.1`、`0.2.0`があった場合、`0.1.1` が選択されます。"
-"これは以下のように決定されます。"
+"バージョン `0.1.0`、`0.1.1`、`0.2.0`があった場合、`0.1.1` が選択されます。こ"
+"れは以下のように決定されます。"
 
 #: src/05_development_environment/02_dependencies.md:69
 msgid "`0.1.0` is compatible with `0.1.0`."
@@ -2573,25 +2881,26 @@ msgid ""
 "[Specifying Dependencies](https://doc.rust-lang.org/cargo/reference/"
 "specifying-dependencies.html#specifying-dependencies-from-cratesio)."
 msgstr ""
-"`version` フィールドは `=0.1.0` のような指定も可能です。"
-"詳細は Rust のバージョン要求についてのドキュメントを参照してください。"
-"[Specifying Dependencies](https://doc.rust-lang.org/cargo/reference/"
-"specifying-dependencies.html#specifying-dependencies-from-cratesio)."
+"`version` フィールドは `=0.1.0` のような指定も可能です。詳細は Rust のバー"
+"ジョン要求についてのドキュメントを参照してください。[Specifying Dependencies]"
+"(https://doc.rust-lang.org/cargo/reference/specifying-dependencies."
+"html#specifying-dependencies-from-cratesio)."
 
 #: src/05_development_environment/03_publish_project.md:3
 msgid ""
 "To publish your project, `veryl publish` can be used. Publising means to "
 "associate a version with a git revision."
 msgstr ""
-"プロジェクトを公開するには `veryl publish` コマンドを使います。"
-"公開とはバージョン番号とgitのリビジョンを紐づけることです。"
+"プロジェクトを公開するには `veryl publish` コマンドを使います。公開とはバー"
+"ジョン番号とgitのリビジョンを紐づけることです。"
 
 #: src/05_development_environment/03_publish_project.md:12
 msgid ""
 "`veryl publish` generates `Veryl.pub` which contains published version "
 "information like below."
 msgstr ""
-"`veryl publish` は以下のように公開されたバージョンの情報を含んだ `Veryl.pub` というファイルを生成します。"
+"`veryl publish` は以下のように公開されたバージョンの情報を含んだ `Veryl.pub` "
+"というファイルを生成します。"
 
 #: src/05_development_environment/03_publish_project.md:14
 msgid ""
@@ -2613,9 +2922,9 @@ msgid ""
 "commit and push. The git branch to be committed must be the default branch "
 "because Veryl search `Veryl.pub` in the default branch."
 msgstr ""
-"`Veryl.pub` と生成した後、gitのadd、commit、pushを行えば公開手続きは完了です。"
-"gitブランチはデフォルトブランチでなければなりません。"
-"これは Veryl が `Veryl.pub` をデフォルトブランチから探すためです。"
+"`Veryl.pub` と生成した後、gitのadd、commit、pushを行えば公開手続きは完了で"
+"す。gitブランチはデフォルトブランチでなければなりません。これは Veryl が "
+"`Veryl.pub` をデフォルトブランチから探すためです。"
 
 #: src/05_development_environment/03_publish_project.md:23
 msgid ""
@@ -2636,8 +2945,8 @@ msgid ""
 "If you enable automatic commit by `publish_commit` in `[publish]` section of "
 "`Veryl.toml`, git add and commit will be executed after publish."
 msgstr ""
-"`Veryl.toml` の `[publish]` セクションに `publish_commit` を設定して自動コミットを有効にすれば、"
-"gitのaddとcommitが自動で実行されます。"
+"`Veryl.toml` の `[publish]` セクションに `publish_commit` を設定して自動コ"
+"ミットを有効にすれば、gitのaddとcommitが自動で実行されます。"
 
 #: src/05_development_environment/03_publish_project.md:38
 msgid "Version Bump"
@@ -2649,8 +2958,9 @@ msgid ""
 "the same as publish, `bump_commit` in `[publish]` section of `Veryl.toml` "
 "can specify automatic commit after bump version."
 msgstr ""
-"`--bump` オプションを使うと公開と同時にバージョンを上げることもできます。"
-"公開と同様に、`Veryl.toml` の`[publish]` セクションに `bump_commit` を設定すれば自動でcommitされます。"
+"`--bump` オプションを使うと公開と同時にバージョンを上げることもできます。公開"
+"と同様に、`Veryl.toml` の`[publish]` セクションに `bump_commit` を設定すれば"
+"自動でcommitされます。"
 
 #: src/05_development_environment/03_publish_project.md:53
 #: src/05_development_environment/03_publish_project.md:61
@@ -2765,9 +3075,9 @@ msgid ""
 "directory layout for an independent project and an integrated project within "
 "other projects is different."
 msgstr ""
-"Veryl は任意のディレクトリ構成をサポートしています。"
-"これは独立したプロジェクトと他のプロジェクトに組み込まれたプロジェクトでは"
-"最適なディレクトリ構成が異なるためです。"
+"Veryl は任意のディレクトリ構成をサポートしています。これは独立したプロジェク"
+"トと他のプロジェクトに組み込まれたプロジェクトでは最適なディレクトリ構成が異"
+"なるためです。"
 
 #: src/05_development_environment/04_directory_layout.md:6
 msgid "In this section, we suggest some directory layout patterns."
@@ -2782,8 +3092,8 @@ msgid ""
 "This pattern contains all sources in `src` directory. In `src`, you can "
 "configure arbitrary sub directories."
 msgstr ""
-"このパターンでは全てのソースコードは `src` ディレクトリに配置されます。"
-"`src` 以下のサブディレクトリの構成は自由です。"
+"このパターンでは全てのソースコードは `src` ディレクトリに配置されます。`src` "
+"以下のサブディレクトリの構成は自由です。"
 
 #: src/05_development_environment/04_directory_layout.md:26
 msgid ""
@@ -2791,8 +3101,8 @@ msgid ""
 "the source by default. You can show the behaviour explicitly by the "
 "following configuration."
 msgstr ""
-"Veryl は全ての `*.vl` ファイルを収集し、デフォルトではソースと同じディレクトリにコードを生成します。"
-"この挙動は以下の設定で明示することもできます。"
+"Veryl は全ての `*.vl` ファイルを収集し、デフォルトではソースと同じディレクト"
+"リにコードを生成します。この挙動は以下の設定で明示することもできます。"
 
 #: src/05_development_environment/04_directory_layout.md:29
 msgid ""
@@ -2819,8 +3129,8 @@ msgid ""
 "If you want to place the generated codes into a directory, you can use "
 "`target` configure in `[build]` section of `Veryl.toml`."
 msgstr ""
-"生成されたコードを1つのディレクトリに入れたい場合、"
-"`Veryl.toml` の `[build]` セクションで `target` を以下のように設定します。"
+"生成されたコードを1つのディレクトリに入れたい場合、`Veryl.toml` の `[build]` "
+"セクションで `target` を以下のように設定します。"
 
 #: src/05_development_environment/04_directory_layout.md:58
 msgid ""
@@ -2847,16 +3157,16 @@ msgid ""
 "If you want to add a veryl project to the existing SystemVerilog project, "
 "you can choose the following structure."
 msgstr ""
-"既存の SystemVerilog プロジェクトに Veryl のプロジェクトを組み込む場合、"
-"以下のような構成にすることもできます。"
+"既存の SystemVerilog プロジェクトに Veryl のプロジェクトを組み込む場合、以下"
+"のような構成にすることもできます。"
 
 #: src/05_development_environment/04_directory_layout.md:110
 msgid ""
 "The generated `prj.f` lists all generated files. So you can use it along "
 "with the existing SystemVerilog filelists."
 msgstr ""
-"生成された `prj.f` は生成されたソースコードを全てリストアップしているので、"
-"既存の SystemVerilog ファイルリストと一緒に使うことができます。"
+"生成された `prj.f` は生成されたソースコードを全てリストアップしているので、既"
+"存の SystemVerilog ファイルリストと一緒に使うことができます。"
 
 #: src/05_development_environment/04_directory_layout.md:112
 msgid "About `.gitignore`"
@@ -2867,8 +3177,8 @@ msgid ""
 "Veryl doesn't provide the default `.gitignore`. This is because which files "
 "should be ignored is different by each projects."
 msgstr ""
-"Veryl はデフォルトの `.gitignore` を提供しません。"
-"これはプロジェクト毎にどのファイルを無視する必要があるかが変わるためです。"
+"Veryl はデフォルトの `.gitignore` を提供しません。これはプロジェクト毎にどの"
+"ファイルを無視する必要があるかが変わるためです。"
 
 #: src/05_development_environment/04_directory_layout.md:117
 msgid "The candidates of `.gitignore` is below:"
@@ -2895,16 +3205,16 @@ msgid ""
 "Source code can be formatted by `veryl fmt` command. Alternatively, language "
 "server support formatting through `textDocument/formatting` request."
 msgstr ""
-"`veryl fmt` コマンドでソースコードをフォーマットできます。"
-"あるいは言語サーバの `textDocument/formatting` 要求によるフォーマットにも対応しています。"
+"`veryl fmt` コマンドでソースコードをフォーマットできます。あるいは言語サーバ"
+"の `textDocument/formatting` 要求によるフォーマットにも対応しています。"
 
 #: src/05_development_environment/05_formatter.md:6
 msgid ""
 "The available configurations are below. These can be specified in `[format]` "
 "section of `Veryl.toml`."
 msgstr ""
-"設定可能な項目は以下の通りです。"
-"これは `Veryl.toml` の `[format]` セクションで指定できます。"
+"設定可能な項目は以下の通りです。これは `Veryl.toml` の `[format]` セクション"
+"で指定できます。"
 
 #: src/05_development_environment/05_formatter.md:16
 msgid "indent_width"
@@ -2923,16 +3233,16 @@ msgid ""
 "Lint check is executed at `veryl check` or `veryl build`. Alternatively, "
 "language server checks lint in real time."
 msgstr ""
-"`veryl check` あるいは `veryl build` でリントチェックができます。"
-"あるいは言語サーバはリアルタイムでのチェックを行います。"
+"`veryl check` あるいは `veryl build` でリントチェックができます。あるいは言語"
+"サーバはリアルタイムでのチェックを行います。"
 
 #: src/05_development_environment/06_linter.md:6
 msgid ""
 "The available configurations are below. These can be specified in `[lint]` "
 "section of `Veryl.toml`."
 msgstr ""
-"設定可能な項目は以下の通りです。"
-"これは `Veryl.toml` の `[lint]` セクションで指定できます。"
+"設定可能な項目は以下の通りです。これは `Veryl.toml` の `[lint]` セクションで"
+"指定できます。"
 
 #: src/05_development_environment/06_linter.md:9
 msgid ""
@@ -3510,32 +3820,32 @@ msgid ""
 "Regular expression string like `\".*\"`. The available syntax is [here]"
 "(https://docs.rs/regex/latest/regex/#syntax)."
 msgstr ""
-"`\".*\"`のような正規表現です。使用可能な構文は[こちら]"
-"(https://docs.rs/regex/latest/regex/#syntax)."
+"`\".*\"`のような正規表現です。使用可能な構文は[こちら](https://docs.rs/regex/"
+"latest/regex/#syntax)."
 
 #: src/05_development_environment/06_linter.md:89
 msgid ""
 "Register type means that the variable is assigned in `always_ff`. It will be "
 "mapped to flip-flop in synthesis phase."
 msgstr ""
-"レジスタ変数とは `always_ff` で代入される変数です。"
-"合成フェーズでフリップフロップにマップされます。"
+"レジスタ変数とは `always_ff` で代入される変数です。合成フェーズでフリップフ"
+"ロップにマップされます。"
 
 #: src/05_development_environment/06_linter.md:91
 msgid ""
 "Wire type means that the variable is assigned in `always_comb`. It will be "
 "mapped to wire in synthesis phase."
 msgstr ""
-"ワイヤ変数とは `always_comb` で代入される変数です。"
-"合成フェーズでワイヤにマップされます。"
+"ワイヤ変数とは `always_comb` で代入される変数です。合成フェーズでワイヤにマッ"
+"プされます。"
 
 #: src/05_development_environment/07_language_server.md:3
 msgid ""
 "`veryl-ls` is a language server binary. If you want to use it, editor "
 "configuration or plugin to use it is required."
 msgstr ""
-"`veryl-ls` は言語サーバのバイナリです。"
-"使用するにはエディタの設定やプラグインが必要です。"
+"`veryl-ls` は言語サーバのバイナリです。使用するにはエディタの設定やプラグイン"
+"が必要です。"
 
 #: src/05_development_environment/08_compatibility.md:3
 msgid ""
@@ -3543,8 +3853,9 @@ msgid ""
 "generation can be customized by configuration of `Veryl.toml` to support "
 "these tools."
 msgstr ""
-"いくつかのツールはサポートしていない SystemVerilog 構文があります。"
-"これをサポートするために、 `Veryl.toml` の設定でコード生成をカスタマイズすることができます。"
+"いくつかのツールはサポートしていない SystemVerilog 構文があります。これをサ"
+"ポートするために、 `Veryl.toml` の設定でコード生成をカスタマイズすることがで"
+"きます。"
 
 #: src/05_development_environment/08_compatibility.md:6
 msgid "Vivado"
@@ -3591,8 +3902,8 @@ msgid ""
 "Documant of project can be generated by `veryl doc` command. All modules, "
 "interfaces and packages will be listed in it."
 msgstr ""
-"プロジェクトのドキュメントは `veryl doc` コマンドで生成することができます。"
-"全てのモジュールとインターフェース、パッケージがリストアップされます。"
+"プロジェクトのドキュメントは `veryl doc` コマンドで生成することができます。全"
+"てのモジュールとインターフェース、パッケージがリストアップされます。"
 
 #: src/05_development_environment/09_documentation.md:6
 msgid ""
@@ -3600,8 +3911,9 @@ msgid ""
 "comment. In the documentation comment, [Markdown](https://www.markdownguide."
 "org) syntax can be used."
 msgstr ""
-"詳細な説明を書きたい場合はドキュメンテーションコメントを追加することもできます。"
-"ドキュメンテーションコメントでは[マークダウン](https://www.markdownguide.org)記法を使えます。"
+"詳細な説明を書きたい場合はドキュメンテーションコメントを追加することもできま"
+"す。ドキュメンテーションコメントでは[マークダウン](https://www.markdownguide."
+"org)記法を使えます。"
 
 #: src/05_development_environment/09_documentation.md:9
 msgid ""
@@ -3644,8 +3956,8 @@ msgid ""
 "Veryl's parser is based on parser generator [parol](https://github.com/"
 "jsinger67/parol). The following syntex definition of parol is formal syntax."
 msgstr ""
-"Veryl のパーサはパーサジェネレータ [parol](https://github.com/jsinger67/parol)"
-"を使っています。以下の parol の構文定義が正式な構文です。"
+"Veryl のパーサはパーサジェネレータ [parol](https://github.com/jsinger67/"
+"parol)を使っています。以下の parol の構文定義が正式な構文です。"
 
 #: src/06_appendix/01_formal_syntax.md:6
 msgid ""
@@ -4721,3 +5033,9 @@ msgstr "unknown_port"
 #: src/06_appendix/02_semantic_error.md:51
 msgid "unused_variable"
 msgstr "unused_variable"
+
+#~ msgid "Concepts"
+#~ msgstr "コンセプト"
+
+#~ msgid "Label can be added to `{}` block."
+#~ msgstr "`{}` ブロックにラベルを付けることができます。"

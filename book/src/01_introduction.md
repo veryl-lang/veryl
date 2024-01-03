@@ -2,14 +2,10 @@
 
 ![Veryl](https://github.com/dalance/veryl/raw/master/support/logo/veryl_wide.png)
 
-Veryl is a modern hardware description language.
-
-## Concepts
-
-Veryl is designed as a "SystemVerilog Alternative".
+Veryl is a modern hardware description language which is designed as a "SystemVerilog Alternative".
 There are some design concepts.
 
-### Symplified Syntax
+## Symplified Syntax
 
 Veryl has symplified syntax based on SystemVerilog / Rust.
 "Symplified" has two meanings. One is for parser, and another is for human.
@@ -25,7 +21,7 @@ Additionally some syntaxes can be written, but cannot be used actually because m
 So user should learn many syntaxes and whether each syntax can be used or not.
 Veryl will not support old Verilog style, unrecommended description, and so on.
 
-### Transpiler to SystemVerilog
+## Transpiler to SystemVerilog
 
 HDL alternative languages should be transpiler to the tradisional HDLs like Verilog / VHDL because major EDA tools support them.
 Veryl is a transpiler to SystemVerilog.
@@ -41,7 +37,7 @@ So transpiled code will be human readable SystemVerilog.
 Additionally Veryl have interoperability with SystemVerilog.
 Veryl can use SystemVerilog's module / interface / struct / enum in the code, and vice versa.
 
-### Integrated Tools
+## Integrated Tools
 
 Modern programming languages have development support tools like linter, formatter, and language server by default.
 Veryl will have them too from the beginning of development.
