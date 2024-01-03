@@ -220,23 +220,24 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="インターフェース"><a class="header" href="#インターフェース">インターフェース</a></h1>
-<pre class="playground"><code class="language-veryl">interface simple_bus {
-    var req  : logic;
-    var gnt  : logic;
-    var addr : logic [8];
-    var data : logic [8];
-    var mode : logic [2];
-    var start: logic;
-    var rdy  : logic;
+<p>インターフェースはソースコードの最上位コンポーネントの1つです。インターフェースはオーバーライド可能なパラメータ、インターフェース定義を持ちます。</p>
+<p>オーバーライド可能なパラメータについてはモジュールと同じです。</p>
+<p>インターフェース定義では <code>modport</code> を宣言することができます。<code>modport</code> はモジュールのポート宣言で、ポートを束ねて接続するために使うことができます。</p>
+<pre class="playground"><code class="language-veryl">interface InterfaceA #(
+    parameter ParamA: u32 = 0,
+    parameter ParamB: u32 = 0,
+) {
+    var a: logic;
+    var b: logic;
 
     modport master {
-        req  : output,
-        addr : output,
-        mode : output,
-        start: output,
-        gnt  : input ,
-        rdy  : input ,
-        data : ref   ,
+        a: output,
+        b: input ,
+    }
+
+    modport slave {
+        b: input ,
+        a: output,
     }
 }
 </code></pre>

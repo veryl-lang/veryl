@@ -220,6 +220,22 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="インスタンス"><a class="header" href="#インスタンス">インスタンス</a></h1>
+<p><code>inst</code> キーワードはモジュールやインターフェースのインスタンス化を表します。インスタンスの名前は <code>inst</code> の後に、インスタンスの型は <code>:</code> の後に書きます。<code>#()</code> でパラメータオーバーライドを、<code>()</code> でポート接続を表します。</p>
+<pre class="playground"><code class="language-veryl">module ModuleA #(
+    parameter paramA: u32 = 1,
+) {
+    var a: logic&lt;10&gt;;
+    var b: logic&lt;10&gt;;
+
+    inst instB: ModuleB #(
+        paramA    , // 名前によるパラメータ代入
+        paramB: 10,
+    ) (
+        a    , // 名前によるポート接続
+        bb: b,
+    );
+}
+</code></pre>
 
                     </main>
 

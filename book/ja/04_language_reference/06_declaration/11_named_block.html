@@ -220,6 +220,17 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="名前付きブロック"><a class="header" href="#名前付きブロック">名前付きブロック</a></h1>
+<p><code>{}</code> ブロックにラベルを付けることができます。そのような名前付きブロックは独立した名前空間を持ちます。</p>
+<pre class="playground"><code class="language-veryl">module ModuleA {
+    :labelA {
+        var _a: logic&lt;10&gt;;
+    }
+
+    :labelB {
+        var _a: logic&lt;10&gt;;
+    }
+}
+</code></pre>
 
                     </main>
 

@@ -220,6 +220,16 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="アトリビュート"><a class="header" href="#アトリビュート">アトリビュート</a></h1>
+<p>アトリビュートは変数宣言などいくつかの宣言に注釈を付けることができます。</p>
+<h2 id="sv-アトリビュート"><a class="header" href="#sv-アトリビュート">SV アトリビュート</a></h2>
+<p>SV アトリビュートは SystemVerilog のアトリビュートを表し、<code>(*  *)</code> という形式の SystemVerilog アトリビュートに変換されます。</p>
+<pre class="playground"><code class="language-veryl">module ModuleA {
+    #[sv(&quot;ram_style=\&quot;block\&quot;&quot;)]
+    var _a: logic&lt;10&gt;;
+    #[sv(&quot;mark_debug=\&quot;true\&quot;&quot;)]
+    var _b: logic&lt;10&gt;;
+}
+</code></pre>
 
                     </main>
 

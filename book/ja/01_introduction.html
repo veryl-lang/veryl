@@ -221,19 +221,17 @@
                     <main>
                         <h1 id="ハードウェア記述言語-veryl"><a class="header" href="#ハードウェア記述言語-veryl">ハードウェア記述言語 Veryl</a></h1>
 <p><img src="https://github.com/dalance/veryl/raw/master/support/logo/veryl_wide.png" alt="Veryl" /></p>
-<p>Veryl is a modern hardware description language.</p>
-<h2 id="concepts"><a class="header" href="#concepts">Concepts</a></h2>
-<p>Veryl is designed as a “SystemVerilog Alternative”. There are some design concepts.</p>
-<h3 id="簡素な構文"><a class="header" href="#簡素な構文">簡素な構文</a></h3>
+<p>Veryl は “SystemVerilog の代替言語” として設計された最新のハードウェア記述言語です。以下のような特徴があります。</p>
+<h2 id="簡素な構文"><a class="header" href="#簡素な構文">簡素な構文</a></h2>
 <p>Veryl の構文は SystemVerilog と Rust をベースに簡素化したものです。ここで “簡素” とは2つの意味があります。1つはパーサにとって、もう1つは人間にとってです。</p>
 <p>SystemVerilog の構文は非常に複雑であり（IEEE Std 1800-2017 Annex A を参照）、このことがツール実装を困難にしています。Veryl はパースしやすい簡素な構文を採用することで、ツール実装のしやすさを重視しています。そのため文脈依存の構文や省略記法よりキーワードや記号による明示的な構文を採用します。例えば Python における “オフサイドルール” や ECMAScript / Go における “自動セミコロン挿入“は採用されません。</p>
 <p>SystemVerilog には Verilog から引き継いだ構文や SystemVerilog で新たに追加された構文など多様な構文があります。さらに、いくつかの構文は書くことができるものの、主要なEDAツールでサポートされていないため事実上使用できません。そのためユーザはそれぞれの構文が使用可能かどうかを学ぶ必要があります。Veryl は古い Verilog スタイルの構文や非推奨記述をサポートしません。</p>
-<h3 id="systemverilog-へのトランスパイラ"><a class="header" href="#systemverilog-へのトランスパイラ">SystemVerilog へのトランスパイラ</a></h3>
+<h2 id="systemverilog-へのトランスパイラ"><a class="header" href="#systemverilog-へのトランスパイラ">SystemVerilog へのトランスパイラ</a></h2>
 <p>HDL の代替言語は主要な EDA ツールがサポートしている Verylog / VHDL のような伝統的な HDL へのトランスパイラである必要があります。Veryl は SystemVerilog へのトランスパイラです。</p>
 <p>Verilog へのトランスパイラであれば OSS の EDA ツールを含め多くの EDA ツールにサポートされています。しかし代替 HDL 上で <code>struct</code> や <code>interface</code> のようなリッチなデータ構造を表現しても、トランスパイルされた Verilog ではそれらを表現できません。代替 HDL が高度なコード生成機構を持っていても、 Verilog ではそれらが展開された非常に長いコードになってしまいます。そのためトランスパイルされたコードのデバッグは困難です。</p>
 <p>Veryl は SystemVerilog とほとんど同じセマンティクスを持っています。そのためトランスパイルされたコードは人間が読みやすい SystemVerilog になります。</p>
 <p>さらに Veryl は SystemVerilog と相互運用可能です。Veryl では SystemVerilog の module / interface / struct / enum を使えますし、逆も可能です。</p>
-<h3 id="ツール統合"><a class="header" href="#ツール統合">ツール統合</a></h3>
+<h2 id="ツール統合"><a class="header" href="#ツール統合">ツール統合</a></h2>
 <p>モダンなプログラミング言語ではリンタやフォーマッタ、言語サーバといったサポートツールが標準で揃っています。Veryl でもそれらを最初からサポートします。</p>
 <p>以下のツールサポートが予定されています。</p>
 <ul>

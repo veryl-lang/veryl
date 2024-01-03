@@ -220,6 +220,16 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="組み合わせ回路"><a class="header" href="#組み合わせ回路">組み合わせ回路</a></h1>
+<p><code>always_comb</code> で代入される変数は組み合わせ回路を意味します。</p>
+<pre class="playground"><code class="language-veryl">module ModuleA {
+    var a: logic&lt;10&gt;;
+    var b: logic&lt;10&gt;;
+
+    always_comb {
+        b = a + 1;
+    }
+}
+</code></pre>
 
                     </main>
 

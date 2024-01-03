@@ -220,6 +220,19 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="生成"><a class="header" href="#生成">生成</a></h1>
+<p>宣言や <code>for</code> や <code>if</code> を使って生成することができます。<code>:</code> で示すラベルは生成された複数の宣言を識別するのに必要です。</p>
+<pre class="playground"><code class="language-veryl">module ModuleA {
+    var a: logic&lt;10&gt;;
+
+    for i in 0..10 :label {
+        if i &gt;: 5 :label {
+            assign a[i] = i + 2;
+        } else { // else 句のラベルは省略可能
+            assign a[i] = i + 2;
+        }
+    }
+}
+</code></pre>
 
                     </main>
 

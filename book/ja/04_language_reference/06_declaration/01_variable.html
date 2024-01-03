@@ -222,11 +222,13 @@
                         <h1 id="変数"><a class="header" href="#変数">変数</a></h1>
 <p>変数宣言は <code>var</code> キーワードで始まり、変数名、<code>:</code>、変数の型と続きます。</p>
 <p>未使用の変数は警告が発生します。<code>_</code> で始まる変数名は未使用変数を意味し、警告を抑制します。</p>
+<p>変数宣言と同時に代入することもできます。</p>
 <pre class="playground"><code class="language-veryl">module ModuleA {
     var _a: logic        ;
     var _b: logic&lt;10&gt;    ;
     var _c: logic&lt;10, 10&gt;;
     var _d: u32          ;
+    var _e: logic        = 1;
 }
 </code></pre>
 

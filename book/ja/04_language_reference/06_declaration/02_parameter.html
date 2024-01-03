@@ -220,7 +220,12 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="パラメータ"><a class="header" href="#パラメータ">パラメータ</a></h1>
-<pre><code class="language-veryl">localparam param_a: u32 = 1;
+<p>パラメータは変数と同時に宣言できます。<code>parameter</code> キーワードはモジュールヘッダで使用することができ、インスタンス時に上書きできます。<code>localparam</code> キーワードはモジュール内で使用することができ、上書きできません。</p>
+<pre class="playground"><code class="language-veryl">module ModuleA #(
+    parameter ParamA: u32 = 1,
+) {
+    localparam ParamB: u32 = 1;
+}
 </code></pre>
 
                     </main>

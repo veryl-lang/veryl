@@ -220,6 +220,29 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="レジスタ"><a class="header" href="#レジスタ">レジスタ</a></h1>
+<p>レジスタ変数とは <code>always_ff</code> で代入される変数です。合成フェーズでフリップフロップにマップされます。</p>
+<p><code>always_ff</code> は必須のクロック変数、オプションのリセット変数、<code>{}</code> ブロックをとります。クロックとリセットは <code>()</code> に書きます。</p>
+<p><code>if_reset</code> は <code>always_ff</code> に書ける特別なキーワードで、そのレジスタ変数のリセット条件を示します。<code>if_reset</code> を使う場合は <code>always_ff</code> のリセット変数は必須です。これを使うことで、リセットの極性と同期性を隠ぺいすることができます。実際の極性と同期性は <code>Veryl.toml</code> の <code>[build]</code> セクションで設定できます。</p>
+<pre class="playground"><code class="language-veryl">module ModuleA (
+    i_clk: input logic,
+    i_rst: input logic,
+) {
+    var a: logic&lt;10&gt;;
+    var b: logic&lt;10&gt;;
+
+    always_ff (i_clk) {
+        a = 1;
+    }
+
+    always_ff (i_clk, i_rst) {
+        if_reset {
+            b = 0;
+        } else {
+            b = 1;
+        }
+    }
+}
+</code></pre>
 
                     </main>
 

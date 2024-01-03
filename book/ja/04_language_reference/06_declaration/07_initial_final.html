@@ -220,6 +220,17 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="initial--final"><a class="header" href="#initial--final">initial / final</a></h1>
+<p><code>initial</code> ブロック内の文はシミュレーション開始時に実行され、<code>final</code> は終了時です。どちらも論理合成では無視され、デバッグやアサーションに使うことができます。</p>
+<pre class="playground"><code class="language-veryl">module ModuleA {
+    initial {
+        $display(&quot;initial&quot;);
+    }
+
+    final {
+        $display(&quot;final&quot;);
+    }
+}
+</code></pre>
 
                     </main>
 
