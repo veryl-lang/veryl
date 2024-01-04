@@ -1,6 +1,7 @@
 use crate::aligner::{Aligner, Location};
+use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::SymbolKind;
-use veryl_analyzer::symbol_table;
+use veryl_analyzer::symbol_table::{self, SymbolPath};
 use veryl_analyzer::{msb_table, namespace_table};
 use veryl_metadata::{Build, BuiltinType, ClockType, Format, Metadata, ResetType};
 use veryl_parser::resource_table;
@@ -284,13 +285,43 @@ impl Emitter {
             .contains(&BuiltinType::Type)
     }
 
+    fn namespace(&mut self, namespace: &Namespace) {
+        let mut ret = String::from("");
+        let mut resolve_namespace = Namespace::new();
+        for (i, path) in namespace.paths.iter().enumerate() {
+            if i > 0 {
+                let symbol_path = SymbolPath::new(&[*path]);
+                if let Ok(ref symbol) = symbol_table::get(&symbol_path, &resolve_namespace) {
+                    if let Some(ref symbol) = symbol.found {
+                        let separator = match symbol.kind {
+                            SymbolKind::Package => "::",
+                            SymbolKind::Interface(_) => ".",
+                            _ => "_",
+                        };
+                        ret.push_str(&format!("{}{}", path, separator));
+                    } else {
+                        return self.str(&format!("{}", namespace));
+                    }
+                } else {
+                    return self.str(&format!("{}", namespace));
+                }
+            } else {
+                // top level namespace is always `_`
+                ret.push_str(&format!("{}_", path));
+            }
+
+            resolve_namespace.push(*path);
+        }
+        self.str(&ret);
+    }
+
     fn path_identifier(&mut self, arg: &[Identifier]) {
         if let Ok(ref symbol) = symbol_table::resolve(arg) {
             if let Some(ref symbol) = symbol.found {
                 match symbol.kind {
                     SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package => {
-                        self.str(&format!("{}", symbol.namespace).replace("::", "_"));
-                        self.str(&format!("_{}", symbol.token.text));
+                        self.namespace(&symbol.namespace);
+                        self.str(&format!("{}", symbol.token.text));
                     }
                     SymbolKind::Parameter(_)
                     | SymbolKind::Function(_)
@@ -299,16 +330,16 @@ impl Emitter {
                     | SymbolKind::TypeDef(_)
                     | SymbolKind::Enum(_) => {
                         if arg.len() > 1 {
-                            self.str(&format!("{}", symbol.namespace).replace("::", "_"));
-                            self.str(&format!("::{}", symbol.token.text));
+                            self.namespace(&symbol.namespace);
+                            self.str(&format!("{}", symbol.token.text));
                         } else {
                             self.identifier(&arg[0]);
                         }
                     }
                     SymbolKind::EnumMember(_) => {
                         if arg.len() > 2 {
-                            self.str(&format!("{}", symbol.namespace).replace("::", "_"));
-                            self.str(&format!("_{}", symbol.token.text));
+                            self.namespace(&symbol.namespace);
+                            self.str(&format!("{}", symbol.token.text));
                         } else {
                             self.identifier(&arg[0]);
                             self.str("_");
@@ -316,8 +347,8 @@ impl Emitter {
                         }
                     }
                     SymbolKind::Modport(_) => {
-                        self.str(&format!("{}", symbol.namespace).replace("::", "_"));
-                        self.str(&format!(".{}", symbol.token.text));
+                        self.namespace(&symbol.namespace);
+                        self.str(&format!("{}", symbol.token.text));
                     }
                     SymbolKind::Port(_)
                     | SymbolKind::Variable(_)
@@ -1992,7 +2023,7 @@ impl VerylWalker for Emitter {
         self.space(1);
         if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
             if let Some(symbol) = symbol.found {
-                self.str(&format!("{}_", symbol.namespace).replace("::", "_"));
+                self.namespace(&symbol.namespace);
             }
         }
         self.identifier(&arg.identifier);
@@ -2177,7 +2208,7 @@ impl VerylWalker for Emitter {
         self.space(1);
         if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
             if let Some(symbol) = symbol.found {
-                self.str(&format!("{}_", symbol.namespace).replace("::", "_"));
+                self.namespace(&symbol.namespace);
             }
         }
         self.identifier(&arg.identifier);
@@ -2358,7 +2389,7 @@ impl VerylWalker for Emitter {
         self.space(1);
         if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
             if let Some(symbol) = symbol.found {
-                self.str(&format!("{}_", symbol.namespace).replace("::", "_"));
+                self.namespace(&symbol.namespace);
             }
         }
         self.identifier(&arg.identifier);
