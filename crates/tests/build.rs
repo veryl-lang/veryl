@@ -13,7 +13,7 @@ fn main() {
 
     let mut testcases = Vec::new();
 
-    for entry in WalkDir::new("../../testcases/vl") {
+    for entry in WalkDir::new("../../testcases/veryl") {
         let entry = entry.unwrap();
         if entry.file_type().is_file() {
             testcases.push(

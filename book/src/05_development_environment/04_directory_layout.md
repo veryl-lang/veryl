@@ -14,16 +14,16 @@ In `src`, you can configure arbitrary sub directories.
 $ tree
 .
 |-- src
-|   |-- module_a.vl
+|   |-- module_a.veryl
 |   `-- module_b
-|       |-- module_b.vl
-|       `-- module_c.vl
+|       |-- module_b.veryl
+|       `-- module_c.veryl
 `-- Veryl.toml
 
 2 directories, 4 files
 ```
 
-Veryl gathers all `*.vl` files and generates codes at the same directory as the source by default.
+Veryl gathers all `*.veryl` files and generates codes at the same directory as the source by default.
 You can show the behaviour explicitly by the following configuration.
 
 ```toml
@@ -40,12 +40,12 @@ $ tree
 |-- prj.f
 |-- src
 |   |-- module_a.sv
-|   |-- module_a.vl
+|   |-- module_a.veryl
 |   `-- module_b
 |       |-- module_b.sv
-|       |-- module_b.vl
+|       |-- module_b.veryl
 |       |-- module_c.sv
-|       `-- module_c.vl
+|       `-- module_c.veryl
 `-- Veryl.toml
 
 3 directories, 8 files
@@ -68,10 +68,10 @@ $ tree
 |-- dependencies
 |-- prj.f
 |-- src
-|   |-- module_a.vl
+|   |-- module_a.veryl
 |   `-- module_b
-|       |-- module_b.vl
-|       `-- module_c.vl
+|       |-- module_b.veryl
+|       `-- module_c.veryl
 |-- target
 |   |-- module_a.sv
 |   |-- module_b.sv
@@ -91,12 +91,12 @@ $ tree
 |-- dependencies
 |-- module_a
 |   |-- module_a.sv
-|   `-- module_a.vl
+|   `-- module_a.veryl
 |-- module_b
 |   |-- module_b.sv
-|   |-- module_b.vl
+|   |-- module_b.veryl
 |   |-- module_c.sv
-|   `-- module_c.vl
+|   `-- module_c.veryl
 |-- prj.f
 |-- sv_module_x
 |   `-- sv_module_x.sv

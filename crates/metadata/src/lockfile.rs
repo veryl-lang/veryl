@@ -156,7 +156,7 @@ impl Lockfile {
                 let metadata = self.get_metadata(&lock.url, &lock.revision)?;
                 let path = metadata.metadata_path.parent().unwrap();
 
-                for src in &utils::gather_files_with_extension(path, "vl")? {
+                for src in &utils::gather_files_with_extension(path, "veryl")? {
                     let rel = src.strip_prefix(path)?;
                     let mut dst = base_dst.join(&lock.name);
                     dst.push(rel);

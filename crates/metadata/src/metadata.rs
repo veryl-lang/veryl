@@ -218,7 +218,7 @@ impl Metadata {
         let base = self.metadata_path.parent().unwrap();
 
         let src_files = if files.is_empty() {
-            utils::gather_files_with_extension(base, "vl")?
+            utils::gather_files_with_extension(base, "veryl")?
         } else {
             files.iter().map(|x| x.as_ref().to_path_buf()).collect()
         };

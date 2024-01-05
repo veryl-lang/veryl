@@ -4,7 +4,7 @@ mod parser {
     use veryl_parser::Parser;
 
     fn test(name: &str) {
-        let file = format!("../../testcases/vl/{}.vl", name);
+        let file = format!("../../testcases/veryl/{}.veryl", name);
         let input = fs::read_to_string(&file).unwrap();
         let ret = Parser::parse(&input, &file);
         match ret {
@@ -27,7 +27,7 @@ mod analyzer {
         let metadata_path = Metadata::search_from_current().unwrap();
         let metadata = Metadata::load(&metadata_path).unwrap();
 
-        let file = format!("../../testcases/vl/{}.vl", name);
+        let file = format!("../../testcases/veryl/{}.veryl", name);
         let input = fs::read_to_string(&file).unwrap();
 
         let ret = Parser::parse(&input, &file).unwrap();
@@ -57,7 +57,7 @@ mod formatter {
         let metadata_path = Metadata::search_from_current().unwrap();
         let metadata = Metadata::load(&metadata_path).unwrap();
 
-        let file = format!("../../testcases/vl/{}.vl", name);
+        let file = format!("../../testcases/veryl/{}.veryl", name);
         let input = fs::read_to_string(&file).unwrap();
         let original = input.clone();
 
@@ -109,7 +109,7 @@ mod emitter {
             }
         }
 
-        let file = format!("../../testcases/vl/{}.vl", name);
+        let file = format!("../../testcases/veryl/{}.veryl", name);
         let input = fs::read_to_string(&file).unwrap();
 
         let ret = Parser::parse(&input, &file).unwrap();

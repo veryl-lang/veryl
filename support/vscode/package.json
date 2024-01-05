@@ -57,7 +57,7 @@
           "veryl"
         ],
         "extensions": [
-          ".vl"
+          ".veryl"
         ],
         "configuration": "./language-configuration.json"
       }
