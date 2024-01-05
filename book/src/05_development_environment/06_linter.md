@@ -79,6 +79,7 @@ This section contains configurations of naming conventions.
 | re_required_wire          | regex[^regex]        | regex required of wire type variable[^wire]     |
 
 [^casetype]: The available values are 
+
 * `"snake"` -- snake_case
 * `"screaming_snake"` -- SCREAMING_SNAKE_CASE
 * `"lower_camel"` -- lowerCamelCase
