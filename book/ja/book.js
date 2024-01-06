@@ -25,23 +25,6 @@ function playground_text(playground, hidden = true) {
         ]);
     }
 
-    var playgrounds = Array.from(document.querySelectorAll(".playground"));
-    if (playgrounds.length > 0) {
-        fetch_with_timeout("https://play.rust-lang.org/meta/crates", {
-            headers: {
-                'Content-Type': "application/json",
-            },
-            method: 'POST',
-            mode: 'cors',
-        })
-        .then(response => response.json())
-        .then(response => {
-            // get list of crates available in the rust playground
-            let playground_crates = response.crates.map(item => item["id"]);
-            playgrounds.forEach(block => handle_crate_list_update(block, playground_crates));
-        });
-    }
-
     function handle_crate_list_update(playground_block, playground_crates) {
         // update the play buttons after receiving the response
         update_play_button(playground_block, playground_crates);
@@ -120,6 +103,18 @@ function playground_text(playground, hidden = true) {
             hljs.highlightBlock(result_block);
         }
     }
+
+    // Add <pre class="playground"> to playground codeblock
+    Array.from(document.querySelectorAll(".playground")).forEach((element) => {
+        let parent = element.parentNode;
+        let wrapper = document.createElement('pre');
+        wrapper.className = 'playground';
+        element.classList.remove('playground');
+        // set the wrapper as child (instead of the element)
+        parent.replaceChild(wrapper, element);
+        // set element as child of wrapper
+        wrapper.appendChild(element);
+    });
 
     // Syntax highlighting Configuration
     hljs.configure({
@@ -205,18 +200,6 @@ function playground_text(playground, hidden = true) {
             }
         });
     }
-
-    // Add <pre class="playground"> to playground codeblock
-    Array.from(document.querySelectorAll(".playground")).forEach((element) => {
-        let parent = element.parentNode;
-        let wrapper = document.createElement('pre');
-        wrapper.className = 'playground';
-        element.classList.remove('playground');
-        // set the wrapper as child (instead of the element)
-        parent.replaceChild(wrapper, element);
-        // set element as child of wrapper
-        wrapper.appendChild(element);
-    });
 
     // Process playground code blocks
     Array.from(document.querySelectorAll(".playground")).forEach(function (pre_block) {

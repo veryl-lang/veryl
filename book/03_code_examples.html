@@ -223,8 +223,8 @@
 <p>Veryl has the almost same semantics as SystemVerilog.
 If you are used to SystemVerilog, you will guess Veryl semantics with a small example source code.</p>
 <p>This is a small example.
-In the following example,  comments show the difference with SystemVerilog syntax.</p>
-<pre><code class="language-veryl playground">module ModuleA (
+In the following example, comments show the difference with SystemVerilog syntax.</p>
+<pre><code class="language-veryl playground editable">module ModuleA (
     // name is first, and type is followed after `:`
     // bit width is represented by `&lt;&gt;`
     i_data: input  logic&lt;10&gt;,
@@ -235,6 +235,7 @@ In the following example,  comments show the difference with SystemVerilog synta
     assign o_data = i_data;
 }
 </code></pre>
+<p>Additionally, the codeblocks in this chapter can be edit. Let’s try to edit and play each code.</p>
 <p>A source code of Veryl has some <code>module</code>, <code>interface</code> and <code>package</code> like SystemVerilog.
 In this chapter, we’ll show the some example source codes of them.</p>
 
@@ -274,6 +275,10 @@ In this chapter, we’ll show the some example source codes of them.</p>
             window.playground_copyable = true;
         </script>
 
+        <script src="ace.js"></script>
+        <script src="editor.js"></script>
+        <script src="theme-dawn.js"></script>
+        <script src="theme-tomorrow_night.js"></script>
 
         <script src="elasticlunr.min.js"></script>
         <script src="mark.min.js"></script>
@@ -289,6 +294,8 @@ In this chapter, we’ll show the some example source codes of them.</p>
         </script>
 
         <!-- Custom JS scripts -->
+        <script src="mode-veryl.js"></script>
+        <script src="editor.js"></script>
 
 
     </div>

@@ -334,7 +334,7 @@ endmodule
 <div style="break-before: page; page-break-before: always;"></div><h1 id="コード例"><a class="header" href="#コード例">コード例</a></h1>
 <p>Veryl は SystemVerilog とほとんど同じセマンティクスを持っています。もし SystemVerilog に慣れていれば、いくつかの例をみるだけで Veryl の構文をだいたい把握できるでしょう。</p>
 <p>この小さな例では、コメントに SystemVerilog 構文との違いが書かれています。</p>
-<pre><code class="language-veryl playground">module ModuleA (
+<pre><code class="language-veryl playground editable">module ModuleA (
     // 識別子が先で `:` の後に型が来ます
     // ビット幅は `&lt;&gt;` で表されます
     i_data: input  logic&lt;10&gt;,
@@ -345,9 +345,10 @@ endmodule
     assign o_data = i_data;
 }
 </code></pre>
+<p>さらに、この章のコードブロックは編集することもできます。それぞれのコードを編集して実行してみましょう。</p>
 <p>Veryl のソースコードは SystemVerilog と同様に、<code>module</code>、<code>interface</code>、<code>package</code> を持ちます。この章ではそれらの例を示します。</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="モジュール"><a class="header" href="#モジュール">モジュール</a></h1>
-<pre><code class="language-veryl playground">// モジュール定義
+<pre><code class="language-veryl playground editable">// モジュール定義
 module ModuleA #(
     parameter  ParamA: u32 = 10,
     localparam ParamB: u32 = 10, // 末尾カンマが可能です
@@ -390,7 +391,7 @@ module ModuleA #(
 }
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="インスタンス"><a class="header" href="#インスタンス">インスタンス</a></h1>
-<pre><code class="language-veryl playground">module ModuleA #(
+<pre><code class="language-veryl playground editable">module ModuleA #(
     parameter  ParamA: u32 = 10,
 ) (
     i_clk : input  logic,
@@ -430,7 +431,7 @@ module ModuleA #(
 }
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="インターフェース"><a class="header" href="#インターフェース">インターフェース</a></h1>
-<pre><code class="language-veryl playground">// インターフェース定義
+<pre><code class="language-veryl playground editable">// インターフェース定義
 interface InterfaceA #(
     parameter ParamA: u32 = 1,
     parameter ParamB: u32 = 1,
@@ -467,7 +468,7 @@ module ModuleA (
 }
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="パッケージ"><a class="header" href="#パッケージ">パッケージ</a></h1>
-<pre><code class="language-veryl playground">// パッケージ定義
+<pre><code class="language-veryl playground editable">// パッケージ定義
 package PackageA {
     localparam ParamA: u32 = 1;
     localparam ParamB: u32 = 1;
@@ -2420,6 +2421,10 @@ Veryl: Start { DescriptionGroup };
             window.playground_copyable = true;
         </script>
 
+        <script src="ace.js"></script>
+        <script src="editor.js"></script>
+        <script src="theme-dawn.js"></script>
+        <script src="theme-tomorrow_night.js"></script>
 
         <script src="elasticlunr.min.js"></script>
         <script src="mark.min.js"></script>
@@ -2435,6 +2440,8 @@ Veryl: Start { DescriptionGroup };
         </script>
 
         <!-- Custom JS scripts -->
+        <script src="mode-veryl.js"></script>
+        <script src="editor.js"></script>
 
         <script>
         window.addEventListener('load', function() {
