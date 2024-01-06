@@ -1,6 +1,6 @@
 # Interface
 
-```veryl,playground
+```veryl,playground,editable
 // interface definition
 interface InterfaceA #(
     parameter ParamA: u32 = 1,

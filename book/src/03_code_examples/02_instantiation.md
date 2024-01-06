@@ -1,6 +1,6 @@
 # Instantiation
 
-```veryl,playground
+```veryl,playground,editable
 module ModuleA #(
     parameter  ParamA: u32 = 10,
 ) (

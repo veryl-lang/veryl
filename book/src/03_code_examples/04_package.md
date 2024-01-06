@@ -1,6 +1,6 @@
 # Package
 
-```veryl,playground
+```veryl,playground,editable
 // package definition
 package PackageA {
     localparam ParamA: u32 = 1;

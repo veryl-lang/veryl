@@ -1,7 +1,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: The Veryl Hardware Description Language\n"
-"POT-Creation-Date: 2024-01-03T22:40:54+09:00\n"
+"POT-Creation-Date: 2024-01-06T17:08:27+09:00\n"
 "PO-Revision-Date: 2023-12-28 23:02+0900\n"
 "Last-Translator: Naoya Hatta <dalance@gmail.com>\n"
 "Language-Team: Japanese\n"
@@ -281,8 +281,8 @@ msgid ""
 "Veryl is a modern hardware description language which is designed as a "
 "\"SystemVerilog Alternative\". There are some design concepts."
 msgstr ""
-"Veryl は \"SystemVerilog の代替言語\" として設計された最新のハードウェア記述言語です。"
-"以下のような特徴があります。"
+"Veryl は \"SystemVerilog の代替言語\" として設計された最新のハードウェア記述"
+"言語です。以下のような特徴があります。"
 
 #: src/01_introduction.md:8
 msgid "Symplified Syntax"
@@ -689,14 +689,14 @@ msgstr ""
 
 #: src/03_code_examples.md:6
 msgid ""
-"This is a small example. In the following example,  comments show the "
+"This is a small example. In the following example, comments show the "
 "difference with SystemVerilog syntax."
 msgstr ""
 "この小さな例では、コメントに SystemVerilog 構文との違いが書かれています。"
 
 #: src/03_code_examples.md:9
 msgid ""
-"```veryl,playground\n"
+"```veryl,playground,editable\n"
 "module ModuleA (\n"
 "    // name is first, and type is followed after `:`\n"
 "    // bit width is represented by `<>`\n"
@@ -709,7 +709,7 @@ msgid ""
 "}\n"
 "```"
 msgstr ""
-"```veryl,playground\n"
+"```veryl,playground,editable\n"
 "module ModuleA (\n"
 "    // 識別子が先で `:` の後に型が来ます\n"
 "    // ビット幅は `<>` で表されます\n"
@@ -724,6 +724,14 @@ msgstr ""
 
 #: src/03_code_examples.md:22
 msgid ""
+"Additionally, the codeblocks in this chapter can be edit. Let's try to edit "
+"and play each code."
+msgstr ""
+"さらに、この章のコードブロックは編集することもできます。それぞれのコードを編集して実"
+"行してみましょう。"
+
+#: src/03_code_examples.md:24
+msgid ""
 "A source code of Veryl has some `module`, `interface` and `package` like "
 "SystemVerilog. In this chapter, we'll show the some example source codes of "
 "them."
@@ -733,7 +741,7 @@ msgstr ""
 
 #: src/03_code_examples/01_module.md:3
 msgid ""
-"```veryl,playground\n"
+"```veryl,playground,editable\n"
 "// module definition\n"
 "module ModuleA #(\n"
 "    parameter  ParamA: u32 = 10,\n"
@@ -779,7 +787,7 @@ msgid ""
 "}\n"
 "```"
 msgstr ""
-"```veryl,playground\n"
+"```veryl,playground,editable\n"
 "// モジュール定義\n"
 "module ModuleA #(\n"
 "    parameter  ParamA: u32 = 10,\n"
@@ -828,7 +836,7 @@ msgstr ""
 
 #: src/03_code_examples/02_instantiation.md:3
 msgid ""
-"```veryl,playground\n"
+"```veryl,playground,editable\n"
 "module ModuleA #(\n"
 "    parameter  ParamA: u32 = 10,\n"
 ") (\n"
@@ -869,7 +877,7 @@ msgid ""
 "}\n"
 "```"
 msgstr ""
-"```veryl,playground\n"
+"```veryl,playground,editable\n"
 "module ModuleA #(\n"
 "    parameter  ParamA: u32 = 10,\n"
 ") (\n"
@@ -912,7 +920,7 @@ msgstr ""
 
 #: src/03_code_examples/03_interface.md:3
 msgid ""
-"```veryl,playground\n"
+"```veryl,playground,editable\n"
 "// interface definition\n"
 "interface InterfaceA #(\n"
 "    parameter ParamA: u32 = 1,\n"
@@ -950,7 +958,7 @@ msgid ""
 "}\n"
 "```"
 msgstr ""
-"```veryl,playground\n"
+"```veryl,playground,editable\n"
 "// インターフェース定義\n"
 "interface InterfaceA #(\n"
 "    parameter ParamA: u32 = 1,\n"
@@ -990,7 +998,7 @@ msgstr ""
 
 #: src/03_code_examples/04_package.md:3
 msgid ""
-"```veryl,playground\n"
+"```veryl,playground,editable\n"
 "// package definition\n"
 "package PackageA {\n"
 "    localparam ParamA: u32 = 1;\n"
@@ -1009,7 +1017,7 @@ msgid ""
 "}\n"
 "```"
 msgstr ""
-"```veryl,playground\n"
+"```veryl,playground,editable\n"
 "// パッケージ定義\n"
 "package PackageA {\n"
 "    localparam ParamA: u32 = 1;\n"
@@ -3799,23 +3807,23 @@ msgstr "ワイヤ変数[^wire]の必須正規表現"
 msgid "The available values are "
 msgstr "設定可能な値は以下です。"
 
-#: src/05_development_environment/06_linter.md:82
+#: src/05_development_environment/06_linter.md:83
 msgid "`\"snake\"` -- snake_case"
 msgstr "`\"snake\"` -- snake_case"
 
-#: src/05_development_environment/06_linter.md:83
+#: src/05_development_environment/06_linter.md:84
 msgid "`\"screaming_snake\"` -- SCREAMING_SNAKE_CASE"
 msgstr "`\"screaming_snake\"` -- SCREAMING_SNAKE_CASE"
 
-#: src/05_development_environment/06_linter.md:84
+#: src/05_development_environment/06_linter.md:85
 msgid "`\"lower_camel\"` -- lowerCamelCase"
 msgstr "`\"lower_camel\"` -- lowerCamelCase"
 
-#: src/05_development_environment/06_linter.md:85
+#: src/05_development_environment/06_linter.md:86
 msgid "`\"upper_camel\"` -- UpperCamelCase"
 msgstr "`\"upper_camel\"` -- UpperCamelCase"
 
-#: src/05_development_environment/06_linter.md:87
+#: src/05_development_environment/06_linter.md:88
 msgid ""
 "Regular expression string like `\".*\"`. The available syntax is [here]"
 "(https://docs.rs/regex/latest/regex/#syntax)."
@@ -3823,7 +3831,7 @@ msgstr ""
 "`\".*\"`のような正規表現です。使用可能な構文は[こちら](https://docs.rs/regex/"
 "latest/regex/#syntax)."
 
-#: src/05_development_environment/06_linter.md:89
+#: src/05_development_environment/06_linter.md:90
 msgid ""
 "Register type means that the variable is assigned in `always_ff`. It will be "
 "mapped to flip-flop in synthesis phase."
@@ -3831,7 +3839,7 @@ msgstr ""
 "レジスタ変数とは `always_ff` で代入される変数です。合成フェーズでフリップフ"
 "ロップにマップされます。"
 
-#: src/05_development_environment/06_linter.md:91
+#: src/05_development_environment/06_linter.md:92
 msgid ""
 "Wire type means that the variable is assigned in `always_comb`. It will be "
 "mapped to wire in synthesis phase."
@@ -5033,9 +5041,3 @@ msgstr "unknown_port"
 #: src/06_appendix/02_semantic_error.md:51
 msgid "unused_variable"
 msgstr "unused_variable"
-
-#~ msgid "Concepts"
-#~ msgstr "コンセプト"
-
-#~ msgid "Label can be added to `{}` block."
-#~ msgstr "`{}` ブロックにラベルを付けることができます。"

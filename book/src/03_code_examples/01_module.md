@@ -1,6 +1,6 @@
 # Module
 
-```veryl,playground
+```veryl,playground,editable
 // module definition
 module ModuleA #(
     parameter  ParamA: u32 = 10,
