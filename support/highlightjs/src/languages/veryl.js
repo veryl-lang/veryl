@@ -8,7 +8,7 @@ module.exports = function (hljs)
   return {
     name: 'Veryl',
     aliases: [
-        'vl'
+        'veryl'
     ],
     case_insensitive: false,
     keywords:

@@ -591,16 +591,16 @@ msgstr "コードを書く"
 msgid ""
 "You can add source codes at an arbitrary position in the project directory. "
 "This is because Veryl project can be independent or integrated to other "
-"SystemVerilog project. The extension of Veryl's source codes is `.vl`."
+"SystemVerilog project. The extension of Veryl's source codes is `.veryl`."
 msgstr ""
 "ソースコードはプロジェクトディレクトリ内のどこに書いても構いません。これは "
 "Veryl プロジェクトが独立したプロジェクトである場合もあれば、他の"
 "SystemVerilog プロジェクトに組み込まれている場合もあるからです。Veryl のソー"
-"スコードの拡張子は `.vl` です。"
+"スコードの拡張子は `.veryl` です。"
 
 #: src/02_getting_started/02_hello_world.md:40
-msgid "For example, put the following code to `src/hello.vl`."
-msgstr "例えば以下のコードを `src/hello.vl` に書いてみましょう。"
+msgid "For example, put the following code to `src/hello.veryl`."
+msgstr "例えば以下のコードを `src/hello.veryl` に書いてみましょう。"
 
 #: src/02_getting_started/02_hello_world.md:42
 #: src/04_language_reference/05_statement/02_function_call.md:6
@@ -3105,11 +3105,11 @@ msgstr ""
 
 #: src/05_development_environment/04_directory_layout.md:26
 msgid ""
-"Veryl gathers all `*.vl` files and generates codes at the same directory as "
-"the source by default. You can show the behaviour explicitly by the "
+"Veryl gathers all `*.veryl` files and generates codes at the same directory "
+"as the source by default. You can show the behaviour explicitly by the "
 "following configuration."
 msgstr ""
-"Veryl は全ての `*.vl` ファイルを収集し、デフォルトではソースと同じディレクト"
+"Veryl は全ての `*.veryl` ファイルを収集し、デフォルトではソースと同じディレクト"
 "リにコードを生成します。この挙動は以下の設定で明示することもできます。"
 
 #: src/05_development_environment/04_directory_layout.md:29

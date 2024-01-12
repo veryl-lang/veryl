@@ -35,9 +35,9 @@ The description of all configuration is [here](../05_development_environment/01_
 
 You can add source codes at an arbitrary position in the project directory.
 This is because Veryl project can be independent or integrated to other SystemVerilog project.
-The extension of Veryl's source codes is `.vl`.
+The extension of Veryl's source codes is `.veryl`.
 
-For example, put the following code to `src/hello.vl`.
+For example, put the following code to `src/hello.veryl`.
 
 ```veryl,playground
 module ModuleA {
@@ -51,7 +51,7 @@ module ModuleA {
 $ tree
 .
 |-- src
-|   `-- hello.vl
+|   `-- hello.veryl
 `-- Veryl.toml
 
 1 directory, 2 files
@@ -66,7 +66,7 @@ You can generate a SystemVerilog code by `veryl build`.
 
 ```
 $ veryl build
-[INFO ]   Processing file ([path to hello]/src/hello.vl)
+[INFO ]   Processing file ([path to hello]/src/hello.veryl)
 [INFO ]       Output filelist ([path to hello]/hello.f)
 $ tree
 .
@@ -74,7 +74,7 @@ $ tree
 |-- hello.f
 |-- src
 |   |-- hello.sv
-|   `-- hello.vl
+|   `-- hello.veryl
 `-- Veryl.toml
 
 2 directories, 4 files
