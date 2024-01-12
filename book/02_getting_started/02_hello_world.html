@@ -243,8 +243,8 @@ version = &quot;0.1.0&quot;
 <h2 id="write-code"><a class="header" href="#write-code">Write Code</a></h2>
 <p>You can add source codes at an arbitrary position in the project directory.
 This is because Veryl project can be independent or integrated to other SystemVerilog project.
-The extension of Veryl’s source codes is <code>.vl</code>.</p>
-<p>For example, put the following code to <code>src/hello.vl</code>.</p>
+The extension of Veryl’s source codes is <code>.veryl</code>.</p>
+<p>For example, put the following code to <code>src/hello.veryl</code>.</p>
 <pre><code class="language-veryl playground">module ModuleA {
     initial {
         $display(&quot;Hello, world!&quot;);
@@ -254,7 +254,7 @@ The extension of Veryl’s source codes is <code>.vl</code>.</p>
 <pre><code>$ tree
 .
 |-- src
-|   `-- hello.vl
+|   `-- hello.veryl
 `-- Veryl.toml
 
 1 directory, 2 files
@@ -266,7 +266,7 @@ If you click the button, the transpiled SystemVerilog code will appear. Please t
 <h2 id="build-code"><a class="header" href="#build-code">Build Code</a></h2>
 <p>You can generate a SystemVerilog code by <code>veryl build</code>.</p>
 <pre><code>$ veryl build
-[INFO ]   Processing file ([path to hello]/src/hello.vl)
+[INFO ]   Processing file ([path to hello]/src/hello.veryl)
 [INFO ]       Output filelist ([path to hello]/hello.f)
 $ tree
 .
@@ -274,7 +274,7 @@ $ tree
 |-- hello.f
 |-- src
 |   |-- hello.sv
-|   `-- hello.vl
+|   `-- hello.veryl
 `-- Veryl.toml
 
 2 directories, 4 files

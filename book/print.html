@@ -309,8 +309,8 @@ version = &quot;0.1.0&quot;
 <h2 id="write-code"><a class="header" href="#write-code">Write Code</a></h2>
 <p>You can add source codes at an arbitrary position in the project directory.
 This is because Veryl project can be independent or integrated to other SystemVerilog project.
-The extension of Veryl’s source codes is <code>.vl</code>.</p>
-<p>For example, put the following code to <code>src/hello.vl</code>.</p>
+The extension of Veryl’s source codes is <code>.veryl</code>.</p>
+<p>For example, put the following code to <code>src/hello.veryl</code>.</p>
 <pre><code class="language-veryl playground">module ModuleA {
     initial {
         $display(&quot;Hello, world!&quot;);
@@ -320,7 +320,7 @@ The extension of Veryl’s source codes is <code>.vl</code>.</p>
 <pre><code>$ tree
 .
 |-- src
-|   `-- hello.vl
+|   `-- hello.veryl
 `-- Veryl.toml
 
 1 directory, 2 files
@@ -332,7 +332,7 @@ If you click the button, the transpiled SystemVerilog code will appear. Please t
 <h2 id="build-code"><a class="header" href="#build-code">Build Code</a></h2>
 <p>You can generate a SystemVerilog code by <code>veryl build</code>.</p>
 <pre><code>$ veryl build
-[INFO ]   Processing file ([path to hello]/src/hello.vl)
+[INFO ]   Processing file ([path to hello]/src/hello.veryl)
 [INFO ]       Output filelist ([path to hello]/hello.f)
 $ tree
 .
@@ -340,7 +340,7 @@ $ tree
 |-- hello.f
 |-- src
 |   |-- hello.sv
-|   `-- hello.vl
+|   `-- hello.veryl
 `-- Veryl.toml
 
 2 directories, 4 files
@@ -1565,15 +1565,15 @@ In <code>src</code>, you can configure arbitrary sub directories.</p>
 <pre><code>$ tree
 .
 |-- src
-|   |-- module_a.vl
+|   |-- module_a.veryl
 |   `-- module_b
-|       |-- module_b.vl
-|       `-- module_c.vl
+|       |-- module_b.veryl
+|       `-- module_c.veryl
 `-- Veryl.toml
 
 2 directories, 4 files
 </code></pre>
-<p>Veryl gathers all <code>*.vl</code> files and generates codes at the same directory as the source by default.
+<p>Veryl gathers all <code>*.veryl</code> files and generates codes at the same directory as the source by default.
 You can show the behaviour explicitly by the following configuration.</p>
 <pre><code class="language-toml">[build]
 target = &quot;source&quot;
@@ -1585,12 +1585,12 @@ target = &quot;source&quot;
 |-- prj.f
 |-- src
 |   |-- module_a.sv
-|   |-- module_a.vl
+|   |-- module_a.veryl
 |   `-- module_b
 |       |-- module_b.sv
-|       |-- module_b.vl
+|       |-- module_b.veryl
 |       |-- module_c.sv
-|       `-- module_c.vl
+|       `-- module_c.veryl
 `-- Veryl.toml
 
 3 directories, 8 files
@@ -1606,10 +1606,10 @@ target = {type = &quot;directory&quot;, path = &quot;target&quot;}
 |-- dependencies
 |-- prj.f
 |-- src
-|   |-- module_a.vl
+|   |-- module_a.veryl
 |   `-- module_b
-|       |-- module_b.vl
-|       `-- module_c.vl
+|       |-- module_b.veryl
+|       `-- module_c.veryl
 |-- target
 |   |-- module_a.sv
 |   |-- module_b.sv
@@ -1625,12 +1625,12 @@ target = {type = &quot;directory&quot;, path = &quot;target&quot;}
 |-- dependencies
 |-- module_a
 |   |-- module_a.sv
-|   `-- module_a.vl
+|   `-- module_a.veryl
 |-- module_b
 |   |-- module_b.sv
-|   |-- module_b.vl
+|   |-- module_b.veryl
 |   |-- module_c.sv
-|   `-- module_c.vl
+|   `-- module_c.veryl
 |-- prj.f
 |-- sv_module_x
 |   `-- sv_module_x.sv

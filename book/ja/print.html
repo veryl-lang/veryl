@@ -286,8 +286,8 @@ version = &quot;0.1.0&quot;
 </code></pre>
 <p>全設定の説明は<a href="02_getting_started/../05_development_environment/01_project_configuration.html">こちら</a>。</p>
 <h2 id="コードを書く"><a class="header" href="#コードを書く">コードを書く</a></h2>
-<p>ソースコードはプロジェクトディレクトリ内のどこに書いても構いません。これは Veryl プロジェクトが独立したプロジェクトである場合もあれば、他のSystemVerilog プロジェクトに組み込まれている場合もあるからです。Veryl のソースコードの拡張子は <code>.vl</code> です。</p>
-<p>例えば以下のコードを <code>src/hello.vl</code> に書いてみましょう。</p>
+<p>You can add source codes at an arbitrary position in the project directory. This is because Veryl project can be independent or integrated to other SystemVerilog project. The extension of Veryl’s source codes is <code>.vl</code>.</p>
+<p>For example, put the following code to <code>src/hello.vl</code>.</p>
 <pre><code class="language-veryl playground">module ModuleA {
     initial {
         $display(&quot;Hello, world!&quot;);
@@ -1437,7 +1437,7 @@ bump_commit_message = &quot;Bump&quot;
 
 2 directories, 4 files
 </code></pre>
-<p>Veryl は全ての <code>*.vl</code> ファイルを収集し、デフォルトではソースと同じディレクトリにコードを生成します。この挙動は以下の設定で明示することもできます。</p>
+<p>Veryl gathers all <code>*.vl</code> files and generates codes at the same directory as the source by default. You can show the behaviour explicitly by the following configuration.</p>
 <pre><code class="language-toml">[build]
 target = &quot;source&quot;
 </code></pre>
