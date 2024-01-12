@@ -1,0 +1,16 @@
+module Module42 (
+    i_clk  : input  logic,
+    i_rst_n: input  logic,
+    i_d    : input  logic,
+    o_d    : output logic,
+) {
+    localparam a: u32 = $sv::pkg::paramA;
+    //localparam b: u32 = pkg::paramA;
+
+    inst u0: $sv::delay (
+        i_clk    ,
+        i_rst_n  ,
+        i_d      ,
+        o_d      ,
+    );
+}

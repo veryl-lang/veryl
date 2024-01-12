@@ -364,7 +364,7 @@ RealNumber: FixedPoint
 // ----------------------------------------------------------------------------
 
 HierarchicalIdentifier: Identifier { Select } { Dot Identifier { Select } };
-ScopedIdentifier      : Identifier { ColonColon Identifier };
+ScopedIdentifier      : [ Dollar ] Identifier { ColonColon Identifier };
 ExpressionIdentifier  : [ Dollar ] Identifier ( ColonColon Identifier { ColonColon Identifier } { Select } | ( { Select } { Dot Identifier { Select } } ) );
 
 // ----------------------------------------------------------------------------

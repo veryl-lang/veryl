@@ -5,13 +5,13 @@ use veryl_parser::ParolError;
 use veryl_parser::Stringifier;
 
 #[derive(Default)]
-pub struct CheckSystemFunction<'a> {
+pub struct CheckDollar<'a> {
     pub errors: Vec<AnalyzerError>,
     text: &'a str,
     point: HandlerPoint,
 }
 
-impl<'a> CheckSystemFunction<'a> {
+impl<'a> CheckDollar<'a> {
     pub fn new(text: &'a str) -> Self {
         Self {
             text,
@@ -20,22 +20,30 @@ impl<'a> CheckSystemFunction<'a> {
     }
 }
 
-impl<'a> Handler for CheckSystemFunction<'a> {
+impl<'a> Handler for CheckDollar<'a> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl<'a> VerylGrammarTrait for CheckSystemFunction<'a> {
-    fn expression_identifier(&mut self, arg: &ExpressionIdentifier) -> Result<(), ParolError> {
+impl<'a> VerylGrammarTrait for CheckDollar<'a> {
+    fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            if arg.expression_identifier_opt.is_some() {
-                let mut stringifier = Stringifier::new();
-                stringifier.expression_identifier(arg);
-                match stringifier.as_str() {
-                    name if DEFINED_SYSTEM_FUNCTIONS.contains(&name) => (),
+            // if Dollar exists
+            if arg.scoped_identifier_opt.is_some() {
+                let name = arg.identifier.identifier_token.text();
+                match name.as_str() {
+                    name if DEFINED_NAMESPACES.contains(&name) => {
+                        if arg.scoped_identifier_list.is_empty() {
+                            self.errors.push(AnalyzerError::undefined_identifier(
+                                &format!("${}", name),
+                                self.text,
+                                &arg.identifier.identifier_token,
+                            ));
+                        }
+                    }
                     name => {
-                        self.errors.push(AnalyzerError::invalid_system_function(
+                        self.errors.push(AnalyzerError::invalid_namespace(
                             name,
                             self.text,
                             &arg.identifier.identifier_token,
@@ -46,7 +54,48 @@ impl<'a> VerylGrammarTrait for CheckSystemFunction<'a> {
         }
         Ok(())
     }
+
+    fn expression_identifier(&mut self, arg: &ExpressionIdentifier) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            // if Dollar exists
+            if arg.expression_identifier_opt.is_some() {
+                match arg.expression_identifier_group.as_ref() {
+                    // Namespace
+                    ExpressionIdentifierGroup::ColonColonIdentifierExpressionIdentifierGroupListExpressionIdentifierGroupList0(_) => {
+                        match arg.identifier.identifier_token.text().as_str() {
+                            name if DEFINED_NAMESPACES.contains(&name) => (),
+                            name => {
+                                self.errors.push(AnalyzerError::invalid_namespace(
+                                    name,
+                                    self.text,
+                                    &arg.identifier.identifier_token,
+                                ));
+                            }
+                        }
+                    },
+                    // System function call
+                    _ => {
+                        let mut stringifier = Stringifier::new();
+                        stringifier.expression_identifier(arg);
+                        match stringifier.as_str() {
+                            name if DEFINED_SYSTEM_FUNCTIONS.contains(&name) => (),
+                            name => {
+                                self.errors.push(AnalyzerError::invalid_system_function(
+                                    name,
+                                    self.text,
+                                    &arg.identifier.identifier_token,
+                                ));
+                            }
+                        }
+                    },
+                }
+            }
+        }
+        Ok(())
+    }
 }
+
+const DEFINED_NAMESPACES: [&str; 1] = ["sv"];
 
 // Refer IEEE Std 1800-2012  Clause 20 and 21
 const DEFINED_SYSTEM_FUNCTIONS: [&str; 196] = [

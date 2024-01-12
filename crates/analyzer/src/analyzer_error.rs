@@ -186,6 +186,21 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_namespace),
+        help("fix namespace name"),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#invalid_namespace")
+    )]
+    #[error("namespace \"{name}\" is not defined")]
+    InvalidNamespace {
+        name: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(mismatch_arity),
         help("fix function arguments"),
         url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#mismatch_arity")
@@ -558,6 +573,14 @@ impl AnalyzerError {
 
     pub fn invalid_system_function(name: &str, source: &str, token: &VerylToken) -> Self {
         AnalyzerError::InvalidSystemFunction {
+            name: name.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.token.into(),
+        }
+    }
+
+    pub fn invalid_namespace(name: &str, source: &str, token: &VerylToken) -> Self {
+        AnalyzerError::InvalidNamespace {
             name: name.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),
