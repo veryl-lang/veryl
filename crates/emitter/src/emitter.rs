@@ -790,8 +790,9 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'InsideExpression'
     fn inside_expression(&mut self, arg: &InsideExpression) {
-        self.str("(");
+        self.str("((");
         self.expression(&arg.expression);
+        self.str(")");
         self.space(1);
         self.inside(&arg.inside);
         self.space(1);
@@ -803,8 +804,9 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'OutsideExpression'
     fn outside_expression(&mut self, arg: &OutsideExpression) {
-        self.str("!(");
+        self.str("!((");
         self.expression(&arg.expression);
+        self.str(")");
         self.space(1);
         self.token(&arg.outside.outside_token.replace("inside"));
         self.space(1);

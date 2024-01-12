@@ -75,12 +75,11 @@ jobs:
             MDBOOK_OUTPUT__HTML__SITE_URL=/veryl/book/$po_lang/ \
             MDBOOK_OUTPUT__HTML__REDIRECT='{}' \
             mdbook build -d book/$po_lang
-            mv book/$po_lang/html book/html/$po_lang
             echo "::endgroup::"
           done
       - name: Deploy
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./book/book/html
+          publish_dir: ./book/book
           destination_dir: book
