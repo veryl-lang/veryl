@@ -27,7 +27,7 @@ description = "A modern hardware description language"
 
 [workspace.dependencies]
 anyhow          = "1.0"
-clap            = {version = "4.4.16", features = ["derive"]}
+clap            = {version = "4.4.17", features = ["derive"]}
 log             = "0.4.20"
 mdbook          = "0.4.36"
 miette          = {version = "5.10", features = ["fancy"]}
