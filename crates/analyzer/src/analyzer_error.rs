@@ -1,6 +1,5 @@
 use miette::{self, Diagnostic, NamedSource, SourceSpan};
 use thiserror::Error;
-use veryl_parser::resource_table;
 use veryl_parser::veryl_token::VerylToken;
 
 #[derive(Error, Diagnostic, Debug)]
@@ -163,21 +162,6 @@ pub enum AnalyzerError {
     #[error("{kind} statement can't be placed at here")]
     InvalidStatement {
         kind: String,
-        #[source_code]
-        input: NamedSource,
-        #[label("Error location")]
-        error_location: SourceSpan,
-    },
-
-    #[diagnostic(
-        severity(Error),
-        code(invalid_system_function),
-        help("fix system function name"),
-        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#invalid_system_function")
-    )]
-    #[error("system function \"{name}\" is not defined")]
-    InvalidSystemFunction {
-        name: String,
         #[source_code]
         input: NamedSource,
         #[label("Error location")]
@@ -444,12 +428,7 @@ pub enum AnalyzerError {
 
 impl AnalyzerError {
     fn named_source(source: &str, token: &VerylToken) -> NamedSource {
-        NamedSource::new(
-            resource_table::get_path_value(token.token.file_path)
-                .unwrap()
-                .to_string_lossy(),
-            source.to_string(),
-        )
+        NamedSource::new(token.token.source.to_string(), source.to_string())
     }
 
     pub fn assignment_to_input(source: &str, identifier: &str, token: &VerylToken) -> Self {
@@ -551,14 +530,6 @@ impl AnalyzerError {
     pub fn invalid_statement(kind: &str, source: &str, token: &VerylToken) -> Self {
         AnalyzerError::InvalidStatement {
             kind: kind.to_string(),
-            input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
-        }
-    }
-
-    pub fn invalid_system_function(name: &str, source: &str, token: &VerylToken) -> Self {
-        AnalyzerError::InvalidSystemFunction {
-            name: name.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),
         }

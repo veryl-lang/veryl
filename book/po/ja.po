@@ -1,7 +1,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: The Veryl Hardware Description Language\n"
-"POT-Creation-Date: 2024-01-06T17:15:27+09:00\n"
+"POT-Creation-Date: 2024-01-17T17:39:28+09:00\n"
 "PO-Revision-Date: 2023-12-28 23:02+0900\n"
 "Last-Translator: Naoya Hatta <dalance@gmail.com>\n"
 "Language-Team: Japanese\n"
@@ -209,58 +209,63 @@ msgstr "生成"
 msgid "Named Block"
 msgstr "名前付きブロック"
 
-#: src/SUMMARY.md:53 src/05_development_environment.md:1
+#: src/SUMMARY.md:53
+#: src/04_language_reference/10_systemverilog_interoperation.md:1
+msgid "SystemVerilog Interoperation"
+msgstr "SystemVerilogとの相互運用"
+
+#: src/SUMMARY.md:54 src/05_development_environment.md:1
 msgid "Development Environment"
 msgstr "開発環境"
 
-#: src/SUMMARY.md:54
+#: src/SUMMARY.md:55
 #: src/05_development_environment/01_project_configuration.md:1
 msgid "Project Configuration"
 msgstr "プロジェクト設定"
 
-#: src/SUMMARY.md:55 src/05_development_environment/02_dependencies.md:1
+#: src/SUMMARY.md:56 src/05_development_environment/02_dependencies.md:1
 msgid "Dependencies"
 msgstr "依存関係"
 
-#: src/SUMMARY.md:56 src/05_development_environment/03_publish_project.md:1
+#: src/SUMMARY.md:57 src/05_development_environment/03_publish_project.md:1
 msgid "Publish Project"
 msgstr "プロジェクトを公開する"
 
-#: src/SUMMARY.md:57 src/05_development_environment/04_directory_layout.md:1
+#: src/SUMMARY.md:58 src/05_development_environment/04_directory_layout.md:1
 msgid "Directory Layout"
 msgstr "ディレクトリ構成"
 
-#: src/SUMMARY.md:58 src/01_introduction.md:48
+#: src/SUMMARY.md:59 src/01_introduction.md:48
 #: src/05_development_environment/05_formatter.md:1
 msgid "Formatter"
 msgstr "フォーマッタ"
 
-#: src/SUMMARY.md:59 src/01_introduction.md:47
+#: src/SUMMARY.md:60 src/01_introduction.md:47
 #: src/05_development_environment/06_linter.md:1
 msgid "Linter"
 msgstr "リンタ"
 
-#: src/SUMMARY.md:60 src/05_development_environment/07_language_server.md:1
+#: src/SUMMARY.md:61 src/05_development_environment/07_language_server.md:1
 msgid "Language Server"
 msgstr "言語サーバ"
 
-#: src/SUMMARY.md:61 src/05_development_environment/08_compatibility.md:1
+#: src/SUMMARY.md:62 src/05_development_environment/08_compatibility.md:1
 msgid "Compatibility"
 msgstr "互換性"
 
-#: src/SUMMARY.md:62 src/05_development_environment/09_documentation.md:1
+#: src/SUMMARY.md:63 src/05_development_environment/09_documentation.md:1
 msgid "Documentation"
 msgstr "ドキュメンテーション"
 
-#: src/SUMMARY.md:63 src/06_appendix.md:1
+#: src/SUMMARY.md:64 src/06_appendix.md:1
 msgid "Appendix"
 msgstr "補遺"
 
-#: src/SUMMARY.md:64 src/06_appendix/01_formal_syntax.md:1
+#: src/SUMMARY.md:65 src/06_appendix/01_formal_syntax.md:1
 msgid "Formal Syntax"
 msgstr "構文"
 
-#: src/SUMMARY.md:65 src/06_appendix/02_semantic_error.md:1
+#: src/SUMMARY.md:66 src/06_appendix/02_semantic_error.md:1
 msgid "Semantic Error"
 msgstr "セマンティックエラー"
 
@@ -727,8 +732,8 @@ msgid ""
 "Additionally, the codeblocks in this chapter can be edit. Let's try to edit "
 "and play each code."
 msgstr ""
-"さらに、この章のコードブロックは編集することもできます。それぞれのコードを編集して実"
-"行してみましょう。"
+"さらに、この章のコードブロックは編集することもできます。それぞれのコードを編"
+"集して実行してみましょう。"
 
 #: src/03_code_examples.md:24
 msgid ""
@@ -2248,6 +2253,16 @@ msgstr ""
 "パッケージ内の要素にアクセスするには、`::` 記号を使って `PackageA::ParamA` の"
 "ようにします。"
 
+#: src/04_language_reference/10_systemverilog_interoperation.md:3
+msgid ""
+"If you want to access to items of SystemVerilog, `$sv` namespace can be "
+"used. For example, \"ModuleA\" in SystemVerilog source code can be accessed "
+"by `$sv::ModuleA`. Veryl don't check the existence of the items."
+msgstr ""
+"SystemVerilogの要素にアクセスする場合は `$sv` 名前空間を使えます。"
+"例えば、SystemVerilogソースコードの \"ModuleA\" は `$sv::ModuleA` です。"
+"Veryl はこれらの要素が実際に存在するかどうかは確認しません。"
+
 #: src/05_development_environment.md:3
 msgid ""
 "In this chapter, we'll discuss about development environment including "
@@ -3109,8 +3124,8 @@ msgid ""
 "as the source by default. You can show the behaviour explicitly by the "
 "following configuration."
 msgstr ""
-"Veryl は全ての `*.veryl` ファイルを収集し、デフォルトではソースと同じディレクト"
-"リにコードを生成します。この挙動は以下の設定で明示することもできます。"
+"Veryl は全ての `*.veryl` ファイルを収集し、デフォルトではソースと同じディレク"
+"トリにコードを生成します。この挙動は以下の設定で明示することもできます。"
 
 #: src/05_development_environment/04_directory_layout.md:29
 msgid ""
@@ -4245,8 +4260,8 @@ msgid ""
 "VarTerm               : /(?-u:\\b)var(?-u:"
 "\\b)/                                                                 : "
 "Token;\n"
-"IdentifierTerm        : /[a-zA-Z_][0-9a-zA-"
-"Z_]*/                                                              : Token;\n"
+"IdentifierTerm        : /[a-zA-Z_][0-9a-zA-Z_"
+"$]*/                                                             : Token;\n"
 "\n"
 "// "
 "----------------------------------------------------------------------------\n"
@@ -4510,7 +4525,7 @@ msgid ""
 "\n"
 "HierarchicalIdentifier: Identifier { Select } { Dot Identifier "
 "{ Select } };\n"
-"ScopedIdentifier      : Identifier { ColonColon Identifier };\n"
+"ScopedIdentifier      : [ Dollar ] Identifier { ColonColon Identifier };\n"
 "ExpressionIdentifier  : [ Dollar ] Identifier ( ColonColon Identifier "
 "{ ColonColon Identifier } { Select } | ( { Select } { Dot Identifier "
 "{ Select } } ) );\n"

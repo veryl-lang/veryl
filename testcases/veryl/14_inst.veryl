@@ -1,4 +1,5 @@
 module Module14 {
+    var a  : logic;
     var aa : logic;
     var bbb: logic;
 

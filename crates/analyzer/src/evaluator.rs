@@ -606,12 +606,8 @@ impl Evaluator {
                     // Identifier
                     let symbol = symbol_table::resolve(x.expression_identifier.as_ref());
                     if let Ok(symbol) = symbol {
-                        if let Some(symbol) = symbol.found {
-                            if let Some(evaluated) = symbol.evaluated.get() {
-                                evaluated
-                            } else {
-                                Evaluated::Unknown
-                            }
+                        if let Some(evaluated) = symbol.found.evaluated.get() {
+                            evaluated
                         } else {
                             Evaluated::Unknown
                         }

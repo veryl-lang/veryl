@@ -37,12 +37,8 @@ impl<'a> VerylGrammarTrait for CheckFunction<'a> {
                 }
 
                 if let Ok(symbol) = symbol_table::resolve(x.expression_identifier.as_ref()) {
-                    let arity = if let Some(symbol) = symbol.found {
-                        if let SymbolKind::Function(x) = symbol.kind {
-                            Some(x.ports.len())
-                        } else {
-                            None
-                        }
+                    let arity = if let SymbolKind::Function(x) = symbol.found.kind {
+                        Some(x.ports.len())
                     } else {
                         None
                     };

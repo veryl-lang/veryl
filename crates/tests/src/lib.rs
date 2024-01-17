@@ -25,7 +25,20 @@ mod analyzer {
 
     fn test(name: &str) {
         let metadata_path = Metadata::search_from_current().unwrap();
-        let metadata = Metadata::load(&metadata_path).unwrap();
+        let mut metadata = Metadata::load(&metadata_path).unwrap();
+
+        if name == "25_dependency" {
+            let paths = metadata.paths::<&str>(&[]).unwrap();
+            let cache_dir = Metadata::cache_dir().canonicalize().unwrap();
+            for path in paths {
+                if path.src.starts_with(&cache_dir) {
+                    let input = fs::read_to_string(&path.src).unwrap();
+                    let ret = Parser::parse(&input, &path.src).unwrap();
+                    let analyzer = Analyzer::new(&metadata);
+                    let _ = analyzer.analyze_pass1(&path.prj, &input, &path.src, &ret.veryl);
+                }
+            }
+        }
 
         let file = format!("../../testcases/veryl/{}.veryl", name);
         let input = fs::read_to_string(&file).unwrap();

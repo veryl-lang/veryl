@@ -15,7 +15,7 @@ use std::collections::HashSet;
 use veryl_parser::doc_comment_table;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::VerylToken;
+use veryl_parser::veryl_token::{TokenSource, VerylToken};
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
@@ -47,27 +47,30 @@ impl<'a> CreateSymbolTable<'a> {
     }
 
     fn insert_symbol(&mut self, token: &VerylToken, kind: SymbolKind) {
-        let file = token.token.file_path;
         let line = token.token.line;
-        let doc_comment = if line == 0 {
-            vec![]
-        } else if let Some(doc_comment) = doc_comment_table::get(file, line) {
-            vec![doc_comment]
-        } else {
-            let mut candidate_line = line - 1;
-            while self.attribute_lines.contains(&candidate_line) {
-                if candidate_line == 0 {
-                    break;
+        let doc_comment = if let TokenSource::File(file) = token.token.source {
+            if line == 0 {
+                vec![]
+            } else if let Some(doc_comment) = doc_comment_table::get(file, line) {
+                vec![doc_comment]
+            } else {
+                let mut candidate_line = line - 1;
+                while self.attribute_lines.contains(&candidate_line) {
+                    if candidate_line == 0 {
+                        break;
+                    }
+                    candidate_line -= 1;
                 }
-                candidate_line -= 1;
+                let mut ret = Vec::new();
+                while let Some(doc_comment) = doc_comment_table::get(file, candidate_line) {
+                    ret.push(doc_comment);
+                    candidate_line -= 1;
+                }
+                ret.reverse();
+                ret
             }
-            let mut ret = Vec::new();
-            while let Some(doc_comment) = doc_comment_table::get(file, candidate_line) {
-                ret.push(doc_comment);
-                candidate_line -= 1;
-            }
-            ret.reverse();
-            ret
+        } else {
+            vec![]
         };
         let mut symbol = Symbol::new(&token.token, kind, &self.namespace, doc_comment);
 
@@ -94,8 +97,9 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
     fn identifier(&mut self, arg: &Identifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let id = arg.identifier_token.token.id;
-            let file_path = arg.identifier_token.token.file_path;
-            namespace_table::insert(id, file_path, &self.namespace);
+            if let TokenSource::File(file) = arg.identifier_token.token.source {
+                namespace_table::insert(id, file, &self.namespace);
+            }
         }
         Ok(())
     }

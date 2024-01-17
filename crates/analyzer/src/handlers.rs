@@ -9,7 +9,6 @@ pub mod check_msb_lsb;
 pub mod check_number;
 pub mod check_reset;
 pub mod check_statement;
-pub mod check_system_function;
 pub mod create_reference;
 pub mod create_symbol_table;
 pub mod create_type_dag;
@@ -23,7 +22,6 @@ use check_msb_lsb::*;
 use check_number::*;
 use check_reset::*;
 use check_statement::*;
-use check_system_function::*;
 use create_reference::*;
 use create_symbol_table::*;
 
@@ -40,7 +38,6 @@ pub struct Pass1Handlers<'a> {
     check_number: CheckNumber<'a>,
     check_reset: CheckReset<'a>,
     check_statement: CheckStatement<'a>,
-    check_system_function: CheckSystemFunction<'a>,
     create_symbol_table: CreateSymbolTable<'a>,
 }
 
@@ -53,7 +50,6 @@ impl<'a> Pass1Handlers<'a> {
             check_number: CheckNumber::new(text),
             check_reset: CheckReset::new(text),
             check_statement: CheckStatement::new(text),
-            check_system_function: CheckSystemFunction::new(text),
             create_symbol_table: CreateSymbolTable::new(text),
         }
     }
@@ -66,7 +62,6 @@ impl<'a> Pass1Handlers<'a> {
             &mut self.check_number as &mut dyn Handler,
             &mut self.check_reset as &mut dyn Handler,
             &mut self.check_statement as &mut dyn Handler,
-            &mut self.check_system_function as &mut dyn Handler,
             &mut self.create_symbol_table as &mut dyn Handler,
         ]
     }
@@ -79,7 +74,6 @@ impl<'a> Pass1Handlers<'a> {
         ret.append(&mut self.check_number.errors);
         ret.append(&mut self.check_reset.errors);
         ret.append(&mut self.check_statement.errors);
-        ret.append(&mut self.check_system_function.errors);
         ret.append(&mut self.create_symbol_table.errors);
         ret
     }

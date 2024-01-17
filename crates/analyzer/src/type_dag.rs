@@ -66,13 +66,7 @@ impl TypeDag {
             token: token.clone(),
         };
         let sym = match symbol_table::get(&trinfo.path.0, &trinfo.path.1) {
-            Ok(rr) => {
-                if let Some(sym) = rr.found {
-                    sym
-                } else {
-                    return Err(DagError::UnableToResolve(Box::new(trinfo)));
-                }
-            }
+            Ok(rr) => rr.found,
             Err(_) => {
                 let e = DagError::UnableToResolve(Box::new(trinfo));
                 return Err(e);
@@ -93,12 +87,7 @@ impl TypeDag {
     fn get_symbol(&self, node: u32) -> Symbol {
         match self.paths.get(&node) {
             Some(TypeResolveInfo { path, .. }) => match symbol_table::get(&path.0, &path.1) {
-                Ok(rr) => match rr.found {
-                    Some(sym) => sym,
-                    None => {
-                        unreachable!();
-                    }
-                },
+                Ok(rr) => rr.found,
                 Err(_) => {
                     unreachable!();
                 }

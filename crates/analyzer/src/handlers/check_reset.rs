@@ -29,14 +29,16 @@ impl<'a> CheckReset<'a> {
         let mut ret = Vec::new();
         ret.push(x.identifier.identifier_token.text());
         match &*x.expression_identifier_group {
-            ExpressionIdentifierGroup::ColonColonIdentifierExpressionIdentifierGroupListExpressionIdentifierGroupList0(x) => {
+            ExpressionIdentifierGroup::ExpressionIdentifierScoped(x) => {
+                let x = &x.expression_identifier_scoped;
                 ret.push(x.identifier.identifier_token.text());
-                for x in &x.expression_identifier_group_list {
+                for x in &x.expression_identifier_scoped_list {
                     ret.push(x.identifier.identifier_token.text());
                 }
             }
-            ExpressionIdentifierGroup::ExpressionIdentifierGroupList1ExpressionIdentifierGroupList2(x) => {
-                for x in &x.expression_identifier_group_list2 {
+            ExpressionIdentifierGroup::ExpressionIdentifierMember(x) => {
+                let x = &x.expression_identifier_member;
+                for x in &x.expression_identifier_member_list0 {
                     ret.push(x.identifier.identifier_token.text());
                 }
             }

@@ -237,13 +237,11 @@ impl Server {
                         SymbolPath::from(finder.token_group.as_slice())
                     };
                     if let Ok(symbol) = symbol_table::get(&path, &namespace) {
-                        if let Some(symbol) = symbol.found {
-                            let location = to_location(&symbol.token);
-                            self.snd
-                                .send_blocking(MsgFromServer::GotoDefinition(Some(location)))
-                                .unwrap();
-                            return;
-                        }
+                        let location = to_location(&symbol.found.token);
+                        self.snd
+                            .send_blocking(MsgFromServer::GotoDefinition(Some(location)))
+                            .unwrap();
+                        return;
                     }
                 }
             }
@@ -279,6 +277,9 @@ impl Server {
                     veryl_analyzer::symbol::SymbolKind::Genvar => SymbolKind::VARIABLE,
                     veryl_analyzer::symbol::SymbolKind::TypeDef(_) => SymbolKind::TYPE_PARAMETER,
                     veryl_analyzer::symbol::SymbolKind::ModportMember => SymbolKind::VARIABLE,
+                    veryl_analyzer::symbol::SymbolKind::SystemVerilog => SymbolKind::NAMESPACE,
+                    veryl_analyzer::symbol::SymbolKind::Namespace => SymbolKind::NAMESPACE,
+                    veryl_analyzer::symbol::SymbolKind::SystemFunction => SymbolKind::FUNCTION,
                 };
                 let location = to_location(&symbol.token);
                 #[allow(deprecated)]
@@ -312,17 +313,15 @@ impl Server {
                         SymbolPath::from(finder.token_group.as_slice())
                     };
                     if let Ok(symbol) = symbol_table::get(&path, &namespace) {
-                        if let Some(symbol) = symbol.found {
-                            let text = symbol.kind.to_string();
-                            let hover = Hover {
-                                contents: HoverContents::Scalar(MarkedString::String(text)),
-                                range: None,
-                            };
-                            self.snd
-                                .send_blocking(MsgFromServer::Hover(Some(hover)))
-                                .unwrap();
-                            return;
-                        }
+                        let text = symbol.found.kind.to_string();
+                        let hover = Hover {
+                            contents: HoverContents::Scalar(MarkedString::String(text)),
+                            range: None,
+                        };
+                        self.snd
+                            .send_blocking(MsgFromServer::Hover(Some(hover)))
+                            .unwrap();
+                        return;
                     }
                 }
             }
@@ -347,11 +346,9 @@ impl Server {
                         SymbolPath::from(finder.token_group.as_slice())
                     };
                     if let Ok(symbol) = symbol_table::get(&path, &namespace) {
-                        if let Some(symbol) = symbol.found {
-                            for reference in &symbol.references {
-                                let location = to_location(reference);
-                                ret.push(location);
-                            }
+                        for reference in &symbol.found.references {
+                            let location = to_location(reference);
+                            ret.push(location);
                         }
                     }
                 }
@@ -368,12 +365,12 @@ impl Server {
         let ret = if let Some(path) = resource_table::get_path_id(Path::new(path).to_path_buf()) {
             let mut tokens = Vec::new();
             for symbol in &symbol_table::get_all() {
-                if symbol.token.file_path == path {
+                if symbol.token.source == path {
                     if let veryl_analyzer::symbol::SymbolKind::Port(_) = symbol.kind {
                         let token_type = semantic_legend::PROPERTY;
                         tokens.push((symbol.token, token_type));
                         for reference in &symbol.references {
-                            if reference.file_path == path {
+                            if reference.source == path {
                                 tokens.push((*reference, token_type));
                             }
                         }
@@ -677,7 +674,7 @@ fn to_location(token: &Token) -> Location {
     let line = token.line - 1;
     let column = token.column - 1;
     let length = token.length;
-    let uri = Url::parse(&token.file_path.to_string()).unwrap();
+    let uri = Url::parse(&token.source.to_string()).unwrap();
     let range = Range::new(
         Position::new(line, column),
         Position::new(line, column + length),

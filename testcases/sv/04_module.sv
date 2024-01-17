@@ -23,6 +23,8 @@ module veryl_testcase_Module04 #(
 endmodule
 
 interface veryl_testcase_Interface04;
+    logic c;
+
     modport d (
         input c
     );

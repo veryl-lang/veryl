@@ -90,7 +90,7 @@ impl<'a> VerylGrammarTrait for CheckModule<'a> {
             if let HandlerPoint::Before = self.point {
                 if let IdentifierStatementGroup::Assignment(_) = &*arg.identifier_statement_group {
                     let symb = symbol_table::resolve(arg.expression_identifier.as_ref()).unwrap();
-                    let symb = symb.found.unwrap();
+                    let symb = symb.found;
                     let token = &arg.expression_identifier.identifier.identifier_token;
                     self.assign_check_inputs(&symb, token);
                 }
@@ -107,7 +107,7 @@ impl<'a> VerylGrammarTrait for CheckModule<'a> {
             match &*arg.port_declaration_item_group {
                 PortDeclarationItemGroup::DirectionArrayType(x) => {
                     let id = match symbol_table::resolve(arg.identifier.as_ref()) {
-                        Ok(x) => x.found.unwrap().id,
+                        Ok(x) => x.found.id,
                         Err(_) => panic!(),
                     };
                     if let Direction::Input(_) = &*x.direction {
@@ -126,7 +126,7 @@ impl<'a> VerylGrammarTrait for CheckModule<'a> {
         if self.in_module {
             if let HandlerPoint::Before = self.point {
                 let symb = match symbol_table::resolve(arg.hierarchical_identifier.as_ref()) {
-                    Ok(x) => x.found.unwrap(),
+                    Ok(x) => x.found,
                     Err(_) => panic!(),
                 };
                 let token = &arg.hierarchical_identifier.identifier.identifier_token;

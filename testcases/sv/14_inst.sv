@@ -1,4 +1,5 @@
 module veryl_testcase_Module14;
+    logic a  ;
     logic aa ;
     logic bbb;
 

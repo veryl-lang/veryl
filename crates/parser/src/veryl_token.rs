@@ -6,6 +6,32 @@ use paste::paste;
 use regex::Regex;
 
 #[derive(Debug, Clone, Copy)]
+pub enum TokenSource {
+    File(PathId),
+    Builtin,
+}
+
+impl ToString for TokenSource {
+    fn to_string(&self) -> String {
+        if let TokenSource::File(x) = self {
+            x.to_string()
+        } else {
+            String::from("builtin")
+        }
+    }
+}
+
+impl PartialEq<PathId> for TokenSource {
+    fn eq(&self, other: &PathId) -> bool {
+        if let TokenSource::File(x) = self {
+            x == other
+        } else {
+            false
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct Token {
     pub id: TokenId,
     pub text: StrId,
@@ -13,7 +39,30 @@ pub struct Token {
     pub column: u32,
     pub length: u32,
     pub pos: u32,
-    pub file_path: PathId,
+    pub source: TokenSource,
+}
+
+impl Token {
+    pub fn new(
+        text: &str,
+        line: u32,
+        column: u32,
+        length: u32,
+        pos: u32,
+        source: TokenSource,
+    ) -> Self {
+        let id = resource_table::new_token_id();
+        let text = resource_table::insert_str(text);
+        Token {
+            id,
+            text,
+            line,
+            column,
+            length,
+            pos,
+            source,
+        }
+    }
 }
 
 impl<'t> TryFrom<&parol_runtime::lexer::Token<'t>> for Token {
@@ -22,7 +71,7 @@ impl<'t> TryFrom<&parol_runtime::lexer::Token<'t>> for Token {
         let id = resource_table::new_token_id();
         let text = resource_table::insert_str(x.text());
         let pos = x.location.scanner_switch_pos + x.location.offset - x.location.length as usize;
-        let file_path = resource_table::insert_path(&x.location.file_name);
+        let source = TokenSource::File(resource_table::insert_path(&x.location.file_name));
         Ok(Token {
             id,
             text,
@@ -30,7 +79,7 @@ impl<'t> TryFrom<&parol_runtime::lexer::Token<'t>> for Token {
             column: x.location.start_column,
             length: x.location.length,
             pos: pos as u32,
-            file_path,
+            source,
         })
     }
 }
@@ -101,7 +150,9 @@ fn split_comment_token(token: Token) -> Vec<Token> {
         let text = resource_table::insert_str(text);
 
         if is_doc_comment {
-            doc_comment_table::insert(token.file_path, line, text);
+            if let TokenSource::File(file) = token.source {
+                doc_comment_table::insert(file, line, text);
+            }
         }
 
         let token = Token {
@@ -111,7 +162,7 @@ fn split_comment_token(token: Token) -> Vec<Token> {
             column: 0,
             length,
             pos: pos as u32 + length,
-            file_path: token.file_path,
+            source: token.source,
         };
         ret.push(token);
     }
@@ -129,7 +180,7 @@ impl TryFrom<&StartToken> for VerylToken {
         }
         let id = resource_table::new_token_id();
         let text = resource_table::insert_str("");
-        let file_path = resource_table::insert_path(std::path::Path::new(""));
+        let source = TokenSource::Builtin;
         let token = Token {
             id,
             text,
@@ -137,7 +188,7 @@ impl TryFrom<&StartToken> for VerylToken {
             column: 1,
             length: 0,
             pos: 0,
-            file_path,
+            source,
         };
         Ok(VerylToken { token, comments })
     }
@@ -172,7 +223,7 @@ macro_rules! token_with_comments {
                         column: x.[<$x:snake _term>].column,
                         length: x.[<$x:snake _term>].length,
                         pos: x.[<$x:snake _term>].pos,
-                        file_path: x.[<$x:snake _term>].file_path,
+                        source: x.[<$x:snake _term>].source,
                     })
                 }
             }
