@@ -1,6 +1,5 @@
 pub mod check_attribute;
 pub mod check_direction;
-pub mod check_dollar;
 pub mod check_enum;
 pub mod check_function;
 pub mod check_identifier;
@@ -15,7 +14,6 @@ pub mod create_symbol_table;
 pub mod create_type_dag;
 use check_attribute::*;
 use check_direction::*;
-use check_dollar::*;
 use check_enum::*;
 use check_function::*;
 use check_identifier::*;
@@ -40,7 +38,6 @@ pub struct Pass1Handlers<'a> {
     check_number: CheckNumber<'a>,
     check_reset: CheckReset<'a>,
     check_statement: CheckStatement<'a>,
-    check_dollar: CheckDollar<'a>,
     create_symbol_table: CreateSymbolTable<'a>,
 }
 
@@ -53,7 +50,6 @@ impl<'a> Pass1Handlers<'a> {
             check_number: CheckNumber::new(text),
             check_reset: CheckReset::new(text),
             check_statement: CheckStatement::new(text),
-            check_dollar: CheckDollar::new(text),
             create_symbol_table: CreateSymbolTable::new(text),
         }
     }
@@ -66,7 +62,6 @@ impl<'a> Pass1Handlers<'a> {
             &mut self.check_number as &mut dyn Handler,
             &mut self.check_reset as &mut dyn Handler,
             &mut self.check_statement as &mut dyn Handler,
-            &mut self.check_dollar as &mut dyn Handler,
             &mut self.create_symbol_table as &mut dyn Handler,
         ]
     }
@@ -79,7 +74,6 @@ impl<'a> Pass1Handlers<'a> {
         ret.append(&mut self.check_number.errors);
         ret.append(&mut self.check_reset.errors);
         ret.append(&mut self.check_statement.errors);
-        ret.append(&mut self.check_dollar.errors);
         ret.append(&mut self.create_symbol_table.errors);
         ret
     }

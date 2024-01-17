@@ -1,7 +1,7 @@
 use crate::aligner::{Aligner, Location};
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::SymbolKind;
-use veryl_analyzer::symbol_table::{self, SymbolPath};
+use veryl_analyzer::symbol_table::{self, SymbolPath, SymbolPathNamespace};
 use veryl_analyzer::{msb_table, namespace_table};
 use veryl_metadata::{Build, BuiltinType, ClockType, Format, Metadata, ResetType};
 use veryl_parser::resource_table;
@@ -311,8 +311,8 @@ impl Emitter {
         self.str(&ret);
     }
 
-    fn path_identifier(&mut self, arg: &[Identifier]) {
-        if let Ok(ref symbol) = symbol_table::resolve(arg) {
+    fn path_identifier(&mut self, path: SymbolPathNamespace, args: &[Identifier]) {
+        if let Ok(ref symbol) = symbol_table::resolve(path) {
             match symbol.found.kind {
                 SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package => {
                     self.namespace(&symbol.found.namespace);
@@ -324,28 +324,40 @@ impl Emitter {
                 | SymbolKind::Union
                 | SymbolKind::TypeDef(_)
                 | SymbolKind::Enum(_) => {
-                    if arg.len() > 1 {
+                    if args.len() > 1 {
                         self.namespace(&symbol.found.namespace);
                         self.str(&format!("{}", symbol.found.token.text));
                     } else {
-                        self.identifier(&arg[0]);
+                        self.identifier(&args[0]);
                     }
                 }
                 SymbolKind::EnumMember(_) => {
-                    if arg.len() > 2 {
+                    if args.len() > 2 {
                         self.namespace(&symbol.found.namespace);
                         self.str(&format!("{}", symbol.found.token.text));
                     } else {
-                        self.identifier(&arg[0]);
+                        self.identifier(&args[0]);
                         self.str("_");
-                        self.identifier(&arg[1]);
+                        self.identifier(&args[1]);
                     }
                 }
                 SymbolKind::Modport(_) => {
                     self.namespace(&symbol.found.namespace);
                     self.str(&format!("{}", symbol.found.token.text));
                 }
-                SymbolKind::SystemVerilog => todo!(),
+                SymbolKind::SystemVerilog => {
+                    // arg[0] is "sv", it should be removed
+                    for (i, arg) in args[1..].iter().enumerate() {
+                        if i != 0 {
+                            self.str("::");
+                        }
+                        self.identifier(&arg);
+                    }
+                }
+                SymbolKind::SystemFunction => {
+                    self.str("$");
+                    self.identifier(&args[0]);
+                }
                 SymbolKind::Port(_)
                 | SymbolKind::Variable(_)
                 | SymbolKind::Instance(_)
@@ -353,21 +365,10 @@ impl Emitter {
                 | SymbolKind::StructMember(_)
                 | SymbolKind::UnionMember(_)
                 | SymbolKind::ModportMember
-                | SymbolKind::Genvar => unreachable!(),
+                | SymbolKind::Genvar
+                | SymbolKind::Namespace => unreachable!(),
             }
             return;
-        }
-
-        // case at unresolved
-        for (i, x) in arg.iter().enumerate() {
-            if i != 0 {
-                if self.in_direction_modport {
-                    self.str(".");
-                } else {
-                    self.str("::");
-                }
-            }
-            self.identifier(x);
         }
     }
 }
@@ -505,36 +506,38 @@ impl VerylWalker for Emitter {
         for x in &arg.scoped_identifier_list {
             path.push(x.identifier.as_ref().clone());
         }
-        self.path_identifier(&path);
+        self.path_identifier(arg.into(), &path);
     }
 
     /// Semantic action for non-terminal 'ExpressionIdentifier'
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) {
-        if let Some(ref x) = arg.expression_identifier_opt {
-            self.dollar(&x.dollar);
-        }
-
         match &*arg.expression_identifier_group {
             ExpressionIdentifierGroup::ColonColonIdentifierExpressionIdentifierGroupListExpressionIdentifierGroupList0(x) => {
                 let mut path = vec![arg.identifier.as_ref().clone(), x.identifier.as_ref().clone()];
                 for x in &x.expression_identifier_group_list {
                     path.push(x.identifier.as_ref().clone());
                 }
-                self.path_identifier(&path);
+                self.path_identifier(arg.into(), &path);
                 for x in &x.expression_identifier_group_list0 {
                     self.select(&x.select);
                 }
             }
             ExpressionIdentifierGroup::ExpressionIdentifierGroupList1ExpressionIdentifierGroupList2(x) => {
-                self.identifier(&arg.identifier);
-                for x in &x.expression_identifier_group_list1 {
-                    self.select(&x.select);
-                }
-                for x in &x.expression_identifier_group_list2 {
-                    self.dot(&x.dot);
-                    self.identifier(&x.identifier);
-                    for x in &x.expression_identifier_group_list2_list {
+                // system function call
+                if arg.expression_identifier_opt.is_some() {
+                    let path = vec![arg.identifier.as_ref().clone()];
+                    self.path_identifier(arg.into(), &path);
+                } else {
+                    self.identifier(&arg.identifier);
+                    for x in &x.expression_identifier_group_list1 {
                         self.select(&x.select);
+                    }
+                    for x in &x.expression_identifier_group_list2 {
+                        self.dot(&x.dot);
+                        self.identifier(&x.identifier);
+                        for x in &x.expression_identifier_group_list2_list {
+                            self.select(&x.select);
+                        }
                     }
                 }
             }

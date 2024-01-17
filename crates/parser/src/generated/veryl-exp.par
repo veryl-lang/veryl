@@ -104,7 +104,7 @@
 /*  95 */ U64Term: /(?-u:\b)u64(?-u:\b)/ : Token;
 /*  96 */ UnionTerm: /(?-u:\b)union(?-u:\b)/ : Token;
 /*  97 */ VarTerm: /(?-u:\b)var(?-u:\b)/ : Token;
-/*  98 */ IdentifierTerm: /[a-zA-Z_][0-9a-zA-Z_]*/ : Token;
+/*  98 */ IdentifierTerm: /[a-zA-Z_][0-9a-zA-Z_$]*/ : Token;
 /*  99 */ Comments: CommentsOpt /* Option */;
 /* 100 */ CommentsOpt /* Option<T>::Some */: CommentsTerm;
 /* 101 */ CommentsOpt /* Option<T>::None */: ;

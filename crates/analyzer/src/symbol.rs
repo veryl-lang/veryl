@@ -105,6 +105,8 @@ pub enum SymbolKind {
     Genvar,
     ModportMember,
     SystemVerilog,
+    Namespace,
+    SystemFunction,
 }
 
 impl SymbolKind {
@@ -129,7 +131,9 @@ impl SymbolKind {
             SymbolKind::Modport(_) => "modport".to_string(),
             SymbolKind::Genvar => "genvar".to_string(),
             SymbolKind::ModportMember => "modport member".to_string(),
-            SymbolKind::SystemVerilog => "systemverilog".to_string(),
+            SymbolKind::SystemVerilog => "systemverilog item".to_string(),
+            SymbolKind::Namespace => "namespace".to_string(),
+            SymbolKind::SystemFunction => "system function".to_string(),
         }
     }
 }
@@ -219,7 +223,9 @@ impl fmt::Display for SymbolKind {
             }
             SymbolKind::Genvar => "genvar".to_string(),
             SymbolKind::ModportMember => "modport member".to_string(),
-            SymbolKind::SystemVerilog => "systemverilog".to_string(),
+            SymbolKind::SystemVerilog => "systemverilog item".to_string(),
+            SymbolKind::Namespace => "namespace".to_string(),
+            SymbolKind::SystemFunction => "system function".to_string(),
         };
         text.fmt(f)
     }

@@ -104,7 +104,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
 
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            // start with $
+            // Add symbols under $sv namespace
             if arg.scoped_identifier_opt.is_some() {
                 if arg.identifier.identifier_token.text() == "sv" {
                     let mut namespace = Namespace::new();
@@ -129,8 +129,6 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                     }
                 }
                 Err(err) => {
-                    dbg!(&err);
-                    dbg!(format!("{}", err.not_found));
                     if let Some(last_found) = err.last_found {
                         let name = format!("{}", last_found.token.text);
                         let member = format!("{}", err.not_found);
@@ -156,10 +154,9 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
 
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            // start with $
+            // Add symbols under $sv namespace
             if arg.expression_identifier_opt.is_some() {
                 match arg.expression_identifier_group.as_ref() {
-                    // Namespace
                     ExpressionIdentifierGroup::ColonColonIdentifierExpressionIdentifierGroupListExpressionIdentifierGroupList0(_) => {
                         if arg.identifier.identifier_token.text() == "sv" {
                             let mut namespace = Namespace::new();
@@ -173,8 +170,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                             }
                         }
                     },
-                    // System function call
-                    _ => return Ok(()),
+                    _ => (),
                 }
             }
 

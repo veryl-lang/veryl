@@ -111,7 +111,7 @@ U32Term               : /(?-u:\b)u32(?-u:\b)/                                   
 U64Term               : /(?-u:\b)u64(?-u:\b)/                                                                 : Token;
 UnionTerm             : /(?-u:\b)union(?-u:\b)/                                                               : Token;
 VarTerm               : /(?-u:\b)var(?-u:\b)/                                                                 : Token;
-IdentifierTerm        : /[a-zA-Z_][0-9a-zA-Z_]*/                                                              : Token;
+IdentifierTerm        : /[a-zA-Z_][0-9a-zA-Z_$]*/                                                             : Token;
 
 // ----------------------------------------------------------------------------
 // Token

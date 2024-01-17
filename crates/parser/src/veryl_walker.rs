@@ -771,6 +771,9 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'ScopedIdentifier'
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) {
         before!(self, scoped_identifier, arg);
+        if let Some(ref x) = arg.scoped_identifier_opt {
+            self.dollar(&x.dollar);
+        }
         self.identifier(&arg.identifier);
         for x in &arg.scoped_identifier_list {
             self.colon_colon(&x.colon_colon);

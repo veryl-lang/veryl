@@ -123,7 +123,7 @@ impl Analyzer {
         let mut ret = Vec::new();
         let symbols = symbol_table::get_all();
         for symbol in symbols {
-            if symbol.token.file_path == path {
+            if symbol.token.source == path {
                 if let SymbolKind::Variable(_) = symbol.kind {
                     if symbol.references.is_empty() && !symbol.allow_unused {
                         let name = format!("{}", symbol.token.text);
