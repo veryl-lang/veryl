@@ -237,13 +237,11 @@ impl Server {
                         SymbolPath::from(finder.token_group.as_slice())
                     };
                     if let Ok(symbol) = symbol_table::get(&path, &namespace) {
-                        if let Some(symbol) = symbol.found {
-                            let location = to_location(&symbol.token);
-                            self.snd
-                                .send_blocking(MsgFromServer::GotoDefinition(Some(location)))
-                                .unwrap();
-                            return;
-                        }
+                        let location = to_location(&symbol.found.token);
+                        self.snd
+                            .send_blocking(MsgFromServer::GotoDefinition(Some(location)))
+                            .unwrap();
+                        return;
                     }
                 }
             }
@@ -279,6 +277,7 @@ impl Server {
                     veryl_analyzer::symbol::SymbolKind::Genvar => SymbolKind::VARIABLE,
                     veryl_analyzer::symbol::SymbolKind::TypeDef(_) => SymbolKind::TYPE_PARAMETER,
                     veryl_analyzer::symbol::SymbolKind::ModportMember => SymbolKind::VARIABLE,
+                    veryl_analyzer::symbol::SymbolKind::SystemVerilog => SymbolKind::NAMESPACE,
                 };
                 let location = to_location(&symbol.token);
                 #[allow(deprecated)]
@@ -312,17 +311,15 @@ impl Server {
                         SymbolPath::from(finder.token_group.as_slice())
                     };
                     if let Ok(symbol) = symbol_table::get(&path, &namespace) {
-                        if let Some(symbol) = symbol.found {
-                            let text = symbol.kind.to_string();
-                            let hover = Hover {
-                                contents: HoverContents::Scalar(MarkedString::String(text)),
-                                range: None,
-                            };
-                            self.snd
-                                .send_blocking(MsgFromServer::Hover(Some(hover)))
-                                .unwrap();
-                            return;
-                        }
+                        let text = symbol.found.kind.to_string();
+                        let hover = Hover {
+                            contents: HoverContents::Scalar(MarkedString::String(text)),
+                            range: None,
+                        };
+                        self.snd
+                            .send_blocking(MsgFromServer::Hover(Some(hover)))
+                            .unwrap();
+                        return;
                     }
                 }
             }
@@ -347,11 +344,9 @@ impl Server {
                         SymbolPath::from(finder.token_group.as_slice())
                     };
                     if let Ok(symbol) = symbol_table::get(&path, &namespace) {
-                        if let Some(symbol) = symbol.found {
-                            for reference in &symbol.references {
-                                let location = to_location(reference);
-                                ret.push(location);
-                            }
+                        for reference in &symbol.found.references {
+                            let location = to_location(reference);
+                            ret.push(location);
                         }
                     }
                 }

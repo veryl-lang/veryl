@@ -46,44 +46,42 @@ impl<'a> VerylGrammarTrait for CheckInstance<'a> {
                 let mut stringifier = Stringifier::new();
                 stringifier.scoped_identifier(&arg.scoped_identifier);
                 let name = stringifier.as_str();
-                if let Some(symbol) = symbol.found {
-                    match symbol.kind {
-                        SymbolKind::Module(ref x) => {
-                            for port in &x.ports {
-                                if !connected_ports.contains(&port.name)
-                                    && !allow_table::contains("missing_port")
-                                {
-                                    let port = resource_table::get_str_value(port.name).unwrap();
-                                    self.errors.push(AnalyzerError::missing_port(
-                                        name,
-                                        &port,
-                                        self.text,
-                                        &arg.identifier.identifier_token,
-                                    ));
-                                }
-                            }
-                            for port in &connected_ports {
-                                if !x.ports.iter().any(|x| &x.name == port) {
-                                    let port = resource_table::get_str_value(*port).unwrap();
-                                    self.errors.push(AnalyzerError::unknown_port(
-                                        name,
-                                        &port,
-                                        self.text,
-                                        &arg.identifier.identifier_token,
-                                    ));
-                                }
+                match symbol.found.kind {
+                    SymbolKind::Module(ref x) => {
+                        for port in &x.ports {
+                            if !connected_ports.contains(&port.name)
+                                && !allow_table::contains("missing_port")
+                            {
+                                let port = resource_table::get_str_value(port.name).unwrap();
+                                self.errors.push(AnalyzerError::missing_port(
+                                    name,
+                                    &port,
+                                    self.text,
+                                    &arg.identifier.identifier_token,
+                                ));
                             }
                         }
-                        SymbolKind::Interface(_) => (),
-                        _ => {
-                            self.errors.push(AnalyzerError::mismatch_type(
-                                name,
-                                "module or interface",
-                                &symbol.kind.to_kind_name(),
-                                self.text,
-                                &arg.identifier.identifier_token,
-                            ));
+                        for port in &connected_ports {
+                            if !x.ports.iter().any(|x| &x.name == port) {
+                                let port = resource_table::get_str_value(*port).unwrap();
+                                self.errors.push(AnalyzerError::unknown_port(
+                                    name,
+                                    &port,
+                                    self.text,
+                                    &arg.identifier.identifier_token,
+                                ));
+                            }
                         }
+                    }
+                    SymbolKind::Interface(_) => (),
+                    _ => {
+                        self.errors.push(AnalyzerError::mismatch_type(
+                            name,
+                            "module or interface",
+                            &symbol.found.kind.to_kind_name(),
+                            self.text,
+                            &arg.identifier.identifier_token,
+                        ));
                     }
                 }
             }

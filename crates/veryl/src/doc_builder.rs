@@ -424,11 +424,7 @@ fn format_doc_comment(text: &[StrId], single_line: bool) -> String {
 
 fn get_comment_from_token(token: &Token) -> Option<String> {
     if let Ok(symbol) = symbol_table::resolve(token) {
-        if let Some(symbol) = symbol.found {
-            Some(format_doc_comment(&symbol.doc_comment, false))
-        } else {
-            None
-        }
+        Some(format_doc_comment(&symbol.found.doc_comment, false))
     } else {
         None
     }

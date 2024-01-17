@@ -54,19 +54,15 @@ impl<'a> VerylGrammarTrait for CheckMsbLsb<'a> {
                 let resolved = if let Ok(x) =
                     symbol_table::resolve(self.identifier_path.last().unwrap().clone())
                 {
-                    if let Some(x) = x.found {
-                        if let SymbolKind::Variable(x) = x.kind {
-                            let select_dimension = *self.select_dimension.last().unwrap();
-                            let expression = if select_dimension >= x.r#type.array.len() {
-                                &x.r#type.width[select_dimension - x.r#type.array.len()]
-                            } else {
-                                &x.r#type.array[select_dimension]
-                            };
-                            msb_table::insert(arg.msb_token.token.id, expression);
-                            true
+                    if let SymbolKind::Variable(x) = x.found.kind {
+                        let select_dimension = *self.select_dimension.last().unwrap();
+                        let expression = if select_dimension >= x.r#type.array.len() {
+                            &x.r#type.width[select_dimension - x.r#type.array.len()]
                         } else {
-                            false
-                        }
+                            &x.r#type.array[select_dimension]
+                        };
+                        msb_table::insert(arg.msb_token.token.id, expression);
+                        true
                     } else {
                         false
                     }

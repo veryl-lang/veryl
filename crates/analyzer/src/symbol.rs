@@ -104,6 +104,7 @@ pub enum SymbolKind {
     Modport(ModportProperty),
     Genvar,
     ModportMember,
+    SystemVerilog,
 }
 
 impl SymbolKind {
@@ -128,6 +129,7 @@ impl SymbolKind {
             SymbolKind::Modport(_) => "modport".to_string(),
             SymbolKind::Genvar => "genvar".to_string(),
             SymbolKind::ModportMember => "modport member".to_string(),
+            SymbolKind::SystemVerilog => "systemverilog".to_string(),
         }
     }
 }
@@ -217,6 +219,7 @@ impl fmt::Display for SymbolKind {
             }
             SymbolKind::Genvar => "genvar".to_string(),
             SymbolKind::ModportMember => "modport member".to_string(),
+            SymbolKind::SystemVerilog => "systemverilog".to_string(),
         };
         text.fmt(f)
     }

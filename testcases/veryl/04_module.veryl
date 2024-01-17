@@ -23,6 +23,8 @@ module Module04 #(
 }
 
 interface Interface04 {
+    var c: logic;
+
     modport d {
         c: input,
     }

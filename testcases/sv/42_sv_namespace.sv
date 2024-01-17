@@ -4,9 +4,10 @@ module veryl_testcase_Module42 (
     input  logic i_d    ,
     output logic o_d
 );
-    localparam int unsigned a = pkg::paramA;
+    localparam int unsigned a = $sv::pkg::paramA;
+    //localparam b: u32 = pkg::paramA;
 
-    delay u0 (
+    sv::delay u0 (
         .i_clk   (i_clk  ),
         .i_rst_n (i_rst_n),
         .i_d     (i_d    ),
