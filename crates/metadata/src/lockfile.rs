@@ -374,6 +374,19 @@ impl Lockfile {
             let git = Git::clone(url, &path)?;
             git.fetch()?;
             git.checkout(Some(revision))?;
+        } else {
+            let git = Git::open(&path)?;
+            let ret = git.fetch();
+
+            // If the existing path is not git repository, cleanup and re-try
+            if ret.is_err() {
+                fs::remove_dir_all(&path)?;
+                let git = Git::clone(url, &path)?;
+                git.fetch()?;
+                git.checkout(Some(revision))?;
+            } else {
+                git.checkout(Some(revision))?;
+            }
         }
 
         let toml = path.join("Veryl.toml");
