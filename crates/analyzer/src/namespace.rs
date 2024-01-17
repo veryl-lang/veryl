@@ -70,7 +70,7 @@ impl From<&SymbolPath> for Namespace {
     fn from(value: &SymbolPath) -> Self {
         let mut paths = Vec::new();
         for x in value.as_slice() {
-            paths.push(x.clone());
+            paths.push(*x);
         }
         Namespace { paths }
     }

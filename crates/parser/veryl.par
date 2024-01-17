@@ -365,7 +365,10 @@ RealNumber: FixedPoint
 
 HierarchicalIdentifier: Identifier { Select } { Dot Identifier { Select } };
 ScopedIdentifier      : [ Dollar ] Identifier { ColonColon Identifier };
-ExpressionIdentifier  : [ Dollar ] Identifier ( ColonColon Identifier { ColonColon Identifier } { Select } | ( { Select } { Dot Identifier { Select } } ) );
+ExpressionIdentifier  : [ Dollar ] Identifier ( ExpressionIdentifierScoped | ExpressionIdentifierMember );
+
+ExpressionIdentifierScoped: ColonColon Identifier { ColonColon Identifier } { Select };
+ExpressionIdentifierMember: { Select } { Dot Identifier { Select } };
 
 // ----------------------------------------------------------------------------
 // Expression

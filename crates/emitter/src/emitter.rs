@@ -351,7 +351,7 @@ impl Emitter {
                         if i != 0 {
                             self.str("::");
                         }
-                        self.identifier(&arg);
+                        self.identifier(arg);
                     }
                 }
                 SymbolKind::SystemFunction => {
@@ -368,7 +368,6 @@ impl Emitter {
                 | SymbolKind::Genvar
                 | SymbolKind::Namespace => unreachable!(),
             }
-            return;
         }
     }
 }
@@ -512,30 +511,35 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'ExpressionIdentifier'
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) {
         match &*arg.expression_identifier_group {
-            ExpressionIdentifierGroup::ColonColonIdentifierExpressionIdentifierGroupListExpressionIdentifierGroupList0(x) => {
-                let mut path = vec![arg.identifier.as_ref().clone(), x.identifier.as_ref().clone()];
-                for x in &x.expression_identifier_group_list {
+            ExpressionIdentifierGroup::ExpressionIdentifierScoped(x) => {
+                let x = &x.expression_identifier_scoped;
+                let mut path = vec![
+                    arg.identifier.as_ref().clone(),
+                    x.identifier.as_ref().clone(),
+                ];
+                for x in &x.expression_identifier_scoped_list {
                     path.push(x.identifier.as_ref().clone());
                 }
                 self.path_identifier(arg.into(), &path);
-                for x in &x.expression_identifier_group_list0 {
+                for x in &x.expression_identifier_scoped_list0 {
                     self.select(&x.select);
                 }
             }
-            ExpressionIdentifierGroup::ExpressionIdentifierGroupList1ExpressionIdentifierGroupList2(x) => {
+            ExpressionIdentifierGroup::ExpressionIdentifierMember(x) => {
+                let x = &x.expression_identifier_member;
                 // system function call
                 if arg.expression_identifier_opt.is_some() {
                     let path = vec![arg.identifier.as_ref().clone()];
                     self.path_identifier(arg.into(), &path);
                 } else {
                     self.identifier(&arg.identifier);
-                    for x in &x.expression_identifier_group_list1 {
+                    for x in &x.expression_identifier_member_list {
                         self.select(&x.select);
                     }
-                    for x in &x.expression_identifier_group_list2 {
+                    for x in &x.expression_identifier_member_list0 {
                         self.dot(&x.dot);
                         self.identifier(&x.identifier);
-                        for x in &x.expression_identifier_group_list2_list {
+                        for x in &x.expression_identifier_member_list0_list {
                             self.select(&x.select);
                         }
                     }

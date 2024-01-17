@@ -47,14 +47,14 @@ fn expression_identifier_tokens(arg: &ExpressionIdentifier) -> Vec<Token> {
         ret.push(x.dollar.dollar_token.token);
     }
     ret.push(arg.identifier.identifier_token.token);
-    match arg.expression_identifier_group.as_ref() {
-        ExpressionIdentifierGroup::ColonColonIdentifierExpressionIdentifierGroupListExpressionIdentifierGroupList0(x) => {
+    if let ExpressionIdentifierGroup::ExpressionIdentifierScoped(x) =
+        arg.expression_identifier_group.as_ref()
+    {
+        let x = &x.expression_identifier_scoped;
+        ret.push(x.identifier.identifier_token.token);
+        for x in &x.expression_identifier_scoped_list {
             ret.push(x.identifier.identifier_token.token);
-            for x in &x.expression_identifier_group_list {
-                ret.push(x.identifier.identifier_token.token);
-            }
         }
-        _ => (),
     }
     ret
 }
@@ -105,17 +105,16 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             // Add symbols under $sv namespace
-            if arg.scoped_identifier_opt.is_some() {
-                if arg.identifier.identifier_token.text() == "sv" {
-                    let mut namespace = Namespace::new();
-                    for (i, token) in scoped_identifier_tokens(arg).iter().enumerate() {
-                        if i != 0 {
-                            let symbol =
-                                Symbol::new(&token, SymbolKind::SystemVerilog, &namespace, vec![]);
-                            let _ = symbol_table::insert(&token, symbol);
-                        }
-                        namespace.push(token.text);
+            if arg.scoped_identifier_opt.is_some() && arg.identifier.identifier_token.text() == "sv"
+            {
+                let mut namespace = Namespace::new();
+                for (i, token) in scoped_identifier_tokens(arg).iter().enumerate() {
+                    if i != 0 {
+                        let symbol =
+                            Symbol::new(token, SymbolKind::SystemVerilog, &namespace, vec![]);
+                        let _ = symbol_table::insert(token, symbol);
                     }
+                    namespace.push(token.text);
                 }
             }
 
@@ -156,21 +155,24 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
         if let HandlerPoint::Before = self.point {
             // Add symbols under $sv namespace
             if arg.expression_identifier_opt.is_some() {
-                match arg.expression_identifier_group.as_ref() {
-                    ExpressionIdentifierGroup::ColonColonIdentifierExpressionIdentifierGroupListExpressionIdentifierGroupList0(_) => {
-                        if arg.identifier.identifier_token.text() == "sv" {
-                            let mut namespace = Namespace::new();
-                            for (i, token) in expression_identifier_tokens(arg).iter().enumerate() {
-                                if i != 0 {
-                                    let symbol =
-                                        Symbol::new(&token, SymbolKind::SystemVerilog, &namespace, vec![]);
-                                    let _ = symbol_table::insert(&token, symbol);
-                                }
-                                namespace.push(token.text);
+                if let ExpressionIdentifierGroup::ExpressionIdentifierScoped(_) =
+                    arg.expression_identifier_group.as_ref()
+                {
+                    if arg.identifier.identifier_token.text() == "sv" {
+                        let mut namespace = Namespace::new();
+                        for (i, token) in expression_identifier_tokens(arg).iter().enumerate() {
+                            if i != 0 {
+                                let symbol = Symbol::new(
+                                    token,
+                                    SymbolKind::SystemVerilog,
+                                    &namespace,
+                                    vec![],
+                                );
+                                let _ = symbol_table::insert(token, symbol);
                             }
+                            namespace.push(token.text);
                         }
-                    },
-                    _ => (),
+                    }
                 }
             }
 

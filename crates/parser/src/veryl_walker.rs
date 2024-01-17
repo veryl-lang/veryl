@@ -790,31 +790,45 @@ pub trait VerylWalker {
         }
         self.identifier(&arg.identifier);
         match &*arg.expression_identifier_group {
-            ExpressionIdentifierGroup::ColonColonIdentifierExpressionIdentifierGroupListExpressionIdentifierGroupList0(x) => {
-                self.colon_colon(&x.colon_colon);
-                self.identifier(&x.identifier);
-                for x in &x.expression_identifier_group_list {
-                    self.colon_colon(&x.colon_colon);
-                    self.identifier(&x.identifier);
-                }
-                for x in &x.expression_identifier_group_list0 {
-                    self.select(&x.select);
-                }
+            ExpressionIdentifierGroup::ExpressionIdentifierScoped(x) => {
+                self.expression_identifier_scoped(&x.expression_identifier_scoped);
             }
-            ExpressionIdentifierGroup::ExpressionIdentifierGroupList1ExpressionIdentifierGroupList2(x) => {
-                for x in &x.expression_identifier_group_list1 {
-                    self.select(&x.select);
-                }
-                for x in &x.expression_identifier_group_list2 {
-                    self.dot(&x.dot);
-                    self.identifier(&x.identifier);
-                    for x in &x.expression_identifier_group_list2_list {
-                        self.select(&x.select);
-                    }
-                }
+            ExpressionIdentifierGroup::ExpressionIdentifierMember(x) => {
+                self.expression_identifier_member(&x.expression_identifier_member);
             }
         }
         after!(self, expression_identifier, arg);
+    }
+
+    /// Semantic action for non-terminal 'ExpressionIdentifierScoped'
+    fn expression_identifier_scoped(&mut self, arg: &ExpressionIdentifierScoped) {
+        before!(self, expression_identifier_scoped, arg);
+        self.colon_colon(&arg.colon_colon);
+        self.identifier(&arg.identifier);
+        for x in &arg.expression_identifier_scoped_list {
+            self.colon_colon(&x.colon_colon);
+            self.identifier(&x.identifier);
+        }
+        for x in &arg.expression_identifier_scoped_list0 {
+            self.select(&x.select);
+        }
+        after!(self, expression_identifier_scoped, arg);
+    }
+
+    /// Semantic action for non-terminal 'ExpressionIdentifierMember'
+    fn expression_identifier_member(&mut self, arg: &ExpressionIdentifierMember) {
+        before!(self, expression_identifier_member, arg);
+        for x in &arg.expression_identifier_member_list {
+            self.select(&x.select);
+        }
+        for x in &arg.expression_identifier_member_list0 {
+            self.dot(&x.dot);
+            self.identifier(&x.identifier);
+            for x in &x.expression_identifier_member_list0_list {
+                self.select(&x.select);
+            }
+        }
+        after!(self, expression_identifier_member, arg);
     }
 
     /// Semantic action for non-terminal 'Expression'

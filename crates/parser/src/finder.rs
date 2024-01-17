@@ -90,31 +90,33 @@ impl VerylWalker for Finder {
         self.identifier(&arg.identifier);
         self.in_group = false;
         match &*arg.expression_identifier_group {
-            ExpressionIdentifierGroup::ColonColonIdentifierExpressionIdentifierGroupListExpressionIdentifierGroupList0(x) => {
+            ExpressionIdentifierGroup::ExpressionIdentifierScoped(x) => {
+                let x = &x.expression_identifier_scoped;
                 self.colon_colon(&x.colon_colon);
                 self.in_group = true;
                 self.identifier(&x.identifier);
                 self.in_group = false;
-                for x in &x.expression_identifier_group_list {
+                for x in &x.expression_identifier_scoped_list {
                     self.colon_colon(&x.colon_colon);
                     self.in_group = true;
                     self.identifier(&x.identifier);
                     self.in_group = false;
                 }
-                for x in &x.expression_identifier_group_list0 {
+                for x in &x.expression_identifier_scoped_list0 {
                     self.select(&x.select);
                 }
             }
-            ExpressionIdentifierGroup::ExpressionIdentifierGroupList1ExpressionIdentifierGroupList2(x) => {
-                for x in &x.expression_identifier_group_list1 {
+            ExpressionIdentifierGroup::ExpressionIdentifierMember(x) => {
+                let x = &x.expression_identifier_member;
+                for x in &x.expression_identifier_member_list {
                     self.select(&x.select);
                 }
-                for x in &x.expression_identifier_group_list2 {
+                for x in &x.expression_identifier_member_list0 {
                     self.dot(&x.dot);
                     self.in_group = true;
                     self.identifier(&x.identifier);
                     self.in_group = false;
-                    for x in &x.expression_identifier_group_list2_list {
+                    for x in &x.expression_identifier_member_list0_list {
                         self.select(&x.select);
                     }
                 }

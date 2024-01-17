@@ -111,17 +111,19 @@ impl From<&syntax_tree::ExpressionIdentifier> for SymbolPath {
         }
         path.push(value.identifier.identifier_token.token.text);
         match &*value.expression_identifier_group {
-            syntax_tree::ExpressionIdentifierGroup::ColonColonIdentifierExpressionIdentifierGroupListExpressionIdentifierGroupList0(x) => {
+            syntax_tree::ExpressionIdentifierGroup::ExpressionIdentifierScoped(x) => {
+                let x = &x.expression_identifier_scoped;
                 path.push(x.identifier.identifier_token.token.text);
-                for x in &x.expression_identifier_group_list {
+                for x in &x.expression_identifier_scoped_list {
                     path.push(x.identifier.identifier_token.token.text);
                 }
-            },
-            syntax_tree::ExpressionIdentifierGroup::ExpressionIdentifierGroupList1ExpressionIdentifierGroupList2(x) => {
-                for x in &x.expression_identifier_group_list2 {
+            }
+            syntax_tree::ExpressionIdentifierGroup::ExpressionIdentifierMember(x) => {
+                let x = &x.expression_identifier_member;
+                for x in &x.expression_identifier_member_list0 {
                     path.push(x.identifier.identifier_token.token.text);
                 }
-            },
+            }
         }
         SymbolPath(path)
     }
@@ -187,7 +189,7 @@ pub struct ResolveError {
 impl ResolveError {
     pub fn new(last_found: Option<&Symbol>, not_found: &StrId) -> Self {
         Self {
-            last_found: last_found.map(|x| x.clone()),
+            last_found: last_found.cloned(),
             not_found: *not_found,
         }
     }
@@ -352,12 +354,10 @@ impl SymbolTable {
                 found: ret.clone(),
                 full_path,
             })
+        } else if format!("{}", path.as_slice()[0]) == "$" {
+            Err(ResolveError::new(last_found, &path.as_slice()[1]))
         } else {
-            if format!("{}", path.as_slice()[0]) == "$" {
-                Err(ResolveError::new(last_found, &path.as_slice()[1]))
-            } else {
-                Err(ResolveError::new(last_found, &path.as_slice()[0]))
-            }
+            Err(ResolveError::new(last_found, &path.as_slice()[0]))
         }
     }
 
