@@ -1225,7 +1225,7 @@ a = 1 || 1;
 <div style="break-before: page; page-break-before: always;"></div><h1 id="systemverilogとの相互運用"><a class="header" href="#systemverilogとの相互運用">SystemVerilogとの相互運用</a></h1>
 <p>SystemVerilogの要素にアクセスする場合は <code>$sv</code> 名前空間を使えます。例えば、SystemVerilogソースコードの “ModuleA” は <code>$sv::ModuleA</code> です。Veryl はこれらの要素が実際に存在するかどうかは確認しません。</p>
 <pre><code class="language-veryl playground">module ModuleA {
-    var a: logic = $sv::PackageA::ParamA;
+    var _a: logic = $sv::PackageA::ParamA;
 
     inst b: $sv::ModuleB ();
     inst c: $sv::InterfaceC ();
