@@ -10,6 +10,7 @@ This project is under the exploration phase of language design.
 If you have any idea, please open [Issue](https://github.com/dalance/veryl/issues).
 
 * [Document](https://dalance.github.io/veryl/book)
+    * [日本語](https://dalance.github.io/veryl/book/ja)
 * [PlayGround](https://dalance.github.io/veryl/playground)
 
 ## Documentation quick links
