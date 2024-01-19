@@ -6,7 +6,7 @@ Veryl don't check the existence of the items.
 
 ```veryl,playground
 module ModuleA {
-    var a: logic = $sv::PackageA::ParamA;
+    var _a: logic = $sv::PackageA::ParamA;
 
     inst b: $sv::ModuleB ();
     inst c: $sv::InterfaceC ();
