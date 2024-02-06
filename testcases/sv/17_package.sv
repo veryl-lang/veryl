@@ -20,12 +20,12 @@ package veryl_testcase_Package17;
     } B;
 
     // function declaration
-    function automatic logic [ParamX-1:0] FuncA(
-        input  logic [ParamX-1:0] a,
-        output logic [ParamX-1:0] b,
-        ref    logic [ParamX-1:0] c
+    function automatic logic        [ParamX-1:0] FuncA(
+        input  logic        [ParamX-1:0] a,
+        output logic        [ParamX-1:0] b,
+        ref    logic        [ParamX-1:0] c
     ) ;
-        int unsigned d;
+        int unsigned              d;
         d = 1;
         b = a + 1 + d;
         c = a / 1;

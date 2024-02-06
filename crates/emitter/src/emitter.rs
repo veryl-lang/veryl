@@ -270,6 +270,7 @@ impl Emitter {
             "f32" => Some(BuiltinType::F32),
             "f64" => Some(BuiltinType::F64),
             "string" => Some(BuiltinType::String),
+            "void" => Some(BuiltinType::Void),
             _ => None,
         };
         if let Some(x) = r#type {
@@ -1967,7 +1968,7 @@ impl VerylWalker for Emitter {
         self.space(1);
         self.str("automatic");
         self.space(1);
-        self.scalar_type(&arg.scalar_type);
+        self.function_type(&arg.function_type);
         self.space(1);
         self.identifier(&arg.identifier);
         if let Some(ref x) = arg.function_declaration_opt0 {

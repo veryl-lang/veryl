@@ -777,6 +777,7 @@ impl VerylWalker for Aligner {
             self.port_declaration(&x.port_declaration);
         }
         self.minus_g_t(&arg.minus_g_t);
+        self.function_type(&arg.function_type);
         // skip type align
         //self.scalar_type(&arg.scalar_type);
         self.l_brace(&arg.l_brace);

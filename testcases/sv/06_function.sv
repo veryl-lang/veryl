@@ -2,12 +2,12 @@ module veryl_testcase_Module06;
     localparam int unsigned ParamX = 1;
 
     // function without parameter
-    function automatic logic [ParamX-1:0] FuncA(
-        input  logic [ParamX-1:0] a,
-        output logic [ParamX-1:0] b,
-        ref    logic [ParamX-1:0] c
+    function automatic logic        [ParamX-1:0] FuncA(
+        input  logic        [ParamX-1:0] a,
+        output logic        [ParamX-1:0] b,
+        ref    logic        [ParamX-1:0] c
     ) ;
-        int unsigned d;
+        int unsigned              d;
         d = 1;
         b = a + 1 + d;
         c = a / 1;
@@ -28,6 +28,14 @@ module veryl_testcase_Module06;
             return a + 2;
         endfunction
     endmodule
+
+    // void function
+    function automatic void FuncC(
+        input logic [ParamX-1:0] a,
+        ref   logic [ParamX-1:0] c
+    ) ;
+        c = a / 1;
+    endfunction
 
     logic [ParamX-1:0] a;
     logic [ParamX-1:0] b;

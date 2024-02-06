@@ -287,6 +287,7 @@ pub enum TypeKind {
     F64,
     Type,
     String,
+    Void,
     UserDefined(Vec<StrId>),
 }
 
@@ -316,6 +317,7 @@ impl fmt::Display for Type {
             TypeKind::F64 => text.push_str("f64"),
             TypeKind::Type => text.push_str("type"),
             TypeKind::String => text.push_str("string"),
+            TypeKind::Void => text.push_str("void"),
             TypeKind::UserDefined(paths) => {
                 text.push_str(&format!("{}", paths.first().unwrap()));
                 for path in &paths[1..] {

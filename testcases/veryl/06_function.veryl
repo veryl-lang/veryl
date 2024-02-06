@@ -26,6 +26,14 @@ module Module06 {
         return a + 2;
     }
 
+    // void function
+    function FuncC (
+        a: input logic<ParamX>,
+        c: ref   logic<ParamX>,
+    ) -> void {
+        c = a / 1;
+    }
+
     var a: logic<ParamX>;
     var b: logic<ParamX>;
     var c: logic<ParamX>;

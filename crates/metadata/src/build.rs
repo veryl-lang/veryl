@@ -75,6 +75,8 @@ pub enum BuiltinType {
     F64,
     #[serde(rename = "string")]
     String,
+    #[serde(rename = "void")]
+    Void,
     #[serde(rename = "type")]
     Type,
 }
