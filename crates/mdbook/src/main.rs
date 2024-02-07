@@ -3,7 +3,7 @@ use line_col::LineColLookup;
 use mdbook::book::{Book, BookItem};
 use mdbook::errors::Error;
 use mdbook::preprocess::{CmdPreprocessor, Preprocessor, PreprocessorContext};
-use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag};
+use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
 use regex::Regex;
 use semver::{Version, VersionReq};
 use std::io;
@@ -100,10 +100,8 @@ impl Preprocessor for Veryl {
                                 in_code = true;
                             }
                         }
-                        Event::End(Tag::CodeBlock(CodeBlockKind::Fenced(x))) => {
-                            if x.as_ref().starts_with("veryl") {
-                                in_code = false;
-                            }
+                        Event::End(TagEnd::CodeBlock) => {
+                            in_code = false;
                         }
                         Event::Text(x) => {
                             if in_code {
