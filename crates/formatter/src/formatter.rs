@@ -1355,10 +1355,12 @@ impl VerylWalker for Formatter {
             self.port_declaration(&x.port_declaration);
             self.space(1);
         }
-        self.minus_g_t(&arg.minus_g_t);
-        self.space(1);
-        self.function_type(&arg.function_type);
-        self.space(1);
+        if let Some(ref x) = arg.function_declaration_opt1 {
+            self.minus_g_t(&x.minus_g_t);
+            self.space(1);
+            self.scalar_type(&x.scalar_type);
+            self.space(1);
+        }
         self.token_will_push(&arg.l_brace.l_brace_token);
         for (i, x) in arg.function_declaration_list.iter().enumerate() {
             self.newline_list(i);

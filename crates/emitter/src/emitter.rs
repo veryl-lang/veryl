@@ -270,7 +270,6 @@ impl Emitter {
             "f32" => Some(BuiltinType::F32),
             "f64" => Some(BuiltinType::F64),
             "string" => Some(BuiltinType::String),
-            "void" => Some(BuiltinType::Void),
             _ => None,
         };
         if let Some(x) = r#type {
@@ -1968,14 +1967,20 @@ impl VerylWalker for Emitter {
         self.space(1);
         self.str("automatic");
         self.space(1);
-        self.function_type(&arg.function_type);
+        if let Some(ref x) = &arg.function_declaration_opt1 {
+            self.scalar_type(&x.scalar_type);
+        } else {
+            self.str("void");
+        }
         self.space(1);
         self.identifier(&arg.identifier);
         if let Some(ref x) = arg.function_declaration_opt0 {
             self.port_declaration(&x.port_declaration);
             self.space(1);
         }
-        self.token(&arg.minus_g_t.minus_g_t_token.replace(""));
+        if let Some(ref x) = arg.function_declaration_opt1 {
+            self.token(&x.minus_g_t.minus_g_t_token.replace(""));
+        }
         self.str(";");
         self.token_will_push(&arg.l_brace.l_brace_token.replace(""));
         for (i, x) in arg.function_declaration_list.iter().enumerate() {

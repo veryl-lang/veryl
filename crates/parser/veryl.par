@@ -109,7 +109,6 @@ TriTerm               : /(?-u:\b)tri(?-u:\b)/                                   
 TypeTerm              : /(?-u:\b)type(?-u:\b)/                                                                : Token;
 U32Term               : /(?-u:\b)u32(?-u:\b)/                                                                 : Token;
 U64Term               : /(?-u:\b)u64(?-u:\b)/                                                                 : Token;
-VoidTerm              : /(?-u:\b)void(?-u:\b)/                                                                : Token;
 UnionTerm             : /(?-u:\b)union(?-u:\b)/                                                               : Token;
 VarTerm               : /(?-u:\b)var(?-u:\b)/                                                                 : Token;
 IdentifierTerm        : /[a-zA-Z_][0-9a-zA-Z_$]*/                                                             : Token;
@@ -221,7 +220,6 @@ TriToken       : TriTerm       : Token Comments;
 TypeToken      : TypeTerm      : Token Comments;
 U32Token       : U32Term       : Token Comments;
 U64Token       : U64Term       : Token Comments;
-VoidToken      : VoidTerm      : Token Comments;
 UnionToken     : UnionTerm     : Token Comments;
 VarToken       : VarTerm       : Token Comments;
 
@@ -338,7 +336,6 @@ Tri       : TriToken       : VerylToken;
 Type      : TypeToken      : VerylToken;
 U32       : U32Token       : VerylToken;
 U64       : U64Token       : VerylToken;
-Void      : VoidToken      : VerylToken;
 Union     : UnionToken     : VerylToken;
 Var       : VarToken       : VerylToken;
 
@@ -452,7 +449,7 @@ RangeOperator: DotDot
              ;
 
 // ----------------------------------------------------------------------------
-// ScalarType / ArrayType / VoidType
+// ScalarType / ArrayType
 // ----------------------------------------------------------------------------
 
 FixedType: U32 | U64 | I32 | I64 | F32 | F64 | Strin;
@@ -464,8 +461,6 @@ TypeModifier: Tri | Signed;
 ScalarType: { TypeModifier } ( VariableType | FixedType );
 
 ArrayType: ScalarType [ Array ];
-
-VoidType: Void;
 
 // ----------------------------------------------------------------------------
 // Statement
@@ -612,14 +607,10 @@ Direction: Input
 // Function
 // ----------------------------------------------------------------------------
 
-FunctionDeclaration: Function Identifier [ WithParameter ] [ PortDeclaration ] MinusGT FunctionType LBrace { FunctionItem } RBrace;
+FunctionDeclaration: Function Identifier [ WithParameter ] [ PortDeclaration ] [ MinusGT ScalarType ] LBrace { FunctionItem } RBrace;
 
 FunctionItem: VarDeclaration
             | Statement
-            ;
-
-FunctionType: ScalarType
-            | VoidType
             ;
 
 // ----------------------------------------------------------------------------

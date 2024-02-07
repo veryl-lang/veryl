@@ -48,6 +48,11 @@ module veryl_testcase_Module06;
     // function call with parameter
     //assign a = FuncB #(ParamX: 1) (a, b, c);
 
+    // void function call
+    initial begin
+        FuncC(a, c);
+    end
+
     // system function call
     assign d = $clog2(a);
 endmodule

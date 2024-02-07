@@ -721,7 +721,9 @@ impl VerylWalker for Aligner {
         if let Some(ref x) = arg.function_declaration_opt0 {
             self.port_declaration(&x.port_declaration);
         }
-        self.minus_g_t(&arg.minus_g_t);
+        if let Some(ref x) = arg.function_declaration_opt1 {
+            self.minus_g_t(&x.minus_g_t);
+        }
         // skip type align
         //self.scalar_type(&arg.scalar_type);
         self.l_brace(&arg.l_brace);

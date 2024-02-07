@@ -332,6 +332,5 @@ token_with_comments!(U32);
 token_with_comments!(U64);
 token_with_comments!(Union);
 token_with_comments!(Var);
-token_with_comments!(Void);
 
 token_with_comments!(Identifier);

@@ -650,13 +650,6 @@ pub trait VerylWalker {
         after!(self, strin, arg);
     }
 
-    /// Semantic action for non-terminal 'Void'
-    fn void(&mut self, arg: &Void) {
-        before!(self, void, arg);
-        self.veryl_token(&arg.void_token);
-        after!(self, void, arg);
-    }
-
     /// Semantic action for non-terminal 'Struct'
     fn r#struct(&mut self, arg: &Struct) {
         before!(self, r#struct, arg);
@@ -1329,13 +1322,6 @@ pub trait VerylWalker {
             self.array(&x.array);
         }
         after!(self, array_type, arg);
-    }
-
-    /// Semantic action for non-terminal 'VoidType'
-    fn void_type(&mut self, arg: &VoidType) {
-        before!(self, void_type, arg);
-        self.veryl_token(&arg.void.void_token);
-        after!(self, void_type, arg);
     }
 
     /// Semantic action for non-terminal 'Statement'
@@ -2138,8 +2124,11 @@ pub trait VerylWalker {
         if let Some(ref x) = arg.function_declaration_opt0 {
             self.port_declaration(&x.port_declaration);
         }
-        self.minus_g_t(&arg.minus_g_t);
-        self.function_type(&arg.function_type);
+        if let Some(ref x) = arg.function_declaration_opt1 {
+            self.minus_g_t(&x.minus_g_t);
+            self.scalar_type(&x.scalar_type);
+        }
+
         self.l_brace(&arg.l_brace);
         for x in &arg.function_declaration_list {
             self.function_item(&x.function_item);
@@ -2156,16 +2145,6 @@ pub trait VerylWalker {
             FunctionItem::Statement(x) => self.statement(&x.statement),
         };
         after!(self, function_item, arg);
-    }
-
-    /// Semantic action for non-terminal 'FunctionType'
-    fn function_type(&mut self, arg: &FunctionType) {
-        before!(self, function_type, arg);
-        match arg {
-            FunctionType::ScalarType(x) => self.scalar_type(&x.scalar_type),
-            FunctionType::VoidType(x) => self.void_type(&x.void_type),
-        };
-        after!(self, function_type, arg);
     }
 
     /// Semantic action for non-terminal 'ImportDeclaration'
