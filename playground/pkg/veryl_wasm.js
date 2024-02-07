@@ -76,6 +76,7 @@ function passStringToWasm0(arg, malloc, realloc) {
         const ret = encodeString(arg, view);
 
         offset += ret.written;
+        ptr = realloc(ptr, len, offset, 1) >>> 0;
     }
 
     WASM_VECTOR_LEN = offset;
@@ -103,6 +104,9 @@ export function format(source) {
     return Result.__wrap(ret);
 }
 
+const ResultFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_result_free(ptr >>> 0));
 /**
 */
 export class Result {
@@ -111,14 +115,14 @@ export class Result {
         ptr = ptr >>> 0;
         const obj = Object.create(Result.prototype);
         obj.__wbg_ptr = ptr;
-
+        ResultFinalization.register(obj, obj.__wbg_ptr, obj);
         return obj;
     }
 
     __destroy_into_raw() {
         const ptr = this.__wbg_ptr;
         this.__wbg_ptr = 0;
-
+        ResultFinalization.unregister(this);
         return ptr;
     }
 
