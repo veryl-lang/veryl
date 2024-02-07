@@ -544,7 +544,6 @@ impl Server {
             return Some(metadata.to_owned());
         } else if let Ok(metadata_path) = Metadata::search_from(path) {
             if let Ok(metadata) = Metadata::load(metadata_path) {
-                println!("metadata: {:?}", metadata);
                 self.metadata_map.insert(path.to_string(), metadata.clone());
                 return Some(metadata);
             }
