@@ -26,6 +26,14 @@ module Module06 {
         return a + 2;
     }
 
+    // void function
+    function FuncC (
+        a: input logic<ParamX>,
+        c: ref   logic<ParamX>,
+    ) {
+        c = a / 1;
+    }
+
     var a: logic<ParamX>;
     var b: logic<ParamX>;
     var c: logic<ParamX>;
@@ -36,6 +44,11 @@ module Module06 {
 
     // function call with parameter
     //assign a = FuncB #(ParamX: 1) (a, b, c);
+
+    // void function call
+    initial {
+        FuncC(a, c);
+    }
 
     // system function call
     assign d = $clog2(a);
