@@ -222,6 +222,7 @@
                         <h1 id="function"><a class="header" href="#function">Function</a></h1>
 <p>Function can be declared by <code>function</code> keyword.
 Arguments are placed in <code>()</code> and return type is placed after <code>-&gt;</code>.</p>
+<p>If function doesn’t have a return value, <code>-&gt;</code> can be omitted.</p>
 <pre><code class="language-veryl playground">module ModuleA {
     var a: logic&lt;10&gt;;
     var b: logic&lt;10&gt;;
@@ -232,7 +233,16 @@ Arguments are placed in <code>()</code> and return type is placed after <code>-&
         return a + 1;
     }
 
+    function FunctionB (
+        a: input logic&lt;10&gt;
+    ) {
+    }
+
     assign b = FunctionA(a);
+
+    initial {
+        FunctionB(a);
+    }
 }
 </code></pre>
 

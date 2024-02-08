@@ -1086,6 +1086,7 @@ a = 1 || 1;
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="関数"><a class="header" href="#関数">関数</a></h1>
 <p>関数は <code>function</code> キーワードで宣言できます。引数は <code>()</code> 内に書き、戻り値の型を <code>-&gt;</code> の後に書きます。</p>
+<p>関数が戻り値を持たない場合、<code>-&gt;</code> は省略できます。</p>
 <pre><code class="language-veryl playground">module ModuleA {
     var a: logic&lt;10&gt;;
     var b: logic&lt;10&gt;;
@@ -1096,7 +1097,16 @@ a = 1 || 1;
         return a + 1;
     }
 
+    function FunctionB (
+        a: input logic&lt;10&gt;
+    ) {
+    }
+
     assign b = FunctionA(a);
+
+    initial {
+        FunctionB(a);
+    }
 }
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="initial--final"><a class="header" href="#initial--final">initial / final</a></h1>
