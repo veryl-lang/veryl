@@ -781,8 +781,6 @@ impl VerylWalker for Aligner {
             // skip type align
             //self.scalar_type(&x.scalar_type);
         }
-        // skip type align
-        //self.scalar_type(&arg.scalar_type);
         self.l_brace(&arg.l_brace);
         for x in &arg.function_declaration_list {
             self.function_item(&x.function_item);
