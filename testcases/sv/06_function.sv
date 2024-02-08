@@ -29,6 +29,14 @@ module veryl_testcase_Module06;
         endfunction
     endmodule
 
+    // void function
+    function automatic void FuncC(
+        input logic [ParamX-1:0] a,
+        ref   logic [ParamX-1:0] c
+    ) ;
+        c = a / 1;
+    endfunction
+
     logic [ParamX-1:0] a;
     logic [ParamX-1:0] b;
     logic [ParamX-1:0] c;
@@ -39,6 +47,11 @@ module veryl_testcase_Module06;
 
     // function call with parameter
     //assign a = FuncB #(ParamX: 1) (a, b, c);
+
+    // void function call
+    initial begin
+        FuncC(a, c);
+    end
 
     // system function call
     assign d = $clog2(a);
