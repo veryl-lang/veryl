@@ -94,9 +94,9 @@ impl Align {
         }
     }
 
-    fn space(&mut self, x: u32) {
+    fn space(&mut self, x: usize) {
         if self.enable {
-            self.width += x;
+            self.width += x as u32;
         }
     }
 }
@@ -143,6 +143,10 @@ impl Aligner {
         }
     }
 
+    fn reset_align(&mut self) {
+        self.finish_group();
+    }
+
     fn insert(&mut self, token: &VerylToken, width: usize) {
         let loc: Location = token.token.into();
         self.additions
@@ -151,7 +155,7 @@ impl Aligner {
             .or_insert(width as u32);
     }
 
-    fn space(&mut self, repeat: u32) {
+    fn space(&mut self, repeat: usize) {
         for i in 0..self.aligns.len() {
             self.aligns[i].space(repeat);
         }
@@ -722,8 +726,8 @@ impl VerylWalker for Aligner {
             self.port_declaration(&x.port_declaration);
         }
         self.minus_g_t(&arg.minus_g_t);
-        // skip type align
-        //self.scalar_type(&arg.scalar_type);
+        self.scalar_type(&arg.scalar_type);
+        self.reset_align();
         self.l_brace(&arg.l_brace);
         for x in &arg.function_declaration_list {
             self.function_item(&x.function_item);
