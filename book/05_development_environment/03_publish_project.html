@@ -228,13 +228,13 @@ Publising means to associate a version with a git revision.</p>
 </code></pre>
 <p><code>veryl publish</code> generates <code>Veryl.pub</code> which contains published version information like below.</p>
 <pre><code class="language-toml">[[releases]]
-version = &quot;0.2.1&quot;
-revision = &quot;297bc6b24c5ceca9e648c3ea5e01011c67d7efe7&quot;
+version = "0.2.1"
+revision = "297bc6b24c5ceca9e648c3ea5e01011c67d7efe7"
 </code></pre>
 <p>After generating <code>Veryl.pub</code>, publishing sequence is completed by git add, commit and push.
 The git branch to be committed must be the default branch because Veryl search <code>Veryl.pub</code> in the default branch.</p>
 <pre><code>$ git add Veryl.pub
-$ git commit -m &quot;Publish&quot;
+$ git commit -m "Publish"
 $ git push
 </code></pre>
 <p>If you enable automatic commit by <code>publish_commit</code> in <code>[publish]</code> section of <code>Veryl.toml</code>, git add and commit will be executed after publish.</p>
@@ -257,7 +257,7 @@ As the same as publish, <code>bump_commit</code> in <code>[publish]</code> secti
 <h3 id="configuration"><a class="header" href="#configuration">Configuration</a></h3>
 <pre><code class="language-toml">[publish]
 bump_commit = true
-bump_commit_message = &quot;Bump&quot;
+bump_commit_message = "Bump"
 </code></pre>
 <div class="table-wrapper"><table><thead><tr><th>Configuration</th><th>Value</th><th>Default</th><th>Description</th></tr></thead><tbody>
 <tr><td>bump_commit</td><td>boolean</td><td>false</td><td>automatic commit after bump</td></tr>

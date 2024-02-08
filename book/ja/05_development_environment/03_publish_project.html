@@ -227,12 +227,12 @@
 </code></pre>
 <p><code>veryl publish</code> は以下のように公開されたバージョンの情報を含んだ <code>Veryl.pub</code> というファイルを生成します。</p>
 <pre><code class="language-toml">[[releases]]
-version = &quot;0.2.1&quot;
-revision = &quot;297bc6b24c5ceca9e648c3ea5e01011c67d7efe7&quot;
+version = "0.2.1"
+revision = "297bc6b24c5ceca9e648c3ea5e01011c67d7efe7"
 </code></pre>
 <p><code>Veryl.pub</code> と生成した後、gitのadd、commit、pushを行えば公開手続きは完了です。gitブランチはデフォルトブランチでなければなりません。これは Veryl が <code>Veryl.pub</code> をデフォルトブランチから探すためです。</p>
 <pre><code>$ git add Veryl.pub
-$ git commit -m &quot;Publish&quot;
+$ git commit -m "Publish"
 $ git push
 </code></pre>
 <p><code>Veryl.toml</code> の <code>[publish]</code> セクションに <code>publish_commit</code> を設定して自動コミットを有効にすれば、gitのaddとcommitが自動で実行されます。</p>
@@ -254,7 +254,7 @@ $ git push
 <h3 id="設定"><a class="header" href="#設定">設定</a></h3>
 <pre><code class="language-toml">[publish]
 bump_commit = true
-bump_commit_message = &quot;Bump&quot;
+bump_commit_message = "Bump"
 </code></pre>
 <div class="table-wrapper"><table><thead><tr><th>設定</th><th>設定値</th><th>デフォルト</th><th>説明</th></tr></thead><tbody>
 <tr><td>bump_commit</td><td>ブーリアン</td><td>false</td><td>バージョンアップ後の自動コミット</td></tr>

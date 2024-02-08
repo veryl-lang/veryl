@@ -260,13 +260,13 @@ The version is constructed by the following three numbers.</p>
 <li>Patch – increment at bug fixes with backward compatibility</li>
 </ul>
 <pre><code class="language-toml">[project]
-version = &quot;0.1.0&quot;
+version = "0.1.0"
 </code></pre>
 <h3 id="the-authors-field"><a class="header" href="#the-authors-field">The <code>authors</code> field</a></h3>
 <p>The optional <code>authors</code> field lists in an array the people or organizations that are considered the “authors” of the project.
 The format of each string in the list is free. Name only, e-mail address only, and name with e-mail address included within angled brackets are commonly used.</p>
 <pre><code class="language-toml">[project]
-authors = [&quot;Fnu Lnu&quot;, &quot;anonymous@example.com&quot;, &quot;Fnu Lnu &lt;anonymous@example.com&gt;&quot;]
+authors = ["Fnu Lnu", "anonymous@example.com", "Fnu Lnu &lt;anonymous@example.com&gt;"]
 </code></pre>
 <h3 id="the-description-field"><a class="header" href="#the-description-field">The <code>description</code> field</a></h3>
 <p>The <code>description</code> is a short blurb about the project. This should be plane text (not Markdown).</p>
@@ -274,12 +274,12 @@ authors = [&quot;Fnu Lnu&quot;, &quot;anonymous@example.com&quot;, &quot;Fnu Lnu
 <p>The <code>license</code> field contains the name of license that the project is released under.
 The string should be follow <a href="https://spdx.github.io/spdx-spec/v2.3/SPDX-license-expressions">SPDX 2.3 license expression</a>.</p>
 <pre><code class="language-toml">[project]
-license = &quot;MIT OR Apache-2.0&quot;
+license = "MIT OR Apache-2.0"
 </code></pre>
 <h3 id="the-repository-field"><a class="header" href="#the-repository-field">The <code>repository</code> field</a></h3>
 <p>The <code>repository</code> field should be a URL to the source repository for the project.</p>
 <pre><code class="language-toml">[project]
-repository = &quot;https://github.com/dalance/veryl&quot;
+repository = "https://github.com/dalance/veryl"
 </code></pre>
 <h2 id="the-build-section"><a class="header" href="#the-build-section">The <code>[build]</code> section</a></h2>
 <p>The <code>[build]</code> section contains the configurations of code generation.</p>
@@ -316,14 +316,14 @@ The available types are below:</p>
 </ul>
 <p>If you want to use <code>directory</code>, you can specify the target directory by <code>path</code> key.</p>
 <pre><code class="language-toml">[build]
-target = {type = &quot;directory&quot;, path = &quot;[dst dir]&quot;}
+target = {type = "directory", path = "[dst dir]"}
 </code></pre>
 <h3 id="the-implicit_parameter_types-field"><a class="header" href="#the-implicit_parameter_types-field">The <code>implicit_parameter_types</code> field</a></h3>
 <p>The <code>implicit_parameter_types</code> field lists the types which will be elided in <code>parameter</code> declaration of the generated codes.
 This is because some EDA tools don’t support <code>parameter</code> declaration with specific types (ex.<code>string</code>).
 If you want to elide <code>string</code>, you can specify like below:</p>
 <pre><code class="language-toml">[build]
-implicit_parameter_types = [&quot;string&quot;]
+implicit_parameter_types = ["string"]
 </code></pre>
 <h2 id="the-format-section"><a class="header" href="#the-format-section">The <code>[format]</code> section</a></h2>
 <p>The <code>[format]</code> section contains the configurations of code formatter.

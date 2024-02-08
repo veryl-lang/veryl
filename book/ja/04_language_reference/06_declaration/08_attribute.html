@@ -224,9 +224,9 @@
 <h2 id="sv-アトリビュート"><a class="header" href="#sv-アトリビュート">SV アトリビュート</a></h2>
 <p>SV アトリビュートは SystemVerilog のアトリビュートを表し、<code>(*  *)</code> という形式の SystemVerilog アトリビュートに変換されます。</p>
 <pre><code class="language-veryl playground">module ModuleA {
-    #[sv(&quot;ram_style=\&quot;block\&quot;&quot;)]
+    #[sv("ram_style=\"block\"")]
     var _a: logic&lt;10&gt;;
-    #[sv(&quot;mark_debug=\&quot;true\&quot;&quot;)]
+    #[sv("mark_debug=\"true\"")]
     var _b: logic&lt;10&gt;;
 }
 </code></pre>

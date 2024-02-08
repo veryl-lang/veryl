@@ -240,7 +240,7 @@ In <code>src</code>, you can configure arbitrary sub directories.</p>
 <p>Veryl gathers all <code>*.veryl</code> files and generates codes at the same directory as the source by default.
 You can show the behaviour explicitly by the following configuration.</p>
 <pre><code class="language-toml">[build]
-target = &quot;source&quot;
+target = "source"
 </code></pre>
 <p>After <code>veryl build</code>, the directory structure will become below:</p>
 <pre><code>$ tree
@@ -262,7 +262,7 @@ target = &quot;source&quot;
 <h2 id="single-source-and-target-directory"><a class="header" href="#single-source-and-target-directory">Single source and target directory</a></h2>
 <p>If you want to place the generated codes into a directory, you can use <code>target</code> configure in <code>[build]</code> section of <code>Veryl.toml</code>.</p>
 <pre><code class="language-toml">[build]
-target = {type = &quot;directory&quot;, path = &quot;target&quot;}
+target = {type = "directory", path = "target"}
 </code></pre>
 <p>The directory layout of this configure will become below:</p>
 <pre><code>$ tree

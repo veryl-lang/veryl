@@ -222,17 +222,17 @@
                         <h1 id="依存関係"><a class="header" href="#依存関係">依存関係</a></h1>
 <p>他の Veryl プロジェクトへの依存関係をプロジェクトに追加したい場合、<code>Veryl.toml</code> に <code>[dependencies]</code> セクションを追加します。エントリの左辺は依存関係へのパス、右辺はバージョンです。</p>
 <pre><code class="language-toml">[dependencies]
-&quot;https://github.com/dalance/veryl_sample&quot; = &quot;0.1.0&quot;
+"https://github.com/dalance/veryl_sample" = "0.1.0"
 </code></pre>
 <p>デフォルトでは依存関係の名前空間はそのプロジェクト名と同じです。もし名前空間を指定したい場合は、 <code>name</code> フィールドを使います。</p>
 <pre><code class="language-toml">[dependencies]
-&quot;https://github.com/dalance/veryl_sample&quot; = {version = &quot;0.1.0&quot;, name = &quot;veryl_sample_alt&quot;}
+"https://github.com/dalance/veryl_sample" = {version = "0.1.0", name = "veryl_sample_alt"}
 </code></pre>
 <p>同じ依存関係の複数のバージョンを使う場合は、以下のようにそれぞれの名前を指定できます。</p>
 <pre><code class="language-toml">[dependencies]
-&quot;https://github.com/dalance/veryl_sample&quot; = [
-    {version = &quot;0.1.0&quot;, name = &quot;veryl_sample1&quot;},
-    {version = &quot;0.2.0&quot;, name = &quot;veryl_sample2&quot;},
+"https://github.com/dalance/veryl_sample" = [
+    {version = "0.1.0", name = "veryl_sample1"},
+    {version = "0.2.0", name = "veryl_sample2"},
 ]
 </code></pre>
 <h2 id="依存関係の使用"><a class="header" href="#依存関係の使用">依存関係の使用</a></h2>
@@ -255,7 +255,7 @@
 <p>注：上記のコードのプレイボタンの結果は依存関係解決を行わないので正確ではありません。実際のモジュール名は <code>veryl_samlle_delay</code> になります。</p>
 </blockquote>
 <h2 id="バージョン要求"><a class="header" href="#バージョン要求">バージョン要求</a></h2>
-<p><code>[dependencies]</code> セクションの <code>version</code> フィールドはバージョン要求を示します。例えば、<code>version = &quot;0.1.0&quot;</code> は <code>0.1.0</code> と互換性のある最新バージョンを意味します。互換性は<a href="https://semver.org/">セマンティックバージョニング</a>で判定されます。バージョンは以下の3つの部分からなります。</p>
+<p><code>[dependencies]</code> セクションの <code>version</code> フィールドはバージョン要求を示します。例えば、<code>version = "0.1.0"</code> は <code>0.1.0</code> と互換性のある最新バージョンを意味します。互換性は<a href="https://semver.org/">セマンティックバージョニング</a>で判定されます。バージョンは以下の3つの部分からなります。</p>
 <ul>
 <li><code>メジャー</code> バージョンはAPI非互換な変更</li>
 <li><code>マイナー</code> バージョンは互換性のある機能追加</li>

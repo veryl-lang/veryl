@@ -226,7 +226,7 @@
 </code></pre>
 <p>コマンドを実行すると、以下のようなディレクトリとファイルが作成されます。</p>
 <pre><code>$ veryl new hello
-[INFO ]      Created &quot;hello&quot; project
+[INFO ]      Created "hello" project
 $ cd hello
 $ tree
 .
@@ -236,8 +236,8 @@ $ tree
 </code></pre>
 <p><code>Veryl.toml</code> はプロジェクトの設定ファイルです。</p>
 <pre><code class="language-toml">[project]
-name = &quot;hello&quot;
-version = &quot;0.1.0&quot;
+name = "hello"
+version = "0.1.0"
 </code></pre>
 <p>全設定の説明は<a href="../05_development_environment/01_project_configuration.html">こちら</a>。</p>
 <h2 id="コードを書く"><a class="header" href="#コードを書く">コードを書く</a></h2>
@@ -245,7 +245,7 @@ version = &quot;0.1.0&quot;
 <p>例えば以下のコードを <code>src/hello.veryl</code> に書いてみましょう。</p>
 <pre><code class="language-veryl playground">module ModuleA {
     initial {
-        $display(&quot;Hello, world!&quot;);
+        $display("Hello, world!");
     }
 }
 </code></pre>
@@ -279,7 +279,7 @@ $ tree
 <p>デフォルトでは SystemVerilog のコードは Veryl のコードと同じディレクトリに生成されます。つまり <code>src/hello.sv</code> です。</p>
 <pre><code class="language-verilog">module hello_ModuleA;
     initial begin
-        $display(&quot;Hello, world!&quot;);
+        $display("Hello, world!");
     end
 endmodule
 </code></pre>

@@ -257,24 +257,24 @@
 <li>バッチ – 互換性のあるバグ修正時に上げる</li>
 </ul>
 <pre><code class="language-toml">[project]
-version = &quot;0.1.0&quot;
+version = "0.1.0"
 </code></pre>
 <h3 id="the-authors-field"><a class="header" href="#the-authors-field"><code>authors</code> フィールド</a></h3>
 <p>オプションの <code>authors</code> フィールドにはこのプロジェクトの作者である人や組織を配列にリストアップします。配列内の各文字列のフォーマットは自由です。名前のみ、Eメールアドレスのみ、名前と括弧で囲んだEメールアドレスといった形式がよく使われます。</p>
 <pre><code class="language-toml">[project]
-authors = [&quot;Fnu Lnu&quot;, &quot;anonymous@example.com&quot;, &quot;Fnu Lnu &lt;anonymous@example.com&gt;&quot;]
+authors = ["Fnu Lnu", "anonymous@example.com", "Fnu Lnu &lt;anonymous@example.com&gt;"]
 </code></pre>
 <h3 id="the-description-field"><a class="header" href="#the-description-field"><code>description</code> フィールド</a></h3>
 <p><code>description</code> はプロジェクトの短い説明です。マークダウンではなくプレーンテキスト形式で書きます。</p>
 <h3 id="the-license-field"><a class="header" href="#the-license-field"><code>license</code> フィールド</a></h3>
 <p><code>license</code> フィールドはこのプロジェクトがどのライセンスで公開されているかを指定します。指定する文字列は<a href="https://spdx.github.io/spdx-spec/v2.3/SPDX-license-expressions">SPDX 2.3 license expression</a>に従ってください。</p>
 <pre><code class="language-toml">[project]
-license = &quot;MIT OR Apache-2.0&quot;
+license = "MIT OR Apache-2.0"
 </code></pre>
 <h3 id="the-repository-field"><a class="header" href="#the-repository-field"><code>repository</code> フィールド</a></h3>
 <p><code>repository</code> フィールドはプロジェクトのソースリポジトリへのURLです。</p>
 <pre><code class="language-toml">[project]
-repository = &quot;https://github.com/dalance/veryl&quot;
+repository = "https://github.com/dalance/veryl"
 </code></pre>
 <h2 id="the-build-section"><a class="header" href="#the-build-section"><code>[build]</code> セクション</a></h2>
 <p><code>[build]</code> セクションはコード生成の設定です。</p>
@@ -307,12 +307,12 @@ repository = &quot;https://github.com/dalance/veryl&quot;
 </ul>
 <p><code>directory</code> を指定する場合は、ターゲットディレクトリを <code>path</code> キーで指定します。</p>
 <pre><code class="language-toml">[build]
-target = {type = &quot;directory&quot;, path = &quot;[dst dir]&quot;}
+target = {type = "directory", path = "[dst dir]"}
 </code></pre>
 <h3 id="the-implicit_parameter_types-field"><a class="header" href="#the-implicit_parameter_types-field"><code>implicit_parameter_types</code> フィールド</a></h3>
 <p><code>implicit_parameter_types</code> フィールドは生成コードの <code>parameter</code> 宣言で省略する型をリストアップします。いくつかのEDAツールでは特定の型（例えば <code>string</code>）を <code>parameter</code> 宣言で使うことができないためです。例えば <code>string</code> を指定する場合は以下のようにします。</p>
 <pre><code class="language-toml">[build]
-implicit_parameter_types = [&quot;string&quot;]
+implicit_parameter_types = ["string"]
 </code></pre>
 <h2 id="the-format-section"><a class="header" href="#the-format-section"><code>[format]</code> セクション</a></h2>
 <p><code>[format]</code> セクションはコードフォーマッターの設定です。詳細は<a href="./05_formatter.html">こちら</a>。</p>

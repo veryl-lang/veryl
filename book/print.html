@@ -292,7 +292,7 @@ There are some instructions for plugin installation and language server integrat
 </code></pre>
 <p>After the command, the following directory and file will be created.</p>
 <pre><code>$ veryl new hello
-[INFO ]      Created &quot;hello&quot; project
+[INFO ]      Created "hello" project
 $ cd hello
 $ tree
 .
@@ -302,8 +302,8 @@ $ tree
 </code></pre>
 <p><code>Veryl.toml</code> is the project configuration.</p>
 <pre><code class="language-toml">[project]
-name = &quot;hello&quot;
-version = &quot;0.1.0&quot;
+name = "hello"
+version = "0.1.0"
 </code></pre>
 <p>The description of all configuration is <a href="02_getting_started/../05_development_environment/01_project_configuration.html">here</a>.</p>
 <h2 id="write-code"><a class="header" href="#write-code">Write Code</a></h2>
@@ -313,7 +313,7 @@ The extension of Veryl’s source codes is <code>.veryl</code>.</p>
 <p>For example, put the following code to <code>src/hello.veryl</code>.</p>
 <pre><code class="language-veryl playground">module ModuleA {
     initial {
-        $display(&quot;Hello, world!&quot;);
+        $display("Hello, world!");
     }
 }
 </code></pre>
@@ -349,7 +349,7 @@ $ tree
 The generated code is <code>src/hello.sv</code>.</p>
 <pre><code class="language-verilog">module hello_ModuleA;
     initial begin
-        $display(&quot;Hello, world!&quot;);
+        $display("Hello, world!");
     end
 endmodule
 </code></pre>
@@ -567,9 +567,9 @@ The following regular expression shows the definition.</p>
 <pre><code>[a-zA-Z_][a-zA-Z0-9_]*
 </code></pre>
 <h2 id="string"><a class="header" href="#string">String</a></h2>
-<p>String is surrounded by <code>&quot;</code>.
-Escape by <code>\</code> can be used like <code>\&quot;</code>, <code>\n</code> and so on.</p>
-<pre><code>&quot;Hello, World!&quot;
+<p>String is surrounded by <code>"</code>.
+Escape by <code>\</code> can be used like <code>\"</code>, <code>\n</code> and so on.</p>
+<pre><code>"Hello, World!"
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="operator"><a class="header" href="#operator">Operator</a></h1>
 <p>Almost all operators are the same as SystemVerilog.
@@ -1033,7 +1033,7 @@ There are other assignment operators:</p>
 In this case, the return value of function will be ignored.</p>
 <pre><code class="language-veryl playground">module ModuleA {
     initial {
-        $display(&quot;Hello, world!&quot;);
+        $display("Hello, world!");
     }
 }
 </code></pre>
@@ -1196,11 +1196,11 @@ Arguments are placed in <code>()</code> and return type is placed after <code>-&
 Both will be ignored logical synthesis, and can be used as debug or assertion.</p>
 <pre><code class="language-veryl playground">module ModuleA {
     initial {
-        $display(&quot;initial&quot;);
+        $display("initial");
     }
 
     final {
-        $display(&quot;final&quot;);
+        $display("final");
     }
 }
 </code></pre>
@@ -1210,9 +1210,9 @@ Both will be ignored logical synthesis, and can be used as debug or assertion.</
 <p>SV attribute represents SystemVerilog attribute.
 It will be transpiled to SystemVerilog attribute <code>(*  *)</code>.</p>
 <pre><code class="language-veryl playground">module ModuleA {
-    #[sv(&quot;ram_style=\&quot;block\&quot;&quot;)]
+    #[sv("ram_style=\"block\"")]
     var _a: logic&lt;10&gt;;
-    #[sv(&quot;mark_debug=\&quot;true\&quot;&quot;)]
+    #[sv("mark_debug=\"true\"")]
     var _b: logic&lt;10&gt;;
 }
 </code></pre>
@@ -1301,7 +1301,7 @@ The available port directions are:</p>
 <p>Interface is one of top level components in source code.
 Interface has overridable parameters, and interface definitions.</p>
 <p>Overridable parameters are the same as them of module.</p>
-<p>In interface definitions, <code>modport</code> can be declared. 
+<p>In interface definitions, <code>modport</code> can be declared.
 <code>modport</code> can be used as bundled port connection at the port declaration of module.</p>
 <pre><code class="language-veryl playground">interface InterfaceA #(
     parameter ParamA: u32 = 0,
@@ -1383,13 +1383,13 @@ The version is constructed by the following three numbers.</p>
 <li>Patch – increment at bug fixes with backward compatibility</li>
 </ul>
 <pre><code class="language-toml">[project]
-version = &quot;0.1.0&quot;
+version = "0.1.0"
 </code></pre>
 <h3 id="the-authors-field"><a class="header" href="#the-authors-field">The <code>authors</code> field</a></h3>
 <p>The optional <code>authors</code> field lists in an array the people or organizations that are considered the “authors” of the project.
 The format of each string in the list is free. Name only, e-mail address only, and name with e-mail address included within angled brackets are commonly used.</p>
 <pre><code class="language-toml">[project]
-authors = [&quot;Fnu Lnu&quot;, &quot;anonymous@example.com&quot;, &quot;Fnu Lnu &lt;anonymous@example.com&gt;&quot;]
+authors = ["Fnu Lnu", "anonymous@example.com", "Fnu Lnu &lt;anonymous@example.com&gt;"]
 </code></pre>
 <h3 id="the-description-field"><a class="header" href="#the-description-field">The <code>description</code> field</a></h3>
 <p>The <code>description</code> is a short blurb about the project. This should be plane text (not Markdown).</p>
@@ -1397,12 +1397,12 @@ authors = [&quot;Fnu Lnu&quot;, &quot;anonymous@example.com&quot;, &quot;Fnu Lnu
 <p>The <code>license</code> field contains the name of license that the project is released under.
 The string should be follow <a href="https://spdx.github.io/spdx-spec/v2.3/SPDX-license-expressions">SPDX 2.3 license expression</a>.</p>
 <pre><code class="language-toml">[project]
-license = &quot;MIT OR Apache-2.0&quot;
+license = "MIT OR Apache-2.0"
 </code></pre>
 <h3 id="the-repository-field"><a class="header" href="#the-repository-field">The <code>repository</code> field</a></h3>
 <p>The <code>repository</code> field should be a URL to the source repository for the project.</p>
 <pre><code class="language-toml">[project]
-repository = &quot;https://github.com/dalance/veryl&quot;
+repository = "https://github.com/dalance/veryl"
 </code></pre>
 <h2 id="the-build-section"><a class="header" href="#the-build-section">The <code>[build]</code> section</a></h2>
 <p>The <code>[build]</code> section contains the configurations of code generation.</p>
@@ -1439,14 +1439,14 @@ The available types are below:</p>
 </ul>
 <p>If you want to use <code>directory</code>, you can specify the target directory by <code>path</code> key.</p>
 <pre><code class="language-toml">[build]
-target = {type = &quot;directory&quot;, path = &quot;[dst dir]&quot;}
+target = {type = "directory", path = "[dst dir]"}
 </code></pre>
 <h3 id="the-implicit_parameter_types-field"><a class="header" href="#the-implicit_parameter_types-field">The <code>implicit_parameter_types</code> field</a></h3>
 <p>The <code>implicit_parameter_types</code> field lists the types which will be elided in <code>parameter</code> declaration of the generated codes.
 This is because some EDA tools don’t support <code>parameter</code> declaration with specific types (ex.<code>string</code>).
 If you want to elide <code>string</code>, you can specify like below:</p>
 <pre><code class="language-toml">[build]
-implicit_parameter_types = [&quot;string&quot;]
+implicit_parameter_types = ["string"]
 </code></pre>
 <h2 id="the-format-section"><a class="header" href="#the-format-section">The <code>[format]</code> section</a></h2>
 <p>The <code>[format]</code> section contains the configurations of code formatter.
@@ -1464,18 +1464,18 @@ Available configurations is <a href="05_development_environment/./02_dependencie
 <p>If you want to add other Veryl projects to dependencies of your project, you can add them to <code>[dependencies]</code> section in <code>Veryl.toml</code>.
 The left hand side of entry is path to the dependency, and the right hand side is version.</p>
 <pre><code class="language-toml">[dependencies]
-&quot;https://github.com/dalance/veryl_sample&quot; = &quot;0.1.0&quot;
+"https://github.com/dalance/veryl_sample" = "0.1.0"
 </code></pre>
 <p>By default, the namespace of the dependency is the same as the project name of the dependency.
 If you want to specify namespace, you can use <code>name</code> field.</p>
 <pre><code class="language-toml">[dependencies]
-&quot;https://github.com/dalance/veryl_sample&quot; = {version = &quot;0.1.0&quot;, name = &quot;veryl_sample_alt&quot;}
+"https://github.com/dalance/veryl_sample" = {version = "0.1.0", name = "veryl_sample_alt"}
 </code></pre>
 <p>If you want to use many versions of the same dependency path, you can specify each name.</p>
 <pre><code class="language-toml">[dependencies]
-&quot;https://github.com/dalance/veryl_sample&quot; = [
-    {version = &quot;0.1.0&quot;, name = &quot;veryl_sample1&quot;},
-    {version = &quot;0.2.0&quot;, name = &quot;veryl_sample2&quot;},
+"https://github.com/dalance/veryl_sample" = [
+    {version = "0.1.0", name = "veryl_sample1"},
+    {version = "0.2.0", name = "veryl_sample2"},
 ]
 </code></pre>
 <h2 id="usage-of-dependency"><a class="header" href="#usage-of-dependency">Usage of dependency</a></h2>
@@ -1501,7 +1501,7 @@ Actually the module name becomes <code>veryl_samlle_delay</code></p>
 </blockquote>
 <h2 id="version-requirement"><a class="header" href="#version-requirement">Version Requirement</a></h2>
 <p>The <code>version</code> field of <code>[dependencies]</code> section shows version requirement.
-For example, <code>version = &quot;0.1.0&quot;</code> means the latest version which has compatibility with <code>0.1.0</code>.
+For example, <code>version = "0.1.0"</code> means the latest version which has compatibility with <code>0.1.0</code>.
 The compatibility is judged by <a href="https://semver.org/">Semantic Versioning</a>.
 A version is constructed from the following three parts.</p>
 <ul>
@@ -1529,13 +1529,13 @@ Publising means to associate a version with a git revision.</p>
 </code></pre>
 <p><code>veryl publish</code> generates <code>Veryl.pub</code> which contains published version information like below.</p>
 <pre><code class="language-toml">[[releases]]
-version = &quot;0.2.1&quot;
-revision = &quot;297bc6b24c5ceca9e648c3ea5e01011c67d7efe7&quot;
+version = "0.2.1"
+revision = "297bc6b24c5ceca9e648c3ea5e01011c67d7efe7"
 </code></pre>
 <p>After generating <code>Veryl.pub</code>, publishing sequence is completed by git add, commit and push.
 The git branch to be committed must be the default branch because Veryl search <code>Veryl.pub</code> in the default branch.</p>
 <pre><code>$ git add Veryl.pub
-$ git commit -m &quot;Publish&quot;
+$ git commit -m "Publish"
 $ git push
 </code></pre>
 <p>If you enable automatic commit by <code>publish_commit</code> in <code>[publish]</code> section of <code>Veryl.toml</code>, git add and commit will be executed after publish.</p>
@@ -1558,7 +1558,7 @@ As the same as publish, <code>bump_commit</code> in <code>[publish]</code> secti
 <h3 id="configuration"><a class="header" href="#configuration">Configuration</a></h3>
 <pre><code class="language-toml">[publish]
 bump_commit = true
-bump_commit_message = &quot;Bump&quot;
+bump_commit_message = "Bump"
 </code></pre>
 <div class="table-wrapper"><table><thead><tr><th>Configuration</th><th>Value</th><th>Default</th><th>Description</th></tr></thead><tbody>
 <tr><td>bump_commit</td><td>boolean</td><td>false</td><td>automatic commit after bump</td></tr>
@@ -1587,7 +1587,7 @@ In <code>src</code>, you can configure arbitrary sub directories.</p>
 <p>Veryl gathers all <code>*.veryl</code> files and generates codes at the same directory as the source by default.
 You can show the behaviour explicitly by the following configuration.</p>
 <pre><code class="language-toml">[build]
-target = &quot;source&quot;
+target = "source"
 </code></pre>
 <p>After <code>veryl build</code>, the directory structure will become below:</p>
 <pre><code>$ tree
@@ -1609,7 +1609,7 @@ target = &quot;source&quot;
 <h2 id="single-source-and-target-directory"><a class="header" href="#single-source-and-target-directory">Single source and target directory</a></h2>
 <p>If you want to place the generated codes into a directory, you can use <code>target</code> configure in <code>[build]</code> section of <code>Veryl.toml</code>.</p>
 <pre><code class="language-toml">[build]
-target = {type = &quot;directory&quot;, path = &quot;target&quot;}
+target = {type = "directory", path = "target"}
 </code></pre>
 <p>The directory layout of this configure will become below:</p>
 <pre><code>$ tree
@@ -1679,7 +1679,7 @@ Alternatively, language server checks lint in real time.</p>
 <p>The available configurations are below.
 These can be specified in <code>[lint]</code> section of <code>Veryl.toml</code>.</p>
 <pre><code class="language-toml">[lint.naming]
-case_enum = &quot;snake&quot;
+case_enum = "snake"
 </code></pre>
 <h2 id="the-lintnaming-section"><a class="header" href="#the-lintnaming-section">The <code>[lint.naming]</code> section</a></h2>
 <p>This section contains configurations of naming conventions.</p>
@@ -1747,16 +1747,16 @@ case_enum = &quot;snake&quot;
 </tbody></table>
 </div>
 <div class="footnote-definition" id="casetype"><sup class="footnote-definition-label">1</sup>
-<p>The available values are </p>
+<p>The available values are</p>
 </div>
 <ul>
-<li><code>&quot;snake&quot;</code> – snake_case</li>
-<li><code>&quot;screaming_snake&quot;</code> – SCREAMING_SNAKE_CASE</li>
-<li><code>&quot;lower_camel&quot;</code> – lowerCamelCase</li>
-<li><code>&quot;upper_camel&quot;</code> – UpperCamelCase</li>
+<li><code>"snake"</code> – snake_case</li>
+<li><code>"screaming_snake"</code> – SCREAMING_SNAKE_CASE</li>
+<li><code>"lower_camel"</code> – lowerCamelCase</li>
+<li><code>"upper_camel"</code> – UpperCamelCase</li>
 </ul>
 <div class="footnote-definition" id="regex"><sup class="footnote-definition-label">4</sup>
-<p>Regular expression string like <code>&quot;.*&quot;</code>. The available syntax is <a href="https://docs.rs/regex/latest/regex/#syntax">here</a>.</p>
+<p>Regular expression string like <code>".*"</code>. The available syntax is <a href="https://docs.rs/regex/latest/regex/#syntax">here</a>.</p>
 </div>
 <div class="footnote-definition" id="reg"><sup class="footnote-definition-label">2</sup>
 <p>Register type means that the variable is assigned in <code>always_ff</code>. It will be mapped to flip-flop in synthesis phase.</p>
@@ -1773,14 +1773,14 @@ Code generation can be customized by configuration of <code>Veryl.toml</code> to
 <h2 id="vivado"><a class="header" href="#vivado">Vivado</a></h2>
 <h3 id="string-parameter"><a class="header" href="#string-parameter">String parameter</a></h3>
 <p>Vivado don’t support <code>parameter</code> which is typed as <code>string</code>.</p>
-<pre><code class="language-verilog">parameter string a = &quot;A&quot;;
+<pre><code class="language-verilog">parameter string a = "A";
 </code></pre>
 <p>So you can use <code>implicit_parameter_types</code> like below:</p>
 <pre><code class="language-toml">[build]
-implicit_parameter_types = [&quot;string&quot;]
+implicit_parameter_types = ["string"]
 </code></pre>
 <p>By the configuration, the generated code becomes like below:</p>
-<pre><code class="language-verilog">parameter a = &quot;A&quot;;
+<pre><code class="language-verilog">parameter a = "A";
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="documentation"><a class="header" href="#documentation">Documentation</a></h1>
 <p>Documant of project can be generated by <code>veryl doc</code> command.
@@ -1808,8 +1808,8 @@ module ModuleA #(
 The following syntex definition of parol is formal syntax.</p>
 <pre><code>
 %start Veryl
-%title &quot;Veryl grammar&quot;
-%comment &quot;Empty grammar generated by `parol`&quot;
+%title "Veryl grammar"
+%comment "Empty grammar generated by `parol`"
 %user_type VerylToken = crate::veryl_token::VerylToken
 %user_type Token = crate::veryl_token::Token
 
@@ -1821,8 +1821,8 @@ The following syntex definition of parol is formal syntax.</p>
 
 // Longest match should be first
 
-CommentsTerm          : &quot;(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+&quot;                     : Token;
-StringLiteralTerm     : &quot;\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}&quot;: Token;
+CommentsTerm          : "(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+"                     : Token;
+StringLiteralTerm     : "\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}": Token;
 ExponentTerm          : /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/                   : Token;
 FixedPointTerm        : /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/                                              : Token;
 BasedTerm             : /(?:[0-9]+(?:_[0-9]+)*)?'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/                : Token;
@@ -1831,19 +1831,19 @@ BaseLessTerm          : /[0-9]+(?:_[0-9]+)*/                                    
 MinusColonTerm        : '-:'                                                                                  : Token;
 MinusGTTerm           : '-&gt;'                                                                                  : Token;
 PlusColonTerm         : '+:'                                                                                  : Token;
-AssignmentOperatorTerm: &quot;\+=|-=|\*=|/=|%=|&amp;=|\|=|\^=|&lt;&lt;=|&gt;&gt;=|&lt;&lt;&lt;=|&gt;&gt;&gt;=&quot;                                       : Token;
-Operator11Term        : &quot;\*\*&quot;                                                                                : Token;
-Operator10Term        : &quot;/|%&quot;                                                                                 : Token;
-Operator09Term        : &quot;\+|-&quot;                                                                                : Token;
-Operator08Term        : &quot;&lt;&lt;&lt;|&gt;&gt;&gt;|&lt;&lt;|&gt;&gt;&quot;                                                                       : Token;
-Operator07Term        : &quot;&lt;=|&gt;=|&lt;:|&gt;:&quot;                                                                         : Token;
-Operator06Term        : &quot;===|==\?|!==|!=\?|==|!=&quot;                                                             : Token;
-Operator02Term        : &quot;&amp;&amp;&quot;                                                                                  : Token;
-Operator01Term        : &quot;\|\|&quot;                                                                                : Token;
-Operator05Term        : &quot;&amp;&quot;                                                                                   : Token;
-Operator04Term        : &quot;\^~|\^|~\^&quot;                                                                          : Token;
-Operator03Term        : &quot;\|&quot;                                                                                  : Token;
-UnaryOperatorTerm     : &quot;~&amp;|~\||!|~&quot;                                                                          : Token;
+AssignmentOperatorTerm: "\+=|-=|\*=|/=|%=|&amp;=|\|=|\^=|&lt;&lt;=|&gt;&gt;=|&lt;&lt;&lt;=|&gt;&gt;&gt;="                                       : Token;
+Operator11Term        : "\*\*"                                                                                : Token;
+Operator10Term        : "/|%"                                                                                 : Token;
+Operator09Term        : "\+|-"                                                                                : Token;
+Operator08Term        : "&lt;&lt;&lt;|&gt;&gt;&gt;|&lt;&lt;|&gt;&gt;"                                                                       : Token;
+Operator07Term        : "&lt;=|&gt;=|&lt;:|&gt;:"                                                                         : Token;
+Operator06Term        : "===|==\?|!==|!=\?|==|!="                                                             : Token;
+Operator02Term        : "&amp;&amp;"                                                                                  : Token;
+Operator01Term        : "\|\|"                                                                                : Token;
+Operator05Term        : "&amp;"                                                                                   : Token;
+Operator04Term        : "\^~|\^|~\^"                                                                          : Token;
+Operator03Term        : "\|"                                                                                  : Token;
+UnaryOperatorTerm     : "~&amp;|~\||!|~"                                                                          : Token;
 ColonColonTerm        : '::'                                                                                  : Token;
 ColonTerm             : ':'                                                                                   : Token;
 CommaTerm             : ','                                                                                   : Token;
@@ -2415,7 +2415,7 @@ Direction: Input
 // Function
 // ----------------------------------------------------------------------------
 
-FunctionDeclaration: Function Identifier [ WithParameter ] [ PortDeclaration ] MinusGT ScalarType LBrace { FunctionItem } RBrace;
+FunctionDeclaration: Function Identifier [ WithParameter ] [ PortDeclaration ] [ MinusGT ScalarType ] LBrace { FunctionItem } RBrace;
 
 FunctionItem: VarDeclaration
             | Statement

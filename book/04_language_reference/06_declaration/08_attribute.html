@@ -225,9 +225,9 @@
 <p>SV attribute represents SystemVerilog attribute.
 It will be transpiled to SystemVerilog attribute <code>(*  *)</code>.</p>
 <pre><code class="language-veryl playground">module ModuleA {
-    #[sv(&quot;ram_style=\&quot;block\&quot;&quot;)]
+    #[sv("ram_style=\"block\"")]
     var _a: logic&lt;10&gt;;
-    #[sv(&quot;mark_debug=\&quot;true\&quot;&quot;)]
+    #[sv("mark_debug=\"true\"")]
     var _b: logic&lt;10&gt;;
 }
 </code></pre>

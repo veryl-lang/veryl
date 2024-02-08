@@ -224,14 +224,14 @@
 <h2 id="vivado"><a class="header" href="#vivado">Vivado</a></h2>
 <h3 id="文字列パラメータ"><a class="header" href="#文字列パラメータ">文字列パラメータ</a></h3>
 <p>Vivadoは <code>string</code> 型の <code>parameter</code> をサポートしていません。</p>
-<pre><code class="language-verilog">parameter string a = &quot;A&quot;;
+<pre><code class="language-verilog">parameter string a = "A";
 </code></pre>
 <p>その場合は <code>implicit_parameter_types</code> を設定してください。</p>
 <pre><code class="language-toml">[build]
-implicit_parameter_types = [&quot;string&quot;]
+implicit_parameter_types = ["string"]
 </code></pre>
 <p>設定すると生成コードは以下のようになります。</p>
-<pre><code class="language-verilog">parameter a = &quot;A&quot;;
+<pre><code class="language-verilog">parameter a = "A";
 </code></pre>
 
                     </main>

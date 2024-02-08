@@ -223,18 +223,18 @@
 <p>If you want to add other Veryl projects to dependencies of your project, you can add them to <code>[dependencies]</code> section in <code>Veryl.toml</code>.
 The left hand side of entry is path to the dependency, and the right hand side is version.</p>
 <pre><code class="language-toml">[dependencies]
-&quot;https://github.com/dalance/veryl_sample&quot; = &quot;0.1.0&quot;
+"https://github.com/dalance/veryl_sample" = "0.1.0"
 </code></pre>
 <p>By default, the namespace of the dependency is the same as the project name of the dependency.
 If you want to specify namespace, you can use <code>name</code> field.</p>
 <pre><code class="language-toml">[dependencies]
-&quot;https://github.com/dalance/veryl_sample&quot; = {version = &quot;0.1.0&quot;, name = &quot;veryl_sample_alt&quot;}
+"https://github.com/dalance/veryl_sample" = {version = "0.1.0", name = "veryl_sample_alt"}
 </code></pre>
 <p>If you want to use many versions of the same dependency path, you can specify each name.</p>
 <pre><code class="language-toml">[dependencies]
-&quot;https://github.com/dalance/veryl_sample&quot; = [
-    {version = &quot;0.1.0&quot;, name = &quot;veryl_sample1&quot;},
-    {version = &quot;0.2.0&quot;, name = &quot;veryl_sample2&quot;},
+"https://github.com/dalance/veryl_sample" = [
+    {version = "0.1.0", name = "veryl_sample1"},
+    {version = "0.2.0", name = "veryl_sample2"},
 ]
 </code></pre>
 <h2 id="usage-of-dependency"><a class="header" href="#usage-of-dependency">Usage of dependency</a></h2>
@@ -260,7 +260,7 @@ Actually the module name becomes <code>veryl_samlle_delay</code></p>
 </blockquote>
 <h2 id="version-requirement"><a class="header" href="#version-requirement">Version Requirement</a></h2>
 <p>The <code>version</code> field of <code>[dependencies]</code> section shows version requirement.
-For example, <code>version = &quot;0.1.0&quot;</code> means the latest version which has compatibility with <code>0.1.0</code>.
+For example, <code>version = "0.1.0"</code> means the latest version which has compatibility with <code>0.1.0</code>.
 The compatibility is judged by <a href="https://semver.org/">Semantic Versioning</a>.
 A version is constructed from the following three parts.</p>
 <ul>

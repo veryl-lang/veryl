@@ -237,7 +237,7 @@
 </code></pre>
 <p>Veryl は全ての <code>*.veryl</code> ファイルを収集し、デフォルトではソースと同じディレクトリにコードを生成します。この挙動は以下の設定で明示することもできます。</p>
 <pre><code class="language-toml">[build]
-target = &quot;source&quot;
+target = "source"
 </code></pre>
 <p><code>veryl build</code> を実行するとディレクトリ構成は以下のようになります。</p>
 <pre><code>$ tree
@@ -259,7 +259,7 @@ target = &quot;source&quot;
 <h2 id="単一のソースとターゲットディレクトリ"><a class="header" href="#単一のソースとターゲットディレクトリ">単一のソースとターゲットディレクトリ</a></h2>
 <p>生成されたコードを1つのディレクトリに入れたい場合、<code>Veryl.toml</code> の <code>[build]</code> セクションで <code>target</code> を以下のように設定します。</p>
 <pre><code class="language-toml">[build]
-target = {type = &quot;directory&quot;, path = &quot;target&quot;}
+target = {type = "directory", path = "target"}
 </code></pre>
 <p>ディレクトリ構成は以下のようになります。</p>
 <pre><code>$ tree

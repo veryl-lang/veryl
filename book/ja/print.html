@@ -271,7 +271,7 @@
 </code></pre>
 <p>コマンドを実行すると、以下のようなディレクトリとファイルが作成されます。</p>
 <pre><code>$ veryl new hello
-[INFO ]      Created &quot;hello&quot; project
+[INFO ]      Created "hello" project
 $ cd hello
 $ tree
 .
@@ -281,8 +281,8 @@ $ tree
 </code></pre>
 <p><code>Veryl.toml</code> はプロジェクトの設定ファイルです。</p>
 <pre><code class="language-toml">[project]
-name = &quot;hello&quot;
-version = &quot;0.1.0&quot;
+name = "hello"
+version = "0.1.0"
 </code></pre>
 <p>全設定の説明は<a href="02_getting_started/../05_development_environment/01_project_configuration.html">こちら</a>。</p>
 <h2 id="コードを書く"><a class="header" href="#コードを書く">コードを書く</a></h2>
@@ -290,7 +290,7 @@ version = &quot;0.1.0&quot;
 <p>例えば以下のコードを <code>src/hello.veryl</code> に書いてみましょう。</p>
 <pre><code class="language-veryl playground">module ModuleA {
     initial {
-        $display(&quot;Hello, world!&quot;);
+        $display("Hello, world!");
     }
 }
 </code></pre>
@@ -324,7 +324,7 @@ $ tree
 <p>デフォルトでは SystemVerilog のコードは Veryl のコードと同じディレクトリに生成されます。つまり <code>src/hello.sv</code> です。</p>
 <pre><code class="language-verilog">module hello_ModuleA;
     initial begin
-        $display(&quot;Hello, world!&quot;);
+        $display("Hello, world!");
     end
 endmodule
 </code></pre>
@@ -529,8 +529,8 @@ package PackageA {
 <pre><code>[a-zA-Z_][a-zA-Z0-9_]*
 </code></pre>
 <h2 id="文字列"><a class="header" href="#文字列">文字列</a></h2>
-<p><code>&quot;</code> で囲んだものが文字列になります。<code>\&quot;</code> や <code>\n</code> のように <code>\</code> によるエスケープも可能です。</p>
-<pre><code>&quot;Hello, World!&quot;
+<p><code>"</code> で囲んだものが文字列になります。<code>\"</code> や <code>\n</code> のように <code>\</code> によるエスケープも可能です。</p>
+<pre><code>"Hello, World!"
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="演算子"><a class="header" href="#演算子">演算子</a></h1>
 <p>ほとんどの演算子は SystemVerilog と同じです。いくつか違いがあるので注意してください。</p>
@@ -958,7 +958,7 @@ a = 1 || 1;
 <p>関数呼び出しは文として使うこともできます。この場合、関数の戻り値は無視されます。</p>
 <pre><code class="language-veryl playground">module ModuleA {
     initial {
-        $display(&quot;Hello, world!&quot;);
+        $display("Hello, world!");
     }
 }
 </code></pre>
@@ -1103,11 +1103,11 @@ a = 1 || 1;
 <p><code>initial</code> ブロック内の文はシミュレーション開始時に実行され、<code>final</code> は終了時です。どちらも論理合成では無視され、デバッグやアサーションに使うことができます。</p>
 <pre><code class="language-veryl playground">module ModuleA {
     initial {
-        $display(&quot;initial&quot;);
+        $display("initial");
     }
 
     final {
-        $display(&quot;final&quot;);
+        $display("final");
     }
 }
 </code></pre>
@@ -1116,9 +1116,9 @@ a = 1 || 1;
 <h2 id="sv-アトリビュート"><a class="header" href="#sv-アトリビュート">SV アトリビュート</a></h2>
 <p>SV アトリビュートは SystemVerilog のアトリビュートを表し、<code>(*  *)</code> という形式の SystemVerilog アトリビュートに変換されます。</p>
 <pre><code class="language-veryl playground">module ModuleA {
-    #[sv(&quot;ram_style=\&quot;block\&quot;&quot;)]
+    #[sv("ram_style=\"block\"")]
     var _a: logic&lt;10&gt;;
-    #[sv(&quot;mark_debug=\&quot;true\&quot;&quot;)]
+    #[sv("mark_debug=\"true\"")]
     var _b: logic&lt;10&gt;;
 }
 </code></pre>
@@ -1271,24 +1271,24 @@ a = 1 || 1;
 <li>バッチ – 互換性のあるバグ修正時に上げる</li>
 </ul>
 <pre><code class="language-toml">[project]
-version = &quot;0.1.0&quot;
+version = "0.1.0"
 </code></pre>
 <h3 id="the-authors-field"><a class="header" href="#the-authors-field"><code>authors</code> フィールド</a></h3>
 <p>オプションの <code>authors</code> フィールドにはこのプロジェクトの作者である人や組織を配列にリストアップします。配列内の各文字列のフォーマットは自由です。名前のみ、Eメールアドレスのみ、名前と括弧で囲んだEメールアドレスといった形式がよく使われます。</p>
 <pre><code class="language-toml">[project]
-authors = [&quot;Fnu Lnu&quot;, &quot;anonymous@example.com&quot;, &quot;Fnu Lnu &lt;anonymous@example.com&gt;&quot;]
+authors = ["Fnu Lnu", "anonymous@example.com", "Fnu Lnu &lt;anonymous@example.com&gt;"]
 </code></pre>
 <h3 id="the-description-field"><a class="header" href="#the-description-field"><code>description</code> フィールド</a></h3>
 <p><code>description</code> はプロジェクトの短い説明です。マークダウンではなくプレーンテキスト形式で書きます。</p>
 <h3 id="the-license-field"><a class="header" href="#the-license-field"><code>license</code> フィールド</a></h3>
 <p><code>license</code> フィールドはこのプロジェクトがどのライセンスで公開されているかを指定します。指定する文字列は<a href="https://spdx.github.io/spdx-spec/v2.3/SPDX-license-expressions">SPDX 2.3 license expression</a>に従ってください。</p>
 <pre><code class="language-toml">[project]
-license = &quot;MIT OR Apache-2.0&quot;
+license = "MIT OR Apache-2.0"
 </code></pre>
 <h3 id="the-repository-field"><a class="header" href="#the-repository-field"><code>repository</code> フィールド</a></h3>
 <p><code>repository</code> フィールドはプロジェクトのソースリポジトリへのURLです。</p>
 <pre><code class="language-toml">[project]
-repository = &quot;https://github.com/dalance/veryl&quot;
+repository = "https://github.com/dalance/veryl"
 </code></pre>
 <h2 id="the-build-section"><a class="header" href="#the-build-section"><code>[build]</code> セクション</a></h2>
 <p><code>[build]</code> セクションはコード生成の設定です。</p>
@@ -1321,12 +1321,12 @@ repository = &quot;https://github.com/dalance/veryl&quot;
 </ul>
 <p><code>directory</code> を指定する場合は、ターゲットディレクトリを <code>path</code> キーで指定します。</p>
 <pre><code class="language-toml">[build]
-target = {type = &quot;directory&quot;, path = &quot;[dst dir]&quot;}
+target = {type = "directory", path = "[dst dir]"}
 </code></pre>
 <h3 id="the-implicit_parameter_types-field"><a class="header" href="#the-implicit_parameter_types-field"><code>implicit_parameter_types</code> フィールド</a></h3>
 <p><code>implicit_parameter_types</code> フィールドは生成コードの <code>parameter</code> 宣言で省略する型をリストアップします。いくつかのEDAツールでは特定の型（例えば <code>string</code>）を <code>parameter</code> 宣言で使うことができないためです。例えば <code>string</code> を指定する場合は以下のようにします。</p>
 <pre><code class="language-toml">[build]
-implicit_parameter_types = [&quot;string&quot;]
+implicit_parameter_types = ["string"]
 </code></pre>
 <h2 id="the-format-section"><a class="header" href="#the-format-section"><code>[format]</code> セクション</a></h2>
 <p><code>[format]</code> セクションはコードフォーマッターの設定です。詳細は<a href="05_development_environment/./05_formatter.html">こちら</a>。</p>
@@ -1339,17 +1339,17 @@ implicit_parameter_types = [&quot;string&quot;]
 <div style="break-before: page; page-break-before: always;"></div><h1 id="依存関係"><a class="header" href="#依存関係">依存関係</a></h1>
 <p>他の Veryl プロジェクトへの依存関係をプロジェクトに追加したい場合、<code>Veryl.toml</code> に <code>[dependencies]</code> セクションを追加します。エントリの左辺は依存関係へのパス、右辺はバージョンです。</p>
 <pre><code class="language-toml">[dependencies]
-&quot;https://github.com/dalance/veryl_sample&quot; = &quot;0.1.0&quot;
+"https://github.com/dalance/veryl_sample" = "0.1.0"
 </code></pre>
 <p>デフォルトでは依存関係の名前空間はそのプロジェクト名と同じです。もし名前空間を指定したい場合は、 <code>name</code> フィールドを使います。</p>
 <pre><code class="language-toml">[dependencies]
-&quot;https://github.com/dalance/veryl_sample&quot; = {version = &quot;0.1.0&quot;, name = &quot;veryl_sample_alt&quot;}
+"https://github.com/dalance/veryl_sample" = {version = "0.1.0", name = "veryl_sample_alt"}
 </code></pre>
 <p>同じ依存関係の複数のバージョンを使う場合は、以下のようにそれぞれの名前を指定できます。</p>
 <pre><code class="language-toml">[dependencies]
-&quot;https://github.com/dalance/veryl_sample&quot; = [
-    {version = &quot;0.1.0&quot;, name = &quot;veryl_sample1&quot;},
-    {version = &quot;0.2.0&quot;, name = &quot;veryl_sample2&quot;},
+"https://github.com/dalance/veryl_sample" = [
+    {version = "0.1.0", name = "veryl_sample1"},
+    {version = "0.2.0", name = "veryl_sample2"},
 ]
 </code></pre>
 <h2 id="依存関係の使用"><a class="header" href="#依存関係の使用">依存関係の使用</a></h2>
@@ -1372,7 +1372,7 @@ implicit_parameter_types = [&quot;string&quot;]
 <p>注：上記のコードのプレイボタンの結果は依存関係解決を行わないので正確ではありません。実際のモジュール名は <code>veryl_samlle_delay</code> になります。</p>
 </blockquote>
 <h2 id="バージョン要求"><a class="header" href="#バージョン要求">バージョン要求</a></h2>
-<p><code>[dependencies]</code> セクションの <code>version</code> フィールドはバージョン要求を示します。例えば、<code>version = &quot;0.1.0&quot;</code> は <code>0.1.0</code> と互換性のある最新バージョンを意味します。互換性は<a href="https://semver.org/">セマンティックバージョニング</a>で判定されます。バージョンは以下の3つの部分からなります。</p>
+<p><code>[dependencies]</code> セクションの <code>version</code> フィールドはバージョン要求を示します。例えば、<code>version = "0.1.0"</code> は <code>0.1.0</code> と互換性のある最新バージョンを意味します。互換性は<a href="https://semver.org/">セマンティックバージョニング</a>で判定されます。バージョンは以下の3つの部分からなります。</p>
 <ul>
 <li><code>メジャー</code> バージョンはAPI非互換な変更</li>
 <li><code>マイナー</code> バージョンは互換性のある機能追加</li>
@@ -1395,12 +1395,12 @@ implicit_parameter_types = [&quot;string&quot;]
 </code></pre>
 <p><code>veryl publish</code> は以下のように公開されたバージョンの情報を含んだ <code>Veryl.pub</code> というファイルを生成します。</p>
 <pre><code class="language-toml">[[releases]]
-version = &quot;0.2.1&quot;
-revision = &quot;297bc6b24c5ceca9e648c3ea5e01011c67d7efe7&quot;
+version = "0.2.1"
+revision = "297bc6b24c5ceca9e648c3ea5e01011c67d7efe7"
 </code></pre>
 <p><code>Veryl.pub</code> と生成した後、gitのadd、commit、pushを行えば公開手続きは完了です。gitブランチはデフォルトブランチでなければなりません。これは Veryl が <code>Veryl.pub</code> をデフォルトブランチから探すためです。</p>
 <pre><code>$ git add Veryl.pub
-$ git commit -m &quot;Publish&quot;
+$ git commit -m "Publish"
 $ git push
 </code></pre>
 <p><code>Veryl.toml</code> の <code>[publish]</code> セクションに <code>publish_commit</code> を設定して自動コミットを有効にすれば、gitのaddとcommitが自動で実行されます。</p>
@@ -1422,7 +1422,7 @@ $ git push
 <h3 id="設定"><a class="header" href="#設定">設定</a></h3>
 <pre><code class="language-toml">[publish]
 bump_commit = true
-bump_commit_message = &quot;Bump&quot;
+bump_commit_message = "Bump"
 </code></pre>
 <div class="table-wrapper"><table><thead><tr><th>設定</th><th>設定値</th><th>デフォルト</th><th>説明</th></tr></thead><tbody>
 <tr><td>bump_commit</td><td>ブーリアン</td><td>false</td><td>バージョンアップ後の自動コミット</td></tr>
@@ -1448,7 +1448,7 @@ bump_commit_message = &quot;Bump&quot;
 </code></pre>
 <p>Veryl は全ての <code>*.veryl</code> ファイルを収集し、デフォルトではソースと同じディレクトリにコードを生成します。この挙動は以下の設定で明示することもできます。</p>
 <pre><code class="language-toml">[build]
-target = &quot;source&quot;
+target = "source"
 </code></pre>
 <p><code>veryl build</code> を実行するとディレクトリ構成は以下のようになります。</p>
 <pre><code>$ tree
@@ -1470,7 +1470,7 @@ target = &quot;source&quot;
 <h2 id="単一のソースとターゲットディレクトリ"><a class="header" href="#単一のソースとターゲットディレクトリ">単一のソースとターゲットディレクトリ</a></h2>
 <p>生成されたコードを1つのディレクトリに入れたい場合、<code>Veryl.toml</code> の <code>[build]</code> セクションで <code>target</code> を以下のように設定します。</p>
 <pre><code class="language-toml">[build]
-target = {type = &quot;directory&quot;, path = &quot;target&quot;}
+target = {type = "directory", path = "target"}
 </code></pre>
 <p>ディレクトリ構成は以下のようになります。</p>
 <pre><code>$ tree
@@ -1535,7 +1535,7 @@ indent_width = 4
 <p><code>veryl check</code> あるいは <code>veryl build</code> でリントチェックができます。あるいは言語サーバはリアルタイムでのチェックを行います。</p>
 <p>設定可能な項目は以下の通りです。これは <code>Veryl.toml</code> の <code>[lint]</code> セクションで指定できます。</p>
 <pre><code class="language-toml">[lint.naming]
-case_enum = &quot;snake&quot;
+case_enum = "snake"
 </code></pre>
 <h2 id="lintnaming-セクション"><a class="header" href="#lintnaming-セクション"><code>[lint.naming]</code> セクション</a></h2>
 <p>このセクションは命名規則の設定です。</p>
@@ -1606,13 +1606,13 @@ case_enum = &quot;snake&quot;
 <p>設定可能な値は以下です。</p>
 </div>
 <ul>
-<li><code>&quot;snake&quot;</code> – snake_case</li>
-<li><code>&quot;screaming_snake&quot;</code> – SCREAMING_SNAKE_CASE</li>
-<li><code>&quot;lower_camel&quot;</code> – lowerCamelCase</li>
-<li><code>&quot;upper_camel&quot;</code> – UpperCamelCase</li>
+<li><code>"snake"</code> – snake_case</li>
+<li><code>"screaming_snake"</code> – SCREAMING_SNAKE_CASE</li>
+<li><code>"lower_camel"</code> – lowerCamelCase</li>
+<li><code>"upper_camel"</code> – UpperCamelCase</li>
 </ul>
 <div class="footnote-definition" id="regex"><sup class="footnote-definition-label">4</sup>
-<p><code>&quot;.*&quot;</code>のような正規表現です。使用可能な構文は<a href="https://docs.rs/regex/latest/regex/#syntax">こちら</a>.</p>
+<p><code>".*"</code>のような正規表現です。使用可能な構文は<a href="https://docs.rs/regex/latest/regex/#syntax">こちら</a>.</p>
 </div>
 <div class="footnote-definition" id="reg"><sup class="footnote-definition-label">2</sup>
 <p>レジスタ変数とは <code>always_ff</code> で代入される変数です。合成フェーズでフリップフロップにマップされます。</p>
@@ -1627,14 +1627,14 @@ case_enum = &quot;snake&quot;
 <h2 id="vivado"><a class="header" href="#vivado">Vivado</a></h2>
 <h3 id="文字列パラメータ"><a class="header" href="#文字列パラメータ">文字列パラメータ</a></h3>
 <p>Vivadoは <code>string</code> 型の <code>parameter</code> をサポートしていません。</p>
-<pre><code class="language-verilog">parameter string a = &quot;A&quot;;
+<pre><code class="language-verilog">parameter string a = "A";
 </code></pre>
 <p>その場合は <code>implicit_parameter_types</code> を設定してください。</p>
 <pre><code class="language-toml">[build]
-implicit_parameter_types = [&quot;string&quot;]
+implicit_parameter_types = ["string"]
 </code></pre>
 <p>設定すると生成コードは以下のようになります。</p>
-<pre><code class="language-verilog">parameter a = &quot;A&quot;;
+<pre><code class="language-verilog">parameter a = "A";
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="ドキュメンテーション"><a class="header" href="#ドキュメンテーション">ドキュメンテーション</a></h1>
 <p>プロジェクトのドキュメントは <code>veryl doc</code> コマンドで生成することができます。全てのモジュールとインターフェース、パッケージがリストアップされます。</p>
@@ -1659,8 +1659,8 @@ module ModuleA #(
 <p>Veryl のパーサはパーサジェネレータ <a href="https://github.com/jsinger67/parol">parol</a>を使っています。以下の parol の構文定義が正式な構文です。</p>
 <pre><code>
 %start Veryl
-%title &quot;Veryl grammar&quot;
-%comment &quot;Empty grammar generated by `parol`&quot;
+%title "Veryl grammar"
+%comment "Empty grammar generated by `parol`"
 %user_type VerylToken = crate::veryl_token::VerylToken
 %user_type Token = crate::veryl_token::Token
 
@@ -1672,8 +1672,8 @@ module ModuleA #(
 
 // Longest match should be first
 
-CommentsTerm          : &quot;(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+&quot;                     : Token;
-StringLiteralTerm     : &quot;\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}&quot;: Token;
+CommentsTerm          : "(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+"                     : Token;
+StringLiteralTerm     : "\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}": Token;
 ExponentTerm          : /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/                   : Token;
 FixedPointTerm        : /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/                                              : Token;
 BasedTerm             : /(?:[0-9]+(?:_[0-9]+)*)?'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/                : Token;
@@ -1682,19 +1682,19 @@ BaseLessTerm          : /[0-9]+(?:_[0-9]+)*/                                    
 MinusColonTerm        : '-:'                                                                                  : Token;
 MinusGTTerm           : '-&gt;'                                                                                  : Token;
 PlusColonTerm         : '+:'                                                                                  : Token;
-AssignmentOperatorTerm: &quot;\+=|-=|\*=|/=|%=|&amp;=|\|=|\^=|&lt;&lt;=|&gt;&gt;=|&lt;&lt;&lt;=|&gt;&gt;&gt;=&quot;                                       : Token;
-Operator11Term        : &quot;\*\*&quot;                                                                                : Token;
-Operator10Term        : &quot;/|%&quot;                                                                                 : Token;
-Operator09Term        : &quot;\+|-&quot;                                                                                : Token;
-Operator08Term        : &quot;&lt;&lt;&lt;|&gt;&gt;&gt;|&lt;&lt;|&gt;&gt;&quot;                                                                       : Token;
-Operator07Term        : &quot;&lt;=|&gt;=|&lt;:|&gt;:&quot;                                                                         : Token;
-Operator06Term        : &quot;===|==\?|!==|!=\?|==|!=&quot;                                                             : Token;
-Operator02Term        : &quot;&amp;&amp;&quot;                                                                                  : Token;
-Operator01Term        : &quot;\|\|&quot;                                                                                : Token;
-Operator05Term        : &quot;&amp;&quot;                                                                                   : Token;
-Operator04Term        : &quot;\^~|\^|~\^&quot;                                                                          : Token;
-Operator03Term        : &quot;\|&quot;                                                                                  : Token;
-UnaryOperatorTerm     : &quot;~&amp;|~\||!|~&quot;                                                                          : Token;
+AssignmentOperatorTerm: "\+=|-=|\*=|/=|%=|&amp;=|\|=|\^=|&lt;&lt;=|&gt;&gt;=|&lt;&lt;&lt;=|&gt;&gt;&gt;="                                       : Token;
+Operator11Term        : "\*\*"                                                                                : Token;
+Operator10Term        : "/|%"                                                                                 : Token;
+Operator09Term        : "\+|-"                                                                                : Token;
+Operator08Term        : "&lt;&lt;&lt;|&gt;&gt;&gt;|&lt;&lt;|&gt;&gt;"                                                                       : Token;
+Operator07Term        : "&lt;=|&gt;=|&lt;:|&gt;:"                                                                         : Token;
+Operator06Term        : "===|==\?|!==|!=\?|==|!="                                                             : Token;
+Operator02Term        : "&amp;&amp;"                                                                                  : Token;
+Operator01Term        : "\|\|"                                                                                : Token;
+Operator05Term        : "&amp;"                                                                                   : Token;
+Operator04Term        : "\^~|\^|~\^"                                                                          : Token;
+Operator03Term        : "\|"                                                                                  : Token;
+UnaryOperatorTerm     : "~&amp;|~\||!|~"                                                                          : Token;
 ColonColonTerm        : '::'                                                                                  : Token;
 ColonTerm             : ':'                                                                                   : Token;
 CommaTerm             : ','                                                                                   : Token;
@@ -2266,7 +2266,7 @@ Direction: Input
 // Function
 // ----------------------------------------------------------------------------
 
-FunctionDeclaration: Function Identifier [ WithParameter ] [ PortDeclaration ] MinusGT ScalarType LBrace { FunctionItem } RBrace;
+FunctionDeclaration: Function Identifier [ WithParameter ] [ PortDeclaration ] [ MinusGT ScalarType ] LBrace { FunctionItem } RBrace;
 
 FunctionItem: VarDeclaration
             | Statement
