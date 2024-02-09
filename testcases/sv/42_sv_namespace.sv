@@ -13,4 +13,11 @@ module veryl_testcase_Module42 (
         .i_d     (i_d    ),
         .o_d     (o_d    )
     );
+
+    delay u1 (
+        .i_clk   (i_clk  ),
+        .i_rst_n (i_rst_n),
+        .i_d     (i_d    ),
+        .o_d     (o_d    )
+    );
 endmodule
