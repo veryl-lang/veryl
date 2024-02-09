@@ -1,0 +1,6 @@
+module Module43 {
+    var a: $sv::StructA    ;
+    var b: logic       <10>;
+
+    assign b = a.memberA;
+}

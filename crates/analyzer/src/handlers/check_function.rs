@@ -1,6 +1,6 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::symbol::SymbolKind;
-use crate::symbol_table::{self, SymbolPath};
+use crate::symbol_table::{self, ResolveSymbol, SymbolPath};
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
@@ -37,8 +37,12 @@ impl<'a> VerylGrammarTrait for CheckFunction<'a> {
                 }
 
                 if let Ok(symbol) = symbol_table::resolve(x.expression_identifier.as_ref()) {
-                    let arity = if let SymbolKind::Function(x) = symbol.found.kind {
-                        Some(x.ports.len())
+                    let arity = if let ResolveSymbol::Symbol(symbol) = symbol.found {
+                        if let SymbolKind::Function(x) = symbol.kind {
+                            Some(x.ports.len())
+                        } else {
+                            None
+                        }
                     } else {
                         None
                     };

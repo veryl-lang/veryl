@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 use std::path::Path;
 use tower_lsp::lsp_types::*;
 use tower_lsp::Client;
-use veryl_analyzer::symbol_table::SymbolPath;
+use veryl_analyzer::symbol_table::{ResolveSymbol, SymbolPath};
 use veryl_analyzer::{namespace_table, symbol_table, Analyzer, AnalyzerError};
 use veryl_formatter::Formatter;
 use veryl_metadata::{Metadata, PathPair};
@@ -237,11 +237,13 @@ impl Server {
                         SymbolPath::from(finder.token_group.as_slice())
                     };
                     if let Ok(symbol) = symbol_table::get(&path, &namespace) {
-                        let location = to_location(&symbol.found.token);
-                        self.snd
-                            .send_blocking(MsgFromServer::GotoDefinition(Some(location)))
-                            .unwrap();
-                        return;
+                        if let ResolveSymbol::Symbol(symbol) = &symbol.found {
+                            let location = to_location(&symbol.token);
+                            self.snd
+                                .send_blocking(MsgFromServer::GotoDefinition(Some(location)))
+                                .unwrap();
+                            return;
+                        }
                     }
                 }
             }
@@ -313,15 +315,17 @@ impl Server {
                         SymbolPath::from(finder.token_group.as_slice())
                     };
                     if let Ok(symbol) = symbol_table::get(&path, &namespace) {
-                        let text = symbol.found.kind.to_string();
-                        let hover = Hover {
-                            contents: HoverContents::Scalar(MarkedString::String(text)),
-                            range: None,
-                        };
-                        self.snd
-                            .send_blocking(MsgFromServer::Hover(Some(hover)))
-                            .unwrap();
-                        return;
+                        if let ResolveSymbol::Symbol(symbol) = &symbol.found {
+                            let text = symbol.kind.to_string();
+                            let hover = Hover {
+                                contents: HoverContents::Scalar(MarkedString::String(text)),
+                                range: None,
+                            };
+                            self.snd
+                                .send_blocking(MsgFromServer::Hover(Some(hover)))
+                                .unwrap();
+                            return;
+                        }
                     }
                 }
             }
@@ -346,9 +350,11 @@ impl Server {
                         SymbolPath::from(finder.token_group.as_slice())
                     };
                     if let Ok(symbol) = symbol_table::get(&path, &namespace) {
-                        for reference in &symbol.found.references {
-                            let location = to_location(reference);
-                            ret.push(location);
+                        if let ResolveSymbol::Symbol(symbol) = &symbol.found {
+                            for reference in &symbol.references {
+                                let location = to_location(reference);
+                                ret.push(location);
+                            }
                         }
                     }
                 }
