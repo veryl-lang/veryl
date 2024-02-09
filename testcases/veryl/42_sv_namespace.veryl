@@ -13,4 +13,11 @@ module Module42 (
         i_d      ,
         o_d      ,
     );
+
+    inst u1: $sv::delay (
+        i_clk    ,
+        i_rst_n  ,
+        i_d      ,
+        o_d      ,
+    );
 }
