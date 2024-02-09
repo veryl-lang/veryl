@@ -8,7 +8,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use tempfile::TempDir;
 use veryl_analyzer::symbol::{ParameterScope, Symbol, SymbolKind};
-use veryl_analyzer::symbol_table;
+use veryl_analyzer::symbol_table::{self, ResolveSymbol};
 use veryl_metadata::Metadata;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::veryl_token::Token;
@@ -424,7 +424,11 @@ fn format_doc_comment(text: &[StrId], single_line: bool) -> String {
 
 fn get_comment_from_token(token: &Token) -> Option<String> {
     if let Ok(symbol) = symbol_table::resolve(token) {
-        Some(format_doc_comment(&symbol.found.doc_comment, false))
+        if let ResolveSymbol::Symbol(symbol) = &symbol.found {
+            Some(format_doc_comment(&symbol.doc_comment, false))
+        } else {
+            None
+        }
     } else {
         None
     }

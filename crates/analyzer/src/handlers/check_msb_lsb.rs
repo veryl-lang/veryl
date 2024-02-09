@@ -2,7 +2,7 @@ use crate::analyzer_error::AnalyzerError;
 use crate::msb_table;
 use crate::namespace_table;
 use crate::symbol::SymbolKind;
-use crate::symbol_table::{self, SymbolPath, SymbolPathNamespace};
+use crate::symbol_table::{self, ResolveSymbol, SymbolPath, SymbolPathNamespace};
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
@@ -54,15 +54,19 @@ impl<'a> VerylGrammarTrait for CheckMsbLsb<'a> {
                 let resolved = if let Ok(x) =
                     symbol_table::resolve(self.identifier_path.last().unwrap().clone())
                 {
-                    if let SymbolKind::Variable(x) = x.found.kind {
-                        let select_dimension = *self.select_dimension.last().unwrap();
-                        let expression = if select_dimension >= x.r#type.array.len() {
-                            &x.r#type.width[select_dimension - x.r#type.array.len()]
+                    if let ResolveSymbol::Symbol(x) = x.found {
+                        if let SymbolKind::Variable(x) = x.kind {
+                            let select_dimension = *self.select_dimension.last().unwrap();
+                            let expression = if select_dimension >= x.r#type.array.len() {
+                                &x.r#type.width[select_dimension - x.r#type.array.len()]
+                            } else {
+                                &x.r#type.array[select_dimension]
+                            };
+                            msb_table::insert(arg.msb_token.token.id, expression);
+                            true
                         } else {
-                            &x.r#type.array[select_dimension]
-                        };
-                        msb_table::insert(arg.msb_token.token.id, expression);
-                        true
+                            false
+                        }
                     } else {
                         false
                     }

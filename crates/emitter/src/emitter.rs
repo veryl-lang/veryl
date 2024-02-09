@@ -1,7 +1,7 @@
 use crate::aligner::{Aligner, Location};
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::SymbolKind;
-use veryl_analyzer::symbol_table::{self, SymbolPath, SymbolPathNamespace};
+use veryl_analyzer::symbol_table::{self, ResolveSymbol, SymbolPath, SymbolPathNamespace};
 use veryl_analyzer::{msb_table, namespace_table};
 use veryl_metadata::{Build, BuiltinType, ClockType, Format, Metadata, ResetType};
 use veryl_parser::resource_table;
@@ -292,10 +292,14 @@ impl Emitter {
             if i > 0 {
                 let symbol_path = SymbolPath::new(&[*path]);
                 if let Ok(ref symbol) = symbol_table::get(&symbol_path, &resolve_namespace) {
-                    let separator = match symbol.found.kind {
-                        SymbolKind::Package => "::",
-                        SymbolKind::Interface(_) => ".",
-                        _ => "_",
+                    let separator = if let ResolveSymbol::Symbol(symbol) = &symbol.found {
+                        match symbol.kind {
+                            SymbolKind::Package => "::",
+                            SymbolKind::Interface(_) => ".",
+                            _ => "_",
+                        }
+                    } else {
+                        unreachable!();
                     };
                     ret.push_str(&format!("{}{}", path, separator));
                 } else {
@@ -313,60 +317,64 @@ impl Emitter {
 
     fn path_identifier(&mut self, path: SymbolPathNamespace, args: &[Identifier]) {
         if let Ok(ref symbol) = symbol_table::resolve(path) {
-            match symbol.found.kind {
-                SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package => {
-                    self.namespace(&symbol.found.namespace);
-                    self.str(&format!("{}", symbol.found.token.text));
-                }
-                SymbolKind::Parameter(_)
-                | SymbolKind::Function(_)
-                | SymbolKind::Struct
-                | SymbolKind::Union
-                | SymbolKind::TypeDef(_)
-                | SymbolKind::Enum(_) => {
-                    if args.len() > 1 {
-                        self.namespace(&symbol.found.namespace);
-                        self.str(&format!("{}", symbol.found.token.text));
-                    } else {
-                        self.identifier(&args[0]);
+            if let ResolveSymbol::Symbol(symbol) = &symbol.found {
+                match symbol.kind {
+                    SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package => {
+                        self.namespace(&symbol.namespace);
+                        self.str(&format!("{}", symbol.token.text));
                     }
-                }
-                SymbolKind::EnumMember(_) => {
-                    if args.len() > 2 {
-                        self.namespace(&symbol.found.namespace);
-                        self.str(&format!("{}", symbol.found.token.text));
-                    } else {
-                        self.identifier(&args[0]);
-                        self.str("_");
-                        self.identifier(&args[1]);
-                    }
-                }
-                SymbolKind::Modport(_) => {
-                    self.namespace(&symbol.found.namespace);
-                    self.str(&format!("{}", symbol.found.token.text));
-                }
-                SymbolKind::SystemVerilog => {
-                    // arg[0] is "sv", it should be removed
-                    for (i, arg) in args[1..].iter().enumerate() {
-                        if i != 0 {
-                            self.str("::");
+                    SymbolKind::Parameter(_)
+                    | SymbolKind::Function(_)
+                    | SymbolKind::Struct
+                    | SymbolKind::Union
+                    | SymbolKind::TypeDef(_)
+                    | SymbolKind::Enum(_) => {
+                        if args.len() > 1 {
+                            self.namespace(&symbol.namespace);
+                            self.str(&format!("{}", symbol.token.text));
+                        } else {
+                            self.identifier(&args[0]);
                         }
-                        self.identifier(arg);
                     }
+                    SymbolKind::EnumMember(_) => {
+                        if args.len() > 2 {
+                            self.namespace(&symbol.namespace);
+                            self.str(&format!("{}", symbol.token.text));
+                        } else {
+                            self.identifier(&args[0]);
+                            self.str("_");
+                            self.identifier(&args[1]);
+                        }
+                    }
+                    SymbolKind::Modport(_) => {
+                        self.namespace(&symbol.namespace);
+                        self.str(&format!("{}", symbol.token.text));
+                    }
+                    SymbolKind::SystemVerilog => {
+                        // arg[0] is "sv", it should be removed
+                        for (i, arg) in args[1..].iter().enumerate() {
+                            if i != 0 {
+                                self.str("::");
+                            }
+                            self.identifier(arg);
+                        }
+                    }
+                    SymbolKind::SystemFunction => {
+                        self.str("$");
+                        self.identifier(&args[0]);
+                    }
+                    SymbolKind::Port(_)
+                    | SymbolKind::Variable(_)
+                    | SymbolKind::Instance(_)
+                    | SymbolKind::Block
+                    | SymbolKind::StructMember(_)
+                    | SymbolKind::UnionMember(_)
+                    | SymbolKind::ModportMember
+                    | SymbolKind::Genvar
+                    | SymbolKind::Namespace => unreachable!(),
                 }
-                SymbolKind::SystemFunction => {
-                    self.str("$");
-                    self.identifier(&args[0]);
-                }
-                SymbolKind::Port(_)
-                | SymbolKind::Variable(_)
-                | SymbolKind::Instance(_)
-                | SymbolKind::Block
-                | SymbolKind::StructMember(_)
-                | SymbolKind::UnionMember(_)
-                | SymbolKind::ModportMember
-                | SymbolKind::Genvar
-                | SymbolKind::Namespace => unreachable!(),
+            } else {
+                unreachable!();
             }
         }
     }
@@ -2032,7 +2040,11 @@ impl VerylWalker for Emitter {
         self.module(&arg.module);
         self.space(1);
         if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
-            self.namespace(&symbol.found.namespace);
+            if let ResolveSymbol::Symbol(symbol) = symbol.found {
+                self.namespace(&symbol.namespace);
+            } else {
+                unreachable!();
+            }
         }
         self.identifier(&arg.identifier);
         let file_scope_import = self.file_scope_import.clone();
@@ -2215,7 +2227,11 @@ impl VerylWalker for Emitter {
         self.interface(&arg.interface);
         self.space(1);
         if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
-            self.namespace(&symbol.found.namespace);
+            if let ResolveSymbol::Symbol(symbol) = symbol.found {
+                self.namespace(&symbol.namespace);
+            } else {
+                unreachable!();
+            }
         }
         self.identifier(&arg.identifier);
         let file_scope_import = self.file_scope_import.clone();
@@ -2394,7 +2410,11 @@ impl VerylWalker for Emitter {
         self.package(&arg.package);
         self.space(1);
         if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
-            self.namespace(&symbol.found.namespace);
+            if let ResolveSymbol::Symbol(symbol) = symbol.found {
+                self.namespace(&symbol.namespace);
+            } else {
+                unreachable!();
+            }
         }
         self.identifier(&arg.identifier);
         self.token_will_push(&arg.l_brace.l_brace_token.replace(";"));
