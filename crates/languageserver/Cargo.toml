@@ -15,7 +15,7 @@ exclude               = ["build.rs"]
 
 [dependencies]
 #crossbeam-channel = "0.5.6"
-async-channel     = "2.1"
+async-channel     = "2.2"
 dashmap           = "5.5.3"
 futures           = "0.3.30"
 glob              = "0.3.1"
