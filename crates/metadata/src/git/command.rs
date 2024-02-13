@@ -64,6 +64,21 @@ impl Git {
                 .current_dir(current_dir)
                 .output()?;
             if !output.status.success() {
+                // retry at checkout failure
+                if path.exists() {
+                    let output = Command::new(GIT_COMMAND)
+                        .arg("restore")
+                        .arg("--source=HEAD")
+                        .arg(":/")
+                        .current_dir(path)
+                        .output()?;
+                    if output.status.success() {
+                        return Ok(Git {
+                            path: path.to_path_buf(),
+                        });
+                    }
+                }
+
                 let context = String::from_utf8_lossy(&output.stderr).to_string();
                 let msg = format!("failed to clone repository: {}", url.as_str());
                 return Err(GitCommandError { msg, context }.into());
