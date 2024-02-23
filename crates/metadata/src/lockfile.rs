@@ -370,26 +370,25 @@ impl Lockfile {
         let uuid = Self::gen_uuid(url, revision)?;
 
         let path = dependencies_dir.join(uuid.simple().encode_lower(&mut Uuid::encode_buffer()));
+        let toml = path.join("Veryl.toml");
+
         if !path.exists() {
             let git = Git::clone(url, &path)?;
             git.fetch()?;
             git.checkout(Some(revision))?;
         } else {
             let git = Git::open(&path)?;
-            let ret = git.fetch();
+            let ret = git.is_clean().map_or(false, |x| x);
 
             // If the existing path is not git repository, cleanup and re-try
-            if ret.is_err() {
+            if !ret || !toml.exists() {
                 fs::remove_dir_all(&path)?;
                 let git = Git::clone(url, &path)?;
                 git.fetch()?;
                 git.checkout(Some(revision))?;
-            } else {
-                git.checkout(Some(revision))?;
             }
         }
 
-        let toml = path.join("Veryl.toml");
         let metadata = Metadata::load(toml)?;
         Ok(metadata)
     }
