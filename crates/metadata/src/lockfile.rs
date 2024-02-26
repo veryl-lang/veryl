@@ -3,12 +3,15 @@ use crate::metadata::{Dependency, Metadata};
 use crate::metadata_error::MetadataError;
 use crate::pubfile::{Pubfile, Release};
 use crate::{utils, PathPair};
+#[cfg(not(target_family = "wasm"))]
 use fs4::FileExt;
 use log::info;
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::fs::{self, File};
+use std::fs;
+#[cfg(not(target_family = "wasm"))]
+use std::fs::File;
 use std::path::Path;
 use std::str::FromStr;
 use url::Url;
@@ -400,6 +403,7 @@ impl Lockfile {
         Ok(metadata)
     }
 
+    #[cfg(not(target_family = "wasm"))]
     fn lock_dir(path: &str) -> Result<File, MetadataError> {
         let base_dir = Metadata::cache_dir().join(path);
         let lock = base_dir.join("lock");
@@ -408,8 +412,19 @@ impl Lockfile {
         Ok(lock)
     }
 
+    #[cfg(not(target_family = "wasm"))]
     fn unlock_dir(lock: File) -> Result<(), MetadataError> {
         lock.unlock()?;
+        Ok(())
+    }
+
+    #[cfg(target_family = "wasm")]
+    fn lock_dir(_path: &str) -> Result<(), MetadataError> {
+        Ok(())
+    }
+
+    #[cfg(target_family = "wasm")]
+    fn unlock_dir(_lock: ()) -> Result<(), MetadataError> {
         Ok(())
     }
 }
