@@ -111,6 +111,20 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_import),
+        help("fix import item"),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#invalid_import")
+    )]
+    #[error("This item can't be imported")]
+    InvalidImport {
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(invalid_lsb),
         help("remove lsb"),
         url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#invalid_lsb")
@@ -494,6 +508,13 @@ impl AnalyzerError {
         AnalyzerError::InvalidIdentifier {
             identifier: identifier.to_string(),
             rule: rule.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.token.into(),
+        }
+    }
+
+    pub fn invalid_import(source: &str, token: &VerylToken) -> Self {
+        AnalyzerError::InvalidImport {
             input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),
         }

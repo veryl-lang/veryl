@@ -1,7 +1,9 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::namespace::Namespace;
+use crate::namespace_table;
 use crate::symbol::{Symbol, SymbolKind};
-use crate::symbol_table::{self, SymbolPath};
+use crate::symbol_table::{self, ResolveSymbol, SymbolPath};
+use veryl_parser::resource_table::TokenId;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
@@ -12,12 +14,16 @@ pub struct CreateReference<'a> {
     pub errors: Vec<AnalyzerError>,
     text: &'a str,
     point: HandlerPoint,
+    top_level: bool,
+    file_scope_imported_items: Vec<TokenId>,
+    file_scope_imported_packages: Vec<Namespace>,
 }
 
 impl<'a> CreateReference<'a> {
     pub fn new(text: &'a str) -> Self {
         Self {
             text,
+            top_level: true,
             ..Default::default()
         }
     }
@@ -281,6 +287,128 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                                 &arg.identifier.identifier_token,
                             ));
                         }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn module_declaration(&mut self, arg: &ModuleDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.top_level = false;
+                let mut namespace = Namespace::default();
+                namespace.push(arg.identifier.identifier_token.token.text);
+                for x in &self.file_scope_imported_items {
+                    symbol_table::add_imported_item(*x, &namespace);
+                }
+                for x in &self.file_scope_imported_packages {
+                    symbol_table::add_imported_package(x, &namespace);
+                }
+            }
+            HandlerPoint::After => {
+                self.top_level = true;
+            }
+        }
+        Ok(())
+    }
+
+    fn interface_declaration(&mut self, arg: &InterfaceDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.top_level = false;
+                let mut namespace = Namespace::default();
+                namespace.push(arg.identifier.identifier_token.token.text);
+                for x in &self.file_scope_imported_items {
+                    symbol_table::add_imported_item(*x, &namespace);
+                }
+                for x in &self.file_scope_imported_packages {
+                    symbol_table::add_imported_package(x, &namespace);
+                }
+            }
+            HandlerPoint::After => {
+                self.top_level = true;
+            }
+        }
+        Ok(())
+    }
+
+    fn package_declaration(&mut self, arg: &PackageDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.top_level = false;
+                let mut namespace = Namespace::default();
+                namespace.push(arg.identifier.identifier_token.token.text);
+                for x in &self.file_scope_imported_items {
+                    symbol_table::add_imported_item(*x, &namespace);
+                }
+                for x in &self.file_scope_imported_packages {
+                    symbol_table::add_imported_package(x, &namespace);
+                }
+            }
+            HandlerPoint::After => {
+                self.top_level = true;
+            }
+        }
+        Ok(())
+    }
+
+    fn import_declaration(&mut self, arg: &ImportDeclaration) -> Result<(), ParolError> {
+        // This should be executed after scoped_identifier
+        if let HandlerPoint::After = self.point {
+            let is_wildcard = arg.import_declaration_opt.is_some();
+            let namespace =
+                namespace_table::get(arg.scoped_identifier.identifier.identifier_token.token.id)
+                    .unwrap();
+            match symbol_table::resolve(arg.scoped_identifier.as_ref()) {
+                Ok(symbol) => {
+                    if let ResolveSymbol::Symbol(x) = symbol.found {
+                        match x.kind {
+                            SymbolKind::Package if is_wildcard => {
+                                let mut target = x.namespace.clone();
+                                target.push(x.token.text);
+
+                                if self.top_level {
+                                    self.file_scope_imported_packages.push(target);
+                                } else {
+                                    symbol_table::add_imported_package(&target, &namespace);
+                                }
+                            }
+                            SymbolKind::SystemVerilog => (),
+                            _ if is_wildcard => {
+                                self.errors.push(AnalyzerError::invalid_import(
+                                    self.text,
+                                    &arg.scoped_identifier.identifier.identifier_token,
+                                ));
+                            }
+                            _ => {
+                                if self.top_level {
+                                    self.file_scope_imported_items.push(x.token.id);
+                                } else {
+                                    symbol_table::add_imported_item(x.token.id, &namespace);
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(err) => {
+                    if let Some(last_found) = err.last_found {
+                        let name = format!("{}", last_found.token.text);
+                        let member = format!("{}", err.not_found);
+                        self.errors.push(AnalyzerError::unknown_member(
+                            &name,
+                            &member,
+                            self.text,
+                            &arg.scoped_identifier.identifier.identifier_token,
+                        ));
+                    } else {
+                        let name = format!("{}", err.not_found);
+                        self.errors.push(AnalyzerError::undefined_identifier(
+                            &name,
+                            self.text,
+                            &arg.scoped_identifier.identifier.identifier_token,
+                        ));
                     }
                 }
             }
