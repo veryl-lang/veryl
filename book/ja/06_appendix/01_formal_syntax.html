@@ -840,9 +840,9 @@ FunctionItem: VarDeclaration
 // Import / Export
 // ----------------------------------------------------------------------------
 
-ImportDeclaration: Import Identifier ColonColon ( Identifier | Star ) Semicolon;
+ImportDeclaration: Import ScopedIdentifier [ ColonColon Star ] Semicolon;
 
-ExportDeclaration: Export ( Identifier | Star ) ColonColon ( Identifier | Star ) Semicolon;
+ExportDeclaration: Export ( Star | ScopedIdentifier [ ColonColon Star ] ) Semicolon;
 
 // ----------------------------------------------------------------------------
 // Module
