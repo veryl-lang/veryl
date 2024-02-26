@@ -273,6 +273,7 @@ impl SymbolTable {
                         namespace.matched(&symbol.namespace)
                     } else {
                         namespace.included(&symbol.namespace)
+                            || symbol.imported.iter().any(|x| namespace.included(x))
                     };
                     if included && symbol.namespace.depth() >= max_depth {
                         symbol.evaluate();
@@ -414,6 +415,26 @@ impl SymbolTable {
         }
     }
 
+    pub fn add_imported_item(&mut self, target: TokenId, namespace: &Namespace) {
+        for (_, symbols) in self.table.iter_mut() {
+            for symbol in symbols.iter_mut() {
+                if symbol.token.id == target {
+                    symbol.imported.push(namespace.to_owned());
+                }
+            }
+        }
+    }
+
+    pub fn add_imported_package(&mut self, target: &Namespace, namespace: &Namespace) {
+        for (_, symbols) in self.table.iter_mut() {
+            for symbol in symbols.iter_mut() {
+                if symbol.namespace.matched(target) {
+                    symbol.imported.push(namespace.to_owned());
+                }
+            }
+        }
+    }
+
     pub fn add_project_local(&mut self, prj: StrId, from: StrId, to: StrId) {
         self.project_local_table
             .entry(prj)
@@ -434,6 +455,7 @@ impl fmt::Display for SymbolTable {
         let mut symbol_width = 0;
         let mut namespace_width = 0;
         let mut reference_width = 0;
+        let mut import_width = 0;
         let mut vec: Vec<_> = self.table.iter().collect();
         vec.sort_by(|x, y| format!("{}", x.0).cmp(&format!("{}", y.0)));
         for (k, v) in &vec {
@@ -441,6 +463,7 @@ impl fmt::Display for SymbolTable {
             for symbol in *v {
                 namespace_width = namespace_width.max(format!("{}", symbol.namespace).len());
                 reference_width = reference_width.max(format!("{}", symbol.references.len()).len());
+                import_width = import_width.max(format!("{}", symbol.imported.len()).len());
             }
         }
         for (k, v) in &vec {
@@ -455,15 +478,17 @@ impl fmt::Display for SymbolTable {
                 };
                 writeln!(
                     f,
-                    "    {:symbol_width$} @ {:namespace_width$} {{ refs: {:reference_width$} }}: {}{},",
+                    "    {:symbol_width$} @ {:namespace_width$} {{ref: {:reference_width$}, import: {:import_width$}}}: {}{},",
                     k,
                     symbol.namespace,
                     symbol.references.len(),
+                    symbol.imported.len(),
                     symbol.kind,
                     evaluated,
                     symbol_width = symbol_width,
                     namespace_width = namespace_width,
-                    reference_width = reference_width
+                    reference_width = reference_width,
+                    import_width = import_width,
                 )?;
             }
         }
@@ -703,6 +728,14 @@ pub fn drop(file_path: PathId) {
 
 pub fn add_reference(target: TokenId, token: &Token) {
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_reference(target, token))
+}
+
+pub fn add_imported_item(target: TokenId, namespace: &Namespace) {
+    SYMBOL_TABLE.with(|f| f.borrow_mut().add_imported_item(target, namespace))
+}
+
+pub fn add_imported_package(target: &Namespace, namespace: &Namespace) {
+    SYMBOL_TABLE.with(|f| f.borrow_mut().add_imported_package(target, namespace))
 }
 
 pub fn add_project_local(prj: StrId, from: StrId, to: StrId) {

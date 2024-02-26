@@ -1,0 +1,20 @@
+module Module44 {
+    var a: logic<10>;
+    var b: logic<10>;
+    var c: logic<10>;
+
+    import Package44A::z;
+    import Package44B::*;
+
+    assign a = Package44A::z;
+    assign b = z;
+    assign c = y;
+}
+
+package Package44A {
+    localparam z: u32 = 0;
+}
+
+package Package44B {
+    localparam y: u32 = 0;
+}
