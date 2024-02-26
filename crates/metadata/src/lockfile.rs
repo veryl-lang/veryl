@@ -3,11 +3,12 @@ use crate::metadata::{Dependency, Metadata};
 use crate::metadata_error::MetadataError;
 use crate::pubfile::{Pubfile, Release};
 use crate::{utils, PathPair};
+use fs4::FileExt;
 use log::info;
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::fs;
+use std::fs::{self, File};
 use std::path::Path;
 use std::str::FromStr;
 use url::Url;
@@ -339,9 +340,11 @@ impl Lockfile {
         let uuid = Self::gen_uuid(url, "")?;
 
         let path = resolve_dir.join(uuid.simple().encode_lower(&mut Uuid::encode_buffer()));
+        let lock = Self::lock_dir("resolve")?;
         let git = Git::clone(url, &path)?;
         git.fetch()?;
         git.checkout(None)?;
+        Self::unlock_dir(lock)?;
 
         let toml = path.join("Veryl.pub");
         let mut pubfile = Pubfile::load(toml)?;
@@ -373,24 +376,41 @@ impl Lockfile {
         let toml = path.join("Veryl.toml");
 
         if !path.exists() {
+            let lock = Self::lock_dir("dependencies")?;
             let git = Git::clone(url, &path)?;
             git.fetch()?;
             git.checkout(Some(revision))?;
+            Self::unlock_dir(lock)?;
         } else {
             let git = Git::open(&path)?;
             let ret = git.is_clean().map_or(false, |x| x);
 
             // If the existing path is not git repository, cleanup and re-try
             if !ret || !toml.exists() {
+                let lock = Self::lock_dir("dependencies")?;
                 fs::remove_dir_all(&path)?;
                 let git = Git::clone(url, &path)?;
                 git.fetch()?;
                 git.checkout(Some(revision))?;
+                Self::unlock_dir(lock)?;
             }
         }
 
         let metadata = Metadata::load(toml)?;
         Ok(metadata)
+    }
+
+    fn lock_dir(path: &str) -> Result<File, MetadataError> {
+        let base_dir = Metadata::cache_dir().join(path);
+        let lock = base_dir.join("lock");
+        let lock = File::create(lock)?;
+        lock.lock_exclusive()?;
+        Ok(lock)
+    }
+
+    fn unlock_dir(lock: File) -> Result<(), MetadataError> {
+        lock.unlock()?;
+        Ok(())
     }
 }
 
