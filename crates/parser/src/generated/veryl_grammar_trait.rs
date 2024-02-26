@@ -2339,7 +2339,7 @@ pub struct FactorNumber {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct FactorExpressionIdentifierFactorOpt {
     pub expression_identifier: Box<ExpressionIdentifier>,
-    pub factor_opt: Option<Box<FactorOpt>>,
+    pub factor_opt: Option<FactorOpt>,
 }
 
 ///
@@ -3308,7 +3308,7 @@ pub struct PortDeclarationItemGroupDirectionArrayType {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct PortDeclarationItemGroupInterfacePortDeclarationItemOpt {
     pub interface: Box<Interface>,
-    pub port_declaration_item_opt: Option<Box<PortDeclarationItemOpt>>,
+    pub port_declaration_item_opt: Option<PortDeclarationItemOpt>,
 }
 
 ///
@@ -3396,67 +3396,7 @@ pub struct FunctionItemStatement {
 }
 
 ///
-/// Type derived for production 697
-///
-/// `ImportDeclarationGroup: Identifier;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ImportDeclarationGroupIdentifier {
-    pub identifier: Box<Identifier>,
-}
-
-///
-/// Type derived for production 698
-///
-/// `ImportDeclarationGroup: Star;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ImportDeclarationGroupStar {
-    pub star: Box<Star>,
-}
-
-///
 /// Type derived for production 700
-///
-/// `ExportDeclarationGroup0: Identifier;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ExportDeclarationGroup0Identifier {
-    pub identifier: Box<Identifier>,
-}
-
-///
-/// Type derived for production 701
-///
-/// `ExportDeclarationGroup0: Star;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ExportDeclarationGroup0Star {
-    pub star: Box<Star>,
-}
-
-///
-/// Type derived for production 702
-///
-/// `ExportDeclarationGroup: Identifier;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ExportDeclarationGroupIdentifier {
-    pub identifier: Box<Identifier>,
-}
-
-///
-/// Type derived for production 703
 ///
 /// `ExportDeclarationGroup: Star;`
 ///
@@ -3465,6 +3405,19 @@ pub struct ExportDeclarationGroupIdentifier {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ExportDeclarationGroupStar {
     pub star: Box<Star>,
+}
+
+///
+/// Type derived for production 701
+///
+/// `ExportDeclarationGroup: ScopedIdentifier ExportDeclarationOpt /* Option */;`
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct ExportDeclarationGroupScopedIdentifierExportDeclarationOpt {
+    pub scoped_identifier: Box<ScopedIdentifier>,
+    pub export_declaration_opt: Option<ExportDeclarationOpt>,
 }
 
 ///
@@ -4182,7 +4135,7 @@ pub struct AlwaysFf {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct AlwaysFfClock {
-    pub always_ff_clock_opt: Option<Box<AlwaysFfClockOpt>>,
+    pub always_ff_clock_opt: Option<AlwaysFfClockOpt>,
     pub hierarchical_identifier: Box<HierarchicalIdentifier>,
 }
 
@@ -4216,7 +4169,7 @@ pub struct AlwaysFfDeclaration {
     pub always_ff: Box<AlwaysFf>,
     pub l_paren: Box<LParen>,
     pub always_ff_clock: Box<AlwaysFfClock>,
-    pub always_ff_declaration_opt: Option<Box<AlwaysFfDeclarationOpt>>,
+    pub always_ff_declaration_opt: Option<AlwaysFfDeclarationOpt>,
     pub r_paren: Box<RParen>,
     pub l_brace: Box<LBrace>,
     pub always_ff_declaration_list: Vec<AlwaysFfDeclarationList>,
@@ -4251,7 +4204,7 @@ pub struct AlwaysFfDeclarationOpt {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct AlwaysFfReset {
-    pub always_ff_reset_opt: Option<Box<AlwaysFfResetOpt>>,
+    pub always_ff_reset_opt: Option<AlwaysFfResetOpt>,
     pub hierarchical_identifier: Box<HierarchicalIdentifier>,
 }
 
@@ -4317,7 +4270,7 @@ pub struct ArgumentItem {
 pub struct ArgumentList {
     pub argument_item: Box<ArgumentItem>,
     pub argument_list_list: Vec<ArgumentListList>,
-    pub argument_list_opt: Option<Box<ArgumentListOpt>>,
+    pub argument_list_opt: Option<ArgumentListOpt>,
 }
 
 ///
@@ -4373,7 +4326,7 @@ pub struct ArrayList {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ArrayType {
     pub scalar_type: Box<ScalarType>,
-    pub array_type_opt: Option<Box<ArrayTypeOpt>>,
+    pub array_type_opt: Option<ArrayTypeOpt>,
 }
 
 ///
@@ -4586,7 +4539,7 @@ pub struct Attribute {
     pub hash: Box<Hash>,
     pub l_bracket: Box<LBracket>,
     pub identifier: Box<Identifier>,
-    pub attribute_opt: Option<Box<AttributeOpt>>,
+    pub attribute_opt: Option<AttributeOpt>,
     pub r_bracket: Box<RBracket>,
 }
 
@@ -4609,7 +4562,7 @@ pub enum AttributeItem {
 pub struct AttributeList {
     pub attribute_item: Box<AttributeItem>,
     pub attribute_list_list: Vec<AttributeListList>,
-    pub attribute_list_opt: Option<Box<AttributeListOpt>>,
+    pub attribute_list_opt: Option<AttributeListOpt>,
 }
 
 ///
@@ -4766,7 +4719,7 @@ pub struct CaseExpression {
     pub defaul: Box<Defaul>,
     pub colon0: Box<Colon>,
     pub expression2: Box<Expression>,
-    pub case_expression_opt: Option<Box<CaseExpressionOpt>>,
+    pub case_expression_opt: Option<CaseExpressionOpt>,
     pub r_brace: Box<RBrace>,
 }
 
@@ -4980,7 +4933,7 @@ pub struct CommaToken {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct Comments {
-    pub comments_opt: Option<Box<CommentsOpt>>,
+    pub comments_opt: Option<CommentsOpt>,
 }
 
 ///
@@ -5011,7 +4964,7 @@ pub struct CommentsTerm {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ConcatenationItem {
     pub expression: Box<Expression>,
-    pub concatenation_item_opt: Option<Box<ConcatenationItemOpt>>,
+    pub concatenation_item_opt: Option<ConcatenationItemOpt>,
 }
 
 ///
@@ -5034,7 +4987,7 @@ pub struct ConcatenationItemOpt {
 pub struct ConcatenationList {
     pub concatenation_item: Box<ConcatenationItem>,
     pub concatenation_list_list: Vec<ConcatenationListList>,
-    pub concatenation_list_opt: Option<Box<ConcatenationListOpt>>,
+    pub concatenation_list_opt: Option<ConcatenationListOpt>,
 }
 
 ///
@@ -5377,7 +5330,7 @@ pub struct EnumGroupList {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct EnumItem {
     pub identifier: Box<Identifier>,
-    pub enum_item_opt: Option<Box<EnumItemOpt>>,
+    pub enum_item_opt: Option<EnumItemOpt>,
 }
 
 ///
@@ -5400,7 +5353,7 @@ pub struct EnumItemOpt {
 pub struct EnumList {
     pub enum_group: Box<EnumGroup>,
     pub enum_list_list: Vec<EnumListList>,
-    pub enum_list_opt: Option<Box<EnumListOpt>>,
+    pub enum_list_opt: Option<EnumListOpt>,
 }
 
 ///
@@ -5526,8 +5479,6 @@ pub struct Export {
 pub struct ExportDeclaration {
     pub export: Box<Export>,
     pub export_declaration_group: Box<ExportDeclarationGroup>,
-    pub colon_colon: Box<ColonColon>,
-    pub export_declaration_group0: Box<ExportDeclarationGroup0>,
     pub semicolon: Box<Semicolon>,
 }
 
@@ -5537,18 +5488,21 @@ pub struct ExportDeclaration {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum ExportDeclarationGroup {
-    Identifier(ExportDeclarationGroupIdentifier),
     Star(ExportDeclarationGroupStar),
+    ScopedIdentifierExportDeclarationOpt(
+        ExportDeclarationGroupScopedIdentifierExportDeclarationOpt,
+    ),
 }
 
 ///
-/// Type derived for non-terminal ExportDeclarationGroup0
+/// Type derived for non-terminal ExportDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub enum ExportDeclarationGroup0 {
-    Identifier(ExportDeclarationGroup0Identifier),
-    Star(ExportDeclarationGroup0Star),
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct ExportDeclarationOpt {
+    pub colon_colon: Box<ColonColon>,
+    pub star: Box<Star>,
 }
 
 ///
@@ -5876,7 +5830,7 @@ pub enum Expression12ListGroup {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ExpressionIdentifier {
-    pub expression_identifier_opt: Option<Box<ExpressionIdentifierOpt>>,
+    pub expression_identifier_opt: Option<ExpressionIdentifierOpt>,
     pub identifier: Box<Identifier>,
     pub expression_identifier_group: Box<ExpressionIdentifierGroup>,
 }
@@ -6212,7 +6166,7 @@ pub struct ForStatement {
     pub scalar_type: Box<ScalarType>,
     pub r#in: Box<In>,
     pub range: Box<Range>,
-    pub for_statement_opt: Option<Box<ForStatementOpt>>,
+    pub for_statement_opt: Option<ForStatementOpt>,
     pub l_brace: Box<LBrace>,
     pub for_statement_list: Vec<ForStatementList>,
     pub r_brace: Box<RBrace>,
@@ -6279,7 +6233,7 @@ pub struct Function {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct FunctionCall {
     pub l_paren: Box<LParen>,
-    pub function_call_opt: Option<Box<FunctionCallOpt>>,
+    pub function_call_opt: Option<FunctionCallOpt>,
     pub r_paren: Box<RParen>,
 }
 
@@ -6302,9 +6256,9 @@ pub struct FunctionCallOpt {
 pub struct FunctionDeclaration {
     pub function: Box<Function>,
     pub identifier: Box<Identifier>,
-    pub function_declaration_opt: Option<Box<FunctionDeclarationOpt>>,
-    pub function_declaration_opt0: Option<Box<FunctionDeclarationOpt0>>,
-    pub function_declaration_opt1: Option<Box<FunctionDeclarationOpt1>>,
+    pub function_declaration_opt: Option<FunctionDeclarationOpt>,
+    pub function_declaration_opt0: Option<FunctionDeclarationOpt0>,
+    pub function_declaration_opt1: Option<FunctionDeclarationOpt1>,
     pub l_brace: Box<LBrace>,
     pub function_declaration_list: Vec<FunctionDeclarationList>,
     pub r_brace: Box<RBrace>,
@@ -6638,7 +6592,7 @@ pub struct IfResetStatement {
     pub if_reset_statement_list: Vec<IfResetStatementList>,
     pub r_brace: Box<RBrace>,
     pub if_reset_statement_list0: Vec<IfResetStatementList0>,
-    pub if_reset_statement_opt: Option<Box<IfResetStatementOpt>>,
+    pub if_reset_statement_opt: Option<IfResetStatementOpt>,
 }
 
 ///
@@ -6733,7 +6687,7 @@ pub struct IfStatement {
     pub if_statement_list: Vec<IfStatementList>,
     pub r_brace: Box<RBrace>,
     pub if_statement_list0: Vec<IfStatementList0>,
-    pub if_statement_opt: Option<Box<IfStatementOpt>>,
+    pub if_statement_opt: Option<IfStatementOpt>,
 }
 
 ///
@@ -6833,20 +6787,20 @@ pub struct Import {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ImportDeclaration {
     pub import: Box<Import>,
-    pub identifier: Box<Identifier>,
-    pub colon_colon: Box<ColonColon>,
-    pub import_declaration_group: Box<ImportDeclarationGroup>,
+    pub scoped_identifier: Box<ScopedIdentifier>,
+    pub import_declaration_opt: Option<ImportDeclarationOpt>,
     pub semicolon: Box<Semicolon>,
 }
 
 ///
-/// Type derived for non-terminal ImportDeclarationGroup
+/// Type derived for non-terminal ImportDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub enum ImportDeclarationGroup {
-    Identifier(ImportDeclarationGroupIdentifier),
-    Star(ImportDeclarationGroupStar),
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct ImportDeclarationOpt {
+    pub colon_colon: Box<ColonColon>,
+    pub star: Box<Star>,
 }
 
 ///
@@ -7083,9 +7037,9 @@ pub struct InstDeclaration {
     pub identifier: Box<Identifier>,
     pub colon: Box<Colon>,
     pub scoped_identifier: Box<ScopedIdentifier>,
-    pub inst_declaration_opt: Option<Box<InstDeclarationOpt>>,
-    pub inst_declaration_opt0: Option<Box<InstDeclarationOpt0>>,
-    pub inst_declaration_opt1: Option<Box<InstDeclarationOpt1>>,
+    pub inst_declaration_opt: Option<InstDeclarationOpt>,
+    pub inst_declaration_opt0: Option<InstDeclarationOpt0>,
+    pub inst_declaration_opt1: Option<InstDeclarationOpt1>,
     pub semicolon: Box<Semicolon>,
 }
 
@@ -7117,7 +7071,7 @@ pub struct InstDeclarationOpt0 {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct InstDeclarationOpt1 {
     pub l_paren: Box<LParen>,
-    pub inst_declaration_opt2: Option<Box<InstDeclarationOpt2>>,
+    pub inst_declaration_opt2: Option<InstDeclarationOpt2>,
     pub r_paren: Box<RParen>,
 }
 
@@ -7140,7 +7094,7 @@ pub struct InstDeclarationOpt2 {
 pub struct InstParameter {
     pub hash: Box<Hash>,
     pub l_paren: Box<LParen>,
-    pub inst_parameter_opt: Option<Box<InstParameterOpt>>,
+    pub inst_parameter_opt: Option<InstParameterOpt>,
     pub r_paren: Box<RParen>,
 }
 
@@ -7183,7 +7137,7 @@ pub struct InstParameterGroupList {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct InstParameterItem {
     pub identifier: Box<Identifier>,
-    pub inst_parameter_item_opt: Option<Box<InstParameterItemOpt>>,
+    pub inst_parameter_item_opt: Option<InstParameterItemOpt>,
 }
 
 ///
@@ -7206,7 +7160,7 @@ pub struct InstParameterItemOpt {
 pub struct InstParameterList {
     pub inst_parameter_group: Box<InstParameterGroup>,
     pub inst_parameter_list_list: Vec<InstParameterListList>,
-    pub inst_parameter_list_opt: Option<Box<InstParameterListOpt>>,
+    pub inst_parameter_list_opt: Option<InstParameterListOpt>,
 }
 
 ///
@@ -7279,7 +7233,7 @@ pub struct InstPortGroupList {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct InstPortItem {
     pub identifier: Box<Identifier>,
-    pub inst_port_item_opt: Option<Box<InstPortItemOpt>>,
+    pub inst_port_item_opt: Option<InstPortItemOpt>,
 }
 
 ///
@@ -7302,7 +7256,7 @@ pub struct InstPortItemOpt {
 pub struct InstPortList {
     pub inst_port_group: Box<InstPortGroup>,
     pub inst_port_list_list: Vec<InstPortListList>,
-    pub inst_port_list_opt: Option<Box<InstPortListOpt>>,
+    pub inst_port_list_opt: Option<InstPortListOpt>,
 }
 
 ///
@@ -7377,7 +7331,7 @@ pub struct Interface {
 pub struct InterfaceDeclaration {
     pub interface: Box<Interface>,
     pub identifier: Box<Identifier>,
-    pub interface_declaration_opt: Option<Box<InterfaceDeclarationOpt>>,
+    pub interface_declaration_opt: Option<InterfaceDeclarationOpt>,
     pub l_brace: Box<LBrace>,
     pub interface_declaration_list: Vec<InterfaceDeclarationList>,
     pub r_brace: Box<RBrace>,
@@ -7414,7 +7368,7 @@ pub struct InterfaceForDeclaration {
     pub identifier: Box<Identifier>,
     pub r#in: Box<In>,
     pub range: Box<Range>,
-    pub interface_for_declaration_opt: Option<Box<InterfaceForDeclarationOpt>>,
+    pub interface_for_declaration_opt: Option<InterfaceForDeclarationOpt>,
     pub interface_named_block: Box<InterfaceNamedBlock>,
 }
 
@@ -7482,7 +7436,7 @@ pub struct InterfaceIfDeclaration {
     pub expression: Box<Expression>,
     pub interface_named_block: Box<InterfaceNamedBlock>,
     pub interface_if_declaration_list: Vec<InterfaceIfDeclarationList>,
-    pub interface_if_declaration_opt: Option<Box<InterfaceIfDeclarationOpt>>,
+    pub interface_if_declaration_opt: Option<InterfaceIfDeclarationOpt>,
 }
 
 ///
@@ -7560,7 +7514,7 @@ pub struct InterfaceNamedBlockList {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct InterfaceOptionalNamedBlock {
-    pub interface_optional_named_block_opt: Option<Box<InterfaceOptionalNamedBlockOpt>>,
+    pub interface_optional_named_block_opt: Option<InterfaceOptionalNamedBlockOpt>,
     pub l_brace: Box<LBrace>,
     pub interface_optional_named_block_list: Vec<InterfaceOptionalNamedBlockList>,
     pub r_brace: Box<RBrace>,
@@ -7987,7 +7941,7 @@ pub struct ModportItem {
 pub struct ModportList {
     pub modport_group: Box<ModportGroup>,
     pub modport_list_list: Vec<ModportListList>,
-    pub modport_list_opt: Option<Box<ModportListOpt>>,
+    pub modport_list_opt: Option<ModportListOpt>,
 }
 
 ///
@@ -8051,8 +8005,8 @@ pub struct Module {
 pub struct ModuleDeclaration {
     pub module: Box<Module>,
     pub identifier: Box<Identifier>,
-    pub module_declaration_opt: Option<Box<ModuleDeclarationOpt>>,
-    pub module_declaration_opt0: Option<Box<ModuleDeclarationOpt0>>,
+    pub module_declaration_opt: Option<ModuleDeclarationOpt>,
+    pub module_declaration_opt0: Option<ModuleDeclarationOpt0>,
     pub l_brace: Box<LBrace>,
     pub module_declaration_list: Vec<ModuleDeclarationList>,
     pub r_brace: Box<RBrace>,
@@ -8099,7 +8053,7 @@ pub struct ModuleForDeclaration {
     pub identifier: Box<Identifier>,
     pub r#in: Box<In>,
     pub range: Box<Range>,
-    pub module_for_declaration_opt: Option<Box<ModuleForDeclarationOpt>>,
+    pub module_for_declaration_opt: Option<ModuleForDeclarationOpt>,
     pub module_named_block: Box<ModuleNamedBlock>,
 }
 
@@ -8167,7 +8121,7 @@ pub struct ModuleIfDeclaration {
     pub expression: Box<Expression>,
     pub module_named_block: Box<ModuleNamedBlock>,
     pub module_if_declaration_list: Vec<ModuleIfDeclarationList>,
-    pub module_if_declaration_opt: Option<Box<ModuleIfDeclarationOpt>>,
+    pub module_if_declaration_opt: Option<ModuleIfDeclarationOpt>,
 }
 
 ///
@@ -8249,7 +8203,7 @@ pub struct ModuleNamedBlockList {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ModuleOptionalNamedBlock {
-    pub module_optional_named_block_opt: Option<Box<ModuleOptionalNamedBlockOpt>>,
+    pub module_optional_named_block_opt: Option<ModuleOptionalNamedBlockOpt>,
     pub l_brace: Box<LBrace>,
     pub module_optional_named_block_list: Vec<ModuleOptionalNamedBlockList>,
     pub r_brace: Box<RBrace>,
@@ -8970,7 +8924,7 @@ pub struct PlusColonToken {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct PortDeclaration {
     pub l_paren: Box<LParen>,
-    pub port_declaration_opt: Option<Box<PortDeclarationOpt>>,
+    pub port_declaration_opt: Option<PortDeclarationOpt>,
     pub r_paren: Box<RParen>,
 }
 
@@ -9046,7 +9000,7 @@ pub struct PortDeclarationItemOpt {
 pub struct PortDeclarationList {
     pub port_declaration_group: Box<PortDeclarationGroup>,
     pub port_declaration_list_list: Vec<PortDeclarationListList>,
-    pub port_declaration_list_opt: Option<Box<PortDeclarationListOpt>>,
+    pub port_declaration_list_opt: Option<PortDeclarationListOpt>,
 }
 
 ///
@@ -9243,7 +9197,7 @@ pub struct RParenToken {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct Range {
     pub expression: Box<Expression>,
-    pub range_opt: Option<Box<RangeOpt>>,
+    pub range_opt: Option<RangeOpt>,
 }
 
 ///
@@ -9265,7 +9219,7 @@ pub struct RangeItem {
 pub struct RangeList {
     pub range_item: Box<RangeItem>,
     pub range_list_list: Vec<RangeListList>,
-    pub range_list_opt: Option<Box<RangeListOpt>>,
+    pub range_list_opt: Option<RangeListOpt>,
 }
 
 ///
@@ -9463,7 +9417,7 @@ pub struct ScalarTypeList {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ScopedIdentifier {
-    pub scoped_identifier_opt: Option<Box<ScopedIdentifierOpt>>,
+    pub scoped_identifier_opt: Option<ScopedIdentifierOpt>,
     pub identifier: Box<Identifier>,
     pub scoped_identifier_list: Vec<ScopedIdentifierList>,
 }
@@ -9498,7 +9452,7 @@ pub struct ScopedIdentifierOpt {
 pub struct Select {
     pub l_bracket: Box<LBracket>,
     pub expression: Box<Expression>,
-    pub select_opt: Option<Box<SelectOpt>>,
+    pub select_opt: Option<SelectOpt>,
     pub r_bracket: Box<RBracket>,
 }
 
@@ -9852,7 +9806,7 @@ pub struct StructUnionItem {
 pub struct StructUnionList {
     pub struct_union_group: Box<StructUnionGroup>,
     pub struct_union_list_list: Vec<StructUnionListList>,
-    pub struct_union_list_opt: Option<Box<StructUnionListOpt>>,
+    pub struct_union_list_opt: Option<StructUnionListOpt>,
 }
 
 ///
@@ -10179,7 +10133,7 @@ pub struct VarDeclaration {
     pub identifier: Box<Identifier>,
     pub colon: Box<Colon>,
     pub array_type: Box<ArrayType>,
-    pub var_declaration_opt: Option<Box<VarDeclarationOpt>>,
+    pub var_declaration_opt: Option<VarDeclarationOpt>,
     pub semicolon: Box<Semicolon>,
 }
 
@@ -10223,7 +10177,7 @@ pub struct VarToken {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct VariableType {
     pub variable_type_group: Box<VariableTypeGroup>,
-    pub variable_type_opt: Option<Box<VariableTypeOpt>>,
+    pub variable_type_opt: Option<VariableTypeOpt>,
 }
 
 ///
@@ -10301,7 +10255,7 @@ pub struct WidthList {
 pub struct WithParameter {
     pub hash: Box<Hash>,
     pub l_paren: Box<LParen>,
-    pub with_parameter_opt: Option<Box<WithParameterOpt>>,
+    pub with_parameter_opt: Option<WithParameterOpt>,
     pub r_paren: Box<RParen>,
 }
 
@@ -10378,7 +10332,7 @@ pub enum WithParameterItemGroup0 {
 pub struct WithParameterList {
     pub with_parameter_group: Box<WithParameterGroup>,
     pub with_parameter_list_list: Vec<WithParameterListList>,
-    pub with_parameter_list_opt: Option<Box<WithParameterListOpt>>,
+    pub with_parameter_list_opt: Option<WithParameterListOpt>,
 }
 
 ///
@@ -10430,24 +10384,24 @@ pub enum ASTType {
     AlwaysCombToken(AlwaysCombToken),
     AlwaysFf(AlwaysFf),
     AlwaysFfClock(AlwaysFfClock),
-    AlwaysFfClockOpt(Option<Box<AlwaysFfClockOpt>>),
+    AlwaysFfClockOpt(Option<AlwaysFfClockOpt>),
     AlwaysFfClockOptGroup(AlwaysFfClockOptGroup),
     AlwaysFfDeclaration(AlwaysFfDeclaration),
     AlwaysFfDeclarationList(Vec<AlwaysFfDeclarationList>),
-    AlwaysFfDeclarationOpt(Option<Box<AlwaysFfDeclarationOpt>>),
+    AlwaysFfDeclarationOpt(Option<AlwaysFfDeclarationOpt>),
     AlwaysFfReset(AlwaysFfReset),
-    AlwaysFfResetOpt(Option<Box<AlwaysFfResetOpt>>),
+    AlwaysFfResetOpt(Option<AlwaysFfResetOpt>),
     AlwaysFfResetOptGroup(AlwaysFfResetOptGroup),
     AlwaysFfTerm(AlwaysFfTerm),
     AlwaysFfToken(AlwaysFfToken),
     ArgumentItem(ArgumentItem),
     ArgumentList(ArgumentList),
     ArgumentListList(Vec<ArgumentListList>),
-    ArgumentListOpt(Option<Box<ArgumentListOpt>>),
+    ArgumentListOpt(Option<ArgumentListOpt>),
     Array(Array),
     ArrayList(Vec<ArrayList>),
     ArrayType(ArrayType),
-    ArrayTypeOpt(Option<Box<ArrayTypeOpt>>),
+    ArrayTypeOpt(Option<ArrayTypeOpt>),
     As(As),
     AsTerm(AsTerm),
     AsToken(AsToken),
@@ -10470,8 +10424,8 @@ pub enum ASTType {
     AttributeItem(AttributeItem),
     AttributeList(AttributeList),
     AttributeListList(Vec<AttributeListList>),
-    AttributeListOpt(Option<Box<AttributeListOpt>>),
-    AttributeOpt(Option<Box<AttributeOpt>>),
+    AttributeListOpt(Option<AttributeListOpt>),
+    AttributeOpt(Option<AttributeOpt>),
     BaseLess(BaseLess),
     BaseLessTerm(BaseLessTerm),
     BaseLessToken(BaseLessToken),
@@ -10484,7 +10438,7 @@ pub enum ASTType {
     Case(Case),
     CaseExpression(CaseExpression),
     CaseExpressionList(Vec<CaseExpressionList>),
-    CaseExpressionOpt(Option<Box<CaseExpressionOpt>>),
+    CaseExpressionOpt(Option<CaseExpressionOpt>),
     CaseItem(CaseItem),
     CaseItemGroup(CaseItemGroup),
     CaseItemGroup0(CaseItemGroup0),
@@ -10503,13 +10457,13 @@ pub enum ASTType {
     CommaTerm(CommaTerm),
     CommaToken(CommaToken),
     Comments(Comments),
-    CommentsOpt(Option<Box<CommentsOpt>>),
+    CommentsOpt(Option<CommentsOpt>),
     CommentsTerm(CommentsTerm),
     ConcatenationItem(ConcatenationItem),
-    ConcatenationItemOpt(Option<Box<ConcatenationItemOpt>>),
+    ConcatenationItemOpt(Option<ConcatenationItemOpt>),
     ConcatenationList(ConcatenationList),
     ConcatenationListList(Vec<ConcatenationListList>),
-    ConcatenationListOpt(Option<Box<ConcatenationListOpt>>),
+    ConcatenationListOpt(Option<ConcatenationListOpt>),
     Defaul(Defaul),
     DefaultTerm(DefaultTerm),
     DefaultToken(DefaultToken),
@@ -10540,10 +10494,10 @@ pub enum ASTType {
     EnumGroupGroup(EnumGroupGroup),
     EnumGroupList(Vec<EnumGroupList>),
     EnumItem(EnumItem),
-    EnumItemOpt(Option<Box<EnumItemOpt>>),
+    EnumItemOpt(Option<EnumItemOpt>),
     EnumList(EnumList),
     EnumListList(Vec<EnumListList>),
-    EnumListOpt(Option<Box<EnumListOpt>>),
+    EnumListOpt(Option<EnumListOpt>),
     EnumTerm(EnumTerm),
     EnumToken(EnumToken),
     Equ(Equ),
@@ -10555,7 +10509,7 @@ pub enum ASTType {
     Export(Export),
     ExportDeclaration(ExportDeclaration),
     ExportDeclarationGroup(ExportDeclarationGroup),
-    ExportDeclarationGroup0(ExportDeclarationGroup0),
+    ExportDeclarationOpt(Option<ExportDeclarationOpt>),
     ExportTerm(ExportTerm),
     ExportToken(ExportToken),
     Expression(Expression),
@@ -10591,7 +10545,7 @@ pub enum ASTType {
     ExpressionIdentifierMemberList(Vec<ExpressionIdentifierMemberList>),
     ExpressionIdentifierMemberList0(Vec<ExpressionIdentifierMemberList0>),
     ExpressionIdentifierMemberList0List(Vec<ExpressionIdentifierMemberList0List>),
-    ExpressionIdentifierOpt(Option<Box<ExpressionIdentifierOpt>>),
+    ExpressionIdentifierOpt(Option<ExpressionIdentifierOpt>),
     ExpressionIdentifierScoped(ExpressionIdentifierScoped),
     ExpressionIdentifierScopedList(Vec<ExpressionIdentifierScopedList>),
     ExpressionIdentifierScopedList0(Vec<ExpressionIdentifierScopedList0>),
@@ -10604,7 +10558,7 @@ pub enum ASTType {
     F64Token(F64Token),
     Factor(Factor),
     FactorGroup(FactorGroup),
-    FactorOpt(Option<Box<FactorOpt>>),
+    FactorOpt(Option<FactorOpt>),
     Final(Final),
     FinalDeclaration(FinalDeclaration),
     FinalDeclarationList(Vec<FinalDeclarationList>),
@@ -10617,17 +10571,17 @@ pub enum ASTType {
     For(For),
     ForStatement(ForStatement),
     ForStatementList(Vec<ForStatementList>),
-    ForStatementOpt(Option<Box<ForStatementOpt>>),
+    ForStatementOpt(Option<ForStatementOpt>),
     ForTerm(ForTerm),
     ForToken(ForToken),
     Function(Function),
     FunctionCall(FunctionCall),
-    FunctionCallOpt(Option<Box<FunctionCallOpt>>),
+    FunctionCallOpt(Option<FunctionCallOpt>),
     FunctionDeclaration(FunctionDeclaration),
     FunctionDeclarationList(Vec<FunctionDeclarationList>),
-    FunctionDeclarationOpt(Option<Box<FunctionDeclarationOpt>>),
-    FunctionDeclarationOpt0(Option<Box<FunctionDeclarationOpt0>>),
-    FunctionDeclarationOpt1(Option<Box<FunctionDeclarationOpt1>>),
+    FunctionDeclarationOpt(Option<FunctionDeclarationOpt>),
+    FunctionDeclarationOpt0(Option<FunctionDeclarationOpt0>),
+    FunctionDeclarationOpt1(Option<FunctionDeclarationOpt1>),
     FunctionItem(FunctionItem),
     FunctionTerm(FunctionTerm),
     FunctionToken(FunctionToken),
@@ -10657,7 +10611,7 @@ pub enum ASTType {
     IfResetStatementList(Vec<IfResetStatementList>),
     IfResetStatementList0(Vec<IfResetStatementList0>),
     IfResetStatementList0List(Vec<IfResetStatementList0List>),
-    IfResetStatementOpt(Option<Box<IfResetStatementOpt>>),
+    IfResetStatementOpt(Option<IfResetStatementOpt>),
     IfResetStatementOptList(Vec<IfResetStatementOptList>),
     IfResetTerm(IfResetTerm),
     IfResetToken(IfResetToken),
@@ -10665,13 +10619,13 @@ pub enum ASTType {
     IfStatementList(Vec<IfStatementList>),
     IfStatementList0(Vec<IfStatementList0>),
     IfStatementList0List(Vec<IfStatementList0List>),
-    IfStatementOpt(Option<Box<IfStatementOpt>>),
+    IfStatementOpt(Option<IfStatementOpt>),
     IfStatementOptList(Vec<IfStatementOptList>),
     IfTerm(IfTerm),
     IfToken(IfToken),
     Import(Import),
     ImportDeclaration(ImportDeclaration),
-    ImportDeclarationGroup(ImportDeclarationGroup),
+    ImportDeclarationOpt(Option<ImportDeclarationOpt>),
     ImportTerm(ImportTerm),
     ImportToken(ImportToken),
     In(In),
@@ -10694,50 +10648,50 @@ pub enum ASTType {
     InsideToken(InsideToken),
     Inst(Inst),
     InstDeclaration(InstDeclaration),
-    InstDeclarationOpt(Option<Box<InstDeclarationOpt>>),
-    InstDeclarationOpt0(Option<Box<InstDeclarationOpt0>>),
-    InstDeclarationOpt1(Option<Box<InstDeclarationOpt1>>),
-    InstDeclarationOpt2(Option<Box<InstDeclarationOpt2>>),
+    InstDeclarationOpt(Option<InstDeclarationOpt>),
+    InstDeclarationOpt0(Option<InstDeclarationOpt0>),
+    InstDeclarationOpt1(Option<InstDeclarationOpt1>),
+    InstDeclarationOpt2(Option<InstDeclarationOpt2>),
     InstParameter(InstParameter),
     InstParameterGroup(InstParameterGroup),
     InstParameterGroupGroup(InstParameterGroupGroup),
     InstParameterGroupList(Vec<InstParameterGroupList>),
     InstParameterItem(InstParameterItem),
-    InstParameterItemOpt(Option<Box<InstParameterItemOpt>>),
+    InstParameterItemOpt(Option<InstParameterItemOpt>),
     InstParameterList(InstParameterList),
     InstParameterListList(Vec<InstParameterListList>),
-    InstParameterListOpt(Option<Box<InstParameterListOpt>>),
-    InstParameterOpt(Option<Box<InstParameterOpt>>),
+    InstParameterListOpt(Option<InstParameterListOpt>),
+    InstParameterOpt(Option<InstParameterOpt>),
     InstPortGroup(InstPortGroup),
     InstPortGroupGroup(InstPortGroupGroup),
     InstPortGroupList(Vec<InstPortGroupList>),
     InstPortItem(InstPortItem),
-    InstPortItemOpt(Option<Box<InstPortItemOpt>>),
+    InstPortItemOpt(Option<InstPortItemOpt>),
     InstPortList(InstPortList),
     InstPortListList(Vec<InstPortListList>),
-    InstPortListOpt(Option<Box<InstPortListOpt>>),
+    InstPortListOpt(Option<InstPortListOpt>),
     InstTerm(InstTerm),
     InstToken(InstToken),
     IntegralNumber(IntegralNumber),
     Interface(Interface),
     InterfaceDeclaration(InterfaceDeclaration),
     InterfaceDeclarationList(Vec<InterfaceDeclarationList>),
-    InterfaceDeclarationOpt(Option<Box<InterfaceDeclarationOpt>>),
+    InterfaceDeclarationOpt(Option<InterfaceDeclarationOpt>),
     InterfaceForDeclaration(InterfaceForDeclaration),
-    InterfaceForDeclarationOpt(Option<Box<InterfaceForDeclarationOpt>>),
+    InterfaceForDeclarationOpt(Option<InterfaceForDeclarationOpt>),
     InterfaceGroup(InterfaceGroup),
     InterfaceGroupGroup(InterfaceGroupGroup),
     InterfaceGroupGroupList(Vec<InterfaceGroupGroupList>),
     InterfaceGroupList(Vec<InterfaceGroupList>),
     InterfaceIfDeclaration(InterfaceIfDeclaration),
     InterfaceIfDeclarationList(Vec<InterfaceIfDeclarationList>),
-    InterfaceIfDeclarationOpt(Option<Box<InterfaceIfDeclarationOpt>>),
+    InterfaceIfDeclarationOpt(Option<InterfaceIfDeclarationOpt>),
     InterfaceItem(InterfaceItem),
     InterfaceNamedBlock(InterfaceNamedBlock),
     InterfaceNamedBlockList(Vec<InterfaceNamedBlockList>),
     InterfaceOptionalNamedBlock(InterfaceOptionalNamedBlock),
     InterfaceOptionalNamedBlockList(Vec<InterfaceOptionalNamedBlockList>),
-    InterfaceOptionalNamedBlockOpt(Option<Box<InterfaceOptionalNamedBlockOpt>>),
+    InterfaceOptionalNamedBlockOpt(Option<InterfaceOptionalNamedBlockOpt>),
     InterfaceTerm(InterfaceTerm),
     InterfaceToken(InterfaceToken),
     LAngle(LAngle),
@@ -10777,29 +10731,29 @@ pub enum ASTType {
     ModportItem(ModportItem),
     ModportList(ModportList),
     ModportListList(Vec<ModportListList>),
-    ModportListOpt(Option<Box<ModportListOpt>>),
+    ModportListOpt(Option<ModportListOpt>),
     ModportTerm(ModportTerm),
     ModportToken(ModportToken),
     Module(Module),
     ModuleDeclaration(ModuleDeclaration),
     ModuleDeclarationList(Vec<ModuleDeclarationList>),
-    ModuleDeclarationOpt(Option<Box<ModuleDeclarationOpt>>),
-    ModuleDeclarationOpt0(Option<Box<ModuleDeclarationOpt0>>),
+    ModuleDeclarationOpt(Option<ModuleDeclarationOpt>),
+    ModuleDeclarationOpt0(Option<ModuleDeclarationOpt0>),
     ModuleForDeclaration(ModuleForDeclaration),
-    ModuleForDeclarationOpt(Option<Box<ModuleForDeclarationOpt>>),
+    ModuleForDeclarationOpt(Option<ModuleForDeclarationOpt>),
     ModuleGroup(ModuleGroup),
     ModuleGroupGroup(ModuleGroupGroup),
     ModuleGroupGroupList(Vec<ModuleGroupGroupList>),
     ModuleGroupList(Vec<ModuleGroupList>),
     ModuleIfDeclaration(ModuleIfDeclaration),
     ModuleIfDeclarationList(Vec<ModuleIfDeclarationList>),
-    ModuleIfDeclarationOpt(Option<Box<ModuleIfDeclarationOpt>>),
+    ModuleIfDeclarationOpt(Option<ModuleIfDeclarationOpt>),
     ModuleItem(ModuleItem),
     ModuleNamedBlock(ModuleNamedBlock),
     ModuleNamedBlockList(Vec<ModuleNamedBlockList>),
     ModuleOptionalNamedBlock(ModuleOptionalNamedBlock),
     ModuleOptionalNamedBlockList(Vec<ModuleOptionalNamedBlockList>),
-    ModuleOptionalNamedBlockOpt(Option<Box<ModuleOptionalNamedBlockOpt>>),
+    ModuleOptionalNamedBlockOpt(Option<ModuleOptionalNamedBlockOpt>),
     ModuleTerm(ModuleTerm),
     ModuleToken(ModuleToken),
     Msb(Msb),
@@ -10871,11 +10825,11 @@ pub enum ASTType {
     PortDeclarationGroupList(Vec<PortDeclarationGroupList>),
     PortDeclarationItem(PortDeclarationItem),
     PortDeclarationItemGroup(PortDeclarationItemGroup),
-    PortDeclarationItemOpt(Option<Box<PortDeclarationItemOpt>>),
+    PortDeclarationItemOpt(Option<PortDeclarationItemOpt>),
     PortDeclarationList(PortDeclarationList),
     PortDeclarationListList(Vec<PortDeclarationListList>),
-    PortDeclarationListOpt(Option<Box<PortDeclarationListOpt>>),
-    PortDeclarationOpt(Option<Box<PortDeclarationOpt>>),
+    PortDeclarationListOpt(Option<PortDeclarationListOpt>),
+    PortDeclarationOpt(Option<PortDeclarationOpt>),
     Posedge(Posedge),
     PosedgeTerm(PosedgeTerm),
     PosedgeToken(PosedgeToken),
@@ -10895,9 +10849,9 @@ pub enum ASTType {
     RangeItem(RangeItem),
     RangeList(RangeList),
     RangeListList(Vec<RangeListList>),
-    RangeListOpt(Option<Box<RangeListOpt>>),
+    RangeListOpt(Option<RangeListOpt>),
     RangeOperator(RangeOperator),
-    RangeOpt(Option<Box<RangeOpt>>),
+    RangeOpt(Option<RangeOpt>),
     RealNumber(RealNumber),
     Ref(Ref),
     RefTerm(RefTerm),
@@ -10914,10 +10868,10 @@ pub enum ASTType {
     ScalarTypeList(Vec<ScalarTypeList>),
     ScopedIdentifier(ScopedIdentifier),
     ScopedIdentifierList(Vec<ScopedIdentifierList>),
-    ScopedIdentifierOpt(Option<Box<ScopedIdentifierOpt>>),
+    ScopedIdentifierOpt(Option<ScopedIdentifierOpt>),
     Select(Select),
     SelectOperator(SelectOperator),
-    SelectOpt(Option<Box<SelectOpt>>),
+    SelectOpt(Option<SelectOpt>),
     Semicolon(Semicolon),
     SemicolonTerm(SemicolonTerm),
     SemicolonToken(SemicolonToken),
@@ -10950,7 +10904,7 @@ pub enum ASTType {
     StructUnionItem(StructUnionItem),
     StructUnionList(StructUnionList),
     StructUnionListList(Vec<StructUnionListList>),
-    StructUnionListOpt(Option<Box<StructUnionListOpt>>),
+    StructUnionListOpt(Option<StructUnionListOpt>),
     SyncHigh(SyncHigh),
     SyncHighTerm(SyncHighTerm),
     SyncHighToken(SyncHighToken),
@@ -10980,12 +10934,12 @@ pub enum ASTType {
     UnionToken(UnionToken),
     Var(Var),
     VarDeclaration(VarDeclaration),
-    VarDeclarationOpt(Option<Box<VarDeclarationOpt>>),
+    VarDeclarationOpt(Option<VarDeclarationOpt>),
     VarTerm(VarTerm),
     VarToken(VarToken),
     VariableType(VariableType),
     VariableTypeGroup(VariableTypeGroup),
-    VariableTypeOpt(Option<Box<VariableTypeOpt>>),
+    VariableTypeOpt(Option<VariableTypeOpt>),
     Veryl(Veryl),
     VerylList(Vec<VerylList>),
     Width(Width),
@@ -10999,8 +10953,8 @@ pub enum ASTType {
     WithParameterItemGroup0(WithParameterItemGroup0),
     WithParameterList(WithParameterList),
     WithParameterListList(Vec<WithParameterListList>),
-    WithParameterListOpt(Option<Box<WithParameterListOpt>>),
-    WithParameterOpt(Option<Box<WithParameterOpt>>),
+    WithParameterListOpt(Option<WithParameterListOpt>),
+    WithParameterOpt(Option<WithParameterOpt>),
 }
 
 /// Auto-implemented adapter grammar
@@ -13000,10 +12954,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let comments_opt_0_built = CommentsOpt {
             comments_term: Box::new(comments_term),
         };
-        self.push(
-            ASTType::CommentsOpt(Some(Box::new(comments_opt_0_built))),
-            context,
-        );
+        self.push(ASTType::CommentsOpt(Some(comments_opt_0_built)), context);
         Ok(())
     }
 
@@ -18034,7 +17985,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             dollar: Box::new(dollar),
         };
         self.push(
-            ASTType::ScopedIdentifierOpt(Some(Box::new(scoped_identifier_opt_0_built))),
+            ASTType::ScopedIdentifierOpt(Some(scoped_identifier_opt_0_built)),
             context,
         );
         Ok(())
@@ -18170,7 +18121,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             dollar: Box::new(dollar),
         };
         self.push(
-            ASTType::ExpressionIdentifierOpt(Some(Box::new(expression_identifier_opt_0_built))),
+            ASTType::ExpressionIdentifierOpt(Some(expression_identifier_opt_0_built)),
             context,
         );
         Ok(())
@@ -19800,10 +19751,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let factor_opt_0_built = FactorOpt {
             function_call: Box::new(function_call),
         };
-        self.push(
-            ASTType::FactorOpt(Some(Box::new(factor_opt_0_built))),
-            context,
-        );
+        self.push(ASTType::FactorOpt(Some(factor_opt_0_built)), context);
         Ok(())
     }
 
@@ -19859,7 +19807,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             argument_list: Box::new(argument_list),
         };
         self.push(
-            ASTType::FunctionCallOpt(Some(Box::new(function_call_opt_0_built))),
+            ASTType::FunctionCallOpt(Some(function_call_opt_0_built)),
             context,
         );
         Ok(())
@@ -19960,7 +19908,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             comma: Box::new(comma),
         };
         self.push(
-            ASTType::ArgumentListOpt(Some(Box::new(argument_list_opt_0_built))),
+            ASTType::ArgumentListOpt(Some(argument_list_opt_0_built)),
             context,
         );
         Ok(())
@@ -20096,7 +20044,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             comma: Box::new(comma),
         };
         self.push(
-            ASTType::ConcatenationListOpt(Some(Box::new(concatenation_list_opt_0_built))),
+            ASTType::ConcatenationListOpt(Some(concatenation_list_opt_0_built)),
             context,
         );
         Ok(())
@@ -20162,7 +20110,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             expression: Box::new(expression),
         };
         self.push(
-            ASTType::ConcatenationItemOpt(Some(Box::new(concatenation_item_opt_0_built))),
+            ASTType::ConcatenationItemOpt(Some(concatenation_item_opt_0_built)),
             context,
         );
         Ok(())
@@ -20403,7 +20351,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             comma: Box::new(comma),
         };
         self.push(
-            ASTType::CaseExpressionOpt(Some(Box::new(case_expression_opt_0_built))),
+            ASTType::CaseExpressionOpt(Some(case_expression_opt_0_built)),
             context,
         );
         Ok(())
@@ -20623,10 +20571,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let range_list_opt_0_built = RangeListOpt {
             comma: Box::new(comma),
         };
-        self.push(
-            ASTType::RangeListOpt(Some(Box::new(range_list_opt_0_built))),
-            context,
-        );
+        self.push(ASTType::RangeListOpt(Some(range_list_opt_0_built)), context);
         Ok(())
     }
 
@@ -20708,10 +20653,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             select_operator: Box::new(select_operator),
             expression: Box::new(expression),
         };
-        self.push(
-            ASTType::SelectOpt(Some(Box::new(select_opt_0_built))),
-            context,
-        );
+        self.push(ASTType::SelectOpt(Some(select_opt_0_built)), context);
         Ok(())
     }
 
@@ -20987,10 +20929,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             range_operator: Box::new(range_operator),
             expression: Box::new(expression),
         };
-        self.push(
-            ASTType::RangeOpt(Some(Box::new(range_opt_0_built))),
-            context,
-        );
+        self.push(ASTType::RangeOpt(Some(range_opt_0_built)), context);
         Ok(())
     }
 
@@ -21261,7 +21200,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             width: Box::new(width),
         };
         self.push(
-            ASTType::VariableTypeOpt(Some(Box::new(variable_type_opt_0_built))),
+            ASTType::VariableTypeOpt(Some(variable_type_opt_0_built)),
             context,
         );
         Ok(())
@@ -21446,10 +21385,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let array_type_opt_0_built = ArrayTypeOpt {
             array: Box::new(array),
         };
-        self.push(
-            ASTType::ArrayTypeOpt(Some(Box::new(array_type_opt_0_built))),
-            context,
-        );
+        self.push(ASTType::ArrayTypeOpt(Some(array_type_opt_0_built)), context);
         Ok(())
     }
 
@@ -21917,7 +21853,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             r_brace: Box::new(r_brace),
         };
         self.push(
-            ASTType::IfStatementOpt(Some(Box::new(if_statement_opt_0_built))),
+            ASTType::IfStatementOpt(Some(if_statement_opt_0_built)),
             context,
         );
         Ok(())
@@ -22206,7 +22142,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             r_brace: Box::new(r_brace),
         };
         self.push(
-            ASTType::IfResetStatementOpt(Some(Box::new(if_reset_statement_opt_0_built))),
+            ASTType::IfResetStatementOpt(Some(if_reset_statement_opt_0_built)),
             context,
         );
         Ok(())
@@ -22409,7 +22345,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             expression: Box::new(expression),
         };
         self.push(
-            ASTType::ForStatementOpt(Some(Box::new(for_statement_opt_0_built))),
+            ASTType::ForStatementOpt(Some(for_statement_opt_0_built)),
             context,
         );
         Ok(())
@@ -22701,10 +22637,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             attribute_list: Box::new(attribute_list),
             r_paren: Box::new(r_paren),
         };
-        self.push(
-            ASTType::AttributeOpt(Some(Box::new(attribute_opt_0_built))),
-            context,
-        );
+        self.push(ASTType::AttributeOpt(Some(attribute_opt_0_built)), context);
         Ok(())
     }
 
@@ -22804,7 +22737,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             comma: Box::new(comma),
         };
         self.push(
-            ASTType::AttributeListOpt(Some(Box::new(attribute_list_opt_0_built))),
+            ASTType::AttributeListOpt(Some(attribute_list_opt_0_built)),
             context,
         );
         Ok(())
@@ -22915,7 +22848,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             expression: Box::new(expression),
         };
         self.push(
-            ASTType::VarDeclarationOpt(Some(Box::new(var_declaration_opt_0_built))),
+            ASTType::VarDeclarationOpt(Some(var_declaration_opt_0_built)),
             context,
         );
         Ok(())
@@ -23198,7 +23131,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             always_ff_reset: Box::new(always_ff_reset),
         };
         self.push(
-            ASTType::AlwaysFfDeclarationOpt(Some(Box::new(always_ff_declaration_opt_0_built))),
+            ASTType::AlwaysFfDeclarationOpt(Some(always_ff_declaration_opt_0_built)),
             context,
         );
         Ok(())
@@ -23266,7 +23199,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             always_ff_clock_opt_group: Box::new(always_ff_clock_opt_group),
         };
         self.push(
-            ASTType::AlwaysFfClockOpt(Some(Box::new(always_ff_clock_opt_0_built))),
+            ASTType::AlwaysFfClockOpt(Some(always_ff_clock_opt_0_built)),
             context,
         );
         Ok(())
@@ -23376,7 +23309,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             always_ff_reset_opt_group: Box::new(always_ff_reset_opt_group),
         };
         self.push(
-            ASTType::AlwaysFfResetOpt(Some(Box::new(always_ff_reset_opt_0_built))),
+            ASTType::AlwaysFfResetOpt(Some(always_ff_reset_opt_0_built)),
             context,
         );
         Ok(())
@@ -23723,7 +23656,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             comma: Box::new(comma),
         };
         self.push(
-            ASTType::ModportListOpt(Some(Box::new(modport_list_opt_0_built))),
+            ASTType::ModportListOpt(Some(modport_list_opt_0_built)),
             context,
         );
         Ok(())
@@ -24001,10 +23934,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let enum_list_opt_0_built = EnumListOpt {
             comma: Box::new(comma),
         };
-        self.push(
-            ASTType::EnumListOpt(Some(Box::new(enum_list_opt_0_built))),
-            context,
-        );
+        self.push(ASTType::EnumListOpt(Some(enum_list_opt_0_built)), context);
         Ok(())
     }
 
@@ -24166,10 +24096,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             equ: Box::new(equ),
             expression: Box::new(expression),
         };
-        self.push(
-            ASTType::EnumItemOpt(Some(Box::new(enum_item_opt_0_built))),
-            context,
-        );
+        self.push(ASTType::EnumItemOpt(Some(enum_item_opt_0_built)), context);
         Ok(())
     }
 
@@ -24349,7 +24276,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             comma: Box::new(comma),
         };
         self.push(
-            ASTType::StructUnionListOpt(Some(Box::new(struct_union_list_opt_0_built))),
+            ASTType::StructUnionListOpt(Some(struct_union_list_opt_0_built)),
             context,
         );
         Ok(())
@@ -24750,7 +24677,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             r_paren: Box::new(r_paren),
         };
         self.push(
-            ASTType::InstDeclarationOpt1(Some(Box::new(inst_declaration_opt1_0_built))),
+            ASTType::InstDeclarationOpt1(Some(inst_declaration_opt1_0_built)),
             context,
         );
         Ok(())
@@ -24769,7 +24696,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             inst_port_list: Box::new(inst_port_list),
         };
         self.push(
-            ASTType::InstDeclarationOpt2(Some(Box::new(inst_declaration_opt2_0_built))),
+            ASTType::InstDeclarationOpt2(Some(inst_declaration_opt2_0_built)),
             context,
         );
         Ok(())
@@ -24812,7 +24739,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             inst_parameter: Box::new(inst_parameter),
         };
         self.push(
-            ASTType::InstDeclarationOpt0(Some(Box::new(inst_declaration_opt0_0_built))),
+            ASTType::InstDeclarationOpt0(Some(inst_declaration_opt0_0_built)),
             context,
         );
         Ok(())
@@ -24843,7 +24770,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             array: Box::new(array),
         };
         self.push(
-            ASTType::InstDeclarationOpt(Some(Box::new(inst_declaration_opt_0_built))),
+            ASTType::InstDeclarationOpt(Some(inst_declaration_opt_0_built)),
             context,
         );
         Ok(())
@@ -24904,7 +24831,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             inst_parameter_list: Box::new(inst_parameter_list),
         };
         self.push(
-            ASTType::InstParameterOpt(Some(Box::new(inst_parameter_opt_0_built))),
+            ASTType::InstParameterOpt(Some(inst_parameter_opt_0_built)),
             context,
         );
         Ok(())
@@ -25024,7 +24951,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             comma: Box::new(comma),
         };
         self.push(
-            ASTType::InstParameterListOpt(Some(Box::new(inst_parameter_list_opt_0_built))),
+            ASTType::InstParameterListOpt(Some(inst_parameter_list_opt_0_built)),
             context,
         );
         Ok(())
@@ -25232,7 +25159,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             expression: Box::new(expression),
         };
         self.push(
-            ASTType::InstParameterItemOpt(Some(Box::new(inst_parameter_item_opt_0_built))),
+            ASTType::InstParameterItemOpt(Some(inst_parameter_item_opt_0_built)),
             context,
         );
         Ok(())
@@ -25334,7 +25261,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             comma: Box::new(comma),
         };
         self.push(
-            ASTType::InstPortListOpt(Some(Box::new(inst_port_list_opt_0_built))),
+            ASTType::InstPortListOpt(Some(inst_port_list_opt_0_built)),
             context,
         );
         Ok(())
@@ -25512,7 +25439,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             expression: Box::new(expression),
         };
         self.push(
-            ASTType::InstPortItemOpt(Some(Box::new(inst_port_item_opt_0_built))),
+            ASTType::InstPortItemOpt(Some(inst_port_item_opt_0_built)),
             context,
         );
         Ok(())
@@ -25573,7 +25500,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             with_parameter_list: Box::new(with_parameter_list),
         };
         self.push(
-            ASTType::WithParameterOpt(Some(Box::new(with_parameter_opt_0_built))),
+            ASTType::WithParameterOpt(Some(with_parameter_opt_0_built)),
             context,
         );
         Ok(())
@@ -25693,7 +25620,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             comma: Box::new(comma),
         };
         self.push(
-            ASTType::WithParameterListOpt(Some(Box::new(with_parameter_list_opt_0_built))),
+            ASTType::WithParameterListOpt(Some(with_parameter_list_opt_0_built)),
             context,
         );
         Ok(())
@@ -26042,7 +25969,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             port_declaration_list: Box::new(port_declaration_list),
         };
         self.push(
-            ASTType::PortDeclarationOpt(Some(Box::new(port_declaration_opt_0_built))),
+            ASTType::PortDeclarationOpt(Some(port_declaration_opt_0_built)),
             context,
         );
         Ok(())
@@ -26166,7 +26093,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             comma: Box::new(comma),
         };
         self.push(
-            ASTType::PortDeclarationListOpt(Some(Box::new(port_declaration_list_opt_0_built))),
+            ASTType::PortDeclarationListOpt(Some(port_declaration_list_opt_0_built)),
             context,
         );
         Ok(())
@@ -26439,7 +26366,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             array: Box::new(array),
         };
         self.push(
-            ASTType::PortDeclarationItemOpt(Some(Box::new(port_declaration_item_opt_0_built))),
+            ASTType::PortDeclarationItemOpt(Some(port_declaration_item_opt_0_built)),
             context,
         );
         Ok(())
@@ -26684,7 +26611,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             scalar_type: Box::new(scalar_type),
         };
         self.push(
-            ASTType::FunctionDeclarationOpt1(Some(Box::new(function_declaration_opt1_0_built))),
+            ASTType::FunctionDeclarationOpt1(Some(function_declaration_opt1_0_built)),
             context,
         );
         Ok(())
@@ -26715,7 +26642,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             port_declaration: Box::new(port_declaration),
         };
         self.push(
-            ASTType::FunctionDeclarationOpt0(Some(Box::new(function_declaration_opt0_0_built))),
+            ASTType::FunctionDeclarationOpt0(Some(function_declaration_opt0_0_built)),
             context,
         );
         Ok(())
@@ -26746,7 +26673,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             with_parameter: Box::new(with_parameter),
         };
         self.push(
-            ASTType::FunctionDeclarationOpt(Some(Box::new(function_declaration_opt_0_built))),
+            ASTType::FunctionDeclarationOpt(Some(function_declaration_opt_0_built)),
             context,
         );
         Ok(())
@@ -26804,34 +26731,27 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 696:
     ///
-    /// `ImportDeclaration: Import Identifier ColonColon ImportDeclarationGroup Semicolon;`
+    /// `ImportDeclaration: Import ScopedIdentifier ImportDeclarationOpt /* Option */ Semicolon;`
     ///
     #[parol_runtime::function_name::named]
     fn import_declaration(
         &mut self,
         _import: &ParseTreeType<'t>,
-        _identifier: &ParseTreeType<'t>,
-        _colon_colon: &ParseTreeType<'t>,
-        _import_declaration_group: &ParseTreeType<'t>,
+        _scoped_identifier: &ParseTreeType<'t>,
+        _import_declaration_opt: &ParseTreeType<'t>,
         _semicolon: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let semicolon = pop_item!(self, semicolon, Semicolon, context);
-        let import_declaration_group = pop_item!(
-            self,
-            import_declaration_group,
-            ImportDeclarationGroup,
-            context
-        );
-        let colon_colon = pop_item!(self, colon_colon, ColonColon, context);
-        let identifier = pop_item!(self, identifier, Identifier, context);
+        let import_declaration_opt =
+            pop_item!(self, import_declaration_opt, ImportDeclarationOpt, context);
+        let scoped_identifier = pop_item!(self, scoped_identifier, ScopedIdentifier, context);
         let import = pop_item!(self, import, Import, context);
         let import_declaration_built = ImportDeclaration {
             import: Box::new(import),
-            identifier: Box::new(identifier),
-            colon_colon: Box::new(colon_colon),
-            import_declaration_group: Box::new(import_declaration_group),
+            scoped_identifier: Box::new(scoped_identifier),
+            import_declaration_opt,
             semicolon: Box::new(semicolon),
         };
         // Calling user action here
@@ -26846,20 +26766,24 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 697:
     ///
-    /// `ImportDeclarationGroup: Identifier;`
+    /// `ImportDeclarationOpt /* Option<T>::Some */: ColonColon Star;`
     ///
     #[parol_runtime::function_name::named]
-    fn import_declaration_group_0(&mut self, _identifier: &ParseTreeType<'t>) -> Result<()> {
+    fn import_declaration_opt_0(
+        &mut self,
+        _colon_colon: &ParseTreeType<'t>,
+        _star: &ParseTreeType<'t>,
+    ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let identifier = pop_item!(self, identifier, Identifier, context);
-        let import_declaration_group_0_built = ImportDeclarationGroupIdentifier {
-            identifier: Box::new(identifier),
+        let star = pop_item!(self, star, Star, context);
+        let colon_colon = pop_item!(self, colon_colon, ColonColon, context);
+        let import_declaration_opt_0_built = ImportDeclarationOpt {
+            colon_colon: Box::new(colon_colon),
+            star: Box::new(star),
         };
-        let import_declaration_group_0_built =
-            ImportDeclarationGroup::Identifier(import_declaration_group_0_built);
         self.push(
-            ASTType::ImportDeclarationGroup(import_declaration_group_0_built),
+            ASTType::ImportDeclarationOpt(Some(import_declaration_opt_0_built)),
             context,
         );
         Ok(())
@@ -26867,48 +26791,30 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 698:
     ///
-    /// `ImportDeclarationGroup: Star;`
+    /// `ImportDeclarationOpt /* Option<T>::None */: ;`
     ///
     #[parol_runtime::function_name::named]
-    fn import_declaration_group_1(&mut self, _star: &ParseTreeType<'t>) -> Result<()> {
+    fn import_declaration_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let star = pop_item!(self, star, Star, context);
-        let import_declaration_group_1_built = ImportDeclarationGroupStar {
-            star: Box::new(star),
-        };
-        let import_declaration_group_1_built =
-            ImportDeclarationGroup::Star(import_declaration_group_1_built);
-        self.push(
-            ASTType::ImportDeclarationGroup(import_declaration_group_1_built),
-            context,
-        );
+        self.push(ASTType::ImportDeclarationOpt(None), context);
         Ok(())
     }
 
     /// Semantic action for production 699:
     ///
-    /// `ExportDeclaration: Export ExportDeclarationGroup ColonColon ExportDeclarationGroup0 Semicolon;`
+    /// `ExportDeclaration: Export ExportDeclarationGroup Semicolon;`
     ///
     #[parol_runtime::function_name::named]
     fn export_declaration(
         &mut self,
         _export: &ParseTreeType<'t>,
         _export_declaration_group: &ParseTreeType<'t>,
-        _colon_colon: &ParseTreeType<'t>,
-        _export_declaration_group0: &ParseTreeType<'t>,
         _semicolon: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let semicolon = pop_item!(self, semicolon, Semicolon, context);
-        let export_declaration_group0 = pop_item!(
-            self,
-            export_declaration_group0,
-            ExportDeclarationGroup0,
-            context
-        );
-        let colon_colon = pop_item!(self, colon_colon, ColonColon, context);
         let export_declaration_group = pop_item!(
             self,
             export_declaration_group,
@@ -26919,8 +26825,6 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let export_declaration_built = ExportDeclaration {
             export: Box::new(export),
             export_declaration_group: Box::new(export_declaration_group),
-            colon_colon: Box::new(colon_colon),
-            export_declaration_group0: Box::new(export_declaration_group0),
             semicolon: Box::new(semicolon),
         };
         // Calling user action here
@@ -26935,60 +26839,18 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 700:
     ///
-    /// `ExportDeclarationGroup0: Identifier;`
+    /// `ExportDeclarationGroup: Star;`
     ///
     #[parol_runtime::function_name::named]
-    fn export_declaration_group0_0(&mut self, _identifier: &ParseTreeType<'t>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let identifier = pop_item!(self, identifier, Identifier, context);
-        let export_declaration_group0_0_built = ExportDeclarationGroup0Identifier {
-            identifier: Box::new(identifier),
-        };
-        let export_declaration_group0_0_built =
-            ExportDeclarationGroup0::Identifier(export_declaration_group0_0_built);
-        self.push(
-            ASTType::ExportDeclarationGroup0(export_declaration_group0_0_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 701:
-    ///
-    /// `ExportDeclarationGroup0: Star;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn export_declaration_group0_1(&mut self, _star: &ParseTreeType<'t>) -> Result<()> {
+    fn export_declaration_group_0(&mut self, _star: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let star = pop_item!(self, star, Star, context);
-        let export_declaration_group0_1_built = ExportDeclarationGroup0Star {
+        let export_declaration_group_0_built = ExportDeclarationGroupStar {
             star: Box::new(star),
         };
-        let export_declaration_group0_1_built =
-            ExportDeclarationGroup0::Star(export_declaration_group0_1_built);
-        self.push(
-            ASTType::ExportDeclarationGroup0(export_declaration_group0_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 702:
-    ///
-    /// `ExportDeclarationGroup: Identifier;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn export_declaration_group_0(&mut self, _identifier: &ParseTreeType<'t>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let identifier = pop_item!(self, identifier, Identifier, context);
-        let export_declaration_group_0_built = ExportDeclarationGroupIdentifier {
-            identifier: Box::new(identifier),
-        };
         let export_declaration_group_0_built =
-            ExportDeclarationGroup::Identifier(export_declaration_group_0_built);
+            ExportDeclarationGroup::Star(export_declaration_group_0_built);
         self.push(
             ASTType::ExportDeclarationGroup(export_declaration_group_0_built),
             context,
@@ -26996,24 +26858,71 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 703:
+    /// Semantic action for production 701:
     ///
-    /// `ExportDeclarationGroup: Star;`
+    /// `ExportDeclarationGroup: ScopedIdentifier ExportDeclarationOpt /* Option */;`
     ///
     #[parol_runtime::function_name::named]
-    fn export_declaration_group_1(&mut self, _star: &ParseTreeType<'t>) -> Result<()> {
+    fn export_declaration_group_1(
+        &mut self,
+        _scoped_identifier: &ParseTreeType<'t>,
+        _export_declaration_opt: &ParseTreeType<'t>,
+    ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let star = pop_item!(self, star, Star, context);
-        let export_declaration_group_1_built = ExportDeclarationGroupStar {
-            star: Box::new(star),
-        };
+        let export_declaration_opt =
+            pop_item!(self, export_declaration_opt, ExportDeclarationOpt, context);
+        let scoped_identifier = pop_item!(self, scoped_identifier, ScopedIdentifier, context);
         let export_declaration_group_1_built =
-            ExportDeclarationGroup::Star(export_declaration_group_1_built);
+            ExportDeclarationGroupScopedIdentifierExportDeclarationOpt {
+                scoped_identifier: Box::new(scoped_identifier),
+                export_declaration_opt,
+            };
+        let export_declaration_group_1_built =
+            ExportDeclarationGroup::ScopedIdentifierExportDeclarationOpt(
+                export_declaration_group_1_built,
+            );
         self.push(
             ASTType::ExportDeclarationGroup(export_declaration_group_1_built),
             context,
         );
+        Ok(())
+    }
+
+    /// Semantic action for production 702:
+    ///
+    /// `ExportDeclarationOpt /* Option<T>::Some */: ColonColon Star;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn export_declaration_opt_0(
+        &mut self,
+        _colon_colon: &ParseTreeType<'t>,
+        _star: &ParseTreeType<'t>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let star = pop_item!(self, star, Star, context);
+        let colon_colon = pop_item!(self, colon_colon, ColonColon, context);
+        let export_declaration_opt_0_built = ExportDeclarationOpt {
+            colon_colon: Box::new(colon_colon),
+            star: Box::new(star),
+        };
+        self.push(
+            ASTType::ExportDeclarationOpt(Some(export_declaration_opt_0_built)),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 703:
+    ///
+    /// `ExportDeclarationOpt /* Option<T>::None */: ;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn export_declaration_opt_1(&mut self) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        self.push(ASTType::ExportDeclarationOpt(None), context);
         Ok(())
     }
 
@@ -27131,7 +27040,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             port_declaration: Box::new(port_declaration),
         };
         self.push(
-            ASTType::ModuleDeclarationOpt0(Some(Box::new(module_declaration_opt0_0_built))),
+            ASTType::ModuleDeclarationOpt0(Some(module_declaration_opt0_0_built)),
             context,
         );
         Ok(())
@@ -27162,7 +27071,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             with_parameter: Box::new(with_parameter),
         };
         self.push(
-            ASTType::ModuleDeclarationOpt(Some(Box::new(module_declaration_opt_0_built))),
+            ASTType::ModuleDeclarationOpt(Some(module_declaration_opt_0_built)),
             context,
         );
         Ok(())
@@ -27312,7 +27221,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             module_optional_named_block: Box::new(module_optional_named_block),
         };
         self.push(
-            ASTType::ModuleIfDeclarationOpt(Some(Box::new(module_if_declaration_opt_0_built))),
+            ASTType::ModuleIfDeclarationOpt(Some(module_if_declaration_opt_0_built)),
             context,
         );
         Ok(())
@@ -27397,7 +27306,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             expression: Box::new(expression),
         };
         self.push(
-            ASTType::ModuleForDeclarationOpt(Some(Box::new(module_for_declaration_opt_0_built))),
+            ASTType::ModuleForDeclarationOpt(Some(module_for_declaration_opt_0_built)),
             context,
         );
         Ok(())
@@ -27603,9 +27512,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             identifier: Box::new(identifier),
         };
         self.push(
-            ASTType::ModuleOptionalNamedBlockOpt(Some(Box::new(
-                module_optional_named_block_opt_0_built,
-            ))),
+            ASTType::ModuleOptionalNamedBlockOpt(Some(module_optional_named_block_opt_0_built)),
             context,
         );
         Ok(())
@@ -28208,7 +28115,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             with_parameter: Box::new(with_parameter),
         };
         self.push(
-            ASTType::InterfaceDeclarationOpt(Some(Box::new(interface_declaration_opt_0_built))),
+            ASTType::InterfaceDeclarationOpt(Some(interface_declaration_opt_0_built)),
             context,
         );
         Ok(())
@@ -28359,9 +28266,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             interface_optional_named_block: Box::new(interface_optional_named_block),
         };
         self.push(
-            ASTType::InterfaceIfDeclarationOpt(Some(Box::new(
-                interface_if_declaration_opt_0_built,
-            ))),
+            ASTType::InterfaceIfDeclarationOpt(Some(interface_if_declaration_opt_0_built)),
             context,
         );
         Ok(())
@@ -28447,9 +28352,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             expression: Box::new(expression),
         };
         self.push(
-            ASTType::InterfaceForDeclarationOpt(Some(Box::new(
-                interface_for_declaration_opt_0_built,
-            ))),
+            ASTType::InterfaceForDeclarationOpt(Some(interface_for_declaration_opt_0_built)),
             context,
         );
         Ok(())
@@ -28666,9 +28569,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             identifier: Box::new(identifier),
         };
         self.push(
-            ASTType::InterfaceOptionalNamedBlockOpt(Some(Box::new(
+            ASTType::InterfaceOptionalNamedBlockOpt(Some(
                 interface_optional_named_block_opt_0_built,
-            ))),
+            )),
             context,
         );
         Ok(())
@@ -30783,26 +30686,14 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             693 => self.function_declaration_opt_1(),
             694 => self.function_item_0(&children[0]),
             695 => self.function_item_1(&children[0]),
-            696 => self.import_declaration(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-            ),
-            697 => self.import_declaration_group_0(&children[0]),
-            698 => self.import_declaration_group_1(&children[0]),
-            699 => self.export_declaration(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-            ),
-            700 => self.export_declaration_group0_0(&children[0]),
-            701 => self.export_declaration_group0_1(&children[0]),
-            702 => self.export_declaration_group_0(&children[0]),
-            703 => self.export_declaration_group_1(&children[0]),
+            696 => self.import_declaration(&children[0], &children[1], &children[2], &children[3]),
+            697 => self.import_declaration_opt_0(&children[0], &children[1]),
+            698 => self.import_declaration_opt_1(),
+            699 => self.export_declaration(&children[0], &children[1], &children[2]),
+            700 => self.export_declaration_group_0(&children[0]),
+            701 => self.export_declaration_group_1(&children[0], &children[1]),
+            702 => self.export_declaration_opt_0(&children[0], &children[1]),
+            703 => self.export_declaration_opt_1(),
             704 => self.module_declaration(
                 &children[0],
                 &children[1],

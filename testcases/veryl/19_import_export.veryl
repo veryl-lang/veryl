@@ -1,5 +1,5 @@
-import PackageA::A;
-import PackageA::*;
+import $sv::PackageA::A;
+import $sv::PackageA::*;
 
 module Module19 {
     import PackageA::A;
@@ -15,5 +15,9 @@ package Package19 {
     import PackageA::A;
     import PackageA::*;
     export PackageA::A;
-    export *::*;
+    export *;
+}
+
+package PackageA {
+    localparam A: u32 = 0;
 }
