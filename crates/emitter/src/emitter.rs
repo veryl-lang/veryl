@@ -2010,11 +2010,10 @@ impl VerylWalker for Emitter {
     fn import_declaration(&mut self, arg: &ImportDeclaration) {
         self.import(&arg.import);
         self.space(1);
-        self.identifier(&arg.identifier);
-        self.colon_colon(&arg.colon_colon);
-        match &*arg.import_declaration_group {
-            ImportDeclarationGroup::Identifier(x) => self.identifier(&x.identifier),
-            ImportDeclarationGroup::Star(x) => self.star(&x.star),
+        self.scoped_identifier(&arg.scoped_identifier);
+        if let Some(ref x) = arg.import_declaration_opt {
+            self.colon_colon(&x.colon_colon);
+            self.star(&x.star);
         }
         self.semicolon(&arg.semicolon);
     }
@@ -2024,13 +2023,14 @@ impl VerylWalker for Emitter {
         self.export(&arg.export);
         self.space(1);
         match &*arg.export_declaration_group {
-            ExportDeclarationGroup::Identifier(x) => self.identifier(&x.identifier),
-            ExportDeclarationGroup::Star(x) => self.star(&x.star),
-        }
-        self.colon_colon(&arg.colon_colon);
-        match &*arg.export_declaration_group0 {
-            ExportDeclarationGroup0::Identifier(x) => self.identifier(&x.identifier),
-            ExportDeclarationGroup0::Star(x) => self.star(&x.star),
+            ExportDeclarationGroup::Star(x) => self.token(&x.star.star_token.replace("*::*")),
+            ExportDeclarationGroup::ScopedIdentifierExportDeclarationOpt(x) => {
+                self.scoped_identifier(&x.scoped_identifier);
+                if let Some(ref x) = x.export_declaration_opt {
+                    self.colon_colon(&x.colon_colon);
+                    self.star(&x.star);
+                }
+            }
         }
         self.semicolon(&arg.semicolon);
     }
