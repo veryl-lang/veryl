@@ -22,3 +22,15 @@ pub module ModuleA #(
     o_data : output logic<ParamA>, /// Data output
 ) {}
 ```
+
+The available configurations are below.
+These can be specified in `[doc]` section of `Veryl.toml`.
+
+```toml
+[doc]
+path = "document"
+```
+
+| Configuration | Value   | Default | Description              |
+|---------------|---------|---------|--------------------------|
+| path          | string  | "doc"   | path to output directory |

@@ -1,4 +1,5 @@
 use crate::build::{Build, Target};
+use crate::doc::Doc;
 use crate::format::Format;
 use crate::git::Git;
 use crate::lint::Lint;
@@ -47,6 +48,8 @@ pub struct Metadata {
     pub lint: Lint,
     #[serde(default)]
     pub publish: Publish,
+    #[serde(default)]
+    pub doc: Doc,
     #[serde(default)]
     pub dependencies: HashMap<Url, Dependency>,
     #[serde(skip)]
