@@ -9,9 +9,9 @@ Veryl is a modern hardware description language.
 This project is under the exploration phase of language design.
 If you have any idea, please open [Issue](https://github.com/dalance/veryl/issues).
 
-* [Document](https://dalance.github.io/veryl/book)
-    * [日本語](https://dalance.github.io/veryl/book/ja)
-* [PlayGround](https://dalance.github.io/veryl/playground)
+* [Document](https://doc.veryl-lang.org/book)
+    * [日本語](https://doc.veryl-lang.org/book/ja)
+* [PlayGround](https://doc.veryl-lang.org/playground)
 
 ## Documentation quick links
 
@@ -86,7 +86,7 @@ module ModuleA #(
 
 ## Installation
 
-See [Document](https://dalance.github.io/veryl/book/02_getting_started/01_installation.html).
+See [Document](https://doc.veryl-lang.org/book/02_getting_started/01_installation.html).
 
 ## Usage
 
@@ -110,7 +110,7 @@ veryl build
 veryl doc
 ```
 
-For detailed information, see [Document](https://dalance.github.io/veryl/book).
+For detailed information, see [Document](https://doc.veryl-lang.org/book).
 
 ## License
 
