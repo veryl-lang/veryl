@@ -1,4 +1,5 @@
 mod build;
+mod doc;
 mod format;
 mod git;
 mod lint;
@@ -12,6 +13,7 @@ mod publish;
 mod tests;
 mod utils;
 pub use build::{Build, BuiltinType, ClockType, FilelistType, ResetType, Target};
+pub use doc::Doc;
 pub use format::Format;
 pub use lint::{Case, Lint};
 pub use lockfile::Lockfile;

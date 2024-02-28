@@ -9,6 +9,5 @@ perf.data*
 /support/highlightjs/dist/
 veryl_testcase.*
 /dependencies/
-/doc/
 /book/po/messages.pot
 /book/po/*~

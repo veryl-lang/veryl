@@ -229,7 +229,12 @@ impl DocBuilder {
         }
 
         let mut cfg = Config::default();
-        cfg.build.build_dir = self.metadata.metadata_path.parent().unwrap().join("doc");
+        cfg.build.build_dir = self
+            .metadata
+            .metadata_path
+            .parent()
+            .unwrap()
+            .join(&self.metadata.doc.path);
         cfg.set("output.html.no-section-label", true).unwrap();
         cfg.set("output.html.fold.enable", true).unwrap();
         cfg.set("output.html.fold.level", 0).unwrap();

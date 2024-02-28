@@ -15,6 +15,9 @@ target        = {type = "directory", path = "testcases/sv"}
 [format]
 indent_width = 4
 
+[doc]
+path = "target/veryl_doc"
+
 [dependencies]
 "https://github.com/dalance/veryl_sample" = [
     {version = "0.7.0", name = "veryl_sample1"},

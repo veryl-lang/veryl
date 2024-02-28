@@ -1,7 +1,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: The Veryl Hardware Description Language\n"
-"POT-Creation-Date: 2024-02-28T10:05:32+09:00\n"
+"POT-Creation-Date: 2024-02-28T14:03:26+09:00\n"
 "PO-Revision-Date: 2023-12-28 23:02+0900\n"
 "Last-Translator: Naoya Hatta <dalance@gmail.com>\n"
 "Language-Team: Japanese\n"
@@ -2276,8 +2276,9 @@ msgid ""
 "By default, all top level items of a project (module, interface and package) "
 "are private. The \"private\" means they are not visible from other project."
 msgstr ""
-"デフォルトではプロジェクトのトップレベルアイテム（モジュール、インターフェース、パッケージ）はプライベートです。"
-"プライベートとは他のプロジェクトから参照できないことを意味します。"
+"デフォルトではプロジェクトのトップレベルアイテム（モジュール、インターフェー"
+"ス、パッケージ）はプライベートです。プライベートとは他のプロジェクトから参照"
+"できないことを意味します。"
 
 #: src/04_language_reference/11_visibility.md:6
 msgid ""
@@ -2285,8 +2286,9 @@ msgid ""
 "`veryl doc` will generate [documents]"
 "(../05_development_environment/09_documentation.md) of public items only."
 msgstr ""
-"`pub` キーワードによって他のプロジェクトから見えるように指定することができます。"
-"`veryl doc` コマンドはパブリックなアイテムの [ドキュメント](../05_development_environment/09_documentation.md) のみを生成します。"
+"`pub` キーワードによって他のプロジェクトから見えるように指定することができま"
+"す。`veryl doc` コマンドはパブリックなアイテムの [ドキュメント]"
+"(../05_development_environment/09_documentation.md) のみを生成します。"
 
 #: src/05_development_environment.md:3
 msgid ""
@@ -3014,6 +3016,7 @@ msgstr ""
 #: src/05_development_environment/03_publish_project.md:61
 #: src/05_development_environment/05_formatter.md:14
 #: src/05_development_environment/06_linter.md:18
+#: src/05_development_environment/09_documentation.md:34
 msgid "Configuration"
 msgstr "設定"
 
@@ -3034,16 +3037,19 @@ msgstr ""
 #: src/05_development_environment/03_publish_project.md:61
 #: src/05_development_environment/05_formatter.md:14
 #: src/05_development_environment/06_linter.md:18
+#: src/05_development_environment/09_documentation.md:34
 msgid "Value"
 msgstr "設定値"
 
 #: src/05_development_environment/03_publish_project.md:61
+#: src/05_development_environment/09_documentation.md:34
 msgid "Default"
 msgstr "デフォルト"
 
 #: src/05_development_environment/03_publish_project.md:61
 #: src/05_development_environment/05_formatter.md:14
 #: src/05_development_environment/06_linter.md:18
+#: src/05_development_environment/09_documentation.md:34
 msgid "Description"
 msgstr "説明"
 
@@ -3094,6 +3100,7 @@ msgstr "bump_commit_mesasge"
 #: src/05_development_environment/06_linter.md:47
 #: src/05_development_environment/06_linter.md:48
 #: src/05_development_environment/06_linter.md:49
+#: src/05_development_environment/09_documentation.md:36
 msgid "string"
 msgstr "文字列"
 
@@ -3952,8 +3959,8 @@ msgid ""
 "(../04_language_reference/11_visibility.md) )"
 msgstr ""
 "プロジェクトのドキュメントは `veryl doc` コマンドで生成することができます。全"
-"てのパブリックなモジュールとインターフェース、パッケージがリストアップされます。"
-"（参照 [可視性](../04_language_reference/11_visibility.md)）"
+"てのパブリックなモジュールとインターフェース、パッケージがリストアップされま"
+"す。（参照 [可視性](../04_language_reference/11_visibility.md)）"
 
 #: src/05_development_environment/09_documentation.md:6
 msgid ""
@@ -4000,6 +4007,38 @@ msgstr ""
 "    o_data : output logic<ParamA>, /// データ出力\n"
 ") {}\n"
 "```"
+
+#: src/05_development_environment/09_documentation.md:26
+msgid ""
+"The available configurations are below. These can be specified in `[doc]` "
+"section of `Veryl.toml`."
+msgstr ""
+"設定可能な項目は以下の通りです。これは `Veryl.toml` の `[doc]` セクション"
+"で指定できます。"
+
+#: src/05_development_environment/09_documentation.md:29
+msgid ""
+"```toml\n"
+"[doc]\n"
+"path = \"document\"\n"
+"```"
+msgstr ""
+"```toml\n"
+"[doc]\n"
+"path = \"document\"\n"
+"```"
+
+#: src/05_development_environment/09_documentation.md:36
+msgid "path"
+msgstr "path"
+
+#: src/05_development_environment/09_documentation.md:36
+msgid "\"doc\""
+msgstr "\"doc\""
+
+#: src/05_development_environment/09_documentation.md:36
+msgid "path to output directory"
+msgstr "出力ディレクトリへのパス"
 
 #: src/06_appendix/01_formal_syntax.md:3
 msgid ""
