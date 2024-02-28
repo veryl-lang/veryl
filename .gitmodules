@@ -1,3 +1,6 @@
 [submodule "support/vim"]
 	path = support/vim
 	url = https://github.com/dalance/veryl.vim
+[submodule "doc"]
+	path = doc
+	url = https://github.com/veryl-lang/doc
