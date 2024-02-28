@@ -51,6 +51,7 @@
     - [Interface](./04_language_reference/08_interface.md)
     - [Package](./04_language_reference/09_package.md)
     - [SystemVerilog Interoperation](./04_language_reference/10_systemverilog_interoperation.md)
+    - [Visibility](./04_language_reference/11_visibility.md)
 - [Development Environment](./05_development_environment.md)
     - [Project Configuration](./05_development_environment/01_project_configuration.md)
     - [Dependencies](./05_development_environment/02_dependencies.md)

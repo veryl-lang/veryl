@@ -54,7 +54,7 @@ impl CmdDoc {
 
         for symbol in veryl_analyzer::symbol_table::get_all() {
             let text = resource_table::get_str_value(symbol.token.text).unwrap();
-            if format!("{}", symbol.namespace) == metadata.project.name {
+            if format!("{}", symbol.namespace) == metadata.project.name && symbol.public {
                 match symbol.kind {
                     SymbolKind::Module(_) => {
                         modules.insert(text, symbol.clone());

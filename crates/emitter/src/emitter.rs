@@ -2060,11 +2060,11 @@ impl VerylWalker for Emitter {
         if !file_scope_import.is_empty() {
             self.newline_pop();
         }
-        if let Some(ref x) = arg.module_declaration_opt {
+        if let Some(ref x) = arg.module_declaration_opt0 {
             self.space(1);
             self.with_parameter(&x.with_parameter);
         }
-        if let Some(ref x) = arg.module_declaration_opt0 {
+        if let Some(ref x) = arg.module_declaration_opt1 {
             self.space(1);
             self.port_declaration(&x.port_declaration);
         }
@@ -2247,7 +2247,7 @@ impl VerylWalker for Emitter {
         if !file_scope_import.is_empty() {
             self.newline_pop();
         }
-        if let Some(ref x) = arg.interface_declaration_opt {
+        if let Some(ref x) = arg.interface_declaration_opt0 {
             self.space(1);
             self.with_parameter(&x.with_parameter);
         }
