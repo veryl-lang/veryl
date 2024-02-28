@@ -1,4 +1,4 @@
-![Veryl](https://veryl-lang.org)
+[![Veryl](support/logo/veryl_wide.png)](https://veryl-lang.org)
 
 [![Actions Status](https://github.com/dalance/veryl/workflows/Regression/badge.svg)](https://github.com/dalance/veryl/actions)
 [![Crates.io](https://img.shields.io/crates/v/veryl.svg)](https://crates.io/crates/veryl)
