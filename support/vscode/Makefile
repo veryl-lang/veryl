@@ -1,4 +1,4 @@
-RELEASE_URL = https://github.com/dalance/veryl/releases/latest/download/
+RELEASE_URL = https://github.com/veryl-lang/veryl/releases/latest/download/
 
 publish: publish_x86_64_linux publish_x86_64_windows publish_x86_64_mac publish_aarch64_mac
 

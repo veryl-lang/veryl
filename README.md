@@ -1,13 +1,13 @@
 [![Veryl](support/logo/veryl_wide.png)](https://veryl-lang.org)
 
-[![Actions Status](https://github.com/dalance/veryl/workflows/Regression/badge.svg)](https://github.com/dalance/veryl/actions)
+[![Actions Status](https://github.com/veryl-lang/veryl/workflows/Regression/badge.svg)](https://github.com/veryl-lang/veryl/actions)
 [![Crates.io](https://img.shields.io/crates/v/veryl.svg)](https://crates.io/crates/veryl)
-[![Changelog](https://img.shields.io/badge/changelog-v0.6.0-green.svg)](https://github.com/dalance/veryl/blob/master/CHANGELOG.md)
+[![Changelog](https://img.shields.io/badge/changelog-v0.6.0-green.svg)](https://github.com/veryl-lang/veryl/blob/master/CHANGELOG.md)
 
 Veryl is a modern hardware description language.
 
 This project is under the exploration phase of language design.
-If you have any idea, please open [Issue](https://github.com/dalance/veryl/issues).
+If you have any idea, please open [Issue](https://github.com/veryl-lang/veryl/issues).
 
 * [Document](https://doc.veryl-lang.org/book)
     * [日本語](https://doc.veryl-lang.org/book/ja)

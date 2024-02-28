@@ -18,7 +18,7 @@ resolver = "2"
 
 [workspace.package]
 authors     = ["dalance@gmail.com"]
-repository  = "https://github.com/dalance/veryl"
+repository  = "https://github.com/veryl-lang/veryl"
 keywords    = ["parser", "verilog", "systemverilog"]
 categories  = ["parsing"]
 license     = "MIT OR Apache-2.0"

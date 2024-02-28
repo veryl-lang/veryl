@@ -1,4 +1,4 @@
-# [Veryl](https://github.com/dalance/veryl) extension for Visual Studio Code
+# [Veryl](https://github.com/veryl-lang/veryl) extension for Visual Studio Code
 
 ![Visual Studio Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/dalance.vscode-veryl)
 ![Visual Studio Marketplace Installs](https://img.shields.io/visual-studio-marketplace/i/dalance.vscode-veryl)

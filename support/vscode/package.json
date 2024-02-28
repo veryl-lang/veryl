@@ -15,7 +15,7 @@
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dalance/veryl.git"
+    "url": "https://github.com/veryl-lang/veryl.git"
   },
   "categories": [
     "Programming Languages"

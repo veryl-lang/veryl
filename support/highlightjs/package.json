@@ -8,7 +8,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dalance/veryl.git"
+    "url": "git+https://github.com/veryl-lang/veryl.git"
   },
   "keywords": [
     "veryl",
@@ -19,7 +19,7 @@
   "author": "Naoya Hatta",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/dalance/veryl/issues"
+    "url": "https://github.com/veryl-lang/veryl/issues"
   },
-  "homepage": "https://github.com/dalance/veryl"
+  "homepage": "https://github.com/veryl-lang/veryl"
 }

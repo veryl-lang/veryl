@@ -4,7 +4,7 @@ version     = "0.1.6"
 authors     = ["dalance@gmail.com"]
 description = "Testcases for test"
 license     = "MIT"
-repository  = "https://github.com/dalance/veryl"
+repository  = "https://github.com/veryl-lang/veryl"
 
 [build]
 clock_type    = "posedge"
