@@ -19,7 +19,7 @@ indent_width = 4
 path = "target/veryl_doc"
 
 [dependencies]
-"https://github.com/dalance/veryl_sample" = [
+"https://github.com/veryl-lang/sample" = [
     {version = "0.7.0", name = "veryl_sample1"},
     {version = "0.8.0", name = "veryl_sample2"},
 ]

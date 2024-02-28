@@ -40,6 +40,7 @@ pub const KEYWORDS: &[&str] = &[
     "package",
     "parameter",
     "posedge",
+    "pub",
     "ref",
     "repeat",
     "return",
