@@ -263,7 +263,7 @@ version = "0.1.0""###
     }
 
     pub fn cache_dir() -> PathBuf {
-        let project_dir = ProjectDirs::from("", "dalance", "veryl").unwrap();
+        let project_dir = ProjectDirs::from("org", "veryl-lang", "veryl").unwrap();
         project_dir.cache_dir().to_path_buf()
     }
 }
