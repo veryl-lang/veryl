@@ -317,6 +317,7 @@ token_with_comments!(Outside);
 token_with_comments!(Package);
 token_with_comments!(Parameter);
 token_with_comments!(Posedge);
+token_with_comments!(Pub);
 token_with_comments!(Ref);
 token_with_comments!(Repeat);
 token_with_comments!(Return);

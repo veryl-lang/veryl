@@ -608,6 +608,13 @@ pub trait VerylWalker {
         after!(self, posedge, arg);
     }
 
+    /// Semantic action for non-terminal 'Pub'
+    fn r#pub(&mut self, arg: &Pub) {
+        before!(self, r#pub, arg);
+        self.veryl_token(&arg.pub_token);
+        after!(self, r#pub, arg);
+    }
+
     /// Semantic action for non-terminal 'Ref'
     fn r#ref(&mut self, arg: &Ref) {
         before!(self, r#ref, arg);
@@ -2181,12 +2188,15 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'ModuleDeclaration'
     fn module_declaration(&mut self, arg: &ModuleDeclaration) {
         before!(self, module_declaration, arg);
+        if let Some(ref x) = arg.module_declaration_opt {
+            self.r#pub(&x.r#pub);
+        }
         self.module(&arg.module);
         self.identifier(&arg.identifier);
-        if let Some(ref x) = arg.module_declaration_opt {
+        if let Some(ref x) = arg.module_declaration_opt0 {
             self.with_parameter(&x.with_parameter);
         }
-        if let Some(ref x) = arg.module_declaration_opt0 {
+        if let Some(ref x) = arg.module_declaration_opt1 {
             self.port_declaration(&x.port_declaration);
         }
         self.l_brace(&arg.l_brace);
@@ -2320,9 +2330,12 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'InterfaceDeclaration'
     fn interface_declaration(&mut self, arg: &InterfaceDeclaration) {
         before!(self, interface_declaration, arg);
+        if let Some(ref x) = arg.interface_declaration_opt {
+            self.r#pub(&x.r#pub);
+        }
         self.interface(&arg.interface);
         self.identifier(&arg.identifier);
-        if let Some(ref x) = arg.interface_declaration_opt {
+        if let Some(ref x) = arg.interface_declaration_opt0 {
             self.with_parameter(&x.with_parameter);
         }
         self.l_brace(&arg.l_brace);
@@ -2454,6 +2467,9 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'PackageDeclaration'
     fn package_declaration(&mut self, arg: &PackageDeclaration) {
         before!(self, package_declaration, arg);
+        if let Some(ref x) = arg.package_declaration_opt {
+            self.r#pub(&x.r#pub);
+        }
         self.package(&arg.package);
         self.identifier(&arg.identifier);
         self.l_brace(&arg.l_brace);

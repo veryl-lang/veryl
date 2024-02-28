@@ -189,14 +189,20 @@ pub enum ResolveSymbol {
 #[derive(Clone, Debug)]
 pub struct ResolveError {
     pub last_found: Option<Symbol>,
-    pub not_found: StrId,
+    pub cause: ResolveErrorCause,
+}
+
+#[derive(Clone, Debug)]
+pub enum ResolveErrorCause {
+    NotFound(StrId),
+    Private,
 }
 
 impl ResolveError {
-    pub fn new(last_found: Option<&Symbol>, not_found: &StrId) -> Self {
+    pub fn new(last_found: Option<&Symbol>, cause: ResolveErrorCause) -> Self {
         Self {
             last_found: last_found.cloned(),
-            not_found: *not_found,
+            cause,
         }
     }
 }
@@ -218,13 +224,19 @@ impl SymbolTable {
 
         for func in DEFINED_NAMESPACES {
             let token = Token::new(func, 0, 0, 0, 0, TokenSource::Builtin);
-            let symbol = Symbol::new(&token, SymbolKind::Namespace, &namespace, vec![]);
+            let symbol = Symbol::new(&token, SymbolKind::Namespace, &namespace, false, vec![]);
             let _ = ret.insert(&token, symbol);
         }
 
         for func in DEFINED_SYSTEM_FUNCTIONS {
             let token = Token::new(func, 0, 0, 0, 0, TokenSource::Builtin);
-            let symbol = Symbol::new(&token, SymbolKind::SystemFunction, &namespace, vec![]);
+            let symbol = Symbol::new(
+                &token,
+                SymbolKind::SystemFunction,
+                &namespace,
+                false,
+                vec![],
+            );
             let _ = ret.insert(&token, symbol);
         }
 
@@ -252,6 +264,7 @@ impl SymbolTable {
         let mut full_path = Vec::new();
         let mut namespace = namespace.clone();
         let mut inner = false;
+        let mut other_prj = false;
 
         let mut path = path.clone();
 
@@ -308,12 +321,32 @@ impl SymbolTable {
                                 }
                             }
                         }
+                        SymbolKind::Module(_) => {
+                            if other_prj & !ret.public {
+                                return Err(ResolveError::new(
+                                    last_found,
+                                    ResolveErrorCause::Private,
+                                ));
+                            }
+                        }
                         SymbolKind::Interface(_) => {
+                            if other_prj & !ret.public {
+                                return Err(ResolveError::new(
+                                    last_found,
+                                    ResolveErrorCause::Private,
+                                ));
+                            }
                             namespace = Namespace::default();
                             namespace.push(ret.token.text);
                             inner = true;
                         }
                         SymbolKind::Package => {
+                            if other_prj & !ret.public {
+                                return Err(ResolveError::new(
+                                    last_found,
+                                    ResolveErrorCause::Private,
+                                ));
+                            }
                             namespace = Namespace::default();
                             namespace.push(ret.token.text);
                             inner = true;
@@ -354,13 +387,17 @@ impl SymbolTable {
                         _ => (),
                     }
                 } else {
-                    return Err(ResolveError::new(last_found, name));
+                    return Err(ResolveError::new(
+                        last_found,
+                        ResolveErrorCause::NotFound(*name),
+                    ));
                 }
             } else {
                 // If symbol is not found, the name is treated as namespace
                 namespace = Namespace::new();
                 namespace.push(*name);
                 inner = true;
+                other_prj = true;
             }
         }
         if let Some(ret) = ret {
@@ -369,9 +406,11 @@ impl SymbolTable {
                 full_path,
             })
         } else if format!("{}", path.as_slice()[0]) == "$" {
-            Err(ResolveError::new(last_found, &path.as_slice()[1]))
+            let cause = ResolveErrorCause::NotFound(path.as_slice()[1]);
+            Err(ResolveError::new(last_found, cause))
         } else {
-            Err(ResolveError::new(last_found, &path.as_slice()[0]))
+            let cause = ResolveErrorCause::NotFound(path.as_slice()[0]);
+            Err(ResolveError::new(last_found, cause))
         }
     }
 

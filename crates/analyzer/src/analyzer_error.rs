@@ -394,6 +394,21 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(private_member),
+        help(""),
+        url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#private_member")
+    )]
+    #[error("\"{name}\" is private member")]
+    PrivateMember {
+        name: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(unknown_msb),
         help(""),
         url("https://dalance.github.io/veryl/book/06_appendix/02_semantic_error.html#unknown_msb")
@@ -693,6 +708,14 @@ impl AnalyzerError {
         AnalyzerError::UnknownMember {
             name: name.to_string(),
             member: member.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.token.into(),
+        }
+    }
+
+    pub fn private_member(name: &str, source: &str, token: &VerylToken) -> Self {
+        AnalyzerError::PrivateMember {
+            name: name.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),
         }

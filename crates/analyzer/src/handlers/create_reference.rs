@@ -2,10 +2,10 @@ use crate::analyzer_error::AnalyzerError;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::{Symbol, SymbolKind};
-use crate::symbol_table::{self, ResolveSymbol, SymbolPath};
+use crate::symbol_table::{self, ResolveError, ResolveErrorCause, ResolveSymbol, SymbolPath};
 use veryl_parser::resource_table::TokenId;
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::Token;
+use veryl_parser::veryl_token::{Token, VerylToken};
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
@@ -25,6 +25,30 @@ impl<'a> CreateReference<'a> {
             text,
             top_level: true,
             ..Default::default()
+        }
+    }
+
+    fn push_resolve_error(&mut self, err: ResolveError, token: &VerylToken) {
+        if let Some(last_found) = err.last_found {
+            let name = format!("{}", last_found.token.text);
+            match err.cause {
+                ResolveErrorCause::NotFound(not_found) => {
+                    let member = format!("{}", not_found);
+                    self.errors.push(AnalyzerError::unknown_member(
+                        &name, &member, self.text, token,
+                    ));
+                }
+                ResolveErrorCause::Private => {
+                    self.errors
+                        .push(AnalyzerError::private_member(&name, self.text, token));
+                }
+            }
+        } else if let ResolveErrorCause::NotFound(not_found) = err.cause {
+            let name = format!("{}", not_found);
+            self.errors
+                .push(AnalyzerError::undefined_identifier(&name, self.text, token));
+        } else {
+            unreachable!();
         }
     }
 }
@@ -84,24 +108,8 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                         return Ok(());
                     }
 
-                    if let Some(last_found) = err.last_found {
-                        // TODO check SV-side member to suppress error
-                        let name = format!("{}", last_found.token.text);
-                        let member = format!("{}", err.not_found);
-                        self.errors.push(AnalyzerError::unknown_member(
-                            &name,
-                            &member,
-                            self.text,
-                            &arg.identifier.identifier_token,
-                        ));
-                    } else {
-                        let name = format!("{}", err.not_found);
-                        self.errors.push(AnalyzerError::undefined_identifier(
-                            &name,
-                            self.text,
-                            &arg.identifier.identifier_token,
-                        ));
-                    }
+                    // TODO check SV-side member to suppress error
+                    self.push_resolve_error(err, &arg.identifier.identifier_token);
                 }
             }
         }
@@ -116,8 +124,13 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                 let mut namespace = Namespace::new();
                 for (i, token) in scoped_identifier_tokens(arg).iter().enumerate() {
                     if i != 0 {
-                        let symbol =
-                            Symbol::new(token, SymbolKind::SystemVerilog, &namespace, vec![]);
+                        let symbol = Symbol::new(
+                            token,
+                            SymbolKind::SystemVerilog,
+                            &namespace,
+                            false,
+                            vec![],
+                        );
                         let _ = symbol_table::insert(token, symbol);
                     }
                     namespace.push(token.text);
@@ -134,23 +147,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                     }
                 }
                 Err(err) => {
-                    if let Some(last_found) = err.last_found {
-                        let name = format!("{}", last_found.token.text);
-                        let member = format!("{}", err.not_found);
-                        self.errors.push(AnalyzerError::unknown_member(
-                            &name,
-                            &member,
-                            self.text,
-                            &arg.identifier.identifier_token,
-                        ));
-                    } else {
-                        let name = format!("{}", err.not_found);
-                        self.errors.push(AnalyzerError::undefined_identifier(
-                            &name,
-                            self.text,
-                            &arg.identifier.identifier_token,
-                        ));
-                    }
+                    self.push_resolve_error(err, &arg.identifier.identifier_token);
                 }
             }
         }
@@ -172,6 +169,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                                     token,
                                     SymbolKind::SystemVerilog,
                                     &namespace,
+                                    false,
                                     vec![],
                                 );
                                 let _ = symbol_table::insert(token, symbol);
@@ -198,23 +196,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                         return Ok(());
                     }
 
-                    if let Some(last_found) = err.last_found {
-                        let name = format!("{}", last_found.token.text);
-                        let member = format!("{}", err.not_found);
-                        self.errors.push(AnalyzerError::unknown_member(
-                            &name,
-                            &member,
-                            self.text,
-                            &arg.identifier.identifier_token,
-                        ));
-                    } else {
-                        let name = format!("{}", err.not_found);
-                        self.errors.push(AnalyzerError::undefined_identifier(
-                            &name,
-                            self.text,
-                            &arg.identifier.identifier_token,
-                        ));
-                    }
+                    self.push_resolve_error(err, &arg.identifier.identifier_token);
                 }
             }
         }
@@ -233,23 +215,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                     }
                 }
                 Err(err) => {
-                    if let Some(last_found) = err.last_found {
-                        let name = format!("{}", last_found.token.text);
-                        let member = format!("{}", err.not_found);
-                        self.errors.push(AnalyzerError::unknown_member(
-                            &name,
-                            &member,
-                            self.text,
-                            &arg.identifier.identifier_token,
-                        ));
-                    } else {
-                        let name = format!("{}", err.not_found);
-                        self.errors.push(AnalyzerError::undefined_identifier(
-                            &name,
-                            self.text,
-                            &arg.identifier.identifier_token,
-                        ));
-                    }
+                    self.push_resolve_error(err, &arg.identifier.identifier_token);
                 }
             }
         }
@@ -270,23 +236,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                         }
                     }
                     Err(err) => {
-                        if let Some(last_found) = err.last_found {
-                            let name = format!("{}", last_found.token.text);
-                            let member = format!("{}", err.not_found);
-                            self.errors.push(AnalyzerError::unknown_member(
-                                &name,
-                                &member,
-                                self.text,
-                                &arg.identifier.identifier_token,
-                            ));
-                        } else {
-                            let name = format!("{}", err.not_found);
-                            self.errors.push(AnalyzerError::undefined_identifier(
-                                &name,
-                                self.text,
-                                &arg.identifier.identifier_token,
-                            ));
-                        }
+                        self.push_resolve_error(err, &arg.identifier.identifier_token);
                     }
                 }
             }
@@ -393,23 +343,10 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                     }
                 }
                 Err(err) => {
-                    if let Some(last_found) = err.last_found {
-                        let name = format!("{}", last_found.token.text);
-                        let member = format!("{}", err.not_found);
-                        self.errors.push(AnalyzerError::unknown_member(
-                            &name,
-                            &member,
-                            self.text,
-                            &arg.scoped_identifier.identifier.identifier_token,
-                        ));
-                    } else {
-                        let name = format!("{}", err.not_found);
-                        self.errors.push(AnalyzerError::undefined_identifier(
-                            &name,
-                            self.text,
-                            &arg.scoped_identifier.identifier.identifier_token,
-                        ));
-                    }
+                    self.push_resolve_error(
+                        err,
+                        &arg.scoped_identifier.identifier.identifier_token,
+                    );
                 }
             }
         }

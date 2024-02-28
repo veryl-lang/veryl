@@ -96,6 +96,7 @@ OutsideTerm           : /(?-u:\b)outside(?-u:\b)/                               
 PackageTerm           : /(?-u:\b)package(?-u:\b)/                                                             : Token;
 ParameterTerm         : /(?-u:\b)parameter(?-u:\b)/                                                           : Token;
 PosedgeTerm           : /(?-u:\b)posedge(?-u:\b)/                                                             : Token;
+PubTerm               : /(?-u:\b)pub(?-u:\b)/                                                                 : Token;
 RefTerm               : /(?-u:\b)ref(?-u:\b)/                                                                 : Token;
 RepeatTerm            : /(?-u:\b)repeat(?-u:\b)/                                                              : Token;
 ReturnTerm            : /(?-u:\b)return(?-u:\b)/                                                              : Token;
@@ -207,6 +208,7 @@ OutsideToken   : OutsideTerm   : Token Comments;
 PackageToken   : PackageTerm   : Token Comments;
 ParameterToken : ParameterTerm : Token Comments;
 PosedgeToken   : PosedgeTerm   : Token Comments;
+PubToken       : PubTerm       : Token Comments;
 RefToken       : RefTerm       : Token Comments;
 RepeatToken    : RepeatTerm    : Token Comments;
 ReturnToken    : ReturnTerm    : Token Comments;
@@ -323,6 +325,7 @@ Outside   : OutsideToken   : VerylToken;
 Package   : PackageToken   : VerylToken;
 Parameter : ParameterToken : VerylToken;
 Posedge   : PosedgeToken   : VerylToken;
+Pub       : PubToken       : VerylToken;
 Ref       : RefToken       : VerylToken;
 Repeat    : RepeatToken    : VerylToken;
 Return    : ReturnToken    : VerylToken;
@@ -625,7 +628,7 @@ ExportDeclaration: Export ( Star | ScopedIdentifier [ ColonColon Star ] ) Semico
 // Module
 // ----------------------------------------------------------------------------
 
-ModuleDeclaration: Module Identifier [ WithParameter ] [ PortDeclaration ] LBrace { ModuleGroup } RBrace;
+ModuleDeclaration: [ Pub ] Module Identifier [ WithParameter ] [ PortDeclaration ] LBrace { ModuleGroup } RBrace;
 
 ModuleIfDeclaration: If Expression ModuleNamedBlock { Else If Expression ModuleOptionalNamedBlock } [ Else ModuleOptionalNamedBlock ];
 
@@ -659,7 +662,7 @@ ModuleItem: VarDeclaration
 // Interface
 // ----------------------------------------------------------------------------
 
-InterfaceDeclaration: Interface Identifier [ WithParameter ] LBrace { InterfaceGroup } RBrace;
+InterfaceDeclaration: [ Pub ] Interface Identifier [ WithParameter ] LBrace { InterfaceGroup } RBrace;
 
 InterfaceIfDeclaration: If Expression InterfaceNamedBlock { Else If Expression InterfaceOptionalNamedBlock } [ Else InterfaceOptionalNamedBlock ];
 
@@ -689,7 +692,7 @@ InterfaceItem: VarDeclaration
 // Package
 // ----------------------------------------------------------------------------
 
-PackageDeclaration: Package Identifier LBrace { PackageGroup } RBrace;
+PackageDeclaration: [ Pub ] Package Identifier LBrace { PackageGroup } RBrace;
 
 PackageGroup: { Attribute } ( LBrace { PackageGroup } RBrace | PackageItem );
 

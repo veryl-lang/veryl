@@ -2,7 +2,7 @@
 ///
 /// * list item0
 /// * list item1
-module Module36 #(
+pub module Module36 #(
     /// Data width
     parameter  ParamA: u32 = 1,
     localparam ParamB: u32 = 1,
@@ -17,7 +17,7 @@ module Module36 #(
 ///
 /// * list item0
 /// * list item1
-interface Interface36 #(
+pub interface Interface36 #(
     parameter  ParamA: u32 = 1, /// Data width
     localparam ParamB: u32 = 1,
 ) {}
@@ -26,4 +26,4 @@ interface Interface36 #(
 ///
 /// * list item0
 /// * list item1
-package Package36 {}
+pub package Package36 {}

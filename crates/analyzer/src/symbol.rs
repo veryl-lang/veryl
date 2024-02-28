@@ -31,6 +31,7 @@ pub struct Symbol {
     pub imported: Vec<Namespace>,
     pub evaluated: Cell<Option<Evaluated>>,
     pub allow_unused: bool,
+    pub public: bool,
     pub doc_comment: Vec<StrId>,
 }
 
@@ -39,6 +40,7 @@ impl Symbol {
         token: &Token,
         kind: SymbolKind,
         namespace: &Namespace,
+        public: bool,
         doc_comment: Vec<StrId>,
     ) -> Self {
         Self {
@@ -50,6 +52,7 @@ impl Symbol {
             imported: Vec::new(),
             evaluated: Cell::new(None),
             allow_unused: false,
+            public,
             doc_comment,
         }
     }

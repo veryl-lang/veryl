@@ -1401,15 +1401,19 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'ModuleDeclaration'
     fn module_declaration(&mut self, arg: &ModuleDeclaration) {
+        if let Some(ref x) = arg.module_declaration_opt {
+            self.r#pub(&x.r#pub);
+            self.space(1);
+        }
         self.module(&arg.module);
         self.space(1);
         self.identifier(&arg.identifier);
         self.space(1);
-        if let Some(ref x) = arg.module_declaration_opt {
+        if let Some(ref x) = arg.module_declaration_opt0 {
             self.with_parameter(&x.with_parameter);
             self.space(1);
         }
-        if let Some(ref x) = arg.module_declaration_opt0 {
+        if let Some(ref x) = arg.module_declaration_opt1 {
             self.port_declaration(&x.port_declaration);
             self.space(1);
         }
@@ -1520,11 +1524,15 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'InterfaceDeclaration'
     fn interface_declaration(&mut self, arg: &InterfaceDeclaration) {
+        if let Some(ref x) = arg.interface_declaration_opt {
+            self.r#pub(&x.r#pub);
+            self.space(1);
+        }
         self.interface(&arg.interface);
         self.space(1);
         self.identifier(&arg.identifier);
         self.space(1);
-        if let Some(ref x) = arg.interface_declaration_opt {
+        if let Some(ref x) = arg.interface_declaration_opt0 {
             self.with_parameter(&x.with_parameter);
             self.space(1);
         }
@@ -1636,6 +1644,10 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'PackageDeclaration'
     fn package_declaration(&mut self, arg: &PackageDeclaration) {
+        if let Some(ref x) = arg.package_declaration_opt {
+            self.r#pub(&x.r#pub);
+            self.space(1);
+        }
         self.package(&arg.package);
         self.space(1);
         self.identifier(&arg.identifier);
