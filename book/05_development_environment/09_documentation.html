@@ -252,7 +252,15 @@ pub module ModuleA #(
     o_data : output logic&lt;ParamA&gt;, /// Data output
 ) {}
 </code></pre>
-
+<p>The available configurations are below.
+These can be specified in <code>[doc]</code> section of <code>Veryl.toml</code>.</p>
+<pre><code class="language-toml">[doc]
+path = "document"
+</code></pre>
+<div class="table-wrapper"><table><thead><tr><th>Configuration</th><th>Value</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td>path</td><td>string</td><td>“doc”</td><td>path to output directory</td></tr>
+</tbody></table>
+</div>
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">

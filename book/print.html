@@ -1839,7 +1839,15 @@ pub module ModuleA #(
     o_data : output logic&lt;ParamA&gt;, /// Data output
 ) {}
 </code></pre>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="appendix"><a class="header" href="#appendix">Appendix</a></h1>
+<p>The available configurations are below.
+These can be specified in <code>[doc]</code> section of <code>Veryl.toml</code>.</p>
+<pre><code class="language-toml">[doc]
+path = "document"
+</code></pre>
+<div class="table-wrapper"><table><thead><tr><th>Configuration</th><th>Value</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td>path</td><td>string</td><td>“doc”</td><td>path to output directory</td></tr>
+</tbody></table>
+</div><div style="break-before: page; page-break-before: always;"></div><h1 id="appendix"><a class="header" href="#appendix">Appendix</a></h1>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="formal-syntax"><a class="header" href="#formal-syntax">Formal Syntax</a></h1>
 <p>Veryl’s parser is based on parser generator <a href="https://github.com/jsinger67/parol">parol</a>.
 The following syntex definition of parol is formal syntax.</p>
