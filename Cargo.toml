@@ -9,10 +9,6 @@ members = [
     "crates/parser",
     "crates/tests",
     "crates/veryl",
-    "crates/wasm",
-]
-exclude = [
-#    "crates/wasm",
 ]
 resolver = "2"
 
@@ -54,8 +50,6 @@ opt-level = 3
 # Workaround for long time compilation
 # https://github.com/rust-lang/rust/issues/106211
 codegen-units = 1
-# for wasm-pack
-opt-level = "z"
 
 [profile.bench]
 debug = true
