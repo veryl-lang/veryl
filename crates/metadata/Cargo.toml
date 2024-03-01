@@ -27,7 +27,7 @@ toml           = {workspace = true}
 url            = {workspace = true}
 uuid           = {version = "1.7", default-features = false, features = ["v5", "serde"]}
 veryl-parser   = {version = "0.7.0", path = "../parser"}
-walkdir        = "2.4.0"
+walkdir        = "2.5.0"
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 fs4            = { version = "0.8.0", features = ["sync"] }
