@@ -4,3 +4,6 @@
 [submodule "doc"]
 	path = doc
 	url = https://github.com/veryl-lang/doc
+[submodule "std"]
+	path = std
+	url = https://github.com/veryl-lang/std
