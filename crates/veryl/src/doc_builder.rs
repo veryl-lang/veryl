@@ -125,20 +125,32 @@ const MODULE_TMPL: &str = r#"
 ### Parameters
 ---
 
+<table class="table_list">
+<tbody>
 {{#each parameters}}
-#### {{this.name}}: <span class="hljs-type">{{this.typ}}</span>
-{{this.description}}
-
+<tr>
+    <th class="table_list_item">{{this.name}}</th>
+    <td class="table_list_item"><span class="hljs-type">{{this.typ}}</span></td>
+    <td class="table_list_item">{{this.description}}</td>
+</tr>
 {{/each}}
+</tbody>
+</table>
 
 ### Ports
 ---
 
+<table class="table_list">
+<tbody>
 {{#each ports}}
-#### {{this.name}}: <span class="hljs-keyword">{{this.direction}}</span> <span class="hljs-type">{{this.typ}}</span>
-{{this.description}}
-
+<tr>
+    <th class="table_list_item">{{this.name}}</th>
+    <td class="table_list_item"><span class="hljs-keyword">{{this.direction}}</span> <span class="hljs-type">{{this.typ}}</span></td>
+    <td class="table_list_item">{{this.description}}</td>
+</tr>
 {{/each}}
+</tbody>
+</table>
 "#;
 
 #[derive(Serialize)]
@@ -172,11 +184,17 @@ const INTERFACE_TMPL: &str = r#"
 ### Parameters
 ---
 
+<table class="table_list">
+<tbody>
 {{#each parameters}}
-#### {{this.name}}: <span class="hljs-type">{{this.typ}}</span>
-{{this.description}}
-
+<tr>
+    <th class="table_list_item">{{this.name}}</th>
+    <td class="table_list_item"><span class="hljs-type">{{this.typ}}</span></td>
+    <td class="table_list_item">{{this.description}}</td>
+</tr>
 {{/each}}
+</tbody>
+</table>
 "#;
 
 #[derive(Serialize)]
