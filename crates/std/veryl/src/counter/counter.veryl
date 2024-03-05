@@ -1,0 +1,122 @@
+/// Value counter
+pub module counter #(
+    /// Counter width
+    parameter WIDTH: u32 = 2,
+    /// Max value of counter
+    parameter MAX_COUNT: bit<WIDTH> = '1,
+    /// Min value of counter
+    parameter MIN_COUNT: bit<WIDTH> = '0,
+    /// Initial value of counter
+    parameter INITIAL_COUNT: bit<WIDTH> = MIN_COUNT,
+    /// Whether counter is wrap around
+    parameter WRAP_AROUND: bit = 1,
+    /// Counter type
+    localparam COUNT: type = logic<WIDTH>,
+) (
+    /// Clock
+    i_clk: input logic,
+    /// Reset
+    i_rst: input logic,
+    /// Clear counter
+    i_clear: input logic,
+    /// Set counter to a value
+    i_set: input logic,
+    /// Value used by i_set
+    i_set_value: input COUNT,
+    /// Count up
+    i_up: input logic,
+    /// Count down
+    i_down: input logic,
+    /// Count value
+    o_count: output COUNT,
+    /// Count value for the next clock cycle
+    o_count_next: output COUNT,
+    /// Indicator for wrap around
+    o_wrap_around: output logic,
+) {
+    var count     : COUNT;
+    var count_next: COUNT;
+
+    assign o_count      = count;
+    assign o_count_next = count_next;
+
+    assign count_next = get_count_next(i_clear, i_set, i_set_value, i_up, i_down, count);
+    always_ff (i_clk, i_rst) {
+        if_reset {
+            count = INITIAL_COUNT;
+        } else {
+            count = count_next;
+        }
+    }
+
+    if (WRAP_AROUND) :g {
+        assign o_wrap_around = get_wrap_around_flag(i_clear, i_set, i_up, i_down, count);
+    } else {
+        assign o_wrap_around = '0;
+    }
+
+    function get_count_next (
+        clear        : input logic,
+        set          : input logic,
+        set_value    : input COUNT,
+        up           : input logic,
+        down         : input logic,
+        current_count: input COUNT,
+    ) -> COUNT {
+        case 1'b1 {
+            clear          : return INITIAL_COUNT;
+            set            : return set_value;
+            (up && (!down)): return count_up(current_count);
+            (down && (!up)): return count_down(current_count);
+            default        : return current_count;
+        }
+    }
+
+    function count_up (
+        current_count: input COUNT,
+    ) -> COUNT {
+        if count == MAX_COUNT {
+            if WRAP_AROUND {
+                return MIN_COUNT;
+            } else {
+                return MAX_COUNT;
+            }
+        } else {
+            return current_count + 1;
+        }
+    }
+
+    function count_down (
+        current_count: input COUNT,
+    ) -> COUNT {
+        if count == MIN_COUNT {
+            if WRAP_AROUND {
+                return MAX_COUNT;
+            } else {
+                return MIN_COUNT;
+            }
+        } else {
+            return current_count - 1;
+        }
+    }
+
+    function get_wrap_around_flag (
+        clear        : input logic,
+        set          : input logic,
+        up           : input logic,
+        down         : input logic,
+        current_count: input COUNT,
+    ) -> logic {
+        var up_down: logic<2>;
+        up_down = {up, down};
+        if clear || set {
+            return '0;
+        } else if (current_count == MAX_COUNT) && (up_down == 2'b10) {
+            return '1;
+        } else if (current_count == MIN_COUNT) && (up_down == 2'b01) {
+            return '1;
+        } else {
+            return '0;
+        }
+    }
+}

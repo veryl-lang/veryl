@@ -1,18 +1,26 @@
+/// Delay input by configured cycle
 pub module delay #(
-    parameter DELAY: u32  = 1           ,
-    parameter WIDTH: u32  = 1           ,
-    parameter TYPE : type = logic<WIDTH>,
+    /// Clock cycle of delay
+    parameter DELAY: u32 = 1,
+    /// Input/output data width
+    parameter WIDTH: u32 = 1,
+    /// Input/output data type
+    parameter TYPE: type = logic<WIDTH>,
 ) (
-    i_clk  : input  logic,
-    i_rst_n: input  logic,
-    i_d    : input  TYPE ,
-    o_d    : output TYPE ,
+    /// Clock
+    i_clk: input logic,
+    /// Reset
+    i_rst: input logic,
+    /// Input
+    i_d: input TYPE,
+    /// Output
+    o_d: output TYPE,
 ) {
     if (DELAY >= 1) :g_delay {
         var delay: TYPE [DELAY];
 
         assign o_d = delay[DELAY - 1];
-        always_ff (i_clk, i_rst_n) {
+        always_ff (i_clk, i_rst) {
             if_reset {
                 delay = '0;
             } else {
