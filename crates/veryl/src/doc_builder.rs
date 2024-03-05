@@ -17,6 +17,9 @@ const SUMMARY_TMPL: &str = r###"
 # Summary
 
 [{{name}}](index.md)
+- [{{version}}]()
+
+---
 
 - [Modules](modules.md)
   {{#each modules}}
@@ -37,6 +40,7 @@ const SUMMARY_TMPL: &str = r###"
 #[derive(Serialize)]
 struct SummaryData {
     name: String,
+    version: String,
     modules: Vec<String>,
     interfaces: Vec<String>,
     packages: Vec<String>,
@@ -45,14 +49,28 @@ struct SummaryData {
 const INDEX_TMPL: &str = r###"
 # {{name}}
 
-## Project
-
 {{description}}
 
-* Version: {{version}}
+<table align="center" class="table_list">
+<tbody>
+<tr>
+    <th class="table_list_item">Version</th>
+    <td class="table_list_item">{{version}}</td>
+</tr>
 {{#if repository}}
-* Repository: [{{repository}}]({{repository}})
+<tr>
+    <th class="table_list_item">Repository</th>
+    <td class="table_list_item"><a href="{{repository}}">{{repository}}</a></td>
+</tr>
 {{/if}}
+{{#if license}}
+<tr>
+    <th class="table_list_item">License</th>
+    <td class="table_list_item">{{license}}</td>
+</tr>
+{{/if}}
+</tbody>
+</table>
 
 {{{{raw}}}}
 {{#include modules.md}}
@@ -67,15 +85,24 @@ struct IndexData {
     description: Option<String>,
     version: String,
     repository: Option<String>,
+    license: Option<String>,
 }
 
 const LIST_TMPL: &str = r###"
 ## {{name}}
+---
 
+<table class="table_list">
+<tbody>
 {{#each items}}
-[{{this.name}}]({{this.name}}.md) {{this.description}}
-
+<tr>
+    <th class="table_list_item"><a href="{{this.name}}.html">{{this.name}}</a></th>
+    <td class="table_list_item">{{this.description}}</td>
+</tr>
 {{/each}}
+</tbody>
+</table>
+
 "###;
 
 #[derive(Serialize)]
@@ -178,6 +205,7 @@ pub struct DocBuilder {
     temp_dir: TempDir,
     root_dir: PathBuf,
     src_dir: PathBuf,
+    theme_dir: PathBuf,
     modules: BTreeMap<String, Symbol>,
     interfaces: BTreeMap<String, Symbol>,
     packages: BTreeMap<String, Symbol>,
@@ -193,13 +221,16 @@ impl DocBuilder {
         let temp_dir = tempfile::tempdir().into_diagnostic()?;
         let root_dir = temp_dir.path().to_path_buf();
         let src_dir = temp_dir.path().join("src");
+        let theme_dir = temp_dir.path().join("theme");
         fs::create_dir(&src_dir).into_diagnostic()?;
+        fs::create_dir(&theme_dir).into_diagnostic()?;
 
         Ok(Self {
             metadata: metadata.clone(),
             temp_dir,
             root_dir,
             src_dir,
+            theme_dir,
             modules,
             interfaces,
             packages,
@@ -207,6 +238,8 @@ impl DocBuilder {
     }
 
     pub fn build(&self) -> Result<()> {
+        self.build_theme()?;
+
         self.build_component("SUMMARY.md", self.build_summary())?;
         self.build_component("index.md", self.build_index())?;
         self.build_component("modules.md", self.build_modules())?;
@@ -237,10 +270,43 @@ impl DocBuilder {
             .join(&self.metadata.doc.path);
         cfg.set("output.html.no-section-label", true).unwrap();
         cfg.set("output.html.fold.enable", true).unwrap();
-        cfg.set("output.html.fold.level", 0).unwrap();
+        cfg.set("output.html.fold.level", 1).unwrap();
+        cfg.set("output.html.additional-css", vec!["theme/custom.css"])
+            .unwrap();
 
         let md = MDBook::load_with_config(&self.root_dir, cfg).unwrap();
         md.build().unwrap();
+        Ok(())
+    }
+
+    fn build_theme(&self) -> Result<()> {
+        let custom_css = r##"
+.affix {
+    font-weight: bold;
+    font-size: 1.8em;
+}
+
+.table_list {
+    margin-left: 0;
+    margin-right: auto;
+}
+
+.table_list_item {
+    text-align: left;
+    border: unset;
+    background-color: var(--bg);
+}
+        "##;
+
+        let file = self.theme_dir.join("custom.css");
+        let mut file = File::create(file).into_diagnostic()?;
+        write!(file, "{}", custom_css).into_diagnostic()?;
+
+        let favicon = include_bytes!("../../../support/logo/favicon.png");
+        let file = self.theme_dir.join("favicon.png");
+        let mut file = File::create(file).into_diagnostic()?;
+        file.write(favicon).into_diagnostic()?;
+
         Ok(())
     }
 
@@ -257,6 +323,7 @@ impl DocBuilder {
         let packages: Vec<_> = self.packages.keys().cloned().collect();
         let data = SummaryData {
             name: self.metadata.project.name.clone(),
+            version: format!("{}", self.metadata.project.version),
             modules,
             interfaces,
             packages,
@@ -272,6 +339,7 @@ impl DocBuilder {
             version: format!("{}", self.metadata.project.version),
             description: self.metadata.project.description.clone(),
             repository: self.metadata.project.repository.clone(),
+            license: self.metadata.project.license.clone(),
         };
 
         let handlebars = Handlebars::new();
