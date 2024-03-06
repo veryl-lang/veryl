@@ -89,16 +89,15 @@ impl<'a> VerylGrammarTrait for CheckModule<'a> {
         if self.in_module {
             if let HandlerPoint::Before = self.point {
                 if let IdentifierStatementGroup::Assignment(_) = &*arg.identifier_statement_group {
-                    match symbol_table::resolve(arg.expression_identifier.as_ref()) {
-                        Ok(x) => match x.found {
+                    if let Ok(x) = symbol_table::resolve(arg.expression_identifier.as_ref()) {
+                        match x.found {
                             ResolveSymbol::Symbol(x) => {
                                 let token = &arg.expression_identifier.identifier.identifier_token;
                                 self.assign_check_inputs(&x, token);
                             }
                             // External symbol can't be checkd
                             ResolveSymbol::External => (),
-                        },
-                        Err(_) => (),
+                        }
                     }
                 }
             }
@@ -113,8 +112,8 @@ impl<'a> VerylGrammarTrait for CheckModule<'a> {
         if let HandlerPoint::Before = self.point {
             match &*arg.port_declaration_item_group {
                 PortDeclarationItemGroup::DirectionArrayType(x) => {
-                    match symbol_table::resolve(arg.identifier.as_ref()) {
-                        Ok(y) => match y.found {
+                    if let Ok(y) = symbol_table::resolve(arg.identifier.as_ref()) {
+                        match y.found {
                             ResolveSymbol::Symbol(y) => {
                                 if let Direction::Input(_) = &*x.direction {
                                     self.inputs.push((y.id, 0));
@@ -122,8 +121,7 @@ impl<'a> VerylGrammarTrait for CheckModule<'a> {
                             }
                             // External symbol can't be checkd
                             ResolveSymbol::External => (),
-                        },
-                        Err(_) => (),
+                        }
                     }
                     // TODO: Cover Inout, Ref, Outputs, and Modports for checking
                 }
@@ -137,16 +135,15 @@ impl<'a> VerylGrammarTrait for CheckModule<'a> {
     fn assign_declaration(&mut self, arg: &AssignDeclaration) -> Result<(), ParolError> {
         if self.in_module {
             if let HandlerPoint::Before = self.point {
-                match symbol_table::resolve(arg.hierarchical_identifier.as_ref()) {
-                    Ok(x) => match x.found {
+                if let Ok(x) = symbol_table::resolve(arg.hierarchical_identifier.as_ref()) {
+                    match x.found {
                         ResolveSymbol::Symbol(x) => {
                             let token = &arg.hierarchical_identifier.identifier.identifier_token;
                             self.assign_check_inputs(&x, token);
                         }
                         // External symbol can't be checkd
                         ResolveSymbol::External => (),
-                    },
-                    Err(_) => (),
+                    }
                 }
             }
         }
