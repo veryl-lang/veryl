@@ -294,7 +294,7 @@ impl Emitter {
                 if let Ok(ref symbol) = symbol_table::get(&symbol_path, &resolve_namespace) {
                     let separator = if let ResolveSymbol::Symbol(symbol) = &symbol.found {
                         match symbol.kind {
-                            SymbolKind::Package => "::",
+                            SymbolKind::Package(_) => "::",
                             SymbolKind::Interface(_) => ".",
                             _ => "_",
                         }
@@ -319,7 +319,7 @@ impl Emitter {
         if let Ok(ref symbol) = symbol_table::resolve(path) {
             if let ResolveSymbol::Symbol(symbol) = &symbol.found {
                 match symbol.kind {
-                    SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package => {
+                    SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_) => {
                         self.namespace(&symbol.namespace);
                         self.str(&format!("{}", symbol.token.text));
                     }

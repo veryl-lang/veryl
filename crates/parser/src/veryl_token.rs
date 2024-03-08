@@ -96,6 +96,39 @@ impl From<Token> for miette::SourceSpan {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct TokenRange {
+    pub beg: Token,
+    pub end: Token,
+}
+
+impl TokenRange {
+    pub fn new(beg: &VerylToken, end: &VerylToken) -> Self {
+        Self {
+            beg: beg.token,
+            end: end.token,
+        }
+    }
+
+    pub fn include(&self, path: PathId, line: u32, column: u32) -> bool {
+        if self.beg.source == path {
+            if self.beg.line == line {
+                if self.end.line == line {
+                    self.beg.column <= column && column <= self.end.column
+                } else {
+                    self.beg.column <= column
+                }
+            } else if self.end.line == line {
+                column <= self.end.column
+            } else {
+                self.beg.line < line && line < self.end.line
+            }
+        } else {
+            false
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct VerylToken {
     pub token: Token,

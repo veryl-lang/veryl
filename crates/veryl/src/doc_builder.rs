@@ -10,7 +10,7 @@ use tempfile::TempDir;
 use veryl_analyzer::symbol::{ParameterScope, Symbol, SymbolKind};
 use veryl_analyzer::symbol_table::{self, ResolveSymbol};
 use veryl_metadata::Metadata;
-use veryl_parser::resource_table::{self, StrId};
+use veryl_parser::resource_table;
 use veryl_parser::veryl_token::Token;
 
 const SUMMARY_TMPL: &str = r###"
@@ -370,7 +370,7 @@ impl DocBuilder {
             .iter()
             .map(|(k, v)| ListItem {
                 name: k.clone(),
-                description: format_doc_comment(&v.doc_comment, true),
+                description: v.doc_comment.format(true),
             })
             .collect();
 
@@ -389,7 +389,7 @@ impl DocBuilder {
             .iter()
             .map(|(k, v)| ListItem {
                 name: k.clone(),
-                description: format_doc_comment(&v.doc_comment, true),
+                description: v.doc_comment.format(true),
             })
             .collect();
 
@@ -408,7 +408,7 @@ impl DocBuilder {
             .iter()
             .map(|(k, v)| ListItem {
                 name: k.clone(),
-                description: format_doc_comment(&v.doc_comment, true),
+                description: v.doc_comment.format(true),
             })
             .collect();
 
@@ -447,7 +447,7 @@ impl DocBuilder {
 
             let data = ModuleData {
                 name: name.to_string(),
-                description: format_doc_comment(&symbol.doc_comment, false),
+                description: symbol.doc_comment.format(false),
                 parameters,
                 ports,
             };
@@ -474,7 +474,7 @@ impl DocBuilder {
 
             let data = InterfaceData {
                 name: name.to_string(),
-                description: format_doc_comment(&symbol.doc_comment, false),
+                description: symbol.doc_comment.format(false),
                 parameters,
             };
 
@@ -486,10 +486,10 @@ impl DocBuilder {
     }
 
     fn build_package(&self, name: &str, symbol: &Symbol) -> String {
-        if let SymbolKind::Package = &symbol.kind {
+        if let SymbolKind::Package(_) = &symbol.kind {
             let data = PackageData {
                 name: name.to_string(),
-                description: format_doc_comment(&symbol.doc_comment, false),
+                description: symbol.doc_comment.format(false),
             };
 
             let handlebars = Handlebars::new();
@@ -500,23 +500,10 @@ impl DocBuilder {
     }
 }
 
-fn format_doc_comment(text: &[StrId], single_line: bool) -> String {
-    let mut ret = String::new();
-    for t in text {
-        let t = format!("{}", t);
-        let t = t.trim_start_matches("///");
-        ret.push_str(t);
-        if single_line {
-            break;
-        }
-    }
-    ret
-}
-
 fn get_comment_from_token(token: &Token) -> Option<String> {
     if let Ok(symbol) = symbol_table::resolve(token) {
         if let ResolveSymbol::Symbol(symbol) = &symbol.found {
-            Some(format_doc_comment(&symbol.doc_comment, false))
+            Some(symbol.doc_comment.format(false))
         } else {
             None
         }
