@@ -23,7 +23,9 @@ impl CmdInit {
         }
 
         if let Some(name) = self.opt.path.canonicalize().into_diagnostic()?.file_name() {
-            let toml = Metadata::create_default_toml(&name.to_string_lossy());
+            let name = name.to_string_lossy();
+
+            let toml = Metadata::create_default_toml(&name).into_diagnostic()?;
             let toml_path = self.opt.path.join("Veryl.toml");
 
             if toml_path.exists() {
@@ -34,7 +36,7 @@ impl CmdInit {
             write!(file, "{toml}").into_diagnostic()?;
             file.flush().into_diagnostic()?;
 
-            info!("Created \"{}\" project", name.to_string_lossy());
+            info!("Created \"{}\" project", name);
         } else {
             bail!("path \"{}\" is not valid", self.opt.path.to_string_lossy());
         }

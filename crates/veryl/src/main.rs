@@ -212,7 +212,7 @@ fn main() -> Result<ExitCode> {
     let mut metadata = match opt.command {
         Commands::New(_) | Commands::Init(_) => {
             // dummy metadata
-            let metadata = Metadata::create_default_toml("");
+            let metadata = Metadata::create_default_toml("dummy").unwrap();
             Metadata::from_str(&metadata)?
         }
         _ => {
