@@ -29,9 +29,9 @@ mod analyzer {
 
         if name == "25_dependency" {
             let paths = metadata.paths::<&str>(&[]).unwrap();
-            let cache_dir = Metadata::cache_dir().canonicalize().unwrap();
+            let cache_path = Metadata::cache_path().canonicalize().unwrap();
             for path in paths {
-                if path.src.starts_with(&cache_dir) {
+                if path.src.starts_with(&cache_path) {
                     let input = fs::read_to_string(&path.src).unwrap();
                     let ret = Parser::parse(&input, &path.src).unwrap();
                     let analyzer = Analyzer::new(&metadata);
@@ -111,9 +111,9 @@ mod emitter {
 
         if name == "25_dependency" {
             let paths = metadata.paths::<&str>(&[]).unwrap();
-            let cache_dir = Metadata::cache_dir().canonicalize().unwrap();
+            let cache_path = Metadata::cache_path().canonicalize().unwrap();
             for path in paths {
-                if path.src.starts_with(&cache_dir) {
+                if path.src.starts_with(&cache_path) {
                     let input = fs::read_to_string(&path.src).unwrap();
                     let ret = Parser::parse(&input, &path.src).unwrap();
                     let analyzer = Analyzer::new(&metadata);

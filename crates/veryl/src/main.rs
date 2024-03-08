@@ -10,6 +10,7 @@ use veryl_metadata::Metadata;
 
 mod cmd_build;
 mod cmd_check;
+mod cmd_clean;
 mod cmd_doc;
 mod cmd_dump;
 mod cmd_fmt;
@@ -47,6 +48,7 @@ enum Commands {
     Fmt(OptFmt),
     Check(OptCheck),
     Build(OptBuild),
+    Clean(OptClean),
     Update(OptUpdate),
     Publish(OptPublish),
     Doc(OptDoc),
@@ -91,6 +93,10 @@ pub struct OptBuild {
     /// Target files
     pub files: Vec<PathBuf>,
 }
+
+/// Clean-up the current project
+#[derive(Args)]
+pub struct OptClean {}
 
 /// Update dependencies
 #[derive(Args)]
@@ -227,6 +233,7 @@ fn main() -> Result<ExitCode> {
         Commands::Fmt(x) => cmd_fmt::CmdFmt::new(x).exec(&mut metadata)?,
         Commands::Check(x) => cmd_check::CmdCheck::new(x).exec(&mut metadata)?,
         Commands::Build(x) => cmd_build::CmdBuild::new(x).exec(&mut metadata)?,
+        Commands::Clean(x) => cmd_clean::CmdClean::new(x).exec(&mut metadata)?,
         Commands::Update(x) => cmd_update::CmdUpdate::new(x).exec(&mut metadata)?,
         Commands::Publish(x) => cmd_publish::CmdPublish::new(x).exec(&mut metadata)?,
         Commands::Doc(x) => cmd_doc::CmdDoc::new(x).exec(&mut metadata)?,

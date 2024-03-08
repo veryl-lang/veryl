@@ -158,10 +158,10 @@ impl Lockfile {
         for locks in self.lock_table.values() {
             for lock in locks {
                 let metadata = self.get_metadata(&lock.url, &lock.revision)?;
-                let path = metadata.metadata_path.parent().unwrap();
+                let path = metadata.project_path();
 
-                for src in &utils::gather_files_with_extension(path, "veryl")? {
-                    let rel = src.strip_prefix(path)?;
+                for src in &utils::gather_files_with_extension(&path, "veryl")? {
+                    let rel = src.strip_prefix(&path)?;
                     let mut dst = base_dst.join(&lock.name);
                     dst.push(rel);
                     dst.set_extension("sv");
@@ -334,7 +334,7 @@ impl Lockfile {
         url: &Url,
         version_req: &VersionReq,
     ) -> Result<Release, MetadataError> {
-        let resolve_dir = Metadata::cache_dir().join("resolve");
+        let resolve_dir = Metadata::cache_path().join("resolve");
 
         if !resolve_dir.exists() {
             fs::create_dir_all(&resolve_dir)?;
@@ -367,7 +367,7 @@ impl Lockfile {
     }
 
     fn get_metadata(&self, url: &Url, revision: &str) -> Result<Metadata, MetadataError> {
-        let dependencies_dir = Metadata::cache_dir().join("dependencies");
+        let dependencies_dir = Metadata::cache_path().join("dependencies");
 
         if !dependencies_dir.exists() {
             fs::create_dir_all(&dependencies_dir)?;
@@ -405,7 +405,7 @@ impl Lockfile {
 
     #[cfg(not(target_family = "wasm"))]
     fn lock_dir(path: &str) -> Result<File, MetadataError> {
-        let base_dir = Metadata::cache_dir().join(path);
+        let base_dir = Metadata::cache_path().join(path);
         let lock = base_dir.join("lock");
         let lock = File::create(lock)?;
         lock.lock_exclusive()?;

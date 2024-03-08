@@ -85,19 +85,13 @@ impl CmdBuild {
     }
 
     fn gen_filelist(&self, metadata: &Metadata, paths: &[PathPair]) -> Result<()> {
-        let filelist_name = match metadata.build.filelist_type {
-            FilelistType::Absolute => format!("{}.f", metadata.project.name),
-            FilelistType::Relative => format!("{}.f", metadata.project.name),
-            FilelistType::Flgen => format!("{}.list.rb", metadata.project.name),
-        };
-
-        let filelist_path = metadata.metadata_path.with_file_name(filelist_name);
-        let base_path = metadata.metadata_path.parent().unwrap();
+        let filelist_path = metadata.filelist_path();
+        let base_path = metadata.project_path();
 
         let mut text = String::new();
         for path in paths {
             let path = path.dst.canonicalize().into_diagnostic()?;
-            let relative = path.strip_prefix(base_path).into_diagnostic()?;
+            let relative = path.strip_prefix(&base_path).into_diagnostic()?;
             let line = match metadata.build.filelist_type {
                 FilelistType::Absolute => format!("{}\n", path.to_string_lossy()),
                 FilelistType::Relative => format!("{}\n", relative.to_string_lossy()),
