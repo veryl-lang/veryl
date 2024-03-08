@@ -7,8 +7,7 @@ use crate::lockfile::Lockfile;
 use crate::project::Project;
 use crate::pubfile::{Pubfile, Release};
 use crate::publish::Publish;
-use crate::utils;
-use crate::MetadataError;
+use crate::{utils, FilelistType, MetadataError};
 use directories::ProjectDirs;
 use log::{debug, info};
 use once_cell::sync::Lazy;
@@ -105,8 +104,8 @@ impl Metadata {
     }
 
     pub fn publish(&mut self) -> Result<(), MetadataError> {
-        let prj_path = self.metadata_path.parent().unwrap();
-        let git = Git::open(prj_path)?;
+        let prj_path = self.project_path();
+        let git = Git::open(&prj_path)?;
         if !git.is_clean()? {
             return Err(MetadataError::ModifiedProject(prj_path.to_path_buf()));
         }
@@ -156,8 +155,8 @@ impl Metadata {
     }
 
     pub fn bump_version(&mut self, kind: BumpKind) -> Result<(), MetadataError> {
-        let prj_path = self.metadata_path.parent().unwrap();
-        let git = Git::open(prj_path)?;
+        let prj_path = self.project_path();
+        let git = Git::open(&prj_path)?;
 
         let mut bumped_version = self.project.version.clone();
         match kind {
@@ -221,10 +220,10 @@ impl Metadata {
     }
 
     pub fn paths<T: AsRef<Path>>(&mut self, files: &[T]) -> Result<Vec<PathPair>, MetadataError> {
-        let base = self.metadata_path.parent().unwrap();
+        let base = self.project_path();
 
         let src_files = if files.is_empty() {
-            utils::gather_files_with_extension(base, "veryl")?
+            utils::gather_files_with_extension(&base, "veryl")?
         } else {
             files.iter().map(|x| x.as_ref().to_path_buf()).collect()
         };
@@ -244,7 +243,7 @@ impl Metadata {
             });
         }
 
-        let base_dst = self.metadata_path.parent().unwrap().join("dependencies");
+        let base_dst = self.project_dependencies_path();
         if !base_dst.exists() {
             fs::create_dir(&base_dst)?;
         }
@@ -269,9 +268,27 @@ version = "0.1.0""###
         ))
     }
 
-    pub fn cache_dir() -> PathBuf {
+    pub fn cache_path() -> PathBuf {
         let project_dir = ProjectDirs::from("org", "veryl-lang", "veryl").unwrap();
         project_dir.cache_dir().to_path_buf()
+    }
+
+    pub fn project_path(&self) -> PathBuf {
+        self.metadata_path.parent().unwrap().to_path_buf()
+    }
+
+    pub fn project_dependencies_path(&self) -> PathBuf {
+        self.project_path().join("dependencies")
+    }
+
+    pub fn filelist_path(&self) -> PathBuf {
+        let filelist_name = match self.build.filelist_type {
+            FilelistType::Absolute => format!("{}.f", self.project.name),
+            FilelistType::Relative => format!("{}.f", self.project.name),
+            FilelistType::Flgen => format!("{}.list.rb", self.project.name),
+        };
+
+        self.metadata_path.with_file_name(filelist_name)
     }
 }
 

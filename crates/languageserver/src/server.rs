@@ -96,7 +96,7 @@ impl Server {
             document_map: DashMap::new(),
             parser_map: DashMap::new(),
             metadata_map: DashMap::new(),
-            cache_dir: Metadata::cache_dir().to_string_lossy().to_string(),
+            cache_dir: Metadata::cache_path().to_string_lossy().to_string(),
             lsp_token: 0,
             background_tasks: VecDeque::new(),
         }
