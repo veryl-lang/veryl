@@ -1,7 +1,7 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol::{Symbol, SymbolKind};
+use crate::symbol::{DocComment, Symbol, SymbolKind};
 use crate::symbol_table::{self, ResolveError, ResolveErrorCause, ResolveSymbol, SymbolPath};
 use veryl_parser::resource_table::TokenId;
 use veryl_parser::veryl_grammar_trait::*;
@@ -129,7 +129,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                             SymbolKind::SystemVerilog,
                             &namespace,
                             false,
-                            vec![],
+                            DocComment::default(),
                         );
                         let _ = symbol_table::insert(token, symbol);
                     }
@@ -170,7 +170,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                                     SymbolKind::SystemVerilog,
                                     &namespace,
                                     false,
-                                    vec![],
+                                    DocComment::default(),
                                 );
                                 let _ = symbol_table::insert(token, symbol);
                             }
@@ -315,7 +315,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                 Ok(symbol) => {
                     if let ResolveSymbol::Symbol(x) = symbol.found {
                         match x.kind {
-                            SymbolKind::Package if is_wildcard => {
+                            SymbolKind::Package(_) if is_wildcard => {
                                 let mut target = x.namespace.clone();
                                 target.push(x.token.text);
 

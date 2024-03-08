@@ -5,17 +5,17 @@ use crate::namespace_table;
 use crate::symbol::Direction as SymDirection;
 use crate::symbol::Type as SymType;
 use crate::symbol::{
-    EnumMemberProperty, EnumProperty, FunctionProperty, InstanceProperty, InterfaceProperty,
-    ModportMember, ModportProperty, ModuleProperty, ParameterProperty, ParameterScope,
-    ParameterValue, PortProperty, StructMemberProperty, Symbol, SymbolKind, TypeDefProperty,
-    TypeKind, UnionMemberProperty, VariableProperty,
+    DocComment, EnumMemberProperty, EnumProperty, FunctionProperty, InstanceProperty,
+    InterfaceProperty, ModportMember, ModportProperty, ModuleProperty, PackageProperty,
+    ParameterProperty, ParameterScope, ParameterValue, PortProperty, StructMemberProperty, Symbol,
+    SymbolKind, TypeDefProperty, TypeKind, UnionMemberProperty, VariableProperty,
 };
 use crate::symbol_table;
 use std::collections::HashSet;
 use veryl_parser::doc_comment_table;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::{TokenSource, VerylToken};
+use veryl_parser::veryl_token::{TokenRange, TokenSource, VerylToken};
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
@@ -50,9 +50,9 @@ impl<'a> CreateSymbolTable<'a> {
         let line = token.token.line;
         let doc_comment = if let TokenSource::File(file) = token.token.source {
             if line == 0 {
-                vec![]
+                DocComment::default()
             } else if let Some(doc_comment) = doc_comment_table::get(file, line) {
-                vec![doc_comment]
+                DocComment(vec![doc_comment])
             } else {
                 let mut candidate_line = line - 1;
                 while self.attribute_lines.contains(&candidate_line) {
@@ -67,10 +67,10 @@ impl<'a> CreateSymbolTable<'a> {
                     candidate_line -= 1;
                 }
                 ret.reverse();
-                ret
+                DocComment(ret)
             }
         } else {
-            vec![]
+            DocComment::default()
         };
         let mut symbol = Symbol::new(&token.token, kind, &self.namespace, public, doc_comment);
 
@@ -385,7 +385,13 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                         }
                     }
                 }
-                let property = FunctionProperty { parameters, ports };
+                let range =
+                    TokenRange::new(&arg.function.function_token, &arg.r_brace.r_brace_token);
+                let property = FunctionProperty {
+                    range,
+                    parameters,
+                    ports,
+                };
                 self.insert_symbol(
                     &arg.identifier.identifier_token,
                     SymbolKind::Function(property),
@@ -423,7 +429,12 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                         }
                     }
                 }
-                let property = ModuleProperty { parameters, ports };
+                let range = TokenRange::new(&arg.module.module_token, &arg.r_brace.r_brace_token);
+                let property = ModuleProperty {
+                    range,
+                    parameters,
+                    ports,
+                };
                 self.insert_symbol(
                     &arg.identifier.identifier_token,
                     SymbolKind::Module(property),
@@ -504,7 +515,9 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                         }
                     }
                 }
-                let property = InterfaceProperty { parameters };
+                let range =
+                    TokenRange::new(&arg.interface.interface_token, &arg.r_brace.r_brace_token);
+                let property = InterfaceProperty { range, parameters };
                 self.insert_symbol(
                     &arg.identifier.identifier_token,
                     SymbolKind::Interface(property),
@@ -579,9 +592,11 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         match self.point {
             HandlerPoint::Before => {
                 let public = arg.package_declaration_opt.is_some();
+                let range = TokenRange::new(&arg.package.package_token, &arg.r_brace.r_brace_token);
+                let property = PackageProperty { range };
                 self.insert_symbol(
                     &arg.identifier.identifier_token,
-                    SymbolKind::Package,
+                    SymbolKind::Package(property),
                     public,
                 );
 

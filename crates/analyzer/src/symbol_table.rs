@@ -1,7 +1,7 @@
 use crate::evaluator::Evaluated;
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol::{Direction, Symbol, SymbolKind, TypeKind};
+use crate::symbol::{Direction, DocComment, Symbol, SymbolKind, TypeKind};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
@@ -224,7 +224,13 @@ impl SymbolTable {
 
         for func in DEFINED_NAMESPACES {
             let token = Token::new(func, 0, 0, 0, 0, TokenSource::Builtin);
-            let symbol = Symbol::new(&token, SymbolKind::Namespace, &namespace, false, vec![]);
+            let symbol = Symbol::new(
+                &token,
+                SymbolKind::Namespace,
+                &namespace,
+                false,
+                DocComment::default(),
+            );
             let _ = ret.insert(&token, symbol);
         }
 
@@ -235,7 +241,7 @@ impl SymbolTable {
                 SymbolKind::SystemFunction,
                 &namespace,
                 false,
-                vec![],
+                DocComment::default(),
             );
             let _ = ret.insert(&token, symbol);
         }
@@ -340,7 +346,7 @@ impl SymbolTable {
                             namespace.push(ret.token.text);
                             inner = true;
                         }
-                        SymbolKind::Package => {
+                        SymbolKind::Package(_) => {
                             if other_prj & !ret.public {
                                 return Err(ResolveError::new(
                                     last_found,

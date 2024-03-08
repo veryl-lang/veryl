@@ -7,6 +7,8 @@ use std::collections::VecDeque;
 use std::path::Path;
 use tower_lsp::lsp_types::*;
 use tower_lsp::Client;
+use veryl_analyzer::namespace::Namespace;
+use veryl_analyzer::symbol::SymbolKind as VerylSymbolKind;
 use veryl_analyzer::symbol_table::{ResolveSymbol, SymbolPath};
 use veryl_analyzer::{namespace_table, symbol_table, Analyzer, AnalyzerError};
 use veryl_formatter::Formatter;
@@ -202,7 +204,7 @@ impl Server {
                 ),
                 CompletionTriggerKind::INVOKED => {
                     let mut items = if let Some(metadata) = self.get_metadata(url) {
-                        completion_toplevel_entity(&metadata, line, column)
+                        completion_symbol(&metadata, url, line, column)
                     } else {
                         vec![]
                     };
@@ -260,28 +262,28 @@ impl Server {
             let name = symbol.token.text.to_string();
             if name.contains(query) {
                 let kind = match symbol.kind {
-                    veryl_analyzer::symbol::SymbolKind::Port(_) => SymbolKind::VARIABLE,
-                    veryl_analyzer::symbol::SymbolKind::Variable(_) => SymbolKind::VARIABLE,
-                    veryl_analyzer::symbol::SymbolKind::Module(_) => SymbolKind::MODULE,
-                    veryl_analyzer::symbol::SymbolKind::Interface(_) => SymbolKind::INTERFACE,
-                    veryl_analyzer::symbol::SymbolKind::Function(_) => SymbolKind::FUNCTION,
-                    veryl_analyzer::symbol::SymbolKind::Parameter(_) => SymbolKind::CONSTANT,
-                    veryl_analyzer::symbol::SymbolKind::Instance(_) => SymbolKind::OBJECT,
-                    veryl_analyzer::symbol::SymbolKind::Block => SymbolKind::NAMESPACE,
-                    veryl_analyzer::symbol::SymbolKind::Package => SymbolKind::PACKAGE,
-                    veryl_analyzer::symbol::SymbolKind::Struct => SymbolKind::STRUCT,
-                    veryl_analyzer::symbol::SymbolKind::StructMember(_) => SymbolKind::VARIABLE,
-                    veryl_analyzer::symbol::SymbolKind::Union => SymbolKind::STRUCT,
-                    veryl_analyzer::symbol::SymbolKind::UnionMember(_) => SymbolKind::VARIABLE,
-                    veryl_analyzer::symbol::SymbolKind::Enum(_) => SymbolKind::ENUM,
-                    veryl_analyzer::symbol::SymbolKind::EnumMember(_) => SymbolKind::ENUM_MEMBER,
-                    veryl_analyzer::symbol::SymbolKind::Modport(_) => SymbolKind::INTERFACE,
-                    veryl_analyzer::symbol::SymbolKind::Genvar => SymbolKind::VARIABLE,
-                    veryl_analyzer::symbol::SymbolKind::TypeDef(_) => SymbolKind::TYPE_PARAMETER,
-                    veryl_analyzer::symbol::SymbolKind::ModportMember => SymbolKind::VARIABLE,
-                    veryl_analyzer::symbol::SymbolKind::SystemVerilog => SymbolKind::NAMESPACE,
-                    veryl_analyzer::symbol::SymbolKind::Namespace => SymbolKind::NAMESPACE,
-                    veryl_analyzer::symbol::SymbolKind::SystemFunction => SymbolKind::FUNCTION,
+                    VerylSymbolKind::Port(_) => SymbolKind::VARIABLE,
+                    VerylSymbolKind::Variable(_) => SymbolKind::VARIABLE,
+                    VerylSymbolKind::Module(_) => SymbolKind::MODULE,
+                    VerylSymbolKind::Interface(_) => SymbolKind::INTERFACE,
+                    VerylSymbolKind::Function(_) => SymbolKind::FUNCTION,
+                    VerylSymbolKind::Parameter(_) => SymbolKind::CONSTANT,
+                    VerylSymbolKind::Instance(_) => SymbolKind::OBJECT,
+                    VerylSymbolKind::Block => SymbolKind::NAMESPACE,
+                    VerylSymbolKind::Package(_) => SymbolKind::PACKAGE,
+                    VerylSymbolKind::Struct => SymbolKind::STRUCT,
+                    VerylSymbolKind::StructMember(_) => SymbolKind::VARIABLE,
+                    VerylSymbolKind::Union => SymbolKind::STRUCT,
+                    VerylSymbolKind::UnionMember(_) => SymbolKind::VARIABLE,
+                    VerylSymbolKind::Enum(_) => SymbolKind::ENUM,
+                    VerylSymbolKind::EnumMember(_) => SymbolKind::ENUM_MEMBER,
+                    VerylSymbolKind::Modport(_) => SymbolKind::INTERFACE,
+                    VerylSymbolKind::Genvar => SymbolKind::VARIABLE,
+                    VerylSymbolKind::TypeDef(_) => SymbolKind::TYPE_PARAMETER,
+                    VerylSymbolKind::ModportMember => SymbolKind::VARIABLE,
+                    VerylSymbolKind::SystemVerilog => SymbolKind::NAMESPACE,
+                    VerylSymbolKind::Namespace => SymbolKind::NAMESPACE,
+                    VerylSymbolKind::SystemFunction => SymbolKind::FUNCTION,
                 };
                 let location = to_location(&symbol.token);
                 #[allow(deprecated)]
@@ -372,7 +374,7 @@ impl Server {
             let mut tokens = Vec::new();
             for symbol in &symbol_table::get_all() {
                 if symbol.token.source == path {
-                    if let veryl_analyzer::symbol::SymbolKind::Port(_) = symbol.kind {
+                    if let VerylSymbolKind::Port(_) = symbol.kind {
                         let token_type = semantic_legend::PROPERTY;
                         tokens.push((symbol.token, token_type));
                         for reference in &symbol.references {
@@ -744,29 +746,40 @@ fn completion_operator(line: usize, column: usize, trigger: &str) -> Option<Comp
     }
 }
 
-fn completion_toplevel_entity(
+fn completion_symbol(
     metadata: &Metadata,
+    url: &Url,
     line: usize,
     column: usize,
 ) -> Vec<CompletionItem> {
+    let current_namespace = current_namespace(url, line, column);
+
     let mut items = Vec::new();
     let line = (line - 1) as u32;
-    let character = (column - 1) as u32;
+    let character = (column - 2) as u32;
     let start = Position { line, character };
     let end = Position { line, character };
 
     let prj = resource_table::get_str_id(&metadata.project.name).unwrap();
 
     for symbol in symbol_table::get_all() {
-        if symbol.namespace.paths.len() == 1 {
-            //&& symbol.namespace.paths[0] == prj {
-            let prefix = if symbol.namespace.paths[0] == prj {
+        let top_level_item = symbol.namespace.paths.len() == 1;
+        let current_item = if let Some(ref x) = current_namespace {
+            symbol.namespace.included(x)
+        } else {
+            false
+        };
+
+        if top_level_item || current_item {
+            let prefix = if symbol.namespace.paths[0] == prj || current_item {
                 "".to_string()
+            } else if let VerylSymbolKind::SystemFunction = symbol.kind {
+                "$".to_string()
             } else {
                 format!("{}::", symbol.namespace.paths[0])
             };
             let (new_text, kind) = match symbol.kind {
-                veryl_analyzer::symbol::SymbolKind::Module(ref x) => {
+                VerylSymbolKind::Module(ref x) => {
                     let mut ports = String::new();
                     for port in &x.ports {
                         ports.push_str(&format!("{}, ", port.name));
@@ -774,13 +787,23 @@ fn completion_toplevel_entity(
                     let text = format!("{}{} ({});", prefix, symbol.token.text, ports);
                     (text, Some(CompletionItemKind::CLASS))
                 }
-                veryl_analyzer::symbol::SymbolKind::Interface(_) => {
+                VerylSymbolKind::Interface(_) => {
                     let text = format!("{}{} ();", prefix, symbol.token.text);
                     (text, Some(CompletionItemKind::INTERFACE))
                 }
-                veryl_analyzer::symbol::SymbolKind::Package => {
+                VerylSymbolKind::Package(_) => {
                     let text = format!("{}{}::", prefix, symbol.token.text);
                     (text, Some(CompletionItemKind::MODULE))
+                }
+                VerylSymbolKind::Port(_)
+                | VerylSymbolKind::Variable(_)
+                | VerylSymbolKind::Parameter(_) => {
+                    let text = format!("{}{}", prefix, symbol.token.text);
+                    (text, Some(CompletionItemKind::VARIABLE))
+                }
+                VerylSymbolKind::Function(_) | VerylSymbolKind::SystemFunction => {
+                    let text = format!("{}{}", prefix, symbol.token.text);
+                    (text, Some(CompletionItemKind::FUNCTION))
                 }
                 _ => {
                     let text = format!("{}{}", prefix, symbol.token.text);
@@ -790,6 +813,15 @@ fn completion_toplevel_entity(
 
             let label = format!("{}{}", prefix, symbol.token.text);
             let detail = Some(format!("{}", symbol.kind));
+            let documentation = if !symbol.doc_comment.is_empty() {
+                let content = MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: symbol.doc_comment.format(false),
+                };
+                Some(Documentation::MarkupContent(content))
+            } else {
+                None
+            };
 
             let text_edit = CompletionTextEdit::Edit(TextEdit {
                 range: Range { start, end },
@@ -800,6 +832,7 @@ fn completion_toplevel_entity(
                 label,
                 kind,
                 detail,
+                documentation,
                 text_edit: Some(text_edit),
                 ..Default::default()
             };
@@ -810,9 +843,51 @@ fn completion_toplevel_entity(
     items
 }
 
+fn current_namespace(url: &Url, line: usize, column: usize) -> Option<Namespace> {
+    let url = resource_table::get_path_id(Path::new(url.as_str()).to_path_buf()).unwrap();
+
+    let mut ret = None;
+    let mut ret_func = None;
+    for symbol in symbol_table::get_all() {
+        match symbol.kind {
+            VerylSymbolKind::Module(x) => {
+                if x.range.include(url, line as u32, column as u32) {
+                    let mut namespace = symbol.namespace;
+                    namespace.push(symbol.token.text);
+                    ret = Some(namespace);
+                }
+            }
+            VerylSymbolKind::Function(x) => {
+                if x.range.include(url, line as u32, column as u32) {
+                    let mut namespace = symbol.namespace;
+                    namespace.push(symbol.token.text);
+                    ret_func = Some(namespace);
+                }
+            }
+            VerylSymbolKind::Interface(x) => {
+                if x.range.include(url, line as u32, column as u32) {
+                    let mut namespace = symbol.namespace;
+                    namespace.push(symbol.token.text);
+                    ret = Some(namespace);
+                }
+            }
+            VerylSymbolKind::Package(x) => {
+                if x.range.include(url, line as u32, column as u32) {
+                    let mut namespace = symbol.namespace;
+                    namespace.push(symbol.token.text);
+                    ret = Some(namespace);
+                }
+            }
+            _ => (),
+        }
+    }
+
+    ret_func.or(ret)
+}
+
 fn completion_keyword(line: usize, column: usize) -> Vec<CompletionItem> {
     let line = (line - 1) as u32;
-    let character = (column - 1) as u32;
+    let character = (column - 2) as u32;
     let start = Position { line, character };
     let end = Position { line, character };
 
