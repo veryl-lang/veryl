@@ -4,7 +4,7 @@ use std::cell::{Cell, RefCell};
 use std::fmt;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::veryl_grammar_trait as syntax_tree;
-use veryl_parser::veryl_token::Token;
+use veryl_parser::veryl_token::{Token, TokenRange};
 use veryl_parser::veryl_walker::VerylWalker;
 use veryl_parser::Stringifier;
 
@@ -21,6 +21,28 @@ pub fn new_symbol_id() -> SymbolId {
     })
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct DocComment(pub Vec<StrId>);
+
+impl DocComment {
+    pub fn format(&self, single_line: bool) -> String {
+        let mut ret = String::new();
+        for t in &self.0 {
+            let t = format!("{}", t);
+            let t = t.trim_start_matches("///");
+            ret.push_str(t);
+            if single_line {
+                break;
+            }
+        }
+        ret
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Symbol {
     pub token: Token,
@@ -32,7 +54,7 @@ pub struct Symbol {
     pub evaluated: Cell<Option<Evaluated>>,
     pub allow_unused: bool,
     pub public: bool,
-    pub doc_comment: Vec<StrId>,
+    pub doc_comment: DocComment,
 }
 
 impl Symbol {
@@ -41,7 +63,7 @@ impl Symbol {
         kind: SymbolKind,
         namespace: &Namespace,
         public: bool,
-        doc_comment: Vec<StrId>,
+        doc_comment: DocComment,
     ) -> Self {
         Self {
             token: *token,
@@ -98,7 +120,7 @@ pub enum SymbolKind {
     Parameter(ParameterProperty),
     Instance(InstanceProperty),
     Block,
-    Package,
+    Package(PackageProperty),
     Struct,
     StructMember(StructMemberProperty),
     Union,
@@ -125,7 +147,7 @@ impl SymbolKind {
             SymbolKind::Parameter(_) => "parameter".to_string(),
             SymbolKind::Instance(_) => "instance".to_string(),
             SymbolKind::Block => "block".to_string(),
-            SymbolKind::Package => "package".to_string(),
+            SymbolKind::Package(_) => "package".to_string(),
             SymbolKind::Struct => "struct".to_string(),
             SymbolKind::StructMember(_) => "struct member".to_string(),
             SymbolKind::Union => "union".to_string(),
@@ -199,7 +221,7 @@ impl fmt::Display for SymbolKind {
                 format!("instance ({type_name})")
             }
             SymbolKind::Block => "block".to_string(),
-            SymbolKind::Package => "package".to_string(),
+            SymbolKind::Package(_) => "package".to_string(),
             SymbolKind::Struct => "struct".to_string(),
             SymbolKind::StructMember(x) => {
                 format!("struct member ({})", x.r#type)
@@ -569,17 +591,20 @@ impl From<&syntax_tree::WithParameterItem> for Parameter {
 
 #[derive(Debug, Clone)]
 pub struct ModuleProperty {
+    pub range: TokenRange,
     pub parameters: Vec<Parameter>,
     pub ports: Vec<Port>,
 }
 
 #[derive(Debug, Clone)]
 pub struct InterfaceProperty {
+    pub range: TokenRange,
     pub parameters: Vec<Parameter>,
 }
 
 #[derive(Debug, Clone)]
 pub struct FunctionProperty {
+    pub range: TokenRange,
     pub parameters: Vec<Parameter>,
     pub ports: Vec<Port>,
 }
@@ -587,6 +612,11 @@ pub struct FunctionProperty {
 #[derive(Debug, Clone)]
 pub struct InstanceProperty {
     pub type_name: Vec<StrId>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PackageProperty {
+    pub range: TokenRange,
 }
 
 #[derive(Debug, Clone)]

@@ -62,7 +62,7 @@ impl CmdDoc {
                     SymbolKind::Interface(_) => {
                         interfaces.insert(text, symbol.clone());
                     }
-                    SymbolKind::Package => {
+                    SymbolKind::Package(_) => {
                         packages.insert(text, symbol.clone());
                     }
                     _ => (),
