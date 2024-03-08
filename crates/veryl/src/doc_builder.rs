@@ -320,7 +320,7 @@ impl DocBuilder {
         let mut file = File::create(file).into_diagnostic()?;
         write!(file, "{}", custom_css).into_diagnostic()?;
 
-        let favicon = include_bytes!("../../../support/logo/favicon.png");
+        let favicon = include_bytes!("../resource/favicon.png");
         let file = self.theme_dir.join("favicon.png");
         let mut file = File::create(file).into_diagnostic()?;
         file.write(favicon).into_diagnostic()?;

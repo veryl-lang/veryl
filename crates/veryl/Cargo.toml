@@ -9,7 +9,6 @@ license.workspace     = true
 readme.workspace      = true
 description.workspace = true
 edition               = "2021"
-include               = ["../../support/logo/favicon.png"]
 
 [package.metadata.release]
 tag = true
