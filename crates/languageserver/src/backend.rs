@@ -1,5 +1,6 @@
-use crate::server::{semantic_legend, MsgFromServer, MsgToServer, Server};
+use crate::server::{semantic_legend, MsgFromServer, MsgToServer, Server, ServerConfigItem};
 use async_channel::{unbounded, Receiver, Sender};
+use serde_json::Value;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
@@ -134,6 +135,17 @@ impl LanguageServer for Backend {
                     format!("did_change_watched_files: {change:?}"),
                 )
                 .await;
+        }
+    }
+
+    async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
+        if let Value::Object(x) = params.settings {
+            if let Some(x) = x.get("veryl-ls") {
+                if let Some(Value::Bool(x)) = x.get("useOperatorCompletion") {
+                    let x = ServerConfigItem::UseOperatorCompletion(*x);
+                    self.send(MsgToServer::DidChangeConfiguration(x)).await;
+                }
+            }
         }
     }
 

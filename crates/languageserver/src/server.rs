@@ -26,6 +26,7 @@ pub enum MsgToServer {
         text: String,
         version: i32,
     },
+    DidChangeConfiguration(ServerConfigItem),
     Completion {
         url: Url,
         line: usize,
@@ -75,6 +76,23 @@ pub struct BackgroundTask {
     progress: bool,
 }
 
+pub enum ServerConfigItem {
+    UseOperatorCompletion(bool),
+}
+
+#[derive(Default)]
+pub struct ServerConfig {
+    use_operator_completion: bool,
+}
+
+impl ServerConfig {
+    pub fn set(&mut self, item: ServerConfigItem) {
+        match item {
+            ServerConfigItem::UseOperatorCompletion(x) => self.use_operator_completion = x,
+        }
+    }
+}
+
 pub struct Server {
     client: Client,
     rcv: Receiver<MsgToServer>,
@@ -85,6 +103,7 @@ pub struct Server {
     cache_dir: String,
     lsp_token: i32,
     background_tasks: VecDeque<BackgroundTask>,
+    config: ServerConfig,
 }
 
 impl Server {
@@ -99,6 +118,7 @@ impl Server {
             cache_dir: Metadata::cache_path().to_string_lossy().to_string(),
             lsp_token: 0,
             background_tasks: VecDeque::new(),
+            config: ServerConfig::default(),
         }
     }
 
@@ -112,6 +132,7 @@ impl Server {
                     MsgToServer::DidChange { url, text, version } => {
                         self.did_change(&url, &text, version)
                     }
+                    MsgToServer::DidChangeConfiguration(x) => self.config.set(x),
                     MsgToServer::Completion {
                         url,
                         line,
@@ -195,11 +216,17 @@ impl Server {
     ) {
         let ret = if let Some(context) = context {
             match context.trigger_kind {
-                CompletionTriggerKind::TRIGGER_CHARACTER => completion_operator(
-                    line,
-                    column,
-                    context.trigger_character.as_ref().unwrap().as_str(),
-                ),
+                CompletionTriggerKind::TRIGGER_CHARACTER => {
+                    if self.config.use_operator_completion {
+                        completion_operator(
+                            line,
+                            column,
+                            context.trigger_character.as_ref().unwrap().as_str(),
+                        )
+                    } else {
+                        None
+                    }
+                }
                 CompletionTriggerKind::INVOKED => {
                     let mut items = if let Some(metadata) = self.get_metadata(url) {
                         completion_toplevel_entity(&metadata, line, column)
