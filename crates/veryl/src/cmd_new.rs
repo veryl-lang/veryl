@@ -20,14 +20,15 @@ impl CmdNew {
         }
 
         if let Some(name) = self.opt.path.file_name() {
-            let toml = Metadata::create_default_toml(&name.to_string_lossy());
+            let name = name.to_string_lossy();
+            let toml = Metadata::create_default_toml(&name).into_diagnostic()?;
 
             fs::create_dir_all(&self.opt.path).into_diagnostic()?;
             let mut file = File::create(self.opt.path.join("Veryl.toml")).into_diagnostic()?;
             write!(file, "{toml}").into_diagnostic()?;
             file.flush().into_diagnostic()?;
 
-            info!("Created \"{}\" project", name.to_string_lossy());
+            info!("Created \"{}\" project", name);
         } else {
             bail!("path \"{}\" is not valid", self.opt.path.to_string_lossy());
         }

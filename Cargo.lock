@@ -4418,6 +4418,7 @@ dependencies = [
  "git-repository",
  "log",
  "miette",
+ "once_cell",
  "regex",
  "semver",
  "serde",

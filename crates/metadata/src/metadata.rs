@@ -11,6 +11,7 @@ use crate::utils;
 use crate::MetadataError;
 use directories::ProjectDirs;
 use log::{debug, info};
+use once_cell::sync::Lazy;
 use regex::Regex;
 use semver::VersionReq;
 use serde::{Deserialize, Serialize};
@@ -63,6 +64,9 @@ pub struct Metadata {
     #[serde(skip)]
     pub lockfile: Lockfile,
 }
+
+static VALID_PROJECT_NAME: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^[a-zA-Z_][0-9a-zA-Z_]*$").unwrap());
 
 impl Metadata {
     pub fn search_from_current() -> Result<PathBuf, MetadataError> {
@@ -140,8 +144,7 @@ impl Metadata {
     }
 
     pub fn check(&self) -> Result<(), MetadataError> {
-        let valid_project_name = Regex::new(r"^[a-zA-Z_][0-9a-zA-Z_]*$").unwrap();
-        if !valid_project_name.is_match(&self.project.name) {
+        if !VALID_PROJECT_NAME.is_match(&self.project.name) {
             return Err(MetadataError::InvalidProjectName(self.project.name.clone()));
         }
 
@@ -254,12 +257,16 @@ impl Metadata {
         Ok(ret)
     }
 
-    pub fn create_default_toml(name: &str) -> String {
-        format!(
+    pub fn create_default_toml(name: &str) -> Result<String, MetadataError> {
+        if !VALID_PROJECT_NAME.is_match(name) {
+            return Err(MetadataError::InvalidProjectName(name.to_string()));
+        }
+
+        Ok(format!(
             r###"[project]
 name = "{name}"
 version = "0.1.0""###
-        )
+        ))
     }
 
     pub fn cache_dir() -> PathBuf {
