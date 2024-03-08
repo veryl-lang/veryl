@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl-metadata"
-version               = "0.7.1"
+version               = "0.7.2"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -27,7 +27,7 @@ thiserror      = {workspace = true}
 toml           = {workspace = true}
 url            = {workspace = true}
 uuid           = {version = "1.7", default-features = false, features = ["v5", "serde"]}
-veryl-parser   = {version = "0.7.1", path = "../parser"}
+veryl-parser   = {version = "0.7.2", path = "../parser"}
 walkdir        = "2.5.0"
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]

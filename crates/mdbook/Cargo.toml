@@ -1,6 +1,6 @@
 [package]
 name                  = "mdbook-veryl"
-version               = "0.7.1"
+version               = "0.7.2"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -21,4 +21,4 @@ pulldown-cmark = "0.10.0"
 regex          = {workspace = true}
 semver         = {workspace = true}
 serde_json     = {workspace = true}
-veryl-parser   = {version = "0.7.1", path = "../parser"}
+veryl-parser   = {version = "0.7.2", path = "../parser"}
