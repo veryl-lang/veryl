@@ -1,4 +1,4 @@
-module lfsr_galois #(
+pub module lfsr_galois #(
     parameter  SIZE  : u32    = 64         ,
     localparam tapvec: type   = logic<SIZE>,
     parameter  TAPVEC: tapvec = if SIZE == 2 {
