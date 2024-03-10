@@ -1,143 +1,87 @@
 pub module lfsr_galois #(
-    parameter  SIZE  : u32    = 64         ,
-    localparam tapvec: type   = logic<SIZE>,
-    parameter  TAPVEC: tapvec = if SIZE == 2 {
-        2'h3
-    } else if SIZE == 2 {
-        2'h3
-    } else if SIZE == 3 {
-        3'h5
-    } else if SIZE == 4 {
-        4'h9
-    } else if SIZE == 5 {
-        5'h12
-    } else if SIZE == 6 {
-        6'h21
-    } else if SIZE == 7 {
-        7'h41
-    } else if SIZE == 8 {
-        8'h8e
-    } else if SIZE == 9 {
-        9'h108
-    } else if SIZE == 10 {
-        10'h204
-    } else if SIZE == 11 {
-        11'h402
-    } else if SIZE == 12 {
-        12'h829
-    } else if SIZE == 13 {
-        13'h100d
-    } else if SIZE == 14 {
-        14'h2015
-    } else if SIZE == 15 {
-        15'h4001
-    } else if SIZE == 16 {
-        16'h8016
-    } else if SIZE == 17 {
-        17'h10004
-    } else if SIZE == 18 {
-        18'h20013
-    } else if SIZE == 19 {
-        19'h40013
-    } else if SIZE == 20 {
-        20'h80004
-    } else if SIZE == 21 {
-        21'h100002
-    } else if SIZE == 22 {
-        22'h200001
-    } else if SIZE == 23 {
-        23'h400010
-    } else if SIZE == 24 {
-        24'h80000d
-    } else if SIZE == 25 {
-        25'h1000004
-    } else if SIZE == 26 {
-        26'h2000023
-    } else if SIZE == 27 {
-        27'h4000013
-    } else if SIZE == 28 {
-        28'h8000004
-    } else if SIZE == 29 {
-        29'h10000002
-    } else if SIZE == 30 {
-        30'h20000029
-    } else if SIZE == 31 {
-        31'h40000004
-    } else if SIZE == 32 {
-        32'h80000057
-    } else if SIZE == 33 {
-        33'h100000029
-    } else if SIZE == 34 {
-        34'h200000073
-    } else if SIZE == 35 {
-        35'h400000002
-    } else if SIZE == 36 {
-        36'h80000003b
-    } else if SIZE == 37 {
-        37'h100000001f
-    } else if SIZE == 38 {
-        38'h2000000031
-    } else if SIZE == 39 {
-        39'h4000000008
-    } else if SIZE == 40 {
-        40'h800000001c
-    } else if SIZE == 41 {
-        41'h10000000004
-    } else if SIZE == 42 {
-        42'h2000000001f
-    } else if SIZE == 43 {
-        43'h4000000002c
-    } else if SIZE == 44 {
-        44'h80000000032
-    } else if SIZE == 45 {
-        45'h10000000000d
-    } else if SIZE == 46 {
-        46'h200000000097
-    } else if SIZE == 47 {
-        47'h400000000010
-    } else if SIZE == 48 {
-        48'h80000000005b
-    } else if SIZE == 49 {
-        49'h1000000000038
-    } else if SIZE == 50 {
-        50'h200000000000e
-    } else if SIZE == 51 {
-        51'h4000000000025
-    } else if SIZE == 52 {
-        52'h8000000000004
-    } else if SIZE == 53 {
-        53'h10000000000023
-    } else if SIZE == 54 {
-        54'h2000000000003e
-    } else if SIZE == 55 {
-        55'h40000000000023
-    } else if SIZE == 56 {
-        56'h8000000000004a
-    } else if SIZE == 57 {
-        57'h100000000000016
-    } else if SIZE == 58 {
-        58'h200000000000031
-    } else if SIZE == 59 {
-        59'h40000000000003d
-    } else if SIZE == 60 {
-        60'h800000000000001
-    } else if SIZE == 61 {
-        61'h1000000000000013
-    } else if SIZE == 62 {
-        62'h2000000000000034
-    } else if SIZE == 63 {
-        63'h4000000000000001
-    } else if SIZE == 64 {
-        64'h800000000000000d
-    } else {
-        '0
+    /// Size of the LFSR in bits
+    parameter  SIZE  : u32  = 64         ,
+    localparam tapvec: type = logic<SIZE>,
+    /// Bit-vector representing the taps of the LFSR.
+    /// Default values provided for `SIZE` in range [2, 64]
+    parameter TAPVEC: tapvec = case SIZE {
+        2      : 2'h3,
+        3      : 3'h5,
+        4      : 4'h9,
+        5      : 5'h12,
+        6      : 6'h21,
+        7      : 7'h41,
+        8      : 8'h8e,
+        9      : 9'h108,
+        10     : 10'h204,
+        11     : 11'h402,
+        12     : 12'h829,
+        13     : 13'h100d,
+        14     : 14'h2015,
+        15     : 15'h4001,
+        16     : 16'h8016,
+        17     : 17'h10004,
+        18     : 18'h20013,
+        19     : 19'h40013,
+        20     : 20'h80004,
+        21     : 21'h100002,
+        22     : 22'h200001,
+        23     : 23'h400010,
+        24     : 24'h80000d,
+        25     : 25'h1000004,
+        26     : 26'h2000023,
+        27     : 27'h4000013,
+        28     : 28'h8000004,
+        29     : 29'h10000002,
+        30     : 30'h20000029,
+        31     : 31'h40000004,
+        32     : 32'h80000057,
+        33     : 33'h100000029,
+        34     : 34'h200000073,
+        35     : 35'h400000002,
+        36     : 36'h80000003b,
+        37     : 37'h100000001f,
+        38     : 38'h2000000031,
+        39     : 39'h4000000008,
+        40     : 40'h800000001c,
+        41     : 41'h10000000004,
+        42     : 42'h2000000001f,
+        43     : 43'h4000000002c,
+        44     : 44'h80000000032,
+        45     : 45'h10000000000d,
+        46     : 46'h200000000097,
+        47     : 47'h400000000010,
+        48     : 48'h80000000005b,
+        49     : 49'h1000000000038,
+        50     : 50'h200000000000e,
+        51     : 51'h4000000000025,
+        52     : 52'h8000000000004,
+        53     : 53'h10000000000023,
+        54     : 54'h2000000000003e,
+        55     : 55'h40000000000023,
+        56     : 56'h8000000000004a,
+        57     : 57'h100000000000016,
+        58     : 58'h200000000000031,
+        59     : 59'h40000000000003d,
+        60     : 60'h800000000000001,
+        61     : 61'h1000000000000013,
+        62     : 62'h2000000000000034,
+        63     : 63'h4000000000000001,
+        64     : 64'h800000000000000d,
+        default       : '0,
     },
+
 ) (
-    i_clk   : input  logic      ,
-    i_en    : input  logic      ,
-    i_set   : input  logic      ,
-    i_setval: input  logic<SIZE>,
-    o_val   : output logic<SIZE>,
+    /// Clock
+    i_clk: input logic,
+    /// Enable - LFSR shifts only when enabled.  Active high.
+    i_en: input logic,
+    /// Flag to set value of LFSR.  Active High.
+    i_set: input logic,
+    /// Value which LFSR is set to when `i_set` is set.
+    i_setval: input logic<SIZE>,
+    /// LFSR value.
+    o_val: output logic<SIZE>,
 ) {
 
     var val_next: logic<SIZE>;
