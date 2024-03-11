@@ -327,6 +327,28 @@ impl SymbolTable {
                                 }
                             }
                         }
+                        SymbolKind::StructMember(x) => {
+                            if let TypeKind::UserDefined(ref x) = x.r#type.kind {
+                                let path = SymbolPath::new(x);
+                                if let Ok(symbol) = self.get(&path, &namespace) {
+                                    if let ResolveSymbol::Symbol(symbol) = symbol.found {
+                                        namespace = Namespace::new();
+                                        for path in &symbol.namespace.paths {
+                                            namespace.push(*path);
+                                        }
+                                        namespace.push(symbol.token.text);
+                                        inner = true;
+                                    } else {
+                                        unreachable!();
+                                    }
+                                } else {
+                                    return Ok(ResolveResult {
+                                        found: ResolveSymbol::External,
+                                        full_path,
+                                    });
+                                }
+                            }
+                        }
                         SymbolKind::Module(_) => {
                             if other_prj & !ret.public {
                                 return Err(ResolveError::new(
@@ -826,8 +848,13 @@ mod tests {
     package PackageA {
         localparam paramB: u32 = 1;
 
+        struct StructX {
+            memberY: logic,
+        }
+
         struct StructA {
             memberA: logic,
+            memberX: StructX,
         }
 
         enum EnumA: logic<2> {
@@ -1149,5 +1176,22 @@ mod tests {
         let symbol = symbol_table::get(&symbol_path, &namespace);
 
         assert!(symbol.is_err());
+    }
+
+    #[test]
+    fn nest_struct() {
+        parse();
+
+        let mut symbol_path = SymbolPath::default();
+        symbol_path.push(resource_table::get_str_id("memberB".to_string()).unwrap());
+        symbol_path.push(resource_table::get_str_id("memberX".to_string()).unwrap());
+        symbol_path.push(resource_table::get_str_id("memberY".to_string()).unwrap());
+
+        let mut namespace = Namespace::default();
+        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
+        let symbol = symbol_table::get(&symbol_path, &namespace);
+
+        assert!(symbol.is_ok());
+        check_namespace(symbol.unwrap().found, "prj::PackageA::StructX");
     }
 }
