@@ -84,6 +84,7 @@ InsideTerm            : /(?-u:\b)inside(?-u:\b)/                                
 InstTerm              : /(?-u:\b)inst(?-u:\b)/                                                                : Token;
 InterfaceTerm         : /(?-u:\b)interface(?-u:\b)/                                                           : Token;
 InTerm                : /(?-u:\b)in(?-u:\b)/                                                                  : Token;
+LetTerm               : /(?-u:\b)let(?-u:\b)/                                                                 : Token;
 LocalparamTerm        : /(?-u:\b)localparam(?-u:\b)/                                                          : Token;
 LogicTerm             : /(?-u:\b)logic(?-u:\b)/                                                               : Token;
 LsbTerm               : /(?-u:\b)lsb(?-u:\b)/                                                                 : Token;
@@ -196,6 +197,7 @@ InsideToken    : InsideTerm    : Token Comments;
 InstToken      : InstTerm      : Token Comments;
 InterfaceToken : InterfaceTerm : Token Comments;
 InToken        : InTerm        : Token Comments;
+LetToken       : LetTerm       : Token Comments;
 LocalparamToken: LocalparamTerm: Token Comments;
 LogicToken     : LogicTerm     : Token Comments;
 LsbToken       : LsbTerm       : Token Comments;
@@ -313,6 +315,7 @@ Input     : InputToken     : VerylToken;
 Inside    : InsideToken    : VerylToken;
 Inst      : InstToken      : VerylToken;
 Interface : InterfaceToken : VerylToken;
+Let       : LetToken       : VerylToken;
 Localparam: LocalparamToken: VerylToken;
 Logic     : LogicToken     : VerylToken;
 Lsb       : LsbToken       : VerylToken;
@@ -469,13 +472,16 @@ ArrayType: ScalarType [ Array ];
 // Statement
 // ----------------------------------------------------------------------------
 
-Statement: IdentifierStatement
+Statement: LetStatement
+         | IdentifierStatement
          | IfStatement
          | IfResetStatement
          | ReturnStatement
          | ForStatement
          | CaseStatement
          ;
+
+LetStatement: Let Identifier Colon ArrayType Equ Expression Semicolon;
 
 IdentifierStatement: ExpressionIdentifier ( FunctionCall | Assignment ) Semicolon;
 
@@ -509,7 +515,9 @@ AttributeItem: Identifier
 // Declaration
 // ----------------------------------------------------------------------------
 
-VarDeclaration: Var Identifier Colon ArrayType [ Equ Expression ] Semicolon;
+LetDeclaration: Let Identifier Colon ArrayType Equ Expression Semicolon;
+
+VarDeclaration: Var Identifier Colon ArrayType Semicolon;
 
 LocalparamDeclaration: Localparam Identifier Colon ( ArrayType Equ Expression | Type Equ TypeExpression ) Semicolon;
 
@@ -640,7 +648,8 @@ ModuleOptionalNamedBlock: [ Colon Identifier ] LBrace { ModuleGroup } RBrace;
 
 ModuleGroup: { Attribute } ( LBrace { ModuleGroup } RBrace | ModuleItem );
 
-ModuleItem: VarDeclaration
+ModuleItem: LetDeclaration 
+          | VarDeclaration
           | InstDeclaration
           | TypeDefDeclaration
           | LocalparamDeclaration
@@ -674,7 +683,8 @@ InterfaceOptionalNamedBlock: [ Colon Identifier ] LBrace { InterfaceGroup } RBra
 
 InterfaceGroup: { Attribute } ( LBrace { InterfaceGroup } RBrace | InterfaceItem );
 
-InterfaceItem: VarDeclaration
+InterfaceItem: LetDeclaration
+             | VarDeclaration
              | LocalparamDeclaration
              | ModportDeclaration
              | InterfaceIfDeclaration

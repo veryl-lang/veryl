@@ -5,6 +5,6 @@ module Module28 {
     var a: logic<10, 20>             ;
     var b: logic<WIDTH0 + 10, WIDTH1>;
 
-    var _x: logic = a[msb][msb:lsb + 1];
-    var _y: logic = b[msb - 3][msb + 5:lsb];
+    let _x: logic = a[msb][msb:lsb + 1];
+    let _y: logic = b[msb - 3][msb + 5:lsb];
 }

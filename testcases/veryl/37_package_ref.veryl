@@ -1,7 +1,7 @@
 module Module37 {
-    var _a: u32 = Package37::A;
-    var _b: u32 = Package37::B::C;
-    var _c: u32 = Package37::X();
+    let _a: u32 = Package37::A;
+    let _b: u32 = Package37::B::C;
+    let _c: u32 = Package37::X();
 }
 package Package37 {
     localparam A: u32 = 1;

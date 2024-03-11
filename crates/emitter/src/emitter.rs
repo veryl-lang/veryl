@@ -28,7 +28,6 @@ pub struct Emitter {
     single_line: bool,
     adjust_line: bool,
     in_always_ff: bool,
-    in_function: bool,
     in_generate: bool,
     in_direction_modport: bool,
     signed: bool,
@@ -55,7 +54,6 @@ impl Default for Emitter {
             single_line: false,
             adjust_line: false,
             in_always_ff: false,
-            in_function: false,
             in_generate: false,
             in_direction_modport: false,
             signed: false,
@@ -948,6 +946,25 @@ impl VerylWalker for Emitter {
         self.signed = false;
     }
 
+    /// Semantic action for non-terminal 'LetStatement'
+    fn let_statement(&mut self, arg: &LetStatement) {
+        self.scalar_type(&arg.array_type.scalar_type);
+        self.space(1);
+        self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.array_type.array_type_opt {
+            self.space(1);
+            self.array(&x.array);
+        }
+        self.str(";");
+        self.newline();
+        self.str(&arg.identifier.identifier_token.text());
+        self.space(1);
+        self.equ(&arg.equ);
+        self.space(1);
+        self.expression(&arg.expression);
+        self.semicolon(&arg.semicolon);
+    }
+
     /// Semantic action for non-terminal 'IdentifierStatement'
     fn identifier_statement(&mut self, arg: &IdentifierStatement) {
         self.expression_identifier(&arg.expression_identifier);
@@ -1250,6 +1267,27 @@ impl VerylWalker for Emitter {
         self.adjust_line = false;
     }
 
+    /// Semantic action for non-terminal 'LetDeclaration'
+    fn let_declaration(&mut self, arg: &LetDeclaration) {
+        self.scalar_type(&arg.array_type.scalar_type);
+        self.space(1);
+        self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.array_type.array_type_opt {
+            self.space(1);
+            self.array(&x.array);
+        }
+        self.str(";");
+        self.newline();
+        self.str("assign");
+        self.space(1);
+        self.str(&arg.identifier.identifier_token.text());
+        self.space(1);
+        self.equ(&arg.equ);
+        self.space(1);
+        self.expression(&arg.expression);
+        self.semicolon(&arg.semicolon);
+    }
+
     /// Semantic action for non-terminal 'VarDeclaration'
     fn var_declaration(&mut self, arg: &VarDeclaration) {
         self.scalar_type(&arg.array_type.scalar_type);
@@ -1258,19 +1296,6 @@ impl VerylWalker for Emitter {
         if let Some(ref x) = arg.array_type.array_type_opt {
             self.space(1);
             self.array(&x.array);
-        }
-        if let Some(ref x) = arg.var_declaration_opt {
-            self.str(";");
-            self.newline();
-            if !self.in_function {
-                self.str("assign");
-                self.space(1);
-            }
-            self.str(&arg.identifier.identifier_token.text());
-            self.space(1);
-            self.equ(&x.equ);
-            self.space(1);
-            self.expression(&x.expression);
         }
         self.semicolon(&arg.semicolon);
     }
@@ -1961,7 +1986,6 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'FunctionDeclaration'
     fn function_declaration(&mut self, arg: &FunctionDeclaration) {
-        self.in_function = true;
         if let Some(ref x) = arg.function_declaration_opt {
             self.str("module");
             self.space(1);
@@ -2003,7 +2027,6 @@ impl VerylWalker for Emitter {
         } else {
             self.token(&arg.r_brace.r_brace_token.replace("endfunction"));
         }
-        self.in_function = false;
     }
 
     /// Semantic action for non-terminal 'ImportDeclaration'

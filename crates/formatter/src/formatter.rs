@@ -540,6 +540,21 @@ impl VerylWalker for Formatter {
         }
     }
 
+    /// Semantic action for non-terminal 'LetStatement'
+    fn let_statement(&mut self, arg: &LetStatement) {
+        self.r#let(&arg.r#let);
+        self.space(1);
+        self.identifier(&arg.identifier);
+        self.colon(&arg.colon);
+        self.space(1);
+        self.array_type(&arg.array_type);
+        self.space(1);
+        self.equ(&arg.equ);
+        self.space(1);
+        self.expression(&arg.expression);
+        self.semicolon(&arg.semicolon);
+    }
+
     /// Semantic action for non-terminal 'Assignment'
     fn assignment(&mut self, arg: &Assignment) {
         self.space(1);
@@ -725,6 +740,21 @@ impl VerylWalker for Formatter {
         }
     }
 
+    /// Semantic action for non-terminal 'LetDeclaration'
+    fn let_declaration(&mut self, arg: &LetDeclaration) {
+        self.r#let(&arg.r#let);
+        self.space(1);
+        self.identifier(&arg.identifier);
+        self.colon(&arg.colon);
+        self.space(1);
+        self.array_type(&arg.array_type);
+        self.space(1);
+        self.equ(&arg.equ);
+        self.space(1);
+        self.expression(&arg.expression);
+        self.semicolon(&arg.semicolon);
+    }
+
     /// Semantic action for non-terminal 'VarDeclaration'
     fn var_declaration(&mut self, arg: &VarDeclaration) {
         self.var(&arg.var);
@@ -733,12 +763,6 @@ impl VerylWalker for Formatter {
         self.colon(&arg.colon);
         self.space(1);
         self.array_type(&arg.array_type);
-        if let Some(ref x) = arg.var_declaration_opt {
-            self.space(1);
-            self.equ(&x.equ);
-            self.space(1);
-            self.expression(&x.expression);
-        }
         self.semicolon(&arg.semicolon);
     }
 

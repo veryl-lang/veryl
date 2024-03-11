@@ -469,6 +469,19 @@ impl VerylWalker for Aligner {
         self.aligns[align_kind::ARRAY].finish_item();
     }
 
+    /// Semantic action for non-terminal 'LetStatement'
+    fn let_statement(&mut self, arg: &LetStatement) {
+        self.r#let(&arg.r#let);
+        self.aligns[align_kind::IDENTIFIER].start_item();
+        self.identifier(&arg.identifier);
+        self.aligns[align_kind::IDENTIFIER].finish_item();
+        self.colon(&arg.colon);
+        self.array_type(&arg.array_type);
+        self.equ(&arg.equ);
+        self.expression(&arg.expression);
+        self.semicolon(&arg.semicolon);
+    }
+
     /// Semantic action for non-terminal 'IdentifierStatement'
     fn identifier_statement(&mut self, arg: &IdentifierStatement) {
         self.aligns[align_kind::IDENTIFIER].start_item();
@@ -519,6 +532,19 @@ impl VerylWalker for Aligner {
         }
     }
 
+    /// Semantic action for non-terminal 'LetDeclaration'
+    fn let_declaration(&mut self, arg: &LetDeclaration) {
+        self.r#let(&arg.r#let);
+        self.aligns[align_kind::IDENTIFIER].start_item();
+        self.identifier(&arg.identifier);
+        self.aligns[align_kind::IDENTIFIER].finish_item();
+        self.colon(&arg.colon);
+        self.array_type(&arg.array_type);
+        self.equ(&arg.equ);
+        self.expression(&arg.expression);
+        self.semicolon(&arg.semicolon);
+    }
+
     /// Semantic action for non-terminal 'VarDeclaration'
     fn var_declaration(&mut self, arg: &VarDeclaration) {
         self.var(&arg.var);
@@ -527,10 +553,6 @@ impl VerylWalker for Aligner {
         self.aligns[align_kind::IDENTIFIER].finish_item();
         self.colon(&arg.colon);
         self.array_type(&arg.array_type);
-        if let Some(ref x) = arg.var_declaration_opt {
-            self.equ(&x.equ);
-            self.expression(&x.expression);
-        }
         self.semicolon(&arg.semicolon);
     }
 
