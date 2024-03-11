@@ -111,6 +111,16 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         Ok(())
     }
 
+    fn let_statement(&mut self, arg: &LetStatement) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            let r#type: SymType = arg.array_type.as_ref().into();
+            let property = VariableProperty { r#type };
+            let kind = SymbolKind::Variable(property);
+            self.insert_symbol(&arg.identifier.identifier_token, kind, false);
+        }
+        Ok(())
+    }
+
     fn for_statement(&mut self, arg: &ForStatement) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
@@ -125,6 +135,16 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 self.insert_symbol(&arg.identifier.identifier_token, kind, false);
             }
             HandlerPoint::After => self.namespace.pop(),
+        }
+        Ok(())
+    }
+
+    fn let_declaration(&mut self, arg: &LetDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            let r#type: SymType = arg.array_type.as_ref().into();
+            let property = VariableProperty { r#type };
+            let kind = SymbolKind::Variable(property);
+            self.insert_symbol(&arg.identifier.identifier_token, kind, false);
         }
         Ok(())
     }

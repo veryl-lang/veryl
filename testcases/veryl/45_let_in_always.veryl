@@ -1,0 +1,15 @@
+module Module45 {
+    var a: logic    ;
+    var b: logic<10>;
+    var c: logic<10>;
+
+    always_ff (a) {
+        let x: logic<10> = 1;
+        b = x * 1;
+    }
+
+    always_comb {
+        let y: logic<10> = 1;
+        c = y * 1;
+    }
+}
