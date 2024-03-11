@@ -453,6 +453,21 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
     },
+
+    #[diagnostic(
+        severity(Warning),
+        code(unused_return),
+        help("add variable assignment for function return"),
+        url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#unused_return")
+    )]
+    #[error("return value of {identifier} is unused")]
+    UnusedReturn {
+        identifier: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
 }
 
 impl AnalyzerError {
@@ -739,6 +754,14 @@ impl AnalyzerError {
 
     pub fn unused_variable(identifier: &str, source: &str, token: &VerylToken) -> Self {
         AnalyzerError::UnusedVariable {
+            identifier: identifier.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.token.into(),
+        }
+    }
+
+    pub fn unused_return(identifier: &str, source: &str, token: &VerylToken) -> Self {
+        AnalyzerError::UnusedReturn {
             identifier: identifier.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),

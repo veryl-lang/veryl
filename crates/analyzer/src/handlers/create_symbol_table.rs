@@ -405,12 +405,17 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                         }
                     }
                 }
+                let ret = arg
+                    .function_declaration_opt1
+                    .as_ref()
+                    .map(|x| (&*x.scalar_type).into());
                 let range =
                     TokenRange::new(&arg.function.function_token, &arg.r_brace.r_brace_token);
                 let property = FunctionProperty {
                     range,
                     parameters,
                     ports,
+                    ret,
                 };
                 self.insert_symbol(
                     &arg.identifier.identifier_token,

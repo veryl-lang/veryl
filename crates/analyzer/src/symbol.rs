@@ -607,6 +607,7 @@ pub struct FunctionProperty {
     pub range: TokenRange,
     pub parameters: Vec<Parameter>,
     pub ports: Vec<Port>,
+    pub ret: Option<Type>,
 }
 
 #[derive(Debug, Clone)]

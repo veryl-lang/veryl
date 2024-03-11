@@ -28,6 +28,44 @@ impl<'a> Handler for CheckFunction<'a> {
 }
 
 impl<'a> VerylGrammarTrait for CheckFunction<'a> {
+    fn identifier_statement(&mut self, arg: &IdentifierStatement) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            if let IdentifierStatementGroup::FunctionCall(_) = &*arg.identifier_statement_group {
+                // skip system function
+                if arg
+                    .expression_identifier
+                    .expression_identifier_opt
+                    .is_some()
+                {
+                    return Ok(());
+                }
+
+                if let Ok(symbol) = symbol_table::resolve(arg.expression_identifier.as_ref()) {
+                    if let ResolveSymbol::Symbol(symbol) = symbol.found {
+                        if let SymbolKind::Function(x) = symbol.kind {
+                            if x.ret.is_some() {
+                                let name = format!(
+                                    "{}",
+                                    SymbolPath::from(arg.expression_identifier.as_ref())
+                                        .as_slice()
+                                        .last()
+                                        .unwrap()
+                                );
+                                self.errors.push(AnalyzerError::unused_return(
+                                    &name,
+                                    self.text,
+                                    &arg.expression_identifier.identifier.identifier_token,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn factor(&mut self, arg: &Factor) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if let Factor::ExpressionIdentifierFactorOpt(x) = arg {
