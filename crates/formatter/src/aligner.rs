@@ -294,6 +294,17 @@ impl VerylWalker for Aligner {
         }
     }
 
+    /// Semantic action for non-terminal 'Expression11'
+    fn expression11(&mut self, arg: &Expression11) {
+        self.expression12(&arg.expression12);
+        for x in &arg.expression11_list {
+            self.space(1);
+            self.r#as(&x.r#as);
+            self.space(1);
+            self.scoped_identifier(&x.scoped_identifier);
+        }
+    }
+
     /// Semantic action for non-terminal 'ArgumentList'
     fn argument_list(&mut self, arg: &ArgumentList) {
         self.argument_item(&arg.argument_item);
