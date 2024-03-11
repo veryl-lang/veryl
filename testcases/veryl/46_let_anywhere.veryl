@@ -1,0 +1,30 @@
+module Module46 {
+    var a: logic    ;
+    var b: logic<10>;
+    var c: logic<10>;
+    var d: logic<10>;
+    var e: logic<10>;
+
+    always_ff (a) {
+        d = 1;
+        let x: logic<10> = 1;
+        b = x * 1;
+    }
+
+    always_comb {
+        e = 1;
+        let y: logic<10> = 1;
+        c = y * 1;
+    }
+
+    function FuncA (
+        a: input  logic<10>,
+        b: output logic<10>,
+        c: ref    logic<10>,
+    ) -> logic<10> {
+        c = a / 1;
+        let d: u32 = 1;
+        b = a + 1 + d;
+        return a + 2;
+    }
+}
