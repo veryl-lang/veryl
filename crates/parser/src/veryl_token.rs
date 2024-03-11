@@ -338,6 +338,7 @@ token_with_comments!(Inside);
 token_with_comments!(Inst);
 token_with_comments!(Interface);
 token_with_comments!(In);
+token_with_comments!(Let);
 token_with_comments!(Localparam);
 token_with_comments!(Logic);
 token_with_comments!(Lsb);

@@ -25,7 +25,7 @@ package Package17 {
         b: output logic<ParamX>,
         c: ref    logic<ParamX>,
     ) -> logic<ParamX> {
-        var d: u32 = 1;
+        let d: u32 = 1;
         b = a + 1 + d;
         c = a / 1;
         return a + 2;

@@ -24,49 +24,49 @@ fn comment() {
 #[test]
 fn number() {
     // integer
-    success("var a: u32 = 0123456789;");
-    success("var a: u32 = 0_1_23456789;");
-    success("var a: u32 = _0_1_23456789;"); // identifier
-    failure("var a: u32 = 0_1__23456789;");
+    success("let a: u32 = 0123456789;");
+    success("let a: u32 = 0_1_23456789;");
+    success("let a: u32 = _0_1_23456789;"); // identifier
+    failure("let a: u32 = 0_1__23456789;");
 
     // binary
-    success("var a: u32 = 32'b01xzXZ;");
-    success("var a: u32 = 32'b01_xz_XZ;");
-    failure("var a: u32 = 32'b01__xz_XZ;");
+    success("let a: u32 = 32'b01xzXZ;");
+    success("let a: u32 = 32'b01_xz_XZ;");
+    failure("let a: u32 = 32'b01__xz_XZ;");
 
     // octal
-    success("var a: u32 = 32'o01234567xzXZ;");
-    success("var a: u32 = 32'o01234567_xz_XZ;");
-    failure("var a: u32 = 32'o01234567__xz_XZ;");
+    success("let a: u32 = 32'o01234567xzXZ;");
+    success("let a: u32 = 32'o01234567_xz_XZ;");
+    failure("let a: u32 = 32'o01234567__xz_XZ;");
 
     // decimal
-    success("var a: u32 = 32'd0123456789xzXZ;");
-    success("var a: u32 = 32'd0123456789_xz_XZ;");
-    failure("var a: u32 = 32'd0123456789__xz_XZ;");
+    success("let a: u32 = 32'd0123456789xzXZ;");
+    success("let a: u32 = 32'd0123456789_xz_XZ;");
+    failure("let a: u32 = 32'd0123456789__xz_XZ;");
 
     // hex
-    success("var a: u32 = 32'h0123456789abcdefABCDEFxzXZ;");
-    success("var a: u32 = 32'h0123456789abcdefABCDEF_xz_XZ;");
-    failure("var a: u32 = 32'h0123456789abcdefABCDEF__xz_XZ;");
+    success("let a: u32 = 32'h0123456789abcdefABCDEFxzXZ;");
+    success("let a: u32 = 32'h0123456789abcdefABCDEF_xz_XZ;");
+    failure("let a: u32 = 32'h0123456789abcdefABCDEF__xz_XZ;");
 
     // all0, all1
-    success("var a: u32 = '0;");
-    success("var a: u32 = '1;");
-    failure("var a: u32 = '2;");
+    success("let a: u32 = '0;");
+    success("let a: u32 = '1;");
+    failure("let a: u32 = '2;");
 
     // floating point
-    success("var a: u32 = 0.1;");
-    success("var a: u32 = 0_1_23.4_5_67;");
-    failure("var a: u32 = 0_1__23.4_5_67;");
+    success("let a: u32 = 0.1;");
+    success("let a: u32 = 0_1_23.4_5_67;");
+    failure("let a: u32 = 0_1__23.4_5_67;");
 
     // exponent
-    success("var a: u32 = 0.1e10;");
-    success("var a: u32 = 0.1e+10;");
-    success("var a: u32 = 0.1e-10;");
-    success("var a: u32 = 0.1E+10;");
-    success("var a: u32 = 0.1E-10;");
-    failure("var a: u32 = 0.1e++10;");
-    failure("var a: u32 = 0.1e10.0;");
+    success("let a: u32 = 0.1e10;");
+    success("let a: u32 = 0.1e+10;");
+    success("let a: u32 = 0.1e-10;");
+    success("let a: u32 = 0.1E+10;");
+    success("let a: u32 = 0.1E-10;");
+    failure("let a: u32 = 0.1e++10;");
+    failure("let a: u32 = 0.1e10.0;");
 }
 
 #[test]
@@ -78,34 +78,34 @@ fn identifier() {
 
 #[test]
 fn expression() {
-    success("var a: u32 = 1 && 1 || 1 & 1 ^ 1 ~^ 1 ^~ 1 | 1;");
-    success("var a: u32 = 1 <: 1 <= 1 >: 1 >= 1 == 1 != 1 === 1 !== 1 ==? 1 !=? 1;");
-    success("var a: u32 = 1 << 1 >> 1 <<< 1 >>> 1;");
-    success("var a: u32 = 1 ** 1 * 1 / 1 % 1 + 1 - 1;");
-    success("var a: u32 = +-!~&|^~&~|~^^~1;");
-    success("var a: u32 = ( (1 && 1) || 1) & (1 ^ 1 ~^ 1) ^~ 1 | 1;");
-    failure("var a: u32 = ( (1 && 1) || 1 & (1 ^ 1 ~^ 1) ^~ 1 | 1;");
+    success("let a: u32 = 1 && 1 || 1 & 1 ^ 1 ~^ 1 ^~ 1 | 1;");
+    success("let a: u32 = 1 <: 1 <= 1 >: 1 >= 1 == 1 != 1 === 1 !== 1 ==? 1 !=? 1;");
+    success("let a: u32 = 1 << 1 >> 1 <<< 1 >>> 1;");
+    success("let a: u32 = 1 ** 1 * 1 / 1 % 1 + 1 - 1;");
+    success("let a: u32 = +-!~&|^~&~|~^^~1;");
+    success("let a: u32 = ( (1 && 1) || 1) & (1 ^ 1 ~^ 1) ^~ 1 | 1;");
+    failure("let a: u32 = ( (1 && 1) || 1 & (1 ^ 1 ~^ 1) ^~ 1 | 1;");
 }
 
 #[test]
 fn function_call() {
-    success("var a: u32 = a();");
-    success("var a: u32 = $a();");
-    success("var a: u32 = a.a.a();");
-    success("var a: u32 = a::a::a();");
-    success("var a: u32 = a(1, 1, 1);");
-    success("var a: u32 = a(1, 1, 1,);");
-    failure("var a: u32 = a(1 1, 1,);");
-    failure("var a: u32 = a::a::a.a.a();");
+    success("let a: u32 = a();");
+    success("let a: u32 = $a();");
+    success("let a: u32 = a.a.a();");
+    success("let a: u32 = a::a::a();");
+    success("let a: u32 = a(1, 1, 1);");
+    success("let a: u32 = a(1, 1, 1,);");
+    failure("let a: u32 = a(1 1, 1,);");
+    failure("let a: u32 = a::a::a.a.a();");
 }
 
 #[test]
 fn range() {
-    success("var a: u32 = a[1];");
-    success("var a: u32 = a[1:0];");
-    success("var a: u32 = a[1+:1];");
-    success("var a: u32 = a[1-:1];");
-    success("var a: u32 = a[1 step 1];");
+    success("let a: u32 = a[1];");
+    success("let a: u32 = a[1:0];");
+    success("let a: u32 = a[1+:1];");
+    success("let a: u32 = a[1-:1];");
+    success("let a: u32 = a[1 step 1];");
 }
 
 #[test]
