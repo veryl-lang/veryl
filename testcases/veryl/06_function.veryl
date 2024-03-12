@@ -1,5 +1,5 @@
 module Module06 {
-    localparam ParamX: u32 = 1;
+    local ParamX: u32 = 1;
 
     // function without parameter
     function FuncA (
@@ -15,7 +15,7 @@ module Module06 {
 
     // function with parameter
     function FuncB #(
-        parameter ParamX: u32 = 1,
+        param ParamX: u32 = 1,
     ) (
         a: input  logic<ParamX>,
         b: output logic<ParamX>,

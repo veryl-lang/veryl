@@ -4,7 +4,7 @@ module Module37 {
     let _c: u32 = Package37::X();
 }
 package Package37 {
-    localparam A: u32 = 1;
+    local A: u32 = 1;
 
     enum B: logic {
         C,

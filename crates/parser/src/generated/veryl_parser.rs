@@ -97,7 +97,7 @@ pub const TERMINALS: &[&str; 107] = &[
     /*  74 */ r"(?-u:\b)interface(?-u:\b)",
     /*  75 */ r"(?-u:\b)in(?-u:\b)",
     /*  76 */ r"(?-u:\b)let(?-u:\b)",
-    /*  77 */ r"(?-u:\b)localparam(?-u:\b)",
+    /*  77 */ r"(?-u:\b)local(?-u:\b)",
     /*  78 */ r"(?-u:\b)logic(?-u:\b)",
     /*  79 */ r"(?-u:\b)lsb(?-u:\b)",
     /*  80 */ r"(?-u:\b)modport(?-u:\b)",
@@ -107,7 +107,7 @@ pub const TERMINALS: &[&str; 107] = &[
     /*  84 */ r"(?-u:\b)output(?-u:\b)",
     /*  85 */ r"(?-u:\b)outside(?-u:\b)",
     /*  86 */ r"(?-u:\b)package(?-u:\b)",
-    /*  87 */ r"(?-u:\b)parameter(?-u:\b)",
+    /*  87 */ r"(?-u:\b)param(?-u:\b)",
     /*  88 */ r"(?-u:\b)posedge(?-u:\b)",
     /*  89 */ r"(?-u:\b)pub(?-u:\b)",
     /*  90 */ r"(?-u:\b)ref(?-u:\b)",
@@ -207,7 +207,7 @@ pub const TERMINAL_NAMES: &[&str; 107] = &[
     /*  74 */ "InterfaceTerm",
     /*  75 */ "InTerm",
     /*  76 */ "LetTerm",
-    /*  77 */ "LocalparamTerm",
+    /*  77 */ "LocalTerm",
     /*  78 */ "LogicTerm",
     /*  79 */ "LsbTerm",
     /*  80 */ "ModportTerm",
@@ -217,7 +217,7 @@ pub const TERMINAL_NAMES: &[&str; 107] = &[
     /*  84 */ "OutputTerm",
     /*  85 */ "OutsideTerm",
     /*  86 */ "PackageTerm",
-    /*  87 */ "ParameterTerm",
+    /*  87 */ "ParamTerm",
     /*  88 */ "PosedgeTerm",
     /*  89 */ "PubTerm",
     /*  90 */ "RefTerm",
@@ -321,7 +321,7 @@ const SCANNER_0: (&[&str; 5], &[TerminalIndex; 101]) = (
         74,  /* InterfaceTerm */
         75,  /* InTerm */
         76,  /* LetTerm */
-        77,  /* LocalparamTerm */
+        77,  /* LocalTerm */
         78,  /* LogicTerm */
         79,  /* LsbTerm */
         80,  /* ModportTerm */
@@ -331,7 +331,7 @@ const SCANNER_0: (&[&str; 5], &[TerminalIndex; 101]) = (
         84,  /* OutputTerm */
         85,  /* OutsideTerm */
         86,  /* PackageTerm */
-        87,  /* ParameterTerm */
+        87,  /* ParamTerm */
         88,  /* PosedgeTerm */
         89,  /* PubTerm */
         90,  /* RefTerm */
@@ -694,11 +694,11 @@ pub const NON_TERMINALS: &[&str; 591] = &[
     /* 335 */ "LetStatement",
     /* 336 */ "LetTerm",
     /* 337 */ "LetToken",
-    /* 338 */ "Localparam",
-    /* 339 */ "LocalparamDeclaration",
-    /* 340 */ "LocalparamDeclarationGroup",
-    /* 341 */ "LocalparamTerm",
-    /* 342 */ "LocalparamToken",
+    /* 338 */ "Local",
+    /* 339 */ "LocalDeclaration",
+    /* 340 */ "LocalDeclarationGroup",
+    /* 341 */ "LocalTerm",
+    /* 342 */ "LocalToken",
     /* 343 */ "Logic",
     /* 344 */ "LogicTerm",
     /* 345 */ "LogicToken",
@@ -803,9 +803,9 @@ pub const NON_TERMINALS: &[&str; 591] = &[
     /* 444 */ "PackageItem",
     /* 445 */ "PackageTerm",
     /* 446 */ "PackageToken",
-    /* 447 */ "Parameter",
-    /* 448 */ "ParameterTerm",
-    /* 449 */ "ParameterToken",
+    /* 447 */ "Param",
+    /* 448 */ "ParamTerm",
+    /* 449 */ "ParamToken",
     /* 450 */ "PlusColon",
     /* 451 */ "PlusColonTerm",
     /* 452 */ "PlusColonToken",
@@ -7511,19 +7511,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 591] = &[
         transitions: &[],
         k: 0,
     },
-    /* 338 - "Localparam" */
+    /* 338 - "Local" */
     LookaheadDFA {
         prod0: 277,
         transitions: &[],
         k: 0,
     },
-    /* 339 - "LocalparamDeclaration" */
+    /* 339 - "LocalDeclaration" */
     LookaheadDFA {
         prod0: 542,
         transitions: &[],
         k: 0,
     },
-    /* 340 - "LocalparamDeclarationGroup" */
+    /* 340 - "LocalDeclarationGroup" */
     LookaheadDFA {
         prod0: -1,
         transitions: &[
@@ -7544,13 +7544,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 591] = &[
         ],
         k: 1,
     },
-    /* 341 - "LocalparamTerm" */
+    /* 341 - "LocalTerm" */
     LookaheadDFA {
         prod0: 72,
         transitions: &[],
         k: 0,
     },
-    /* 342 - "LocalparamToken" */
+    /* 342 - "LocalToken" */
     LookaheadDFA {
         prod0: 176,
         transitions: &[],
@@ -8992,19 +8992,19 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 591] = &[
         transitions: &[],
         k: 0,
     },
-    /* 447 - "Parameter" */
+    /* 447 - "Param" */
     LookaheadDFA {
         prod0: 287,
         transitions: &[],
         k: 0,
     },
-    /* 448 - "ParameterTerm" */
+    /* 448 - "ParamTerm" */
     LookaheadDFA {
         prod0: 82,
         transitions: &[],
         k: 0,
     },
-    /* 449 - "ParameterToken" */
+    /* 449 - "ParamToken" */
     LookaheadDFA {
         prod0: 186,
         transitions: &[],
@@ -13487,7 +13487,7 @@ pub const PRODUCTIONS: &[Production; 839] = &[
         lhs: 336,
         production: &[ParseType::T(76)],
     },
-    // 72 - LocalparamTerm: /(?-u:\b)localparam(?-u:\b)/;
+    // 72 - LocalTerm: /(?-u:\b)local(?-u:\b)/;
     Production {
         lhs: 341,
         production: &[ParseType::T(77)],
@@ -13537,7 +13537,7 @@ pub const PRODUCTIONS: &[Production; 839] = &[
         lhs: 445,
         production: &[ParseType::T(86)],
     },
-    // 82 - ParameterTerm: /(?-u:\b)parameter(?-u:\b)/;
+    // 82 - ParamTerm: /(?-u:\b)param(?-u:\b)/;
     Production {
         lhs: 448,
         production: &[ParseType::T(87)],
@@ -14007,7 +14007,7 @@ pub const PRODUCTIONS: &[Production; 839] = &[
         lhs: 337,
         production: &[ParseType::N(82), ParseType::N(336)],
     },
-    // 176 - LocalparamToken: LocalparamTerm : crate::veryl_token::Token  Comments;
+    // 176 - LocalToken: LocalTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 342,
         production: &[ParseType::N(82), ParseType::N(341)],
@@ -14057,7 +14057,7 @@ pub const PRODUCTIONS: &[Production; 839] = &[
         lhs: 446,
         production: &[ParseType::N(82), ParseType::N(445)],
     },
-    // 186 - ParameterToken: ParameterTerm : crate::veryl_token::Token  Comments;
+    // 186 - ParamToken: ParamTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 449,
         production: &[ParseType::N(82), ParseType::N(448)],
@@ -14512,7 +14512,7 @@ pub const PRODUCTIONS: &[Production; 839] = &[
         lhs: 333,
         production: &[ParseType::N(337)],
     },
-    // 277 - Localparam: LocalparamToken : crate::veryl_token::VerylToken ;
+    // 277 - Local: LocalToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 338,
         production: &[ParseType::N(342)],
@@ -14562,7 +14562,7 @@ pub const PRODUCTIONS: &[Production; 839] = &[
         lhs: 436,
         production: &[ParseType::N(446)],
     },
-    // 287 - Parameter: ParameterToken : crate::veryl_token::VerylToken ;
+    // 287 - Param: ParamToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 447,
         production: &[ParseType::N(449)],
@@ -16009,7 +16009,7 @@ pub const PRODUCTIONS: &[Production; 839] = &[
             ParseType::N(569),
         ],
     },
-    // 542 - LocalparamDeclaration: Localparam Identifier Colon LocalparamDeclarationGroup Semicolon;
+    // 542 - LocalDeclaration: Local Identifier Colon LocalDeclarationGroup Semicolon;
     Production {
         lhs: 339,
         production: &[
@@ -16020,12 +16020,12 @@ pub const PRODUCTIONS: &[Production; 839] = &[
             ParseType::N(338),
         ],
     },
-    // 543 - LocalparamDeclarationGroup: ArrayType Equ Expression;
+    // 543 - LocalDeclarationGroup: ArrayType Equ Expression;
     Production {
         lhs: 340,
         production: &[ParseType::N(138), ParseType::N(126), ParseType::N(26)],
     },
-    // 544 - LocalparamDeclarationGroup: Type Equ TypeExpression;
+    // 544 - LocalDeclarationGroup: Type Equ TypeExpression;
     Production {
         lhs: 340,
         production: &[ParseType::N(553), ParseType::N(126), ParseType::N(551)],
@@ -16720,12 +16720,12 @@ pub const PRODUCTIONS: &[Production; 839] = &[
         lhs: 586,
         production: &[ParseType::N(553), ParseType::N(126), ParseType::N(551)],
     },
-    // 667 - WithParameterItemGroup: Parameter;
+    // 667 - WithParameterItemGroup: Param;
     Production {
         lhs: 585,
         production: &[ParseType::N(447)],
     },
-    // 668 - WithParameterItemGroup: Localparam;
+    // 668 - WithParameterItemGroup: Local;
     Production {
         lhs: 585,
         production: &[ParseType::N(338)],
@@ -17173,7 +17173,7 @@ pub const PRODUCTIONS: &[Production; 839] = &[
         lhs: 381,
         production: &[ParseType::N(552)],
     },
-    // 747 - ModuleItem: LocalparamDeclaration;
+    // 747 - ModuleItem: LocalDeclaration;
     Production {
         lhs: 381,
         production: &[ParseType::N(339)],
@@ -17436,7 +17436,7 @@ pub const PRODUCTIONS: &[Production; 839] = &[
         lhs: 313,
         production: &[ParseType::N(570)],
     },
-    // 792 - InterfaceItem: LocalparamDeclaration;
+    // 792 - InterfaceItem: LocalDeclaration;
     Production {
         lhs: 313,
         production: &[ParseType::N(339)],
@@ -17563,7 +17563,7 @@ pub const PRODUCTIONS: &[Production; 839] = &[
         lhs: 444,
         production: &[ParseType::N(570)],
     },
-    // 816 - PackageItem: LocalparamDeclaration;
+    // 816 - PackageItem: LocalDeclaration;
     Production {
         lhs: 444,
         production: &[ParseType::N(339)],

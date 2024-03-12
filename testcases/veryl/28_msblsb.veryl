@@ -1,6 +1,6 @@
 module Module28 {
-    localparam WIDTH0: u32 = 10;
-    localparam WIDTH1: u32 = 20;
+    local WIDTH0: u32 = 10;
+    local WIDTH1: u32 = 20;
 
     var a: logic<10, 20>             ;
     var b: logic<WIDTH0 + 10, WIDTH1>;

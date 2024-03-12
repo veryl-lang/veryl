@@ -214,7 +214,7 @@ impl<'a> VerylGrammarTrait for CheckIdentifier<'a> {
         Ok(())
     }
 
-    fn localparam_declaration(&mut self, arg: &LocalparamDeclaration) -> Result<(), ParolError> {
+    fn local_declaration(&mut self, arg: &LocalDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             self.check(&arg.identifier.identifier_token, Kind::Parameter);
         }

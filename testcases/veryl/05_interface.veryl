@@ -1,13 +1,13 @@
 // interface declaration
 interface Interface05 #(
     // interface parameter
-    parameter  a  : u32 = 1,
-    parameter  aa : u32 = 1,
-    localparam aaa: u32 = 1,
+    param a  : u32 = 1,
+    param aa : u32 = 1,
+    local aaa: u32 = 1,
 ) {
     // localparam declaration
-    localparam b : u32 = 1;
-    localparam bb: u64 = 1;
+    local b : u32 = 1;
+    local bb: u64 = 1;
 
     // variable declaration
     var c  : logic            ;

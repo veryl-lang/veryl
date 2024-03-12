@@ -78,7 +78,7 @@
 /*  69 */ InterfaceTerm: /(?-u:\b)interface(?-u:\b)/ : Token;
 /*  70 */ InTerm: /(?-u:\b)in(?-u:\b)/ : Token;
 /*  71 */ LetTerm: /(?-u:\b)let(?-u:\b)/ : Token;
-/*  72 */ LocalparamTerm: /(?-u:\b)localparam(?-u:\b)/ : Token;
+/*  72 */ LocalTerm: /(?-u:\b)local(?-u:\b)/ : Token;
 /*  73 */ LogicTerm: /(?-u:\b)logic(?-u:\b)/ : Token;
 /*  74 */ LsbTerm: /(?-u:\b)lsb(?-u:\b)/ : Token;
 /*  75 */ ModportTerm: /(?-u:\b)modport(?-u:\b)/ : Token;
@@ -88,7 +88,7 @@
 /*  79 */ OutputTerm: /(?-u:\b)output(?-u:\b)/ : Token;
 /*  80 */ OutsideTerm: /(?-u:\b)outside(?-u:\b)/ : Token;
 /*  81 */ PackageTerm: /(?-u:\b)package(?-u:\b)/ : Token;
-/*  82 */ ParameterTerm: /(?-u:\b)parameter(?-u:\b)/ : Token;
+/*  82 */ ParamTerm: /(?-u:\b)param(?-u:\b)/ : Token;
 /*  83 */ PosedgeTerm: /(?-u:\b)posedge(?-u:\b)/ : Token;
 /*  84 */ PubTerm: /(?-u:\b)pub(?-u:\b)/ : Token;
 /*  85 */ RefTerm: /(?-u:\b)ref(?-u:\b)/ : Token;
@@ -182,7 +182,7 @@
 /* 173 */ InterfaceToken: InterfaceTerm : Token Comments;
 /* 174 */ InToken: InTerm : Token Comments;
 /* 175 */ LetToken: LetTerm : Token Comments;
-/* 176 */ LocalparamToken: LocalparamTerm : Token Comments;
+/* 176 */ LocalToken: LocalTerm : Token Comments;
 /* 177 */ LogicToken: LogicTerm : Token Comments;
 /* 178 */ LsbToken: LsbTerm : Token Comments;
 /* 179 */ ModportToken: ModportTerm : Token Comments;
@@ -192,7 +192,7 @@
 /* 183 */ OutputToken: OutputTerm : Token Comments;
 /* 184 */ OutsideToken: OutsideTerm : Token Comments;
 /* 185 */ PackageToken: PackageTerm : Token Comments;
-/* 186 */ ParameterToken: ParameterTerm : Token Comments;
+/* 186 */ ParamToken: ParamTerm : Token Comments;
 /* 187 */ PosedgeToken: PosedgeTerm : Token Comments;
 /* 188 */ PubToken: PubTerm : Token Comments;
 /* 189 */ RefToken: RefTerm : Token Comments;
@@ -283,7 +283,7 @@
 /* 274 */ Inst: InstToken : VerylToken;
 /* 275 */ Interface: InterfaceToken : VerylToken;
 /* 276 */ Let: LetToken : VerylToken;
-/* 277 */ Localparam: LocalparamToken : VerylToken;
+/* 277 */ Local: LocalToken : VerylToken;
 /* 278 */ Logic: LogicToken : VerylToken;
 /* 279 */ Lsb: LsbToken : VerylToken;
 /* 280 */ Modport: ModportToken : VerylToken;
@@ -293,7 +293,7 @@
 /* 284 */ Output: OutputToken : VerylToken;
 /* 285 */ Outside: OutsideToken : VerylToken;
 /* 286 */ Package: PackageToken : VerylToken;
-/* 287 */ Parameter: ParameterToken : VerylToken;
+/* 287 */ Param: ParamToken : VerylToken;
 /* 288 */ Posedge: PosedgeToken : VerylToken;
 /* 289 */ Pub: PubToken : VerylToken;
 /* 290 */ Ref: RefToken : VerylToken;
@@ -548,9 +548,9 @@
 /* 539 */ AttributeItem: StringLiteral;
 /* 540 */ LetDeclaration: Let Identifier Colon ArrayType Equ Expression Semicolon;
 /* 541 */ VarDeclaration: Var Identifier Colon ArrayType Semicolon;
-/* 542 */ LocalparamDeclaration: Localparam Identifier Colon LocalparamDeclarationGroup Semicolon;
-/* 543 */ LocalparamDeclarationGroup: ArrayType Equ Expression;
-/* 544 */ LocalparamDeclarationGroup: Type Equ TypeExpression;
+/* 542 */ LocalDeclaration: Local Identifier Colon LocalDeclarationGroup Semicolon;
+/* 543 */ LocalDeclarationGroup: ArrayType Equ Expression;
+/* 544 */ LocalDeclarationGroup: Type Equ TypeExpression;
 /* 545 */ TypeDefDeclaration: Type Identifier Equ ArrayType Semicolon;
 /* 546 */ AlwaysFfDeclaration: AlwaysFf LParen AlwaysFfClock AlwaysFfDeclarationOpt /* Option */ RParen LBrace AlwaysFfDeclarationList /* Vec */ RBrace;
 /* 547 */ AlwaysFfDeclarationList /* Vec<T>::Push */: Statement AlwaysFfDeclarationList;
@@ -673,8 +673,8 @@
 /* 664 */ WithParameterItem: WithParameterItemGroup Identifier Colon WithParameterItemGroup0;
 /* 665 */ WithParameterItemGroup0: ArrayType Equ Expression;
 /* 666 */ WithParameterItemGroup0: Type Equ TypeExpression;
-/* 667 */ WithParameterItemGroup: Parameter;
-/* 668 */ WithParameterItemGroup: Localparam;
+/* 667 */ WithParameterItemGroup: Param;
+/* 668 */ WithParameterItemGroup: Local;
 /* 669 */ PortDeclaration: LParen PortDeclarationOpt /* Option */ RParen;
 /* 670 */ PortDeclarationOpt /* Option<T>::Some */: PortDeclarationList;
 /* 671 */ PortDeclarationOpt /* Option<T>::None */: ;
@@ -753,7 +753,7 @@
 /* 744 */ ModuleItem: VarDeclaration;
 /* 745 */ ModuleItem: InstDeclaration;
 /* 746 */ ModuleItem: TypeDefDeclaration;
-/* 747 */ ModuleItem: LocalparamDeclaration;
+/* 747 */ ModuleItem: LocalDeclaration;
 /* 748 */ ModuleItem: AlwaysFfDeclaration;
 /* 749 */ ModuleItem: AlwaysCombDeclaration;
 /* 750 */ ModuleItem: AssignDeclaration;
@@ -798,7 +798,7 @@
 /* 789 */ InterfaceGroupList /* Vec<T>::New */: ;
 /* 790 */ InterfaceItem: LetDeclaration;
 /* 791 */ InterfaceItem: VarDeclaration;
-/* 792 */ InterfaceItem: LocalparamDeclaration;
+/* 792 */ InterfaceItem: LocalDeclaration;
 /* 793 */ InterfaceItem: ModportDeclaration;
 /* 794 */ InterfaceItem: InterfaceIfDeclaration;
 /* 795 */ InterfaceItem: InterfaceForDeclaration;
@@ -822,7 +822,7 @@
 /* 813 */ PackageGroupList /* Vec<T>::Push */: Attribute PackageGroupList;
 /* 814 */ PackageGroupList /* Vec<T>::New */: ;
 /* 815 */ PackageItem: VarDeclaration;
-/* 816 */ PackageItem: LocalparamDeclaration;
+/* 816 */ PackageItem: LocalDeclaration;
 /* 817 */ PackageItem: TypeDefDeclaration;
 /* 818 */ PackageItem: EnumDeclaration;
 /* 819 */ PackageItem: StructUnionDeclaration;

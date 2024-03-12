@@ -380,8 +380,8 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'LocalparamTerm'
-    fn localparam_term(&mut self, _arg: &LocalparamTerm) -> Result<()> {
+    /// Semantic action for non-terminal 'LocalTerm'
+    fn local_term(&mut self, _arg: &LocalTerm) -> Result<()> {
         Ok(())
     }
 
@@ -430,8 +430,8 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'ParameterTerm'
-    fn parameter_term(&mut self, _arg: &ParameterTerm) -> Result<()> {
+    /// Semantic action for non-terminal 'ParamTerm'
+    fn param_term(&mut self, _arg: &ParamTerm) -> Result<()> {
         Ok(())
     }
 
@@ -890,8 +890,8 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'LocalparamToken'
-    fn localparam_token(&mut self, _arg: &LocalparamToken) -> Result<()> {
+    /// Semantic action for non-terminal 'LocalToken'
+    fn local_token(&mut self, _arg: &LocalToken) -> Result<()> {
         Ok(())
     }
 
@@ -940,8 +940,8 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'ParameterToken'
-    fn parameter_token(&mut self, _arg: &ParameterToken) -> Result<()> {
+    /// Semantic action for non-terminal 'ParamToken'
+    fn param_token(&mut self, _arg: &ParamToken) -> Result<()> {
         Ok(())
     }
 
@@ -1395,8 +1395,8 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'Localparam'
-    fn localparam(&mut self, _arg: &Localparam) -> Result<()> {
+    /// Semantic action for non-terminal 'Local'
+    fn local(&mut self, _arg: &Local) -> Result<()> {
         Ok(())
     }
 
@@ -1445,8 +1445,8 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'Parameter'
-    fn parameter(&mut self, _arg: &Parameter) -> Result<()> {
+    /// Semantic action for non-terminal 'Param'
+    fn param(&mut self, _arg: &Param) -> Result<()> {
         Ok(())
     }
 
@@ -1840,8 +1840,8 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'LocalparamDeclaration'
-    fn localparam_declaration(&mut self, _arg: &LocalparamDeclaration) -> Result<()> {
+    /// Semantic action for non-terminal 'LocalDeclaration'
+    fn local_declaration(&mut self, _arg: &LocalDeclaration) -> Result<()> {
         Ok(())
     }
 
@@ -2982,12 +2982,12 @@ pub struct AttributeItemStringLiteral {
 ///
 /// Type derived for production 543
 ///
-/// `LocalparamDeclarationGroup: ArrayType Equ Expression;`
+/// `LocalDeclarationGroup: ArrayType Equ Expression;`
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct LocalparamDeclarationGroupArrayTypeEquExpression {
+pub struct LocalDeclarationGroupArrayTypeEquExpression {
     pub array_type: Box<ArrayType>,
     pub equ: Box<Equ>,
     pub expression: Box<Expression>,
@@ -2996,12 +2996,12 @@ pub struct LocalparamDeclarationGroupArrayTypeEquExpression {
 ///
 /// Type derived for production 544
 ///
-/// `LocalparamDeclarationGroup: Type Equ TypeExpression;`
+/// `LocalDeclarationGroup: Type Equ TypeExpression;`
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct LocalparamDeclarationGroupTypeEquTypeExpression {
+pub struct LocalDeclarationGroupTypeEquTypeExpression {
     pub r#type: Box<Type>,
     pub equ: Box<Equ>,
     pub type_expression: Box<TypeExpression>,
@@ -3290,25 +3290,25 @@ pub struct WithParameterItemGroup0TypeEquTypeExpression {
 ///
 /// Type derived for production 667
 ///
-/// `WithParameterItemGroup: Parameter;`
+/// `WithParameterItemGroup: Param;`
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct WithParameterItemGroupParameter {
-    pub parameter: Box<Parameter>,
+pub struct WithParameterItemGroupParam {
+    pub param: Box<Param>,
 }
 
 ///
 /// Type derived for production 668
 ///
-/// `WithParameterItemGroup: Localparam;`
+/// `WithParameterItemGroup: Local;`
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct WithParameterItemGroupLocalparam {
-    pub localparam: Box<Localparam>,
+pub struct WithParameterItemGroupLocal {
+    pub local: Box<Local>,
 }
 
 ///
@@ -3549,13 +3549,13 @@ pub struct ModuleItemTypeDefDeclaration {
 ///
 /// Type derived for production 747
 ///
-/// `ModuleItem: LocalparamDeclaration;`
+/// `ModuleItem: LocalDeclaration;`
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleItemLocalparamDeclaration {
-    pub localparam_declaration: Box<LocalparamDeclaration>,
+pub struct ModuleItemLocalDeclaration {
+    pub local_declaration: Box<LocalDeclaration>,
 }
 
 ///
@@ -3755,13 +3755,13 @@ pub struct InterfaceItemVarDeclaration {
 ///
 /// Type derived for production 792
 ///
-/// `InterfaceItem: LocalparamDeclaration;`
+/// `InterfaceItem: LocalDeclaration;`
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct InterfaceItemLocalparamDeclaration {
-    pub localparam_declaration: Box<LocalparamDeclaration>,
+pub struct InterfaceItemLocalDeclaration {
+    pub local_declaration: Box<LocalDeclaration>,
 }
 
 ///
@@ -3925,13 +3925,13 @@ pub struct PackageItemVarDeclaration {
 ///
 /// Type derived for production 816
 ///
-/// `PackageItem: LocalparamDeclaration;`
+/// `PackageItem: LocalDeclaration;`
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct PackageItemLocalparamDeclaration {
-    pub localparam_declaration: Box<LocalparamDeclaration>,
+pub struct PackageItemLocalDeclaration {
+    pub local_declaration: Box<LocalDeclaration>,
 }
 
 ///
@@ -7558,7 +7558,7 @@ pub struct InterfaceIfDeclarationOpt {
 pub enum InterfaceItem {
     LetDeclaration(InterfaceItemLetDeclaration),
     VarDeclaration(InterfaceItemVarDeclaration),
-    LocalparamDeclaration(InterfaceItemLocalparamDeclaration),
+    LocalDeclaration(InterfaceItemLocalDeclaration),
     ModportDeclaration(InterfaceItemModportDeclaration),
     InterfaceIfDeclaration(InterfaceItemInterfaceIfDeclaration),
     InterfaceForDeclaration(InterfaceItemInterfaceForDeclaration),
@@ -7838,57 +7838,57 @@ pub struct LetToken {
 }
 
 ///
-/// Type derived for non-terminal Localparam
+/// Type derived for non-terminal Local
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct Localparam {
-    pub localparam_token: crate::veryl_token::VerylToken,
+pub struct Local {
+    pub local_token: crate::veryl_token::VerylToken,
 }
 
 ///
-/// Type derived for non-terminal LocalparamDeclaration
+/// Type derived for non-terminal LocalDeclaration
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct LocalparamDeclaration {
-    pub localparam: Box<Localparam>,
+pub struct LocalDeclaration {
+    pub local: Box<Local>,
     pub identifier: Box<Identifier>,
     pub colon: Box<Colon>,
-    pub localparam_declaration_group: Box<LocalparamDeclarationGroup>,
+    pub local_declaration_group: Box<LocalDeclarationGroup>,
     pub semicolon: Box<Semicolon>,
 }
 
 ///
-/// Type derived for non-terminal LocalparamDeclarationGroup
+/// Type derived for non-terminal LocalDeclarationGroup
 ///
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-pub enum LocalparamDeclarationGroup {
-    ArrayTypeEquExpression(LocalparamDeclarationGroupArrayTypeEquExpression),
-    TypeEquTypeExpression(LocalparamDeclarationGroupTypeEquTypeExpression),
+pub enum LocalDeclarationGroup {
+    ArrayTypeEquExpression(LocalDeclarationGroupArrayTypeEquExpression),
+    TypeEquTypeExpression(LocalDeclarationGroupTypeEquTypeExpression),
 }
 
 ///
-/// Type derived for non-terminal LocalparamTerm
+/// Type derived for non-terminal LocalTerm
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct LocalparamTerm {
-    pub localparam_term: crate::veryl_token::Token, /* (?-u:\b)localparam(?-u:\b) */
+pub struct LocalTerm {
+    pub local_term: crate::veryl_token::Token, /* (?-u:\b)local(?-u:\b) */
 }
 
 ///
-/// Type derived for non-terminal LocalparamToken
+/// Type derived for non-terminal LocalToken
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct LocalparamToken {
-    pub localparam_term: crate::veryl_token::Token,
+pub struct LocalToken {
+    pub local_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
 }
 
@@ -8320,7 +8320,7 @@ pub enum ModuleItem {
     VarDeclaration(ModuleItemVarDeclaration),
     InstDeclaration(ModuleItemInstDeclaration),
     TypeDefDeclaration(ModuleItemTypeDefDeclaration),
-    LocalparamDeclaration(ModuleItemLocalparamDeclaration),
+    LocalDeclaration(ModuleItemLocalDeclaration),
     AlwaysFfDeclaration(ModuleItemAlwaysFfDeclaration),
     AlwaysCombDeclaration(ModuleItemAlwaysCombDeclaration),
     AssignDeclaration(ModuleItemAssignDeclaration),
@@ -8996,7 +8996,7 @@ pub struct PackageGroupList {
 #[derive(Debug, Clone)]
 pub enum PackageItem {
     VarDeclaration(PackageItemVarDeclaration),
-    LocalparamDeclaration(PackageItemLocalparamDeclaration),
+    LocalDeclaration(PackageItemLocalDeclaration),
     TypeDefDeclaration(PackageItemTypeDefDeclaration),
     EnumDeclaration(PackageItemEnumDeclaration),
     StructUnionDeclaration(PackageItemStructUnionDeclaration),
@@ -9029,33 +9029,33 @@ pub struct PackageToken {
 }
 
 ///
-/// Type derived for non-terminal Parameter
+/// Type derived for non-terminal Param
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct Parameter {
-    pub parameter_token: crate::veryl_token::VerylToken,
+pub struct Param {
+    pub param_token: crate::veryl_token::VerylToken,
 }
 
 ///
-/// Type derived for non-terminal ParameterTerm
+/// Type derived for non-terminal ParamTerm
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct ParameterTerm {
-    pub parameter_term: crate::veryl_token::Token, /* (?-u:\b)parameter(?-u:\b) */
+pub struct ParamTerm {
+    pub param_term: crate::veryl_token::Token, /* (?-u:\b)param(?-u:\b) */
 }
 
 ///
-/// Type derived for non-terminal ParameterToken
+/// Type derived for non-terminal ParamToken
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct ParameterToken {
-    pub parameter_term: crate::veryl_token::Token,
+pub struct ParamToken {
+    pub param_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
 }
 
@@ -10503,8 +10503,8 @@ pub struct WithParameterItem {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum WithParameterItemGroup {
-    Parameter(WithParameterItemGroupParameter),
-    Localparam(WithParameterItemGroupLocalparam),
+    Param(WithParameterItemGroupParam),
+    Local(WithParameterItemGroupLocal),
 }
 
 ///
@@ -10906,11 +10906,11 @@ pub enum ASTType {
     LetStatement(LetStatement),
     LetTerm(LetTerm),
     LetToken(LetToken),
-    Localparam(Localparam),
-    LocalparamDeclaration(LocalparamDeclaration),
-    LocalparamDeclarationGroup(LocalparamDeclarationGroup),
-    LocalparamTerm(LocalparamTerm),
-    LocalparamToken(LocalparamToken),
+    Local(Local),
+    LocalDeclaration(LocalDeclaration),
+    LocalDeclarationGroup(LocalDeclarationGroup),
+    LocalTerm(LocalTerm),
+    LocalToken(LocalToken),
     Logic(Logic),
     LogicTerm(LogicTerm),
     LogicToken(LogicToken),
@@ -11015,9 +11015,9 @@ pub enum ASTType {
     PackageItem(PackageItem),
     PackageTerm(PackageTerm),
     PackageToken(PackageToken),
-    Parameter(Parameter),
-    ParameterTerm(ParameterTerm),
-    ParameterToken(ParameterToken),
+    Param(Param),
+    ParamTerm(ParamTerm),
+    ParamToken(ParamToken),
     PlusColon(PlusColon),
     PlusColonTerm(PlusColonTerm),
     PlusColonToken(PlusColonToken),
@@ -12619,20 +12619,20 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 72:
     ///
-    /// `LocalparamTerm: /(?-u:\b)localparam(?-u:\b)/ : Token;`
+    /// `LocalTerm: /(?-u:\b)local(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
-    fn localparam_term(&mut self, localparam_term: &ParseTreeType<'t>) -> Result<()> {
+    fn local_term(&mut self, local_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let localparam_term = localparam_term
+        let local_term = local_term
             .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
-        let localparam_term_built = LocalparamTerm { localparam_term };
+        let local_term_built = LocalTerm { local_term };
         // Calling user action here
-        self.user_grammar.localparam_term(&localparam_term_built)?;
-        self.push(ASTType::LocalparamTerm(localparam_term_built), context);
+        self.user_grammar.local_term(&local_term_built)?;
+        self.push(ASTType::LocalTerm(local_term_built), context);
         Ok(())
     }
 
@@ -12809,20 +12809,20 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 82:
     ///
-    /// `ParameterTerm: /(?-u:\b)parameter(?-u:\b)/ : Token;`
+    /// `ParamTerm: /(?-u:\b)param(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
-    fn parameter_term(&mut self, parameter_term: &ParseTreeType<'t>) -> Result<()> {
+    fn param_term(&mut self, param_term: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let parameter_term = parameter_term
+        let param_term = param_term
             .token()?
             .try_into()
             .map_err(parol_runtime::ParolError::UserError)?;
-        let parameter_term_built = ParameterTerm { parameter_term };
+        let param_term_built = ParamTerm { param_term };
         // Calling user action here
-        self.user_grammar.parameter_term(&parameter_term_built)?;
-        self.push(ASTType::ParameterTerm(parameter_term_built), context);
+        self.user_grammar.param_term(&param_term_built)?;
+        self.push(ASTType::ParamTerm(param_term_built), context);
         Ok(())
     }
 
@@ -15113,28 +15113,27 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 176:
     ///
-    /// `LocalparamToken: LocalparamTerm : Token Comments;`
+    /// `LocalToken: LocalTerm : Token Comments;`
     ///
     #[parol_runtime::function_name::named]
-    fn localparam_token(
+    fn local_token(
         &mut self,
-        _localparam_term: &ParseTreeType<'t>,
+        _local_term: &ParseTreeType<'t>,
         _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
-        let localparam_term = pop_item!(self, localparam_term, LocalparamTerm, context);
-        let localparam_token_built = LocalparamToken {
-            localparam_term: (&localparam_term)
+        let local_term = pop_item!(self, local_term, LocalTerm, context);
+        let local_token_built = LocalToken {
+            local_term: (&local_term)
                 .try_into()
                 .map_err(parol_runtime::ParolError::UserError)?,
             comments: Box::new(comments),
         };
         // Calling user action here
-        self.user_grammar
-            .localparam_token(&localparam_token_built)?;
-        self.push(ASTType::LocalparamToken(localparam_token_built), context);
+        self.user_grammar.local_token(&local_token_built)?;
+        self.push(ASTType::LocalToken(local_token_built), context);
         Ok(())
     }
 
@@ -15374,27 +15373,27 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 186:
     ///
-    /// `ParameterToken: ParameterTerm : Token Comments;`
+    /// `ParamToken: ParamTerm : Token Comments;`
     ///
     #[parol_runtime::function_name::named]
-    fn parameter_token(
+    fn param_token(
         &mut self,
-        _parameter_term: &ParseTreeType<'t>,
+        _param_term: &ParseTreeType<'t>,
         _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let comments = pop_item!(self, comments, Comments, context);
-        let parameter_term = pop_item!(self, parameter_term, ParameterTerm, context);
-        let parameter_token_built = ParameterToken {
-            parameter_term: (&parameter_term)
+        let param_term = pop_item!(self, param_term, ParamTerm, context);
+        let param_token_built = ParamToken {
+            param_term: (&param_term)
                 .try_into()
                 .map_err(parol_runtime::ParolError::UserError)?,
             comments: Box::new(comments),
         };
         // Calling user action here
-        self.user_grammar.parameter_token(&parameter_token_built)?;
-        self.push(ASTType::ParameterToken(parameter_token_built), context);
+        self.user_grammar.param_token(&param_token_built)?;
+        self.push(ASTType::ParamToken(param_token_built), context);
         Ok(())
     }
 
@@ -17323,21 +17322,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 277:
     ///
-    /// `Localparam: LocalparamToken : VerylToken;`
+    /// `Local: LocalToken : VerylToken;`
     ///
     #[parol_runtime::function_name::named]
-    fn localparam(&mut self, _localparam_token: &ParseTreeType<'t>) -> Result<()> {
+    fn local(&mut self, _local_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let localparam_token = pop_item!(self, localparam_token, LocalparamToken, context);
-        let localparam_built = Localparam {
-            localparam_token: (&localparam_token)
+        let local_token = pop_item!(self, local_token, LocalToken, context);
+        let local_built = Local {
+            local_token: (&local_token)
                 .try_into()
                 .map_err(parol_runtime::ParolError::UserError)?,
         };
         // Calling user action here
-        self.user_grammar.localparam(&localparam_built)?;
-        self.push(ASTType::Localparam(localparam_built), context);
+        self.user_grammar.local(&local_built)?;
+        self.push(ASTType::Local(local_built), context);
         Ok(())
     }
 
@@ -17523,21 +17522,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 287:
     ///
-    /// `Parameter: ParameterToken : VerylToken;`
+    /// `Param: ParamToken : VerylToken;`
     ///
     #[parol_runtime::function_name::named]
-    fn parameter(&mut self, _parameter_token: &ParseTreeType<'t>) -> Result<()> {
+    fn param(&mut self, _param_token: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let parameter_token = pop_item!(self, parameter_token, ParameterToken, context);
-        let parameter_built = Parameter {
-            parameter_token: (&parameter_token)
+        let param_token = pop_item!(self, param_token, ParamToken, context);
+        let param_built = Param {
+            param_token: (&param_token)
                 .try_into()
                 .map_err(parol_runtime::ParolError::UserError)?,
         };
         // Calling user action here
-        self.user_grammar.parameter(&parameter_built)?;
-        self.push(ASTType::Parameter(parameter_built), context);
+        self.user_grammar.param(&param_built)?;
+        self.push(ASTType::Param(param_built), context);
         Ok(())
     }
 
@@ -23259,52 +23258,49 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 542:
     ///
-    /// `LocalparamDeclaration: Localparam Identifier Colon LocalparamDeclarationGroup Semicolon;`
+    /// `LocalDeclaration: Local Identifier Colon LocalDeclarationGroup Semicolon;`
     ///
     #[parol_runtime::function_name::named]
-    fn localparam_declaration(
+    fn local_declaration(
         &mut self,
-        _localparam: &ParseTreeType<'t>,
+        _local: &ParseTreeType<'t>,
         _identifier: &ParseTreeType<'t>,
         _colon: &ParseTreeType<'t>,
-        _localparam_declaration_group: &ParseTreeType<'t>,
+        _local_declaration_group: &ParseTreeType<'t>,
         _semicolon: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let semicolon = pop_item!(self, semicolon, Semicolon, context);
-        let localparam_declaration_group = pop_item!(
+        let local_declaration_group = pop_item!(
             self,
-            localparam_declaration_group,
-            LocalparamDeclarationGroup,
+            local_declaration_group,
+            LocalDeclarationGroup,
             context
         );
         let colon = pop_item!(self, colon, Colon, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
-        let localparam = pop_item!(self, localparam, Localparam, context);
-        let localparam_declaration_built = LocalparamDeclaration {
-            localparam: Box::new(localparam),
+        let local = pop_item!(self, local, Local, context);
+        let local_declaration_built = LocalDeclaration {
+            local: Box::new(local),
             identifier: Box::new(identifier),
             colon: Box::new(colon),
-            localparam_declaration_group: Box::new(localparam_declaration_group),
+            local_declaration_group: Box::new(local_declaration_group),
             semicolon: Box::new(semicolon),
         };
         // Calling user action here
         self.user_grammar
-            .localparam_declaration(&localparam_declaration_built)?;
-        self.push(
-            ASTType::LocalparamDeclaration(localparam_declaration_built),
-            context,
-        );
+            .local_declaration(&local_declaration_built)?;
+        self.push(ASTType::LocalDeclaration(local_declaration_built), context);
         Ok(())
     }
 
     /// Semantic action for production 543:
     ///
-    /// `LocalparamDeclarationGroup: ArrayType Equ Expression;`
+    /// `LocalDeclarationGroup: ArrayType Equ Expression;`
     ///
     #[parol_runtime::function_name::named]
-    fn localparam_declaration_group_0(
+    fn local_declaration_group_0(
         &mut self,
         _array_type: &ParseTreeType<'t>,
         _equ: &ParseTreeType<'t>,
@@ -23315,18 +23311,15 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let expression = pop_item!(self, expression, Expression, context);
         let equ = pop_item!(self, equ, Equ, context);
         let array_type = pop_item!(self, array_type, ArrayType, context);
-        let localparam_declaration_group_0_built =
-            LocalparamDeclarationGroupArrayTypeEquExpression {
-                array_type: Box::new(array_type),
-                equ: Box::new(equ),
-                expression: Box::new(expression),
-            };
-        let localparam_declaration_group_0_built =
-            LocalparamDeclarationGroup::ArrayTypeEquExpression(
-                localparam_declaration_group_0_built,
-            );
+        let local_declaration_group_0_built = LocalDeclarationGroupArrayTypeEquExpression {
+            array_type: Box::new(array_type),
+            equ: Box::new(equ),
+            expression: Box::new(expression),
+        };
+        let local_declaration_group_0_built =
+            LocalDeclarationGroup::ArrayTypeEquExpression(local_declaration_group_0_built);
         self.push(
-            ASTType::LocalparamDeclarationGroup(localparam_declaration_group_0_built),
+            ASTType::LocalDeclarationGroup(local_declaration_group_0_built),
             context,
         );
         Ok(())
@@ -23334,10 +23327,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 544:
     ///
-    /// `LocalparamDeclarationGroup: Type Equ TypeExpression;`
+    /// `LocalDeclarationGroup: Type Equ TypeExpression;`
     ///
     #[parol_runtime::function_name::named]
-    fn localparam_declaration_group_1(
+    fn local_declaration_group_1(
         &mut self,
         _type: &ParseTreeType<'t>,
         _equ: &ParseTreeType<'t>,
@@ -23348,16 +23341,15 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let type_expression = pop_item!(self, type_expression, TypeExpression, context);
         let equ = pop_item!(self, equ, Equ, context);
         let r#type = pop_item!(self, r#type, Type, context);
-        let localparam_declaration_group_1_built =
-            LocalparamDeclarationGroupTypeEquTypeExpression {
-                r#type: Box::new(r#type),
-                equ: Box::new(equ),
-                type_expression: Box::new(type_expression),
-            };
-        let localparam_declaration_group_1_built =
-            LocalparamDeclarationGroup::TypeEquTypeExpression(localparam_declaration_group_1_built);
+        let local_declaration_group_1_built = LocalDeclarationGroupTypeEquTypeExpression {
+            r#type: Box::new(r#type),
+            equ: Box::new(equ),
+            type_expression: Box::new(type_expression),
+        };
+        let local_declaration_group_1_built =
+            LocalDeclarationGroup::TypeEquTypeExpression(local_declaration_group_1_built);
         self.push(
-            ASTType::LocalparamDeclarationGroup(localparam_declaration_group_1_built),
+            ASTType::LocalDeclarationGroup(local_declaration_group_1_built),
             context,
         );
         Ok(())
@@ -26277,18 +26269,18 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 667:
     ///
-    /// `WithParameterItemGroup: Parameter;`
+    /// `WithParameterItemGroup: Param;`
     ///
     #[parol_runtime::function_name::named]
-    fn with_parameter_item_group_0(&mut self, _parameter: &ParseTreeType<'t>) -> Result<()> {
+    fn with_parameter_item_group_0(&mut self, _param: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let parameter = pop_item!(self, parameter, Parameter, context);
-        let with_parameter_item_group_0_built = WithParameterItemGroupParameter {
-            parameter: Box::new(parameter),
+        let param = pop_item!(self, param, Param, context);
+        let with_parameter_item_group_0_built = WithParameterItemGroupParam {
+            param: Box::new(param),
         };
         let with_parameter_item_group_0_built =
-            WithParameterItemGroup::Parameter(with_parameter_item_group_0_built);
+            WithParameterItemGroup::Param(with_parameter_item_group_0_built);
         self.push(
             ASTType::WithParameterItemGroup(with_parameter_item_group_0_built),
             context,
@@ -26298,18 +26290,18 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 668:
     ///
-    /// `WithParameterItemGroup: Localparam;`
+    /// `WithParameterItemGroup: Local;`
     ///
     #[parol_runtime::function_name::named]
-    fn with_parameter_item_group_1(&mut self, _localparam: &ParseTreeType<'t>) -> Result<()> {
+    fn with_parameter_item_group_1(&mut self, _local: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let localparam = pop_item!(self, localparam, Localparam, context);
-        let with_parameter_item_group_1_built = WithParameterItemGroupLocalparam {
-            localparam: Box::new(localparam),
+        let local = pop_item!(self, local, Local, context);
+        let with_parameter_item_group_1_built = WithParameterItemGroupLocal {
+            local: Box::new(local),
         };
         let with_parameter_item_group_1_built =
-            WithParameterItemGroup::Localparam(with_parameter_item_group_1_built);
+            WithParameterItemGroup::Local(with_parameter_item_group_1_built);
         self.push(
             ASTType::WithParameterItemGroup(with_parameter_item_group_1_built),
             context,
@@ -28194,18 +28186,17 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 747:
     ///
-    /// `ModuleItem: LocalparamDeclaration;`
+    /// `ModuleItem: LocalDeclaration;`
     ///
     #[parol_runtime::function_name::named]
-    fn module_item_4(&mut self, _localparam_declaration: &ParseTreeType<'t>) -> Result<()> {
+    fn module_item_4(&mut self, _local_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let localparam_declaration =
-            pop_item!(self, localparam_declaration, LocalparamDeclaration, context);
-        let module_item_4_built = ModuleItemLocalparamDeclaration {
-            localparam_declaration: Box::new(localparam_declaration),
+        let local_declaration = pop_item!(self, local_declaration, LocalDeclaration, context);
+        let module_item_4_built = ModuleItemLocalDeclaration {
+            local_declaration: Box::new(local_declaration),
         };
-        let module_item_4_built = ModuleItem::LocalparamDeclaration(module_item_4_built);
+        let module_item_4_built = ModuleItem::LocalDeclaration(module_item_4_built);
         // Calling user action here
         self.user_grammar.module_item(&module_item_4_built)?;
         self.push(ASTType::ModuleItem(module_item_4_built), context);
@@ -29287,18 +29278,17 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 792:
     ///
-    /// `InterfaceItem: LocalparamDeclaration;`
+    /// `InterfaceItem: LocalDeclaration;`
     ///
     #[parol_runtime::function_name::named]
-    fn interface_item_2(&mut self, _localparam_declaration: &ParseTreeType<'t>) -> Result<()> {
+    fn interface_item_2(&mut self, _local_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let localparam_declaration =
-            pop_item!(self, localparam_declaration, LocalparamDeclaration, context);
-        let interface_item_2_built = InterfaceItemLocalparamDeclaration {
-            localparam_declaration: Box::new(localparam_declaration),
+        let local_declaration = pop_item!(self, local_declaration, LocalDeclaration, context);
+        let interface_item_2_built = InterfaceItemLocalDeclaration {
+            local_declaration: Box::new(local_declaration),
         };
-        let interface_item_2_built = InterfaceItem::LocalparamDeclaration(interface_item_2_built);
+        let interface_item_2_built = InterfaceItem::LocalDeclaration(interface_item_2_built);
         // Calling user action here
         self.user_grammar.interface_item(&interface_item_2_built)?;
         self.push(ASTType::InterfaceItem(interface_item_2_built), context);
@@ -29828,18 +29818,17 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 816:
     ///
-    /// `PackageItem: LocalparamDeclaration;`
+    /// `PackageItem: LocalDeclaration;`
     ///
     #[parol_runtime::function_name::named]
-    fn package_item_1(&mut self, _localparam_declaration: &ParseTreeType<'t>) -> Result<()> {
+    fn package_item_1(&mut self, _local_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let localparam_declaration =
-            pop_item!(self, localparam_declaration, LocalparamDeclaration, context);
-        let package_item_1_built = PackageItemLocalparamDeclaration {
-            localparam_declaration: Box::new(localparam_declaration),
+        let local_declaration = pop_item!(self, local_declaration, LocalDeclaration, context);
+        let package_item_1_built = PackageItemLocalDeclaration {
+            local_declaration: Box::new(local_declaration),
         };
-        let package_item_1_built = PackageItem::LocalparamDeclaration(package_item_1_built);
+        let package_item_1_built = PackageItem::LocalDeclaration(package_item_1_built);
         // Calling user action here
         self.user_grammar.package_item(&package_item_1_built)?;
         self.push(ASTType::PackageItem(package_item_1_built), context);
@@ -30407,7 +30396,7 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             69 => self.interface_term(&children[0]),
             70 => self.in_term(&children[0]),
             71 => self.let_term(&children[0]),
-            72 => self.localparam_term(&children[0]),
+            72 => self.local_term(&children[0]),
             73 => self.logic_term(&children[0]),
             74 => self.lsb_term(&children[0]),
             75 => self.modport_term(&children[0]),
@@ -30417,7 +30406,7 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             79 => self.output_term(&children[0]),
             80 => self.outside_term(&children[0]),
             81 => self.package_term(&children[0]),
-            82 => self.parameter_term(&children[0]),
+            82 => self.param_term(&children[0]),
             83 => self.posedge_term(&children[0]),
             84 => self.pub_term(&children[0]),
             85 => self.ref_term(&children[0]),
@@ -30511,7 +30500,7 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             173 => self.interface_token(&children[0], &children[1]),
             174 => self.in_token(&children[0], &children[1]),
             175 => self.let_token(&children[0], &children[1]),
-            176 => self.localparam_token(&children[0], &children[1]),
+            176 => self.local_token(&children[0], &children[1]),
             177 => self.logic_token(&children[0], &children[1]),
             178 => self.lsb_token(&children[0], &children[1]),
             179 => self.modport_token(&children[0], &children[1]),
@@ -30521,7 +30510,7 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             183 => self.output_token(&children[0], &children[1]),
             184 => self.outside_token(&children[0], &children[1]),
             185 => self.package_token(&children[0], &children[1]),
-            186 => self.parameter_token(&children[0], &children[1]),
+            186 => self.param_token(&children[0], &children[1]),
             187 => self.posedge_token(&children[0], &children[1]),
             188 => self.pub_token(&children[0], &children[1]),
             189 => self.ref_token(&children[0], &children[1]),
@@ -30612,7 +30601,7 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             274 => self.inst(&children[0]),
             275 => self.interface(&children[0]),
             276 => self.r#let(&children[0]),
-            277 => self.localparam(&children[0]),
+            277 => self.local(&children[0]),
             278 => self.logic(&children[0]),
             279 => self.lsb(&children[0]),
             280 => self.modport(&children[0]),
@@ -30622,7 +30611,7 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             284 => self.output(&children[0]),
             285 => self.outside(&children[0]),
             286 => self.package(&children[0]),
-            287 => self.parameter(&children[0]),
+            287 => self.param(&children[0]),
             288 => self.posedge(&children[0]),
             289 => self.r#pub(&children[0]),
             290 => self.r#ref(&children[0]),
@@ -31026,15 +31015,15 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[3],
                 &children[4],
             ),
-            542 => self.localparam_declaration(
+            542 => self.local_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
             ),
-            543 => self.localparam_declaration_group_0(&children[0], &children[1], &children[2]),
-            544 => self.localparam_declaration_group_1(&children[0], &children[1], &children[2]),
+            543 => self.local_declaration_group_0(&children[0], &children[1], &children[2]),
+            544 => self.local_declaration_group_1(&children[0], &children[1], &children[2]),
             545 => self.type_def_declaration(
                 &children[0],
                 &children[1],

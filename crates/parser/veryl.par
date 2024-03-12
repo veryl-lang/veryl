@@ -85,7 +85,7 @@ InstTerm              : /(?-u:\b)inst(?-u:\b)/                                  
 InterfaceTerm         : /(?-u:\b)interface(?-u:\b)/                                                           : Token;
 InTerm                : /(?-u:\b)in(?-u:\b)/                                                                  : Token;
 LetTerm               : /(?-u:\b)let(?-u:\b)/                                                                 : Token;
-LocalparamTerm        : /(?-u:\b)localparam(?-u:\b)/                                                          : Token;
+LocalTerm             : /(?-u:\b)local(?-u:\b)/                                                               : Token;
 LogicTerm             : /(?-u:\b)logic(?-u:\b)/                                                               : Token;
 LsbTerm               : /(?-u:\b)lsb(?-u:\b)/                                                                 : Token;
 ModportTerm           : /(?-u:\b)modport(?-u:\b)/                                                             : Token;
@@ -95,7 +95,7 @@ NegedgeTerm           : /(?-u:\b)negedge(?-u:\b)/                               
 OutputTerm            : /(?-u:\b)output(?-u:\b)/                                                              : Token;
 OutsideTerm           : /(?-u:\b)outside(?-u:\b)/                                                             : Token;
 PackageTerm           : /(?-u:\b)package(?-u:\b)/                                                             : Token;
-ParameterTerm         : /(?-u:\b)parameter(?-u:\b)/                                                           : Token;
+ParamTerm             : /(?-u:\b)param(?-u:\b)/                                                               : Token;
 PosedgeTerm           : /(?-u:\b)posedge(?-u:\b)/                                                             : Token;
 PubTerm               : /(?-u:\b)pub(?-u:\b)/                                                                 : Token;
 RefTerm               : /(?-u:\b)ref(?-u:\b)/                                                                 : Token;
@@ -198,7 +198,7 @@ InstToken      : InstTerm      : Token Comments;
 InterfaceToken : InterfaceTerm : Token Comments;
 InToken        : InTerm        : Token Comments;
 LetToken       : LetTerm       : Token Comments;
-LocalparamToken: LocalparamTerm: Token Comments;
+LocalToken     : LocalTerm     : Token Comments;
 LogicToken     : LogicTerm     : Token Comments;
 LsbToken       : LsbTerm       : Token Comments;
 ModportToken   : ModportTerm   : Token Comments;
@@ -208,7 +208,7 @@ NegedgeToken   : NegedgeTerm   : Token Comments;
 OutputToken    : OutputTerm    : Token Comments;
 OutsideToken   : OutsideTerm   : Token Comments;
 PackageToken   : PackageTerm   : Token Comments;
-ParameterToken : ParameterTerm : Token Comments;
+ParamToken     : ParamTerm     : Token Comments;
 PosedgeToken   : PosedgeTerm   : Token Comments;
 PubToken       : PubTerm       : Token Comments;
 RefToken       : RefTerm       : Token Comments;
@@ -316,7 +316,7 @@ Inside    : InsideToken    : VerylToken;
 Inst      : InstToken      : VerylToken;
 Interface : InterfaceToken : VerylToken;
 Let       : LetToken       : VerylToken;
-Localparam: LocalparamToken: VerylToken;
+Local     : LocalToken     : VerylToken;
 Logic     : LogicToken     : VerylToken;
 Lsb       : LsbToken       : VerylToken;
 Modport   : ModportToken   : VerylToken;
@@ -326,7 +326,7 @@ Negedge   : NegedgeToken   : VerylToken;
 Output    : OutputToken    : VerylToken;
 Outside   : OutsideToken   : VerylToken;
 Package   : PackageToken   : VerylToken;
-Parameter : ParameterToken : VerylToken;
+Param     : ParamToken     : VerylToken;
 Posedge   : PosedgeToken   : VerylToken;
 Pub       : PubToken       : VerylToken;
 Ref       : RefToken       : VerylToken;
@@ -519,7 +519,7 @@ LetDeclaration: Let Identifier Colon ArrayType Equ Expression Semicolon;
 
 VarDeclaration: Var Identifier Colon ArrayType Semicolon;
 
-LocalparamDeclaration: Localparam Identifier Colon ( ArrayType Equ Expression | Type Equ TypeExpression ) Semicolon;
+LocalDeclaration: Local Identifier Colon ( ArrayType Equ Expression | Type Equ TypeExpression ) Semicolon;
 
 TypeDefDeclaration: Type Identifier Equ ArrayType Semicolon;
 
@@ -593,7 +593,7 @@ WithParameterList: WithParameterGroup { Comma WithParameterGroup } [ Comma ];
 
 WithParameterGroup: { Attribute } ( LBrace WithParameterList RBrace | WithParameterItem );
 
-WithParameterItem: ( Parameter | Localparam ) Identifier Colon ( ArrayType Equ Expression | Type Equ TypeExpression );
+WithParameterItem: ( Param | Local ) Identifier Colon ( ArrayType Equ Expression | Type Equ TypeExpression );
 
 // ----------------------------------------------------------------------------
 // PortDeclaration
@@ -652,7 +652,7 @@ ModuleItem: LetDeclaration
           | VarDeclaration
           | InstDeclaration
           | TypeDefDeclaration
-          | LocalparamDeclaration
+          | LocalDeclaration
           | AlwaysFfDeclaration
           | AlwaysCombDeclaration
           | AssignDeclaration
@@ -685,7 +685,7 @@ InterfaceGroup: { Attribute } ( LBrace { InterfaceGroup } RBrace | InterfaceItem
 
 InterfaceItem: LetDeclaration
              | VarDeclaration
-             | LocalparamDeclaration
+             | LocalDeclaration
              | ModportDeclaration
              | InterfaceIfDeclaration
              | InterfaceForDeclaration
@@ -707,7 +707,7 @@ PackageDeclaration: [ Pub ] Package Identifier LBrace { PackageGroup } RBrace;
 PackageGroup: { Attribute } ( LBrace { PackageGroup } RBrace | PackageItem );
 
 PackageItem: VarDeclaration
-           | LocalparamDeclaration
+           | LocalDeclaration
            | TypeDefDeclaration
            | EnumDeclaration
            | StructUnionDeclaration
