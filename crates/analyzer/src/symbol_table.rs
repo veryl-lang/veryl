@@ -823,20 +823,20 @@ mod tests {
 
     const CODE: &str = r##"
     module ModuleA #(
-        parameter paramA: u32 = 1,
+        param paramA: u32 = 1,
     ) (
         portA: input logic<10>,
     ) {
-        localparam paramB: u32 = 1;
+        local paramB: u32 = 1;
 
         var memberA: logic;
         var memberB: PackageA::StructA;
     }
 
     interface InterfaceA #(
-        parameter paramA: u32 = 1,
+        param paramA: u32 = 1,
     ) {
-        localparam paramB: u32 = 1;
+        local paramB: u32 = 1;
 
         var memberA: logic;
 
@@ -846,7 +846,7 @@ mod tests {
     }
 
     package PackageA {
-        localparam paramB: u32 = 1;
+        local paramB: u32 = 1;
 
         struct StructX {
             memberY: logic,

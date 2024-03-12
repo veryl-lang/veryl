@@ -521,6 +521,11 @@ impl VerylWalker for Emitter {
         self.veryl_token(&arg.i64_token.replace("longint signed"));
     }
 
+    /// Semantic action for non-terminal 'Local'
+    fn local(&mut self, arg: &Local) {
+        self.veryl_token(&arg.local_token.replace("localparam"));
+    }
+
     /// Semantic action for non-terminal 'Lsb'
     fn lsb(&mut self, arg: &Lsb) {
         self.token(&arg.lsb_token.replace("0"));
@@ -532,6 +537,11 @@ impl VerylWalker for Emitter {
         self.str("((");
         self.expression(&expression);
         self.str(") - 1)");
+    }
+
+    /// Semantic action for non-terminal 'Param'
+    fn param(&mut self, arg: &Param) {
+        self.veryl_token(&arg.param_token.replace("parameter"));
     }
 
     /// Semantic action for non-terminal 'U32'
@@ -1429,12 +1439,12 @@ impl VerylWalker for Emitter {
         self.semicolon(&arg.semicolon);
     }
 
-    /// Semantic action for non-terminal 'LocalparamDeclaration'
-    fn localparam_declaration(&mut self, arg: &LocalparamDeclaration) {
-        self.localparam(&arg.localparam);
+    /// Semantic action for non-terminal 'LocalDeclaration'
+    fn local_declaration(&mut self, arg: &LocalDeclaration) {
+        self.local(&arg.local);
         self.space(1);
-        match &*arg.localparam_declaration_group {
-            LocalparamDeclarationGroup::ArrayTypeEquExpression(x) => {
+        match &*arg.local_declaration_group {
+            LocalDeclarationGroup::ArrayTypeEquExpression(x) => {
                 if !self.is_implicit_scalar_type(&x.array_type.scalar_type) {
                     self.scalar_type(&x.array_type.scalar_type);
                     self.space(1);
@@ -1449,7 +1459,7 @@ impl VerylWalker for Emitter {
                 self.space(1);
                 self.expression(&x.expression);
             }
-            LocalparamDeclarationGroup::TypeEquTypeExpression(x) => {
+            LocalDeclarationGroup::TypeEquTypeExpression(x) => {
                 if !self.is_implicit_type() {
                     self.r#type(&x.r#type);
                     self.space(1);
@@ -1464,7 +1474,7 @@ impl VerylWalker for Emitter {
         self.semicolon(&arg.semicolon);
     }
 
-    /// Semantic action for non-terminal 'LocalparamDeclaration'
+    /// Semantic action for non-terminal 'TypeDefDeclaration'
     fn type_def_declaration(&mut self, arg: &TypeDefDeclaration) {
         self.token(&arg.r#type.type_token.replace("typedef"));
         self.space(1);
@@ -2032,8 +2042,8 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'WithParameterItem'
     fn with_parameter_item(&mut self, arg: &WithParameterItem) {
         match &*arg.with_parameter_item_group {
-            WithParameterItemGroup::Parameter(x) => self.parameter(&x.parameter),
-            WithParameterItemGroup::Localparam(x) => self.localparam(&x.localparam),
+            WithParameterItemGroup::Param(x) => self.param(&x.param),
+            WithParameterItemGroup::Local(x) => self.local(&x.local),
         };
         self.space(1);
         match &*arg.with_parameter_item_group0 {

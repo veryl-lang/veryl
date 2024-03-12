@@ -4,8 +4,8 @@ module Module42 (
     i_d    : input  logic,
     o_d    : output logic,
 ) {
-    localparam a: u32 = $sv::pkg::paramA;
-    //localparam b: u32 = pkg::paramA;
+    local a: u32 = $sv::pkg::paramA;
+    //local b: u32 = pkg::paramA;
 
     inst u0: $sv::delay (
         i_clk    ,

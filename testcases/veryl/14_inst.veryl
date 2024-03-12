@@ -37,6 +37,6 @@ module Module14C (
 ) {}
 
 interface InterfaceA #(
-    parameter a: u32 = 1,
-    parameter b: u32 = 1,
+    param a: u32 = 1,
+    param b: u32 = 1,
 ) {}

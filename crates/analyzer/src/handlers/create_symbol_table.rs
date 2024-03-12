@@ -159,11 +159,11 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         Ok(())
     }
 
-    fn localparam_declaration(&mut self, arg: &LocalparamDeclaration) -> Result<(), ParolError> {
+    fn local_declaration(&mut self, arg: &LocalDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let token = arg.identifier.identifier_token.token;
-            let property = match &*arg.localparam_declaration_group {
-                LocalparamDeclarationGroup::ArrayTypeEquExpression(x) => {
+            let property = match &*arg.local_declaration_group {
+                LocalDeclarationGroup::ArrayTypeEquExpression(x) => {
                     let r#type: SymType = x.array_type.as_ref().into();
                     let value = ParameterValue::Expression(*x.expression.clone());
                     ParameterProperty {
@@ -173,7 +173,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                         value,
                     }
                 }
-                LocalparamDeclarationGroup::TypeEquTypeExpression(x) => {
+                LocalDeclarationGroup::TypeEquTypeExpression(x) => {
                     let r#type: SymType = SymType {
                         modifier: vec![],
                         kind: TypeKind::Type,
@@ -322,8 +322,8 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         if let HandlerPoint::Before = self.point {
             let token = arg.identifier.identifier_token.token;
             let scope = match &*arg.with_parameter_item_group {
-                WithParameterItemGroup::Parameter(_) => ParameterScope::Global,
-                WithParameterItemGroup::Localparam(_) => ParameterScope::Local,
+                WithParameterItemGroup::Param(_) => ParameterScope::Global,
+                WithParameterItemGroup::Local(_) => ParameterScope::Local,
             };
             let property = match &*arg.with_parameter_item_group0 {
                 WithParameterItemGroup0::ArrayTypeEquExpression(x) => {

@@ -550,8 +550,8 @@ impl From<&syntax_tree::WithParameterItem> for Parameter {
     fn from(value: &syntax_tree::WithParameterItem) -> Self {
         let token = value.identifier.identifier_token.token;
         let scope = match &*value.with_parameter_item_group {
-            syntax_tree::WithParameterItemGroup::Parameter(_) => ParameterScope::Global,
-            syntax_tree::WithParameterItemGroup::Localparam(_) => ParameterScope::Local,
+            syntax_tree::WithParameterItemGroup::Param(_) => ParameterScope::Global,
+            syntax_tree::WithParameterItemGroup::Local(_) => ParameterScope::Local,
         };
         match &*value.with_parameter_item_group0 {
             syntax_tree::WithParameterItemGroup0::ArrayTypeEquExpression(x) => {

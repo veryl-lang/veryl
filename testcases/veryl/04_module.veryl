@@ -1,9 +1,9 @@
 // module declaration
 module Module04 #(
     // module parameter
-    parameter  a  : u32  = 1        ,
-    localparam aa : u32  = 1        ,
-    localparam aaa: type = logic<10>,
+    param a  : u32  = 1        ,
+    local aa : u32  = 1        ,
+    local aaa: type = logic<10>,
 ) (
     // module port
     b    : input  logic    <10>,
@@ -13,8 +13,8 @@ module Module04 #(
     bbbbb: modport Interface04::d,
 ) {
     // localparam declaration
-    localparam c : u32 = 1;
-    localparam cc: u64 = 1;
+    local c : u32 = 1;
+    local cc: u64 = 1;
 
     // variable declaration
     var _d  : logic        ;

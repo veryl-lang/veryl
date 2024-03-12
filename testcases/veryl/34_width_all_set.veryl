@@ -1,10 +1,10 @@
 module Module34 {
-    localparam a0: u32 = '0;
-    localparam a1: u32 = '1;
-    localparam a2: u32 = 'x;
-    localparam a3: u32 = 'z;
-    localparam a4: u32 = 10'0;
-    localparam a5: u32 = 10'1;
-    localparam a6: u32 = 10'x;
-    localparam a7: u32 = 10'z;
+    local a0: u32 = '0;
+    local a1: u32 = '1;
+    local a2: u32 = 'x;
+    local a3: u32 = 'z;
+    local a4: u32 = 10'0;
+    local a5: u32 = 10'1;
+    local a6: u32 = 10'x;
+    local a7: u32 = 10'z;
 }

@@ -19,5 +19,5 @@ package Package19 {
 }
 
 package PackageA {
-    localparam A: u32 = 0;
+    local A: u32 = 0;
 }

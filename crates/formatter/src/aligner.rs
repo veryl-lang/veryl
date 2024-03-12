@@ -548,20 +548,20 @@ impl VerylWalker for Aligner {
         self.semicolon(&arg.semicolon);
     }
 
-    /// Semantic action for non-terminal 'LocalparamDeclaration'
-    fn localparam_declaration(&mut self, arg: &LocalparamDeclaration) {
-        self.localparam(&arg.localparam);
+    /// Semantic action for non-terminal 'LocalDeclaration'
+    fn local_declaration(&mut self, arg: &LocalDeclaration) {
+        self.local(&arg.local);
         self.aligns[align_kind::IDENTIFIER].start_item();
         self.identifier(&arg.identifier);
         self.aligns[align_kind::IDENTIFIER].finish_item();
         self.colon(&arg.colon);
-        match &*arg.localparam_declaration_group {
-            LocalparamDeclarationGroup::ArrayTypeEquExpression(x) => {
+        match &*arg.local_declaration_group {
+            LocalDeclarationGroup::ArrayTypeEquExpression(x) => {
                 self.array_type(&x.array_type);
                 self.equ(&x.equ);
                 self.expression(&x.expression);
             }
-            LocalparamDeclarationGroup::TypeEquTypeExpression(x) => {
+            LocalDeclarationGroup::TypeEquTypeExpression(x) => {
                 self.aligns[align_kind::TYPE].start_item();
                 self.r#type(&x.r#type);
                 self.aligns[align_kind::TYPE].finish_item();
@@ -572,7 +572,7 @@ impl VerylWalker for Aligner {
         self.semicolon(&arg.semicolon);
     }
 
-    /// Semantic action for non-terminal 'LocalparamDeclaration'
+    /// Semantic action for non-terminal 'TypeDefDeclaration'
     fn type_def_declaration(&mut self, arg: &TypeDefDeclaration) {
         self.r#type(&arg.r#type);
         self.aligns[align_kind::IDENTIFIER].start_item();
@@ -687,8 +687,8 @@ impl VerylWalker for Aligner {
     fn with_parameter_item(&mut self, arg: &WithParameterItem) {
         self.aligns[align_kind::PARAMETER].start_item();
         match &*arg.with_parameter_item_group {
-            WithParameterItemGroup::Parameter(x) => self.parameter(&x.parameter),
-            WithParameterItemGroup::Localparam(x) => self.localparam(&x.localparam),
+            WithParameterItemGroup::Param(x) => self.param(&x.param),
+            WithParameterItemGroup::Local(x) => self.local(&x.local),
         };
         self.aligns[align_kind::PARAMETER].finish_item();
         self.aligns[align_kind::IDENTIFIER].start_item();

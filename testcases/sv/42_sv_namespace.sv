@@ -5,7 +5,7 @@ module veryl_testcase_Module42 (
     output logic o_d
 );
     localparam int unsigned a = pkg::paramA;
-    //localparam b: u32 = pkg::paramA;
+    //local b: u32 = pkg::paramA;
 
     delay u0 (
         .i_clk   (i_clk  ),

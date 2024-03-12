@@ -2,16 +2,16 @@
 # It is not intended for manual editing.
 [[projects]]
 name = "veryl_sample1"
-uuid = "48cc458c-a767-5666-9356-0569a278eb65"
-version = "0.7.0"
+uuid = "535a83e7-49a9-560e-a196-60a7a19f8eed"
+version = "0.9.0"
 url = "https://github.com/veryl-lang/sample"
-revision = "f65a82de0f8e3432757584ed25d352ecd9aa3fae"
+revision = "f50c5c46ef37bcdfc04e44d593c2d1ff7c66052c"
 dependencies = []
 
 [[projects]]
 name = "veryl_sample2"
-uuid = "cce55958-af92-5fe6-b0f9-799094cd680a"
-version = "0.8.0"
+uuid = "f2cfd55b-8b53-5b44-97dd-d9984ae36e1d"
+version = "0.10.0"
 url = "https://github.com/veryl-lang/sample"
-revision = "3972bfcfb3b2f8cb6c9f944fd51f3310310c1748"
+revision = "15566e82442cd87a8fee2e0d283e67b6ecdf8ccc"
 dependencies = []

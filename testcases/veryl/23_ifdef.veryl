@@ -3,11 +3,11 @@ module Module23 #(
     #[ifdef(DEFINE_B)]
     #[ifdef(DEFINE_C)]
     #[ifdef(DEFINE_D)]
-    parameter ParamA: u32 = 1,
-    parameter ParamB: u32 = 1,
+    param ParamA: u32 = 1,
+    param ParamB: u32 = 1,
     #[ifdef(DEFINE_A)]
     {
-        parameter ParamC: u32 = 1,
+        param ParamC: u32 = 1,
     },
 ) (
     #[ifdef(DEFINE_A)]

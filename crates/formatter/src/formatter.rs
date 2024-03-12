@@ -766,22 +766,22 @@ impl VerylWalker for Formatter {
         self.semicolon(&arg.semicolon);
     }
 
-    /// Semantic action for non-terminal 'LocalparamDeclaration'
-    fn localparam_declaration(&mut self, arg: &LocalparamDeclaration) {
-        self.localparam(&arg.localparam);
+    /// Semantic action for non-terminal 'LocalDeclaration'
+    fn local_declaration(&mut self, arg: &LocalDeclaration) {
+        self.local(&arg.local);
         self.space(1);
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
         self.space(1);
-        match &*arg.localparam_declaration_group {
-            LocalparamDeclarationGroup::ArrayTypeEquExpression(x) => {
+        match &*arg.local_declaration_group {
+            LocalDeclarationGroup::ArrayTypeEquExpression(x) => {
                 self.array_type(&x.array_type);
                 self.space(1);
                 self.equ(&x.equ);
                 self.space(1);
                 self.expression(&x.expression);
             }
-            LocalparamDeclarationGroup::TypeEquTypeExpression(x) => {
+            LocalDeclarationGroup::TypeEquTypeExpression(x) => {
                 self.r#type(&x.r#type);
                 self.space(1);
                 self.equ(&x.equ);
@@ -1270,8 +1270,8 @@ impl VerylWalker for Formatter {
     /// Semantic action for non-terminal 'WithParameterItem'
     fn with_parameter_item(&mut self, arg: &WithParameterItem) {
         match &*arg.with_parameter_item_group {
-            WithParameterItemGroup::Parameter(x) => self.parameter(&x.parameter),
-            WithParameterItemGroup::Localparam(x) => self.localparam(&x.localparam),
+            WithParameterItemGroup::Param(x) => self.param(&x.param),
+            WithParameterItemGroup::Local(x) => self.local(&x.local),
         };
         self.space(1);
         self.identifier(&arg.identifier);
