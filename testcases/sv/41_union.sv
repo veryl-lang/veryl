@@ -10,8 +10,8 @@ module veryl_testcase_Module41;
     } A;
 
     A foo  ;
-    assign foo.b = 1'b0;
+    always_comb foo.b = 1'b0;
 
     A bar  ;
-    assign bar.c = Boolean_True;
+    always_comb bar.c = Boolean_True;
 endmodule

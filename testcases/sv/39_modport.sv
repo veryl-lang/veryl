@@ -2,7 +2,7 @@ module veryl_testcase_Module39 (
     veryl_testcase_Interface39.master mst,
     veryl_testcase_Interface39.slave slv
 );
-    assign mst.a = slv.a;
+    always_comb mst.a = slv.a;
 endmodule
 
 interface veryl_testcase_Interface39;

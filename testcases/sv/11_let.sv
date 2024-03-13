@@ -6,9 +6,9 @@ module veryl_testcase_Module11;
 
     // variable declaration with assignment
     logic [10-1:0] _c;
-    assign _c = 1;
+    always_comb _c = 1;
 
     // assign declaration
-    assign b  = 1;
-    assign bb = 1;
+    always_comb b  = 1;
+    always_comb bb = 1;
 endmodule

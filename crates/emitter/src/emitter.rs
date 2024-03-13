@@ -501,6 +501,11 @@ impl VerylWalker for Emitter {
         }
     }
 
+    /// Semantic action for non-terminal 'Assign'
+    fn assign(&mut self, arg: &Assign) {
+        self.veryl_token(&arg.assign_token.replace("always_comb"));
+    }
+
     /// Semantic action for non-terminal 'F32'
     fn f32(&mut self, arg: &F32) {
         self.veryl_token(&arg.f32_token.replace("shortreal"));
@@ -1417,7 +1422,7 @@ impl VerylWalker for Emitter {
         }
         self.str(";");
         self.newline();
-        self.str("assign");
+        self.str("always_comb");
         self.space(1);
         self.str(&arg.identifier.identifier_token.text());
         self.space(1);
