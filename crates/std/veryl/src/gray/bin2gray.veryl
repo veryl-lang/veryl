@@ -1,0 +1,8 @@
+pub module bin2gray #(
+  param WIDTH: u32 = 32,
+) (
+  i_bin: input logic<WIDTH>,
+  o_gray: output logic<WIDTH>,
+) {
+  assign o_gray = i_bin ^ (i_bin >> 1);
+}
