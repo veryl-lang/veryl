@@ -170,6 +170,10 @@ pub struct OptDump {
     /// output namespace table
     #[arg(long)]
     pub namespace_table: bool,
+
+    /// output type dag
+    #[arg(long)]
+    pub type_dag: bool,
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

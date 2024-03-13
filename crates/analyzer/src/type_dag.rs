@@ -3,9 +3,9 @@ use crate::{
     symbol_table::{self, ResolveSymbol, SymbolPathNamespace},
 };
 use bimap::BiMap;
-use std::{cell::RefCell, collections::HashMap};
+use std::{cell::RefCell, collections::HashMap, collections::HashSet};
 
-use daggy::Dag;
+use daggy::{petgraph::algo, Dag, Walker};
 use veryl_parser::veryl_token::VerylToken;
 
 #[derive(Default)]
@@ -33,6 +33,9 @@ pub enum Context {
     Union,
     Enum,
     TypeDef,
+    Module,
+    Interface,
+    Package,
 }
 
 #[derive(Debug, Clone)]
@@ -111,11 +114,49 @@ impl TypeDag {
         match self.dag.add_edge(start.into(), end.into(), edge) {
             Ok(_) => Ok(()),
             Err(_) => {
-                let ssym = self.get_symbol(start);
-                let esym = self.get_symbol(end);
-                Err(DagError::Cyclic(ssym, esym))
+                // Direct recursion of module/interface is allowed
+                let is_direct_recursion = start == end;
+                if matches!(edge, Context::Module | Context::Interface) && is_direct_recursion {
+                    Ok(())
+                } else {
+                    let ssym = self.get_symbol(start);
+                    let esym = self.get_symbol(end);
+                    Err(DagError::Cyclic(ssym, esym))
+                }
             }
         }
+    }
+
+    fn toposort(&self) -> Vec<VerylToken> {
+        let nodes = algo::toposort(self.dag.graph(), None).unwrap();
+        let mut ret = vec![];
+        for node in nodes {
+            if let Some(path) = self.paths.get(&(node.index() as u32)) {
+                ret.push(path.token.clone());
+            }
+        }
+        ret
+    }
+
+    fn dump(&self) -> String {
+        let nodes = algo::toposort(self.dag.graph(), None).unwrap();
+        let mut ret = "".to_string();
+        for node in nodes {
+            if let Some(path) = self.paths.get(&(node.index() as u32)) {
+                ret.push_str(&format!("{}\n", path.name,));
+                let mut set = HashSet::new();
+                for parent in self.dag.parents(node).iter(&self.dag) {
+                    let node = parent.1.index() as u32;
+                    if !set.contains(&node) {
+                        set.insert(node);
+                        if let Some(path) = self.paths.get(&node) {
+                            ret.push_str(&format!(" |- {}\n", path.name));
+                        }
+                    }
+                }
+            }
+        }
+        ret
     }
 }
 
@@ -135,4 +176,12 @@ pub fn insert_node(
 
 pub fn get_symbol(node: u32) -> Symbol {
     TYPE_DAG.with(|f| f.borrow().get_symbol(node))
+}
+
+pub fn toposort() -> Vec<VerylToken> {
+    TYPE_DAG.with(|f| f.borrow().toposort())
+}
+
+pub fn dump() -> String {
+    TYPE_DAG.with(|f| f.borrow().dump())
 }
