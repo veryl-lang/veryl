@@ -69,12 +69,18 @@ impl<'a> VerylGrammarTrait for CheckFunction<'a> {
     fn factor(&mut self, arg: &Factor) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if let Factor::ExpressionIdentifierFactorOpt(x) = arg {
+                // not function call
+                if x.factor_opt.is_none() {
+                    return Ok(());
+                }
                 // skip system function
-                if x.factor_opt.is_some() {
+                if x.expression_identifier.expression_identifier_opt.is_some() {
                     return Ok(());
                 }
 
+                dbg!(&x.expression_identifier);
                 if let Ok(symbol) = symbol_table::resolve(x.expression_identifier.as_ref()) {
+                    dbg!(&symbol);
                     let arity = if let ResolveSymbol::Symbol(symbol) = symbol.found {
                         if let SymbolKind::Function(x) = symbol.kind {
                             Some(x.ports.len())

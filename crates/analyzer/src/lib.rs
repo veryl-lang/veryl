@@ -11,3 +11,5 @@ pub mod symbol_table;
 pub mod type_dag;
 pub use analyzer::Analyzer;
 pub use analyzer_error::AnalyzerError;
+#[cfg(test)]
+mod tests;
