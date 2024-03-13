@@ -2,14 +2,16 @@ use crate::cmd_check::CheckError;
 use crate::OptBuild;
 use log::{debug, info};
 use miette::{IntoDiagnostic, Result, WrapErr};
+use std::collections::HashMap;
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::path::PathBuf;
 use std::time::Instant;
-use veryl_analyzer::Analyzer;
+use veryl_analyzer::{type_dag, Analyzer};
 use veryl_emitter::Emitter;
 use veryl_metadata::{FilelistType, Metadata, PathPair};
-use veryl_parser::Parser;
+use veryl_parser::{veryl_token::TokenSource, Parser};
 
 pub struct CmdBuild {
     opt: OptBuild,
@@ -88,6 +90,8 @@ impl CmdBuild {
         let filelist_path = metadata.filelist_path();
         let base_path = metadata.project_path();
 
+        let paths = Self::sort_filelist(paths);
+
         let mut text = String::new();
         for path in paths {
             let path = path.dst.canonicalize().into_diagnostic()?;
@@ -111,5 +115,29 @@ impl CmdBuild {
         file.flush().into_diagnostic()?;
 
         Ok(())
+    }
+
+    fn sort_filelist(paths: &[PathPair]) -> Vec<PathPair> {
+        let mut table = HashMap::new();
+        for path in paths {
+            table.insert(path.src.clone(), path);
+        }
+
+        let mut ret = vec![];
+        let sorted_tokens = type_dag::toposort();
+        for token in sorted_tokens {
+            if let TokenSource::File(x) = token.token.source {
+                let path = PathBuf::from(format!("{}", x));
+                if let Some(x) = table.remove(&path) {
+                    ret.push(x.clone());
+                }
+            }
+        }
+
+        for path in table.into_values() {
+            ret.push(path.clone());
+        }
+
+        ret
     }
 }
