@@ -12,5 +12,5 @@ module veryl_testcase_Module21;
         EnumB_D
     } EnumB;
 
-    assign a = EnumA'(EnumB'(b));
+    always_comb a = EnumA'(EnumB'(b));
 endmodule

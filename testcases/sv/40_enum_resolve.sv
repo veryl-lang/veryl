@@ -9,7 +9,7 @@ module veryl_testcase_Module40;
 
     EnumA a;
 
-    assign a = EnumA_member_a;
+    always_comb a = EnumA_member_a;
     function automatic logic is_a(
         input EnumA e
     ) ;

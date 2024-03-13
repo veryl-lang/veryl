@@ -6,9 +6,9 @@ module veryl_testcase_Module44;
     import veryl_testcase_Package44A::z;
     import veryl_testcase_Package44B::*;
 
-    assign a = veryl_testcase_Package44A::z;
-    assign b = z;
-    assign c = y;
+    always_comb a = veryl_testcase_Package44A::z;
+    always_comb b = z;
+    always_comb c = y;
 endmodule
 
 package veryl_testcase_Package44A;

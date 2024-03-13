@@ -6,5 +6,5 @@ module veryl_testcase_Module38;
     typedef bit     [8-1:0] octbyte [0:8-1];
 
     regfile_t rf   ;
-    assign rf[0] = '0;
+    always_comb rf[0] = '0;
 endmodule

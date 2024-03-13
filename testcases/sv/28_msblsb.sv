@@ -6,7 +6,7 @@ module veryl_testcase_Module28;
     logic [WIDTH0 + 10-1:0][WIDTH1-1:0] b;
 
     logic _x;
-    assign _x = a[((10) - 1)][((20) - 1):0 + 1];
+    always_comb _x = a[((10) - 1)][((20) - 1):0 + 1];
     logic _y;
-    assign _y = b[((WIDTH0 + 10) - 1) - 3][((WIDTH1) - 1) + 5:0];
+    always_comb _y = b[((WIDTH0 + 10) - 1) - 3][((WIDTH1) - 1) + 5:0];
 endmodule

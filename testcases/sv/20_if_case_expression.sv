@@ -4,7 +4,7 @@ module veryl_testcase_Module20;
     logic x;
     logic y;
 
-    assign a = ((x) ? (
+    always_comb a = ((x) ? (
         1
     ) : (
         ((y) ? (
@@ -14,7 +14,7 @@ module veryl_testcase_Module20;
         ))
     ));
 
-    assign b = ((a == 1) ? (
+    always_comb b = ((a == 1) ? (
         0
     ) : (a == 2) ? (
         1

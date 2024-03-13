@@ -16,6 +16,6 @@ module veryl_testcase_Module09;
     A a;
     B b;
 
-    assign a.a = 1;
-    assign b   = B_X;
+    always_comb a.a = 1;
+    always_comb b   = B_X;
 endmodule

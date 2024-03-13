@@ -11,56 +11,56 @@ module veryl_testcase_Module03;
     logic aaaaaaaaaa;
 
     // unary arithmetic
-    assign a  = +1;
-    assign aa = -1;
+    always_comb a  = +1;
+    always_comb aa = -1;
 
     // unary logical
-    assign a  = !1;
-    assign aa = ~1;
+    always_comb a  = !1;
+    always_comb aa = ~1;
 
     // unary reduce
-    assign a       = &1;
-    assign aa      = |1;
-    assign aaa     = ^1;
-    assign aaaa    = ~&1;
-    assign aaaaa   = ~|1;
-    assign aaaaaa  = ~^1;
-    assign aaaaaaa = ^~1;
+    always_comb a       = &1;
+    always_comb aa      = |1;
+    always_comb aaa     = ^1;
+    always_comb aaaa    = ~&1;
+    always_comb aaaaa   = ~|1;
+    always_comb aaaaaa  = ~^1;
+    always_comb aaaaaaa = ^~1;
 
     // binary arithmetic
-    assign a      = 1 ** 1;
-    assign aa     = 1 * 1;
-    assign aaa    = 1 / 1;
-    assign aaaa   = 1 % 1;
-    assign aaaaa  = 1 + 1;
-    assign aaaaaa = 1 - 1;
+    always_comb a      = 1 ** 1;
+    always_comb aa     = 1 * 1;
+    always_comb aaa    = 1 / 1;
+    always_comb aaaa   = 1 % 1;
+    always_comb aaaaa  = 1 + 1;
+    always_comb aaaaaa = 1 - 1;
 
     // binary shift
-    assign a    = 1 << 1;
-    assign aa   = 1 >> 1;
-    assign aaa  = 1 <<< 1;
-    assign aaaa = 1 >>> 1;
+    always_comb a    = 1 << 1;
+    always_comb aa   = 1 >> 1;
+    always_comb aaa  = 1 <<< 1;
+    always_comb aaaa = 1 >>> 1;
 
     // binary compare
-    assign a          = 1 < 1;
-    assign aa         = 1 <= 1;
-    assign aaa        = 1 > 1;
-    assign aaaa       = 1 >= 1;
-    assign aaaaa      = 1 == 1;
-    assign aaaaaa     = 1 != 1;
-    assign aaaaaaa    = 1 === 1;
-    assign aaaaaaaa   = 1 !== 1;
-    assign aaaaaaaaa  = 1 ==? 1;
-    assign aaaaaaaaaa = 1 !=? 1;
+    always_comb a          = 1 < 1;
+    always_comb aa         = 1 <= 1;
+    always_comb aaa        = 1 > 1;
+    always_comb aaaa       = 1 >= 1;
+    always_comb aaaaa      = 1 == 1;
+    always_comb aaaaaa     = 1 != 1;
+    always_comb aaaaaaa    = 1 === 1;
+    always_comb aaaaaaaa   = 1 !== 1;
+    always_comb aaaaaaaaa  = 1 ==? 1;
+    always_comb aaaaaaaaaa = 1 !=? 1;
 
     // binary bitwise
-    assign a     = 1 & 1;
-    assign aa    = 1 ^ 1;
-    assign aaa   = 1 ~^ 1;
-    assign aaaa  = 1 ^~ 1;
-    assign aaaaa = 1 | 1;
+    always_comb a     = 1 & 1;
+    always_comb aa    = 1 ^ 1;
+    always_comb aaa   = 1 ~^ 1;
+    always_comb aaaa  = 1 ^~ 1;
+    always_comb aaaaa = 1 | 1;
 
     // binary logical
-    assign a  = 1 && 1;
-    assign aa = 1 || 1;
+    always_comb a  = 1 && 1;
+    always_comb aa = 1 || 1;
 endmodule

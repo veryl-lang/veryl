@@ -3,15 +3,15 @@ module veryl_testcase_Module13;
     logic X;
 
     // bit select
-    assign a = X[0];
+    always_comb a = X[0];
 
     // range select
-    assign a = X[1:0];
+    always_comb a = X[1:0];
 
     // position and width
-    assign a = X[1+:2];
-    assign a = X[1-:2];
+    always_comb a = X[1+:2];
+    always_comb a = X[1-:2];
 
     // index by step
-    assign a = X[1*(2)+:(2)];
+    always_comb a = X[1*(2)+:(2)];
 endmodule

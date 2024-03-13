@@ -43,7 +43,7 @@ module veryl_testcase_Module06;
     logic [ParamX-1:0] d;
 
     // function call
-    assign d = FuncA(a, b, c);
+    always_comb d = FuncA(a, b, c);
 
     // function call with parameter
     //assign a = FuncB #(ParamX: 1) (a, b, c);
@@ -54,5 +54,5 @@ module veryl_testcase_Module06;
     end
 
     // system function call
-    assign d = $clog2(a);
+    always_comb d = $clog2(a);
 endmodule

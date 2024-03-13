@@ -1,10 +1,10 @@
 module veryl_testcase_Module37;
     int unsigned _a;
-    assign _a = veryl_testcase_Package37::A;
+    always_comb _a = veryl_testcase_Package37::A;
     int unsigned _b;
-    assign _b = veryl_testcase_Package37::B_C;
+    always_comb _b = veryl_testcase_Package37::B_C;
     int unsigned _c;
-    assign _c = veryl_testcase_Package37::X();
+    always_comb _c = veryl_testcase_Package37::X();
 endmodule
 package veryl_testcase_Package37;
     localparam int unsigned A = 1;
