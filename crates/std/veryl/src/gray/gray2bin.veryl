@@ -1,34 +1,46 @@
-/// Converts a Gray-encoded bit vector to a binary encoded bit-vector
+/// Converts a Gray encoded bit vector to a binary encoded bit-vector
+/// Space Complexity: O(WIDTH log WIDTH)
+/// Time Complexity: O(log WIDTH)
 pub module gray2bin #(
-  /// Input and output bit vector width
-  param WIDTH: u32 = 1,
+    /// Input and output bit vector width
+    parameter WIDTH: u32 = 1,
 ) (
-  /// Input Bit Vecotr
-  i_val : input logic<WIDTH>,
-  /// Output Bit Vector such that
-  /// o_val[k] = ^o_val[WIDTH-1:k]
-  o_val : output logic<WIDTH>,
+    /// Input Gray encoded Bit Vector
+    i_gray: input logic<WIDTH>,
+    /// Output binary encoded Bit Vector such that
+    /// o_bin[k] = ^o_bin[WIDTH-1:k]
+    o_bin: output logic<WIDTH>,
 ) {
-  if WIDTH == 1 : g_base {
-    assign o_val = i_val;
-  } else {
-    local BWIDTH: u32 = WIDTH / 2;
-    local TWIDTH: u32 = WIDTH - BWIDTH;
+    if WIDTH == 1 :g_base {
+        assign o_bin = i_gray;
+    } else {
+        localparam BWIDTH: u32 = WIDTH / 2;
+        localparam TWIDTH: u32 = WIDTH - BWIDTH;
 
-    // Top Bits
-    let top_in: logic<TWIDTH> = i_val[WIDTH-1:BWIDTH];
-    var top_out: logic<TWIDTH>;
+        // Top Bits
+        let top_in : logic<TWIDTH> = i_gray[WIDTH - 1:BWIDTH];
+        var top_out: logic<TWIDTH>;
 
-    inst u_top: gray2bin #(WIDTH: TWIDTH) (i_val: top_in, o_val: top_out);
+        inst u_top: gray2bin #(
+            WIDTH : TWIDTH ,
+        ) (
+            i_gray: top_in ,
+            o_bin : top_out,
+        );
 
-    // Bot Bits
-    let bot_in: logic<BWIDTH> = i_val[BWIDTH-1:0];
-    var bot_out: logic<BWIDTH>;
-    // Have to xor all of the bottom bits with the xor-reduction of the top bits
-    let bot_red: logic<BWIDTH> = bot_out ^ {top_out[0] repeat BWIDTH};
+        // Bot Bits
+        let bot_in : logic<BWIDTH> = i_gray[BWIDTH - 1:0];
+        var bot_out: logic<BWIDTH>;
+        // Have to xor all of the bottom bits with the xor-reduction of the top bits
+        let bot_red: logic<BWIDTH> = bot_out ^ {top_out[0] repeat BWIDTH};
 
-    inst u_bot: gray2bin #(WIDTH: BWIDTH) (i_val: bot_in, o_val: bot_out);
+        inst u_bot: gray2bin #(
+            WIDTH : BWIDTH ,
+        ) (
+            i_gray: bot_in ,
+            o_bin : bot_out,
+        );
 
-    assign o_val = {top_out, bot_red};
-  }
+        assign o_bin = {top_out, bot_red};
+    }
 }

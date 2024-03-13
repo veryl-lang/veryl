@@ -1,8 +1,14 @@
+/// Converts a binary encoded bit vector to a Gray encoded bit-vector
+/// Space Complexity: O(WIDTH)
+/// Time Complexity: O(1)
 pub module bin2gray #(
-  param WIDTH: u32 = 32,
+    /// Input and output bit vector width
+    parameter WIDTH: u32 = 32,
 ) (
-  i_bin: input logic<WIDTH>,
-  o_gray: output logic<WIDTH>,
+    /// Input Binary encoded Bit Vector
+    i_bin : input  logic<WIDTH>,
+    /// Output Gray encoded Bit Vector
+    o_gray: output logic<WIDTH>,
 ) {
-  assign o_gray = i_bin ^ (i_bin >> 1);
+    assign o_gray = i_bin ^ (i_bin >> 1);
 }
