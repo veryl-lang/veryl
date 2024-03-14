@@ -1,11 +1,11 @@
 /// Delay input by configured cycle
 pub module delay #(
     /// Clock cycle of delay
-    parameter DELAY: u32 = 1,
+    param DELAY: u32 = 1,
     /// Input/output data width
-    parameter WIDTH: u32 = 1,
+    param WIDTH: u32 = 1,
     /// Input/output data type
-    parameter TYPE: type = logic<WIDTH>,
+    param TYPE: type = logic<WIDTH>,
 ) (
     /// Clock
     i_clk: input logic,

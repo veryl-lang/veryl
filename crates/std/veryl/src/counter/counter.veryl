@@ -1,17 +1,17 @@
 /// Value counter
 pub module counter #(
     /// Counter width
-    parameter WIDTH: u32 = 2,
+    param WIDTH: u32 = 2,
     /// Max value of counter
-    parameter MAX_COUNT: bit<WIDTH> = '1,
+    param MAX_COUNT: bit<WIDTH> = '1,
     /// Min value of counter
-    parameter MIN_COUNT: bit<WIDTH> = '0,
+    param MIN_COUNT: bit<WIDTH> = '0,
     /// Initial value of counter
-    parameter INITIAL_COUNT: bit<WIDTH> = MIN_COUNT,
+    param INITIAL_COUNT: bit<WIDTH> = MIN_COUNT,
     /// Whether counter is wrap around
-    parameter WRAP_AROUND: bit = 1,
+    param WRAP_AROUND: bit = 1,
     /// Counter type
-    localparam COUNT: type = logic<WIDTH>,
+    local COUNT: type = logic<WIDTH>,
 ) (
     /// Clock
     i_clk: input logic,
