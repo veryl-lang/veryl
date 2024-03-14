@@ -78,9 +78,7 @@ impl<'a> VerylGrammarTrait for CheckFunction<'a> {
                     return Ok(());
                 }
 
-                dbg!(&x.expression_identifier);
                 if let Ok(symbol) = symbol_table::resolve(x.expression_identifier.as_ref()) {
-                    dbg!(&symbol);
                     let arity = if let ResolveSymbol::Symbol(symbol) = symbol.found {
                         if let SymbolKind::Function(x) = symbol.kind {
                             Some(x.ports.len())
