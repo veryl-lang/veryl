@@ -2,16 +2,16 @@
 /// Transforms a unary encoded value into a binary encoding.
 pub module binary_encoder #(
     /// Width of the input unary vector
-    param UNARY_WIDTH: u32 = 256                ,
+    param UNARY_WIDTH: u32 = 256,
     /// Width of the output binary vector
-    local BIN_WIDTH  : u32 = $clog2(UNARY_WIDTH),
+    local BIN_WIDTH: u32 = $clog2(UNARY_WIDTH),
 ) (
     /// Enable Signal.  Dynamic power is minimzed when not enabled.
-    i_en   : input  logic             ,
+    i_en: input logic,
     /// Unary encoded input.
-    i_unary: input  logic<UNARY_WIDTH>,
+    i_unary: input logic<UNARY_WIDTH>,
     /// Binary encoded output.
-    o_bin  : output logic<BIN_WIDTH>  ,
+    o_bin: output logic<BIN_WIDTH>,
 ) {
     let unary_masked: logic<UNARY_WIDTH> = if i_en {
         i_unary
