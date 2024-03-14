@@ -3,7 +3,7 @@
 /// Time Complexity: O(log WIDTH)
 pub module gray2bin #(
     /// Input and output bit vector width
-    parameter WIDTH: u32 = 1,
+    param WIDTH: u32 = 1,
 ) (
     /// Input Gray encoded Bit Vector
     i_gray: input logic<WIDTH>,
@@ -14,15 +14,15 @@ pub module gray2bin #(
     if WIDTH == 1 :g_base {
         assign o_bin = i_gray;
     } else {
-        localparam BWIDTH: u32 = WIDTH / 2;
-        localparam TWIDTH: u32 = WIDTH - BWIDTH;
+        local BWIDTH: u32 = WIDTH / 2;
+        local TWIDTH: u32 = WIDTH - BWIDTH;
 
         // Top Bits
         let top_in : logic<TWIDTH> = i_gray[WIDTH - 1:BWIDTH];
         var top_out: logic<TWIDTH>;
 
         inst u_top: gray2bin #(
-            WIDTH : TWIDTH ,
+            WIDTH: TWIDTH,
         ) (
             i_gray: top_in ,
             o_bin : top_out,
@@ -35,7 +35,7 @@ pub module gray2bin #(
         let bot_red: logic<BWIDTH> = bot_out ^ {top_out[0] repeat BWIDTH};
 
         inst u_bot: gray2bin #(
-            WIDTH : BWIDTH ,
+            WIDTH: BWIDTH,
         ) (
             i_gray: bot_in ,
             o_bin : bot_out,

@@ -3,10 +3,10 @@
 /// Time Complexity: O(1)
 pub module bin2gray #(
     /// Input and output bit vector width
-    parameter WIDTH: u32 = 32,
+    param WIDTH: u32 = 32,
 ) (
     /// Input Binary encoded Bit Vector
-    i_bin : input  logic<WIDTH>,
+    i_bin: input logic<WIDTH>,
     /// Output Gray encoded Bit Vector
     o_gray: output logic<WIDTH>,
 ) {

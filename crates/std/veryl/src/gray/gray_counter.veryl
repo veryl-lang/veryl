@@ -1,0 +1,73 @@
+/// Value counter using Gray Encoding
+pub module gray_counter #(
+    /// Counter width
+    param WIDTH: u32 = 2,
+    /// Max value of counter (in binary)
+    param MAX_COUNT: bit<WIDTH> = '1,
+    /// Min value of counter (in binary)
+    param MIN_COUNT: bit<WIDTH> = '0,
+    /// Initial value of counter (in binary)
+    param INITIAL_COUNT: bit<WIDTH> = MIN_COUNT,
+    /// Whether counter is wrap around
+    param WRAP_AROUND: bit = 1,
+    /// Counter type
+    local COUNT: type = logic<WIDTH>,
+) (
+    /// Clock
+    i_clk: input logic,
+    /// Reset
+    i_rst: input logic,
+    /// Clear counter
+    i_clear: input logic,
+    /// Set counter to a value
+    i_set: input logic,
+    /// Value used by i_set
+    i_set_value: input COUNT,
+    /// Count up
+    i_up: input logic,
+    /// Count down
+    i_down: input logic,
+    /// Count value
+    o_count: output COUNT,
+    /// Count value for the next clock cycle
+    o_count_next: output COUNT,
+    /// Indicator for wrap around
+    o_wrap_around: output logic,
+) {
+
+    var bin_count     : COUNT;
+    var bin_count_next: COUNT;
+
+    inst u_bin_counter: counter #(
+        WIDTH          ,
+        MAX_COUNT      ,
+        MIN_COUNT      ,
+        INITIAL_COUNT  ,
+        WRAP_AROUND    ,
+    ) (
+        i_clk                        ,
+        i_rst                        ,
+        i_clear                      ,
+        i_set                        ,
+        i_set_value                  ,
+        i_up                         ,
+        i_down                       ,
+        o_count      : bin_count     ,
+        o_count_next : bin_count_next,
+        o_wrap_around                ,
+    );
+
+    inst u_gray_cur: bin2gray #(
+        WIDTH                 ,
+    ) (
+        i_bin : bin_count     ,
+        o_gray: o_count       ,
+    );
+    inst u_gray_next: bin2gray #(
+        WIDTH                 ,
+    ) (
+        i_bin : bin_count_next,
+        o_gray: o_count_next  ,
+    );
+
+}
