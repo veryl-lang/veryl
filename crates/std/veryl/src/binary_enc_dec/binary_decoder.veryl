@@ -1,0 +1,65 @@
+/// A binary decoder.
+/// Converts a bit vector from a binary encoding to
+/// a bit vector with a unary encoding.
+pub module binary_decoder #(
+    /// Width of the input binary vector
+    param BIN_WIDTH: u32 = 8,
+    /// Width of the output unary vector
+    local UNARY_WIDTH: u32 = 1 << BIN_WIDTH,
+) (
+    /// Enable Signal.  Dynamic power is minimzed when not enabled.
+    i_en: input logic,
+    /// Binary encoded input.
+    i_bin: input logic<BIN_WIDTH>,
+    /// Unary encoded output.
+    o_unary: output logic<UNARY_WIDTH>,
+) {
+
+    // Mask the binary encoded input with the enable signal to eliminate
+    // dynamic power consumption while the decoder is not active.
+    let masked_bin: logic<BIN_WIDTH> = i_bin & {i_en repeat BIN_WIDTH};
+
+    inst u_bin_decoder: _bin_decoder #(
+        BIN_WIDTH: BIN_WIDTH,
+    ) (
+        i_bin  : masked_bin,
+        o_unary: o_unary   ,
+    );
+
+}
+
+module _bin_decoder #(
+    param BIN_WIDTH  : u32 = 8             ,
+    local UNARY_WIDTH: u32 = 1 << BIN_WIDTH,
+) (
+    /// Binary encoded
+    i_bin: input logic<BIN_WIDTH>,
+    /// Unary encoded output
+    o_unary: output logic<UNARY_WIDTH>,
+) {
+
+    if BIN_WIDTH == 1 :g_base_case {
+        assign o_unary = {i_bin, ~i_bin};
+    } else :g_recurssive_case {
+        local REC_BIN_WIDTH  : u32                    = BIN_WIDTH - 1;
+        local REC_UNARY_WIDTH: u32                    = 1 << REC_BIN_WIDTH;
+        let r_bin          : logic<REC_BIN_WIDTH>   = i_bin[REC_BIN_WIDTH - 1:0];
+        var r_unary        : logic<REC_UNARY_WIDTH>;
+
+        inst rec_bin_decoder: _bin_decoder #(
+            BIN_WIDTH: REC_BIN_WIDTH,
+        ) (
+            i_bin  : r_bin  ,
+            o_unary: r_unary,
+        );
+
+        let mask_top: logic<REC_UNARY_WIDTH> = if i_bin[BIN_WIDTH - 1] {
+            '1
+        } else {
+            '0
+        };
+        let mask_bot: logic<REC_UNARY_WIDTH> = ~mask_top;
+
+        assign o_unary = {r_unary, r_unary} & {mask_top, mask_bot};
+    }
+}

@@ -1,0 +1,88 @@
+/// A binary encoder.
+/// Transforms a unary encoded value into a binary encoding.
+pub module binary_encoder #(
+    /// Width of the input unary vector
+    param UNARY_WIDTH: u32 = 256                ,
+    /// Width of the output binary vector
+    local BIN_WIDTH  : u32 = $clog2(UNARY_WIDTH),
+) (
+    /// Enable Signal.  Dynamic power is minimzed when not enabled.
+    i_en   : input  logic             ,
+    /// Unary encoded input.
+    i_unary: input  logic<UNARY_WIDTH>,
+    /// Binary encoded output.
+    o_bin  : output logic<BIN_WIDTH>  ,
+) {
+    let unary_masked: logic<UNARY_WIDTH> = if i_en {
+        i_unary
+    } else {
+        {'0, 1'b1}
+    };
+
+    inst u_binary_encoder: _binary_encoder #(
+        UNARY_WIDTH: UNARY_WIDTH,
+    ) (
+        i_unary: unary_masked,
+        o_bin                ,
+        o_valid: _           ,
+    );
+}
+
+module _binary_encoder #(
+    param UNARY_WIDTH: u32 = 256                ,
+    local BIN_WIDTH  : u32 = $clog2(UNARY_WIDTH),
+) (
+    i_unary: input  logic<UNARY_WIDTH>,
+    o_bin  : output logic<BIN_WIDTH>  ,
+    o_valid: output logic             ,
+) {
+
+    if UNARY_WIDTH == 2 :g_base_case2 {
+        // We assume overall i_unary is onehot, thus OR is fine.
+        assign o_valid = |i_unary;
+        assign o_bin   = i_unary[1];
+    } else if UNARY_WIDTH == 3 :g_base_case3 {
+        assign o_valid = |i_unary;
+        assign o_bin   = case i_unary {
+            3'b001 : 2'b00,
+            3'b010 : 2'b01,
+            3'b100 : 2'b10,
+            default: 2'bxx,
+        };
+    } else :g_recursive_case {
+        local REC_UNARY_WIDTH_BOT: u32 = UNARY_WIDTH / 2;
+        local REC_UNARY_WIDTH_TOP: u32 = UNARY_WIDTH - REC_UNARY_WIDTH_BOT;
+        local REC_BIN_WIDTH      : u32 = BIN_WIDTH - 1;
+
+        let r_unary_bot: logic<REC_UNARY_WIDTH_BOT> = i_unary[REC_UNARY_WIDTH_BOT - 1:0];
+        let r_unary_top: logic<REC_UNARY_WIDTH_TOP> = i_unary[UNARY_WIDTH - 1:REC_UNARY_WIDTH_BOT];
+        var r_valid_bot: logic                     ;
+        var r_valid_top: logic                     ;
+        var r_bin_bot  : logic<REC_BIN_WIDTH>      ;
+        var r_bin_top  : logic<REC_BIN_WIDTH>      ;
+
+        inst u_rec_bot: _binary_encoder #(
+            UNARY_WIDTH: REC_UNARY_WIDTH_BOT,
+        ) (
+            i_unary: r_unary_bot,
+            o_bin  : r_bin_bot  ,
+            o_valid: r_valid_bot,
+        );
+
+        inst u_rec_top: _binary_encoder #(
+            UNARY_WIDTH: REC_UNARY_WIDTH_TOP,
+        ) (
+            i_unary: r_unary_top,
+            o_bin  : r_bin_top  ,
+            o_valid: r_valid_top,
+        );
+
+        assign o_valid = r_valid_bot | r_valid_top;
+        assign o_bin   = {r_valid_top, if r_valid_top {
+            r_bin_top
+        } else {
+            r_bin_bot
+        }};
+    }
+
+}
