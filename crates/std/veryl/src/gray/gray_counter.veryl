@@ -58,13 +58,13 @@ pub module gray_counter #(
     );
 
     inst u_gray_cur: bin2gray #(
-        WIDTH                 ,
+        WIDTH  ,
     ) (
-        i_bin : bin_count     ,
-        o_gray: o_count       ,
+        i_bin : bin_count,
+        o_gray: o_count  ,
     );
     inst u_gray_next: bin2gray #(
-        WIDTH                 ,
+        WIDTH  ,
     ) (
         i_bin : bin_count_next,
         o_gray: o_count_next  ,
