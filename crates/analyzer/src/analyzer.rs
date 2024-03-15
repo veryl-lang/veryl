@@ -119,10 +119,12 @@ impl Analyzer {
     }
 
     fn check_symbol_table(path: &Path, text: &str) -> Vec<AnalyzerError> {
-        let path = resource_table::get_path_id(path.to_path_buf()).unwrap();
         let mut ret = Vec::new();
         let symbols = symbol_table::get_all();
-        for symbol in symbols {
+
+        // check unused variables
+        let path = resource_table::get_path_id(path.to_path_buf()).unwrap();
+        for symbol in &symbols {
             if symbol.token.source == path {
                 if let SymbolKind::Variable(_) = symbol.kind {
                     if symbol.references.is_empty() && !symbol.allow_unused {
@@ -144,6 +146,10 @@ impl Analyzer {
                 }
             }
         }
+
+        // check assignment
+        let _assign_list = symbol_table::get_assign_list();
+
         ret
     }
 }

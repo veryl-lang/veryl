@@ -121,16 +121,16 @@ pub enum SymbolKind {
     Instance(InstanceProperty),
     Block,
     Package(PackageProperty),
-    Struct,
+    Struct(StructProperty),
     StructMember(StructMemberProperty),
-    Union,
+    Union(UnionProperty),
     UnionMember(UnionMemberProperty),
     TypeDef(TypeDefProperty),
     Enum(EnumProperty),
     EnumMember(EnumMemberProperty),
     Modport(ModportProperty),
     Genvar,
-    ModportMember,
+    ModportMember(ModportMemberProperty),
     SystemVerilog,
     Namespace,
     SystemFunction,
@@ -148,16 +148,16 @@ impl SymbolKind {
             SymbolKind::Instance(_) => "instance".to_string(),
             SymbolKind::Block => "block".to_string(),
             SymbolKind::Package(_) => "package".to_string(),
-            SymbolKind::Struct => "struct".to_string(),
+            SymbolKind::Struct(_) => "struct".to_string(),
             SymbolKind::StructMember(_) => "struct member".to_string(),
-            SymbolKind::Union => "union".to_string(),
+            SymbolKind::Union(_) => "union".to_string(),
             SymbolKind::UnionMember(_) => "union member".to_string(),
             SymbolKind::TypeDef(_) => "typedef".to_string(),
             SymbolKind::Enum(_) => "enum".to_string(),
             SymbolKind::EnumMember(_) => "enum member".to_string(),
             SymbolKind::Modport(_) => "modport".to_string(),
             SymbolKind::Genvar => "genvar".to_string(),
-            SymbolKind::ModportMember => "modport member".to_string(),
+            SymbolKind::ModportMember(_) => "modport member".to_string(),
             SymbolKind::SystemVerilog => "systemverilog item".to_string(),
             SymbolKind::Namespace => "namespace".to_string(),
             SymbolKind::SystemFunction => "system function".to_string(),
@@ -222,11 +222,11 @@ impl fmt::Display for SymbolKind {
             }
             SymbolKind::Block => "block".to_string(),
             SymbolKind::Package(_) => "package".to_string(),
-            SymbolKind::Struct => "struct".to_string(),
+            SymbolKind::Struct(_) => "struct".to_string(),
             SymbolKind::StructMember(x) => {
                 format!("struct member ({})", x.r#type)
             }
-            SymbolKind::Union => "union".to_string(),
+            SymbolKind::Union(_) => "union".to_string(),
             SymbolKind::UnionMember(x) => {
                 format!("union member ({})", x.r#type)
             }
@@ -249,7 +249,7 @@ impl fmt::Display for SymbolKind {
                 format!("modport ({} ports)", x.members.len())
             }
             SymbolKind::Genvar => "genvar".to_string(),
-            SymbolKind::ModportMember => "modport member".to_string(),
+            SymbolKind::ModportMember(x) => format!("modport member ({})", x.direction),
             SymbolKind::SystemVerilog => "systemverilog item".to_string(),
             SymbolKind::Namespace => "namespace".to_string(),
             SymbolKind::SystemFunction => "system function".to_string(),
@@ -621,7 +621,29 @@ pub struct PackageProperty {
 }
 
 #[derive(Debug, Clone)]
+pub struct StructProperty {
+    pub members: Vec<StructMember>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StructMember {
+    pub name: StrId,
+    pub r#type: Type,
+}
+
+#[derive(Debug, Clone)]
 pub struct StructMemberProperty {
+    pub r#type: Type,
+}
+
+#[derive(Debug, Clone)]
+pub struct UnionProperty {
+    pub members: Vec<UnionMember>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UnionMember {
+    pub name: StrId,
     pub r#type: Type,
 }
 
@@ -638,6 +660,12 @@ pub struct TypeDefProperty {
 #[derive(Debug, Clone)]
 pub struct EnumProperty {
     pub r#type: Type,
+    pub members: Vec<EnumMember>,
+}
+
+#[derive(Debug, Clone)]
+pub struct EnumMember {
+    pub name: StrId,
 }
 
 #[derive(Debug, Clone)]
@@ -653,5 +681,10 @@ pub struct ModportProperty {
 #[derive(Debug, Clone)]
 pub struct ModportMember {
     pub name: StrId,
+    pub direction: Direction,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModportMemberProperty {
     pub direction: Direction,
 }

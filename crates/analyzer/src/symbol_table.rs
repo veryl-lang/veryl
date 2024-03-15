@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::fmt;
 use veryl_parser::resource_table::{self, PathId, StrId, TokenId};
 use veryl_parser::veryl_grammar_trait as syntax_tree;
-use veryl_parser::veryl_token::{Token, TokenSource};
+use veryl_parser::veryl_token::{Token, TokenSource, VerylToken};
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct SymbolPath(Vec<StrId>);
@@ -207,10 +207,17 @@ impl ResolveError {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct Assign {
+    full_path: Vec<Symbol>,
+    position: Vec<VerylToken>,
+}
+
 #[derive(Clone, Default, Debug)]
 pub struct SymbolTable {
     table: HashMap<StrId, Vec<Symbol>>,
     project_local_table: HashMap<StrId, HashMap<StrId, StrId>>,
+    assign_list: Vec<Assign>,
 }
 
 impl SymbolTable {
@@ -463,6 +470,68 @@ impl SymbolTable {
         format!("{self}")
     }
 
+    pub fn dump_assign_list(&self) -> String {
+        let mut ret = "AssignList [\n".to_string();
+
+        let mut path_width = 0;
+        let mut pos_width = 0;
+        for assign in &self.assign_list {
+            path_width = path_width.max(
+                assign
+                    .full_path
+                    .iter()
+                    .map(|x| format!("{}", x.token.text).len())
+                    .sum::<usize>()
+                    + assign.full_path.len()
+                    - 1,
+            );
+            pos_width = pos_width.max(
+                assign
+                    .position
+                    .iter()
+                    .map(|x| x.text().len())
+                    .sum::<usize>()
+                    + assign.position.len()
+                    - 1,
+            );
+        }
+
+        for assign in &self.assign_list {
+            let mut path = "".to_string();
+            for (i, x) in assign.full_path.iter().enumerate() {
+                if i == 0 {
+                    path.push_str(&format!("{}", x.token.text));
+                } else {
+                    path.push_str(&format!(".{}", x.token.text));
+                }
+            }
+
+            let mut pos = "".to_string();
+            for (i, x) in assign.position.iter().enumerate() {
+                if i == 0 {
+                    pos.push_str(&x.text());
+                } else {
+                    pos.push_str(&format!(".{}", x.text()));
+                }
+            }
+
+            let last_token = assign.position.last().unwrap().token;
+
+            ret.push_str(&format!(
+                "    {:path_width$} / {:pos_width$} @ {}:{}:{}\n",
+                path,
+                pos,
+                last_token.source,
+                last_token.line,
+                last_token.column,
+                path_width = path_width,
+                pos_width = pos_width,
+            ));
+        }
+        ret.push(']');
+        ret
+    }
+
     pub fn drop(&mut self, file_path: PathId) {
         for (_, symbols) in self.table.iter_mut() {
             symbols.retain(|x| x.token.source != file_path);
@@ -514,6 +583,18 @@ impl SymbolTable {
     pub fn get_project_local(&self, prj: StrId) -> Option<HashMap<StrId, StrId>> {
         self.project_local_table.get(&prj).cloned()
     }
+
+    pub fn add_assign(&mut self, full_path: Vec<Symbol>, position: Vec<VerylToken>) {
+        let assign = Assign {
+            full_path,
+            position,
+        };
+        self.assign_list.push(assign);
+    }
+
+    pub fn get_assign_list(&self) -> Vec<Assign> {
+        self.assign_list.clone()
+    }
 }
 
 impl fmt::Display for SymbolTable {
@@ -560,6 +641,7 @@ impl fmt::Display for SymbolTable {
             }
         }
         writeln!(f, "]")?;
+
         Ok(())
     }
 }
@@ -789,6 +871,10 @@ pub fn dump() -> String {
     SYMBOL_TABLE.with(|f| f.borrow().dump())
 }
 
+pub fn dump_assign_list() -> String {
+    SYMBOL_TABLE.with(|f| f.borrow().dump_assign_list())
+}
+
 pub fn drop(file_path: PathId) {
     SYMBOL_TABLE.with(|f| f.borrow_mut().drop(file_path))
 }
@@ -811,6 +897,14 @@ pub fn add_project_local(prj: StrId, from: StrId, to: StrId) {
 
 pub fn get_project_local(prj: StrId) -> Option<HashMap<StrId, StrId>> {
     SYMBOL_TABLE.with(|f| f.borrow().get_project_local(prj))
+}
+
+pub fn add_assign(full_path: Vec<Symbol>, position: Vec<VerylToken>) {
+    SYMBOL_TABLE.with(|f| f.borrow_mut().add_assign(full_path, position))
+}
+
+pub fn get_assign_list() -> Vec<Assign> {
+    SYMBOL_TABLE.with(|f| f.borrow_mut().get_assign_list())
 }
 
 #[cfg(test)]
