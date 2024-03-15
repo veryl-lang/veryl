@@ -323,8 +323,8 @@ impl Emitter {
                     }
                     SymbolKind::Parameter(_)
                     | SymbolKind::Function(_)
-                    | SymbolKind::Struct
-                    | SymbolKind::Union
+                    | SymbolKind::Struct(_)
+                    | SymbolKind::Union(_)
                     | SymbolKind::TypeDef(_)
                     | SymbolKind::Enum(_) => {
                         if args.len() > 1 {
@@ -367,7 +367,7 @@ impl Emitter {
                     | SymbolKind::Block
                     | SymbolKind::StructMember(_)
                     | SymbolKind::UnionMember(_)
-                    | SymbolKind::ModportMember
+                    | SymbolKind::ModportMember(_)
                     | SymbolKind::Genvar
                     | SymbolKind::Namespace => unreachable!(),
                 }

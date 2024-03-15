@@ -17,20 +17,6 @@ fn analyze(code: &str) -> Vec<AnalyzerError> {
 }
 
 #[test]
-fn assignment_to_input() {
-    let code = r#"
-    module ModuleA (
-        a: input logic,
-    ) {
-        assign a = 1;
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::AssignmentToInput { .. }));
-}
-
-#[test]
 fn cyclic_type_dependency() {
     let code = r#"
     module ModuleA {
@@ -47,17 +33,17 @@ fn cyclic_type_dependency() {
     ));
 
     let code = r#"
-    module ModuleA {
-        inst u: ModuleB;
-    }
     module ModuleB {
-        inst u: ModuleA;
+        inst u: ModuleC;
+    }
+    module ModuleC {
+        inst u: ModuleB;
     }
     "#;
 
     let errors = analyze(code);
     assert!(matches!(
-        errors[1],
+        errors[0],
         AnalyzerError::CyclicTypeDependency { .. }
     ));
 
@@ -121,6 +107,39 @@ fn duplicated_assignment() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidAllow { .. }));
+}
+
+#[test]
+fn invalid_assignment() {
+    let code = r#"
+    module ModuleA (
+        a: input logic,
+    ) {
+        assign a = 1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidAssignment { .. }));
+
+    let code = r#"
+    module ModuleB (
+        a: modport InterfaceA::x,
+    ) {
+        assign a.a = 1;
+    }
+
+    interface InterfaceA {
+        var a: logic;
+
+        modport x {
+            a: input,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidAssignment { .. }));
 }
 
 #[test]

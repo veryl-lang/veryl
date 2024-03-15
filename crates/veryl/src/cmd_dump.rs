@@ -48,6 +48,10 @@ impl CmdDump {
             println!("{}", veryl_analyzer::symbol_table::dump());
         }
 
+        if self.opt.assign_list {
+            println!("{}", veryl_analyzer::symbol_table::dump_assign_list());
+        }
+
         if self.opt.namespace_table {
             println!("{}", veryl_analyzer::namespace_table::dump());
         }

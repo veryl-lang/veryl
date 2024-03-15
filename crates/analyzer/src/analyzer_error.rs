@@ -6,20 +6,6 @@ use veryl_parser::veryl_token::VerylToken;
 pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
-        code(assignment_to_input),
-        help(""),
-        url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#assignment_to_input")
-    )]
-    #[error("Assignment to input {identifier}")]
-    AssignmentToInput {
-        identifier: String,
-        #[source_code]
-        input: NamedSource,
-        #[label("Error location")]
-        error_location: SourceSpan,
-    },
-    #[diagnostic(
-        severity(Error),
         code(cyclice_type_dependency),
         help(""),
         url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#cyclic_type_dependency")
@@ -33,6 +19,7 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
     },
+
     #[diagnostic(
         severity(Error),
         code(duplicated_identifier),
@@ -47,6 +34,7 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
     },
+
     #[diagnostic(
         severity(Error),
         code(duplicated_assignment),
@@ -61,6 +49,7 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
     },
+
     #[diagnostic(
         severity(Error),
         code(invalid_allow),
@@ -70,6 +59,24 @@ pub enum AnalyzerError {
     #[error("{identifier} can't be allowed")]
     InvalidAllow {
         identifier: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(invalid_assignment),
+        help("remove the assignment"),
+        url(
+            "https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#invalid_assignment"
+        )
+    )]
+    #[error("{identifier} can't be assigned because it is {kind}")]
+    InvalidAssignment {
+        identifier: String,
+        kind: String,
         #[source_code]
         input: NamedSource,
         #[label("Error location")]
@@ -475,14 +482,6 @@ impl AnalyzerError {
         NamedSource::new(token.token.source.to_string(), source.to_string())
     }
 
-    pub fn assignment_to_input(source: &str, identifier: &str, token: &VerylToken) -> Self {
-        AnalyzerError::AssignmentToInput {
-            identifier: identifier.into(),
-            input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
-        }
-    }
-
     pub fn cyclic_type_dependency(
         source: &str,
         start: &str,
@@ -516,6 +515,20 @@ impl AnalyzerError {
     pub fn invalid_allow(identifier: &str, source: &str, token: &VerylToken) -> Self {
         AnalyzerError::InvalidAllow {
             identifier: identifier.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.token.into(),
+        }
+    }
+
+    pub fn invalid_assignment(
+        identifier: &str,
+        source: &str,
+        kind: &str,
+        token: &VerylToken,
+    ) -> Self {
+        AnalyzerError::InvalidAssignment {
+            identifier: identifier.into(),
+            kind: kind.into(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.token.into(),
         }

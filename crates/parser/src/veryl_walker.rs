@@ -1616,6 +1616,7 @@ pub trait VerylWalker {
         self.semicolon(&arg.semicolon);
         after!(self, type_def_declaration, arg);
     }
+
     /// Semantic action for non-terminal 'AlwaysFfDeclaration'
     fn always_ff_declaration(&mut self, arg: &AlwaysFfDeclaration) {
         before!(self, always_ff_declaration, arg);

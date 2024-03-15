@@ -4,6 +4,7 @@ use crate::veryl_grammar_trait::*;
 use once_cell::sync::Lazy;
 use paste::paste;
 use regex::Regex;
+use std::fmt;
 
 #[derive(Debug, Clone, Copy)]
 pub enum TokenSource {
@@ -11,13 +12,14 @@ pub enum TokenSource {
     Builtin,
 }
 
-impl ToString for TokenSource {
-    fn to_string(&self) -> String {
-        if let TokenSource::File(x) = self {
+impl fmt::Display for TokenSource {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let text = if let TokenSource::File(x) = self {
             x.to_string()
         } else {
             String::from("builtin")
-        }
+        };
+        text.fmt(f)
     }
 }
 

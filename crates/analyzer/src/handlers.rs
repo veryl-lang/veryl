@@ -1,10 +1,10 @@
+pub mod check_assignment;
 pub mod check_attribute;
 pub mod check_direction;
 pub mod check_enum;
 pub mod check_function;
 pub mod check_identifier;
 pub mod check_instance;
-pub mod check_module;
 pub mod check_msb_lsb;
 pub mod check_number;
 pub mod check_reset;
@@ -29,7 +29,7 @@ use crate::analyzer_error::AnalyzerError;
 use veryl_metadata::Lint;
 use veryl_parser::veryl_walker::Handler;
 
-use self::{check_module::CheckModule, create_type_dag::CreateTypeDag};
+use self::{check_assignment::CheckAssignment, create_type_dag::CreateTypeDag};
 
 pub struct Pass1Handlers<'a> {
     check_attribute: CheckAttribute<'a>,
@@ -85,7 +85,7 @@ pub struct Pass2Handlers<'a> {
     check_function: CheckFunction<'a>,
     check_instance: CheckInstance<'a>,
     check_msb_lsb: CheckMsbLsb<'a>,
-    check_module: CheckModule<'a>,
+    check_assignment: CheckAssignment<'a>,
     create_reference: CreateReference<'a>,
     create_type_dag: CreateTypeDag<'a>,
 }
@@ -98,7 +98,7 @@ impl<'a> Pass2Handlers<'a> {
             check_function: CheckFunction::new(text),
             check_instance: CheckInstance::new(text),
             check_msb_lsb: CheckMsbLsb::new(text),
-            check_module: CheckModule::new(text),
+            check_assignment: CheckAssignment::new(text),
             create_reference: CreateReference::new(text),
             create_type_dag: CreateTypeDag::new(text),
         }
@@ -111,7 +111,7 @@ impl<'a> Pass2Handlers<'a> {
             &mut self.check_function as &mut dyn Handler,
             &mut self.check_instance as &mut dyn Handler,
             &mut self.check_msb_lsb as &mut dyn Handler,
-            &mut self.check_module as &mut dyn Handler,
+            &mut self.check_assignment as &mut dyn Handler,
             &mut self.create_reference as &mut dyn Handler,
             &mut self.create_type_dag as &mut dyn Handler,
         ]
@@ -124,7 +124,7 @@ impl<'a> Pass2Handlers<'a> {
         ret.append(&mut self.check_function.errors);
         ret.append(&mut self.check_instance.errors);
         ret.append(&mut self.check_msb_lsb.errors);
-        ret.append(&mut self.check_module.errors);
+        ret.append(&mut self.check_assignment.errors);
         ret.append(&mut self.create_reference.errors);
         ret.append(&mut self.create_type_dag.errors);
         ret
