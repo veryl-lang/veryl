@@ -94,11 +94,8 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
         if let HandlerPoint::Before = self.point {
             match symbol_table::resolve(arg) {
                 Ok(symbol) => {
-                    for symbol in symbol.full_path {
-                        symbol_table::add_reference(
-                            symbol.token.id,
-                            &arg.identifier.identifier_token.token,
-                        );
+                    for id in symbol.full_path {
+                        symbol_table::add_reference(id, &arg.identifier.identifier_token.token);
                     }
                 }
                 Err(err) => {
@@ -139,11 +136,8 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
 
             match symbol_table::resolve(arg) {
                 Ok(symbol) => {
-                    for symbol in symbol.full_path {
-                        symbol_table::add_reference(
-                            symbol.token.id,
-                            &arg.identifier.identifier_token.token,
-                        );
+                    for id in symbol.full_path {
+                        symbol_table::add_reference(id, &arg.identifier.identifier_token.token);
                     }
                 }
                 Err(err) => {
@@ -182,11 +176,8 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
 
             match symbol_table::resolve(arg) {
                 Ok(symbol) => {
-                    for symbol in symbol.full_path {
-                        symbol_table::add_reference(
-                            symbol.token.id,
-                            &arg.identifier.identifier_token.token,
-                        );
+                    for id in symbol.full_path {
+                        symbol_table::add_reference(id, &arg.identifier.identifier_token.token);
                     }
                 }
                 Err(err) => {
@@ -207,11 +198,8 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
         if let HandlerPoint::Before = self.point {
             match symbol_table::resolve(arg.identifier.as_ref()) {
                 Ok(symbol) => {
-                    for symbol in symbol.full_path {
-                        symbol_table::add_reference(
-                            symbol.token.id,
-                            &arg.identifier.identifier_token.token,
-                        );
+                    for id in symbol.full_path {
+                        symbol_table::add_reference(id, &arg.identifier.identifier_token.token);
                     }
                 }
                 Err(err) => {
@@ -228,11 +216,8 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
             if arg.inst_port_item_opt.is_none() {
                 match symbol_table::resolve(arg.identifier.as_ref()) {
                     Ok(symbol) => {
-                        for symbol in symbol.full_path {
-                            symbol_table::add_reference(
-                                symbol.token.id,
-                                &arg.identifier.identifier_token.token,
-                            );
+                        for id in symbol.full_path {
+                            symbol_table::add_reference(id, &arg.identifier.identifier_token.token);
                         }
                     }
                     Err(err) => {

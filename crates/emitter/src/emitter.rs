@@ -289,7 +289,7 @@ impl Emitter {
         for (i, path) in namespace.paths.iter().enumerate() {
             if i > 0 {
                 let symbol_path = SymbolPath::new(&[*path]);
-                if let Ok(ref symbol) = symbol_table::get(&symbol_path, &resolve_namespace) {
+                if let Ok(ref symbol) = symbol_table::resolve((&symbol_path, &resolve_namespace)) {
                     let separator = if let ResolveSymbol::Symbol(symbol) = &symbol.found {
                         match symbol.kind {
                             SymbolKind::Package(_) => "::",
