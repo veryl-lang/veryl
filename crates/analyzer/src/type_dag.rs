@@ -68,7 +68,7 @@ impl TypeDag {
             name: id.into(),
             token: token.clone(),
         };
-        let sym = match symbol_table::get(&trinfo.path.0, &trinfo.path.1) {
+        let sym = match symbol_table::resolve(&trinfo.path) {
             Ok(rr) => match rr.found {
                 ResolveSymbol::Symbol(symbol) => symbol,
                 ResolveSymbol::External => {
@@ -95,7 +95,7 @@ impl TypeDag {
 
     fn get_symbol(&self, node: u32) -> Symbol {
         match self.paths.get(&node) {
-            Some(TypeResolveInfo { path, .. }) => match symbol_table::get(&path.0, &path.1) {
+            Some(TypeResolveInfo { path, .. }) => match symbol_table::resolve(path) {
                 Ok(rr) => match rr.found {
                     ResolveSymbol::Symbol(symbol) => symbol,
                     ResolveSymbol::External => unreachable!(),

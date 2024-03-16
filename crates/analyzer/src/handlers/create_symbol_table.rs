@@ -5,11 +5,11 @@ use crate::namespace_table;
 use crate::symbol::Direction as SymDirection;
 use crate::symbol::Type as SymType;
 use crate::symbol::{
-    DocComment, EnumMember, EnumMemberProperty, EnumProperty, FunctionProperty, InstanceProperty,
-    InterfaceProperty, ModportMember, ModportMemberProperty, ModportProperty, ModuleProperty,
-    PackageProperty, ParameterProperty, ParameterScope, ParameterValue, PortProperty, StructMember,
-    StructMemberProperty, StructProperty, Symbol, SymbolKind, TypeDefProperty, TypeKind,
-    UnionMember, UnionMemberProperty, UnionProperty, VariableProperty,
+    DocComment, EnumMemberProperty, EnumProperty, FunctionProperty, InstanceProperty,
+    InterfaceProperty, ModportMemberProperty, ModportProperty, ModuleProperty, PackageProperty,
+    ParameterProperty, ParameterScope, ParameterValue, PortProperty, StructMemberProperty,
+    StructProperty, Symbol, SymbolId, SymbolKind, TypeDefProperty, TypeKind, UnionMemberProperty,
+    UnionProperty, VariableProperty,
 };
 use crate::symbol_table;
 use std::collections::HashSet;
@@ -31,9 +31,8 @@ pub struct CreateSymbolTable<'a> {
     anonymous_namespace: usize,
     attribute_lines: HashSet<u32>,
     struct_or_union: Option<StructOrUnion>,
-    enum_members: Vec<EnumMember>,
-    struct_members: Vec<StructMember>,
-    union_members: Vec<UnionMember>,
+    enum_members: Vec<Option<SymbolId>>,
+    struct_union_members: Vec<Option<SymbolId>>,
 }
 
 #[derive(Clone)]
@@ -50,7 +49,12 @@ impl<'a> CreateSymbolTable<'a> {
         }
     }
 
-    fn insert_symbol(&mut self, token: &VerylToken, kind: SymbolKind, public: bool) {
+    fn insert_symbol(
+        &mut self,
+        token: &VerylToken,
+        kind: SymbolKind,
+        public: bool,
+    ) -> Option<SymbolId> {
         let line = token.token.line;
         let doc_comment = if let TokenSource::File(file) = token.token.source {
             if line == 0 {
@@ -82,12 +86,14 @@ impl<'a> CreateSymbolTable<'a> {
             symbol.allow_unused = true;
         }
 
-        if !symbol_table::insert(&token.token, symbol) {
+        let id = symbol_table::insert(&token.token, symbol);
+        if id.is_none() {
             let text = resource_table::get_str_value(token.token.text).unwrap();
             self.errors.push(AnalyzerError::duplicated_identifier(
                 &text, self.text, token,
             ));
         }
+        id
     }
 }
 
@@ -209,21 +215,18 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
             for item in items {
                 let direction: crate::symbol::Direction = item.direction.as_ref().into();
-                let member = ModportMember {
-                    name: item.identifier.identifier_token.token.text,
-                    direction: direction.clone(),
-                };
                 let property = ModportMemberProperty { direction };
-                members.push(member);
-                self.insert_symbol(
+                let id = self.insert_symbol(
                     &item.identifier.identifier_token,
                     SymbolKind::ModportMember(property),
                     false,
                 );
+                members.push(id);
             }
 
             self.namespace.pop();
 
+            let members: Vec<_> = members.into_iter().flatten().collect();
             let property = ModportProperty { members };
             let kind = SymbolKind::Modport(property);
             self.insert_symbol(&arg.identifier.identifier_token, kind, false);
@@ -241,7 +244,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 self.namespace.pop();
 
                 let r#type = arg.scalar_type.as_ref().into();
-                let members: Vec<_> = self.enum_members.drain(0..).collect();
+                let members: Vec<_> = self.enum_members.drain(0..).flatten().collect();
                 let property = EnumProperty { r#type, members };
                 let kind = SymbolKind::Enum(property);
                 self.insert_symbol(&arg.identifier.identifier_token, kind, false);
@@ -255,12 +258,8 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             let value = arg.enum_item_opt.as_ref().map(|x| *x.expression.clone());
             let property = EnumMemberProperty { value };
             let kind = SymbolKind::EnumMember(property);
-            self.insert_symbol(&arg.identifier.identifier_token, kind, false);
-
-            let member = EnumMember {
-                name: arg.identifier.identifier_token.token.text,
-            };
-            self.enum_members.push(member);
+            let id = self.insert_symbol(&arg.identifier.identifier_token, kind, false);
+            self.enum_members.push(id);
         }
         Ok(())
     }
@@ -280,14 +279,13 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 self.struct_or_union = None;
                 self.namespace.pop();
 
+                let members: Vec<_> = self.struct_union_members.drain(0..).flatten().collect();
                 let kind = match &*arg.struct_union {
                     StructUnion::Struct(_) => {
-                        let members: Vec<_> = self.struct_members.drain(0..).collect();
                         let property = StructProperty { members };
                         SymbolKind::Struct(property)
                     }
                     StructUnion::Union(_) => {
-                        let members: Vec<_> = self.union_members.drain(0..).collect();
                         let property = UnionProperty { members };
                         SymbolKind::Union(property)
                     }
@@ -313,29 +311,16 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             let r#type: SymType = arg.scalar_type.as_ref().into();
             let kind = match self.struct_or_union.clone().unwrap() {
                 StructOrUnion::InStruct => {
-                    let property = StructMemberProperty {
-                        r#type: r#type.clone(),
-                    };
-                    let member = StructMember {
-                        name: arg.identifier.identifier_token.token.text,
-                        r#type,
-                    };
-                    self.struct_members.push(member);
+                    let property = StructMemberProperty { r#type };
                     SymbolKind::StructMember(property)
                 }
                 StructOrUnion::InUnion => {
-                    let property = UnionMemberProperty {
-                        r#type: r#type.clone(),
-                    };
-                    let member = UnionMember {
-                        name: arg.identifier.identifier_token.token.text,
-                        r#type,
-                    };
-                    self.union_members.push(member);
+                    let property = UnionMemberProperty { r#type };
                     SymbolKind::UnionMember(property)
                 }
             };
-            self.insert_symbol(&arg.identifier.identifier_token, kind, false);
+            let id = self.insert_symbol(&arg.identifier.identifier_token, kind, false);
+            self.struct_union_members.push(id);
         }
         Ok(())
     }

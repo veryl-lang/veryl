@@ -622,13 +622,7 @@ pub struct PackageProperty {
 
 #[derive(Debug, Clone)]
 pub struct StructProperty {
-    pub members: Vec<StructMember>,
-}
-
-#[derive(Debug, Clone)]
-pub struct StructMember {
-    pub name: StrId,
-    pub r#type: Type,
+    pub members: Vec<SymbolId>,
 }
 
 #[derive(Debug, Clone)]
@@ -638,13 +632,7 @@ pub struct StructMemberProperty {
 
 #[derive(Debug, Clone)]
 pub struct UnionProperty {
-    pub members: Vec<UnionMember>,
-}
-
-#[derive(Debug, Clone)]
-pub struct UnionMember {
-    pub name: StrId,
-    pub r#type: Type,
+    pub members: Vec<SymbolId>,
 }
 
 #[derive(Debug, Clone)]
@@ -660,12 +648,7 @@ pub struct TypeDefProperty {
 #[derive(Debug, Clone)]
 pub struct EnumProperty {
     pub r#type: Type,
-    pub members: Vec<EnumMember>,
-}
-
-#[derive(Debug, Clone)]
-pub struct EnumMember {
-    pub name: StrId,
+    pub members: Vec<SymbolId>,
 }
 
 #[derive(Debug, Clone)]
@@ -675,13 +658,7 @@ pub struct EnumMemberProperty {
 
 #[derive(Debug, Clone)]
 pub struct ModportProperty {
-    pub members: Vec<ModportMember>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ModportMember {
-    pub name: StrId,
-    pub direction: Direction,
+    pub members: Vec<SymbolId>,
 }
 
 #[derive(Debug, Clone)]

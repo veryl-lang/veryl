@@ -265,7 +265,7 @@ impl Server {
                     } else {
                         SymbolPath::from(finder.token_group.as_slice())
                     };
-                    if let Ok(symbol) = symbol_table::get(&path, &namespace) {
+                    if let Ok(symbol) = symbol_table::resolve((&path, &namespace)) {
                         if let ResolveSymbol::Symbol(symbol) = &symbol.found {
                             let location = to_location(&symbol.token);
                             self.snd
@@ -343,7 +343,7 @@ impl Server {
                     } else {
                         SymbolPath::from(finder.token_group.as_slice())
                     };
-                    if let Ok(symbol) = symbol_table::get(&path, &namespace) {
+                    if let Ok(symbol) = symbol_table::resolve((&path, &namespace)) {
                         if let ResolveSymbol::Symbol(symbol) = &symbol.found {
                             let text = symbol.kind.to_string();
                             let hover = Hover {
@@ -378,7 +378,7 @@ impl Server {
                     } else {
                         SymbolPath::from(finder.token_group.as_slice())
                     };
-                    if let Ok(symbol) = symbol_table::get(&path, &namespace) {
+                    if let Ok(symbol) = symbol_table::resolve((&path, &namespace)) {
                         if let ResolveSymbol::Symbol(symbol) = &symbol.found {
                             for reference in &symbol.references {
                                 let location = to_location(reference);
