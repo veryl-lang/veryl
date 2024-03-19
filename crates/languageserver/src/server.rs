@@ -625,8 +625,8 @@ impl Server {
                             } else {
                                 !matches!(
                                     x,
-                                    AnalyzerError::UndefinedIdentifier { .. } // After #573 merged
-                                                                              //    | AnalyzerError::UnassignVariable { .. }
+                                    AnalyzerError::UndefinedIdentifier { .. }
+                                        | AnalyzerError::UnassignVariable { .. }
                                 )
                             }
                         })
