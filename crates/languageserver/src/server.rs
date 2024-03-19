@@ -105,6 +105,7 @@ pub struct Server {
     cache_dir: String,
     lsp_token: i32,
     background_tasks: VecDeque<BackgroundTask>,
+    background_done: bool,
     config: ServerConfig,
 }
 
@@ -120,6 +121,7 @@ impl Server {
             cache_dir: Metadata::cache_path().to_string_lossy().to_string(),
             lsp_token: 0,
             background_tasks: VecDeque::new(),
+            background_done: true,
             config: ServerConfig::default(),
         }
     }
@@ -170,6 +172,9 @@ impl Server {
                     }
                     if task.paths.is_empty() {
                         self.progress_done("background analyze done");
+                        if self.background_tasks.is_empty() {
+                            self.background_done = true;
+                        }
                     } else {
                         self.background_tasks.push_front(task);
                     }
@@ -182,6 +187,7 @@ impl Server {
 impl Server {
     fn did_open(&mut self, url: &Url, text: &str, version: i32) {
         if let Some(mut metadata) = self.get_metadata(url) {
+            self.background_done = false;
             self.on_change(&metadata.project.name, url, text, version);
 
             if !url.as_str().contains(&self.cache_dir) {
@@ -194,7 +200,11 @@ impl Server {
                         progress: false,
                     };
                     self.background_tasks.push_back(task);
+                } else {
+                    self.background_done = true;
                 }
+            } else {
+                self.background_done = true;
             }
         } else {
             self.on_change("", url, text, version);
@@ -608,6 +618,18 @@ impl Server {
                     errors.append(&mut analyzer.analyze_pass3(prj, text, path, &x.veryl));
                     let ret: Vec<_> = errors
                         .drain(0..)
+                        .filter(|x| {
+                            // Filter errors caused by unresolve error until background completion
+                            if self.background_done {
+                                true
+                            } else {
+                                !matches!(
+                                    x,
+                                    AnalyzerError::UndefinedIdentifier { .. } // After #573 merged
+                                                                              //    | AnalyzerError::UnassignVariable { .. }
+                                )
+                            }
+                        })
                         .map(|x| {
                             let x: miette::ErrReport = x.into();
                             to_diag(x, &rope)
