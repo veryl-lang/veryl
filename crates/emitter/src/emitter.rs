@@ -4,7 +4,7 @@ use veryl_analyzer::symbol::SymbolKind;
 use veryl_analyzer::symbol_table::{self, ResolveSymbol, SymbolPath, SymbolPathNamespace};
 use veryl_analyzer::{msb_table, namespace_table};
 use veryl_metadata::{Build, BuiltinType, ClockType, Format, Metadata, ResetType};
-use veryl_parser::resource_table;
+use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::{Token, VerylToken};
 use veryl_parser::veryl_walker::VerylWalker;
@@ -16,6 +16,7 @@ pub enum AttributeType {
 }
 
 pub struct Emitter {
+    project_name: Option<StrId>,
     build_opt: Build,
     format_opt: Format,
     string: String,
@@ -42,6 +43,7 @@ pub struct Emitter {
 impl Default for Emitter {
     fn default() -> Self {
         Self {
+            project_name: None,
             build_opt: Build::default(),
             format_opt: Format::default(),
             string: String::new(),
@@ -72,6 +74,7 @@ impl Emitter {
         let mut aligner = Aligner::new();
         aligner.set_metadata(metadata);
         Self {
+            project_name: Some(metadata.project.name.as_str().into()),
             build_opt: metadata.build.clone(),
             format_opt: metadata.format.clone(),
             aligner,
@@ -304,8 +307,16 @@ impl Emitter {
                     return self.str(&format!("{}", namespace));
                 }
             } else {
+                let emit_prj_prefix = if self.build_opt.omit_project_prefix {
+                    self.project_name != Some(*path)
+                } else {
+                    true
+                };
+
                 // top level namespace is always `_`
-                ret.push_str(&format!("{}_", path));
+                if emit_prj_prefix {
+                    ret.push_str(&format!("{}_", path));
+                }
             }
 
             resolve_namespace.push(*path);
