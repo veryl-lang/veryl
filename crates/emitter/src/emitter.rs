@@ -28,6 +28,7 @@ pub struct Emitter {
     consumed_next_newline: bool,
     single_line: bool,
     adjust_line: bool,
+    case_item_indent: Option<usize>,
     in_always_ff: bool,
     in_generate: bool,
     in_direction_modport: bool,
@@ -55,6 +56,7 @@ impl Default for Emitter {
             consumed_next_newline: false,
             single_line: false,
             adjust_line: false,
+            case_item_indent: None,
             in_always_ff: false,
             in_generate: false,
             in_direction_modport: false,
@@ -92,6 +94,10 @@ impl Emitter {
         &self.string
     }
 
+    fn column(&self) -> usize {
+        self.string.len() - self.string.rfind('\n').unwrap_or(0)
+    }
+
     fn str(&mut self, x: &str) {
         self.string.push_str(x);
     }
@@ -107,7 +113,9 @@ impl Emitter {
     }
 
     fn indent(&mut self) {
-        self.str(&" ".repeat(self.indent * self.format_opt.indent_width));
+        self.str(&" ".repeat(
+            self.indent * self.format_opt.indent_width + self.case_item_indent.unwrap_or(0),
+        ));
     }
 
     fn newline_push(&mut self) {
@@ -1341,12 +1349,14 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'CaseItem'
     fn case_item(&mut self, arg: &CaseItem) {
+        let start = self.column();
         match &*arg.case_item_group {
             CaseItemGroup::Expression(x) => self.expression(&x.expression),
             CaseItemGroup::Defaul(x) => self.defaul(&x.defaul),
         }
         self.colon(&arg.colon);
         self.space(1);
+        self.case_item_indent = Some(self.column() - start);
         match &*arg.case_item_group0 {
             CaseItemGroup0::Statement(x) => self.statement(&x.statement),
             CaseItemGroup0::LBraceCaseItemGroup0ListRBrace(x) => {
@@ -1369,6 +1379,7 @@ impl VerylWalker for Emitter {
                 self.token(&x.r_brace.r_brace_token.replace("end"));
             }
         }
+        self.case_item_indent = None;
     }
 
     /// Semantic action for non-terminal 'Attribute'

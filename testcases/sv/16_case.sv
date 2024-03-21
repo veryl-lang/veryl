@@ -8,10 +8,10 @@ module veryl_testcase_Module16;
             0: a = 1;
             1: a = 1;
             2: begin
-                a = 1;
-                a = 1;
-                a = 1;
-            end
+                   a = 1;
+                   a = 1;
+                   a = 1;
+               end
             y - 1  : a = 1;
             default: a = 1;
         endcase
