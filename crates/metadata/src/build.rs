@@ -16,6 +16,8 @@ pub struct Build {
     pub implicit_parameter_types: Vec<BuiltinType>,
     #[serde(default)]
     pub omit_project_prefix: bool,
+    #[serde(default)]
+    pub strip_comments: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

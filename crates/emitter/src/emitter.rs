@@ -191,7 +191,8 @@ impl Emitter {
             self.space(*width as usize);
         }
 
-        if duplicated.is_some() {
+        // skip to emit comments
+        if duplicated.is_some() || self.build_opt.strip_comments {
             return;
         }
 
