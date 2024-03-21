@@ -16,6 +16,7 @@ pub struct Formatter {
     consumed_next_newline: bool,
     single_line: bool,
     adjust_line: bool,
+    case_item_indent: Option<usize>,
 }
 
 impl Default for Formatter {
@@ -31,6 +32,7 @@ impl Default for Formatter {
             consumed_next_newline: false,
             single_line: false,
             adjust_line: false,
+            case_item_indent: None,
         }
     }
 }
@@ -52,6 +54,10 @@ impl Formatter {
         &self.string
     }
 
+    fn column(&self) -> usize {
+        self.string.len() - self.string.rfind('\n').unwrap_or(0)
+    }
+
     fn str(&mut self, x: &str) {
         self.string.push_str(x);
     }
@@ -67,7 +73,9 @@ impl Formatter {
     }
 
     fn indent(&mut self) {
-        self.str(&" ".repeat(self.indent * self.format_opt.indent_width));
+        self.str(&" ".repeat(
+            self.indent * self.format_opt.indent_width + self.case_item_indent.unwrap_or(0),
+        ));
     }
 
     fn newline_push(&mut self) {
@@ -707,12 +715,14 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'CaseItem'
     fn case_item(&mut self, arg: &CaseItem) {
+        let start = self.column();
         match &*arg.case_item_group {
             CaseItemGroup::Expression(x) => self.expression(&x.expression),
             CaseItemGroup::Defaul(x) => self.defaul(&x.defaul),
         }
         self.colon(&arg.colon);
         self.space(1);
+        self.case_item_indent = Some(self.column() - start);
         match &*arg.case_item_group0 {
             CaseItemGroup0::Statement(x) => self.statement(&x.statement),
             CaseItemGroup0::LBraceCaseItemGroup0ListRBrace(x) => {
@@ -725,6 +735,7 @@ impl VerylWalker for Formatter {
                 self.r_brace(&x.r_brace);
             }
         }
+        self.case_item_indent = None;
     }
 
     /// Semantic action for non-terminal 'AttributeList'
