@@ -8,8 +8,8 @@ module veryl_testcase_Module37;
 endmodule
 package veryl_testcase_Package37;
     localparam int unsigned A = 1;
-    typedef 
-    enum logic {
+
+    typedef enum logic {
         B_C
     } B;
 

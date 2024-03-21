@@ -1693,9 +1693,7 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'EnumDeclaration'
     fn enum_declaration(&mut self, arg: &EnumDeclaration) {
         self.enum_name = Some(arg.identifier.identifier_token.text());
-        self.str("typedef");
-        self.space(1);
-        self.r#enum(&arg.r#enum);
+        self.token(&arg.r#enum.enum_token.append("typedef ", ""));
         self.space(1);
         self.scalar_type(&arg.scalar_type);
         self.space(1);
