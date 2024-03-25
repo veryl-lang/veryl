@@ -2740,7 +2740,12 @@ impl VerylWalker for Emitter {
             let items: Vec<DescriptionItem> = x.description_group.as_ref().into();
             for item in items {
                 if let DescriptionItem::ImportDeclaration(x) = item {
-                    let mut emitter = Emitter::default();
+                    let mut emitter = Emitter {
+                        project_name: self.project_name,
+                        build_opt: self.build_opt.clone(),
+                        format_opt: self.format_opt.clone(),
+                        ..Default::default()
+                    };
                     emitter.import_declaration(&x.import_declaration);
                     self.file_scope_import.push(emitter.as_str().to_string());
                 }
