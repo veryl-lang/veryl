@@ -11,7 +11,7 @@ use veryl_parser::Stringifier;
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SymbolId(pub usize);
 
-thread_local!(static SYMBOL_ID: RefCell<usize> = RefCell::new(0));
+thread_local!(static SYMBOL_ID: RefCell<usize> = const { RefCell::new(0) });
 
 pub fn new_symbol_id() -> SymbolId {
     SYMBOL_ID.with(|f| {
