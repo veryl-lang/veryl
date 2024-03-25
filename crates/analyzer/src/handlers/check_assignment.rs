@@ -12,7 +12,7 @@ pub struct CheckAssignment<'a> {
     text: &'a str,
     point: HandlerPoint,
     current_position: Vec<VerylToken>,
-    in_if_expression: bool,
+    in_if_expression: Vec<()>,
 }
 
 impl<'a> CheckAssignment<'a> {
@@ -22,7 +22,7 @@ impl<'a> CheckAssignment<'a> {
             text,
             point: HandlerPoint::Before,
             current_position: Vec::new(),
-            in_if_expression: false,
+            in_if_expression: Vec::new(),
         }
     }
 }
@@ -51,7 +51,7 @@ fn can_assign(arg: &Symbol) -> bool {
 impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
     fn r#else(&mut self, arg: &Else) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            if !self.in_if_expression {
+            if self.in_if_expression.is_empty() {
                 *self.current_position.last_mut().unwrap() = arg.else_token.clone();
             }
         }
@@ -61,10 +61,10 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
     fn if_expression(&mut self, _arg: &IfExpression) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                self.in_if_expression = true;
+                self.in_if_expression.push(());
             }
             HandlerPoint::After => {
-                self.in_if_expression = false;
+                self.in_if_expression.pop();
             }
         }
         Ok(())

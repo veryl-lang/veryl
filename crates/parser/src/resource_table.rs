@@ -91,7 +91,7 @@ impl From<&str> for StrId {
 
 thread_local!(static STRING_TABLE: RefCell<GlobalTable<String, StrId>> = RefCell::new(GlobalTable::default()));
 thread_local!(static PATHBUF_TABLE: RefCell<GlobalTable<PathBuf, PathId>> = RefCell::new(GlobalTable::default()));
-thread_local!(static TOKEN_ID: RefCell<usize> = RefCell::new(0));
+thread_local!(static TOKEN_ID: RefCell<usize> = const { RefCell::new(0) });
 
 pub fn insert_str(value: &str) -> StrId {
     STRING_TABLE.with(|f| f.borrow_mut().insert(value.to_owned()))
