@@ -30,7 +30,7 @@ impl<'a> CreateReference<'a> {
 
     fn push_resolve_error(&mut self, err: ResolveError, token: &Token) {
         if let Some(last_found) = err.last_found {
-            let name = format!("{}", last_found.token.text);
+            let name = last_found.token.to_string();
             match err.cause {
                 ResolveErrorCause::NotFound(not_found) => {
                     let member = format!("{}", not_found);

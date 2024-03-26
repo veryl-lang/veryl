@@ -127,13 +127,13 @@ impl Analyzer {
             if symbol.token.source == path {
                 if let SymbolKind::Variable(_) = symbol.kind {
                     if symbol.references.is_empty() && !symbol.allow_unused {
-                        let name = format!("{}", symbol.token.text);
+                        let name = symbol.token.to_string();
                         if name.starts_with('_') {
                             continue;
                         }
 
                         ret.push(AnalyzerError::unused_variable(
-                            &format!("{}", symbol.token.text),
+                            &symbol.token.to_string(),
                             text,
                             &symbol.token,
                         ));

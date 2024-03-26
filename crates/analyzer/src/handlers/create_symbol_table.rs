@@ -83,9 +83,10 @@ impl<'a> CreateSymbolTable<'a> {
 
         let id = symbol_table::insert(token, symbol);
         if id.is_none() {
-            let text = resource_table::get_str_value(token.text).unwrap();
             self.errors.push(AnalyzerError::duplicated_identifier(
-                &text, self.text, token,
+                &token.to_string(),
+                self.text,
+                token,
             ));
         }
         id
