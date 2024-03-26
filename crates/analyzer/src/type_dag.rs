@@ -15,6 +15,7 @@ pub struct TypeDag {
     nodes: BiMap<SymbolId, u32>,
     /// Map between NodeIdx and Symbol Resolve Information
     paths: HashMap<u32, TypeResolveInfo>,
+    symbols: HashMap<u32, Symbol>,
     source: u32,
 }
 
@@ -51,8 +52,9 @@ impl TypeDag {
         let source = dag.add_node(()).index() as u32;
         Self {
             dag,
-            nodes: BiMap::<SymbolId, u32>::new(),
-            paths: HashMap::<u32, TypeResolveInfo>::new(),
+            nodes: BiMap::new(),
+            paths: HashMap::new(),
+            symbols: HashMap::new(),
             source,
         }
     }
@@ -88,22 +90,15 @@ impl TypeDag {
                 self.insert_edge(self.source, node_idx, Context::Irrelevant)?;
                 self.nodes.insert(sym.id, node_idx);
                 self.paths.insert(node_idx, trinfo);
+                self.symbols.insert(node_idx, sym);
                 Ok(node_idx)
             }
         }
     }
 
     fn get_symbol(&self, node: u32) -> Symbol {
-        match self.paths.get(&node) {
-            Some(TypeResolveInfo { path, .. }) => match symbol_table::resolve(path) {
-                Ok(rr) => match rr.found {
-                    ResolveSymbol::Symbol(symbol) => symbol,
-                    ResolveSymbol::External => unreachable!(),
-                },
-                Err(_) => {
-                    unreachable!();
-                }
-            },
+        match self.symbols.get(&node) {
+            Some(x) => x.clone(),
             None => {
                 panic!("Must insert node before accessing");
             }
