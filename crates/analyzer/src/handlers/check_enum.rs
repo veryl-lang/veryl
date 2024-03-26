@@ -1,7 +1,7 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::evaluator::{Evaluated, Evaluator};
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::VerylToken;
+use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
@@ -10,7 +10,7 @@ pub struct CheckEnum<'a> {
     text: &'a str,
     point: HandlerPoint,
     enum_variants: usize,
-    enum_member_values: Vec<(Evaluated, VerylToken)>,
+    enum_member_values: Vec<(Evaluated, Token)>,
 }
 
 impl<'a> CheckEnum<'a> {
@@ -45,13 +45,13 @@ impl<'a> VerylGrammarTrait for CheckEnum<'a> {
                 if let Some(width) = width {
                     let max_members = 2_usize.pow(width as u32);
                     if self.enum_variants > max_members {
-                        let name = arg.identifier.identifier_token.text();
+                        let name = arg.identifier.identifier_token.to_string();
                         self.errors.push(AnalyzerError::too_much_enum_variant(
                             &name,
                             self.enum_variants,
                             width,
                             self.text,
-                            &arg.identifier.identifier_token,
+                            &arg.identifier.identifier_token.token,
                         ));
                     }
 
@@ -59,7 +59,7 @@ impl<'a> VerylGrammarTrait for CheckEnum<'a> {
                         if let Evaluated::Fixed { value, .. } = enum_value {
                             if *value as usize >= max_members {
                                 self.errors.push(AnalyzerError::too_large_enum_variant(
-                                    &token.text(),
+                                    &token.to_string(),
                                     *value,
                                     width,
                                     self.text,
@@ -78,7 +78,7 @@ impl<'a> VerylGrammarTrait for CheckEnum<'a> {
         if let HandlerPoint::Before = self.point {
             self.enum_variants += 1;
             if let Some(ref x) = arg.enum_item_opt {
-                let token = arg.identifier.identifier_token.clone();
+                let token = arg.identifier.identifier_token.token;
                 let mut evaluator = Evaluator::new();
                 let evaluated = evaluator.expression(&x.expression);
                 self.enum_member_values.push((evaluated, token));

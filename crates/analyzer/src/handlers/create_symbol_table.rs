@@ -16,7 +16,7 @@ use std::collections::HashSet;
 use veryl_parser::doc_comment_table;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::{TokenRange, TokenSource, VerylToken};
+use veryl_parser::veryl_token::{Token, TokenRange, TokenSource};
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
@@ -27,7 +27,7 @@ pub struct CreateSymbolTable<'a> {
     point: HandlerPoint,
     namespace: Namespace,
     default_block: Option<StrId>,
-    for_identifier: Option<VerylToken>,
+    for_identifier: Option<Token>,
     anonymous_namespace: usize,
     attribute_lines: HashSet<u32>,
     struct_or_union: Option<StructOrUnion>,
@@ -49,14 +49,9 @@ impl<'a> CreateSymbolTable<'a> {
         }
     }
 
-    fn insert_symbol(
-        &mut self,
-        token: &VerylToken,
-        kind: SymbolKind,
-        public: bool,
-    ) -> Option<SymbolId> {
-        let line = token.token.line;
-        let doc_comment = if let TokenSource::File(file) = token.token.source {
+    fn insert_symbol(&mut self, token: &Token, kind: SymbolKind, public: bool) -> Option<SymbolId> {
+        let line = token.line;
+        let doc_comment = if let TokenSource::File(file) = token.source {
             if line == 0 {
                 DocComment::default()
             } else if let Some(doc_comment) = doc_comment_table::get(file, line) {
@@ -80,15 +75,15 @@ impl<'a> CreateSymbolTable<'a> {
         } else {
             DocComment::default()
         };
-        let mut symbol = Symbol::new(&token.token, kind, &self.namespace, public, doc_comment);
+        let mut symbol = Symbol::new(token, kind, &self.namespace, public, doc_comment);
 
         if allow_table::contains("unused_variable") {
             symbol.allow_unused = true;
         }
 
-        let id = symbol_table::insert(&token.token, symbol);
+        let id = symbol_table::insert(token, symbol);
         if id.is_none() {
-            let text = resource_table::get_str_value(token.token.text).unwrap();
+            let text = resource_table::get_str_value(token.text).unwrap();
             self.errors.push(AnalyzerError::duplicated_identifier(
                 &text, self.text, token,
             ));
@@ -126,7 +121,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             let r#type: SymType = arg.array_type.as_ref().into();
             let property = VariableProperty { r#type };
             let kind = SymbolKind::Variable(property);
-            self.insert_symbol(&arg.identifier.identifier_token, kind, false);
+            self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
         }
         Ok(())
     }
@@ -142,7 +137,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 let r#type: SymType = arg.scalar_type.as_ref().into();
                 let property = VariableProperty { r#type };
                 let kind = SymbolKind::Variable(property);
-                self.insert_symbol(&arg.identifier.identifier_token, kind, false);
+                self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
             }
             HandlerPoint::After => self.namespace.pop(),
         }
@@ -154,7 +149,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             let r#type: SymType = arg.array_type.as_ref().into();
             let property = VariableProperty { r#type };
             let kind = SymbolKind::Variable(property);
-            self.insert_symbol(&arg.identifier.identifier_token, kind, false);
+            self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
         }
         Ok(())
     }
@@ -164,7 +159,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             let r#type: SymType = arg.array_type.as_ref().into();
             let property = VariableProperty { r#type };
             let kind = SymbolKind::Variable(property);
-            self.insert_symbol(&arg.identifier.identifier_token, kind, false);
+            self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
         }
         Ok(())
     }
@@ -200,7 +195,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 }
             };
             let kind = SymbolKind::Parameter(property);
-            self.insert_symbol(&arg.identifier.identifier_token, kind, false);
+            self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
         }
         Ok(())
     }
@@ -217,7 +212,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 let direction: crate::symbol::Direction = item.direction.as_ref().into();
                 let property = ModportMemberProperty { direction };
                 let id = self.insert_symbol(
-                    &item.identifier.identifier_token,
+                    &item.identifier.identifier_token.token,
                     SymbolKind::ModportMember(property),
                     false,
                 );
@@ -229,7 +224,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             let members: Vec<_> = members.into_iter().flatten().collect();
             let property = ModportProperty { members };
             let kind = SymbolKind::Modport(property);
-            self.insert_symbol(&arg.identifier.identifier_token, kind, false);
+            self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
         }
         Ok(())
     }
@@ -247,7 +242,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 let members: Vec<_> = self.enum_members.drain(0..).flatten().collect();
                 let property = EnumProperty { r#type, members };
                 let kind = SymbolKind::Enum(property);
-                self.insert_symbol(&arg.identifier.identifier_token, kind, false);
+                self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
             }
         }
         Ok(())
@@ -258,7 +253,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             let value = arg.enum_item_opt.as_ref().map(|x| *x.expression.clone());
             let property = EnumMemberProperty { value };
             let kind = SymbolKind::EnumMember(property);
-            let id = self.insert_symbol(&arg.identifier.identifier_token, kind, false);
+            let id = self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
             self.enum_members.push(id);
         }
         Ok(())
@@ -290,7 +285,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                         SymbolKind::Union(property)
                     }
                 };
-                self.insert_symbol(&arg.identifier.identifier_token, kind, false);
+                self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
             }
         }
         Ok(())
@@ -301,7 +296,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             let r#type = arg.array_type.as_ref().into();
             let property = TypeDefProperty { r#type };
             let kind = SymbolKind::TypeDef(property);
-            self.insert_symbol(&arg.identifier.identifier_token, kind, false);
+            self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
         }
         Ok(())
     }
@@ -319,7 +314,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     SymbolKind::UnionMember(property)
                 }
             };
-            let id = self.insert_symbol(&arg.identifier.identifier_token, kind, false);
+            let id = self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
             self.struct_union_members.push(id);
         }
         Ok(())
@@ -333,7 +328,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             }
             let property = InstanceProperty { type_name };
             let kind = SymbolKind::Instance(property);
-            self.insert_symbol(&arg.identifier.identifier_token, kind, false);
+            self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
         }
         Ok(())
     }
@@ -373,7 +368,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 }
             };
             let kind = SymbolKind::Parameter(property);
-            self.insert_symbol(&arg.identifier.identifier_token, kind, false);
+            self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
         }
         Ok(())
     }
@@ -398,7 +393,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 },
             };
             let kind = SymbolKind::Port(property);
-            self.insert_symbol(&arg.identifier.identifier_token, kind, false);
+            self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
         }
         Ok(())
     }
@@ -438,7 +433,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     ret,
                 };
                 self.insert_symbol(
-                    &arg.identifier.identifier_token,
+                    &arg.identifier.identifier_token.token,
                     SymbolKind::Function(property),
                     false,
                 );
@@ -481,7 +476,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     ports,
                 };
                 self.insert_symbol(
-                    &arg.identifier.identifier_token,
+                    &arg.identifier.identifier_token.token,
                     SymbolKind::Module(property),
                     public,
                 );
@@ -496,7 +491,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
     fn module_for_declaration(&mut self, arg: &ModuleForDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            self.for_identifier = Some(arg.identifier.identifier_token.clone());
+            self.for_identifier = Some(arg.identifier.identifier_token.token);
         }
         Ok(())
     }
@@ -504,14 +499,18 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
     fn module_named_block(&mut self, arg: &ModuleNamedBlock) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                self.insert_symbol(&arg.identifier.identifier_token, SymbolKind::Block, false);
+                self.insert_symbol(
+                    &arg.identifier.identifier_token.token,
+                    SymbolKind::Block,
+                    false,
+                );
 
                 let name = arg.identifier.identifier_token.token.text;
                 self.default_block = Some(name);
                 self.namespace.push(name);
 
                 if self.for_identifier.is_some() {
-                    let identifier = self.for_identifier.clone().unwrap();
+                    let identifier = self.for_identifier.unwrap();
                     self.insert_symbol(&identifier, SymbolKind::Genvar, false);
                     self.for_identifier = None;
                 }
@@ -528,7 +527,11 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         match self.point {
             HandlerPoint::Before => {
                 let name = if let Some(ref x) = arg.module_optional_named_block_opt {
-                    self.insert_symbol(&x.identifier.identifier_token, SymbolKind::Block, false);
+                    self.insert_symbol(
+                        &x.identifier.identifier_token.token,
+                        SymbolKind::Block,
+                        false,
+                    );
                     x.identifier.identifier_token.token.text
                 } else {
                     let name = format!(
@@ -564,7 +567,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     TokenRange::new(&arg.interface.interface_token, &arg.r_brace.r_brace_token);
                 let property = InterfaceProperty { range, parameters };
                 self.insert_symbol(
-                    &arg.identifier.identifier_token,
+                    &arg.identifier.identifier_token.token,
                     SymbolKind::Interface(property),
                     public,
                 );
@@ -582,7 +585,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         arg: &InterfaceForDeclaration,
     ) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            self.for_identifier = Some(arg.identifier.identifier_token.clone());
+            self.for_identifier = Some(arg.identifier.identifier_token.token);
         }
         Ok(())
     }
@@ -590,14 +593,18 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
     fn interface_named_block(&mut self, arg: &InterfaceNamedBlock) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                self.insert_symbol(&arg.identifier.identifier_token, SymbolKind::Block, false);
+                self.insert_symbol(
+                    &arg.identifier.identifier_token.token,
+                    SymbolKind::Block,
+                    false,
+                );
 
                 let name = arg.identifier.identifier_token.token.text;
                 self.default_block = Some(name);
                 self.namespace.push(name);
 
                 if self.for_identifier.is_some() {
-                    let identifier = self.for_identifier.clone().unwrap();
+                    let identifier = self.for_identifier.unwrap();
                     self.insert_symbol(&identifier, SymbolKind::Genvar, false);
                     self.for_identifier = None;
                 }
@@ -614,7 +621,11 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         match self.point {
             HandlerPoint::Before => {
                 let name = if let Some(ref x) = arg.interface_optional_named_block_opt {
-                    self.insert_symbol(&x.identifier.identifier_token, SymbolKind::Block, false);
+                    self.insert_symbol(
+                        &x.identifier.identifier_token.token,
+                        SymbolKind::Block,
+                        false,
+                    );
                     x.identifier.identifier_token.token.text
                 } else {
                     let name = format!(
@@ -640,7 +651,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 let range = TokenRange::new(&arg.package.package_token, &arg.r_brace.r_brace_token);
                 let property = PackageProperty { range };
                 self.insert_symbol(
-                    &arg.identifier.identifier_token,
+                    &arg.identifier.identifier_token.token,
                     SymbolKind::Package(property),
                     public,
                 );

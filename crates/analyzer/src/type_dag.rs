@@ -6,7 +6,7 @@ use bimap::BiMap;
 use std::{cell::RefCell, collections::HashMap, collections::HashSet};
 
 use daggy::{petgraph::algo, Dag, Walker};
-use veryl_parser::veryl_token::VerylToken;
+use veryl_parser::veryl_token::Token;
 
 #[derive(Default)]
 pub struct TypeDag {
@@ -22,7 +22,7 @@ pub struct TypeDag {
 pub struct TypeResolveInfo {
     pub path: SymbolPathNamespace,
     pub name: String,
-    pub token: VerylToken,
+    pub token: Token,
 }
 
 #[derive(Default, Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq)]
@@ -61,12 +61,12 @@ impl TypeDag {
         &mut self,
         path: &SymbolPathNamespace,
         id: &str,
-        token: &VerylToken,
+        token: &Token,
     ) -> Result<u32, DagError> {
         let trinfo = TypeResolveInfo {
             path: path.clone(),
             name: id.into(),
-            token: token.clone(),
+            token: *token,
         };
         let sym = match symbol_table::resolve(&trinfo.path) {
             Ok(rr) => match rr.found {
@@ -127,12 +127,14 @@ impl TypeDag {
         }
     }
 
-    fn toposort(&self) -> Vec<VerylToken> {
+    fn toposort(&self) -> Vec<Symbol> {
         let nodes = algo::toposort(self.dag.graph(), None).unwrap();
         let mut ret = vec![];
         for node in nodes {
-            if let Some(path) = self.paths.get(&(node.index() as u32)) {
-                ret.push(path.token.clone());
+            let index = node.index() as u32;
+            if self.paths.contains_key(&index) {
+                let sym = self.get_symbol(index);
+                ret.push(sym);
             }
         }
         ret
@@ -166,11 +168,7 @@ pub fn insert_edge(start: u32, end: u32, context: Context) -> Result<(), DagErro
     TYPE_DAG.with(|f| f.borrow_mut().insert_edge(start, end, context))
 }
 
-pub fn insert_node(
-    start: &SymbolPathNamespace,
-    id: &str,
-    token: &VerylToken,
-) -> Result<u32, DagError> {
+pub fn insert_node(start: &SymbolPathNamespace, id: &str, token: &Token) -> Result<u32, DagError> {
     TYPE_DAG.with(|f| f.borrow_mut().insert_node(start, id, token))
 }
 
@@ -178,7 +176,7 @@ pub fn get_symbol(node: u32) -> Symbol {
     TYPE_DAG.with(|f| f.borrow().get_symbol(node))
 }
 
-pub fn toposort() -> Vec<VerylToken> {
+pub fn toposort() -> Vec<Symbol> {
     TYPE_DAG.with(|f| f.borrow().toposort())
 }
 

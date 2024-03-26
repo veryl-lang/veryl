@@ -10,7 +10,7 @@ use veryl_parser::{
         ScopedIdentifier, StructUnion, StructUnionDeclaration, TypeDefDeclaration,
         VerylGrammarTrait,
     },
-    veryl_token::VerylToken,
+    veryl_token::Token,
     ParolError,
 };
 use veryl_parser::{
@@ -39,7 +39,7 @@ impl<'a> CreateTypeDag<'a> {
         &mut self,
         path: &SymbolPathNamespace,
         name: &str,
-        token: &VerylToken,
+        token: &Token,
     ) -> Option<u32> {
         match type_dag::insert_node(path, name, token) {
             Ok(n) => Some(n),
@@ -53,10 +53,6 @@ impl<'a> CreateTypeDag<'a> {
     fn to_analyzer_error(&self, de: DagError) -> AnalyzerError {
         match de {
             DagError::Cyclic(s, e) => {
-                let token: VerylToken = VerylToken {
-                    token: e.token,
-                    comments: vec![],
-                };
                 let start = match resource_table::get_str_value(s.token.text) {
                     Some(s) => s,
                     None => "<unknown StrId>".into(),
@@ -65,7 +61,7 @@ impl<'a> CreateTypeDag<'a> {
                     Some(s) => s,
                     None => "<unknown StrId>".into(),
                 };
-                AnalyzerError::cyclic_type_dependency(self.text, &start, &end, &token)
+                AnalyzerError::cyclic_type_dependency(self.text, &start, &end, &e.token)
             }
             DagError::UnableToResolve(b) => {
                 let t = b.as_ref();
@@ -103,8 +99,8 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
         match self.point {
             HandlerPoint::Before => {
                 let path: SymbolPathNamespace = arg.identifier.as_ref().into();
-                let name = arg.identifier.identifier_token.text();
-                let token = arg.identifier.identifier_token.clone();
+                let name = arg.identifier.identifier_token.to_string();
+                let token = arg.identifier.identifier_token.token;
                 if let Some(x) = self.insert_node(&path, &name, &token) {
                     self.parent.push(x)
                 }
@@ -127,8 +123,8 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
         match self.point {
             HandlerPoint::Before => {
                 let path: SymbolPathNamespace = arg.identifier.as_ref().into();
-                let name = arg.identifier.identifier_token.text();
-                let token = arg.identifier.identifier_token.clone();
+                let name = arg.identifier.identifier_token.to_string();
+                let token = arg.identifier.identifier_token.token;
                 if let Some(x) = self.insert_node(&path, &name, &token) {
                     self.parent.push(x)
                 }
@@ -147,7 +143,7 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
             if !self.ctx.is_empty() {
                 let path: SymbolPathNamespace = arg.into();
                 let name = to_string(arg);
-                let token = arg.identifier.identifier_token.clone();
+                let token = arg.identifier.identifier_token.token;
                 let child = self.insert_node(&path, &name, &token);
                 if let (Some(parent), Some(child)) = (self.parent.last(), child) {
                     self.insert_edge(*parent, child, *self.ctx.last().unwrap());
@@ -161,8 +157,8 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
         match self.point {
             HandlerPoint::Before => {
                 let path: SymbolPathNamespace = arg.identifier.as_ref().into();
-                let name = arg.identifier.identifier_token.text();
-                let token = arg.identifier.identifier_token.clone();
+                let name = arg.identifier.identifier_token.to_string();
+                let token = arg.identifier.identifier_token.token;
                 if let Some(x) = self.insert_node(&path, &name, &token) {
                     self.parent.push(x)
                 }
@@ -180,8 +176,8 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
         match self.point {
             HandlerPoint::Before => {
                 let path: SymbolPathNamespace = arg.identifier.as_ref().into();
-                let name = arg.identifier.identifier_token.text();
-                let token = arg.identifier.identifier_token.clone();
+                let name = arg.identifier.identifier_token.to_string();
+                let token = arg.identifier.identifier_token.token;
                 if let Some(x) = self.insert_node(&path, &name, &token) {
                     self.parent.push(x)
                 }
@@ -199,8 +195,8 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
         match self.point {
             HandlerPoint::Before => {
                 let path: SymbolPathNamespace = arg.identifier.as_ref().into();
-                let name = arg.identifier.identifier_token.text();
-                let token = arg.identifier.identifier_token.clone();
+                let name = arg.identifier.identifier_token.to_string();
+                let token = arg.identifier.identifier_token.token;
                 if let Some(x) = self.insert_node(&path, &name, &token) {
                     self.parent.push(x)
                 }
@@ -218,8 +214,8 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
         match self.point {
             HandlerPoint::Before => {
                 let path: SymbolPathNamespace = arg.identifier.as_ref().into();
-                let name = arg.identifier.identifier_token.text();
-                let token = arg.identifier.identifier_token.clone();
+                let name = arg.identifier.identifier_token.to_string();
+                let token = arg.identifier.identifier_token.token;
                 if let Some(x) = self.insert_node(&path, &name, &token) {
                     self.parent.push(x)
                 }
@@ -239,7 +235,7 @@ fn to_string(sid: &ScopedIdentifier) -> String {
 
     let f = |id: &Identifier, scope: bool| -> String {
         let mut s: String = (if scope { "::" } else { "" }).into();
-        s.push_str(&id.identifier_token.text());
+        s.push_str(&id.identifier_token.to_string());
         s
     };
     rv.push_str(&f(&sid.identifier, false));

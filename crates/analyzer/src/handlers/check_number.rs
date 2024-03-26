@@ -32,8 +32,8 @@ impl<'a> Handler for CheckNumber<'a> {
 impl<'a> VerylGrammarTrait for CheckNumber<'a> {
     fn based(&mut self, arg: &Based) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let token = &arg.based_token;
-            let text = token.text();
+            let token = &arg.based_token.token;
+            let text = token.to_string();
             let (width, tail) = text.split_once('\'').unwrap();
             let base = &tail[0..1];
             let number = &tail[1..];

@@ -5,7 +5,7 @@ use crate::symbol::{DocComment, Symbol, SymbolKind};
 use crate::symbol_table::{self, ResolveError, ResolveErrorCause, ResolveSymbol, SymbolPath};
 use veryl_parser::resource_table::TokenId;
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::{Token, VerylToken};
+use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
@@ -28,7 +28,7 @@ impl<'a> CreateReference<'a> {
         }
     }
 
-    fn push_resolve_error(&mut self, err: ResolveError, token: &VerylToken) {
+    fn push_resolve_error(&mut self, err: ResolveError, token: &Token) {
         if let Some(last_found) = err.last_found {
             let name = format!("{}", last_found.token.text);
             match err.cause {
@@ -100,13 +100,13 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                 }
                 Err(err) => {
                     let is_single_identifier = SymbolPath::from(arg).as_slice().len() == 1;
-                    let name = arg.identifier.identifier_token.text();
+                    let name = arg.identifier.identifier_token.to_string();
                     if name == "_" && is_single_identifier {
                         return Ok(());
                     }
 
                     // TODO check SV-side member to suppress error
-                    self.push_resolve_error(err, &arg.identifier.identifier_token);
+                    self.push_resolve_error(err, &arg.identifier.identifier_token.token);
                 }
             }
         }
@@ -116,7 +116,8 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             // Add symbols under $sv namespace
-            if arg.scoped_identifier_opt.is_some() && arg.identifier.identifier_token.text() == "sv"
+            if arg.scoped_identifier_opt.is_some()
+                && arg.identifier.identifier_token.to_string() == "sv"
             {
                 let mut namespace = Namespace::new();
                 for (i, token) in scoped_identifier_tokens(arg).iter().enumerate() {
@@ -141,7 +142,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                     }
                 }
                 Err(err) => {
-                    self.push_resolve_error(err, &arg.identifier.identifier_token);
+                    self.push_resolve_error(err, &arg.identifier.identifier_token.token);
                 }
             }
         }
@@ -155,7 +156,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                 if let ExpressionIdentifierGroup::ExpressionIdentifierScoped(_) =
                     arg.expression_identifier_group.as_ref()
                 {
-                    if arg.identifier.identifier_token.text() == "sv" {
+                    if arg.identifier.identifier_token.to_string() == "sv" {
                         let mut namespace = Namespace::new();
                         for (i, token) in expression_identifier_tokens(arg).iter().enumerate() {
                             if i != 0 {
@@ -182,12 +183,12 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                 }
                 Err(err) => {
                     let is_single_identifier = SymbolPath::from(arg).as_slice().len() == 1;
-                    let name = arg.identifier.identifier_token.text();
+                    let name = arg.identifier.identifier_token.to_string();
                     if name == "_" && is_single_identifier {
                         return Ok(());
                     }
 
-                    self.push_resolve_error(err, &arg.identifier.identifier_token);
+                    self.push_resolve_error(err, &arg.identifier.identifier_token.token);
                 }
             }
         }
@@ -203,7 +204,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                     }
                 }
                 Err(err) => {
-                    self.push_resolve_error(err, &arg.identifier.identifier_token);
+                    self.push_resolve_error(err, &arg.identifier.identifier_token.token);
                 }
             }
         }
@@ -221,7 +222,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                         }
                     }
                     Err(err) => {
-                        self.push_resolve_error(err, &arg.identifier.identifier_token);
+                        self.push_resolve_error(err, &arg.identifier.identifier_token.token);
                     }
                 }
             }
@@ -314,7 +315,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                             _ if is_wildcard => {
                                 self.errors.push(AnalyzerError::invalid_import(
                                     self.text,
-                                    &arg.scoped_identifier.identifier.identifier_token,
+                                    &arg.scoped_identifier.identifier.identifier_token.token,
                                 ));
                             }
                             _ => {
@@ -330,7 +331,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                 Err(err) => {
                     self.push_resolve_error(
                         err,
-                        &arg.scoped_identifier.identifier.identifier_token,
+                        &arg.scoped_identifier.identifier.identifier_token.token,
                     );
                 }
             }

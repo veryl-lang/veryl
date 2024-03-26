@@ -3,7 +3,7 @@ use crate::symbol::Direction as SymDirection;
 use crate::symbol::{Symbol, SymbolKind};
 use crate::symbol_table::{self, ResolveSymbol};
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::VerylToken;
+use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
@@ -11,7 +11,7 @@ pub struct CheckAssignment<'a> {
     pub errors: Vec<AnalyzerError>,
     text: &'a str,
     point: HandlerPoint,
-    current_position: Vec<VerylToken>,
+    current_position: Vec<Token>,
     in_if_expression: Vec<()>,
 }
 
@@ -52,7 +52,7 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
     fn r#else(&mut self, arg: &Else) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if self.in_if_expression.is_empty() {
-                *self.current_position.last_mut().unwrap() = arg.else_token.clone();
+                *self.current_position.last_mut().unwrap() = arg.else_token.token;
             }
         }
         Ok(())
@@ -74,7 +74,7 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
         if let HandlerPoint::Before = self.point {
             if let Ok(x) = symbol_table::resolve(arg.identifier.as_ref()) {
                 let mut position = self.current_position.clone();
-                position.push(arg.r#let.let_token.clone());
+                position.push(arg.r#let.let_token.token);
                 symbol_table::add_assign(x.full_path, position);
             }
         }
@@ -91,11 +91,12 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                             if can_assign(&x) {
                                 symbol_table::add_assign(full_path, self.current_position.clone());
                             } else {
-                                let token = &arg.expression_identifier.identifier.identifier_token;
+                                let token =
+                                    &arg.expression_identifier.identifier.identifier_token.token;
                                 self.errors.push(AnalyzerError::invalid_assignment(
                                     &x.kind.to_kind_name(),
                                     self.text,
-                                    &token.text(),
+                                    &token.to_string(),
                                     token,
                                 ));
                             }
@@ -112,7 +113,7 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
     fn if_statement(&mut self, arg: &IfStatement) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                self.current_position.push(arg.r#if.if_token.clone());
+                self.current_position.push(arg.r#if.if_token.token);
             }
             HandlerPoint::After => {
                 self.current_position.pop();
@@ -125,7 +126,7 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
         match self.point {
             HandlerPoint::Before => {
                 self.current_position
-                    .push(arg.if_reset.if_reset_token.clone());
+                    .push(arg.if_reset.if_reset_token.token);
             }
             HandlerPoint::After => {
                 self.current_position.pop();
@@ -137,7 +138,7 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
     fn case_item(&mut self, arg: &CaseItem) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                self.current_position.push(arg.colon.colon_token.clone());
+                self.current_position.push(arg.colon.colon_token.token);
             }
             HandlerPoint::After => {
                 self.current_position.pop();
@@ -150,7 +151,7 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
         if let HandlerPoint::Before = self.point {
             if let Ok(x) = symbol_table::resolve(arg.identifier.as_ref()) {
                 let mut position = self.current_position.clone();
-                position.push(arg.r#let.let_token.clone());
+                position.push(arg.r#let.let_token.token);
                 symbol_table::add_assign(x.full_path, position);
             }
         }
@@ -161,7 +162,7 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
         match self.point {
             HandlerPoint::Before => {
                 self.current_position
-                    .push(arg.always_ff.always_ff_token.clone());
+                    .push(arg.always_ff.always_ff_token.token);
             }
             HandlerPoint::After => {
                 self.current_position.pop();
@@ -174,7 +175,7 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
         match self.point {
             HandlerPoint::Before => {
                 self.current_position
-                    .push(arg.always_comb.always_comb_token.clone());
+                    .push(arg.always_comb.always_comb_token.token);
             }
             HandlerPoint::After => {
                 self.current_position.pop();
@@ -191,14 +192,18 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                     ResolveSymbol::Symbol(x) => {
                         if can_assign(&x) {
                             let mut position = self.current_position.clone();
-                            position.push(arg.assign.assign_token.clone());
+                            position.push(arg.assign.assign_token.token);
                             symbol_table::add_assign(full_path, position);
                         } else {
-                            let token = &arg.hierarchical_identifier.identifier.identifier_token;
+                            let token = &arg
+                                .hierarchical_identifier
+                                .identifier
+                                .identifier_token
+                                .token;
                             self.errors.push(AnalyzerError::invalid_assignment(
                                 &x.kind.to_kind_name(),
                                 self.text,
-                                &token.text(),
+                                &token.to_string(),
                                 token,
                             ));
                         }
@@ -215,7 +220,7 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
         match self.point {
             HandlerPoint::Before => {
                 self.current_position
-                    .push(arg.function.function_token.clone());
+                    .push(arg.function.function_token.token);
             }
             HandlerPoint::After => {
                 self.current_position.pop();
@@ -227,7 +232,7 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
     fn module_if_declaration(&mut self, arg: &ModuleIfDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                self.current_position.push(arg.r#if.if_token.clone());
+                self.current_position.push(arg.r#if.if_token.token);
             }
             HandlerPoint::After => {
                 self.current_position.pop();

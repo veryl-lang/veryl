@@ -58,7 +58,7 @@ impl<'a> VerylGrammarTrait for CheckInstance<'a> {
                                         name,
                                         &port,
                                         self.text,
-                                        &arg.identifier.identifier_token,
+                                        &arg.identifier.identifier_token.token,
                                     ));
                                 }
                             }
@@ -69,7 +69,7 @@ impl<'a> VerylGrammarTrait for CheckInstance<'a> {
                                         name,
                                         &port,
                                         self.text,
-                                        &arg.identifier.identifier_token,
+                                        &arg.identifier.identifier_token.token,
                                     ));
                                 }
                             }
@@ -82,7 +82,7 @@ impl<'a> VerylGrammarTrait for CheckInstance<'a> {
                                 "module or interface",
                                 &symbol.kind.to_kind_name(),
                                 self.text,
-                                &arg.identifier.identifier_token,
+                                &arg.identifier.identifier_token.token,
                             ));
                         }
                     }

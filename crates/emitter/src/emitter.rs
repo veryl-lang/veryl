@@ -455,7 +455,7 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'Based'
     fn based(&mut self, arg: &Based) {
         let token = &arg.based_token;
-        let text = token.text();
+        let text = token.to_string();
         let (width, tail) = text.split_once('\'').unwrap();
         let base = &tail[0..1];
         let number = &tail[1..];
@@ -482,7 +482,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'AllBit'
     fn all_bit(&mut self, arg: &AllBit) {
-        let text = &arg.all_bit_token.text();
+        let text = &arg.all_bit_token.to_string();
         let (width, tail) = text.split_once('\'').unwrap();
 
         if width.is_empty() {
@@ -581,7 +581,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Operator07'
     fn operator07(&mut self, arg: &Operator07) {
-        match arg.operator07_token.text().as_str() {
+        match arg.operator07_token.to_string().as_str() {
             "<:" => self.str("<"),
             ">:" => self.str(">"),
             _ => self.veryl_token(&arg.operator07_token),
@@ -1041,7 +1041,7 @@ impl VerylWalker for Emitter {
         //}
         //self.str(";");
         //self.newline();
-        self.str(&arg.identifier.identifier_token.text());
+        self.str(&arg.identifier.identifier_token.to_string());
         self.space(1);
         self.equ(&arg.equ);
         self.space(1);
@@ -1385,7 +1385,7 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'Attribute'
     fn attribute(&mut self, arg: &Attribute) {
         self.adjust_line = false;
-        let identifier = arg.identifier.identifier_token.text();
+        let identifier = arg.identifier.identifier_token.to_string();
         match identifier.as_str() {
             "ifdef" | "ifndef" => {
                 if let Some(ref x) = arg.attribute_opt {
@@ -1419,7 +1419,7 @@ impl VerylWalker for Emitter {
                     self.str("(*");
                     self.space(1);
                     if let AttributeItem::StringLiteral(x) = &*x.attribute_list.attribute_item {
-                        let text = x.string_literal.string_literal_token.text();
+                        let text = x.string_literal.string_literal_token.to_string();
                         let text = &text[1..text.len() - 1];
                         let text = text.replace("\\\"", "\"");
                         self.str(&text);
@@ -1447,7 +1447,7 @@ impl VerylWalker for Emitter {
         self.newline();
         self.str("always_comb");
         self.space(1);
-        self.str(&arg.identifier.identifier_token.text());
+        self.str(&arg.identifier.identifier_token.to_string());
         self.space(1);
         self.equ(&arg.equ);
         self.space(1);
@@ -1704,7 +1704,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'EnumDeclaration'
     fn enum_declaration(&mut self, arg: &EnumDeclaration) {
-        self.enum_name = Some(arg.identifier.identifier_token.text());
+        self.enum_name = Some(arg.identifier.identifier_token.to_string());
         self.token(&arg.r#enum.enum_token.append("typedef ", ""));
         self.space(1);
         self.scalar_type(&arg.scalar_type);
@@ -2407,7 +2407,7 @@ impl VerylWalker for Emitter {
         self.space(1);
         self.colon(&arg.colon);
         self.identifier(&arg.identifier);
-        self.default_block = Some(arg.identifier.identifier_token.text());
+        self.default_block = Some(arg.identifier.identifier_token.to_string());
         self.token_will_push(&arg.l_brace.l_brace_token.replace(""));
         for (i, x) in arg.module_named_block_list.iter().enumerate() {
             self.newline_list(i);
@@ -2590,7 +2590,7 @@ impl VerylWalker for Emitter {
         self.space(1);
         self.colon(&arg.colon);
         self.identifier(&arg.identifier);
-        self.default_block = Some(arg.identifier.identifier_token.text());
+        self.default_block = Some(arg.identifier.identifier_token.to_string());
         self.token_will_push(&arg.l_brace.l_brace_token.replace(""));
         for (i, x) in arg.interface_named_block_list.iter().enumerate() {
             self.newline_list(i);

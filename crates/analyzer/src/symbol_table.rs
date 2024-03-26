@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::fmt;
 use veryl_parser::resource_table::{self, PathId, StrId, TokenId};
 use veryl_parser::veryl_grammar_trait as syntax_tree;
-use veryl_parser::veryl_token::{Token, TokenSource, VerylToken};
+use veryl_parser::veryl_token::{Token, TokenSource};
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct SymbolPath(Vec<StrId>);
@@ -222,7 +222,7 @@ impl ResolveError {
 #[derive(Clone, Debug)]
 pub struct Assign {
     full_path: Vec<SymbolId>,
-    position: Vec<VerylToken>,
+    position: Vec<Token>,
 }
 
 #[derive(Clone, Default, Debug)]
@@ -506,7 +506,7 @@ impl SymbolTable {
                 assign
                     .position
                     .iter()
-                    .map(|x| x.text().len())
+                    .map(|x| x.to_string().len())
                     .sum::<usize>()
                     + assign.position.len()
                     - 1,
@@ -518,22 +518,22 @@ impl SymbolTable {
             for (i, x) in assign.full_path.iter().enumerate() {
                 let x = self.symbol_table.get(x).unwrap();
                 if i == 0 {
-                    path.push_str(&format!("{}", x.token.text));
+                    path.push_str(&x.token.to_string());
                 } else {
-                    path.push_str(&format!(".{}", x.token.text));
+                    path.push_str(&format!(".{}", x.token));
                 }
             }
 
             let mut pos = "".to_string();
             for (i, x) in assign.position.iter().enumerate() {
                 if i == 0 {
-                    pos.push_str(&x.text());
+                    pos.push_str(&x.to_string());
                 } else {
-                    pos.push_str(&format!(".{}", x.text()));
+                    pos.push_str(&format!(".{}", x));
                 }
             }
 
-            let last_token = assign.position.last().unwrap().token;
+            let last_token = assign.position.last().unwrap();
 
             ret.push_str(&format!(
                 "    {:path_width$} / {:pos_width$} @ {}:{}:{}\n",
@@ -608,7 +608,7 @@ impl SymbolTable {
         self.project_local_table.get(&prj).cloned()
     }
 
-    pub fn add_assign(&mut self, full_path: Vec<SymbolId>, position: Vec<VerylToken>) {
+    pub fn add_assign(&mut self, full_path: Vec<SymbolId>, position: Vec<Token>) {
         let assign = Assign {
             full_path,
             position,
@@ -925,7 +925,7 @@ pub fn get_project_local(prj: StrId) -> Option<HashMap<StrId, StrId>> {
     SYMBOL_TABLE.with(|f| f.borrow().get_project_local(prj))
 }
 
-pub fn add_assign(full_path: Vec<SymbolId>, position: Vec<VerylToken>) {
+pub fn add_assign(full_path: Vec<SymbolId>, position: Vec<Token>) {
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_assign(full_path, position))
 }
 

@@ -6,7 +6,7 @@ use inflector::cases::{
 };
 use veryl_metadata::{Case, Lint};
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::VerylToken;
+use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
@@ -50,7 +50,7 @@ impl<'a> CheckIdentifier<'a> {
         }
     }
 
-    fn check(&mut self, token: &VerylToken, kind: Kind) {
+    fn check(&mut self, token: &Token, kind: Kind) {
         let opt = &self.lint_opt.naming;
 
         let prefix = match kind {
@@ -129,7 +129,7 @@ impl<'a> CheckIdentifier<'a> {
             Kind::Wire => &opt.re_forbidden_wire,
         };
 
-        let identifier = token.text();
+        let identifier = token.to_string();
         if let Some(prefix) = prefix {
             if !identifier.starts_with(prefix) {
                 self.errors.push(AnalyzerError::invalid_identifier(
@@ -200,13 +200,13 @@ impl<'a> VerylGrammarTrait for CheckIdentifier<'a> {
         if let HandlerPoint::Before = self.point {
             if self.in_always_comb {
                 self.check(
-                    &arg.expression_identifier.identifier.identifier_token,
+                    &arg.expression_identifier.identifier.identifier_token.token,
                     Kind::Wire,
                 );
             }
             if self.in_always_ff {
                 self.check(
-                    &arg.expression_identifier.identifier.identifier_token,
+                    &arg.expression_identifier.identifier.identifier_token.token,
                     Kind::Reg,
                 );
             }
@@ -216,21 +216,21 @@ impl<'a> VerylGrammarTrait for CheckIdentifier<'a> {
 
     fn local_declaration(&mut self, arg: &LocalDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            self.check(&arg.identifier.identifier_token, Kind::Parameter);
+            self.check(&arg.identifier.identifier_token.token, Kind::Parameter);
         }
         Ok(())
     }
 
     fn modport_declaration(&mut self, arg: &ModportDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            self.check(&arg.identifier.identifier_token, Kind::Modport);
+            self.check(&arg.identifier.identifier_token.token, Kind::Modport);
         }
         Ok(())
     }
 
     fn enum_declaration(&mut self, arg: &EnumDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            self.check(&arg.identifier.identifier_token, Kind::Enum);
+            self.check(&arg.identifier.identifier_token.token, Kind::Enum);
         }
         Ok(())
     }
@@ -239,27 +239,27 @@ impl<'a> VerylGrammarTrait for CheckIdentifier<'a> {
         if let HandlerPoint::Before = self.point {
             match &*arg.struct_union {
                 StructUnion::Struct(_) => {
-                    self.check(&arg.identifier.identifier_token, Kind::Struct);
+                    self.check(&arg.identifier.identifier_token.token, Kind::Struct);
                 }
                 StructUnion::Union(_) => {
-                    self.check(&arg.identifier.identifier_token, Kind::Union);
+                    self.check(&arg.identifier.identifier_token.token, Kind::Union);
                 }
             }
-            self.check(&arg.identifier.identifier_token, Kind::Struct);
+            self.check(&arg.identifier.identifier_token.token, Kind::Struct);
         }
         Ok(())
     }
 
     fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            self.check(&arg.identifier.identifier_token, Kind::Instance);
+            self.check(&arg.identifier.identifier_token.token, Kind::Instance);
         }
         Ok(())
     }
 
     fn with_parameter_item(&mut self, arg: &WithParameterItem) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            self.check(&arg.identifier.identifier_token, Kind::Parameter);
+            self.check(&arg.identifier.identifier_token.token, Kind::Parameter);
         }
         Ok(())
     }
@@ -284,7 +284,7 @@ impl<'a> VerylGrammarTrait for CheckIdentifier<'a> {
             };
 
             if let Some(kind) = kind {
-                self.check(&arg.identifier.identifier_token, kind);
+                self.check(&arg.identifier.identifier_token.token, kind);
             }
         }
         Ok(())
@@ -308,28 +308,28 @@ impl<'a> VerylGrammarTrait for CheckIdentifier<'a> {
 
     fn function_declaration(&mut self, arg: &FunctionDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            self.check(&arg.identifier.identifier_token, Kind::Function);
+            self.check(&arg.identifier.identifier_token.token, Kind::Function);
         }
         Ok(())
     }
 
     fn module_declaration(&mut self, arg: &ModuleDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            self.check(&arg.identifier.identifier_token, Kind::Module);
+            self.check(&arg.identifier.identifier_token.token, Kind::Module);
         }
         Ok(())
     }
 
     fn interface_declaration(&mut self, arg: &InterfaceDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            self.check(&arg.identifier.identifier_token, Kind::Interface);
+            self.check(&arg.identifier.identifier_token.token, Kind::Interface);
         }
         Ok(())
     }
 
     fn package_declaration(&mut self, arg: &PackageDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            self.check(&arg.identifier.identifier_token, Kind::Package);
+            self.check(&arg.identifier.identifier_token.token, Kind::Package);
         }
         Ok(())
     }

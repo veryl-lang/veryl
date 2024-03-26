@@ -27,19 +27,19 @@ impl<'a> CheckReset<'a> {
 
     fn get_identifier_path(x: &ExpressionIdentifier) -> Vec<String> {
         let mut ret = Vec::new();
-        ret.push(x.identifier.identifier_token.text());
+        ret.push(x.identifier.identifier_token.to_string());
         match &*x.expression_identifier_group {
             ExpressionIdentifierGroup::ExpressionIdentifierScoped(x) => {
                 let x = &x.expression_identifier_scoped;
-                ret.push(x.identifier.identifier_token.text());
+                ret.push(x.identifier.identifier_token.to_string());
                 for x in &x.expression_identifier_scoped_list {
-                    ret.push(x.identifier.identifier_token.text());
+                    ret.push(x.identifier.identifier_token.to_string());
                 }
             }
             ExpressionIdentifierGroup::ExpressionIdentifierMember(x) => {
                 let x = &x.expression_identifier_member;
                 for x in &x.expression_identifier_member_list0 {
-                    ret.push(x.identifier.identifier_token.text());
+                    ret.push(x.identifier.identifier_token.to_string());
                 }
             }
         }
@@ -115,7 +115,7 @@ impl<'a> VerylGrammarTrait for CheckReset<'a> {
                 if if_reset_required {
                     self.errors.push(AnalyzerError::missing_if_reset(
                         self.text,
-                        &arg.always_ff.always_ff_token,
+                        &arg.always_ff.always_ff_token.token,
                     ));
                 }
 
@@ -126,7 +126,7 @@ impl<'a> VerylGrammarTrait for CheckReset<'a> {
                 if self.if_reset_exist && arg.always_ff_declaration_opt.is_none() {
                     self.errors.push(AnalyzerError::missing_reset_signal(
                         self.text,
-                        &arg.always_ff.always_ff_token,
+                        &arg.always_ff.always_ff_token.token,
                     ));
                 }
 
@@ -149,7 +149,7 @@ impl<'a> VerylGrammarTrait for CheckReset<'a> {
                         self.errors.push(AnalyzerError::missing_reset_statement(
                             &name,
                             self.text,
-                            &x.identifier.identifier_token,
+                            &x.identifier.identifier_token.token,
                         ));
                     }
                 }

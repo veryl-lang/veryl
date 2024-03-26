@@ -376,7 +376,7 @@ impl Evaluator {
     }
 
     fn based(&mut self, arg: &Based) -> Evaluated {
-        let text = arg.based_token.text().replace('_', "");
+        let text = arg.based_token.to_string().replace('_', "");
         if let Some((width, rest)) = text.split_once('\'') {
             let (base, value) = rest.split_at(1);
             let radix = match base {
@@ -399,7 +399,7 @@ impl Evaluator {
     }
 
     fn base_less(&mut self, arg: &BaseLess) -> Evaluated {
-        let text = arg.base_less_token.text().replace('_', "");
+        let text = arg.base_less_token.to_string().replace('_', "");
         if let Ok(value) = text.parse() {
             Evaluated::Fixed { width: 32, value }
         } else {
@@ -408,7 +408,7 @@ impl Evaluator {
     }
 
     fn all_bit(&mut self, arg: &AllBit) -> Evaluated {
-        let text = arg.all_bit_token.text();
+        let text = arg.all_bit_token.to_string();
         let mut unknown = false;
         let value = match text.as_str() {
             "'1" => {
@@ -464,7 +464,7 @@ impl Evaluator {
     pub fn expression(&mut self, arg: &Expression) -> Evaluated {
         let mut ret = self.expression01(&arg.expression01);
         for x in &arg.expression_list {
-            let operator = x.operator01.operator01_token.text();
+            let operator = x.operator01.operator01_token.to_string();
             let operand = self.expression01(&x.expression01);
             ret = self.binary_operator(&operator, ret, operand);
         }
@@ -474,7 +474,7 @@ impl Evaluator {
     fn expression01(&mut self, arg: &Expression01) -> Evaluated {
         let mut ret = self.expression02(&arg.expression02);
         for x in &arg.expression01_list {
-            let operator = x.operator02.operator02_token.text();
+            let operator = x.operator02.operator02_token.to_string();
             let operand = self.expression02(&x.expression02);
             ret = self.binary_operator(&operator, ret, operand);
         }
@@ -484,7 +484,7 @@ impl Evaluator {
     fn expression02(&mut self, arg: &Expression02) -> Evaluated {
         let mut ret = self.expression03(&arg.expression03);
         for x in &arg.expression02_list {
-            let operator = x.operator03.operator03_token.text();
+            let operator = x.operator03.operator03_token.to_string();
             let operand = self.expression03(&x.expression03);
             ret = self.binary_operator(&operator, ret, operand);
         }
@@ -494,7 +494,7 @@ impl Evaluator {
     fn expression03(&mut self, arg: &Expression03) -> Evaluated {
         let mut ret = self.expression04(&arg.expression04);
         for x in &arg.expression03_list {
-            let operator = x.operator04.operator04_token.text();
+            let operator = x.operator04.operator04_token.to_string();
             let operand = self.expression04(&x.expression04);
             ret = self.binary_operator(&operator, ret, operand);
         }
@@ -504,7 +504,7 @@ impl Evaluator {
     fn expression04(&mut self, arg: &Expression04) -> Evaluated {
         let mut ret = self.expression05(&arg.expression05);
         for x in &arg.expression04_list {
-            let operator = x.operator05.operator05_token.text();
+            let operator = x.operator05.operator05_token.to_string();
             let operand = self.expression05(&x.expression05);
             ret = self.binary_operator(&operator, ret, operand);
         }
@@ -514,7 +514,7 @@ impl Evaluator {
     fn expression05(&mut self, arg: &Expression05) -> Evaluated {
         let mut ret = self.expression06(&arg.expression06);
         for x in &arg.expression05_list {
-            let operator = x.operator06.operator06_token.text();
+            let operator = x.operator06.operator06_token.to_string();
             let operand = self.expression06(&x.expression06);
             ret = self.binary_operator(&operator, ret, operand);
         }
@@ -524,7 +524,7 @@ impl Evaluator {
     fn expression06(&mut self, arg: &Expression06) -> Evaluated {
         let mut ret = self.expression07(&arg.expression07);
         for x in &arg.expression06_list {
-            let operator = x.operator07.operator07_token.text();
+            let operator = x.operator07.operator07_token.to_string();
             let operand = self.expression07(&x.expression07);
             ret = self.binary_operator(&operator, ret, operand);
         }
@@ -534,7 +534,7 @@ impl Evaluator {
     fn expression07(&mut self, arg: &Expression07) -> Evaluated {
         let mut ret = self.expression08(&arg.expression08);
         for x in &arg.expression07_list {
-            let operator = x.operator08.operator08_token.text();
+            let operator = x.operator08.operator08_token.to_string();
             let operand = self.expression08(&x.expression08);
             ret = self.binary_operator(&operator, ret, operand);
         }
@@ -544,7 +544,7 @@ impl Evaluator {
     fn expression08(&mut self, arg: &Expression08) -> Evaluated {
         let mut ret = self.expression09(&arg.expression09);
         for x in &arg.expression08_list {
-            let operator = x.operator09.operator09_token.text();
+            let operator = x.operator09.operator09_token.to_string();
             let operand = self.expression09(&x.expression09);
             ret = self.binary_operator(&operator, ret, operand);
         }
@@ -555,8 +555,8 @@ impl Evaluator {
         let mut ret = self.expression10(&arg.expression10);
         for x in &arg.expression09_list {
             let operator = match &*x.expression09_list_group {
-                Expression09ListGroup::Operator10(x) => x.operator10.operator10_token.text(),
-                Expression09ListGroup::Star(x) => x.star.star_token.text(),
+                Expression09ListGroup::Operator10(x) => x.operator10.operator10_token.to_string(),
+                Expression09ListGroup::Star(x) => x.star.star_token.to_string(),
             };
             let operand = self.expression10(&x.expression10);
             ret = self.binary_operator(&operator, ret, operand);
@@ -567,7 +567,7 @@ impl Evaluator {
     fn expression10(&mut self, arg: &Expression10) -> Evaluated {
         let mut ret = self.expression11(&arg.expression11);
         for x in &arg.expression10_list {
-            let operator = x.operator11.operator11_token.text();
+            let operator = x.operator11.operator11_token.to_string();
             let operand = self.expression11(&x.expression11);
             ret = self.binary_operator(&operator, ret, operand);
         }
@@ -583,12 +583,12 @@ impl Evaluator {
         for x in arg.expression12_list.iter().rev() {
             let operator = match &*x.expression12_list_group {
                 Expression12ListGroup::UnaryOperator(x) => {
-                    x.unary_operator.unary_operator_token.text()
+                    x.unary_operator.unary_operator_token.to_string()
                 }
-                Expression12ListGroup::Operator03(x) => x.operator03.operator03_token.text(),
-                Expression12ListGroup::Operator04(x) => x.operator04.operator04_token.text(),
-                Expression12ListGroup::Operator05(x) => x.operator05.operator05_token.text(),
-                Expression12ListGroup::Operator09(x) => x.operator09.operator09_token.text(),
+                Expression12ListGroup::Operator03(x) => x.operator03.operator03_token.to_string(),
+                Expression12ListGroup::Operator04(x) => x.operator04.operator04_token.to_string(),
+                Expression12ListGroup::Operator05(x) => x.operator05.operator05_token.to_string(),
+                Expression12ListGroup::Operator09(x) => x.operator09.operator09_token.to_string(),
             };
             ret = self.unary_operator(&operator, ret);
         }

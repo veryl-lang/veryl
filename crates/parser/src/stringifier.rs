@@ -19,6 +19,6 @@ impl Stringifier {
 impl VerylWalker for Stringifier {
     /// Semantic action for non-terminal 'VerylToken'
     fn veryl_token(&mut self, arg: &VerylToken) {
-        self.string.push_str(&arg.text());
+        self.string.push_str(&arg.to_string());
     }
 }

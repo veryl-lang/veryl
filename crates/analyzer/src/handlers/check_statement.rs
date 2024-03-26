@@ -43,9 +43,9 @@ impl<'a> VerylGrammarTrait for CheckStatement<'a> {
         if let HandlerPoint::Before = self.point {
             if self.in_initial || self.in_final {
                 let token = match &*arg.assignment_group {
-                    AssignmentGroup::Equ(x) => &x.equ.equ_token,
+                    AssignmentGroup::Equ(x) => &x.equ.equ_token.token,
                     AssignmentGroup::AssignmentOperator(x) => {
-                        &x.assignment_operator.assignment_operator_token
+                        &x.assignment_operator.assignment_operator_token.token
                     }
                 };
                 self.errors.push(AnalyzerError::invalid_statement(
@@ -64,7 +64,7 @@ impl<'a> VerylGrammarTrait for CheckStatement<'a> {
                 self.errors.push(AnalyzerError::invalid_statement(
                     "if_reset",
                     self.text,
-                    &arg.if_reset.if_reset_token,
+                    &arg.if_reset.if_reset_token.token,
                 ));
             }
 
@@ -72,7 +72,7 @@ impl<'a> VerylGrammarTrait for CheckStatement<'a> {
                 self.errors.push(AnalyzerError::invalid_statement(
                     "if_reset",
                     self.text,
-                    &arg.if_reset.if_reset_token,
+                    &arg.if_reset.if_reset_token.token,
                 ));
             }
         }
@@ -85,7 +85,7 @@ impl<'a> VerylGrammarTrait for CheckStatement<'a> {
                 self.errors.push(AnalyzerError::invalid_statement(
                     "return",
                     self.text,
-                    &arg.r#return.return_token,
+                    &arg.r#return.return_token.token,
                 ));
             }
         }

@@ -1,6 +1,6 @@
 use miette::{self, Diagnostic, NamedSource, SourceSpan};
 use thiserror::Error;
-use veryl_parser::veryl_token::VerylToken;
+use veryl_parser::veryl_token::Token;
 
 #[derive(Error, Diagnostic, Debug)]
 pub enum AnalyzerError {
@@ -478,124 +478,104 @@ pub enum AnalyzerError {
 }
 
 impl AnalyzerError {
-    fn named_source(source: &str, token: &VerylToken) -> NamedSource {
-        NamedSource::new(token.token.source.to_string(), source.to_string())
+    fn named_source(source: &str, token: &Token) -> NamedSource {
+        NamedSource::new(token.source.to_string(), source.to_string())
     }
 
-    pub fn cyclic_type_dependency(
-        source: &str,
-        start: &str,
-        end: &str,
-        token: &VerylToken,
-    ) -> Self {
+    pub fn cyclic_type_dependency(source: &str, start: &str, end: &str, token: &Token) -> Self {
         AnalyzerError::CyclicTypeDependency {
             start: start.into(),
             end: end.into(),
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
-    pub fn duplicated_identifier(identifier: &str, source: &str, token: &VerylToken) -> Self {
+    pub fn duplicated_identifier(identifier: &str, source: &str, token: &Token) -> Self {
         AnalyzerError::DuplicatedIdentifier {
             identifier: identifier.to_string(),
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
-    pub fn duplicated_assignment(identifier: &str, source: &str, token: &VerylToken) -> Self {
+    pub fn duplicated_assignment(identifier: &str, source: &str, token: &Token) -> Self {
         AnalyzerError::DuplicatedAssignment {
             identifier: identifier.to_string(),
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
-    pub fn invalid_allow(identifier: &str, source: &str, token: &VerylToken) -> Self {
+    pub fn invalid_allow(identifier: &str, source: &str, token: &Token) -> Self {
         AnalyzerError::InvalidAllow {
             identifier: identifier.to_string(),
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
-    pub fn invalid_assignment(
-        identifier: &str,
-        source: &str,
-        kind: &str,
-        token: &VerylToken,
-    ) -> Self {
+    pub fn invalid_assignment(identifier: &str, source: &str, kind: &str, token: &Token) -> Self {
         AnalyzerError::InvalidAssignment {
             identifier: identifier.into(),
             kind: kind.into(),
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
-    pub fn invalid_direction(kind: &str, source: &str, token: &VerylToken) -> Self {
+    pub fn invalid_direction(kind: &str, source: &str, token: &Token) -> Self {
         AnalyzerError::InvalidDirection {
             kind: kind.to_string(),
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
-    pub fn invalid_identifier(
-        identifier: &str,
-        rule: &str,
-        source: &str,
-        token: &VerylToken,
-    ) -> Self {
+    pub fn invalid_identifier(identifier: &str, rule: &str, source: &str, token: &Token) -> Self {
         AnalyzerError::InvalidIdentifier {
             identifier: identifier.to_string(),
             rule: rule.to_string(),
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
-    pub fn invalid_import(source: &str, token: &VerylToken) -> Self {
+    pub fn invalid_import(source: &str, token: &Token) -> Self {
         AnalyzerError::InvalidImport {
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
-    pub fn invalid_lsb(source: &str, token: &VerylToken) -> Self {
+    pub fn invalid_lsb(source: &str, token: &Token) -> Self {
         AnalyzerError::InvalidLsb {
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
-    pub fn invalid_msb(source: &str, token: &VerylToken) -> Self {
+    pub fn invalid_msb(source: &str, token: &Token) -> Self {
         AnalyzerError::InvalidMsb {
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
-    pub fn invalid_number_character(
-        cause: char,
-        kind: &str,
-        source: &str,
-        token: &VerylToken,
-    ) -> Self {
+    pub fn invalid_number_character(cause: char, kind: &str, source: &str, token: &Token) -> Self {
         AnalyzerError::InvalidNumberCharacter {
             cause,
             kind: kind.to_string(),
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
-    pub fn invalid_statement(kind: &str, source: &str, token: &VerylToken) -> Self {
+    pub fn invalid_statement(kind: &str, source: &str, token: &Token) -> Self {
         AnalyzerError::InvalidStatement {
             kind: kind.to_string(),
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
@@ -604,14 +584,14 @@ impl AnalyzerError {
         arity: usize,
         args: usize,
         source: &str,
-        token: &VerylToken,
+        token: &Token,
     ) -> Self {
         AnalyzerError::MismatchArity {
             name: name.to_string(),
             arity,
             args,
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
@@ -620,36 +600,36 @@ impl AnalyzerError {
         expected: &str,
         actual: &str,
         source: &str,
-        token: &VerylToken,
+        token: &Token,
     ) -> Self {
         AnalyzerError::MismatchType {
             name: name.to_string(),
             expected: expected.to_string(),
             actual: actual.to_string(),
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
-    pub fn missing_if_reset(source: &str, token: &VerylToken) -> Self {
+    pub fn missing_if_reset(source: &str, token: &Token) -> Self {
         AnalyzerError::MissingIfReset {
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
-    pub fn missing_reset_signal(source: &str, token: &VerylToken) -> Self {
+    pub fn missing_reset_signal(source: &str, token: &Token) -> Self {
         AnalyzerError::MissingResetSignal {
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
-    pub fn missing_reset_statement(name: &str, source: &str, token: &VerylToken) -> Self {
+    pub fn missing_reset_statement(name: &str, source: &str, token: &Token) -> Self {
         AnalyzerError::MissingResetStatement {
             name: name.to_string(),
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
@@ -657,22 +637,22 @@ impl AnalyzerError {
         name: &str,
         expected: &str,
         source: &str,
-        token: &VerylToken,
+        token: &Token,
     ) -> Self {
         AnalyzerError::MismatchAttributeArgs {
             name: name.to_string(),
             expected: expected.to_string(),
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
-    pub fn missing_port(name: &str, port: &str, source: &str, token: &VerylToken) -> Self {
+    pub fn missing_port(name: &str, port: &str, source: &str, token: &Token) -> Self {
         AnalyzerError::MissingPort {
             name: name.to_string(),
             port: port.to_string(),
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
@@ -681,22 +661,22 @@ impl AnalyzerError {
         value: isize,
         width: usize,
         source: &str,
-        token: &VerylToken,
+        token: &Token,
     ) -> Self {
         AnalyzerError::TooLargeEnumVariant {
             identifier: identifier.to_string(),
             value,
             width,
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
-    pub fn too_large_number(width: usize, source: &str, token: &VerylToken) -> Self {
+    pub fn too_large_number(width: usize, source: &str, token: &Token) -> Self {
         AnalyzerError::TooLargeNumber {
             width,
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
@@ -705,79 +685,79 @@ impl AnalyzerError {
         number: usize,
         width: usize,
         source: &str,
-        token: &VerylToken,
+        token: &Token,
     ) -> Self {
         AnalyzerError::TooMuchEnumVariant {
             identifier: identifier.to_string(),
             number,
             width,
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
-    pub fn undefined_identifier(identifier: &str, source: &str, token: &VerylToken) -> Self {
+    pub fn undefined_identifier(identifier: &str, source: &str, token: &Token) -> Self {
         AnalyzerError::UndefinedIdentifier {
             identifier: identifier.to_string(),
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
-    pub fn unknown_attribute(name: &str, source: &str, token: &VerylToken) -> Self {
+    pub fn unknown_attribute(name: &str, source: &str, token: &Token) -> Self {
         AnalyzerError::UnknownAttribute {
             name: name.to_string(),
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
-    pub fn unknown_member(name: &str, member: &str, source: &str, token: &VerylToken) -> Self {
+    pub fn unknown_member(name: &str, member: &str, source: &str, token: &Token) -> Self {
         AnalyzerError::UnknownMember {
             name: name.to_string(),
             member: member.to_string(),
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
-    pub fn private_member(name: &str, source: &str, token: &VerylToken) -> Self {
+    pub fn private_member(name: &str, source: &str, token: &Token) -> Self {
         AnalyzerError::PrivateMember {
             name: name.to_string(),
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
-    pub fn unknown_msb(source: &str, token: &VerylToken) -> Self {
+    pub fn unknown_msb(source: &str, token: &Token) -> Self {
         AnalyzerError::UnknownMsb {
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
-    pub fn unknown_port(name: &str, port: &str, source: &str, token: &VerylToken) -> Self {
+    pub fn unknown_port(name: &str, port: &str, source: &str, token: &Token) -> Self {
         AnalyzerError::UnknownPort {
             name: name.to_string(),
             port: port.to_string(),
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
-    pub fn unused_variable(identifier: &str, source: &str, token: &VerylToken) -> Self {
+    pub fn unused_variable(identifier: &str, source: &str, token: &Token) -> Self {
         AnalyzerError::UnusedVariable {
             identifier: identifier.to_string(),
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 
-    pub fn unused_return(identifier: &str, source: &str, token: &VerylToken) -> Self {
+    pub fn unused_return(identifier: &str, source: &str, token: &Token) -> Self {
         AnalyzerError::UnusedReturn {
             identifier: identifier.to_string(),
             input: AnalyzerError::named_source(source, token),
-            error_location: token.token.into(),
+            error_location: token.into(),
         }
     }
 }

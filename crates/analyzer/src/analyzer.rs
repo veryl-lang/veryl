@@ -7,7 +7,6 @@ use std::path::Path;
 use veryl_metadata::{Lint, Metadata};
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::VerylToken;
 use veryl_parser::veryl_walker::{Handler, VerylWalker};
 
 pub struct AnalyzerPass1<'a> {
@@ -133,14 +132,10 @@ impl Analyzer {
                             continue;
                         }
 
-                        let token = VerylToken {
-                            token: symbol.token,
-                            comments: Vec::new(),
-                        };
                         ret.push(AnalyzerError::unused_variable(
                             &format!("{}", symbol.token.text),
                             text,
-                            &token,
+                            &symbol.token,
                         ));
                     }
                 }

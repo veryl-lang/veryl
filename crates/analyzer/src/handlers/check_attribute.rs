@@ -20,7 +20,7 @@ impl<'a> CheckAttribute<'a> {
     }
 
     pub fn allow_pop(x: &Attribute) {
-        let identifier = x.identifier.identifier_token.text();
+        let identifier = x.identifier.identifier_token.to_string();
         if identifier.as_str() == "allow" {
             allow_table::pop();
         }
@@ -36,7 +36,7 @@ impl<'a> Handler for CheckAttribute<'a> {
 impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
     fn attribute(&mut self, arg: &Attribute) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let identifier = arg.identifier.identifier_token.text();
+            let identifier = arg.identifier.identifier_token.to_string();
             match identifier.as_str() {
                 "ifdef" | "ifndef" => {
                     let valid_arg = if let Some(ref x) = arg.attribute_opt {
@@ -55,7 +55,7 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
                             &identifier,
                             "single identifier",
                             self.text,
-                            &arg.identifier.identifier_token,
+                            &arg.identifier.identifier_token.token,
                         ));
                     }
                 }
@@ -76,7 +76,7 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
                             &identifier,
                             "single string",
                             self.text,
-                            &arg.identifier.identifier_token,
+                            &arg.identifier.identifier_token.token,
                         ));
                     }
                 }
@@ -86,12 +86,12 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
                         if args.is_empty() {
                             false
                         } else if let AttributeItem::Identifier(x) = &args[0] {
-                            let text = x.identifier.identifier_token.text();
+                            let text = x.identifier.identifier_token.to_string();
                             if !ALLOWABLE_ERROR.contains(&text.as_str()) {
                                 self.errors.push(AnalyzerError::invalid_allow(
                                     &text,
                                     self.text,
-                                    &arg.identifier.identifier_token,
+                                    &arg.identifier.identifier_token.token,
                                 ));
                             }
                             allow_table::push(x.identifier.identifier_token.token.text);
@@ -108,7 +108,7 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
                             &identifier,
                             "error identifier",
                             self.text,
-                            &arg.identifier.identifier_token,
+                            &arg.identifier.identifier_token.token,
                         ));
                     }
                 }
@@ -116,7 +116,7 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
                     self.errors.push(AnalyzerError::unknown_attribute(
                         &identifier,
                         self.text,
-                        &arg.identifier.identifier_token,
+                        &arg.identifier.identifier_token.token,
                     ));
                 }
             }

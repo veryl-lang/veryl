@@ -124,9 +124,9 @@ impl CmdBuild {
         }
 
         let mut ret = vec![];
-        let sorted_tokens = type_dag::toposort();
-        for token in sorted_tokens {
-            if let TokenSource::File(x) = token.token.source {
+        let sorted_symbols = type_dag::toposort();
+        for symbol in sorted_symbols {
+            if let TokenSource::File(x) = symbol.token.source {
                 let path = PathBuf::from(format!("{}", x));
                 if let Some(x) = table.remove(&path) {
                     ret.push(x.clone());

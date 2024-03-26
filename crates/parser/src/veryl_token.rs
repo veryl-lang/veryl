@@ -67,6 +67,13 @@ impl Token {
     }
 }
 
+impl fmt::Display for Token {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let text = format!("{}", self.text);
+        text.fmt(f)
+    }
+}
+
 impl<'t> TryFrom<&parol_runtime::lexer::Token<'t>> for Token {
     type Error = anyhow::Error;
     fn try_from(x: &parol_runtime::lexer::Token<'t>) -> Result<Self, anyhow::Error> {
@@ -156,9 +163,12 @@ impl VerylToken {
         ret.token.length = length as u32;
         ret
     }
+}
 
-    pub fn text(&self) -> String {
-        resource_table::get_str_value(self.token.text).unwrap()
+impl fmt::Display for VerylToken {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let text = format!("{}", self.token);
+        text.fmt(f)
     }
 }
 

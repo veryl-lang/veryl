@@ -54,7 +54,7 @@ impl<'a> VerylGrammarTrait for CheckFunction<'a> {
                                 self.errors.push(AnalyzerError::unused_return(
                                     &name,
                                     self.text,
-                                    &arg.expression_identifier.identifier.identifier_token,
+                                    &arg.expression_identifier.identifier.identifier_token.token,
                                 ));
                             }
                         }
@@ -111,7 +111,7 @@ impl<'a> VerylGrammarTrait for CheckFunction<'a> {
                                 arity,
                                 args,
                                 self.text,
-                                &x.expression_identifier.identifier.identifier_token,
+                                &x.expression_identifier.identifier.identifier_token.token,
                             ));
                         }
                     }
