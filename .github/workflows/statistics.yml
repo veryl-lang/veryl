@@ -24,7 +24,7 @@ jobs:
         default_author: github_actions
         message: "Update statistics"
         add: "./statistics/*"
-        fetch: false
+        fetch: true
         new_branch: statistics
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
