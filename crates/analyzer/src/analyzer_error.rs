@@ -475,6 +475,23 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
     },
+
+    #[diagnostic(
+        severity(Warning),
+        code(unassign_variable),
+        help(""),
+        url(
+            "https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#unassign_variable"
+        )
+    )]
+    #[error("{identifier} is unassigned")]
+    UnassignVariable {
+        identifier: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
 }
 
 impl AnalyzerError {
@@ -755,6 +772,14 @@ impl AnalyzerError {
 
     pub fn unused_return(identifier: &str, source: &str, token: &Token) -> Self {
         AnalyzerError::UnusedReturn {
+            identifier: identifier.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn unassign_variable(identifier: &str, source: &str, token: &Token) -> Self {
+        AnalyzerError::UnassignVariable {
             identifier: identifier.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),

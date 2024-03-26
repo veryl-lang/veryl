@@ -3,7 +3,9 @@ module veryl_testcase_Module28;
     localparam int unsigned WIDTH1 = 20;
 
     logic [10-1:0][20-1:0]              a;
+    always_comb a = 1;
     logic [WIDTH0 + 10-1:0][WIDTH1-1:0] b;
+    always_comb b = 1;
 
     logic _x;
     always_comb _x = a[((10) - 1)][((20) - 1):0 + 1];

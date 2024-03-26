@@ -1,8 +1,10 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::handlers::*;
 use crate::namespace_table;
-use crate::symbol::SymbolKind;
-use crate::symbol_table;
+use crate::symbol::{
+    Direction, ParameterValue, SymbolId, SymbolKind, TypeKind, VariableAffiniation,
+};
+use crate::symbol_table::{self, AssignPath, ResolveSymbol};
 use std::path::Path;
 use veryl_metadata::{Lint, Metadata};
 use veryl_parser::resource_table;
@@ -143,8 +145,191 @@ impl Analyzer {
         }
 
         // check assignment
-        let _assign_list = symbol_table::get_assign_list();
+        let assign_list = symbol_table::get_assign_list();
+        let mut assignable_list = Vec::new();
+        for symbol in &symbols {
+            if symbol.token.source == path {
+                assignable_list.append(&mut traverse_assignable_symbol(
+                    symbol.id,
+                    &AssignPath::new(symbol.id),
+                ));
+            }
+        }
+        let mut assignable_list: Vec<_> = assignable_list.iter().map(|x| (x, vec![])).collect();
+        for assign in &assign_list {
+            for assignable in &mut assignable_list {
+                if assignable.0.included(&assign.path) {
+                    assignable.1.push(assign.position.clone());
+                }
+            }
+        }
+
+        for (path, position) in &assignable_list {
+            if position.is_empty() {
+                let symbol = symbol_table::get(*path.0.first().unwrap()).unwrap();
+                ret.push(AnalyzerError::unassign_variable(
+                    &symbol.token.to_string(),
+                    text,
+                    &symbol.token,
+                ));
+            }
+        }
 
         ret
     }
+}
+
+fn is_assignable(direction: &Direction) -> bool {
+    matches!(
+        direction,
+        Direction::Ref | Direction::Inout | Direction::Output | Direction::Modport
+    )
+}
+
+fn traverse_type_symbol(id: SymbolId, path: &AssignPath) -> Vec<AssignPath> {
+    if let Some(symbol) = symbol_table::get(id) {
+        match &symbol.kind {
+            SymbolKind::Variable(x) => {
+                if let TypeKind::UserDefined(ref x) = x.r#type.kind {
+                    if let Ok(symbol) = symbol_table::resolve((x, &symbol.namespace)) {
+                        if let ResolveSymbol::Symbol(symbol) = symbol.found {
+                            return traverse_type_symbol(symbol.id, path);
+                        }
+                    }
+                } else {
+                    return vec![path.clone()];
+                }
+            }
+            SymbolKind::StructMember(x) => {
+                if let TypeKind::UserDefined(ref x) = x.r#type.kind {
+                    if let Ok(symbol) = symbol_table::resolve((x, &symbol.namespace)) {
+                        if let ResolveSymbol::Symbol(symbol) = symbol.found {
+                            return traverse_type_symbol(symbol.id, path);
+                        }
+                    }
+                } else {
+                    return vec![path.clone()];
+                }
+            }
+            SymbolKind::UnionMember(x) => {
+                if let TypeKind::UserDefined(ref x) = x.r#type.kind {
+                    if let Ok(symbol) = symbol_table::resolve((x, &symbol.namespace)) {
+                        if let ResolveSymbol::Symbol(symbol) = symbol.found {
+                            return traverse_type_symbol(symbol.id, path);
+                        }
+                    }
+                } else {
+                    return vec![path.clone()];
+                }
+            }
+            SymbolKind::TypeDef(x) => {
+                if let TypeKind::UserDefined(ref x) = x.r#type.kind {
+                    if let Ok(symbol) = symbol_table::resolve((x, &symbol.namespace)) {
+                        if let ResolveSymbol::Symbol(symbol) = symbol.found {
+                            return traverse_type_symbol(symbol.id, path);
+                        }
+                    }
+                } else {
+                    return vec![path.clone()];
+                }
+            }
+            SymbolKind::Parameter(x) if x.r#type.kind == TypeKind::Type => {
+                if let ParameterValue::TypeExpression(TypeExpression::ScalarType(ref x)) = x.value {
+                    let r#type: crate::symbol::Type = (&*x.scalar_type).into();
+                    if let TypeKind::UserDefined(ref x) = r#type.kind {
+                        if let Ok(symbol) = symbol_table::resolve((x, &symbol.namespace)) {
+                            if let ResolveSymbol::Symbol(symbol) = symbol.found {
+                                return traverse_type_symbol(symbol.id, path);
+                            }
+                        }
+                    } else {
+                        return vec![path.clone()];
+                    }
+                }
+            }
+            SymbolKind::Struct(x) => {
+                let mut ret = Vec::new();
+                for member in &x.members {
+                    let mut path = path.clone();
+                    path.push(*member);
+                    ret.append(&mut traverse_type_symbol(*member, &path));
+                }
+                return ret;
+            }
+            // TODO union support
+            //SymbolKind::Union(x) => {
+            //    let mut ret = Vec::new();
+            //    for member in &x.members {
+            //        let mut path = path.clone();
+            //        path.push(*member);
+            //        ret.append(&mut traverse_type_symbol(*member, &path));
+            //    }
+            //    return ret;
+            //}
+            SymbolKind::Modport(x) => {
+                let mut ret = Vec::new();
+                for member in &x.members {
+                    let mut path = path.clone();
+                    path.push(*member);
+                    ret.append(&mut traverse_type_symbol(*member, &path));
+                }
+                return ret;
+            }
+            SymbolKind::ModportMember(x) if is_assignable(&x.direction) => {
+                if let Ok(symbol) = symbol_table::resolve(&symbol.token) {
+                    if let ResolveSymbol::Symbol(symbol) = symbol.found {
+                        return traverse_type_symbol(symbol.id, path);
+                    }
+                }
+            }
+            SymbolKind::Enum(_) => {
+                return vec![path.clone()];
+            }
+            _ => (),
+        }
+    }
+
+    vec![]
+}
+
+fn traverse_assignable_symbol(id: SymbolId, path: &AssignPath) -> Vec<AssignPath> {
+    // check cyclic dependency
+    if path.0.iter().filter(|x| **x == id).count() > 1 {
+        return vec![];
+    }
+
+    if let Some(symbol) = symbol_table::get(id) {
+        match &symbol.kind {
+            SymbolKind::Port(x) if is_assignable(&x.direction) => {
+                if let Some(ref x) = x.r#type {
+                    if let TypeKind::UserDefined(ref x) = x.kind {
+                        if let Ok(symbol) = symbol_table::resolve((x, &symbol.namespace)) {
+                            if let ResolveSymbol::Symbol(symbol) = symbol.found {
+                                return traverse_type_symbol(symbol.id, path);
+                            }
+                        }
+                    } else {
+                        return vec![path.clone()];
+                    }
+                }
+            }
+            SymbolKind::Variable(x)
+                if x.affiniation == VariableAffiniation::Module
+                    || x.affiniation == VariableAffiniation::Function =>
+            {
+                if let TypeKind::UserDefined(ref x) = x.r#type.kind {
+                    if let Ok(symbol) = symbol_table::resolve((x, &symbol.namespace)) {
+                        if let ResolveSymbol::Symbol(symbol) = symbol.found {
+                            return traverse_type_symbol(symbol.id, path);
+                        }
+                    }
+                } else {
+                    return vec![path.clone()];
+                }
+            }
+            _ => (),
+        }
+    }
+
+    vec![]
 }

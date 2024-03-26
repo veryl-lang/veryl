@@ -145,6 +145,13 @@ pub struct VerylToken {
 }
 
 impl VerylToken {
+    pub fn new(token: Token) -> Self {
+        Self {
+            token,
+            comments: vec![],
+        }
+    }
+
     pub fn replace(&self, text: &str) -> Self {
         let length = text.len();
         let text = resource_table::insert_str(text);

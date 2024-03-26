@@ -1,7 +1,7 @@
 use crate::evaluator::Evaluated;
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol::{Direction, DocComment, Symbol, SymbolId, SymbolKind, TypeKind};
+use crate::symbol::{DocComment, Symbol, SymbolId, SymbolKind, TypeKind};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
@@ -31,6 +31,10 @@ impl SymbolPath {
 
     pub fn as_slice(&self) -> &[StrId] {
         self.0.as_slice()
+    }
+
+    pub fn to_vec(self) -> Vec<StrId> {
+        self.0
     }
 }
 
@@ -151,6 +155,13 @@ impl From<(&SymbolPath, &Namespace)> for SymbolPathNamespace {
     }
 }
 
+impl From<(&Vec<StrId>, &Namespace)> for SymbolPathNamespace {
+    fn from(value: (&Vec<StrId>, &Namespace)) -> Self {
+        let path = SymbolPath::new(value.0);
+        SymbolPathNamespace(path, value.1.clone())
+    }
+}
+
 impl From<&syntax_tree::Identifier> for SymbolPathNamespace {
     fn from(value: &syntax_tree::Identifier) -> Self {
         let namespace = namespace_table::get(value.identifier_token.token.id).unwrap();
@@ -221,8 +232,102 @@ impl ResolveError {
 
 #[derive(Clone, Debug)]
 pub struct Assign {
-    full_path: Vec<SymbolId>,
-    position: Vec<Token>,
+    pub path: AssignPath,
+    pub position: AssignPosition,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct AssignPath(pub Vec<SymbolId>);
+
+impl AssignPath {
+    pub fn new(x: SymbolId) -> Self {
+        Self(vec![x])
+    }
+
+    pub fn push(&mut self, x: SymbolId) {
+        self.0.push(x)
+    }
+
+    pub fn pop(&mut self) -> Option<SymbolId> {
+        self.0.pop()
+    }
+
+    pub fn included(&self, x: &AssignPath) -> bool {
+        for (i, x) in x.0.iter().enumerate() {
+            if let Some(path) = self.0.get(i) {
+                if path != x {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+impl fmt::Display for AssignPath {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut ret = "".to_string();
+        for (i, id) in self.0.iter().enumerate() {
+            if let Some(symbol) = get(*id) {
+                if i != 0 {
+                    ret.push('.');
+                }
+                ret.push_str(&symbol.token.to_string());
+            }
+        }
+        ret.fmt(f)
+    }
+}
+
+#[derive(Clone, Default, Debug)]
+pub struct AssignPosition(pub Vec<AssignPositionType>);
+
+impl AssignPosition {
+    pub fn new(x: AssignPositionType) -> Self {
+        Self(vec![x])
+    }
+
+    pub fn push(&mut self, x: AssignPositionType) {
+        self.0.push(x)
+    }
+
+    pub fn pop(&mut self) -> Option<AssignPositionType> {
+        self.0.pop()
+    }
+}
+
+impl fmt::Display for AssignPosition {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut ret = "".to_string();
+        for (i, x) in self.0.iter().enumerate() {
+            if i != 0 {
+                ret.push('.');
+            }
+            ret.push_str(&x.token().to_string());
+        }
+        ret.fmt(f)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum AssignPositionType {
+    DeclarationBlock(Token),
+    Declaration(Token),
+    StatementBlock(Token),
+    Statement(Token),
+}
+
+impl AssignPositionType {
+    pub fn token(&self) -> &Token {
+        match self {
+            AssignPositionType::DeclarationBlock(x) => x,
+            AssignPositionType::Declaration(x) => x,
+            AssignPositionType::StatementBlock(x) => x,
+            AssignPositionType::Statement(x) => x,
+        }
+    }
 }
 
 #[derive(Clone, Default, Debug)]
@@ -377,6 +482,30 @@ impl SymbolTable {
                                 }
                             }
                         }
+                        SymbolKind::Port(ref x) => {
+                            if let Some(ref x) = x.r#type {
+                                if let TypeKind::UserDefined(ref x) = x.kind {
+                                    let path = SymbolPath::new(x);
+                                    if let Ok(symbol) = self.resolve(&path, &namespace) {
+                                        if let ResolveSymbol::Symbol(symbol) = symbol.found {
+                                            namespace = Namespace::new();
+                                            for path in &symbol.namespace.paths {
+                                                namespace.push(*path);
+                                            }
+                                            namespace.push(symbol.token.text);
+                                            inner = true;
+                                        } else {
+                                            unreachable!();
+                                        }
+                                    } else {
+                                        return Ok(ResolveResult {
+                                            found: ResolveSymbol::External,
+                                            full_path,
+                                        });
+                                    }
+                                }
+                            }
+                        }
                         SymbolKind::Module(_) => {
                             if other_prj & !ret.public {
                                 return Err(ResolveError::new(
@@ -418,17 +547,6 @@ impl SymbolTable {
                                 namespace.push(*x);
                             }
                             inner = true;
-                        }
-                        SymbolKind::Port(ref x) if x.direction == Direction::Modport => {
-                            if let Some(ref x) = x.r#type {
-                                if let TypeKind::UserDefined(ref x) = x.kind {
-                                    namespace = Namespace::default();
-                                    for x in x {
-                                        namespace.push(*x);
-                                    }
-                                    inner = true;
-                                }
-                            }
                         }
                         SymbolKind::SystemVerilog => {
                             namespace = ret.namespace.clone();
@@ -492,53 +610,17 @@ impl SymbolTable {
         let mut path_width = 0;
         let mut pos_width = 0;
         for assign in &self.assign_list {
-            path_width = path_width.max(
-                assign
-                    .full_path
-                    .iter()
-                    .map(|x| self.symbol_table.get(x).unwrap())
-                    .map(|x| format!("{}", x.token.text).len())
-                    .sum::<usize>()
-                    + assign.full_path.len()
-                    - 1,
-            );
-            pos_width = pos_width.max(
-                assign
-                    .position
-                    .iter()
-                    .map(|x| x.to_string().len())
-                    .sum::<usize>()
-                    + assign.position.len()
-                    - 1,
-            );
+            path_width = path_width.max(assign.path.to_string().len());
+            pos_width = pos_width.max(assign.position.to_string().len());
         }
 
         for assign in &self.assign_list {
-            let mut path = "".to_string();
-            for (i, x) in assign.full_path.iter().enumerate() {
-                let x = self.symbol_table.get(x).unwrap();
-                if i == 0 {
-                    path.push_str(&x.token.to_string());
-                } else {
-                    path.push_str(&format!(".{}", x.token));
-                }
-            }
-
-            let mut pos = "".to_string();
-            for (i, x) in assign.position.iter().enumerate() {
-                if i == 0 {
-                    pos.push_str(&x.to_string());
-                } else {
-                    pos.push_str(&format!(".{}", x));
-                }
-            }
-
-            let last_token = assign.position.last().unwrap();
+            let last_token = assign.position.0.last().unwrap().token();
 
             ret.push_str(&format!(
                 "    {:path_width$} / {:pos_width$} @ {}:{}:{}\n",
-                path,
-                pos,
+                assign.path,
+                assign.position,
                 last_token.source,
                 last_token.line,
                 last_token.column,
@@ -608,9 +690,9 @@ impl SymbolTable {
         self.project_local_table.get(&prj).cloned()
     }
 
-    pub fn add_assign(&mut self, full_path: Vec<SymbolId>, position: Vec<Token>) {
+    pub fn add_assign(&mut self, full_path: Vec<SymbolId>, position: AssignPosition) {
         let assign = Assign {
-            full_path,
+            path: AssignPath(full_path),
             position,
         };
         self.assign_list.push(assign);
@@ -925,7 +1007,7 @@ pub fn get_project_local(prj: StrId) -> Option<HashMap<StrId, StrId>> {
     SYMBOL_TABLE.with(|f| f.borrow().get_project_local(prj))
 }
 
-pub fn add_assign(full_path: Vec<SymbolId>, position: Vec<Token>) {
+pub fn add_assign(full_path: Vec<SymbolId>, position: AssignPosition) {
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_assign(full_path, position))
 }
 

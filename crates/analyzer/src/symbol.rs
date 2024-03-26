@@ -1,6 +1,7 @@
 use crate::evaluator::{Evaluated, Evaluator};
 use crate::namespace::Namespace;
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::fmt;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::veryl_grammar_trait as syntax_tree;
@@ -258,7 +259,7 @@ impl fmt::Display for SymbolKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Direction {
     Input,
     Output,
@@ -302,7 +303,7 @@ pub struct Type {
     pub array: Vec<syntax_tree::Expression>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeKind {
     Bit,
     Logic,
@@ -463,6 +464,15 @@ impl From<&syntax_tree::ArrayType> for Type {
 #[derive(Debug, Clone)]
 pub struct VariableProperty {
     pub r#type: Type,
+    pub affiniation: VariableAffiniation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VariableAffiniation {
+    Module,
+    Intarface,
+    Package,
+    Function,
 }
 
 #[derive(Debug, Clone)]
@@ -613,6 +623,7 @@ pub struct FunctionProperty {
 #[derive(Debug, Clone)]
 pub struct InstanceProperty {
     pub type_name: Vec<StrId>,
+    pub connects: HashMap<StrId, Vec<StrId>>,
 }
 
 #[derive(Debug, Clone)]

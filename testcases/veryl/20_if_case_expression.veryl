@@ -1,8 +1,8 @@
 module Module20 {
     var a: logic;
     var b: logic;
-    var x: logic;
-    var y: logic;
+    let x: logic = 1;
+    let y: logic = 1;
 
     assign a = if x {
         1

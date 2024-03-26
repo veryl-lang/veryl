@@ -21,12 +21,12 @@ module Module23 #(
 ) {
     #[ifdef(DEFINE_A)]
     #[ifdef(DEFINE_B)]
-    var _a: logic<10>;
+    let _a: logic<10> = 1;
 
     #[ifdef(DEFINE_A)]
     {
-        var _b: logic<10>;
-        var _c: logic<10>;
+        let _b: logic<10> = 1;
+        let _c: logic<10> = 1;
     }
 }
 

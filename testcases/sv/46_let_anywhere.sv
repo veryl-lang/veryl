@@ -1,5 +1,6 @@
 module veryl_testcase_Module46;
     logic          a;
+    always_comb a = 1;
     logic [10-1:0] b;
     logic [10-1:0] c;
     logic [10-1:0] d;

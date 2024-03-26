@@ -1,6 +1,7 @@
 module veryl_testcase_Module13;
     logic a;
     logic X;
+    always_comb X = 1;
 
     // bit select
     always_comb a = X[0];

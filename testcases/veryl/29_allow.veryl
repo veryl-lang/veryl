@@ -5,7 +5,7 @@ module Module29 (
     var a: logic;
     var b: logic;
     #[allow(unused_variable)]
-    var c: logic;
+    let c: logic = 1;
 
     #[allow(missing_reset_statement)]
     always_ff (clk, rst) {

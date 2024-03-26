@@ -2,7 +2,7 @@ module Module11 {
     // variable declaration
     var b   : logic        ;
     var bb  : logic<10>    ;
-    var _bbb: bit  <10, 10>;
+    let _bbb: bit  <10, 10> = 1;
 
     // variable declaration with assignment
     let _c: logic<10> = 1;

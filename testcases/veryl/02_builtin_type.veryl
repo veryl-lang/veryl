@@ -1,31 +1,31 @@
 module Module02 {
     // unsigned integer
-    var _a : u32;
-    var _aa: u64;
+    let _a : u32 = 1;
+    let _aa: u64 = 1;
 
     // signed integer
-    var _b : i32;
-    var _bb: i64;
+    let _b : i32 = 1;
+    let _bb: i64 = 1;
 
     // floating point
-    var _c : f32;
-    var _cc: f64;
+    let _c : f32 = 1;
+    let _cc: f64 = 1;
 
     // 4 state (01xz) type
-    var _d  : logic        ;
-    var _dd : logic<10>    ;
-    var _ddd: logic<10, 10>;
+    let _d  : logic         = 1;
+    let _dd : logic<10>     = 1;
+    let _ddd: logic<10, 10> = 1;
 
     // 2 state (01) type
-    var _e  : bit        ;
-    var _ee : bit<10>    ;
-    var _eee: bit<10, 10>;
+    let _e  : bit         = 1;
+    let _ee : bit<10>     = 1;
+    let _eee: bit<10, 10> = 1;
 
     // array
-    var _f     : u32 [10];
-    var _ff    : u64 [10];
-    var _fff   : i32 [10];
-    var _ffff  : i64 [10];
-    var _fffff : f32 [10];
-    var _ffffff: f64 [10];
+    let _f     : u32 [10] = 1;
+    let _ff    : u64 [10] = 1;
+    let _fff   : i32 [10] = 1;
+    let _ffff  : i64 [10] = 1;
+    let _fffff : f32 [10] = 1;
+    let _ffffff: f64 [10] = 1;
 }

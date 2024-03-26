@@ -2,7 +2,9 @@ module veryl_testcase_Module20;
     logic a;
     logic b;
     logic x;
+    always_comb x = 1;
     logic y;
+    always_comb y = 1;
 
     always_comb a = ((x) ? (
         1

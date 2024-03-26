@@ -12,6 +12,7 @@ module veryl_testcase_Module36 #(
     input  logic [ParamA-1:0] i_data , /// Data input
     output logic [ParamA-1:0] o_data  /// Data output
 );
+    always_comb o_data = 0;
 endmodule
 
 /// Test interface for doc comment

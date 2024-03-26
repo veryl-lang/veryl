@@ -1,6 +1,6 @@
 module Module24 {
     #[sv("ram_style=\"block\"")]
-    var _a: logic;
+    let _a: logic = 1;
     #[sv("mark_debug=\"true\"")]
-    var _b: logic;
+    let _b: logic = 1;
 }

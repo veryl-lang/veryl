@@ -1,7 +1,10 @@
 module veryl_testcase_Module14;
     logic a  ;
+    always_comb a = 1;
     logic aa ;
+    always_comb aa = 1;
     logic bbb;
+    always_comb bbb = 1;
 
     // module instantiation
     veryl_testcase_Module14B x ();

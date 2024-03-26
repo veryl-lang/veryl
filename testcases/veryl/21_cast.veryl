@@ -1,6 +1,6 @@
 module Module21 {
     var a: logic;
-    var b: logic;
+    let b: logic = 1;
 
     enum EnumA: logic {
         A,

@@ -38,8 +38,11 @@ module veryl_testcase_Module06;
     endfunction
 
     logic [ParamX-1:0] a;
+    always_comb a = 1;
     logic [ParamX-1:0] b;
+    always_comb b = 1;
     logic [ParamX-1:0] c;
+    always_comb c = 1;
     logic [ParamX-1:0] d;
 
     // function call
