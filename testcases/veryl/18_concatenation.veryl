@@ -1,7 +1,8 @@
 module Module18 {
     var a: logic;
-    let b: logic = 1;
+    var b: logic;
+    let c: logic = 1;
 
-    assign a = {a[10:0], b};
-    assign a = {a[10:0] repeat 10, b repeat 4};
+    assign a = {a[10:0], c};
+    assign b = {a[10:0] repeat 10, c repeat 4};
 }

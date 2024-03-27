@@ -1,66 +1,55 @@
 module Module03 {
-    var a         : logic;
-    var aa        : logic;
-    var aaa       : logic;
-    var aaaa      : logic;
-    var aaaaa     : logic;
-    var aaaaaa    : logic;
-    var aaaaaaa   : logic;
-    var aaaaaaaa  : logic;
-    var aaaaaaaaa : logic;
-    var aaaaaaaaaa: logic;
-
     // unary arithmetic
-    assign a  = +1;
-    assign aa = -1;
+    let _a : logic = +1;
+    let _aa: logic = -1;
 
     // unary logical
-    assign a  = !1;
-    assign aa = ~1;
+    let _b : logic = !1;
+    let _bb: logic = ~1;
 
     // unary reduce
-    assign a       = &1;
-    assign aa      = |1;
-    assign aaa     = ^1;
-    assign aaaa    = ~&1;
-    assign aaaaa   = ~|1;
-    assign aaaaaa  = ~^1;
-    assign aaaaaaa = ^~1;
+    let _c      : logic = &1;
+    let _cc     : logic = |1;
+    let _ccc    : logic = ^1;
+    let _cccc   : logic = ~&1;
+    let _ccccc  : logic = ~|1;
+    let _cccccc : logic = ~^1;
+    let _ccccccc: logic = ^~1;
 
     // binary arithmetic
-    assign a      = 1 ** 1;
-    assign aa     = 1 * 1;
-    assign aaa    = 1 / 1;
-    assign aaaa   = 1 % 1;
-    assign aaaaa  = 1 + 1;
-    assign aaaaaa = 1 - 1;
+    let _d     : logic = 1 ** 1;
+    let _dd    : logic = 1 * 1;
+    let _ddd   : logic = 1 / 1;
+    let _dddd  : logic = 1 % 1;
+    let _ddddd : logic = 1 + 1;
+    let _dddddd: logic = 1 - 1;
 
     // binary shift
-    assign a    = 1 << 1;
-    assign aa   = 1 >> 1;
-    assign aaa  = 1 <<< 1;
-    assign aaaa = 1 >>> 1;
+    let _e   : logic = 1 << 1;
+    let _ee  : logic = 1 >> 1;
+    let _eee : logic = 1 <<< 1;
+    let _eeee: logic = 1 >>> 1;
 
     // binary compare
-    assign a          = 1 <: 1;
-    assign aa         = 1 <= 1;
-    assign aaa        = 1 >: 1;
-    assign aaaa       = 1 >= 1;
-    assign aaaaa      = 1 == 1;
-    assign aaaaaa     = 1 != 1;
-    assign aaaaaaa    = 1 === 1;
-    assign aaaaaaaa   = 1 !== 1;
-    assign aaaaaaaaa  = 1 ==? 1;
-    assign aaaaaaaaaa = 1 !=? 1;
+    let _f         : logic = 1 <: 1;
+    let _ff        : logic = 1 <= 1;
+    let _fff       : logic = 1 >: 1;
+    let _ffff      : logic = 1 >= 1;
+    let _fffff     : logic = 1 == 1;
+    let _ffffff    : logic = 1 != 1;
+    let _fffffff   : logic = 1 === 1;
+    let _ffffffff  : logic = 1 !== 1;
+    let _fffffffff : logic = 1 ==? 1;
+    let _ffffffffff: logic = 1 !=? 1;
 
     // binary bitwise
-    assign a     = 1 & 1;
-    assign aa    = 1 ^ 1;
-    assign aaa   = 1 ~^ 1;
-    assign aaaa  = 1 ^~ 1;
-    assign aaaaa = 1 | 1;
+    let _g    : logic = 1 & 1;
+    let _gg   : logic = 1 ^ 1;
+    let _ggg  : logic = 1 ~^ 1;
+    let _gggg : logic = 1 ^~ 1;
+    let _ggggg: logic = 1 | 1;
 
     // binary logical
-    assign a  = 1 && 1;
-    assign aa = 1 || 1;
+    let _h : logic = 1 && 1;
+    let _hh: logic = 1 || 1;
 }

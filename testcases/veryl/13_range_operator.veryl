@@ -1,17 +1,21 @@
 module Module13 {
     var a: logic;
+    var b: logic;
+    var c: logic;
+    var d: logic;
+    var e: logic;
     let X: logic = 1;
 
     // bit select
     assign a = X[0];
 
     // range select
-    assign a = X[1:0];
+    assign b = X[1:0];
 
     // position and width
-    assign a = X[1+:2];
-    assign a = X[1-:2];
+    assign c = X[1+:2];
+    assign d = X[1-:2];
 
     // index by step
-    assign a = X[1 step 2];
+    assign e = X[1 step 2];
 }

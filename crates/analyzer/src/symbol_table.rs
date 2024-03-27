@@ -234,6 +234,7 @@ impl ResolveError {
 pub struct Assign {
     pub path: AssignPath,
     pub position: AssignPosition,
+    pub partial: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -311,23 +312,62 @@ impl fmt::Display for AssignPosition {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AssignPositionType {
-    DeclarationBlock(Token),
-    Declaration(Token),
-    StatementBlock(Token),
-    Statement(Token),
+    DeclarationBranch {
+        token: Token,
+        branches: usize,
+    },
+    DeclarationBranchItem {
+        token: Token,
+        index: usize,
+    },
+    Declaration {
+        token: Token,
+        r#type: AssignDeclarationType,
+    },
+    StatementBranch {
+        token: Token,
+        branches: usize,
+        r#type: AssignStatementBranchType,
+    },
+    StatementBranchItem {
+        token: Token,
+        index: usize,
+    },
+    Statement {
+        token: Token,
+    },
 }
 
 impl AssignPositionType {
     pub fn token(&self) -> &Token {
         match self {
-            AssignPositionType::DeclarationBlock(x) => x,
-            AssignPositionType::Declaration(x) => x,
-            AssignPositionType::StatementBlock(x) => x,
-            AssignPositionType::Statement(x) => x,
+            AssignPositionType::DeclarationBranch { token: x, .. } => x,
+            AssignPositionType::DeclarationBranchItem { token: x, .. } => x,
+            AssignPositionType::Declaration { token: x, .. } => x,
+            AssignPositionType::StatementBranch { token: x, .. } => x,
+            AssignPositionType::StatementBranchItem { token: x, .. } => x,
+            AssignPositionType::Statement { token: x, .. } => x,
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AssignDeclarationType {
+    Let,
+    AlwaysFf,
+    AlwaysComb,
+    Assign,
+    Inst,
+    Function,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AssignStatementBranchType {
+    If,
+    IfReset,
+    Case,
 }
 
 #[derive(Clone, Default, Debug)]
@@ -690,10 +730,16 @@ impl SymbolTable {
         self.project_local_table.get(&prj).cloned()
     }
 
-    pub fn add_assign(&mut self, full_path: Vec<SymbolId>, position: AssignPosition) {
+    pub fn add_assign(
+        &mut self,
+        full_path: Vec<SymbolId>,
+        position: &AssignPosition,
+        partial: bool,
+    ) {
         let assign = Assign {
             path: AssignPath(full_path),
-            position,
+            position: position.clone(),
+            partial,
         };
         self.assign_list.push(assign);
     }
@@ -1007,8 +1053,8 @@ pub fn get_project_local(prj: StrId) -> Option<HashMap<StrId, StrId>> {
     SYMBOL_TABLE.with(|f| f.borrow().get_project_local(prj))
 }
 
-pub fn add_assign(full_path: Vec<SymbolId>, position: AssignPosition) {
-    SYMBOL_TABLE.with(|f| f.borrow_mut().add_assign(full_path, position))
+pub fn add_assign(full_path: Vec<SymbolId>, position: &AssignPosition, partial: bool) {
+    SYMBOL_TABLE.with(|f| f.borrow_mut().add_assign(full_path, position, partial))
 }
 
 pub fn get_assign_list() -> Vec<Assign> {

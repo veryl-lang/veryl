@@ -2,9 +2,10 @@ use crate::analyzer_error::AnalyzerError;
 use crate::handlers::*;
 use crate::namespace_table;
 use crate::symbol::{
-    Direction, ParameterValue, SymbolId, SymbolKind, TypeKind, VariableAffiniation,
+    Direction, ParameterValue, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiniation,
 };
-use crate::symbol_table::{self, AssignPath, ResolveSymbol};
+use crate::symbol_table::{self, AssignPath, AssignPosition, AssignPositionType, ResolveSymbol};
+use itertools::Itertools;
 use std::path::Path;
 use veryl_metadata::{Lint, Metadata};
 use veryl_parser::resource_table;
@@ -159,19 +160,25 @@ impl Analyzer {
         for assign in &assign_list {
             for assignable in &mut assignable_list {
                 if assignable.0.included(&assign.path) {
-                    assignable.1.push(assign.position.clone());
+                    assignable.1.push((assign.position.clone(), assign.partial));
                 }
             }
         }
 
-        for (path, position) in &assignable_list {
-            if position.is_empty() {
+        for (path, positions) in &assignable_list {
+            if positions.is_empty() {
                 let symbol = symbol_table::get(*path.0.first().unwrap()).unwrap();
                 ret.push(AnalyzerError::unassign_variable(
                     &symbol.token.to_string(),
                     text,
                     &symbol.token,
                 ));
+            }
+            if positions.len() > 1 {
+                let symbol = symbol_table::get(*path.0.first().unwrap()).unwrap();
+                for comb in positions.iter().combinations(2) {
+                    ret.append(&mut check_assign_position(&symbol, text, comb[0], comb[1]));
+                }
             }
         }
 
@@ -332,4 +339,42 @@ fn traverse_assignable_symbol(id: SymbolId, path: &AssignPath) -> Vec<AssignPath
     }
 
     vec![]
+}
+
+fn check_assign_position(
+    symbol: &Symbol,
+    text: &str,
+    x: &(AssignPosition, bool),
+    y: &(AssignPosition, bool),
+) -> Vec<AnalyzerError> {
+    let x_pos = &x.0;
+    let y_pos = &y.0;
+    let x_partial = &x.1;
+    let y_partial = &y.1;
+    let mut ret = Vec::new();
+    let len = x_pos.0.len().min(y_pos.0.len());
+
+    for i in 0..len {
+        let x_type = &x_pos.0[i];
+        let y_type = &y_pos.0[i];
+        if x_type != y_type {
+            match x_type {
+                AssignPositionType::DeclarationBranch { .. }
+                | AssignPositionType::Declaration { .. } => {
+                    if !x_partial | !y_partial {
+                        ret.push(AnalyzerError::multiple_assignment(
+                            &symbol.token.to_string(),
+                            text,
+                            &symbol.token,
+                            x_pos.0.last().unwrap().token(),
+                            y_pos.0.last().unwrap().token(),
+                        ));
+                    }
+                }
+                _ => return vec![],
+            }
+        }
+    }
+
+    ret
 }

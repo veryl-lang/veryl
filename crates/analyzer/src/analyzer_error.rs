@@ -37,17 +37,21 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
-        code(duplicated_assignment),
+        code(multiple_assignment),
         help(""),
-        url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#duplicated_assignment")
+        url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#multiple_assignment")
     )]
     #[error("{identifier} is assigned in multiple procedural blocks or assignment statements")]
-    DuplicatedAssignment {
+    MultipleAssignment {
         identifier: String,
         #[source_code]
         input: NamedSource,
         #[label("Error location")]
         error_location: SourceSpan,
+        #[label("Assigned")]
+        assign_pos0: SourceSpan,
+        #[label("Assigned too")]
+        assign_pos1: SourceSpan,
     },
 
     #[diagnostic(
@@ -516,11 +520,19 @@ impl AnalyzerError {
         }
     }
 
-    pub fn duplicated_assignment(identifier: &str, source: &str, token: &Token) -> Self {
-        AnalyzerError::DuplicatedAssignment {
+    pub fn multiple_assignment(
+        identifier: &str,
+        source: &str,
+        token: &Token,
+        assign_pos0: &Token,
+        assign_pos1: &Token,
+    ) -> Self {
+        AnalyzerError::MultipleAssignment {
             identifier: identifier.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
+            assign_pos0: assign_pos0.into(),
+            assign_pos1: assign_pos1.into(),
         }
     }
 
