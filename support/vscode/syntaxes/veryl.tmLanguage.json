@@ -26,7 +26,7 @@
 			"patterns": [
 				{
 					"name": "keyword.control.veryl",
-					"match": "\\b(if|if_reset|else|for|in|step|repeat|inside|outside)\\b"
+					"match": "\\b(if|if_reset|else|case|for|in|step|repeat|inside|outside)\\b"
 				},
 				{
 					"name": "keyword.other.veryl",
