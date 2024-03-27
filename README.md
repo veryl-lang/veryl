@@ -22,67 +22,92 @@ If you have any idea, please open [Issue](https://github.com/veryl-lang/veryl/is
 * [License](#license)
 * [Contribution](#contribution)
 
-## Concepts
+## Overview
 
-Veryl is designed as a "SystemVerilog Alternative".
-There are some design concepts.
+Veryl is a hardware description language based on SystemVerilog, providing the following advantages:
 
-* Simplified syntax
-    * Based on SystemVerilog / Rust
-    * Removed traditional Verilog syntax
-* Transpiler to SystemVerilog
-    * Human readable SystemVerilog code generation
-    * Interoperability with SystemVerilog
-* Integrated tools
-    * Formatter / Linter
-    * VSCode, vim/neovim integration
-    * Package management based on git
+### Optimized Syntax
+Veryl adopts syntax optimized for logic design while being based on a familiar basic syntax for SystemVerilog experts.
+This optimization includes guarantees for synthesizability, ensuring consistency between simulation results, and providing numerous syntax simplifications for common idioms.
+This approach enables ease of learning, improves the reliability and efficiency of the design process, and facilitates ease of code writing.
+
+### Interoperability
+Designed with interoperability with SystemVerilog in mind, Veryl allows smooth integration and partial replacement with existing SystemVerilog components and projects.
+Furthermore, SystemVerilog source code transpiled from Veryl retains high readability, enabling seamless integration and debugging.
+
+### Productivity
+Veryl comes with a rich set of development support tools, including package managers, build tools, real-time checkers compatible with major editors such as VSCode, Vim, Emacs, automatic completion, and automatic formatting.
+These tools accelerate the development process and significantly enhance productivity.
+
+With these features, Veryl provides powerful support for designers to efficiently and productively conduct high-quality hardware design.
 
 ## Example
 
-```
-// module definition
-module ModuleA #(
-    parameter  ParamA: u32 = 10,
-    localparam ParamB: u32 = 10, // trailing comma is allowed
+<table>
+<tr>
+<th>SystemVerilog</th>
+<th>Veryl</th>
+
+</tr>
+<tr>
+<td>
+
+```systemverilog
+// comment
+//
+//
+module Delay #(
+    parameter int WIDTH = 1
 ) (
-    i_clk : input  logic,
-    i_rst : input  logic,
-    i_sel : input  logic,
-    i_data: input  logic<ParamA> [2], // `[]` means unpacked array in SystemVerilog
-    o_data: output logic<ParamA>    , // `<>` means packed array in SystemVerilog
+    input              i_clk ,
+    input              i_rst ,
+    input  [WIDTH-1:0] i_data,
+    output [WIDTH-1:0] o_data
+);
+    logic unused_variable;
+
+    always_ff @ (posedge i_clk or negedge i_rst) begin
+        if (!i_rst) begin
+            o_data <= '0;
+        end else begin
+            o_data <= i_data;
+        end
+    end
+endmodule
+```
+
+</td>
+<td>
+
+```systemverilog
+/// documentation comment by markdown format
+/// * list item1
+/// * list item2
+pub module Delay #( // visibility control by `pub` keyword
+    param WIDTH: u32 = 1, // trailing comma is allowed
+) (
+    i_clk : input logic       ,
+    i_rst : input logic       ,
+    i_data: input logic<WIDTH>,
+    o_data: input logic<WIDTH>,
 ) {
-    // localparam declaration
-    //   `parameter` is not allowed in module
-    localparam ParamC: u32 = 10;
+    // unused variable which is not started with `_` are warned
+    var _unused_variable: logic;
 
-    // variable declaration
-    var r_data0: logic<ParamA>;
-    var r_data1: logic<ParamA>;
-
-    // always_ff statement with reset
-    //   `always_ff` can take a mandatory clock and a optional reset
-    //   `if_reset` means `if (i_rst)`. This conceals reset porality
-    //   `()` of `if` is not required
-    //   `=` in `always_ff` is non-blocking assignment
     always_ff (i_clk, i_rst) {
+        // abstraction syntax of reset polarity and synchronicity
         if_reset {
-            r_data0 = 0;
-        } else if i_sel {
-            r_data0 = i_data[0];
+            o_data = '0;
         } else {
-            r_data0 = i_data[1];
+            o_data = i_data;
         }
     }
-
-    // always_ff statement without reset
-    always_ff (i_clk) {
-        r_data1 = r_data0;
-    }
-
-    assign o_data = r_data1;
 }
 ```
+
+</td>
+</tr>
+</table>
 
 ## Installation
 
