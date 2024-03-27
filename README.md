@@ -45,38 +45,11 @@ With these features, Veryl provides powerful support for designers to efficientl
 
 <table>
 <tr>
-<th>SystemVerilog</th>
 <th>Veryl</th>
+<th>SystemVerilog</th>
 
 </tr>
 <tr>
-<td>
-
-```systemverilog
-// comment
-//
-//
-module Delay #(
-    parameter int WIDTH = 1
-) (
-    input              i_clk ,
-    input              i_rst ,
-    input  [WIDTH-1:0] i_data,
-    output [WIDTH-1:0] o_data
-);
-    logic unused_variable;
-
-    always_ff @ (posedge i_clk or negedge i_rst) begin
-        if (!i_rst) begin
-            o_data <= '0;
-        end else begin
-            o_data <= i_data;
-        end
-    end
-endmodule
-```
-
-</td>
 <td>
 
 ```systemverilog
@@ -103,6 +76,33 @@ pub module Delay #( // visibility control by `pub` keyword
         }
     }
 }
+```
+
+</td>
+<td>
+
+```systemverilog
+// comment
+//
+//
+module Delay #(
+    parameter int WIDTH = 1
+) (
+    input              i_clk ,
+    input              i_rst ,
+    input  [WIDTH-1:0] i_data,
+    output [WIDTH-1:0] o_data
+);
+    logic unused_variable;
+
+    always_ff @ (posedge i_clk or negedge i_rst) begin
+        if (!i_rst) begin
+            o_data <= '0;
+        end else begin
+            o_data <= i_data;
+        end
+    end
+endmodule
 ```
 
 </td>
