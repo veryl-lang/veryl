@@ -118,16 +118,18 @@ impl<'a> AnalyzerPass3<'a> {
         for (path, positions) in &assignable_list {
             if positions.is_empty() {
                 let symbol = symbol_table::get(*path.0.first().unwrap()).unwrap();
-                let path: Vec<_> = path
-                    .0
-                    .iter()
-                    .map(|x| symbol_table::get(*x).unwrap().token.to_string())
-                    .collect();
-                ret.push(AnalyzerError::unassign_variable(
-                    &path.join("."),
-                    self.text,
-                    &symbol.token,
-                ));
+                if must_be_assigned(&symbol.kind) {
+                    let path: Vec<_> = path
+                        .0
+                        .iter()
+                        .map(|x| symbol_table::get(*x).unwrap().token.to_string())
+                        .collect();
+                    ret.push(AnalyzerError::unassign_variable(
+                        &path.join("."),
+                        self.text,
+                        &symbol.token,
+                    ));
+                }
             }
 
             let symbol = symbol_table::get(*path.0.first().unwrap()).unwrap();
@@ -229,6 +231,16 @@ fn is_assignable(direction: &Direction) -> bool {
         direction,
         Direction::Ref | Direction::Inout | Direction::Output | Direction::Modport
     )
+}
+
+fn must_be_assigned(kind: &SymbolKind) -> bool {
+    match kind {
+        SymbolKind::Port(x) => x.direction == Direction::Output,
+        SymbolKind::ModportMember(x) => x.direction == Direction::Output,
+        SymbolKind::Variable(_) => true,
+        SymbolKind::StructMember(_) => true,
+        _ => false,
+    }
 }
 
 fn traverse_type_symbol(id: SymbolId, path: &AssignPath) -> Vec<AssignPath> {
