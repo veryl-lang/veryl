@@ -418,7 +418,7 @@ ConcatenationItem: Expression [ Repeat Expression ];
 
 IfExpression: If Expression LBrace Expression RBrace { Else If Expression LBrace Expression RBrace } Else LBrace Expression RBrace;
 
-CaseExpression: Case Expression LBrace Expression Colon Expression Comma { Expression Colon Expression Comma } Defaul Colon Expression [ Comma ] RBrace;
+CaseExpression: Case Expression LBrace Expression { Comma Expression } Colon Expression Comma { Expression { Comma Expression } Colon Expression Comma } Defaul Colon Expression [ Comma ] RBrace;
 
 TypeExpression: ScalarType
               | Type LParen Expression RParen
@@ -497,7 +497,7 @@ ForStatement: For Identifier Colon ScalarType In Range [ Step AssignmentOperator
 
 CaseStatement: Case Expression LBrace { CaseItem } RBrace;
 
-CaseItem: ( Expression | Defaul ) Colon ( Statement | LBrace { Statement } RBrace );
+CaseItem: ( Expression { Comma Expression } | Defaul ) Colon ( Statement | LBrace { Statement } RBrace );
 
 // ----------------------------------------------------------------------------
 // Attribute
@@ -648,7 +648,7 @@ ModuleOptionalNamedBlock: [ Colon Identifier ] LBrace { ModuleGroup } RBrace;
 
 ModuleGroup: { Attribute } ( LBrace { ModuleGroup } RBrace | ModuleItem );
 
-ModuleItem: LetDeclaration 
+ModuleItem: LetDeclaration
           | VarDeclaration
           | InstDeclaration
           | TypeDefDeclaration

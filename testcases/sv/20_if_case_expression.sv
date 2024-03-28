@@ -18,7 +18,11 @@ module veryl_testcase_Module20;
         0
     ) : (a == 2) ? (
         1
-    ) : (
+    ) : (a == 3) ? (
         2
+    ) : (a == 4) ? (
+        2
+    ) : (
+        3
     ));
 endmodule

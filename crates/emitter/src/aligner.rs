@@ -525,7 +525,14 @@ impl VerylWalker for Aligner {
     fn case_item(&mut self, arg: &CaseItem) {
         self.aligns[align_kind::EXPRESSION].start_item();
         match &*arg.case_item_group {
-            CaseItemGroup::Expression(x) => self.expression(&x.expression),
+            CaseItemGroup::ExpressionCaseItemGroupList(x) => {
+                self.expression(&x.expression);
+                for x in &x.case_item_group_list {
+                    self.comma(&x.comma);
+                    self.space(1);
+                    self.expression(&x.expression);
+                }
+            }
             CaseItemGroup::Defaul(x) => self.defaul(&x.defaul),
         }
         self.aligns[align_kind::EXPRESSION].finish_item();

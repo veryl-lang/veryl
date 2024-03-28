@@ -415,13 +415,23 @@ impl VerylWalker for Formatter {
         self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
         self.expression(&arg.expression0);
+        for x in &arg.case_expression_list {
+            self.comma(&x.comma);
+            self.space(1);
+            self.expression(&x.expression);
+        }
         self.colon(&arg.colon);
         self.space(1);
         self.expression(&arg.expression1);
         self.comma(&arg.comma);
         self.newline();
-        for x in &arg.case_expression_list {
+        for x in &arg.case_expression_list0 {
             self.expression(&x.expression);
+            for x in &x.case_expression_list0_list {
+                self.comma(&x.comma);
+                self.space(1);
+                self.expression(&x.expression);
+            }
             self.colon(&x.colon);
             self.space(1);
             self.expression(&x.expression0);
@@ -717,7 +727,14 @@ impl VerylWalker for Formatter {
     fn case_item(&mut self, arg: &CaseItem) {
         let start = self.column();
         match &*arg.case_item_group {
-            CaseItemGroup::Expression(x) => self.expression(&x.expression),
+            CaseItemGroup::ExpressionCaseItemGroupList(x) => {
+                self.expression(&x.expression);
+                for x in &x.case_item_group_list {
+                    self.comma(&x.comma);
+                    self.space(1);
+                    self.expression(&x.expression);
+                }
+            }
             CaseItemGroup::Defaul(x) => self.defaul(&x.defaul),
         }
         self.colon(&arg.colon);
