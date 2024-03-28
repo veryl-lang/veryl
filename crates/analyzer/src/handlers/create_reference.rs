@@ -1,7 +1,7 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol::{DocComment, Symbol, SymbolKind};
+use crate::symbol::SymbolKind;
 use crate::symbol_table::{self, ResolveError, ResolveErrorCause, ResolveSymbol, SymbolPath};
 use veryl_parser::resource_table::TokenId;
 use veryl_parser::veryl_grammar_trait::*;
@@ -59,36 +59,6 @@ impl<'a> Handler for CreateReference<'a> {
     }
 }
 
-fn scoped_identifier_tokens(arg: &ScopedIdentifier) -> Vec<Token> {
-    let mut ret = Vec::new();
-    if let Some(ref x) = arg.scoped_identifier_opt {
-        ret.push(x.dollar.dollar_token.token);
-    }
-    ret.push(arg.identifier.identifier_token.token);
-    for x in &arg.scoped_identifier_list {
-        ret.push(x.identifier.identifier_token.token);
-    }
-    ret
-}
-
-fn expression_identifier_tokens(arg: &ExpressionIdentifier) -> Vec<Token> {
-    let mut ret = Vec::new();
-    if let Some(ref x) = arg.expression_identifier_opt {
-        ret.push(x.dollar.dollar_token.token);
-    }
-    ret.push(arg.identifier.identifier_token.token);
-    if let ExpressionIdentifierGroup::ExpressionIdentifierScoped(x) =
-        arg.expression_identifier_group.as_ref()
-    {
-        let x = &x.expression_identifier_scoped;
-        ret.push(x.identifier.identifier_token.token);
-        for x in &x.expression_identifier_scoped_list {
-            ret.push(x.identifier.identifier_token.token);
-        }
-    }
-    ret
-}
-
 impl<'a> VerylGrammarTrait for CreateReference<'a> {
     fn hierarchical_identifier(&mut self, arg: &HierarchicalIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
@@ -115,26 +85,6 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
 
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            // Add symbols under $sv namespace
-            if arg.scoped_identifier_opt.is_some()
-                && arg.identifier.identifier_token.to_string() == "sv"
-            {
-                let mut namespace = Namespace::new();
-                for (i, token) in scoped_identifier_tokens(arg).iter().enumerate() {
-                    if i != 0 {
-                        let symbol = Symbol::new(
-                            token,
-                            SymbolKind::SystemVerilog,
-                            &namespace,
-                            false,
-                            DocComment::default(),
-                        );
-                        let _ = symbol_table::insert(token, symbol);
-                    }
-                    namespace.push(token.text);
-                }
-            }
-
             match symbol_table::resolve(arg) {
                 Ok(symbol) => {
                     for id in symbol.full_path {
@@ -151,30 +101,6 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
 
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            // Add symbols under $sv namespace
-            if arg.expression_identifier_opt.is_some() {
-                if let ExpressionIdentifierGroup::ExpressionIdentifierScoped(_) =
-                    arg.expression_identifier_group.as_ref()
-                {
-                    if arg.identifier.identifier_token.to_string() == "sv" {
-                        let mut namespace = Namespace::new();
-                        for (i, token) in expression_identifier_tokens(arg).iter().enumerate() {
-                            if i != 0 {
-                                let symbol = Symbol::new(
-                                    token,
-                                    SymbolKind::SystemVerilog,
-                                    &namespace,
-                                    false,
-                                    DocComment::default(),
-                                );
-                                let _ = symbol_table::insert(token, symbol);
-                            }
-                            namespace.push(token.text);
-                        }
-                    }
-                }
-            }
-
             match symbol_table::resolve(arg) {
                 Ok(symbol) => {
                     for id in symbol.full_path {
@@ -291,8 +217,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
     }
 
     fn import_declaration(&mut self, arg: &ImportDeclaration) -> Result<(), ParolError> {
-        // This should be executed after scoped_identifier
-        if let HandlerPoint::After = self.point {
+        if let HandlerPoint::Before = self.point {
             let is_wildcard = arg.import_declaration_opt.is_some();
             let namespace =
                 namespace_table::get(arg.scoped_identifier.identifier.identifier_token.token.id)

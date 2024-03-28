@@ -102,6 +102,36 @@ impl<'a> Handler for CreateSymbolTable<'a> {
     }
 }
 
+fn scoped_identifier_tokens(arg: &ScopedIdentifier) -> Vec<Token> {
+    let mut ret = Vec::new();
+    if let Some(ref x) = arg.scoped_identifier_opt {
+        ret.push(x.dollar.dollar_token.token);
+    }
+    ret.push(arg.identifier.identifier_token.token);
+    for x in &arg.scoped_identifier_list {
+        ret.push(x.identifier.identifier_token.token);
+    }
+    ret
+}
+
+fn expression_identifier_tokens(arg: &ExpressionIdentifier) -> Vec<Token> {
+    let mut ret = Vec::new();
+    if let Some(ref x) = arg.expression_identifier_opt {
+        ret.push(x.dollar.dollar_token.token);
+    }
+    ret.push(arg.identifier.identifier_token.token);
+    if let ExpressionIdentifierGroup::ExpressionIdentifierScoped(x) =
+        arg.expression_identifier_group.as_ref()
+    {
+        let x = &x.expression_identifier_scoped;
+        ret.push(x.identifier.identifier_token.token);
+        for x in &x.expression_identifier_scoped_list {
+            ret.push(x.identifier.identifier_token.token);
+        }
+    }
+    ret
+}
+
 impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
     fn identifier(&mut self, arg: &Identifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
@@ -113,8 +143,57 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         Ok(())
     }
 
+    fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            // Add symbols under $sv namespace
+            if arg.scoped_identifier_opt.is_some()
+                && arg.identifier.identifier_token.to_string() == "sv"
+            {
+                let mut namespace = Namespace::new();
+                for (i, token) in scoped_identifier_tokens(arg).iter().enumerate() {
+                    if i != 0 {
+                        let symbol = Symbol::new(
+                            token,
+                            SymbolKind::SystemVerilog,
+                            &namespace,
+                            false,
+                            DocComment::default(),
+                        );
+                        let _ = symbol_table::insert(token, symbol);
+                    }
+                    namespace.push(token.text);
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
+            // Add symbols under $sv namespace
+            if arg.expression_identifier_opt.is_some() {
+                if let ExpressionIdentifierGroup::ExpressionIdentifierScoped(_) =
+                    arg.expression_identifier_group.as_ref()
+                {
+                    if arg.identifier.identifier_token.to_string() == "sv" {
+                        let mut namespace = Namespace::new();
+                        for (i, token) in expression_identifier_tokens(arg).iter().enumerate() {
+                            if i != 0 {
+                                let symbol = Symbol::new(
+                                    token,
+                                    SymbolKind::SystemVerilog,
+                                    &namespace,
+                                    false,
+                                    DocComment::default(),
+                                );
+                                let _ = symbol_table::insert(token, symbol);
+                            }
+                            namespace.push(token.text);
+                        }
+                    }
+                }
+            }
+
             if let ExpressionIdentifierGroup::ExpressionIdentifierMember(x) =
                 arg.expression_identifier_group.as_ref()
             {
