@@ -1,5 +1,5 @@
 module Module35 {
-    var aa: logic;
+    let aa: logic = 1;
 
     inst xx: Module35B (
         aa     ,

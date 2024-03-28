@@ -11,7 +11,9 @@ pub module Module36 #(
     i_rst_n: input  logic        , /// Reset
     i_data : input  logic<ParamA>, /// Data input
     o_data : output logic<ParamA>, /// Data output
-) {}
+) {
+    assign o_data = 0;
+}
 
 /// Test interface for doc comment
 ///

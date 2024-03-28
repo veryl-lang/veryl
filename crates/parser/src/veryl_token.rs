@@ -6,7 +6,7 @@ use paste::paste;
 use regex::Regex;
 use std::fmt;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenSource {
     File(PathId),
     Builtin,
@@ -33,7 +33,7 @@ impl PartialEq<PathId> for TokenSource {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Token {
     pub id: TokenId,
     pub text: StrId,
@@ -145,6 +145,13 @@ pub struct VerylToken {
 }
 
 impl VerylToken {
+    pub fn new(token: Token) -> Self {
+        Self {
+            token,
+            comments: vec![],
+        }
+    }
+
     pub fn replace(&self, text: &str) -> Self {
         let length = text.len();
         let text = resource_table::insert_str(text);

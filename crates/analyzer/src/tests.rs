@@ -76,28 +76,28 @@ fn duplicated_identifier() {
     ));
 }
 
-//#[test]
-//fn duplicated_assignment() {
-//    let code = r#"
-//    module ModuleA {
-//        var a: logic;
-//
-//        assign a = 1;
-//        always_comb {
-//            a = 1;
-//        }
-//    }
-//    "#;
-//
-//    let errors = analyze(code);
-//    assert!(matches!(
-//        errors[0],
-//        AnalyzerError::DuplicatedAssignment { .. }
-//    ));
-//}
+#[test]
+fn multiple_assignment() {
+    let code = r#"
+    module ModuleA {
+        var a: logic;
+
+        assign a = 1;
+        always_comb {
+            a = 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MultipleAssignment { .. }
+    ));
+}
 
 #[test]
-fn duplicated_assignment() {
+fn invalid_allow() {
     let code = r#"
     module ModuleA {
         #[allow(dummy_name)]
@@ -502,4 +502,35 @@ fn unused_return() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UnusedReturn { .. }));
+}
+
+#[test]
+fn unassign_variable() {
+    let code = r#"
+    module ModuleA {
+        var _a: logic;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
+}
+
+#[test]
+fn uncovered_branch() {
+    let code = r#"
+    module ModuleA {
+        var a: logic;
+        let x: logic = 1;
+
+        always_comb {
+            if x {
+                a = 1;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UncoveredBranch { .. }));
 }

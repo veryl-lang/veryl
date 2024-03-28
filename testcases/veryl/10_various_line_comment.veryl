@@ -20,6 +20,8 @@ module //a
     ;
     var up_down: logic<2>;
 
+    assign o_count = count;
+
     always_comb // a
      {
         up_down = // a

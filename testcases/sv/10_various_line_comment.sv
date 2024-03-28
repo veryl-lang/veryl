@@ -21,6 +21,8 @@ module //a
     ;
     logic [2-1:0] up_down;
 
+    always_comb o_count = count;
+
     always_comb // a
      begin
         up_down = // a

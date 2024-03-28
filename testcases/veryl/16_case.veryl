@@ -1,7 +1,7 @@
 module Module16 {
     var a: logic;
-    var x: logic;
-    var y: logic;
+    let x: logic = 1;
+    let y: logic = 1;
 
     always_comb {
         case x {

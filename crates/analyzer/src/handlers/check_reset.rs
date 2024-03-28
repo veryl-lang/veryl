@@ -1,8 +1,7 @@
-use crate::allow_table;
 use crate::analyzer_error::AnalyzerError;
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_walker::{Handler, HandlerPoint, VerylWalker};
-use veryl_parser::{ParolError, Stringifier};
+use veryl_parser::veryl_walker::{Handler, HandlerPoint};
+use veryl_parser::ParolError;
 
 #[derive(Default)]
 pub struct CheckReset<'a> {
@@ -13,8 +12,6 @@ pub struct CheckReset<'a> {
     in_if_reset: bool,
     if_reset_brace: usize,
     if_reset_exist: bool,
-    all_lefthand_sides: Vec<ExpressionIdentifier>,
-    reset_lefthand_sides: Vec<ExpressionIdentifier>,
 }
 
 impl<'a> CheckReset<'a> {
@@ -23,27 +20,6 @@ impl<'a> CheckReset<'a> {
             text,
             ..Default::default()
         }
-    }
-
-    fn get_identifier_path(x: &ExpressionIdentifier) -> Vec<String> {
-        let mut ret = Vec::new();
-        ret.push(x.identifier.identifier_token.to_string());
-        match &*x.expression_identifier_group {
-            ExpressionIdentifierGroup::ExpressionIdentifierScoped(x) => {
-                let x = &x.expression_identifier_scoped;
-                ret.push(x.identifier.identifier_token.to_string());
-                for x in &x.expression_identifier_scoped_list {
-                    ret.push(x.identifier.identifier_token.to_string());
-                }
-            }
-            ExpressionIdentifierGroup::ExpressionIdentifierMember(x) => {
-                let x = &x.expression_identifier_member;
-                for x in &x.expression_identifier_member_list0 {
-                    ret.push(x.identifier.identifier_token.to_string());
-                }
-            }
-        }
-        ret
     }
 }
 
@@ -69,22 +45,6 @@ impl<'a> VerylGrammarTrait for CheckReset<'a> {
                 self.if_reset_brace -= 1;
                 if self.if_reset_brace == 0 {
                     self.in_if_reset = false;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn identifier_statement(&mut self, arg: &IdentifierStatement) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if let IdentifierStatementGroup::Assignment(_) = &*arg.identifier_statement_group {
-                if self.in_always_ff {
-                    self.all_lefthand_sides
-                        .push(*arg.expression_identifier.clone());
-                    if self.in_if_reset {
-                        self.reset_lefthand_sides
-                            .push(*arg.expression_identifier.clone());
-                    }
                 }
             }
         }
@@ -130,32 +90,6 @@ impl<'a> VerylGrammarTrait for CheckReset<'a> {
                     ));
                 }
 
-                // Check lefthand side values which is not reset
-                let mut reset_lefthand_sides = Vec::new();
-                for x in &self.reset_lefthand_sides {
-                    reset_lefthand_sides.push(Self::get_identifier_path(x));
-                }
-
-                for x in &self.all_lefthand_sides {
-                    let mut stringifier = Stringifier::new();
-                    stringifier.expression_identifier(x);
-                    let name = stringifier.as_str().to_string();
-                    let path = Self::get_identifier_path(x);
-
-                    if self.if_reset_exist
-                        && !allow_table::contains("missing_reset_statement")
-                        && !reset_lefthand_sides.iter().any(|x| path.starts_with(x))
-                    {
-                        self.errors.push(AnalyzerError::missing_reset_statement(
-                            &name,
-                            self.text,
-                            &x.identifier.identifier_token.token,
-                        ));
-                    }
-                }
-
-                self.all_lefthand_sides.clear();
-                self.reset_lefthand_sides.clear();
                 self.in_always_ff = false;
                 self.if_reset_exist = false;
             }

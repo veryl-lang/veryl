@@ -1,5 +1,5 @@
 module Module45 {
-    var a: logic    ;
+    let a: logic     = 1;
     var b: logic<10>;
     var c: logic<10>;
 

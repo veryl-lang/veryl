@@ -3,6 +3,7 @@ module veryl_testcase_Module11;
     logic                  b   ;
     logic [10-1:0]         bb  ;
     bit   [10-1:0][10-1:0] _bbb;
+    always_comb _bbb = 1;
 
     // variable declaration with assignment
     logic [10-1:0] _c;

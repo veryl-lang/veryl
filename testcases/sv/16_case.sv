@@ -1,7 +1,9 @@
 module veryl_testcase_Module16;
     logic a;
     logic x;
+    always_comb x = 1;
     logic y;
+    always_comb y = 1;
 
     always_comb begin
         case (x)

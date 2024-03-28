@@ -17,9 +17,12 @@ module Module04 #(
     local cc: u64 = 1;
 
     // variable declaration
-    var _d  : logic        ;
-    var _dd : logic<10>    ;
-    var _ddd: bit  <10, 10>;
+    let _d  : logic         = 1;
+    let _dd : logic<10>     = 1;
+    let _ddd: bit  <10, 10> = 1;
+
+    assign bb  = 0;
+    assign bbb = 0;
 }
 
 interface Interface04 {

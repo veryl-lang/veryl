@@ -37,17 +37,21 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
-        code(duplicated_assignment),
+        code(multiple_assignment),
         help(""),
-        url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#duplicated_assignment")
+        url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#multiple_assignment")
     )]
     #[error("{identifier} is assigned in multiple procedural blocks or assignment statements")]
-    DuplicatedAssignment {
+    MultipleAssignment {
         identifier: String,
         #[source_code]
         input: NamedSource,
         #[label("Error location")]
         error_location: SourceSpan,
+        #[label("Assigned")]
+        assign_pos0: SourceSpan,
+        #[label("Assigned too")]
+        assign_pos1: SourceSpan,
     },
 
     #[diagnostic(
@@ -300,6 +304,8 @@ pub enum AnalyzerError {
         input: NamedSource,
         #[label("Error location")]
         error_location: SourceSpan,
+        #[label("Not reset")]
+        reset: SourceSpan,
     },
 
     #[diagnostic(
@@ -475,6 +481,40 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
     },
+
+    #[diagnostic(
+        severity(Warning),
+        code(unassign_variable),
+        help(""),
+        url(
+            "https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#unassign_variable"
+        )
+    )]
+    #[error("{identifier} is unassigned")]
+    UnassignVariable {
+        identifier: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Warning),
+        code(uncovered_branch),
+        help(""),
+        url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#uncovered_branch")
+    )]
+    #[error("{identifier} is not covered by all branches, it causes latch generation")]
+    UncoveredBranch {
+        identifier: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        #[label("Uncovered")]
+        uncovered: SourceSpan,
+    },
 }
 
 impl AnalyzerError {
@@ -499,11 +539,19 @@ impl AnalyzerError {
         }
     }
 
-    pub fn duplicated_assignment(identifier: &str, source: &str, token: &Token) -> Self {
-        AnalyzerError::DuplicatedAssignment {
+    pub fn multiple_assignment(
+        identifier: &str,
+        source: &str,
+        token: &Token,
+        assign_pos0: &Token,
+        assign_pos1: &Token,
+    ) -> Self {
+        AnalyzerError::MultipleAssignment {
             identifier: identifier.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
+            assign_pos0: assign_pos0.into(),
+            assign_pos1: assign_pos1.into(),
         }
     }
 
@@ -625,11 +673,12 @@ impl AnalyzerError {
         }
     }
 
-    pub fn missing_reset_statement(name: &str, source: &str, token: &Token) -> Self {
+    pub fn missing_reset_statement(name: &str, source: &str, token: &Token, reset: &Token) -> Self {
         AnalyzerError::MissingResetStatement {
             name: name.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
+            reset: reset.into(),
         }
     }
 
@@ -758,6 +807,28 @@ impl AnalyzerError {
             identifier: identifier.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
+        }
+    }
+
+    pub fn unassign_variable(identifier: &str, source: &str, token: &Token) -> Self {
+        AnalyzerError::UnassignVariable {
+            identifier: identifier.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn uncovered_branch(
+        identifier: &str,
+        source: &str,
+        token: &Token,
+        uncovered: &Token,
+    ) -> Self {
+        AnalyzerError::UncoveredBranch {
+            identifier: identifier.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+            uncovered: uncovered.into(),
         }
     }
 }

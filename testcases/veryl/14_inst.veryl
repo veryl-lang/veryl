@@ -1,7 +1,7 @@
 module Module14 {
-    var a  : logic;
-    var aa : logic;
-    var bbb: logic;
+    let a  : logic = 1;
+    let aa : logic = 1;
+    let bbb: logic = 1;
 
     // module instantiation
     inst x: Module14B;

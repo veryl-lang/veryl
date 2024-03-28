@@ -2,19 +2,20 @@ module Module25 (
     i_clk  : input  logic,
     i_rst_n: input  logic,
     i_d    : input  logic,
-    o_d    : output logic,
+    o_d0   : output logic,
+    o_d1   : output logic,
 ) {
     inst u0: veryl_sample1::delay (
-        i_clk    ,
-        i_rst_n  ,
-        i_d      ,
-        o_d      ,
+        i_clk        ,
+        i_rst_n      ,
+        i_d          ,
+        o_d    : o_d0,
     );
 
     inst u1: veryl_sample2::delay (
-        i_clk    ,
-        i_rst_n  ,
-        i_d      ,
-        o_d      ,
+        i_clk        ,
+        i_rst_n      ,
+        i_d          ,
+        o_d    : o_d1,
     );
 }

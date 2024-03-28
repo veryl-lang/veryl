@@ -16,6 +16,8 @@ module veryl_testcase_Module09;
     A a;
     B b;
 
-    always_comb a.a = 1;
-    always_comb b   = B_X;
+    always_comb a.a   = 1;
+    always_comb a.aa  = 1;
+    always_comb a.aaa = 1;
+    always_comb b     = B_X;
 endmodule

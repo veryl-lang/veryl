@@ -34,10 +34,11 @@ module Module06 {
         c = a / 1;
     }
 
-    var a: logic<ParamX>;
-    var b: logic<ParamX>;
-    var c: logic<ParamX>;
+    let a: logic<ParamX> = 1;
+    let b: logic<ParamX> = 1;
+    let c: logic<ParamX> = 1;
     var d: logic<ParamX>;
+    var e: logic<ParamX>;
 
     // function call
     assign d = FuncA(a, b, c);
@@ -51,5 +52,5 @@ module Module06 {
     }
 
     // system function call
-    assign d = $clog2(a);
+    assign e = $clog2(a);
 }
