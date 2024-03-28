@@ -1,6 +1,7 @@
 pub mod allow_table;
 pub mod analyzer;
 pub mod analyzer_error;
+pub mod assign;
 pub mod evaluator;
 pub mod handlers;
 pub mod msb_table;

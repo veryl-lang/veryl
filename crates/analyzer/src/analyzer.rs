@@ -1,12 +1,12 @@
+use crate::analyzer::resource_table::PathId;
 use crate::analyzer_error::AnalyzerError;
+use crate::assign::{AssignPath, AssignPosition, AssignPositionTree, AssignPositionType};
 use crate::handlers::*;
 use crate::namespace_table;
 use crate::symbol::{
     Direction, ParameterValue, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiniation,
 };
-use crate::symbol_table::{
-    self, AssignPath, AssignPosition, AssignPositionTree, AssignPositionType, ResolveSymbol,
-};
+use crate::symbol_table::{self, ResolveSymbol};
 use itertools::Itertools;
 use std::path::Path;
 use veryl_metadata::{Lint, Metadata};
@@ -47,6 +47,105 @@ impl<'a> AnalyzerPass2<'a> {
 impl<'a> VerylWalker for AnalyzerPass2<'a> {
     fn get_handlers(&mut self) -> Option<Vec<&mut dyn Handler>> {
         Some(self.handlers.get_handlers())
+    }
+}
+
+pub struct AnalyzerPass3<'a> {
+    path: PathId,
+    text: &'a str,
+    symbols: Vec<Symbol>,
+}
+
+impl<'a> AnalyzerPass3<'a> {
+    pub fn new(path: &'a Path, text: &'a str) -> Self {
+        let symbols = symbol_table::get_all();
+        let path = resource_table::get_path_id(path.to_path_buf()).unwrap();
+        AnalyzerPass3 {
+            path,
+            text,
+            symbols,
+        }
+    }
+
+    pub fn check_unused_variables(&self) -> Vec<AnalyzerError> {
+        let mut ret = Vec::new();
+
+        for symbol in &self.symbols {
+            if symbol.token.source == self.path {
+                if let SymbolKind::Variable(_) = symbol.kind {
+                    if symbol.references.is_empty() && !symbol.allow_unused {
+                        let name = symbol.token.to_string();
+                        if name.starts_with('_') {
+                            continue;
+                        }
+
+                        ret.push(AnalyzerError::unused_variable(
+                            &symbol.token.to_string(),
+                            self.text,
+                            &symbol.token,
+                        ));
+                    }
+                }
+            }
+        }
+
+        ret
+    }
+
+    pub fn check_assignment(&self) -> Vec<AnalyzerError> {
+        let mut ret = Vec::new();
+
+        let assign_list = symbol_table::get_assign_list();
+        let mut assignable_list = Vec::new();
+
+        for symbol in &self.symbols {
+            if symbol.token.source == self.path {
+                assignable_list.append(&mut traverse_assignable_symbol(
+                    symbol.id,
+                    &AssignPath::new(symbol.id),
+                ));
+            }
+        }
+        let mut assignable_list: Vec<_> = assignable_list.iter().map(|x| (x, vec![])).collect();
+        for assign in &assign_list {
+            for assignable in &mut assignable_list {
+                if assignable.0.included(&assign.path) {
+                    assignable.1.push((assign.position.clone(), assign.partial));
+                }
+            }
+        }
+
+        for (path, positions) in &assignable_list {
+            if positions.is_empty() {
+                let symbol = symbol_table::get(*path.0.first().unwrap()).unwrap();
+                let path: Vec<_> = path
+                    .0
+                    .iter()
+                    .map(|x| symbol_table::get(*x).unwrap().token.to_string())
+                    .collect();
+                ret.push(AnalyzerError::unassign_variable(
+                    &path.join("."),
+                    self.text,
+                    &symbol.token,
+                ));
+            }
+
+            let symbol = symbol_table::get(*path.0.first().unwrap()).unwrap();
+
+            if positions.len() > 1 {
+                for comb in positions.iter().combinations(2) {
+                    ret.append(&mut check_multiple_assignment(
+                        &symbol, self.text, comb[0], comb[1],
+                    ));
+                }
+            }
+
+            ret.append(&mut check_assign_position_tree(
+                &symbol, self.text, positions,
+            ));
+        }
+
+        ret
     }
 }
 
@@ -117,83 +216,9 @@ impl Analyzer {
         let mut ret = Vec::new();
 
         namespace_table::set_default(&[project_name.into()]);
-        ret.append(&mut Analyzer::check_symbol_table(path.as_ref(), text));
-
-        ret
-    }
-
-    fn check_symbol_table(path: &Path, text: &str) -> Vec<AnalyzerError> {
-        let mut ret = Vec::new();
-        let symbols = symbol_table::get_all();
-
-        // check unused variables
-        let path = resource_table::get_path_id(path.to_path_buf()).unwrap();
-        for symbol in &symbols {
-            if symbol.token.source == path {
-                if let SymbolKind::Variable(_) = symbol.kind {
-                    if symbol.references.is_empty() && !symbol.allow_unused {
-                        let name = symbol.token.to_string();
-                        if name.starts_with('_') {
-                            continue;
-                        }
-
-                        ret.push(AnalyzerError::unused_variable(
-                            &symbol.token.to_string(),
-                            text,
-                            &symbol.token,
-                        ));
-                    }
-                }
-            }
-        }
-
-        // check assignment
-        let assign_list = symbol_table::get_assign_list();
-        let mut assignable_list = Vec::new();
-        for symbol in &symbols {
-            if symbol.token.source == path {
-                assignable_list.append(&mut traverse_assignable_symbol(
-                    symbol.id,
-                    &AssignPath::new(symbol.id),
-                ));
-            }
-        }
-        let mut assignable_list: Vec<_> = assignable_list.iter().map(|x| (x, vec![])).collect();
-        for assign in &assign_list {
-            for assignable in &mut assignable_list {
-                if assignable.0.included(&assign.path) {
-                    assignable.1.push((assign.position.clone(), assign.partial));
-                }
-            }
-        }
-
-        for (path, positions) in &assignable_list {
-            if positions.is_empty() {
-                let symbol = symbol_table::get(*path.0.first().unwrap()).unwrap();
-                let path: Vec<_> = path
-                    .0
-                    .iter()
-                    .map(|x| symbol_table::get(*x).unwrap().token.to_string())
-                    .collect();
-                ret.push(AnalyzerError::unassign_variable(
-                    &path.join("."),
-                    text,
-                    &symbol.token,
-                ));
-            }
-
-            let symbol = symbol_table::get(*path.0.first().unwrap()).unwrap();
-
-            if positions.len() > 1 {
-                for comb in positions.iter().combinations(2) {
-                    ret.append(&mut check_multiple_assignment(
-                        &symbol, text, comb[0], comb[1],
-                    ));
-                }
-            }
-
-            ret.append(&mut check_assign_position_tree(&symbol, text, positions));
-        }
+        let pass3 = AnalyzerPass3::new(path.as_ref(), text);
+        ret.append(&mut pass3.check_unused_variables());
+        ret.append(&mut pass3.check_assignment());
 
         ret
     }

@@ -1,10 +1,11 @@
 use crate::allow_table;
 use crate::analyzer_error::AnalyzerError;
-use crate::symbol::{Direction, SymbolId, SymbolKind};
-use crate::symbol_table::{
-    self, AssignDeclarationType, AssignPosition, AssignPositionType, AssignStatementBranchItemType,
-    AssignStatementBranchType, ResolveSymbol,
+use crate::assign::{
+    AssignDeclarationType, AssignPosition, AssignPositionType, AssignStatementBranchItemType,
+    AssignStatementBranchType,
 };
+use crate::symbol::{Direction, SymbolId, SymbolKind};
+use crate::symbol_table::{self, ResolveSymbol};
 use std::collections::HashMap;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
