@@ -187,12 +187,16 @@ impl AssignPositionTree {
     pub fn check_always_comb_uncovered(&self) -> Option<Token> {
         if let Some(AssignPositionType::Declaration { ref r#type, .. }) = self.r#type {
             if *r#type == AssignDeclarationType::AlwaysComb {
-                return self
+                let children: Vec<_> = self
                     .children
                     .iter()
                     .map(|x| x.impl_always_comb_uncovered())
-                    .find(|x| x.is_some())
-                    .flatten();
+                    .collect();
+                if children.iter().any(|x| x.is_none()) {
+                    return None;
+                } else {
+                    return children.into_iter().find(|x| x.is_some()).flatten();
+                }
             }
         }
 
@@ -224,12 +228,18 @@ impl AssignPositionTree {
                         .flatten()
                 }
             }
-            Some(AssignPositionType::StatementBranchItem { .. }) => self
-                .children
-                .iter()
-                .map(|x| x.impl_always_comb_uncovered())
-                .find(|x| x.is_some())
-                .flatten(),
+            Some(AssignPositionType::StatementBranchItem { .. }) => {
+                let children: Vec<_> = self
+                    .children
+                    .iter()
+                    .map(|x| x.impl_always_comb_uncovered())
+                    .collect();
+                if children.iter().any(|x| x.is_none()) {
+                    None
+                } else {
+                    children.into_iter().find(|x| x.is_some()).flatten()
+                }
+            }
             Some(AssignPositionType::Statement { .. }) => None,
             _ => unreachable!(),
         }
