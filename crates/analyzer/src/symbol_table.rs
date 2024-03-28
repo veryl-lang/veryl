@@ -329,6 +329,7 @@ pub enum AssignPositionType {
     StatementBranch {
         token: Token,
         branches: usize,
+        has_default: bool,
         r#type: AssignStatementBranchType,
     },
     StatementBranchItem {
@@ -368,6 +369,87 @@ pub enum AssignStatementBranchType {
     If,
     IfReset,
     Case,
+}
+
+#[derive(Clone, Default, Debug)]
+pub struct AssignPositionTree {
+    r#type: Option<AssignPositionType>,
+    children: Vec<AssignPositionTree>,
+}
+
+impl AssignPositionTree {
+    pub fn add(&mut self, mut pos: AssignPosition) {
+        if pos.0.is_empty() {
+            return;
+        }
+
+        let mut head: Vec<_> = pos.0.drain(0..1).collect();
+
+        for child in &mut self.children {
+            if child.r#type.as_ref() == head.first() {
+                child.add(pos);
+                return;
+            }
+        }
+
+        let mut node = AssignPositionTree {
+            r#type: Some(head.remove(0)),
+            children: vec![],
+        };
+        node.add(pos);
+        self.children.push(node);
+    }
+
+    pub fn check_always_comb_uncovered(&self) -> Option<Token> {
+        if let Some(AssignPositionType::Declaration { ref r#type, .. }) = self.r#type {
+            if *r#type == AssignDeclarationType::AlwaysComb {
+                return self
+                    .children
+                    .iter()
+                    .map(|x| x.impl_always_comb_uncovered())
+                    .find(|x| x.is_some())
+                    .flatten();
+            }
+        }
+
+        for child in &self.children {
+            let ret = child.check_always_comb_uncovered();
+            if ret.is_some() {
+                return ret;
+            }
+        }
+
+        None
+    }
+
+    fn impl_always_comb_uncovered(&self) -> Option<Token> {
+        match self.r#type {
+            Some(AssignPositionType::StatementBranch {
+                token,
+                branches,
+                has_default,
+                ..
+            }) => {
+                if !has_default || self.children.len() != branches {
+                    Some(token)
+                } else {
+                    self.children
+                        .iter()
+                        .map(|x| x.impl_always_comb_uncovered())
+                        .find(|x| x.is_some())
+                        .flatten()
+                }
+            }
+            Some(AssignPositionType::StatementBranchItem { .. }) => self
+                .children
+                .iter()
+                .map(|x| x.impl_always_comb_uncovered())
+                .find(|x| x.is_some())
+                .flatten(),
+            Some(AssignPositionType::Statement { .. }) => None,
+            _ => unreachable!(),
+        }
+    }
 }
 
 #[derive(Clone, Default, Debug)]

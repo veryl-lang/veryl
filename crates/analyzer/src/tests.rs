@@ -515,3 +515,22 @@ fn unassign_variable() {
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
 }
+
+#[test]
+fn uncovered_branch() {
+    let code = r#"
+    module ModuleA {
+        var a: logic;
+        let x: logic = 1;
+
+        always_comb {
+            if x {
+                a = 1;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UncoveredBranch { .. }));
+}

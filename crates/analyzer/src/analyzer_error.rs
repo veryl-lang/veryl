@@ -496,6 +496,23 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
     },
+
+    #[diagnostic(
+        severity(Warning),
+        code(uncovered_branch),
+        help(""),
+        url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#uncovered_branch")
+    )]
+    #[error("{identifier} is not covered by all branches, it causes latch generation")]
+    UncoveredBranch {
+        identifier: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        #[label("Uncovered")]
+        uncovered: SourceSpan,
+    },
 }
 
 impl AnalyzerError {
@@ -795,6 +812,20 @@ impl AnalyzerError {
             identifier: identifier.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
+        }
+    }
+
+    pub fn uncovered_branch(
+        identifier: &str,
+        source: &str,
+        token: &Token,
+        uncovered: &Token,
+    ) -> Self {
+        AnalyzerError::UncoveredBranch {
+            identifier: identifier.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+            uncovered: uncovered.into(),
         }
     }
 }

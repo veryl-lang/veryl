@@ -4,7 +4,9 @@ use crate::namespace_table;
 use crate::symbol::{
     Direction, ParameterValue, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiniation,
 };
-use crate::symbol_table::{self, AssignPath, AssignPosition, AssignPositionType, ResolveSymbol};
+use crate::symbol_table::{
+    self, AssignPath, AssignPosition, AssignPositionTree, AssignPositionType, ResolveSymbol,
+};
 use itertools::Itertools;
 use std::path::Path;
 use veryl_metadata::{Lint, Metadata};
@@ -174,12 +176,18 @@ impl Analyzer {
                     &symbol.token,
                 ));
             }
+
+            let symbol = symbol_table::get(*path.0.first().unwrap()).unwrap();
+
             if positions.len() > 1 {
-                let symbol = symbol_table::get(*path.0.first().unwrap()).unwrap();
                 for comb in positions.iter().combinations(2) {
-                    ret.append(&mut check_assign_position(&symbol, text, comb[0], comb[1]));
+                    ret.append(&mut check_multiple_assignment(
+                        &symbol, text, comb[0], comb[1],
+                    ));
                 }
             }
+
+            ret.append(&mut check_uncovered_branch(&symbol, text, positions));
         }
 
         ret
@@ -341,7 +349,7 @@ fn traverse_assignable_symbol(id: SymbolId, path: &AssignPath) -> Vec<AssignPath
     vec![]
 }
 
-fn check_assign_position(
+fn check_multiple_assignment(
     symbol: &Symbol,
     text: &str,
     x: &(AssignPosition, bool),
@@ -374,6 +382,32 @@ fn check_assign_position(
                 _ => return vec![],
             }
         }
+    }
+
+    ret
+}
+
+fn check_uncovered_branch(
+    symbol: &Symbol,
+    text: &str,
+    positions: &[(AssignPosition, bool)],
+) -> Vec<AnalyzerError> {
+    let mut ret = Vec::new();
+
+    let mut tree = AssignPositionTree::default();
+    for x in positions {
+        let pos = &x.0;
+
+        tree.add(pos.clone());
+    }
+
+    if let Some(token) = tree.check_always_comb_uncovered() {
+        ret.push(AnalyzerError::uncovered_branch(
+            &symbol.token.to_string(),
+            text,
+            &symbol.token,
+            &token,
+        ));
     }
 
     ret

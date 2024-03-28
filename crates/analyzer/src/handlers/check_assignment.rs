@@ -187,10 +187,12 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
             HandlerPoint::Before => {
                 self.branch_index = 0;
                 let branches = 1 + arg.if_statement_list0.len() + arg.if_statement_opt.iter().len();
+                let has_default = arg.if_statement_opt.is_some();
                 self.assign_position
                     .push(AssignPositionType::StatementBranch {
                         token: arg.r#if.if_token.token,
                         branches,
+                        has_default,
                         r#type: AssignStatementBranchType::If,
                     });
                 self.assign_position
@@ -215,10 +217,12 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                 let branches = 1
                     + arg.if_reset_statement_list0.len()
                     + arg.if_reset_statement_opt.iter().len();
+                let has_default = arg.if_reset_statement_opt.is_some();
                 self.assign_position
                     .push(AssignPositionType::StatementBranch {
                         token: arg.if_reset.if_reset_token.token,
                         branches,
+                        has_default,
                         r#type: AssignStatementBranchType::IfReset,
                     });
                 self.assign_position
@@ -254,10 +258,17 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
             HandlerPoint::Before => {
                 self.branch_index = 0;
                 let branches = arg.case_statement_list.len();
+                let has_default = arg.case_statement_list.iter().any(|x| {
+                    matches!(
+                        x.case_item.case_item_group.as_ref(),
+                        CaseItemGroup::Defaul(_)
+                    )
+                });
                 self.assign_position
                     .push(AssignPositionType::StatementBranch {
                         token: arg.case.case_token.token,
                         branches,
+                        has_default,
                         r#type: AssignStatementBranchType::Case,
                     });
             }
