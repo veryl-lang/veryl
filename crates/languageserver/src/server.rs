@@ -626,6 +626,7 @@ impl Server {
                                 !matches!(
                                     x,
                                     AnalyzerError::UndefinedIdentifier { .. }
+                                        | AnalyzerError::UnknownMember { .. }
                                         | AnalyzerError::UnassignVariable { .. }
                                 )
                             }
