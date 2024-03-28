@@ -1127,11 +1127,19 @@ pub trait VerylWalker {
         self.expression(&arg.expression);
         self.l_brace(&arg.l_brace);
         self.expression(&arg.expression0);
+        for x in &arg.case_expression_list {
+            self.comma(&x.comma);
+            self.expression(&x.expression);
+        }
         self.colon(&arg.colon);
         self.expression(&arg.expression1);
         self.comma(&arg.comma);
-        for x in &arg.case_expression_list {
+        for x in &arg.case_expression_list0 {
             self.expression(&x.expression);
+            for x in &x.case_expression_list0_list {
+                self.comma(&x.comma);
+                self.expression(&x.expression);
+            }
             self.colon(&x.colon);
             self.expression(&x.expression0);
             self.comma(&x.comma);
@@ -1504,7 +1512,13 @@ pub trait VerylWalker {
     fn case_item(&mut self, arg: &CaseItem) {
         before!(self, case_item, arg);
         match &*arg.case_item_group {
-            CaseItemGroup::Expression(x) => self.expression(&x.expression),
+            CaseItemGroup::ExpressionCaseItemGroupList(x) => {
+                self.expression(&x.expression);
+                for x in &x.case_item_group_list {
+                    self.comma(&x.comma);
+                    self.expression(&x.expression);
+                }
+            }
             CaseItemGroup::Defaul(x) => self.defaul(&x.defaul),
         }
         self.colon(&arg.colon);

@@ -856,9 +856,23 @@ impl VerylWalker for Emitter {
         self.newline_push();
         self.expression(&arg.expression1);
         self.newline_pop();
+        for x in &arg.case_expression_list {
+            self.token(&x.comma.comma_token.replace(")"));
+            self.space(1);
+            self.str(": (");
+            self.expression(&arg.expression);
+            self.space(1);
+            self.str("==");
+            self.space(1);
+            self.expression(&x.expression);
+            self.str(") ? (");
+            self.newline_push();
+            self.expression(&arg.expression1);
+            self.newline_pop();
+        }
         self.str(")");
         self.space(1);
-        for x in &arg.case_expression_list {
+        for x in &arg.case_expression_list0 {
             self.str(": (");
             self.expression(&arg.expression);
             self.space(1);
@@ -869,6 +883,20 @@ impl VerylWalker for Emitter {
             self.newline_push();
             self.expression(&x.expression0);
             self.newline_pop();
+            for y in &x.case_expression_list0_list {
+                self.token(&x.comma.comma_token.replace(")"));
+                self.space(1);
+                self.str(": (");
+                self.expression(&arg.expression);
+                self.space(1);
+                self.str("==");
+                self.space(1);
+                self.expression(&y.expression);
+                self.str(") ? (");
+                self.newline_push();
+                self.expression(&x.expression0);
+                self.newline_pop();
+            }
             self.token(&x.comma.comma_token.replace(")"));
             self.space(1);
         }
@@ -1351,7 +1379,14 @@ impl VerylWalker for Emitter {
     fn case_item(&mut self, arg: &CaseItem) {
         let start = self.column();
         match &*arg.case_item_group {
-            CaseItemGroup::Expression(x) => self.expression(&x.expression),
+            CaseItemGroup::ExpressionCaseItemGroupList(x) => {
+                self.expression(&x.expression);
+                for x in &x.case_item_group_list {
+                    self.comma(&x.comma);
+                    self.space(1);
+                    self.expression(&x.expression);
+                }
+            }
             CaseItemGroup::Defaul(x) => self.defaul(&x.defaul),
         }
         self.colon(&arg.colon);
