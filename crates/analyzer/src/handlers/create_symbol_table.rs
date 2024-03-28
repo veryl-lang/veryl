@@ -35,7 +35,7 @@ pub struct CreateSymbolTable<'a> {
     struct_union_members: Vec<Option<SymbolId>>,
     affiniation: Vec<VariableAffiniation>,
     connect_targets: Vec<Vec<StrId>>,
-    connects: HashMap<Token, Vec<StrId>>,
+    connects: HashMap<Token, Vec<Vec<StrId>>>,
 }
 
 #[derive(Clone)]
@@ -383,9 +383,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 } else {
                     vec![vec![port.text]]
                 };
-                for target in targets {
-                    self.connects.insert(port, target);
-                }
+                self.connects.insert(port, targets);
             }
         }
         Ok(())

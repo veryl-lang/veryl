@@ -428,31 +428,35 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                             r#type: AssignDeclarationType::Inst,
                         });
 
-                        for (token, target) in &x.connects {
-                            if !target.is_empty() {
-                                let dir_output = if let Some(dir) = dirs.get(&token.text) {
-                                    matches!(
-                                        dir,
-                                        Direction::Ref | Direction::Inout | Direction::Output
-                                    )
-                                } else {
-                                    false
-                                };
+                        for (token, targets) in &x.connects {
+                            for target in targets {
+                                if !target.is_empty() {
+                                    let dir_output = if let Some(dir) = dirs.get(&token.text) {
+                                        matches!(
+                                            dir,
+                                            Direction::Ref | Direction::Inout | Direction::Output
+                                        )
+                                    } else {
+                                        false
+                                    };
 
-                                if dir_output | dir_unknown {
-                                    if let Ok(x) =
-                                        symbol_table::resolve((target, &symbol.namespace))
-                                    {
-                                        self.assign_position.push(AssignPositionType::Connect {
-                                            token: *token,
-                                            maybe: dir_unknown,
-                                        });
-                                        symbol_table::add_assign(
-                                            x.full_path,
-                                            &self.assign_position,
-                                            false,
-                                        );
-                                        self.assign_position.pop();
+                                    if dir_output | dir_unknown {
+                                        if let Ok(x) =
+                                            symbol_table::resolve((target, &symbol.namespace))
+                                        {
+                                            self.assign_position.push(
+                                                AssignPositionType::Connect {
+                                                    token: *token,
+                                                    maybe: dir_unknown,
+                                                },
+                                            );
+                                            symbol_table::add_assign(
+                                                x.full_path,
+                                                &self.assign_position,
+                                                false,
+                                            );
+                                            self.assign_position.pop();
+                                        }
                                     }
                                 }
                             }
