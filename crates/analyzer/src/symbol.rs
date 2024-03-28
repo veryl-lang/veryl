@@ -623,7 +623,7 @@ pub struct FunctionProperty {
 #[derive(Debug, Clone)]
 pub struct InstanceProperty {
     pub type_name: Vec<StrId>,
-    pub connects: HashMap<StrId, Vec<StrId>>,
+    pub connects: HashMap<Token, Vec<StrId>>,
 }
 
 #[derive(Debug, Clone)]

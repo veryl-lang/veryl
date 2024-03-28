@@ -115,17 +115,29 @@ pub enum AssignPositionType {
         token: Token,
         resettable: bool,
     },
+    Connect {
+        token: Token,
+        maybe: bool,
+    },
 }
 
 impl AssignPositionType {
     pub fn token(&self) -> &Token {
         match self {
-            AssignPositionType::DeclarationBranch { token: x, .. } => x,
-            AssignPositionType::DeclarationBranchItem { token: x, .. } => x,
-            AssignPositionType::Declaration { token: x, .. } => x,
-            AssignPositionType::StatementBranch { token: x, .. } => x,
-            AssignPositionType::StatementBranchItem { token: x, .. } => x,
-            AssignPositionType::Statement { token: x, .. } => x,
+            AssignPositionType::DeclarationBranch { token, .. } => token,
+            AssignPositionType::DeclarationBranchItem { token, .. } => token,
+            AssignPositionType::Declaration { token, .. } => token,
+            AssignPositionType::StatementBranch { token, .. } => token,
+            AssignPositionType::StatementBranchItem { token, .. } => token,
+            AssignPositionType::Statement { token, .. } => token,
+            AssignPositionType::Connect { token, .. } => token,
+        }
+    }
+
+    pub fn is_maybe(&self) -> bool {
+        match self {
+            AssignPositionType::Connect { maybe, .. } => *maybe,
+            _ => false,
         }
     }
 }

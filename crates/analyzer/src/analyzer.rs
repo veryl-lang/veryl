@@ -392,6 +392,12 @@ fn check_multiple_assignment(
     let mut ret = Vec::new();
     let len = x_pos.0.len().min(y_pos.0.len());
 
+    let x_maybe = x_pos.0.last().unwrap().is_maybe();
+    let y_maybe = y_pos.0.last().unwrap().is_maybe();
+    if x_maybe || y_maybe {
+        return vec![];
+    }
+
     for i in 0..len {
         let x_type = &x_pos.0[i];
         let y_type = &y_pos.0[i];

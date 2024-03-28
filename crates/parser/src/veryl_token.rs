@@ -6,7 +6,7 @@ use paste::paste;
 use regex::Regex;
 use std::fmt;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenSource {
     File(PathId),
     Builtin,
@@ -33,7 +33,7 @@ impl PartialEq<PathId> for TokenSource {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Token {
     pub id: TokenId,
     pub text: StrId,

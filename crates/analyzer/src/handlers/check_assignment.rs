@@ -423,9 +423,14 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                             }
                         }
 
-                        for (name, target) in &x.connects {
+                        self.assign_position.push(AssignPositionType::Declaration {
+                            token: arg.inst.inst_token.token,
+                            r#type: AssignDeclarationType::Inst,
+                        });
+
+                        for (token, target) in &x.connects {
                             if !target.is_empty() {
-                                let dir_output = if let Some(dir) = dirs.get(name) {
+                                let dir_output = if let Some(dir) = dirs.get(&token.text) {
                                     matches!(
                                         dir,
                                         Direction::Ref | Direction::Inout | Direction::Output
@@ -438,12 +443,10 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                                     if let Ok(x) =
                                         symbol_table::resolve((target, &symbol.namespace))
                                     {
-                                        self.assign_position.push(
-                                            AssignPositionType::Declaration {
-                                                token: arg.inst.inst_token.token,
-                                                r#type: AssignDeclarationType::Inst,
-                                            },
-                                        );
+                                        self.assign_position.push(AssignPositionType::Connect {
+                                            token: *token,
+                                            maybe: dir_unknown,
+                                        });
                                         symbol_table::add_assign(
                                             x.full_path,
                                             &self.assign_position,
@@ -454,6 +457,8 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                                 }
                             }
                         }
+
+                        self.assign_position.pop();
                     }
                 }
             }
