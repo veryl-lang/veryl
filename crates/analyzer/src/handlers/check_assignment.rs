@@ -1,8 +1,9 @@
+use crate::allow_table;
 use crate::analyzer_error::AnalyzerError;
 use crate::symbol::{Direction, SymbolId, SymbolKind};
 use crate::symbol_table::{
-    self, AssignDeclarationType, AssignPosition, AssignPositionType, AssignStatementBranchType,
-    ResolveSymbol,
+    self, AssignDeclarationType, AssignPosition, AssignPositionType, AssignStatementBranchItemType,
+    AssignStatementBranchType, ResolveSymbol,
 };
 use std::collections::HashMap;
 use veryl_parser::veryl_grammar_trait::*;
@@ -86,6 +87,7 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                     AssignPositionType::StatementBranchItem {
                         token: arg.else_token.token,
                         index: self.branch_index,
+                        r#type: AssignStatementBranchItemType::Else,
                     }
                 } else {
                     AssignPositionType::DeclarationBranchItem {
@@ -117,6 +119,7 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
             if let Ok(x) = symbol_table::resolve(arg.identifier.as_ref()) {
                 self.assign_position.push(AssignPositionType::Statement {
                     token: arg.equ.equ_token.token,
+                    resettable: false,
                 });
                 symbol_table::add_assign(x.full_path, &self.assign_position, false);
                 self.assign_position.pop();
@@ -158,8 +161,10 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                                     }
                                 };
 
-                                self.assign_position
-                                    .push(AssignPositionType::Statement { token });
+                                self.assign_position.push(AssignPositionType::Statement {
+                                    token,
+                                    resettable: true,
+                                });
                                 symbol_table::add_assign(full_path, &self.assign_position, partial);
                                 self.assign_position.pop();
                             } else {
@@ -193,12 +198,14 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                         token: arg.r#if.if_token.token,
                         branches,
                         has_default,
+                        allow_missing_reset_statement: false,
                         r#type: AssignStatementBranchType::If,
                     });
                 self.assign_position
                     .push(AssignPositionType::StatementBranchItem {
                         token: arg.r#if.if_token.token,
                         index: self.branch_index,
+                        r#type: AssignStatementBranchItemType::If,
                     });
                 self.branch_index += 1;
             }
@@ -218,17 +225,21 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                     + arg.if_reset_statement_list0.len()
                     + arg.if_reset_statement_opt.iter().len();
                 let has_default = arg.if_reset_statement_opt.is_some();
+                let allow_missing_reset_statement =
+                    allow_table::contains("missing_reset_statement");
                 self.assign_position
                     .push(AssignPositionType::StatementBranch {
                         token: arg.if_reset.if_reset_token.token,
                         branches,
                         has_default,
+                        allow_missing_reset_statement,
                         r#type: AssignStatementBranchType::IfReset,
                     });
                 self.assign_position
                     .push(AssignPositionType::StatementBranchItem {
                         token: arg.if_reset.if_reset_token.token,
                         index: self.branch_index,
+                        r#type: AssignStatementBranchItemType::IfReset,
                     });
                 self.branch_index += 1;
             }
@@ -245,6 +256,7 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
             if let Ok(x) = symbol_table::resolve(arg.identifier.as_ref()) {
                 self.assign_position.push(AssignPositionType::Statement {
                     token: arg.r#for.for_token.token,
+                    resettable: false,
                 });
                 symbol_table::add_assign(x.full_path, &self.assign_position, false);
                 self.assign_position.pop();
@@ -269,6 +281,7 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                         token: arg.case.case_token.token,
                         branches,
                         has_default,
+                        allow_missing_reset_statement: false,
                         r#type: AssignStatementBranchType::Case,
                     });
             }
@@ -286,6 +299,7 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                     .push(AssignPositionType::StatementBranchItem {
                         token: arg.colon.colon_token.token,
                         index: self.branch_index,
+                        r#type: AssignStatementBranchItemType::Case,
                     });
                 self.branch_index += 1;
             }
@@ -492,6 +506,7 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
             if let Ok(x) = symbol_table::resolve(arg.identifier.as_ref()) {
                 self.assign_position.push(AssignPositionType::Statement {
                     token: arg.r#for.for_token.token,
+                    resettable: false,
                 });
                 symbol_table::add_assign(x.full_path, &self.assign_position, false);
                 self.assign_position.pop();

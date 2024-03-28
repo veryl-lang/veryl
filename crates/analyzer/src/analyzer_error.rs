@@ -304,6 +304,8 @@ pub enum AnalyzerError {
         input: NamedSource,
         #[label("Error location")]
         error_location: SourceSpan,
+        #[label("Not reset")]
+        reset: SourceSpan,
     },
 
     #[diagnostic(
@@ -671,11 +673,12 @@ impl AnalyzerError {
         }
     }
 
-    pub fn missing_reset_statement(name: &str, source: &str, token: &Token) -> Self {
+    pub fn missing_reset_statement(name: &str, source: &str, token: &Token, reset: &Token) -> Self {
         AnalyzerError::MissingResetStatement {
             name: name.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
+            reset: reset.into(),
         }
     }
 

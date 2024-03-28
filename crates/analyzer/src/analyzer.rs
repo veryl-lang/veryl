@@ -170,8 +170,13 @@ impl Analyzer {
         for (path, positions) in &assignable_list {
             if positions.is_empty() {
                 let symbol = symbol_table::get(*path.0.first().unwrap()).unwrap();
+                let path: Vec<_> = path
+                    .0
+                    .iter()
+                    .map(|x| symbol_table::get(*x).unwrap().token.to_string())
+                    .collect();
                 ret.push(AnalyzerError::unassign_variable(
-                    &symbol.token.to_string(),
+                    &path.join("."),
                     text,
                     &symbol.token,
                 ));
@@ -187,7 +192,7 @@ impl Analyzer {
                 }
             }
 
-            ret.append(&mut check_uncovered_branch(&symbol, text, positions));
+            ret.append(&mut check_assign_position_tree(&symbol, text, positions));
         }
 
         ret
@@ -387,7 +392,7 @@ fn check_multiple_assignment(
     ret
 }
 
-fn check_uncovered_branch(
+fn check_assign_position_tree(
     symbol: &Symbol,
     text: &str,
     positions: &[(AssignPosition, bool)],
@@ -403,6 +408,15 @@ fn check_uncovered_branch(
 
     if let Some(token) = tree.check_always_comb_uncovered() {
         ret.push(AnalyzerError::uncovered_branch(
+            &symbol.token.to_string(),
+            text,
+            &symbol.token,
+            &token,
+        ));
+    }
+
+    if let Some(token) = tree.check_always_ff_missing_reset() {
+        ret.push(AnalyzerError::missing_reset_statement(
             &symbol.token.to_string(),
             text,
             &symbol.token,

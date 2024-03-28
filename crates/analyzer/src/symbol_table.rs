@@ -330,14 +330,17 @@ pub enum AssignPositionType {
         token: Token,
         branches: usize,
         has_default: bool,
+        allow_missing_reset_statement: bool,
         r#type: AssignStatementBranchType,
     },
     StatementBranchItem {
         token: Token,
         index: usize,
+        r#type: AssignStatementBranchItemType,
     },
     Statement {
         token: Token,
+        resettable: bool,
     },
 }
 
@@ -368,6 +371,14 @@ pub enum AssignDeclarationType {
 pub enum AssignStatementBranchType {
     If,
     IfReset,
+    Case,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AssignStatementBranchItemType {
+    If,
+    IfReset,
+    Else,
     Case,
 }
 
@@ -448,6 +459,46 @@ impl AssignPositionTree {
                 .flatten(),
             Some(AssignPositionType::Statement { .. }) => None,
             _ => unreachable!(),
+        }
+    }
+
+    pub fn check_always_ff_missing_reset(&self) -> Option<Token> {
+        if let Some(AssignPositionType::StatementBranch {
+            ref r#type,
+            ref token,
+            ref allow_missing_reset_statement,
+            ..
+        }) = self.r#type
+        {
+            if *r#type == AssignStatementBranchType::IfReset
+                && !allow_missing_reset_statement
+                && self.is_resettable()
+            {
+                if let Some(AssignPositionType::StatementBranchItem { ref r#type, .. }) =
+                    self.children[0].r#type
+                {
+                    if *r#type != AssignStatementBranchItemType::IfReset {
+                        return Some(*token);
+                    }
+                }
+            }
+        }
+
+        for child in &self.children {
+            let ret = child.check_always_ff_missing_reset();
+            if ret.is_some() {
+                return ret;
+            }
+        }
+
+        None
+    }
+
+    fn is_resettable(&self) -> bool {
+        if let Some(AssignPositionType::Statement { resettable, .. }) = self.r#type {
+            resettable
+        } else {
+            self.children.iter().any(|x| x.is_resettable())
         }
     }
 }
