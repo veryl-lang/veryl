@@ -13,11 +13,19 @@ module Module09 {
         Z,
     }
 
+    #[enum_member_prefix(FOO)]
+    enum C: logic {
+        C_0,
+        C_1,
+    }
+
     var a: A;
     var b: B;
+    var c: C;
 
     assign a.a   = 1;
     assign a.aa  = 1;
     assign a.aaa = 1;
     assign b     = B::X;
+    assign c     = C::C_0;
 }

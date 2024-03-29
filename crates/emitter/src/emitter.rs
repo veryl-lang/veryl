@@ -35,7 +35,7 @@ pub struct Emitter {
     signed: bool,
     reset_signal: Option<String>,
     default_block: Option<String>,
-    enum_name: Option<String>,
+    enum_member_prefix: Option<String>,
     file_scope_import: Vec<String>,
     attribute: Vec<AttributeType>,
     assignment_lefthand_side: Option<ExpressionIdentifier>,
@@ -63,7 +63,7 @@ impl Default for Emitter {
             signed: false,
             reset_signal: None,
             default_block: None,
-            enum_name: None,
+            enum_member_prefix: None,
             file_scope_import: Vec::new(),
             attribute: Vec::new(),
             assignment_lefthand_side: None,
@@ -336,7 +336,7 @@ impl Emitter {
     fn path_identifier(&mut self, path: SymbolPathNamespace, args: &[Identifier]) {
         if let Ok(ref symbol) = symbol_table::resolve(path) {
             if let ResolveSymbol::Symbol(symbol) = &symbol.found {
-                match symbol.kind {
+                match &symbol.kind {
                     SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_) => {
                         self.namespace(&symbol.namespace);
                         self.str(&format!("{}", symbol.token.text));
@@ -354,12 +354,12 @@ impl Emitter {
                             self.identifier(&args[0]);
                         }
                     }
-                    SymbolKind::EnumMember(_) => {
+                    SymbolKind::EnumMember(x) => {
                         if args.len() > 2 {
                             self.namespace(&symbol.namespace);
                             self.str(&format!("{}", symbol.token.text));
                         } else {
-                            self.identifier(&args[0]);
+                            self.str(&x.prefix);
                             self.str("_");
                             self.identifier(&args[1]);
                         }
@@ -1471,6 +1471,13 @@ impl VerylWalker for Emitter {
                     self.adjust_line = false;
                 }
             }
+            "enum_member_prefix" => {
+                if let Some(ref x) = arg.attribute_opt {
+                    if let AttributeItem::Identifier(x) = &*x.attribute_list.attribute_item {
+                        self.enum_member_prefix = Some(x.identifier.identifier_token.to_string());
+                    }
+                }
+            }
             _ => (),
         }
     }
@@ -1745,7 +1752,9 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'EnumDeclaration'
     fn enum_declaration(&mut self, arg: &EnumDeclaration) {
-        self.enum_name = Some(arg.identifier.identifier_token.to_string());
+        if self.enum_member_prefix.is_none() {
+            self.enum_member_prefix = Some(arg.identifier.identifier_token.to_string());
+        }
         self.token(&arg.r#enum.enum_token.append("typedef ", ""));
         self.space(1);
         self.scalar_type(&arg.scalar_type);
@@ -1759,6 +1768,7 @@ impl VerylWalker for Emitter {
         self.identifier(&arg.identifier);
         self.str(";");
         self.token(&arg.r_brace.r_brace_token.replace(""));
+        self.enum_member_prefix = None;
     }
 
     /// Semantic action for non-terminal 'EnumList'
@@ -1792,7 +1802,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'EnumItem'
     fn enum_item(&mut self, arg: &EnumItem) {
-        let prefix = format!("{}_", self.enum_name.clone().unwrap());
+        let prefix = format!("{}_", self.enum_member_prefix.clone().unwrap());
         self.token(&arg.identifier.identifier_token.append(&prefix, ""));
         if let Some(ref x) = arg.enum_item_opt {
             self.space(1);

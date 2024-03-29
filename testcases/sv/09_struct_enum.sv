@@ -13,11 +13,18 @@ module veryl_testcase_Module09;
         B_Z
     } B;
 
+    typedef enum logic {
+        FOO_C_0,
+        FOO_C_1
+    } C;
+
     A a;
     B b;
+    C c;
 
     always_comb a.a   = 1;
     always_comb a.aa  = 1;
     always_comb a.aaa = 1;
     always_comb b     = B_X;
+    always_comb c     = FOO_C_0;
 endmodule

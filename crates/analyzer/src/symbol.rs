@@ -665,6 +665,7 @@ pub struct EnumProperty {
 #[derive(Debug, Clone)]
 pub struct EnumMemberProperty {
     pub value: Option<syntax_tree::Expression>,
+    pub prefix: String,
 }
 
 #[derive(Debug, Clone)]

@@ -31,6 +31,7 @@ pub struct CreateSymbolTable<'a> {
     anonymous_namespace: usize,
     attribute_lines: HashSet<u32>,
     struct_or_union: Option<StructOrUnion>,
+    enum_member_prefix: Option<String>,
     enum_members: Vec<Option<SymbolId>>,
     struct_union_members: Vec<Option<SymbolId>>,
     affiniation: Vec<VariableAffiniation>,
@@ -213,6 +214,15 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
     fn attribute(&mut self, arg: &Attribute) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             self.attribute_lines.insert(arg.hash.hash_token.token.line);
+
+            let identifier = arg.identifier.identifier_token.to_string();
+            if identifier.as_str() == "enum_member_prefix" {
+                if let Some(ref x) = arg.attribute_opt {
+                    if let AttributeItem::Identifier(x) = &*x.attribute_list.attribute_item {
+                        self.enum_member_prefix = Some(x.identifier.identifier_token.to_string());
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -351,9 +361,13 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             HandlerPoint::Before => {
                 let name = arg.identifier.identifier_token.token.text;
                 self.namespace.push(name);
+                if self.enum_member_prefix.is_none() {
+                    self.enum_member_prefix = Some(arg.identifier.identifier_token.to_string());
+                }
             }
             HandlerPoint::After => {
                 self.namespace.pop();
+                self.enum_member_prefix = None;
 
                 let r#type = arg.scalar_type.as_ref().into();
                 let members: Vec<_> = self.enum_members.drain(0..).flatten().collect();
@@ -368,7 +382,8 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
     fn enum_item(&mut self, arg: &EnumItem) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let value = arg.enum_item_opt.as_ref().map(|x| *x.expression.clone());
-            let property = EnumMemberProperty { value };
+            let prefix = self.enum_member_prefix.clone().unwrap();
+            let property = EnumMemberProperty { value, prefix };
             let kind = SymbolKind::EnumMember(property);
             let id = self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
             self.enum_members.push(id);
