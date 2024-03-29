@@ -1,5 +1,6 @@
 use handlebars::Handlebars;
 use mdbook::{Config, MDBook};
+use mdbook_wavedrom::Wavedrom;
 use miette::{IntoDiagnostic, Result};
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -291,8 +292,15 @@ impl DocBuilder {
         cfg.set("output.html.fold.level", 1).unwrap();
         cfg.set("output.html.additional-css", vec!["theme/custom.css"])
             .unwrap();
+        cfg.set(
+            "output.html.additional-js",
+            vec!["theme/wavedrom.min.js", "theme/wavedrom_skin.js"],
+        )
+        .unwrap();
 
-        let md = MDBook::load_with_config(&self.root_dir, cfg).unwrap();
+        let wavedrom = Wavedrom;
+        let mut md = MDBook::load_with_config(&self.root_dir, cfg).unwrap();
+        md.with_preprocessor(wavedrom);
         md.build().unwrap();
         Ok(())
     }
@@ -325,6 +333,16 @@ impl DocBuilder {
         let mut file = File::create(file).into_diagnostic()?;
         file.write(favicon).into_diagnostic()?;
 
+        let wavedrom = include_bytes!("../resource/wavedrom/wavedrom.min.js");
+        let file = self.theme_dir.join("wavedrom.min.js");
+        let mut file = File::create(file).into_diagnostic()?;
+        file.write(wavedrom).into_diagnostic()?;
+
+        let wavedrom_skin = include_bytes!("../resource/wavedrom/skins/default.js");
+        let file = self.theme_dir.join("wavedrom_skin.js");
+        let mut file = File::create(file).into_diagnostic()?;
+        file.write(wavedrom_skin).into_diagnostic()?;
+
         Ok(())
     }
 
@@ -347,7 +365,8 @@ impl DocBuilder {
             packages,
         };
 
-        let handlebars = Handlebars::new();
+        let mut handlebars = Handlebars::new();
+        handlebars.register_escape_fn(handlebars::no_escape);
         handlebars.render_template(SUMMARY_TMPL, &data).unwrap()
     }
 
@@ -360,7 +379,8 @@ impl DocBuilder {
             license: self.metadata.project.license.clone(),
         };
 
-        let handlebars = Handlebars::new();
+        let mut handlebars = Handlebars::new();
+        handlebars.register_escape_fn(handlebars::no_escape);
         handlebars.render_template(INDEX_TMPL, &data).unwrap()
     }
 
@@ -379,7 +399,8 @@ impl DocBuilder {
             items,
         };
 
-        let handlebars = Handlebars::new();
+        let mut handlebars = Handlebars::new();
+        handlebars.register_escape_fn(handlebars::no_escape);
         handlebars.render_template(LIST_TMPL, &data).unwrap()
     }
 
@@ -398,7 +419,8 @@ impl DocBuilder {
             items,
         };
 
-        let handlebars = Handlebars::new();
+        let mut handlebars = Handlebars::new();
+        handlebars.register_escape_fn(handlebars::no_escape);
         handlebars.render_template(LIST_TMPL, &data).unwrap()
     }
 
@@ -417,7 +439,8 @@ impl DocBuilder {
             items,
         };
 
-        let handlebars = Handlebars::new();
+        let mut handlebars = Handlebars::new();
+        handlebars.register_escape_fn(handlebars::no_escape);
         handlebars.render_template(LIST_TMPL, &data).unwrap()
     }
 
@@ -452,7 +475,8 @@ impl DocBuilder {
                 ports,
             };
 
-            let handlebars = Handlebars::new();
+            let mut handlebars = Handlebars::new();
+            handlebars.register_escape_fn(handlebars::no_escape);
             handlebars.render_template(MODULE_TMPL, &data).unwrap()
         } else {
             String::new()
@@ -478,7 +502,8 @@ impl DocBuilder {
                 parameters,
             };
 
-            let handlebars = Handlebars::new();
+            let mut handlebars = Handlebars::new();
+            handlebars.register_escape_fn(handlebars::no_escape);
             handlebars.render_template(INTERFACE_TMPL, &data).unwrap()
         } else {
             String::new()
@@ -492,7 +517,8 @@ impl DocBuilder {
                 description: symbol.doc_comment.format(false),
             };
 
-            let handlebars = Handlebars::new();
+            let mut handlebars = Handlebars::new();
+            handlebars.register_escape_fn(handlebars::no_escape);
             handlebars.render_template(PACKAGE_TMPL, &data).unwrap()
         } else {
             String::new()
