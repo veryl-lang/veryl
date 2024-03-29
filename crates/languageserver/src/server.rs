@@ -107,6 +107,7 @@ pub struct Server {
     background_tasks: VecDeque<BackgroundTask>,
     background_done: bool,
     config: ServerConfig,
+    latest_change: Option<(Url, String, i32)>,
 }
 
 impl Server {
@@ -123,6 +124,7 @@ impl Server {
             background_tasks: VecDeque::new(),
             background_done: true,
             config: ServerConfig::default(),
+            latest_change: None,
         }
     }
 
@@ -131,10 +133,12 @@ impl Server {
             if let Ok(msg) = self.rcv.recv_blocking() {
                 match msg {
                     MsgToServer::DidOpen { url, text, version } => {
-                        self.did_open(&url, &text, version)
+                        self.did_open(&url, &text, version);
+                        self.latest_change = Some((url, text, version));
                     }
                     MsgToServer::DidChange { url, text, version } => {
-                        self.did_change(&url, &text, version)
+                        self.did_change(&url, &text, version);
+                        self.latest_change = Some((url, text, version));
                     }
                     MsgToServer::DidChangeConfiguration(x) => self.config.set(x),
                     MsgToServer::Completion {
@@ -174,6 +178,11 @@ impl Server {
                         self.progress_done("background analyze done");
                         if self.background_tasks.is_empty() {
                             self.background_done = true;
+
+                            // call did_change after background_done to notify filtered errors
+                            if let Some((url, text, version)) = self.latest_change.take() {
+                                self.did_change(&url, &text, version);
+                            }
                         }
                     } else {
                         self.background_tasks.push_front(task);
