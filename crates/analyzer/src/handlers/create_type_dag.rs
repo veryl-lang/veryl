@@ -6,9 +6,9 @@ use crate::{
 use veryl_parser::{
     resource_table,
     veryl_grammar_trait::{
-        EnumDeclaration, InterfaceDeclaration, ModuleDeclaration, PackageDeclaration,
-        ScopedIdentifier, StructUnion, StructUnionDeclaration, TypeDefDeclaration,
-        VerylGrammarTrait,
+        DescriptionItem, EnumDeclaration, InterfaceDeclaration, ModuleDeclaration,
+        PackageDeclaration, ScopedIdentifier, StructUnion, StructUnionDeclaration,
+        TypeDefDeclaration, Veryl, VerylGrammarTrait,
     },
     veryl_token::Token,
     ParolError,
@@ -25,6 +25,7 @@ pub struct CreateTypeDag<'a> {
     parent: Vec<u32>,
     point: HandlerPoint,
     ctx: Vec<Context>,
+    file_scope_import: Vec<Option<u32>>,
 }
 
 impl<'a> CreateTypeDag<'a> {
@@ -88,13 +89,6 @@ impl<'a> Handler for CreateTypeDag<'a> {
 }
 
 impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
-    fn veryl(&mut self, _arg: &veryl_parser::veryl_grammar_trait::Veryl) -> Result<(), ParolError> {
-        if let HandlerPoint::After = self.point {
-            // Evaluate DAG
-        }
-        Ok(())
-    }
-
     fn struct_union_declaration(&mut self, arg: &StructUnionDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
@@ -182,6 +176,12 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
                     self.parent.push(x)
                 }
                 self.ctx.push(Context::Module);
+
+                for child in &self.file_scope_import.clone() {
+                    if let (Some(parent), Some(child)) = (self.parent.last(), child) {
+                        self.insert_edge(*parent, *child, *self.ctx.last().unwrap());
+                    }
+                }
             }
             HandlerPoint::After => {
                 self.parent.pop();
@@ -201,6 +201,12 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
                     self.parent.push(x)
                 }
                 self.ctx.push(Context::Interface);
+
+                for child in &self.file_scope_import.clone() {
+                    if let (Some(parent), Some(child)) = (self.parent.last(), child) {
+                        self.insert_edge(*parent, *child, *self.ctx.last().unwrap());
+                    }
+                }
             }
             HandlerPoint::After => {
                 self.parent.pop();
@@ -220,10 +226,36 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
                     self.parent.push(x)
                 }
                 self.ctx.push(Context::Package);
+
+                for child in &self.file_scope_import.clone() {
+                    if let (Some(parent), Some(child)) = (self.parent.last(), child) {
+                        self.insert_edge(*parent, *child, *self.ctx.last().unwrap());
+                    }
+                }
             }
             HandlerPoint::After => {
                 self.parent.pop();
                 self.ctx.pop();
+            }
+        }
+        Ok(())
+    }
+
+    fn veryl(&mut self, arg: &Veryl) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            for x in &arg.veryl_list {
+                let items: Vec<DescriptionItem> = x.description_group.as_ref().into();
+                for item in items {
+                    if let DescriptionItem::ImportDeclaration(x) = item {
+                        let x = &x.import_declaration.scoped_identifier;
+
+                        let path: SymbolPathNamespace = x.as_ref().into();
+                        let name = to_string(x);
+                        let token = x.identifier.identifier_token.token;
+                        let child = self.insert_node(&path, &name, &token);
+                        self.file_scope_import.push(child);
+                    }
+                }
             }
         }
         Ok(())

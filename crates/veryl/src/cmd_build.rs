@@ -8,6 +8,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::Instant;
+use veryl_analyzer::symbol::SymbolKind;
 use veryl_analyzer::{type_dag, Analyzer};
 use veryl_emitter::Emitter;
 use veryl_metadata::{FilelistType, Metadata, PathPair};
@@ -126,10 +127,15 @@ impl CmdBuild {
         let mut ret = vec![];
         let sorted_symbols = type_dag::toposort();
         for symbol in sorted_symbols {
-            if let TokenSource::File(x) = symbol.token.source {
-                let path = PathBuf::from(format!("{}", x));
-                if let Some(x) = table.remove(&path) {
-                    ret.push(x.clone());
+            if matches!(
+                symbol.kind,
+                SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)
+            ) {
+                if let TokenSource::File(x) = symbol.token.source {
+                    let path = PathBuf::from(format!("{}", x));
+                    if let Some(x) = table.remove(&path) {
+                        ret.push(x.clone());
+                    }
                 }
             }
         }
