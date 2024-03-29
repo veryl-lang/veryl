@@ -1419,11 +1419,12 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Attribute'
     fn attribute(&mut self, arg: &Attribute) {
-        self.adjust_line = false;
         let identifier = arg.identifier.identifier_token.to_string();
         match identifier.as_str() {
             "ifdef" | "ifndef" => {
                 if let Some(ref x) = arg.attribute_opt {
+                    self.adjust_line = false;
+
                     let comma = if self.string.trim_end().ends_with(',') {
                         self.unindent();
                         self.string.truncate(self.string.len() - ",\n".len());
@@ -1447,10 +1448,14 @@ impl VerylWalker for Emitter {
                         self.str(",");
                         self.newline();
                     }
+
+                    self.adjust_line = false;
                 }
             }
             "sv" => {
                 if let Some(ref x) = arg.attribute_opt {
+                    self.adjust_line = false;
+
                     self.str("(*");
                     self.space(1);
                     if let AttributeItem::StringLiteral(x) = &*x.attribute_list.attribute_item {
@@ -1462,11 +1467,12 @@ impl VerylWalker for Emitter {
                     self.space(1);
                     self.str("*)");
                     self.newline();
+
+                    self.adjust_line = false;
                 }
             }
             _ => (),
         }
-        self.adjust_line = false;
     }
 
     /// Semantic action for non-terminal 'LetDeclaration'

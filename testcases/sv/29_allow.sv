@@ -4,8 +4,10 @@ module veryl_testcase_Module29 (
 );
     logic a;
     logic b;
+
     logic c;
     always_comb c = 1;
+
     always_ff @ (posedge clk, negedge rst) begin
         if (!rst) begin
             a <= 0;
@@ -14,6 +16,7 @@ module veryl_testcase_Module29 (
             b <= 0;
         end
     end
+
     veryl_testcase_Module29 u0 (
 
 
