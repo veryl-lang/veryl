@@ -112,6 +112,27 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
                         ));
                     }
                 }
+                "enum_member_prefix" => {
+                    let valid_arg = if let Some(ref x) = arg.attribute_opt {
+                        let args: Vec<AttributeItem> = x.attribute_list.as_ref().into();
+                        if args.len() != 1 {
+                            false
+                        } else {
+                            matches!(args[0], AttributeItem::Identifier(_))
+                        }
+                    } else {
+                        false
+                    };
+
+                    if !valid_arg {
+                        self.errors.push(AnalyzerError::mismatch_attribute_args(
+                            &identifier,
+                            "single identifier",
+                            self.text,
+                            &arg.identifier.identifier_token.token,
+                        ));
+                    }
+                }
                 _ => {
                     self.errors.push(AnalyzerError::unknown_attribute(
                         &identifier,
