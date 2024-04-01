@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl"
-version               = "0.8.1"
+version               = "0.8.2"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -37,8 +37,8 @@ serde_json      = {workspace = true}
 similar         = {version = "2.5.0", features = ["text", "inline"]}
 tempfile        = {workspace = true}
 thiserror       = {workspace = true}
-veryl-analyzer  = {version = "0.8.1", path = "../analyzer"}
-veryl-emitter   = {version = "0.8.1", path = "../emitter"}
-veryl-formatter = {version = "0.8.1", path = "../formatter"}
-veryl-metadata  = {version = "0.8.1", path = "../metadata"}
-veryl-parser    = {version = "0.8.1", path = "../parser"}
+veryl-analyzer  = {version = "0.8.2", path = "../analyzer"}
+veryl-emitter   = {version = "0.8.2", path = "../emitter"}
+veryl-formatter = {version = "0.8.2", path = "../formatter"}
+veryl-metadata  = {version = "0.8.2", path = "../metadata"}
+veryl-parser    = {version = "0.8.2", path = "../parser"}
