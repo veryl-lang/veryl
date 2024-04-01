@@ -14,6 +14,7 @@ pub struct CheckStatement<'a> {
     in_initial: bool,
     in_final: bool,
     statement_depth_in_always_ff: usize,
+    statement_depth_in_loop: usize,
 }
 
 impl<'a> CheckStatement<'a> {
@@ -88,6 +89,27 @@ impl<'a> VerylGrammarTrait for CheckStatement<'a> {
                     &arg.r#return.return_token.token,
                 ));
             }
+        }
+        Ok(())
+    }
+
+    fn break_statement(&mut self, arg: &BreakStatement) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            if self.statement_depth_in_loop == 0 {
+                self.errors.push(AnalyzerError::invalid_statement(
+                    "break",
+                    self.text,
+                    &arg.r#break.break_token.token,
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn for_statement(&mut self, _arg: &ForStatement) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => self.statement_depth_in_loop += 1,
+            HandlerPoint::After => self.statement_depth_in_loop -= 1,
         }
         Ok(())
     }

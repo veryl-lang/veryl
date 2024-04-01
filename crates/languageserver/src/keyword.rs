@@ -45,6 +45,7 @@ pub const KEYWORDS: &[&str] = &[
     "ref",
     "repeat",
     "return",
+    "break",
     "signed",
     "step",
     "string",

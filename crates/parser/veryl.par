@@ -101,6 +101,7 @@ PubTerm               : /(?-u:\b)pub(?-u:\b)/                                   
 RefTerm               : /(?-u:\b)ref(?-u:\b)/                                                                 : Token;
 RepeatTerm            : /(?-u:\b)repeat(?-u:\b)/                                                              : Token;
 ReturnTerm            : /(?-u:\b)return(?-u:\b)/                                                              : Token;
+BreakTerm             : /(?-u:\b)break(?-u:\b)/                                                               : Token;
 SignedTerm            : /(?-u:\b)signed(?-u:\b)/                                                              : Token;
 StepTerm              : /(?-u:\b)step(?-u:\b)/                                                                : Token;
 StringTerm            : /(?-u:\b)string(?-u:\b)/                                                              : Token;
@@ -214,6 +215,7 @@ PubToken       : PubTerm       : Token Comments;
 RefToken       : RefTerm       : Token Comments;
 RepeatToken    : RepeatTerm    : Token Comments;
 ReturnToken    : ReturnTerm    : Token Comments;
+BreakToken     : BreakTerm     : Token Comments;
 SignedToken    : SignedTerm    : Token Comments;
 StepToken      : StepTerm      : Token Comments;
 StringToken    : StringTerm    : Token Comments;
@@ -293,6 +295,7 @@ Assign    : AssignToken    : VerylToken;
 AsyncHigh : AsyncHighToken : VerylToken;
 AsyncLow  : AsyncLowToken  : VerylToken;
 Bit       : BitToken       : VerylToken;
+Break     : BreakToken     : VerylToken;
 Case      : CaseToken      : VerylToken;
 Defaul    : DefaultToken   : VerylToken; // avoid to conflict with Rust's Default trait
 Else      : ElseToken      : VerylToken;
@@ -477,6 +480,7 @@ Statement: LetStatement
          | IfStatement
          | IfResetStatement
          | ReturnStatement
+         | BreakStatement
          | ForStatement
          | CaseStatement
          ;
@@ -492,6 +496,8 @@ IfStatement: If Expression LBrace { Statement } RBrace { Else If Expression LBra
 IfResetStatement: IfReset LBrace { Statement } RBrace { Else If Expression LBrace { Statement } RBrace } [ Else LBrace { Statement } RBrace ];
 
 ReturnStatement: Return Expression Semicolon;
+
+BreakStatement: Break Semicolon;
 
 ForStatement: For Identifier Colon ScalarType In Range [ Step AssignmentOperator Expression ] LBrace { Statement } RBrace;
 
