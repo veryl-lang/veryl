@@ -643,6 +643,13 @@ pub trait VerylWalker {
         after!(self, r#return, arg);
     }
 
+    /// Semantic action for non-terminal 'Break'
+    fn r#break(&mut self, arg: &Break) {
+        before!(self, r#break, arg);
+        self.veryl_token(&arg.break_token);
+        after!(self, r#break, arg);
+    }
+
     /// Semantic action for non-terminal 'Signed'
     fn signed(&mut self, arg: &Signed) {
         before!(self, signed, arg);
@@ -1355,6 +1362,7 @@ pub trait VerylWalker {
             Statement::IfStatement(x) => self.if_statement(&x.if_statement),
             Statement::IfResetStatement(x) => self.if_reset_statement(&x.if_reset_statement),
             Statement::ReturnStatement(x) => self.return_statement(&x.return_statement),
+            Statement::BreakStatement(x) => self.break_statement(&x.break_statement),
             Statement::ForStatement(x) => self.for_statement(&x.for_statement),
             Statement::CaseStatement(x) => self.case_statement(&x.case_statement),
         };
@@ -1471,6 +1479,14 @@ pub trait VerylWalker {
         self.expression(&arg.expression);
         self.semicolon(&arg.semicolon);
         after!(self, return_statement, arg);
+    }
+
+    /// Semantic action for non-terminal 'BreakStatement'
+    fn break_statement(&mut self, arg: &BreakStatement) {
+        before!(self, break_statement, arg);
+        self.r#break(&arg.r#break);
+        self.semicolon(&arg.semicolon);
+        after!(self, break_statement, arg);
     }
 
     /// Semantic action for non-terminal 'ForStatement'

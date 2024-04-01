@@ -1297,6 +1297,12 @@ impl VerylWalker for Emitter {
         self.semicolon(&arg.semicolon);
     }
 
+    /// Semantic action for non-terminal 'BreakStatement'
+    fn break_statement(&mut self, arg: &BreakStatement) {
+        self.r#break(&arg.r#break);
+        self.semicolon(&arg.semicolon);
+    }
+
     /// Semantic action for non-terminal 'ForStatement'
     fn for_statement(&mut self, arg: &ForStatement) {
         self.r#for(&arg.r#for);

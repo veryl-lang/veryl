@@ -521,6 +521,33 @@ fn unused_return() {
 }
 
 #[test]
+fn break_outside_loop() {
+    let code = r#"
+    module ModuleA {
+        always_comb {
+            break;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidStatement { .. }));
+
+    let code = r#"
+    module ModuleA {
+        always_comb {
+            if 1 {
+                break;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidStatement { .. }));
+}
+
+#[test]
 fn unassign_variable() {
     let code = r#"
     module ModuleA {

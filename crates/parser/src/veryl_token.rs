@@ -335,6 +335,7 @@ token_with_comments!(Assign);
 token_with_comments!(AsyncHigh);
 token_with_comments!(AsyncLow);
 token_with_comments!(Bit);
+token_with_comments!(Break);
 token_with_comments!(Case);
 token_with_comments!(Default);
 token_with_comments!(Else);

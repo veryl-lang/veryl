@@ -52,6 +52,25 @@ module Module07 {
             a  = i;
             aa = i + 1;
         }
+
+        // for statement with break statement
+        for i: u32 in 0..10 {
+            a  = i;
+            aa = i + 1;
+            if i == 0 {
+                break;
+            }
+        }
+
+        for i: u32 in 0..10 {
+            for j: u32 in 0..10 {
+                a  = i;
+                aa = i + j;
+                if i == 0 && j == 0 {
+                    break;
+                }
+            }
+        }
     }
 
     always_ff (clk) {

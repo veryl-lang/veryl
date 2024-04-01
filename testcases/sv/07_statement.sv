@@ -53,6 +53,25 @@ module veryl_testcase_Module07;
             a  = i;
             aa = i + 1;
         end
+
+        // for statement with break statement
+        for (int unsigned i = 0; i < 10; i++) begin
+            a  = i;
+            aa = i + 1;
+            if (i == 0) begin
+                break;
+            end
+        end
+
+        for (int unsigned i = 0; i < 10; i++) begin
+            for (int unsigned j = 0; j < 10; j++) begin
+                a  = i;
+                aa = i + j;
+                if (i == 0 && j == 0) begin
+                    break;
+                end
+            end
+        end
     end
 
     always_ff @ (posedge clk) begin
