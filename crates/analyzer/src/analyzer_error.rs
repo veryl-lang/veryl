@@ -453,6 +453,22 @@ pub enum AnalyzerError {
     },
 
     #[diagnostic(
+        severity(Error),
+        code(unknown_param),
+        help("remove \"{param}\" param"),
+        url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#unknown_param")
+    )]
+    #[error("module \"{name}\" doesn't have param \"{param}\", but it is overrided")]
+    UnknownParam {
+        name: String,
+        param: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
         severity(Warning),
         code(unused_variable),
         help("add prefix `_` to unused variable name"),
@@ -789,6 +805,15 @@ impl AnalyzerError {
         AnalyzerError::UnknownPort {
             name: name.to_string(),
             port: port.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn unknown_param(name: &str, param: &str, source: &str, token: &Token) -> Self {
+        AnalyzerError::UnknownParam {
+            name: name.to_string(),
+            param: param.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
         }

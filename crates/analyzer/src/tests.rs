@@ -475,6 +475,22 @@ fn uknown_port() {
 }
 
 #[test]
+fn uknown_param() {
+    let code = r#"
+    module ModuleA {
+        inst u: ModuleB #(
+            X: 1,
+        )();
+    }
+
+    module ModuleB {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnknownParam { .. }));
+}
+
+#[test]
 fn unused_variable() {
     let code = r#"
     module ModuleA {

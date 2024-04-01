@@ -1,4 +1,6 @@
 module Module14 {
+    local X: u32 = 1;
+
     let a  : logic = 1;
     let aa : logic = 1;
     let bbb: logic = 1;
@@ -8,9 +10,8 @@ module Module14 {
 
     // module instantiation with parameter and port
     inst xx: Module14C #(
-        a      ,
-        aa: 10 ,
-        aa: 100,
+        X    ,
+        Y: 10,
     ) (
         a        ,
         bb  : aa ,
@@ -30,7 +31,10 @@ module Module14 {
 
 module Module14B {}
 
-module Module14C (
+module Module14C #(
+    param X: u32 = 1,
+    param Y: u32 = 1,
+) (
     a   : input u32,
     bb  : input u32,
     bbbb: input u32,

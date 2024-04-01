@@ -32,6 +32,16 @@ impl<'a> Handler for CheckInstance<'a> {
 impl<'a> VerylGrammarTrait for CheckInstance<'a> {
     fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
+            let mut connected_params = Vec::new();
+            if let Some(ref x) = arg.inst_declaration_opt0 {
+                if let Some(ref x) = x.inst_parameter.inst_parameter_opt {
+                    let items: Vec<InstParameterItem> = x.inst_parameter_list.as_ref().into();
+                    for item in items {
+                        connected_params.push(item.identifier.identifier_token.token.text);
+                    }
+                }
+            }
+
             let mut connected_ports = Vec::new();
             if let Some(ref x) = arg.inst_declaration_opt1 {
                 if let Some(ref x) = x.inst_declaration_opt2 {
@@ -57,6 +67,17 @@ impl<'a> VerylGrammarTrait for CheckInstance<'a> {
                                     self.errors.push(AnalyzerError::missing_port(
                                         name,
                                         &port,
+                                        self.text,
+                                        &arg.identifier.identifier_token.token,
+                                    ));
+                                }
+                            }
+                            for param in &connected_params {
+                                if !x.parameters.iter().any(|x| &x.name == param) {
+                                    let param = resource_table::get_str_value(*param).unwrap();
+                                    self.errors.push(AnalyzerError::unknown_param(
+                                        name,
+                                        &param,
                                         self.text,
                                         &arg.identifier.identifier_token.token,
                                     ));
