@@ -1,4 +1,6 @@
 module veryl_testcase_Module14;
+    localparam int unsigned X = 1;
+
     logic a  ;
     always_comb a = 1;
     logic aa ;
@@ -11,9 +13,8 @@ module veryl_testcase_Module14;
 
     // module instantiation with parameter and port
     veryl_testcase_Module14C #(
-        .a  (a  ),
-        .aa (10 ),
-        .aa (100)
+        .X (X ),
+        .Y (10)
     ) xx (
         .a    (a  ),
         .bb   (aa ),
@@ -34,7 +35,10 @@ endmodule
 module veryl_testcase_Module14B;
 endmodule
 
-module veryl_testcase_Module14C (
+module veryl_testcase_Module14C #(
+    parameter int unsigned X = 1,
+    parameter int unsigned Y = 1
+) (
     input int unsigned a   ,
     input int unsigned bb  ,
     input int unsigned bbbb
