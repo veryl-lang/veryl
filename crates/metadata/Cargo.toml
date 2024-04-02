@@ -31,7 +31,7 @@ veryl-parser   = {version = "0.8.2", path = "../parser"}
 walkdir        = "2.5.0"
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-fs4            = { version = "0.8.1", features = ["sync"] }
+fs4            = { version = "0.8.2", features = ["sync"] }
 
 [dev-dependencies]
 tempfile       = {workspace = true}
