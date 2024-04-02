@@ -8,3 +8,19 @@ module Module38 {
     var rf   : regfile_t;
     assign rf[0] = '0;
 }
+
+interface Interface38 {
+    type word_t    = logic <16>         ;
+    type words_t   = logic <16, 16>     ;
+    type regfile_t = word_t         [16];
+
+    type octbyte = bit<8> [8];
+}
+
+package Package38 {
+    type word_t    = logic <16>         ;
+    type words_t   = logic <16, 16>     ;
+    type regfile_t = word_t         [16];
+
+    type octbyte = bit<8> [8];
+}

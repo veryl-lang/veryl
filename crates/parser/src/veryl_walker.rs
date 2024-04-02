@@ -2504,6 +2504,9 @@ pub trait VerylWalker {
             InterfaceItem::InterfaceForDeclaration(x) => {
                 self.interface_for_declaration(&x.interface_for_declaration)
             }
+            InterfaceItem::TypeDefDeclaration(x) => {
+                self.type_def_declaration(&x.type_def_declaration)
+            }
             InterfaceItem::EnumDeclaration(x) => self.enum_declaration(&x.enum_declaration),
             InterfaceItem::StructUnionDeclaration(x) => {
                 self.struct_union_declaration(&x.struct_union_declaration)
