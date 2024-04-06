@@ -278,9 +278,9 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bitflags"
-version = "2.4.2"
+version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed570934406eb16438a4e976b1b4500774099c13b8cb96eec99f620f05090ddf"
+checksum = "cf4b9d6a944f767f8e5e0db018570623c85f3d925ac718db4e06d0187adb21c1"
 
 [[package]]
 name = "block-buffer"
@@ -699,36 +699,12 @@ dependencies = [
 
 [[package]]
 name = "darling"
-version = "0.14.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b750cb3417fd1b327431a470f388520309479ab0bf5e323505daf0290cd3850"
-dependencies = [
- "darling_core 0.14.4",
- "darling_macro 0.14.4",
-]
-
-[[package]]
-name = "darling"
 version = "0.20.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "54e36fcd13ed84ffdfda6f5be89b31287cbb80c439841fe69e04841435464391"
 dependencies = [
- "darling_core 0.20.8",
- "darling_macro 0.20.8",
-]
-
-[[package]]
-name = "darling_core"
-version = "0.14.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "109c1ca6e6b7f82cc233a97004ea8ed7ca123a9af07a8230878fcfda9b158bf0"
-dependencies = [
- "fnv",
- "ident_case",
- "proc-macro2",
- "quote",
- "strsim 0.10.0",
- "syn 1.0.109",
+ "darling_core",
+ "darling_macro",
 ]
 
 [[package]]
@@ -747,22 +723,11 @@ dependencies = [
 
 [[package]]
 name = "darling_macro"
-version = "0.14.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4aab4dbc9f7611d8b55048a3a16d2d010c2c8334e46304b40ac1cc14bf3b48e"
-dependencies = [
- "darling_core 0.14.4",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "darling_macro"
 version = "0.20.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a668eda54683121533a393014d8692171709ff57a7d61f187b6e782719f8933f"
 dependencies = [
- "darling_core 0.20.8",
+ "darling_core",
  "quote",
  "syn 2.0.52",
 ]
@@ -806,32 +771,11 @@ dependencies = [
 
 [[package]]
 name = "derive_builder"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f59169f400d8087f238c5c0c7db6a28af18681717f3b623227d92f397e938c7"
-dependencies = [
- "derive_builder_macro 0.13.1",
-]
-
-[[package]]
-name = "derive_builder"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0350b5cb0331628a5916d6c5c0b72e97393b8b6b03b47a9284f4e7f5a405ffd7"
 dependencies = [
- "derive_builder_macro 0.20.0",
-]
-
-[[package]]
-name = "derive_builder_core"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4ec317cc3e7ef0928b0ca6e4a634a4d6c001672ae210438cf114a83e56b018d"
-dependencies = [
- "darling 0.14.4",
- "proc-macro2",
- "quote",
- "syn 1.0.109",
+ "derive_builder_macro",
 ]
 
 [[package]]
@@ -840,20 +784,10 @@ version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d48cda787f839151732d396ac69e3473923d54312c070ee21e9effcaa8ca0b1d"
 dependencies = [
- "darling 0.20.8",
+ "darling",
  "proc-macro2",
  "quote",
  "syn 2.0.52",
-]
-
-[[package]]
-name = "derive_builder_macro"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "870368c3fb35b8031abb378861d4460f573b92238ec2152c927a21f77e3e0127"
-dependencies = [
- "derive_builder_core 0.13.1",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -862,7 +796,7 @@ version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "206868b8242f27cecce124c19fd88157fbd0dd334df2587f36417bafbc85097b"
 dependencies = [
- "derive_builder_core 0.20.0",
+ "derive_builder_core",
  "syn 2.0.52",
 ]
 
@@ -2417,7 +2351,7 @@ version = "0.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85c833ca1e66078851dba29046874e38f08b2c883700aa29a03ddd3b23814ee8"
 dependencies = [
- "bitflags 2.4.2",
+ "bitflags 2.5.0",
  "libc",
  "redox_syscall",
 ]
@@ -2727,7 +2661,7 @@ version = "6.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6205bd8bb1e454ad2e27422015fb5e4f2bcc7e08fa8f27058670d208324a4d2d"
 dependencies = [
- "bitflags 2.4.2",
+ "bitflags 2.5.0",
  "crossbeam-channel",
  "filetime",
  "fsevent-sys",
@@ -2876,16 +2810,16 @@ dependencies = [
 
 [[package]]
 name = "parol"
-version = "0.26.1"
+version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b10cd90f274dc5b7d9eb2676c239ae709041f8d349a04940de27944cc1473a6"
+checksum = "0fdef18ebe86e3ba5ad8e3f23232d1d2674bda15e21ee06f099766be45d89d3b"
 dependencies = [
  "anyhow",
  "assert_cmd",
- "bitflags 2.4.2",
+ "bitflags 2.5.0",
  "cfg-if",
  "clap 4.5.4",
- "derive_builder 0.13.1",
+ "derive_builder",
  "env_logger 0.10.2",
  "function_name",
  "graph-cycles",
@@ -2924,7 +2858,7 @@ checksum = "19c4d943784ca239f3f6e641b214f6fce55eec3fdb098d2e54b4f28e114ce546"
 dependencies = [
  "anyhow",
  "codespan-reporting",
- "derive_builder 0.20.0",
+ "derive_builder",
  "function_name",
  "log",
  "once_cell",
@@ -3199,7 +3133,7 @@ version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57206b407293d2bcd3af849ce869d52068623f19e1b5ff8e8778e3309439682b"
 dependencies = [
- "bitflags 2.4.2",
+ "bitflags 2.5.0",
  "getopts",
  "memchr",
  "unicase",
@@ -3211,7 +3145,7 @@ version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f0530d13d87d1f549b66a3e8d0c688952abe5994e204ed62615baaf25dc029c"
 dependencies = [
- "bitflags 2.4.2",
+ "bitflags 2.5.0",
  "getopts",
  "memchr",
  "pulldown-cmark-escape",
@@ -3296,9 +3230,9 @@ dependencies = [
 
 [[package]]
 name = "rayon"
-version = "1.9.0"
+version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4963ed1bc86e4f3ee217022bd855b297cef07fb9eac5dfa1f788b220b49b3bd"
+checksum = "b418a60154510ca1a002a752ca9714984e21e4241e804d32555251faf8b78ffa"
 dependencies = [
  "either",
  "rayon-core",
@@ -3461,7 +3395,7 @@ version = "0.38.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ea3e1a662af26cd7a3ba09c0297a31af215563ecf42817c98df621387f4e949"
 dependencies = [
- "bitflags 2.4.2",
+ "bitflags 2.5.0",
  "errno",
  "libc",
  "linux-raw-sys",
@@ -4361,9 +4295,9 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "ts-rs"
-version = "7.1.1"
+version = "8.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc2cae1fc5d05d47aa24b64f9a4f7cba24cdc9187a2084dd97ac57bef5eccae6"
+checksum = "09d3fa4606cdab1e9b668cc65ce2545941d01f52bc27536a195c66c55b91cb84"
 dependencies = [
  "thiserror",
  "ts-rs-macros",
@@ -4371,9 +4305,9 @@ dependencies = [
 
 [[package]]
 name = "ts-rs-macros"
-version = "7.1.1"
+version = "8.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73f7f9b821696963053a89a7bd8b292dc34420aea8294d7b225274d488f3ec92"
+checksum = "f86ae36cbb2d58b86677ad413054feeb0712e382e822131cf9a4a1e580c419b5"
 dependencies = [
  "Inflector",
  "proc-macro2",
