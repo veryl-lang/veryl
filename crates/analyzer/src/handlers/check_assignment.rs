@@ -5,7 +5,7 @@ use crate::assign::{
     AssignStatementBranchType,
 };
 use crate::symbol::{Direction, SymbolId, SymbolKind};
-use crate::symbol_table::{self, ResolveSymbol};
+use crate::symbol_table;
 use std::collections::HashMap;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
@@ -44,38 +44,25 @@ fn can_assign(full_path: &[SymbolId]) -> bool {
         return false;
     }
 
-    let leaf_symbol = full_path.last().unwrap();
-    if let Some(leaf_symbol) = symbol_table::get(*leaf_symbol) {
-        match leaf_symbol.kind {
-            SymbolKind::Variable(_) => true,
-            SymbolKind::StructMember(_) | SymbolKind::UnionMember(_) => {
-                let root_symbol = full_path.first().unwrap();
-                if let Some(root_symbol) = symbol_table::get(*root_symbol) {
-                    match root_symbol.kind {
-                        SymbolKind::Variable(_) => true,
-                        SymbolKind::Port(x) if x.direction == Direction::Output => true,
-                        SymbolKind::Port(x) if x.direction == Direction::Ref => true,
-                        SymbolKind::Port(x) if x.direction == Direction::Inout => true,
-                        SymbolKind::ModportMember(x) if x.direction == Direction::Output => true,
-                        SymbolKind::ModportMember(x) if x.direction == Direction::Ref => true,
-                        SymbolKind::ModportMember(x) if x.direction == Direction::Inout => true,
-                        _ => false,
-                    }
-                } else {
-                    false
-                }
+    for path in full_path {
+        if let Some(symbol) = symbol_table::get(*path) {
+            let can_assign = match symbol.kind {
+                SymbolKind::Variable(_) => true,
+                SymbolKind::Port(x) if x.direction == Direction::Output => true,
+                SymbolKind::Port(x) if x.direction == Direction::Ref => true,
+                SymbolKind::Port(x) if x.direction == Direction::Inout => true,
+                SymbolKind::ModportMember(x) if x.direction == Direction::Output => true,
+                SymbolKind::ModportMember(x) if x.direction == Direction::Ref => true,
+                SymbolKind::ModportMember(x) if x.direction == Direction::Inout => true,
+                _ => false,
+            };
+            if can_assign {
+                return true;
             }
-            SymbolKind::Port(x) if x.direction == Direction::Output => true,
-            SymbolKind::Port(x) if x.direction == Direction::Ref => true,
-            SymbolKind::Port(x) if x.direction == Direction::Inout => true,
-            SymbolKind::ModportMember(x) if x.direction == Direction::Output => true,
-            SymbolKind::ModportMember(x) if x.direction == Direction::Ref => true,
-            SymbolKind::ModportMember(x) if x.direction == Direction::Inout => true,
-            _ => false,
         }
-    } else {
-        false
     }
+
+    false
 }
 
 impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
@@ -140,47 +127,39 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                 };
                 if let Ok(x) = symbol_table::resolve(arg.expression_identifier.as_ref()) {
                     let full_path = x.full_path;
-                    match x.found {
-                        ResolveSymbol::Symbol(x) => {
-                            if can_assign(&full_path) {
-                                let partial = match arg
-                                    .expression_identifier
-                                    .expression_identifier_group
-                                    .as_ref()
-                                {
-                                    ExpressionIdentifierGroup::ExpressionIdentifierScoped(x) => !x
-                                        .expression_identifier_scoped
-                                        .expression_identifier_scoped_list0
-                                        .is_empty(),
-                                    ExpressionIdentifierGroup::ExpressionIdentifierMember(x) => {
-                                        let x = &x.expression_identifier_member;
-                                        !x.expression_identifier_member_list.is_empty()
-                                            | x.expression_identifier_member_list0.iter().any(|x| {
-                                                !x.expression_identifier_member_list0_list
-                                                    .is_empty()
-                                            })
-                                    }
-                                };
-
-                                self.assign_position.push(AssignPositionType::Statement {
-                                    token,
-                                    resettable: true,
-                                });
-                                symbol_table::add_assign(full_path, &self.assign_position, partial);
-                                self.assign_position.pop();
-                            } else {
-                                let token =
-                                    &arg.expression_identifier.identifier.identifier_token.token;
-                                self.errors.push(AnalyzerError::invalid_assignment(
-                                    &x.kind.to_kind_name(),
-                                    self.text,
-                                    &token.to_string(),
-                                    token,
-                                ));
+                    if can_assign(&full_path) {
+                        let partial = match arg
+                            .expression_identifier
+                            .expression_identifier_group
+                            .as_ref()
+                        {
+                            ExpressionIdentifierGroup::ExpressionIdentifierScoped(x) => !x
+                                .expression_identifier_scoped
+                                .expression_identifier_scoped_list0
+                                .is_empty(),
+                            ExpressionIdentifierGroup::ExpressionIdentifierMember(x) => {
+                                let x = &x.expression_identifier_member;
+                                !x.expression_identifier_member_list.is_empty()
+                                    | x.expression_identifier_member_list0.iter().any(|x| {
+                                        !x.expression_identifier_member_list0_list.is_empty()
+                                    })
                             }
-                        }
-                        // External symbol can't be checkd
-                        ResolveSymbol::External => (),
+                        };
+
+                        self.assign_position.push(AssignPositionType::Statement {
+                            token,
+                            resettable: true,
+                        });
+                        symbol_table::add_assign(full_path, &self.assign_position, partial);
+                        self.assign_position.pop();
+                    } else {
+                        let token = &arg.expression_identifier.identifier.identifier_token.token;
+                        self.errors.push(AnalyzerError::invalid_assignment(
+                            &token.to_string(),
+                            self.text,
+                            &x.found.kind.to_kind_name(),
+                            token,
+                        ));
                     }
                 }
             }
@@ -359,42 +338,36 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
         if let HandlerPoint::Before = self.point {
             if let Ok(x) = symbol_table::resolve(arg.hierarchical_identifier.as_ref()) {
                 let full_path = x.full_path;
-                match x.found {
-                    ResolveSymbol::Symbol(x) => {
-                        if can_assign(&full_path) {
-                            // selected partially
-                            let partial = !arg
-                                .hierarchical_identifier
-                                .hierarchical_identifier_list
-                                .is_empty()
-                                | arg
-                                    .hierarchical_identifier
-                                    .hierarchical_identifier_list0
-                                    .iter()
-                                    .any(|x| !x.hierarchical_identifier_list0_list.is_empty());
+                if can_assign(&full_path) {
+                    // selected partially
+                    let partial = !arg
+                        .hierarchical_identifier
+                        .hierarchical_identifier_list
+                        .is_empty()
+                        | arg
+                            .hierarchical_identifier
+                            .hierarchical_identifier_list0
+                            .iter()
+                            .any(|x| !x.hierarchical_identifier_list0_list.is_empty());
 
-                            self.assign_position.push(AssignPositionType::Declaration {
-                                token: arg.assign.assign_token.token,
-                                r#type: AssignDeclarationType::Assign,
-                            });
-                            symbol_table::add_assign(full_path, &self.assign_position, partial);
-                            self.assign_position.pop();
-                        } else {
-                            let token = &arg
-                                .hierarchical_identifier
-                                .identifier
-                                .identifier_token
-                                .token;
-                            self.errors.push(AnalyzerError::invalid_assignment(
-                                &x.kind.to_kind_name(),
-                                self.text,
-                                &token.to_string(),
-                                token,
-                            ));
-                        }
-                    }
-                    // External symbol can't be checkd
-                    ResolveSymbol::External => (),
+                    self.assign_position.push(AssignPositionType::Declaration {
+                        token: arg.assign.assign_token.token,
+                        r#type: AssignDeclarationType::Assign,
+                    });
+                    symbol_table::add_assign(full_path, &self.assign_position, partial);
+                    self.assign_position.pop();
+                } else {
+                    let token = &arg
+                        .hierarchical_identifier
+                        .identifier
+                        .identifier_token
+                        .token;
+                    self.errors.push(AnalyzerError::invalid_assignment(
+                        &token.to_string(),
+                        self.text,
+                        &x.found.kind.to_kind_name(),
+                        token,
+                    ));
                 }
             }
         }
@@ -403,67 +376,61 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
 
     fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            if let Ok(x) = symbol_table::resolve(arg.identifier.as_ref()) {
-                if let ResolveSymbol::Symbol(ref symbol) = x.found {
-                    if let SymbolKind::Instance(ref x) = symbol.kind {
-                        // get port direction
-                        let mut dirs = HashMap::new();
-                        let mut dir_unknown = false;
-                        if let Ok(x) = symbol_table::resolve((&x.type_name, &symbol.namespace)) {
-                            if let ResolveSymbol::Symbol(ref symbol) = x.found {
-                                match symbol.kind {
-                                    SymbolKind::Module(ref x) => {
-                                        for port in &x.ports {
-                                            dirs.insert(port.name, port.property.direction);
-                                        }
-                                    }
-                                    SymbolKind::SystemVerilog => dir_unknown = true,
-                                    _ => (),
+            if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
+                if let SymbolKind::Instance(ref x) = symbol.found.kind {
+                    // get port direction
+                    let mut dirs = HashMap::new();
+                    let mut dir_unknown = false;
+                    if let Ok(x) = symbol_table::resolve((&x.type_name, &symbol.found.namespace)) {
+                        match x.found.kind {
+                            SymbolKind::Module(ref x) => {
+                                for port in &x.ports {
+                                    dirs.insert(port.name, port.property.direction);
                                 }
                             }
+                            SymbolKind::SystemVerilog => dir_unknown = true,
+                            _ => (),
                         }
-
-                        self.assign_position.push(AssignPositionType::Declaration {
-                            token: arg.inst.inst_token.token,
-                            r#type: AssignDeclarationType::Inst,
-                        });
-
-                        for (token, targets) in &x.connects {
-                            for target in targets {
-                                if !target.is_empty() {
-                                    let dir_output = if let Some(dir) = dirs.get(&token.text) {
-                                        matches!(
-                                            dir,
-                                            Direction::Ref | Direction::Inout | Direction::Output
-                                        )
-                                    } else {
-                                        false
-                                    };
-
-                                    if dir_output | dir_unknown {
-                                        if let Ok(x) =
-                                            symbol_table::resolve((target, &symbol.namespace))
-                                        {
-                                            self.assign_position.push(
-                                                AssignPositionType::Connect {
-                                                    token: *token,
-                                                    maybe: dir_unknown,
-                                                },
-                                            );
-                                            symbol_table::add_assign(
-                                                x.full_path,
-                                                &self.assign_position,
-                                                false,
-                                            );
-                                            self.assign_position.pop();
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        self.assign_position.pop();
                     }
+
+                    self.assign_position.push(AssignPositionType::Declaration {
+                        token: arg.inst.inst_token.token,
+                        r#type: AssignDeclarationType::Inst,
+                    });
+
+                    for (token, targets) in &x.connects {
+                        for target in targets {
+                            if !target.is_empty() {
+                                let dir_output = if let Some(dir) = dirs.get(&token.text) {
+                                    matches!(
+                                        dir,
+                                        Direction::Ref | Direction::Inout | Direction::Output
+                                    )
+                                } else {
+                                    false
+                                };
+
+                                if dir_output | dir_unknown {
+                                    if let Ok(x) =
+                                        symbol_table::resolve((target, &symbol.found.namespace))
+                                    {
+                                        self.assign_position.push(AssignPositionType::Connect {
+                                            token: *token,
+                                            maybe: dir_unknown,
+                                        });
+                                        symbol_table::add_assign(
+                                            x.full_path,
+                                            &self.assign_position,
+                                            false,
+                                        );
+                                        self.assign_position.pop();
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    self.assign_position.pop();
                 }
             }
         }

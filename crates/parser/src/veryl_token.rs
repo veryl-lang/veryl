@@ -10,14 +10,15 @@ use std::fmt;
 pub enum TokenSource {
     File(PathId),
     Builtin,
+    External,
 }
 
 impl fmt::Display for TokenSource {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let text = if let TokenSource::File(x) = self {
-            x.to_string()
-        } else {
-            String::from("builtin")
+        let text = match self {
+            TokenSource::File(x) => x.to_string(),
+            TokenSource::Builtin => "builtin".to_string(),
+            TokenSource::External => "external".to_string(),
         };
         text.fmt(f)
     }

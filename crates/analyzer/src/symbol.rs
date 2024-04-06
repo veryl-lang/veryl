@@ -109,6 +109,12 @@ impl Symbol {
             evaluated
         }
     }
+
+    pub fn inner_namespace(&self) -> Namespace {
+        let mut ret = self.namespace.clone();
+        ret.push(self.token.text);
+        ret
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -397,6 +403,9 @@ impl From<&syntax_tree::ScalarType> for Type {
                     syntax_tree::VariableTypeGroup::ScopedIdentifier(x) => {
                         let x = &x.scoped_identifier;
                         let mut name = Vec::new();
+                        if let Some(ref x) = x.scoped_identifier_opt {
+                            name.push(x.dollar.dollar_token.token.text);
+                        }
                         name.push(x.identifier.identifier_token.token.text);
                         for x in &x.scoped_identifier_list {
                             name.push(x.identifier.identifier_token.token.text);

@@ -2,7 +2,7 @@ use crate::analyzer_error::AnalyzerError;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::SymbolKind;
-use crate::symbol_table::{self, ResolveError, ResolveErrorCause, ResolveSymbol, SymbolPath};
+use crate::symbol_table::{self, ResolveError, ResolveErrorCause, SymbolPath};
 use veryl_parser::resource_table::TokenId;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::Token;
@@ -224,31 +224,30 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                     .unwrap();
             match symbol_table::resolve(arg.scoped_identifier.as_ref()) {
                 Ok(symbol) => {
-                    if let ResolveSymbol::Symbol(x) = symbol.found {
-                        match x.kind {
-                            SymbolKind::Package(_) if is_wildcard => {
-                                let mut target = x.namespace.clone();
-                                target.push(x.token.text);
+                    let symbol = symbol.found;
+                    match symbol.kind {
+                        SymbolKind::Package(_) if is_wildcard => {
+                            let mut target = symbol.namespace.clone();
+                            target.push(symbol.token.text);
 
-                                if self.top_level {
-                                    self.file_scope_imported_packages.push(target);
-                                } else {
-                                    symbol_table::add_imported_package(&target, &namespace);
-                                }
+                            if self.top_level {
+                                self.file_scope_imported_packages.push(target);
+                            } else {
+                                symbol_table::add_imported_package(&target, &namespace);
                             }
-                            SymbolKind::SystemVerilog => (),
-                            _ if is_wildcard => {
-                                self.errors.push(AnalyzerError::invalid_import(
-                                    self.text,
-                                    &arg.scoped_identifier.identifier.identifier_token.token,
-                                ));
-                            }
-                            _ => {
-                                if self.top_level {
-                                    self.file_scope_imported_items.push(x.token.id);
-                                } else {
-                                    symbol_table::add_imported_item(x.token.id, &namespace);
-                                }
+                        }
+                        SymbolKind::SystemVerilog => (),
+                        _ if is_wildcard => {
+                            self.errors.push(AnalyzerError::invalid_import(
+                                self.text,
+                                &arg.scoped_identifier.identifier.identifier_token.token,
+                            ));
+                        }
+                        _ => {
+                            if self.top_level {
+                                self.file_scope_imported_items.push(symbol.token.id);
+                            } else {
+                                symbol_table::add_imported_item(symbol.token.id, &namespace);
                             }
                         }
                     }
