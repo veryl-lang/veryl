@@ -27,10 +27,10 @@ fn criterion_benchmark(c: &mut Criterion) {
         b.iter_with_large_drop(|| {
             let parser = Parser::parse(black_box(&text), &"").unwrap();
             let prj = &metadata.project.name;
-            let analyzer = Analyzer::new(&prj, black_box(&metadata));
-            analyzer.analyze_pass1(black_box(&text), &"", &parser.veryl);
-            analyzer.analyze_pass2(black_box(&text), &"", &parser.veryl);
-            analyzer.analyze_pass3(black_box(&text), &"", &parser.veryl);
+            let analyzer = Analyzer::new(black_box(&metadata));
+            analyzer.analyze_pass1(prj, black_box(&text), &"", &parser.veryl);
+            analyzer.analyze_pass2(prj, black_box(&text), &"", &parser.veryl);
+            analyzer.analyze_pass3(prj, black_box(&text), &"", &parser.veryl);
         })
     });
     group.bench_function("format", |b| {
