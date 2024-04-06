@@ -1,7 +1,7 @@
 use crate::allow_table;
 use crate::analyzer_error::AnalyzerError;
 use crate::symbol::SymbolKind;
-use crate::symbol_table::{self, ResolveSymbol};
+use crate::symbol_table;
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint, VerylWalker};
@@ -56,56 +56,54 @@ impl<'a> VerylGrammarTrait for CheckInstance<'a> {
                 let mut stringifier = Stringifier::new();
                 stringifier.scoped_identifier(&arg.scoped_identifier);
                 let name = stringifier.as_str();
-                if let ResolveSymbol::Symbol(symbol) = symbol.found {
-                    match symbol.kind {
-                        SymbolKind::Module(ref x) => {
-                            for port in &x.ports {
-                                if !connected_ports.contains(&port.name)
-                                    && !allow_table::contains("missing_port")
-                                {
-                                    let port = resource_table::get_str_value(port.name).unwrap();
-                                    self.errors.push(AnalyzerError::missing_port(
-                                        name,
-                                        &port,
-                                        self.text,
-                                        &arg.identifier.identifier_token.token,
-                                    ));
-                                }
-                            }
-                            for param in &connected_params {
-                                if !x.parameters.iter().any(|x| &x.name == param) {
-                                    let param = resource_table::get_str_value(*param).unwrap();
-                                    self.errors.push(AnalyzerError::unknown_param(
-                                        name,
-                                        &param,
-                                        self.text,
-                                        &arg.identifier.identifier_token.token,
-                                    ));
-                                }
-                            }
-                            for port in &connected_ports {
-                                if !x.ports.iter().any(|x| &x.name == port) {
-                                    let port = resource_table::get_str_value(*port).unwrap();
-                                    self.errors.push(AnalyzerError::unknown_port(
-                                        name,
-                                        &port,
-                                        self.text,
-                                        &arg.identifier.identifier_token.token,
-                                    ));
-                                }
+                match symbol.found.kind {
+                    SymbolKind::Module(ref x) => {
+                        for port in &x.ports {
+                            if !connected_ports.contains(&port.name)
+                                && !allow_table::contains("missing_port")
+                            {
+                                let port = resource_table::get_str_value(port.name).unwrap();
+                                self.errors.push(AnalyzerError::missing_port(
+                                    name,
+                                    &port,
+                                    self.text,
+                                    &arg.identifier.identifier_token.token,
+                                ));
                             }
                         }
-                        SymbolKind::Interface(_) => (),
-                        SymbolKind::SystemVerilog => (),
-                        _ => {
-                            self.errors.push(AnalyzerError::mismatch_type(
-                                name,
-                                "module or interface",
-                                &symbol.kind.to_kind_name(),
-                                self.text,
-                                &arg.identifier.identifier_token.token,
-                            ));
+                        for param in &connected_params {
+                            if !x.parameters.iter().any(|x| &x.name == param) {
+                                let param = resource_table::get_str_value(*param).unwrap();
+                                self.errors.push(AnalyzerError::unknown_param(
+                                    name,
+                                    &param,
+                                    self.text,
+                                    &arg.identifier.identifier_token.token,
+                                ));
+                            }
                         }
+                        for port in &connected_ports {
+                            if !x.ports.iter().any(|x| &x.name == port) {
+                                let port = resource_table::get_str_value(*port).unwrap();
+                                self.errors.push(AnalyzerError::unknown_port(
+                                    name,
+                                    &port,
+                                    self.text,
+                                    &arg.identifier.identifier_token.token,
+                                ));
+                            }
+                        }
+                    }
+                    SymbolKind::Interface(_) => (),
+                    SymbolKind::SystemVerilog => (),
+                    _ => {
+                        self.errors.push(AnalyzerError::mismatch_type(
+                            name,
+                            "module or interface",
+                            &symbol.found.kind.to_kind_name(),
+                            self.text,
+                            &arg.identifier.identifier_token.token,
+                        ));
                     }
                 }
             }

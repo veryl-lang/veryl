@@ -1,6 +1,6 @@
 use crate::{
     symbol::{Symbol, SymbolId},
-    symbol_table::{self, ResolveSymbol, SymbolPathNamespace},
+    symbol_table::{self, SymbolPathNamespace},
 };
 use bimap::BiMap;
 use std::{cell::RefCell, collections::HashMap, collections::HashSet};
@@ -71,13 +71,7 @@ impl TypeDag {
             token: *token,
         };
         let sym = match symbol_table::resolve(&trinfo.path) {
-            Ok(rr) => match rr.found {
-                ResolveSymbol::Symbol(symbol) => symbol,
-                ResolveSymbol::External => {
-                    let e = DagError::UnableToResolve(Box::new(trinfo));
-                    return Err(e);
-                }
-            },
+            Ok(rr) => rr.found,
             Err(_) => {
                 let e = DagError::UnableToResolve(Box::new(trinfo));
                 return Err(e);

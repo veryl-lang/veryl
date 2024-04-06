@@ -1,6 +1,6 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::symbol::SymbolKind;
-use crate::symbol_table::{self, ResolveSymbol, SymbolPath};
+use crate::symbol_table::{self, SymbolPath};
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
@@ -41,22 +41,20 @@ impl<'a> VerylGrammarTrait for CheckFunction<'a> {
                 }
 
                 if let Ok(symbol) = symbol_table::resolve(arg.expression_identifier.as_ref()) {
-                    if let ResolveSymbol::Symbol(symbol) = symbol.found {
-                        if let SymbolKind::Function(x) = symbol.kind {
-                            if x.ret.is_some() {
-                                let name = format!(
-                                    "{}",
-                                    SymbolPath::from(arg.expression_identifier.as_ref())
-                                        .as_slice()
-                                        .last()
-                                        .unwrap()
-                                );
-                                self.errors.push(AnalyzerError::unused_return(
-                                    &name,
-                                    self.text,
-                                    &arg.expression_identifier.identifier.identifier_token.token,
-                                ));
-                            }
+                    if let SymbolKind::Function(x) = symbol.found.kind {
+                        if x.ret.is_some() {
+                            let name = format!(
+                                "{}",
+                                SymbolPath::from(arg.expression_identifier.as_ref())
+                                    .as_slice()
+                                    .last()
+                                    .unwrap()
+                            );
+                            self.errors.push(AnalyzerError::unused_return(
+                                &name,
+                                self.text,
+                                &arg.expression_identifier.identifier.identifier_token.token,
+                            ));
                         }
                     }
                 }
@@ -79,12 +77,8 @@ impl<'a> VerylGrammarTrait for CheckFunction<'a> {
                 }
 
                 if let Ok(symbol) = symbol_table::resolve(x.expression_identifier.as_ref()) {
-                    let arity = if let ResolveSymbol::Symbol(symbol) = symbol.found {
-                        if let SymbolKind::Function(x) = symbol.kind {
-                            Some(x.ports.len())
-                        } else {
-                            None
-                        }
+                    let arity = if let SymbolKind::Function(x) = symbol.found.kind {
+                        Some(x.ports.len())
                     } else {
                         None
                     };

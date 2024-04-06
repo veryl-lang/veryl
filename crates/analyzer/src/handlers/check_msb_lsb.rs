@@ -1,8 +1,8 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::msb_table;
 use crate::namespace_table;
-use crate::symbol::SymbolKind;
-use crate::symbol_table::{self, ResolveSymbol, SymbolPath, SymbolPathNamespace};
+use crate::symbol::{SymbolKind, TypeKind};
+use crate::symbol_table::{self, SymbolPath, SymbolPathNamespace};
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
@@ -54,8 +54,18 @@ impl<'a> VerylGrammarTrait for CheckMsbLsb<'a> {
                 let resolved = if let Ok(x) =
                     symbol_table::resolve(self.identifier_path.last().unwrap().clone())
                 {
-                    if let ResolveSymbol::Symbol(x) = x.found {
-                        if let SymbolKind::Variable(x) = x.kind {
+                    let namespace = &x.found.namespace;
+                    if let SymbolKind::Variable(x) = x.found.kind {
+                        let sv_type = if let TypeKind::UserDefined(ref x) = x.r#type.kind {
+                            let symbol = symbol_table::resolve((&SymbolPath::new(x), namespace));
+                            matches!(symbol.unwrap().found.kind, SymbolKind::SystemVerilog)
+                        } else {
+                            false
+                        };
+
+                        if sv_type {
+                            false
+                        } else {
                             let select_dimension = *self.select_dimension.last().unwrap();
                             let expression = if select_dimension >= x.r#type.array.len() {
                                 &x.r#type.width[select_dimension - x.r#type.array.len()]
@@ -64,8 +74,6 @@ impl<'a> VerylGrammarTrait for CheckMsbLsb<'a> {
                             };
                             msb_table::insert(arg.msb_token.token.id, expression);
                             true
-                        } else {
-                            false
                         }
                     } else {
                         false

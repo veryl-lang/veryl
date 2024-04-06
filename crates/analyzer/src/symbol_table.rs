@@ -200,14 +200,8 @@ impl From<&syntax_tree::ExpressionIdentifier> for SymbolPathNamespace {
 
 #[derive(Clone, Debug)]
 pub struct ResolveResult {
-    pub found: ResolveSymbol,
+    pub found: Symbol,
     pub full_path: Vec<SymbolId>,
-}
-
-#[derive(Clone, Debug)]
-pub enum ResolveSymbol {
-    Symbol(Symbol),
-    External,
 }
 
 #[derive(Clone, Debug)]
@@ -293,22 +287,36 @@ impl SymbolTable {
         self.symbol_table.get(&id).cloned()
     }
 
+    fn trace_user_defined<'a>(
+        &self,
+        mut context: ResolveContext<'a>,
+        kind: &TypeKind,
+    ) -> Result<ResolveContext<'a>, ResolveError> {
+        if let TypeKind::UserDefined(ref x) = kind {
+            let symbol = self.resolve(&SymbolPath::new(x), &context.namespace)?;
+            match symbol.found.kind {
+                SymbolKind::SystemVerilog => context.sv_member = true,
+                SymbolKind::TypeDef(x) => {
+                    return self.trace_user_defined(context, &x.r#type.kind);
+                }
+                _ => (),
+            }
+            context.namespace = symbol.found.inner_namespace();
+            context.inner = true;
+        }
+        Ok(context)
+    }
+
     pub fn resolve(
         &self,
         path: &SymbolPath,
         namespace: &Namespace,
     ) -> Result<ResolveResult, ResolveError> {
-        let mut ret = None;
-        let mut last_found = None;
-        let mut full_path = Vec::new();
-        let mut namespace = namespace.clone();
-        let mut inner = false;
-        let mut other_prj = false;
-
+        let mut context = ResolveContext::new(namespace);
         let mut path = path.clone();
 
         // replace project local name
-        let prj = namespace.paths[0];
+        let prj = context.namespace.paths[0];
         let path_head = path.0[0];
         if let Some(map) = self.project_local_table.get(&prj) {
             if let Some(id) = map.get(&path_head) {
@@ -318,174 +326,131 @@ impl SymbolTable {
 
         for name in path.as_slice() {
             let mut max_depth = 0;
-            ret = None;
+            context.found = None;
+
+            if context.sv_member {
+                let token = Token::new(&name.to_string(), 0, 0, 0, 0, TokenSource::External);
+                let symbol = Symbol::new(
+                    &token,
+                    SymbolKind::SystemFunction,
+                    &context.namespace,
+                    false,
+                    DocComment::default(),
+                );
+                return Ok(ResolveResult {
+                    found: symbol,
+                    full_path: context.full_path,
+                });
+            }
+
             if let Some(ids) = self.name_table.get(name) {
                 for id in ids {
                     let symbol = self.symbol_table.get(id).unwrap();
-                    let included = if inner {
-                        namespace.matched(&symbol.namespace)
+                    let included = if context.inner {
+                        context.namespace.matched(&symbol.namespace)
                     } else {
-                        namespace.included(&symbol.namespace)
-                            || symbol.imported.iter().any(|x| namespace.included(x))
+                        context.namespace.included(&symbol.namespace)
+                            || symbol
+                                .imported
+                                .iter()
+                                .any(|x| context.namespace.included(x))
                     };
                     if included && symbol.namespace.depth() >= max_depth {
                         symbol.evaluate();
-                        ret = Some(symbol);
-                        last_found = Some(symbol);
+                        context.found = Some(symbol);
+                        context.last_found = Some(symbol);
                         max_depth = symbol.namespace.depth();
                     }
                 }
 
-                if let Some(ret) = ret {
-                    full_path.push(ret.id);
-                    match &ret.kind {
+                if let Some(found) = context.found {
+                    context.full_path.push(found.id);
+                    match &found.kind {
                         SymbolKind::Variable(x) => {
-                            if let TypeKind::UserDefined(ref x) = x.r#type.kind {
-                                let path = SymbolPath::new(x);
-                                if let Ok(symbol) = self.resolve(&path, &namespace) {
-                                    if let ResolveSymbol::Symbol(symbol) = symbol.found {
-                                        namespace = Namespace::new();
-                                        for path in &symbol.namespace.paths {
-                                            namespace.push(*path);
-                                        }
-                                        namespace.push(symbol.token.text);
-                                        inner = true;
-                                    } else {
-                                        unreachable!();
-                                    }
-                                } else {
-                                    return Ok(ResolveResult {
-                                        found: ResolveSymbol::External,
-                                        full_path,
-                                    });
-                                }
-                            }
+                            context = self.trace_user_defined(context, &x.r#type.kind)?;
                         }
                         SymbolKind::StructMember(x) => {
-                            if let TypeKind::UserDefined(ref x) = x.r#type.kind {
-                                let path = SymbolPath::new(x);
-                                if let Ok(symbol) = self.resolve(&path, &namespace) {
-                                    if let ResolveSymbol::Symbol(symbol) = symbol.found {
-                                        namespace = Namespace::new();
-                                        for path in &symbol.namespace.paths {
-                                            namespace.push(*path);
-                                        }
-                                        namespace.push(symbol.token.text);
-                                        inner = true;
-                                    } else {
-                                        unreachable!();
-                                    }
-                                } else {
-                                    return Ok(ResolveResult {
-                                        found: ResolveSymbol::External,
-                                        full_path,
-                                    });
-                                }
-                            }
+                            context = self.trace_user_defined(context, &x.r#type.kind)?;
+                        }
+                        SymbolKind::UnionMember(x) => {
+                            context = self.trace_user_defined(context, &x.r#type.kind)?;
+                        }
+                        SymbolKind::Parameter(x) => {
+                            context = self.trace_user_defined(context, &x.r#type.kind)?;
                         }
                         SymbolKind::Port(ref x) => {
                             if let Some(ref x) = x.r#type {
-                                if let TypeKind::UserDefined(ref x) = x.kind {
-                                    let path = SymbolPath::new(x);
-                                    if let Ok(symbol) = self.resolve(&path, &namespace) {
-                                        if let ResolveSymbol::Symbol(symbol) = symbol.found {
-                                            namespace = Namespace::new();
-                                            for path in &symbol.namespace.paths {
-                                                namespace.push(*path);
-                                            }
-                                            namespace.push(symbol.token.text);
-                                            inner = true;
-                                        } else {
-                                            unreachable!();
-                                        }
-                                    } else {
-                                        return Ok(ResolveResult {
-                                            found: ResolveSymbol::External,
-                                            full_path,
-                                        });
-                                    }
-                                }
+                                context = self.trace_user_defined(context, &x.kind)?;
                             }
                         }
-                        SymbolKind::Module(_) => {
-                            if other_prj & !ret.public {
+                        SymbolKind::ModportMember(_) => {
+                            let path = SymbolPath::new(&[found.token.text]);
+                            context.namespace = found.namespace.clone();
+                            context.namespace.pop();
+                            let symbol = self.resolve(&path, &context.namespace)?;
+                            if let SymbolKind::Variable(x) = &symbol.found.kind {
+                                context = self.trace_user_defined(context, &x.r#type.kind)?;
+                            }
+                        }
+                        SymbolKind::Module(_)
+                        | SymbolKind::Interface(_)
+                        | SymbolKind::Package(_) => {
+                            if context.other_prj & !found.public {
                                 return Err(ResolveError::new(
-                                    last_found,
+                                    context.last_found,
                                     ResolveErrorCause::Private,
                                 ));
                             }
+                            context.namespace = found.inner_namespace();
+                            context.inner = true;
                         }
-                        SymbolKind::Interface(_) => {
-                            if other_prj & !ret.public {
-                                return Err(ResolveError::new(
-                                    last_found,
-                                    ResolveErrorCause::Private,
-                                ));
-                            }
-                            namespace = Namespace::default();
-                            namespace.push(ret.token.text);
-                            inner = true;
-                        }
-                        SymbolKind::Package(_) => {
-                            if other_prj & !ret.public {
-                                return Err(ResolveError::new(
-                                    last_found,
-                                    ResolveErrorCause::Private,
-                                ));
-                            }
-                            namespace = Namespace::default();
-                            namespace.push(ret.token.text);
-                            inner = true;
-                        }
-                        SymbolKind::Enum(_) => {
-                            namespace = ret.namespace.clone();
-                            namespace.push(ret.token.text);
-                            inner = true;
+                        SymbolKind::Enum(_) | SymbolKind::SystemVerilog | SymbolKind::Namespace => {
+                            context.namespace = found.inner_namespace();
+                            context.inner = true;
                         }
                         SymbolKind::Instance(ref x) => {
-                            namespace = Namespace::default();
+                            context.namespace = Namespace::default();
                             for x in &x.type_name {
-                                namespace.push(*x);
+                                context.namespace.push(*x);
                             }
-                            inner = true;
+                            context.inner = true;
                         }
-                        SymbolKind::SystemVerilog => {
-                            namespace = ret.namespace.clone();
-                            namespace.push(ret.token.text);
-                            inner = true;
-                        }
-                        SymbolKind::Namespace => {
-                            namespace = ret.namespace.clone();
-                            namespace.push(ret.token.text);
-                            inner = true;
-                        }
-                        _ => (),
+                        // don't trace inner item
+                        SymbolKind::Function(_)
+                        | SymbolKind::Struct(_)
+                        | SymbolKind::Union(_)
+                        | SymbolKind::TypeDef(_)
+                        | SymbolKind::Modport(_)
+                        | SymbolKind::EnumMember(_)
+                        | SymbolKind::Block
+                        | SymbolKind::SystemFunction
+                        | SymbolKind::Genvar => (),
                     }
                 } else {
                     return Err(ResolveError::new(
-                        last_found,
+                        context.last_found,
                         ResolveErrorCause::NotFound(*name),
                     ));
                 }
             } else {
                 // If symbol is not found, the name is treated as namespace
-                namespace = Namespace::new();
-                namespace.push(*name);
-                inner = true;
-                other_prj = true;
+                context.namespace = Namespace::new();
+                context.namespace.push(*name);
+                context.inner = true;
+                context.other_prj = true;
             }
         }
-        if let Some(ret) = ret {
+        if let Some(found) = context.found {
             Ok(ResolveResult {
-                found: ResolveSymbol::Symbol(ret.clone()),
-                full_path,
+                found: found.clone(),
+                full_path: context.full_path,
             })
         } else if format!("{}", path.as_slice()[0]) == "$" {
             let cause = ResolveErrorCause::NotFound(path.as_slice()[1]);
-            Err(ResolveError::new(last_found, cause))
+            Err(ResolveError::new(context.last_found, cause))
         } else {
             let cause = ResolveErrorCause::NotFound(path.as_slice()[0]);
-            Err(ResolveError::new(last_found, cause))
+            Err(ResolveError::new(context.last_found, cause))
         }
     }
 
@@ -658,6 +623,30 @@ impl fmt::Display for SymbolTable {
         writeln!(f, "]")?;
 
         Ok(())
+    }
+}
+
+struct ResolveContext<'a> {
+    found: Option<&'a Symbol>,
+    last_found: Option<&'a Symbol>,
+    full_path: Vec<SymbolId>,
+    namespace: Namespace,
+    inner: bool,
+    other_prj: bool,
+    sv_member: bool,
+}
+
+impl<'a> ResolveContext<'a> {
+    fn new(namespace: &Namespace) -> Self {
+        Self {
+            found: None,
+            last_found: None,
+            full_path: vec![],
+            namespace: namespace.clone(),
+            inner: false,
+            other_prj: false,
+            sv_member: false,
+        }
     }
 }
 
@@ -925,7 +914,7 @@ pub fn get_assign_list() -> Vec<Assign> {
 #[cfg(test)]
 mod tests {
     use crate::namespace::Namespace;
-    use crate::symbol_table::{ResolveSymbol, SymbolPath};
+    use crate::symbol_table::{ResolveError, ResolveResult, SymbolPath};
     use crate::{symbol_table, Analyzer};
     use veryl_metadata::Metadata;
     use veryl_parser::{resource_table, Parser};
@@ -933,41 +922,64 @@ mod tests {
     const CODE: &str = r##"
     module ModuleA #(
         param paramA: u32 = 1,
+        param paramB: PackageA::StructA = 1,
     ) (
         portA: input logic<10>,
+        portB: modport InterfaceA::modportA,
     ) {
-        local paramB: u32 = 1;
+        local localA: u32 = 1;
+        local localB: PackageA::StructA = 1;
+
+        type TypeA = PackageA::StructA;
 
         var memberA: logic;
         var memberB: PackageA::StructA;
+        var memberC: TypeA;
+        var memberD: $sv::SvTypeA;
+        var memberE: PackageA::UnionA;
+
+        inst instA: InterfaceA;
     }
 
     interface InterfaceA #(
         param paramA: u32 = 1,
+        param paramB: PackageA::StructA = 1,
     ) {
-        local paramB: u32 = 1;
+        local localA: u32 = 1;
+        local localB: PackageA::StructA = 1;
+
+        type TypeA = PackageA::StructA;
 
         var memberA: logic;
+        var memberB: PackageA::StructA;
+        var memberC: TypeA;
 
         modport modportA {
             memberA: input,
+            memberB: output,
+            memberC: output,
         }
     }
 
     package PackageA {
-        local paramB: u32 = 1;
-
-        struct StructX {
-            memberY: logic,
-        }
+        local localA: u32 = 1;
 
         struct StructA {
             memberA: logic,
-            memberX: StructX,
+            memberB: StructB,
+        }
+
+        struct StructB {
+            memberA: logic,
         }
 
         enum EnumA: logic<2> {
             memberA,
+        }
+
+        union UnionA {
+            memberA: logic<2>,
+            memberB: EnumA,
         }
     }
     "##;
@@ -980,327 +992,373 @@ mod tests {
         analyzer.analyze_pass1(&"prj", &CODE, &"", &parser.veryl);
     }
 
-    fn check_namespace(symbol: ResolveSymbol, expect: &str) {
-        if let ResolveSymbol::Symbol(symbol) = symbol {
-            assert_eq!(format!("{}", symbol.namespace), expect);
-        } else {
-            assert!(false);
+    #[track_caller]
+    fn check_found(result: Result<ResolveResult, ResolveError>, expect: &str) {
+        assert_eq!(format!("{}", result.unwrap().found.namespace), expect);
+    }
+
+    #[track_caller]
+    fn check_not_found(result: Result<ResolveResult, ResolveError>) {
+        assert!(result.is_err());
+    }
+
+    fn create_path(paths: &[&str]) -> SymbolPath {
+        let mut ret = SymbolPath::default();
+
+        for path in paths {
+            ret.push(resource_table::insert_str(path));
         }
+
+        ret
+    }
+
+    fn create_namespace(paths: &[&str]) -> Namespace {
+        let mut ret = Namespace::default();
+
+        for path in paths {
+            ret.push(resource_table::insert_str(path));
+        }
+
+        ret
+    }
+
+    fn resolve(paths: &[&str], namespace: &[&str]) -> Result<ResolveResult, ResolveError> {
+        let path = create_path(paths);
+        let namespace = create_namespace(namespace);
+        symbol_table::resolve((&path, &namespace))
     }
 
     #[test]
     fn module() {
         parse();
 
-        let mut symbol_path = SymbolPath::default();
-        symbol_path.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
+        let symbol = resolve(&["ModuleA"], &[]);
+        check_found(symbol, "prj");
 
-        let namespace = Namespace::default();
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
+        let symbol = resolve(&["ModuleA"], &["ModuleA"]);
+        check_found(symbol, "prj");
 
-        assert!(symbol.is_ok());
-        check_namespace(symbol.unwrap().found, "prj");
+        let symbol = resolve(&["ModuleA"], &["InterfaceA"]);
+        check_found(symbol, "prj");
 
-        let mut namespace = Namespace::default();
-        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
-
-        assert!(symbol.is_ok());
-        check_namespace(symbol.unwrap().found, "prj");
-
-        let mut namespace = Namespace::default();
-        namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
-
-        assert!(symbol.is_ok());
-        check_namespace(symbol.unwrap().found, "prj");
-
-        let mut namespace = Namespace::default();
-        namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
-
-        assert!(symbol.is_ok());
-        check_namespace(symbol.unwrap().found, "prj");
+        let symbol = resolve(&["ModuleA"], &["PackageA"]);
+        check_found(symbol, "prj");
     }
 
     #[test]
     fn interface() {
         parse();
 
-        let mut symbol_path = SymbolPath::default();
-        symbol_path.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
+        let symbol = resolve(&["InterfaceA"], &[]);
+        check_found(symbol, "prj");
 
-        let namespace = Namespace::default();
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
+        let symbol = resolve(&["InterfaceA"], &["ModuleA"]);
+        check_found(symbol, "prj");
 
-        assert!(symbol.is_ok());
-        check_namespace(symbol.unwrap().found, "prj");
+        let symbol = resolve(&["InterfaceA"], &["InterfaceA"]);
+        check_found(symbol, "prj");
 
-        let mut namespace = Namespace::default();
-        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
-
-        assert!(symbol.is_ok());
-        check_namespace(symbol.unwrap().found, "prj");
-
-        let mut namespace = Namespace::default();
-        namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
-
-        assert!(symbol.is_ok());
-        check_namespace(symbol.unwrap().found, "prj");
-
-        let mut namespace = Namespace::default();
-        namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
-
-        assert!(symbol.is_ok());
-        check_namespace(symbol.unwrap().found, "prj");
+        let symbol = resolve(&["InterfaceA"], &["PackageA"]);
+        check_found(symbol, "prj");
     }
 
     #[test]
     fn package() {
         parse();
 
-        let mut symbol_path = SymbolPath::default();
-        symbol_path.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
+        let symbol = resolve(&["PackageA"], &[]);
+        check_found(symbol, "prj");
 
-        let namespace = Namespace::default();
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
+        let symbol = resolve(&["InterfaceA"], &["ModuleA"]);
+        check_found(symbol, "prj");
 
-        assert!(symbol.is_ok());
-        check_namespace(symbol.unwrap().found, "prj");
+        let symbol = resolve(&["InterfaceA"], &["InterfaceA"]);
+        check_found(symbol, "prj");
 
-        let mut namespace = Namespace::default();
-        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
-
-        assert!(symbol.is_ok());
-        check_namespace(symbol.unwrap().found, "prj");
-
-        let mut namespace = Namespace::default();
-        namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
-
-        assert!(symbol.is_ok());
-        check_namespace(symbol.unwrap().found, "prj");
-
-        let mut namespace = Namespace::default();
-        namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
-
-        assert!(symbol.is_ok());
-        check_namespace(symbol.unwrap().found, "prj");
+        let symbol = resolve(&["InterfaceA"], &["PackageA"]);
+        check_found(symbol, "prj");
     }
 
     #[test]
-    fn parameter() {
+    fn param() {
         parse();
 
-        let mut symbol_path = SymbolPath::default();
-        symbol_path.push(resource_table::get_str_id("paramA".to_string()).unwrap());
+        let symbol = resolve(&["paramA"], &[]);
+        check_not_found(symbol);
 
-        let namespace = Namespace::default();
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
+        let symbol = resolve(&["paramA"], &["ModuleA"]);
+        check_found(symbol, "prj::ModuleA");
 
-        assert!(symbol.is_err());
+        let symbol = resolve(&["paramA"], &["InterfaceA"]);
+        check_found(symbol, "prj::InterfaceA");
 
-        let mut namespace = Namespace::default();
-        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
+        let symbol = resolve(&["paramA"], &["PackageA"]);
+        check_not_found(symbol);
 
-        assert!(symbol.is_ok());
-        check_namespace(symbol.unwrap().found, "prj::ModuleA");
+        let symbol = resolve(&["paramB", "memberB"], &["ModuleA"]);
+        check_found(symbol, "prj::PackageA::StructA");
 
-        let mut namespace = Namespace::default();
-        namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
+        let symbol = resolve(&["paramB", "memberB"], &["InterfaceA"]);
+        check_found(symbol, "prj::PackageA::StructA");
 
-        assert!(symbol.is_ok());
-        check_namespace(symbol.unwrap().found, "prj::InterfaceA");
+        let symbol = resolve(&["paramB", "memberB", "memberA"], &["ModuleA"]);
+        check_found(symbol, "prj::PackageA::StructB");
+
+        let symbol = resolve(&["paramB", "memberB", "memberA"], &["InterfaceA"]);
+        check_found(symbol, "prj::PackageA::StructB");
     }
 
     #[test]
-    fn localparam() {
+    fn local() {
         parse();
 
-        let mut symbol_path = SymbolPath::default();
-        symbol_path.push(resource_table::get_str_id("paramB".to_string()).unwrap());
+        let symbol = resolve(&["localA"], &[]);
+        check_not_found(symbol);
 
-        let namespace = Namespace::default();
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
+        let symbol = resolve(&["localA"], &["ModuleA"]);
+        check_found(symbol, "prj::ModuleA");
 
-        assert!(symbol.is_err());
+        let symbol = resolve(&["localA"], &["InterfaceA"]);
+        check_found(symbol, "prj::InterfaceA");
 
-        let mut namespace = Namespace::default();
-        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
+        let symbol = resolve(&["localA"], &["PackageA"]);
+        check_found(symbol, "prj::PackageA");
 
-        assert!(symbol.is_ok());
-        check_namespace(symbol.unwrap().found, "prj::ModuleA");
+        let symbol = resolve(&["localB", "memberB"], &["ModuleA"]);
+        check_found(symbol, "prj::PackageA::StructA");
 
-        let mut namespace = Namespace::default();
-        namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
+        let symbol = resolve(&["localB", "memberB"], &["InterfaceA"]);
+        check_found(symbol, "prj::PackageA::StructA");
 
-        assert!(symbol.is_ok());
-        check_namespace(symbol.unwrap().found, "prj::InterfaceA");
+        let symbol = resolve(&["localB", "memberB", "memberA"], &["ModuleA"]);
+        check_found(symbol, "prj::PackageA::StructB");
 
-        let mut namespace = Namespace::default();
-        namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
-
-        assert!(symbol.is_ok());
-        check_namespace(symbol.unwrap().found, "prj::PackageA");
+        let symbol = resolve(&["localB", "memberB", "memberA"], &["InterfaceA"]);
+        check_found(symbol, "prj::PackageA::StructB");
     }
 
     #[test]
     fn port() {
         parse();
 
-        let mut symbol_path = SymbolPath::default();
-        symbol_path.push(resource_table::get_str_id("portA".to_string()).unwrap());
+        let symbol = resolve(&["portA"], &[]);
+        check_not_found(symbol);
 
-        let namespace = Namespace::default();
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
+        let symbol = resolve(&["portA"], &["ModuleA"]);
+        check_found(symbol, "prj::ModuleA");
 
-        assert!(symbol.is_err());
+        let symbol = resolve(&["portA"], &["InterfaceA"]);
+        check_not_found(symbol);
 
-        let mut namespace = Namespace::default();
-        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
-
-        assert!(symbol.is_ok());
-        check_namespace(symbol.unwrap().found, "prj::ModuleA");
-
-        let mut namespace = Namespace::default();
-        namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
-
-        assert!(symbol.is_err());
-
-        let mut namespace = Namespace::default();
-        namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
-
-        assert!(symbol.is_err());
+        let symbol = resolve(&["portA"], &["PackageA"]);
+        check_not_found(symbol);
     }
 
     #[test]
     fn variable() {
         parse();
 
-        let mut symbol_path = SymbolPath::default();
-        symbol_path.push(resource_table::get_str_id("memberA".to_string()).unwrap());
+        let symbol = resolve(&["memberA"], &[]);
+        check_not_found(symbol);
 
-        let namespace = Namespace::default();
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
+        let symbol = resolve(&["memberA"], &["ModuleA"]);
+        check_found(symbol, "prj::ModuleA");
 
-        assert!(symbol.is_err());
+        let symbol = resolve(&["memberA"], &["InterfaceA"]);
+        check_found(symbol, "prj::InterfaceA");
 
-        let mut namespace = Namespace::default();
-        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
-
-        assert!(symbol.is_ok());
-        check_namespace(symbol.unwrap().found, "prj::ModuleA");
-
-        let mut namespace = Namespace::default();
-        namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
-
-        assert!(symbol.is_ok());
-        check_namespace(symbol.unwrap().found, "prj::InterfaceA");
+        let symbol = resolve(&["memberA"], &["PackageA"]);
+        check_not_found(symbol);
     }
 
     #[test]
     fn r#struct() {
         parse();
 
-        let mut symbol_path = SymbolPath::default();
-        symbol_path.push(resource_table::get_str_id("StructA".to_string()).unwrap());
+        let symbol = resolve(&["StructA"], &[]);
+        check_not_found(symbol);
 
-        let namespace = Namespace::default();
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
+        let symbol = resolve(&["StructA"], &["ModuleA"]);
+        check_not_found(symbol);
 
-        assert!(symbol.is_err());
+        let symbol = resolve(&["StructA"], &["InterfaceA"]);
+        check_not_found(symbol);
 
-        let mut namespace = Namespace::default();
-        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
-
-        assert!(symbol.is_err());
-
-        let mut namespace = Namespace::default();
-        namespace.push(resource_table::get_str_id("InterfaceA".to_string()).unwrap());
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
-
-        assert!(symbol.is_err());
-
-        let mut namespace = Namespace::default();
-        namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
-
-        assert!(symbol.is_ok());
-        check_namespace(symbol.unwrap().found, "prj::PackageA");
+        let symbol = resolve(&["StructA"], &["PackageA"]);
+        check_found(symbol, "prj::PackageA");
     }
 
     #[test]
     fn struct_member() {
         parse();
 
-        let mut symbol_path = SymbolPath::default();
-        symbol_path.push(resource_table::get_str_id("memberA".to_string()).unwrap());
+        let symbol = resolve(&["memberA"], &[]);
+        check_not_found(symbol);
 
-        let namespace = Namespace::default();
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
+        let symbol = resolve(&["memberA"], &["PackageA", "StructA"]);
+        check_found(symbol, "prj::PackageA::StructA");
 
-        assert!(symbol.is_err());
+        let symbol = resolve(&["memberB", "memberA"], &["ModuleA"]);
+        check_found(symbol, "prj::PackageA::StructA");
 
-        let mut namespace = Namespace::default();
-        namespace.push(resource_table::get_str_id("PackageA".to_string()).unwrap());
-        namespace.push(resource_table::get_str_id("StructA".to_string()).unwrap());
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
-
-        assert!(symbol.is_ok());
-        check_namespace(symbol.unwrap().found, "prj::PackageA::StructA");
-
-        let mut symbol_path = SymbolPath::default();
-        symbol_path.push(resource_table::get_str_id("memberB".to_string()).unwrap());
-        symbol_path.push(resource_table::get_str_id("memberA".to_string()).unwrap());
-
-        let mut namespace = Namespace::default();
-        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
-
-        assert!(symbol.is_ok());
-        check_namespace(symbol.unwrap().found, "prj::PackageA::StructA");
-
-        let mut symbol_path = SymbolPath::default();
-        symbol_path.push(resource_table::get_str_id("memberB".to_string()).unwrap());
-        symbol_path.push(resource_table::get_str_id("memberB".to_string()).unwrap());
-
-        let mut namespace = Namespace::default();
-        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
-
-        assert!(symbol.is_err());
+        let symbol = resolve(&["memberB", "memberX"], &["ModuleA"]);
+        check_not_found(symbol);
     }
 
     #[test]
-    fn nest_struct() {
+    fn r#enum() {
         parse();
 
-        let mut symbol_path = SymbolPath::default();
-        symbol_path.push(resource_table::get_str_id("memberB".to_string()).unwrap());
-        symbol_path.push(resource_table::get_str_id("memberX".to_string()).unwrap());
-        symbol_path.push(resource_table::get_str_id("memberY".to_string()).unwrap());
+        let symbol = resolve(&["EnumA"], &[]);
+        check_not_found(symbol);
 
-        let mut namespace = Namespace::default();
-        namespace.push(resource_table::get_str_id("ModuleA".to_string()).unwrap());
-        let symbol = symbol_table::resolve((&symbol_path, &namespace));
+        let symbol = resolve(&["EnumA"], &["ModuleA"]);
+        check_not_found(symbol);
 
-        assert!(symbol.is_ok());
-        check_namespace(symbol.unwrap().found, "prj::PackageA::StructX");
+        let symbol = resolve(&["EnumA"], &["InterfaceA"]);
+        check_not_found(symbol);
+
+        let symbol = resolve(&["EnumA"], &["PackageA"]);
+        check_found(symbol, "prj::PackageA");
+    }
+
+    #[test]
+    fn enum_member() {
+        parse();
+
+        let symbol = resolve(&["EnumA", "memberA"], &[]);
+        check_not_found(symbol);
+
+        let symbol = resolve(&["EnumA", "memberA"], &["ModuleA"]);
+        check_not_found(symbol);
+
+        let symbol = resolve(&["EnumA", "memberA"], &["InterfaceA"]);
+        check_not_found(symbol);
+
+        let symbol = resolve(&["EnumA", "memberA"], &["PackageA"]);
+        check_found(symbol, "prj::PackageA::EnumA");
+    }
+
+    #[test]
+    fn union() {
+        parse();
+
+        let symbol = resolve(&["UnionA"], &[]);
+        check_not_found(symbol);
+
+        let symbol = resolve(&["UnionA"], &["ModuleA"]);
+        check_not_found(symbol);
+
+        let symbol = resolve(&["UnionA"], &["InterfaceA"]);
+        check_not_found(symbol);
+
+        let symbol = resolve(&["UnionA"], &["PackageA"]);
+        check_found(symbol, "prj::PackageA");
+    }
+
+    #[test]
+    fn union_member() {
+        parse();
+
+        let symbol = resolve(&["memberE"], &[]);
+        check_not_found(symbol);
+
+        let symbol = resolve(&["memberE"], &["ModuleA"]);
+        check_found(symbol, "prj::ModuleA");
+
+        let symbol = resolve(&["memberE", "memberA"], &["ModuleA"]);
+        check_found(symbol, "prj::PackageA::UnionA");
+
+        let symbol = resolve(&["memberE", "memberB"], &["ModuleA"]);
+        check_found(symbol, "prj::PackageA::UnionA");
+    }
+
+    #[test]
+    fn modport() {
+        parse();
+
+        let symbol = resolve(&["portB"], &[]);
+        check_not_found(symbol);
+
+        let symbol = resolve(&["portB"], &["ModuleA"]);
+        check_found(symbol, "prj::ModuleA");
+
+        let symbol = resolve(&["portB", "memberA"], &["ModuleA"]);
+        check_found(symbol, "prj::InterfaceA::modportA");
+
+        let symbol = resolve(&["portB", "memberB"], &["ModuleA"]);
+        check_found(symbol, "prj::InterfaceA::modportA");
+
+        let symbol = resolve(&["portB", "memberB", "memberA"], &["ModuleA"]);
+        check_found(symbol, "prj::PackageA::StructA");
+
+        let symbol = resolve(&["portB", "memberB", "memberB"], &["ModuleA"]);
+        check_found(symbol, "prj::PackageA::StructA");
+
+        let symbol = resolve(&["portB", "memberB", "memberB", "memberA"], &["ModuleA"]);
+        check_found(symbol, "prj::PackageA::StructB");
+
+        let symbol = resolve(&["portB", "memberC"], &["ModuleA"]);
+        check_found(symbol, "prj::InterfaceA::modportA");
+
+        let symbol = resolve(&["portB", "memberC", "memberA"], &["ModuleA"]);
+        check_found(symbol, "prj::PackageA::StructA");
+
+        let symbol = resolve(&["portB", "memberC", "memberB"], &["ModuleA"]);
+        check_found(symbol, "prj::PackageA::StructA");
+
+        let symbol = resolve(&["portB", "memberC", "memberB", "memberA"], &["ModuleA"]);
+        check_found(symbol, "prj::PackageA::StructB");
+    }
+
+    #[test]
+    fn typedef() {
+        parse();
+
+        let symbol = resolve(&["memberC"], &[]);
+        check_not_found(symbol);
+
+        let symbol = resolve(&["memberC"], &["ModuleA"]);
+        check_found(symbol, "prj::ModuleA");
+
+        let symbol = resolve(&["memberC", "memberA"], &["ModuleA"]);
+        check_found(symbol, "prj::PackageA::StructA");
+
+        let symbol = resolve(&["memberC", "memberX"], &["ModuleA"]);
+        check_not_found(symbol);
+    }
+
+    #[test]
+    fn sv_member() {
+        parse();
+
+        let symbol = resolve(&["memberD"], &[]);
+        check_not_found(symbol);
+
+        let symbol = resolve(&["memberD"], &["ModuleA"]);
+        check_found(symbol, "prj::ModuleA");
+
+        let symbol = resolve(&["memberD", "memberA"], &["ModuleA"]);
+        check_found(symbol, "$::sv::SvTypeA");
+
+        let symbol = resolve(&["memberD", "memberA", "memberA", "memberA"], &["ModuleA"]);
+        check_found(symbol, "$::sv::SvTypeA");
+    }
+
+    #[test]
+    fn inst() {
+        parse();
+
+        let symbol = resolve(&["instA"], &[]);
+        check_not_found(symbol);
+
+        let symbol = resolve(&["instA"], &["ModuleA"]);
+        check_found(symbol, "prj::ModuleA");
+
+        let symbol = resolve(&["instA", "memberA"], &["ModuleA"]);
+        check_found(symbol, "prj::InterfaceA");
+
+        let symbol = resolve(&["instA", "memberB", "memberB", "memberA"], &["ModuleA"]);
+        check_found(symbol, "prj::PackageA::StructB");
     }
 }

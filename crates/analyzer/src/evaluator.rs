@@ -1,5 +1,5 @@
 use crate::symbol::{Type, TypeKind};
-use crate::symbol_table::{self, ResolveSymbol};
+use crate::symbol_table;
 use veryl_parser::veryl_grammar_trait::*;
 
 #[derive(Clone, Copy, Debug)]
@@ -606,12 +606,8 @@ impl Evaluator {
                     // Identifier
                     let symbol = symbol_table::resolve(x.expression_identifier.as_ref());
                     if let Ok(symbol) = symbol {
-                        if let ResolveSymbol::Symbol(symbol) = symbol.found {
-                            if let Some(evaluated) = symbol.evaluated.get() {
-                                evaluated
-                            } else {
-                                Evaluated::Unknown
-                            }
+                        if let Some(evaluated) = symbol.found.evaluated.get() {
+                            evaluated
                         } else {
                             Evaluated::Unknown
                         }

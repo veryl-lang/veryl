@@ -9,7 +9,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use tempfile::TempDir;
 use veryl_analyzer::symbol::{ParameterScope, Symbol, SymbolKind};
-use veryl_analyzer::symbol_table::{self, ResolveSymbol};
+use veryl_analyzer::symbol_table;
 use veryl_metadata::Metadata;
 use veryl_parser::resource_table;
 use veryl_parser::veryl_token::Token;
@@ -528,11 +528,7 @@ impl DocBuilder {
 
 fn get_comment_from_token(token: &Token) -> Option<String> {
     if let Ok(symbol) = symbol_table::resolve(token) {
-        if let ResolveSymbol::Symbol(symbol) = &symbol.found {
-            Some(symbol.doc_comment.format(false))
-        } else {
-            None
-        }
+        Some(symbol.found.doc_comment.format(false))
     } else {
         None
     }
