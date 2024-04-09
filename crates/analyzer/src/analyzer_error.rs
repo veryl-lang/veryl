@@ -393,6 +393,40 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(unknown_embed_lang),
+        help(""),
+        url(
+            "https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#unknown_embed_lang"
+        )
+    )]
+    #[error("\"{name}\" is not valid embed language")]
+    UnknownEmbedLang {
+        name: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(unknown_embed_way),
+        help(""),
+        url(
+            "https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#unknown_embed_way"
+        )
+    )]
+    #[error("\"{name}\" is not valid embed way")]
+    UnknownEmbedWay {
+        name: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(unknown_member),
         help(""),
         url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#unknown_member")
@@ -771,6 +805,22 @@ impl AnalyzerError {
 
     pub fn unknown_attribute(name: &str, source: &str, token: &Token) -> Self {
         AnalyzerError::UnknownAttribute {
+            name: name.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn unknown_embed_lang(name: &str, source: &str, token: &Token) -> Self {
+        AnalyzerError::UnknownEmbedLang {
+            name: name.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn unknown_embed_way(name: &str, source: &str, token: &Token) -> Self {
+        AnalyzerError::UnknownEmbedWay {
             name: name.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),

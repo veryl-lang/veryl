@@ -2731,6 +2731,17 @@ impl VerylWalker for Emitter {
         }
     }
 
+    /// Semantic action for non-terminal 'EmbedDeclaration'
+    fn embed_declaration(&mut self, arg: &EmbedDeclaration) {
+        if arg.identifier.identifier_token.to_string() == "inline" {
+            let text = arg.embed_content.embed_content_token.to_string();
+            let text = text.strip_prefix("{{{").unwrap();
+            let text = text.strip_suffix("}}}").unwrap();
+            let text = text.replace('\r', "");
+            self.str(&text);
+        }
+    }
+
     /// Semantic action for non-terminal 'DescriptionGroup'
     fn description_group(&mut self, arg: &DescriptionGroup) {
         for x in &arg.description_group_list {
@@ -2764,6 +2775,7 @@ impl VerylWalker for Emitter {
             }
             // file scope import is not emitted at SystemVerilog
             DescriptionItem::ImportDeclaration(_) => (),
+            DescriptionItem::EmbedDeclaration(x) => self.embed_declaration(&x.embed_declaration),
         };
     }
 

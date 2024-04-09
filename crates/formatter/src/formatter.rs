@@ -1733,6 +1733,21 @@ impl VerylWalker for Formatter {
         }
     }
 
+    /// Semantic action for non-terminal 'EmbedDeclaration'
+    fn embed_declaration(&mut self, arg: &EmbedDeclaration) {
+        self.embed(&arg.embed);
+        self.space(1);
+        self.l_paren(&arg.l_paren);
+        self.identifier(&arg.identifier);
+        self.r_paren(&arg.r_paren);
+        self.space(1);
+        self.identifier(&arg.identifier0);
+
+        let text = arg.embed_content.embed_content_token.to_string();
+        let text = text.replace('\r', "");
+        self.str(&text);
+    }
+
     /// Semantic action for non-terminal 'DescriptionGroup'
     fn description_group(&mut self, arg: &DescriptionGroup) {
         for x in &arg.description_group_list {

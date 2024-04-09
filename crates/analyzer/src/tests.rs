@@ -2,6 +2,7 @@ use crate::{Analyzer, AnalyzerError};
 use veryl_metadata::Metadata;
 use veryl_parser::Parser;
 
+#[track_caller]
 fn analyze(code: &str) -> Vec<AnalyzerError> {
     let metadata: Metadata =
         toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
@@ -425,6 +426,28 @@ fn unknown_attribute() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UnknownAttribute { .. }));
+}
+
+#[test]
+fn unknown_embed_lang() {
+    let code = r#"
+    embed (inline) x{{{
+    }}}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnknownEmbedLang { .. }));
+}
+
+#[test]
+fn unknown_embed_way() {
+    let code = r#"
+    embed (x) sv{{{
+    }}}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnknownEmbedWay { .. }));
 }
 
 #[test]
