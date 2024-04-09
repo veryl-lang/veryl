@@ -374,6 +374,7 @@ impl Emitter {
                     }
                 }
                 SymbolKind::SystemFunction => {
+                    self.adjust_line = false;
                     self.str("$");
                     self.identifier(&args[0]);
                 }
