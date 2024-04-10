@@ -340,6 +340,7 @@ token_with_comments!(Break);
 token_with_comments!(Case);
 token_with_comments!(Default);
 token_with_comments!(Else);
+token_with_comments!(Embed);
 token_with_comments!(Enum);
 token_with_comments!(Export);
 token_with_comments!(F32);
@@ -390,3 +391,49 @@ token_with_comments!(Union);
 token_with_comments!(Var);
 
 token_with_comments!(Identifier);
+
+fn embed_item_to_string(x: &EmbedItem) -> String {
+    let mut ret = String::new();
+    match x {
+        EmbedItem::LBraceTermEmbedItemListRBraceTerm(x) => {
+            ret.push_str(&x.l_brace_term.l_brace_term.to_string());
+            for x in &x.embed_item_list {
+                ret.push_str(&embed_item_to_string(&x.embed_item));
+            }
+            ret.push_str(&x.r_brace_term.r_brace_term.to_string());
+        }
+        EmbedItem::AnyTerm(x) => {
+            ret.push_str(&x.any_term.any_term.to_string());
+        }
+    }
+    ret
+}
+
+impl TryFrom<&EmbedContentToken> for VerylToken {
+    type Error = anyhow::Error;
+
+    fn try_from(x: &EmbedContentToken) -> Result<Self, anyhow::Error> {
+        let head_token = &x.l_brace_term.l_brace_term;
+        let line = head_token.line;
+        let column = head_token.column;
+        let length = head_token.length;
+        let pos = head_token.pos;
+        let source = head_token.source;
+
+        let mut text = x.l_brace_term.l_brace_term.to_string();
+        text.push_str(&x.l_brace_term0.l_brace_term.to_string());
+        text.push_str(&x.l_brace_term1.l_brace_term.to_string());
+        for x in &x.embed_content_token_list {
+            text.push_str(&embed_item_to_string(&x.embed_item));
+        }
+        text.push_str(&x.r_brace_term.r_brace_term.to_string());
+        text.push_str(&x.r_brace_term0.r_brace_term.to_string());
+        text.push_str(&x.r_brace_term1.r_brace_term.to_string());
+
+        let token = Token::new(&text, line, column, length, pos, source);
+        Ok(VerylToken {
+            token,
+            comments: Vec::new(),
+        })
+    }
+}

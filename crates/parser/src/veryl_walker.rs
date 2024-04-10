@@ -391,6 +391,13 @@ pub trait VerylWalker {
         after!(self, r#else, arg);
     }
 
+    /// Semantic action for non-terminal 'Embed'
+    fn embed(&mut self, arg: &Embed) {
+        before!(self, embed, arg);
+        self.veryl_token(&arg.embed_token);
+        after!(self, embed, arg);
+    }
+
     /// Semantic action for non-terminal 'Enum'
     fn r#enum(&mut self, arg: &Enum) {
         before!(self, r#enum, arg);
@@ -2585,6 +2592,25 @@ pub trait VerylWalker {
         after!(self, package_item, arg);
     }
 
+    /// Semantic action for non-terminal 'EmbedDeclaration'
+    fn embed_declaration(&mut self, arg: &EmbedDeclaration) {
+        before!(self, embed_declaration, arg);
+        self.embed(&arg.embed);
+        self.l_paren(&arg.l_paren);
+        self.identifier(&arg.identifier);
+        self.r_paren(&arg.r_paren);
+        self.identifier(&arg.identifier0);
+        self.embed_content(&arg.embed_content);
+        after!(self, embed_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'EmbedContent'
+    fn embed_content(&mut self, arg: &EmbedContent) {
+        before!(self, embed_content, arg);
+        self.veryl_token(&arg.embed_content_token);
+        after!(self, embed_content, arg);
+    }
+
     /// Semantic action for non-terminal 'DescriptionGroup'
     fn description_group(&mut self, arg: &DescriptionGroup) {
         before!(self, description_group, arg);
@@ -2616,6 +2642,7 @@ pub trait VerylWalker {
                 self.package_declaration(&x.package_declaration)
             }
             DescriptionItem::ImportDeclaration(x) => self.import_declaration(&x.import_declaration),
+            DescriptionItem::EmbedDeclaration(x) => self.embed_declaration(&x.embed_declaration),
         };
         after!(self, description_item, arg);
     }

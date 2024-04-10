@@ -9,6 +9,7 @@ pub const KEYWORDS: &[&str] = &[
     "case",
     "default",
     "else",
+    "embed",
     "enum",
     "export",
     "f32",

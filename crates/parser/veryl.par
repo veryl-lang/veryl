@@ -5,6 +5,11 @@
 %user_type VerylToken = crate::veryl_token::VerylToken
 %user_type Token = crate::veryl_token::Token
 
+%scanner Embed {
+    %auto_newline_off
+    %auto_ws_off
+}
+
 %%
 
 // ----------------------------------------------------------------------------
@@ -46,11 +51,11 @@ DotTerm               : '.'                                                     
 EquTerm               : '='                                                                                   : Token;
 HashTerm              : '#'                                                                                   : Token;
 LAngleTerm            : '<'                                                                                   : Token;
-LBraceTerm            : '{'                                                                                   : Token;
+LBraceTerm            : <Embed, INITIAL>'{'                                                                   : Token;
 LBracketTerm          : '['                                                                                   : Token;
 LParenTerm            : '('                                                                                   : Token;
 RAngleTerm            : '>'                                                                                   : Token;
-RBraceTerm            : '}'                                                                                   : Token;
+RBraceTerm            : <Embed, INITIAL>'}'                                                                   : Token;
 RBracketTerm          : ']'                                                                                   : Token;
 RParenTerm            : ')'                                                                                   : Token;
 SemicolonTerm         : ';'                                                                                   : Token;
@@ -65,6 +70,7 @@ BitTerm               : /(?-u:\b)bit(?-u:\b)/                                   
 CaseTerm              : /(?-u:\b)case(?-u:\b)/                                                                : Token;
 DefaultTerm           : /(?-u:\b)default(?-u:\b)/                                                             : Token;
 ElseTerm              : /(?-u:\b)else(?-u:\b)/                                                                : Token;
+EmbedTerm             : /(?-u:\b)embed(?-u:\b)/                                                               : Token;
 EnumTerm              : /(?-u:\b)enum(?-u:\b)/                                                                : Token;
 ExportTerm            : /(?-u:\b)export(?-u:\b)/                                                              : Token;
 F32Term               : /(?-u:\b)f32(?-u:\b)/                                                                 : Token;
@@ -115,6 +121,7 @@ U64Term               : /(?-u:\b)u64(?-u:\b)/                                   
 UnionTerm             : /(?-u:\b)union(?-u:\b)/                                                               : Token;
 VarTerm               : /(?-u:\b)var(?-u:\b)/                                                                 : Token;
 IdentifierTerm        : /[a-zA-Z_][0-9a-zA-Z_$]*/                                                             : Token;
+AnyTerm               : <Embed>/[^{}]*/                                                                       : Token;
 
 // ----------------------------------------------------------------------------
 // Token
@@ -179,6 +186,7 @@ BitToken       : BitTerm       : Token Comments;
 CaseToken      : CaseTerm      : Token Comments;
 DefaultToken   : DefaultTerm   : Token Comments;
 ElseToken      : ElseTerm      : Token Comments;
+EmbedToken     : EmbedTerm     : Token Comments;
 EnumToken      : EnumTerm      : Token Comments;
 ExportToken    : ExportTerm    : Token Comments;
 F32Token       : F32Term       : Token Comments;
@@ -299,6 +307,7 @@ Break     : BreakToken     : VerylToken;
 Case      : CaseToken      : VerylToken;
 Defaul    : DefaultToken   : VerylToken; // avoid to conflict with Rust's Default trait
 Else      : ElseToken      : VerylToken;
+Embed     : EmbedToken     : VerylToken;
 Enum      : EnumToken      : VerylToken;
 Export    : ExportToken    : VerylToken;
 F32       : F32Token       : VerylToken;
@@ -726,6 +735,19 @@ PackageItem: VarDeclaration
            ;
 
 // ----------------------------------------------------------------------------
+// Embed
+// ----------------------------------------------------------------------------
+
+EmbedDeclaration: Embed LParen Identifier RParen Identifier EmbedContent;
+
+EmbedContent: EmbedContentToken: VerylToken;
+
+EmbedContentToken: LBraceTerm %push(Embed) LBraceTerm LBraceTerm { EmbedItem } RBraceTerm RBraceTerm RBraceTerm %pop();
+
+EmbedItem: LBraceTerm { EmbedItem } RBraceTerm
+         | AnyTerm;
+
+// ----------------------------------------------------------------------------
 // Description
 // ----------------------------------------------------------------------------
 
@@ -735,6 +757,7 @@ DescriptionItem: ModuleDeclaration
                | InterfaceDeclaration
                | PackageDeclaration
                | ImportDeclaration
+               | EmbedDeclaration
                ;
 
 // ----------------------------------------------------------------------------
