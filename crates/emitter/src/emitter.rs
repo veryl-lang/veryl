@@ -1,4 +1,6 @@
 use crate::aligner::{Aligner, Location};
+use veryl_analyzer::attribute::Attribute as Attr;
+use veryl_analyzer::attribute_table;
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::SymbolKind;
 use veryl_analyzer::symbol_table::{self, SymbolPath, SymbolPathNamespace};
@@ -1471,13 +1473,6 @@ impl VerylWalker for Emitter {
                     self.adjust_line = false;
                 }
             }
-            "enum_member_prefix" => {
-                if let Some(ref x) = arg.attribute_opt {
-                    if let AttributeItem::Identifier(x) = &*x.attribute_list.attribute_item {
-                        self.enum_member_prefix = Some(x.identifier.identifier_token.to_string());
-                    }
-                }
-            }
             _ => (),
         }
     }
@@ -1752,8 +1747,11 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'EnumDeclaration'
     fn enum_declaration(&mut self, arg: &EnumDeclaration) {
-        if self.enum_member_prefix.is_none() {
-            self.enum_member_prefix = Some(arg.identifier.identifier_token.to_string());
+        self.enum_member_prefix = Some(arg.identifier.identifier_token.to_string());
+        for attr in &attribute_table::get(&arg.r#enum.enum_token.token) {
+            if let Attr::EnumMemberPrefix(x) = attr {
+                self.enum_member_prefix = Some(x.to_string());
+            }
         }
         self.token(&arg.r#enum.enum_token.append("typedef ", ""));
         self.space(1);
