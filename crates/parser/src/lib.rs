@@ -1,6 +1,7 @@
 pub mod doc_comment_table;
 pub mod finder;
 pub mod generated;
+pub mod last_token;
 pub mod parser;
 pub mod parser_error;
 pub mod resource_table;

@@ -1,5 +1,7 @@
-use crate::allow_table;
 use crate::analyzer_error::AnalyzerError;
+use crate::attribute::AllowItem;
+use crate::attribute::Attribute as Attr;
+use crate::attribute_table;
 use crate::symbol::SymbolKind;
 use crate::symbol_table;
 use veryl_parser::resource_table;
@@ -60,7 +62,10 @@ impl<'a> VerylGrammarTrait for CheckInstance<'a> {
                     SymbolKind::Module(ref x) => {
                         for port in &x.ports {
                             if !connected_ports.contains(&port.name)
-                                && !allow_table::contains("missing_port")
+                                && !attribute_table::contains(
+                                    &arg.inst.inst_token.token,
+                                    Attr::Allow(AllowItem::MissingPort),
+                                )
                             {
                                 let port = resource_table::get_str_value(port.name).unwrap();
                                 self.errors.push(AnalyzerError::missing_port(

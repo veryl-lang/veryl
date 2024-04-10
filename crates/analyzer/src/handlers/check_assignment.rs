@@ -1,9 +1,11 @@
-use crate::allow_table;
 use crate::analyzer_error::AnalyzerError;
 use crate::assign::{
     AssignDeclarationType, AssignPosition, AssignPositionType, AssignStatementBranchItemType,
     AssignStatementBranchType,
 };
+use crate::attribute::AllowItem;
+use crate::attribute::Attribute as Attr;
+use crate::attribute_table;
 use crate::symbol::{Direction, SymbolId, SymbolKind};
 use crate::symbol_table;
 use std::collections::HashMap;
@@ -205,8 +207,10 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                     + arg.if_reset_statement_list0.len()
                     + arg.if_reset_statement_opt.iter().len();
                 let has_default = arg.if_reset_statement_opt.is_some();
-                let allow_missing_reset_statement =
-                    allow_table::contains("missing_reset_statement");
+                let allow_missing_reset_statement = attribute_table::contains(
+                    &arg.if_reset.if_reset_token.token,
+                    Attr::Allow(AllowItem::MissingResetStatement),
+                );
                 self.assign_position
                     .push(AssignPositionType::StatementBranch {
                         token: arg.if_reset.if_reset_token.token,
