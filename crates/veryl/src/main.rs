@@ -178,6 +178,10 @@ pub struct OptDump {
     /// output type dag
     #[arg(long)]
     pub type_dag: bool,
+
+    /// output attribute table
+    #[arg(long)]
+    pub attribute_table: bool,
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

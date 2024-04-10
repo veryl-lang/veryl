@@ -60,6 +60,10 @@ impl CmdDump {
             println!("{}", veryl_analyzer::type_dag::dump());
         }
 
+        if self.opt.attribute_table {
+            println!("{}", veryl_analyzer::attribute_table::dump());
+        }
+
         let elapsed_time = now.elapsed();
         debug!("Elapsed time ({} milliseconds)", elapsed_time.as_millis());
 

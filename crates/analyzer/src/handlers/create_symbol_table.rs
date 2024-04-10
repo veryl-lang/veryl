@@ -1,5 +1,7 @@
-use crate::allow_table;
 use crate::analyzer_error::AnalyzerError;
+use crate::attribute::AllowItem;
+use crate::attribute::Attribute as Attr;
+use crate::attribute_table;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::Direction as SymDirection;
@@ -81,7 +83,7 @@ impl<'a> CreateSymbolTable<'a> {
         };
         let mut symbol = Symbol::new(token, kind, &self.namespace, public, doc_comment);
 
-        if allow_table::contains("unused_variable") {
+        if attribute_table::contains(token, Attr::Allow(AllowItem::UnusedVariable)) {
             symbol.allow_unused = true;
         }
 
@@ -214,15 +216,6 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
     fn attribute(&mut self, arg: &Attribute) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             self.attribute_lines.insert(arg.hash.hash_token.token.line);
-
-            let identifier = arg.identifier.identifier_token.to_string();
-            if identifier.as_str() == "enum_member_prefix" {
-                if let Some(ref x) = arg.attribute_opt {
-                    if let AttributeItem::Identifier(x) = &*x.attribute_list.attribute_item {
-                        self.enum_member_prefix = Some(x.identifier.identifier_token.to_string());
-                    }
-                }
-            }
         }
         Ok(())
     }
@@ -361,8 +354,16 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             HandlerPoint::Before => {
                 let name = arg.identifier.identifier_token.token.text;
                 self.namespace.push(name);
-                if self.enum_member_prefix.is_none() {
-                    self.enum_member_prefix = Some(arg.identifier.identifier_token.to_string());
+
+                // default prefix
+                self.enum_member_prefix = Some(arg.identifier.identifier_token.to_string());
+
+                // overridden prefix by attribute
+                let attrs = attribute_table::get(&arg.r#enum.enum_token.token);
+                for attr in attrs {
+                    if let Attr::EnumMemberPrefix(x) = attr {
+                        self.enum_member_prefix = Some(x.to_string());
+                    }
                 }
             }
             HandlerPoint::After => {
