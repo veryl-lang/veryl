@@ -1,0 +1,10 @@
+module Module48 {}
+
+#[test(test1)]
+embed (inline) sv{{{
+module test;
+   initial begin
+       $display("hello");
+   end
+endmodule
+}}}

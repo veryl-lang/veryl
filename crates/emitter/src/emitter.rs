@@ -15,6 +15,7 @@ use veryl_parser::Stringifier;
 pub enum AttributeType {
     Ifdef,
     Sv,
+    Test,
 }
 
 pub struct Emitter {
@@ -265,9 +266,16 @@ impl Emitter {
     }
 
     fn attribute_end(&mut self) {
-        if let Some(AttributeType::Ifdef) = self.attribute.pop() {
-            self.newline();
-            self.str("`endif");
+        match self.attribute.pop() {
+            Some(AttributeType::Ifdef) => {
+                self.newline();
+                self.str("`endif");
+            }
+            Some(AttributeType::Test) => {
+                self.newline();
+                self.str("`endif");
+            }
+            _ => (),
         }
     }
 
@@ -1471,6 +1479,16 @@ impl VerylWalker for Emitter {
                     self.newline();
 
                     self.adjust_line = false;
+                }
+            }
+            "test" => {
+                if let Some(ref x) = arg.attribute_opt {
+                    if let AttributeItem::Identifier(x) = &*x.attribute_list.attribute_item {
+                        let test_name = x.identifier.identifier_token.to_string();
+                        let text = format!("`ifdef __veryl_test_{}__", test_name);
+                        self.token(&arg.hash.hash_token.replace(&text));
+                        self.attribute.push(AttributeType::Test);
+                    }
                 }
             }
             _ => (),

@@ -9,6 +9,7 @@ pub enum Attribute {
     Sv(StrId),
     Allow(AllowItem),
     EnumMemberPrefix(StrId),
+    Test(StrId),
 }
 
 impl fmt::Display for Attribute {
@@ -19,6 +20,7 @@ impl fmt::Display for Attribute {
             Attribute::Sv(x) => format!("sv(\"{}\")", x),
             Attribute::Allow(x) => format!("allow({})", x),
             Attribute::EnumMemberPrefix(x) => format!("enum_member_prefix({})", x),
+            Attribute::Test(x) => format!("test({})", x),
         };
         text.fmt(f)
     }
@@ -74,6 +76,7 @@ struct Pattern {
     pub missing_reset_statement: StrId,
     pub unused_variable: StrId,
     pub enum_member_prefix: StrId,
+    pub test: StrId,
 }
 
 impl Pattern {
@@ -87,6 +90,7 @@ impl Pattern {
             missing_reset_statement: resource_table::insert_str("missing_reset_statement"),
             unused_variable: resource_table::insert_str("unused_variable"),
             enum_member_prefix: resource_table::insert_str("enum_member_prefix"),
+            test: resource_table::insert_str("test"),
         }
     }
 }
@@ -143,6 +147,15 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
 
                 if let Some(arg) = arg {
                     Ok(Attribute::EnumMemberPrefix(arg))
+                } else {
+                    Err(AttributeError::MismatchArgs("single identifier"))
+                }
+            }
+            x if x == pat.test => {
+                let arg = get_arg_ident(&value.attribute_opt);
+
+                if let Some(arg) = arg {
+                    Ok(Attribute::Test(arg))
                 } else {
                     Err(AttributeError::MismatchArgs("single identifier"))
                 }
