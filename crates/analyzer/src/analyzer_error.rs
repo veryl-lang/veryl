@@ -565,6 +565,23 @@ pub enum AnalyzerError {
         #[label("Uncovered")]
         uncovered: SourceSpan,
     },
+
+    #[diagnostic(
+        severity(Error),
+        code(reserved_identifier),
+        help("prefix `__` can't be used"),
+        url(
+            "https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#reserved_identifier"
+        )
+    )]
+    #[error("{identifier} is reverved for compiler usage")]
+    ReservedIdentifier {
+        identifier: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
 }
 
 impl AnalyzerError {
@@ -904,6 +921,14 @@ impl AnalyzerError {
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
             uncovered: uncovered.into(),
+        }
+    }
+
+    pub fn reserved_identifier(identifier: &str, source: &str, token: &Token) -> Self {
+        AnalyzerError::ReservedIdentifier {
+            identifier: identifier.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
         }
     }
 }
