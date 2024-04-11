@@ -17,8 +17,8 @@ impl Namespace {
         self.paths.push(path);
     }
 
-    pub fn pop(&mut self) {
-        self.paths.pop();
+    pub fn pop(&mut self) -> Option<StrId> {
+        self.paths.pop()
     }
 
     pub fn depth(&self) -> usize {

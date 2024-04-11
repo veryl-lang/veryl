@@ -160,7 +160,7 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                             &token.to_string(),
                             self.text,
                             &x.found.kind.to_kind_name(),
-                            token,
+                            &arg.expression_identifier.as_ref().into(),
                         ));
                     }
                 }
@@ -370,7 +370,7 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                         &token.to_string(),
                         self.text,
                         &x.found.kind.to_kind_name(),
-                        token,
+                        &arg.hierarchical_identifier.as_ref().into(),
                     ));
                 }
             }

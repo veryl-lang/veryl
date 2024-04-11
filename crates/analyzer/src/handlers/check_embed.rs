@@ -35,7 +35,7 @@ impl<'a> VerylGrammarTrait for CheckEmbed<'a> {
                 self.errors.push(AnalyzerError::unknown_embed_way(
                     &way,
                     self.text,
-                    &arg.identifier.identifier_token.token,
+                    &arg.identifier.as_ref().into(),
                 ));
             }
 
@@ -43,7 +43,7 @@ impl<'a> VerylGrammarTrait for CheckEmbed<'a> {
                 self.errors.push(AnalyzerError::unknown_embed_lang(
                     &lang,
                     self.text,
-                    &arg.identifier0.identifier_token.token,
+                    &arg.identifier0.as_ref().into(),
                 ));
             }
         }

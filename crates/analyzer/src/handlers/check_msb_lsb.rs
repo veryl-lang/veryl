@@ -41,8 +41,10 @@ impl<'a> VerylGrammarTrait for CheckMsbLsb<'a> {
     fn lsb(&mut self, arg: &Lsb) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if !(self.in_expression_identifier && self.in_select) {
-                self.errors
-                    .push(AnalyzerError::invalid_lsb(self.text, &arg.lsb_token.token));
+                self.errors.push(AnalyzerError::invalid_lsb(
+                    self.text,
+                    &arg.lsb_token.token.into(),
+                ));
             }
         }
         Ok(())
@@ -82,12 +84,16 @@ impl<'a> VerylGrammarTrait for CheckMsbLsb<'a> {
                     false
                 };
                 if !resolved {
-                    self.errors
-                        .push(AnalyzerError::unknown_msb(self.text, &arg.msb_token.token));
+                    self.errors.push(AnalyzerError::unknown_msb(
+                        self.text,
+                        &arg.msb_token.token.into(),
+                    ));
                 }
             } else {
-                self.errors
-                    .push(AnalyzerError::invalid_msb(self.text, &arg.msb_token.token));
+                self.errors.push(AnalyzerError::invalid_msb(
+                    self.text,
+                    &arg.msb_token.token.into(),
+                ));
             }
         }
         Ok(())

@@ -92,7 +92,7 @@ impl<'a> CreateSymbolTable<'a> {
             self.errors.push(AnalyzerError::duplicated_identifier(
                 &token.to_string(),
                 self.text,
-                token,
+                &token.into(),
             ));
         }
         id
@@ -251,7 +251,9 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 let kind = SymbolKind::Variable(property);
                 self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
             }
-            HandlerPoint::After => self.namespace.pop(),
+            HandlerPoint::After => {
+                self.namespace.pop();
+            }
         }
         Ok(())
     }
@@ -674,7 +676,9 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     self.for_identifier = None;
                 }
             }
-            HandlerPoint::After => self.namespace.pop(),
+            HandlerPoint::After => {
+                self.namespace.pop();
+            }
         }
         Ok(())
     }
@@ -704,7 +708,9 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
                 self.namespace.push(name)
             }
-            HandlerPoint::After => self.namespace.pop(),
+            HandlerPoint::After => {
+                self.namespace.pop();
+            }
         }
         Ok(())
     }
@@ -772,7 +778,9 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     self.for_identifier = None;
                 }
             }
-            HandlerPoint::After => self.namespace.pop(),
+            HandlerPoint::After => {
+                self.namespace.pop();
+            }
         }
         Ok(())
     }
@@ -802,7 +810,9 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
                 self.namespace.push(name)
             }
-            HandlerPoint::After => self.namespace.pop(),
+            HandlerPoint::After => {
+                self.namespace.pop();
+            }
         }
         Ok(())
     }

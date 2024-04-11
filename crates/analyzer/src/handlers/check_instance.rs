@@ -72,7 +72,7 @@ impl<'a> VerylGrammarTrait for CheckInstance<'a> {
                                     name,
                                     &port,
                                     self.text,
-                                    &arg.identifier.identifier_token.token,
+                                    &arg.identifier.as_ref().into(),
                                 ));
                             }
                         }
@@ -83,7 +83,7 @@ impl<'a> VerylGrammarTrait for CheckInstance<'a> {
                                     name,
                                     &param,
                                     self.text,
-                                    &arg.identifier.identifier_token.token,
+                                    &arg.identifier.as_ref().into(),
                                 ));
                             }
                         }
@@ -94,7 +94,7 @@ impl<'a> VerylGrammarTrait for CheckInstance<'a> {
                                     name,
                                     &port,
                                     self.text,
-                                    &arg.identifier.identifier_token.token,
+                                    &arg.identifier.as_ref().into(),
                                 ));
                             }
                         }
@@ -107,7 +107,7 @@ impl<'a> VerylGrammarTrait for CheckInstance<'a> {
                             "module or interface",
                             &symbol.found.kind.to_kind_name(),
                             self.text,
-                            &arg.identifier.identifier_token.token,
+                            &arg.identifier.as_ref().into(),
                         ));
                     }
                 }

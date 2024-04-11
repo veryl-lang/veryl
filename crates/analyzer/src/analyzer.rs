@@ -82,7 +82,7 @@ impl<'a> AnalyzerPass3<'a> {
                         ret.push(AnalyzerError::unused_variable(
                             &symbol.token.to_string(),
                             self.text,
-                            &symbol.token,
+                            &symbol.token.into(),
                         ));
                     }
                 }
@@ -127,7 +127,7 @@ impl<'a> AnalyzerPass3<'a> {
                     ret.push(AnalyzerError::unassign_variable(
                         &path.join("."),
                         self.text,
-                        &symbol.token,
+                        &symbol.token.into(),
                     ));
                 }
             }
@@ -405,9 +405,9 @@ fn check_multiple_assignment(
                         ret.push(AnalyzerError::multiple_assignment(
                             &symbol.token.to_string(),
                             text,
-                            &symbol.token,
-                            x_pos.0.last().unwrap().token(),
-                            y_pos.0.last().unwrap().token(),
+                            &symbol.token.into(),
+                            &x_pos.0.last().unwrap().token().into(),
+                            &y_pos.0.last().unwrap().token().into(),
                         ));
                     }
                 }
@@ -437,8 +437,8 @@ fn check_assign_position_tree(
         ret.push(AnalyzerError::uncovered_branch(
             &symbol.token.to_string(),
             text,
-            &symbol.token,
-            &token,
+            &symbol.token.into(),
+            &token.into(),
         ));
     }
 
@@ -446,8 +446,8 @@ fn check_assign_position_tree(
         ret.push(AnalyzerError::missing_reset_statement(
             &symbol.token.to_string(),
             text,
-            &symbol.token,
-            &token,
+            &symbol.token.into(),
+            &token.into(),
         ));
     }
 

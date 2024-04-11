@@ -52,7 +52,7 @@ impl<'a> VerylGrammarTrait for CheckStatement<'a> {
                 self.errors.push(AnalyzerError::invalid_statement(
                     "assignment",
                     self.text,
-                    token,
+                    &token.into(),
                 ));
             }
         }
@@ -65,7 +65,7 @@ impl<'a> VerylGrammarTrait for CheckStatement<'a> {
                 self.errors.push(AnalyzerError::invalid_statement(
                     "if_reset",
                     self.text,
-                    &arg.if_reset.if_reset_token.token,
+                    &arg.if_reset.if_reset_token.token.into(),
                 ));
             }
 
@@ -73,7 +73,7 @@ impl<'a> VerylGrammarTrait for CheckStatement<'a> {
                 self.errors.push(AnalyzerError::invalid_statement(
                     "if_reset",
                     self.text,
-                    &arg.if_reset.if_reset_token.token,
+                    &arg.if_reset.if_reset_token.token.into(),
                 ));
             }
         }
@@ -86,7 +86,7 @@ impl<'a> VerylGrammarTrait for CheckStatement<'a> {
                 self.errors.push(AnalyzerError::invalid_statement(
                     "return",
                     self.text,
-                    &arg.r#return.return_token.token,
+                    &arg.r#return.return_token.token.into(),
                 ));
             }
         }
@@ -99,7 +99,7 @@ impl<'a> VerylGrammarTrait for CheckStatement<'a> {
                 self.errors.push(AnalyzerError::invalid_statement(
                     "break",
                     self.text,
-                    &arg.r#break.break_token.token,
+                    &arg.r#break.break_token.token.into(),
                 ));
             }
         }

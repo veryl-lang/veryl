@@ -36,7 +36,7 @@ impl<'a> VerylGrammarTrait for CheckDirection<'a> {
                         self.errors.push(AnalyzerError::invalid_direction(
                             "ref",
                             self.text,
-                            &x.r#ref.ref_token.token,
+                            &x.r#ref.ref_token.token.into(),
                         ));
                     }
                 }
@@ -45,7 +45,7 @@ impl<'a> VerylGrammarTrait for CheckDirection<'a> {
                         self.errors.push(AnalyzerError::invalid_direction(
                             "modport",
                             self.text,
-                            &x.modport.modport_token.token,
+                            &x.modport.modport_token.token.into(),
                         ));
                     }
                 }

@@ -73,10 +73,8 @@ impl<'a> VerylGrammarTrait for CheckReset<'a> {
                     false
                 };
                 if if_reset_required {
-                    self.errors.push(AnalyzerError::missing_if_reset(
-                        self.text,
-                        &arg.always_ff.always_ff_token.token,
-                    ));
+                    self.errors
+                        .push(AnalyzerError::missing_if_reset(self.text, &arg.into()));
                 }
 
                 self.in_always_ff = true;
@@ -84,10 +82,8 @@ impl<'a> VerylGrammarTrait for CheckReset<'a> {
             HandlerPoint::After => {
                 // Check reset signal when if_reset exists
                 if self.if_reset_exist && arg.always_ff_declaration_opt.is_none() {
-                    self.errors.push(AnalyzerError::missing_reset_signal(
-                        self.text,
-                        &arg.always_ff.always_ff_token.token,
-                    ));
+                    self.errors
+                        .push(AnalyzerError::missing_reset_signal(self.text, &arg.into()));
                 }
 
                 self.in_always_ff = false;

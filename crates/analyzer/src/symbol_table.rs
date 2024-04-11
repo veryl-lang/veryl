@@ -447,11 +447,8 @@ impl SymbolTable {
                 found: found.clone(),
                 full_path: context.full_path,
             })
-        } else if format!("{}", path.as_slice()[0]) == "$" {
-            let cause = ResolveErrorCause::NotFound(path.as_slice()[1]);
-            Err(ResolveError::new(context.last_found, cause))
         } else {
-            let cause = ResolveErrorCause::NotFound(path.as_slice()[0]);
+            let cause = ResolveErrorCause::NotFound(context.namespace.pop().unwrap());
             Err(ResolveError::new(context.last_found, cause))
         }
     }

@@ -5,7 +5,7 @@ use crate::symbol::SymbolKind;
 use crate::symbol_table::{self, ResolveError, ResolveErrorCause, SymbolPath};
 use veryl_parser::resource_table::TokenId;
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::Token;
+use veryl_parser::veryl_token::TokenRange;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
@@ -28,7 +28,7 @@ impl<'a> CreateReference<'a> {
         }
     }
 
-    fn push_resolve_error(&mut self, err: ResolveError, token: &Token) {
+    fn push_resolve_error(&mut self, err: ResolveError, token: &TokenRange) {
         if let Some(last_found) = err.last_found {
             let name = last_found.token.to_string();
             match err.cause {
@@ -76,7 +76,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                     }
 
                     // TODO check SV-side member to suppress error
-                    self.push_resolve_error(err, &arg.identifier.identifier_token.token);
+                    self.push_resolve_error(err, &arg.into());
                 }
             }
         }
@@ -92,7 +92,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                     }
                 }
                 Err(err) => {
-                    self.push_resolve_error(err, &arg.identifier.identifier_token.token);
+                    self.push_resolve_error(err, &arg.into());
                 }
             }
         }
@@ -114,7 +114,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                         return Ok(());
                     }
 
-                    self.push_resolve_error(err, &arg.identifier.identifier_token.token);
+                    self.push_resolve_error(err, &arg.into());
                 }
             }
         }
@@ -130,7 +130,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                     }
                 }
                 Err(err) => {
-                    self.push_resolve_error(err, &arg.identifier.identifier_token.token);
+                    self.push_resolve_error(err, &arg.identifier.as_ref().into());
                 }
             }
         }
@@ -148,7 +148,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                         }
                     }
                     Err(err) => {
-                        self.push_resolve_error(err, &arg.identifier.identifier_token.token);
+                        self.push_resolve_error(err, &arg.identifier.as_ref().into());
                     }
                 }
             }
@@ -240,7 +240,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                         _ if is_wildcard => {
                             self.errors.push(AnalyzerError::invalid_import(
                                 self.text,
-                                &arg.scoped_identifier.identifier.identifier_token.token,
+                                &arg.scoped_identifier.as_ref().into(),
                             ));
                         }
                         _ => {
@@ -253,10 +253,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                     }
                 }
                 Err(err) => {
-                    self.push_resolve_error(
-                        err,
-                        &arg.scoped_identifier.identifier.identifier_token.token,
-                    );
+                    self.push_resolve_error(err, &arg.scoped_identifier.as_ref().into());
                 }
             }
         }
