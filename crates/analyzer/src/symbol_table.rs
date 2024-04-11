@@ -378,6 +378,9 @@ impl SymbolTable {
                         SymbolKind::Parameter(x) => {
                             context = self.trace_user_defined(context, &x.r#type.kind)?;
                         }
+                        SymbolKind::TypeDef(x) => {
+                            context = self.trace_user_defined(context, &x.r#type.kind)?;
+                        }
                         SymbolKind::Port(ref x) => {
                             if let Some(ref x) = x.r#type {
                                 context = self.trace_user_defined(context, &x.kind)?;
@@ -419,7 +422,6 @@ impl SymbolTable {
                         SymbolKind::Function(_)
                         | SymbolKind::Struct(_)
                         | SymbolKind::Union(_)
-                        | SymbolKind::TypeDef(_)
                         | SymbolKind::Modport(_)
                         | SymbolKind::EnumMember(_)
                         | SymbolKind::Block
