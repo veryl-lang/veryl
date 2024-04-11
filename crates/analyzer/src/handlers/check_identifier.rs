@@ -130,6 +130,15 @@ impl<'a> CheckIdentifier<'a> {
         };
 
         let identifier = token.to_string();
+
+        if identifier.starts_with("__") {
+            self.errors.push(AnalyzerError::reserved_identifier(
+                &identifier,
+                self.text,
+                token,
+            ));
+        }
+
         if let Some(prefix) = prefix {
             if !identifier.starts_with(prefix) {
                 self.errors.push(AnalyzerError::invalid_identifier(

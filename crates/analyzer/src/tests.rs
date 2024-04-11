@@ -600,3 +600,17 @@ fn uncovered_branch() {
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UncoveredBranch { .. }));
 }
+
+#[test]
+fn reserved_identifier() {
+    let code = r#"
+    module __ModuleA {
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ReservedIdentifier { .. }
+    ));
+}
