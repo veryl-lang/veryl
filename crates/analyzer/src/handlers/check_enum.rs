@@ -51,7 +51,7 @@ impl<'a> VerylGrammarTrait for CheckEnum<'a> {
                             self.enum_variants,
                             width,
                             self.text,
-                            &arg.identifier.identifier_token.token,
+                            &arg.identifier.as_ref().into(),
                         ));
                     }
 
@@ -63,7 +63,7 @@ impl<'a> VerylGrammarTrait for CheckEnum<'a> {
                                     *value,
                                     width,
                                     self.text,
-                                    token,
+                                    &token.into(),
                                 ));
                             }
                         }

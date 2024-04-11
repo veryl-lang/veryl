@@ -139,6 +139,118 @@ impl TokenRange {
     }
 }
 
+impl From<&TokenRange> for miette::SourceSpan {
+    fn from(x: &TokenRange) -> Self {
+        let length = (x.end.pos - x.beg.pos + x.end.length) as usize;
+        (x.beg.pos as usize, length).into()
+    }
+}
+
+impl From<TokenRange> for miette::SourceSpan {
+    fn from(x: TokenRange) -> Self {
+        let length = (x.end.pos - x.beg.pos + x.end.length) as usize;
+        (x.beg.pos as usize, length).into()
+    }
+}
+
+impl From<Token> for TokenRange {
+    fn from(value: Token) -> Self {
+        let beg = value;
+        let end = value;
+        TokenRange { beg, end }
+    }
+}
+
+impl From<&Token> for TokenRange {
+    fn from(value: &Token) -> Self {
+        let beg = *value;
+        let end = *value;
+        TokenRange { beg, end }
+    }
+}
+
+impl From<&Identifier> for TokenRange {
+    fn from(value: &Identifier) -> Self {
+        let beg = value.identifier_token.token;
+        let end = value.identifier_token.token;
+        TokenRange { beg, end }
+    }
+}
+
+impl From<&HierarchicalIdentifier> for TokenRange {
+    fn from(value: &HierarchicalIdentifier) -> Self {
+        let beg = value.identifier.identifier_token.token;
+        let mut end = value.identifier.identifier_token.token;
+        if let Some(x) = value.hierarchical_identifier_list.last() {
+            end = x.select.r_bracket.r_bracket_token.token;
+        }
+        if let Some(x) = value.hierarchical_identifier_list0.last() {
+            end = x.identifier.identifier_token.token;
+            if let Some(x) = x.hierarchical_identifier_list0_list.last() {
+                end = x.select.r_bracket.r_bracket_token.token;
+            }
+        }
+        TokenRange { beg, end }
+    }
+}
+
+impl From<&ScopedIdentifier> for TokenRange {
+    fn from(value: &ScopedIdentifier) -> Self {
+        let mut beg = value.identifier.identifier_token.token;
+        if let Some(ref x) = value.scoped_identifier_opt {
+            beg = x.dollar.dollar_token.token;
+        }
+        let mut end = value.identifier.identifier_token.token;
+        if let Some(x) = value.scoped_identifier_list.last() {
+            end = x.identifier.identifier_token.token;
+        }
+        TokenRange { beg, end }
+    }
+}
+
+impl From<&ExpressionIdentifier> for TokenRange {
+    fn from(value: &ExpressionIdentifier) -> Self {
+        let mut beg = value.identifier.identifier_token.token;
+        if let Some(ref x) = value.expression_identifier_opt {
+            beg = x.dollar.dollar_token.token;
+        }
+        let mut end = value.identifier.identifier_token.token;
+        match &*value.expression_identifier_group {
+            ExpressionIdentifierGroup::ExpressionIdentifierScoped(x) => {
+                let x = &x.expression_identifier_scoped;
+                end = x.identifier.identifier_token.token;
+                if let Some(x) = x.expression_identifier_scoped_list.last() {
+                    end = x.identifier.identifier_token.token;
+                }
+                if let Some(x) = x.expression_identifier_scoped_list0.last() {
+                    end = x.select.r_bracket.r_bracket_token.token;
+                }
+            }
+            ExpressionIdentifierGroup::ExpressionIdentifierMember(x) => {
+                let x = &x.expression_identifier_member;
+                if let Some(x) = x.expression_identifier_member_list.last() {
+                    end = x.select.r_bracket.r_bracket_token.token;
+                }
+                if let Some(x) = x.expression_identifier_member_list0.last() {
+                    end = x.identifier.identifier_token.token;
+                    if let Some(x) = x.expression_identifier_member_list0_list.last() {
+                        end = x.select.r_bracket.r_bracket_token.token;
+                    }
+                }
+            }
+        }
+        TokenRange { beg, end }
+    }
+}
+
+impl From<&AlwaysFfDeclaration> for TokenRange {
+    fn from(value: &AlwaysFfDeclaration) -> Self {
+        let beg = value.always_ff.always_ff_token.token;
+        let end = value.r_brace.r_brace_token.token;
+        TokenRange { beg, end }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct VerylToken {
     pub token: Token,

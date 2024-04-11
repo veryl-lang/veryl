@@ -135,7 +135,7 @@ impl<'a> CheckIdentifier<'a> {
             self.errors.push(AnalyzerError::reserved_identifier(
                 &identifier,
                 self.text,
-                token,
+                &token.into(),
             ));
         }
 
@@ -145,7 +145,7 @@ impl<'a> CheckIdentifier<'a> {
                     &identifier,
                     &format!("prefix: {prefix}"),
                     self.text,
-                    token,
+                    &token.into(),
                 ));
             }
         }
@@ -161,7 +161,7 @@ impl<'a> CheckIdentifier<'a> {
                     &identifier,
                     &format!("case: {case}"),
                     self.text,
-                    token,
+                    &token.into(),
                 ));
             }
         }
@@ -176,7 +176,7 @@ impl<'a> CheckIdentifier<'a> {
                     &identifier,
                     &format!("re_required: {re_required}"),
                     self.text,
-                    token,
+                    &token.into(),
                 ));
             }
         }
@@ -191,7 +191,7 @@ impl<'a> CheckIdentifier<'a> {
                     &identifier,
                     &format!("re_forbidden: {re_forbidden}"),
                     self.text,
-                    token,
+                    &token.into(),
                 ));
             }
         }

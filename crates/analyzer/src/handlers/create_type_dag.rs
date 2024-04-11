@@ -62,11 +62,11 @@ impl<'a> CreateTypeDag<'a> {
                     Some(s) => s,
                     None => "<unknown StrId>".into(),
                 };
-                AnalyzerError::cyclic_type_dependency(self.text, &start, &end, &e.token)
+                AnalyzerError::cyclic_type_dependency(self.text, &start, &end, &e.token.into())
             }
             DagError::UnableToResolve(b) => {
                 let t = b.as_ref();
-                AnalyzerError::undefined_identifier(&t.name, self.text, &t.token)
+                AnalyzerError::undefined_identifier(&t.name, self.text, &t.token.into())
             }
         }
     }

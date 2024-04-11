@@ -44,7 +44,7 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
                             self.errors.push(AnalyzerError::unknown_attribute(
                                 &arg.identifier.identifier_token.to_string(),
                                 self.text,
-                                &arg.identifier.identifier_token.token,
+                                &arg.identifier.as_ref().into(),
                             ));
                         }
                         crate::attribute::AttributeError::MismatchArgs(x) => {
@@ -52,14 +52,14 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
                                 &arg.identifier.identifier_token.to_string(),
                                 x,
                                 self.text,
-                                &arg.identifier.identifier_token.token,
+                                &arg.identifier.as_ref().into(),
                             ));
                         }
                         crate::attribute::AttributeError::InvalidAllow(x) => {
                             self.errors.push(AnalyzerError::invalid_allow(
                                 &x.to_string(),
                                 self.text,
-                                &arg.identifier.identifier_token.token,
+                                &arg.identifier.as_ref().into(),
                             ));
                         }
                     }
