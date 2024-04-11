@@ -1,11 +1,13 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use console::Style;
 use fern::Dispatch;
+use log::debug;
 use log::{Level, LevelFilter};
 use miette::{IntoDiagnostic, Result};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::str::FromStr;
+use std::time::Instant;
 use veryl_metadata::Metadata;
 
 mod cmd_build;
@@ -18,8 +20,10 @@ mod cmd_init;
 mod cmd_metadata;
 mod cmd_new;
 mod cmd_publish;
+mod cmd_test;
 mod cmd_update;
 mod doc_builder;
+mod runner;
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Opt
@@ -54,6 +58,7 @@ enum Commands {
     Doc(OptDoc),
     Metadata(OptMetadata),
     Dump(OptDump),
+    Test(OptTest),
 }
 
 /// Create a new project
@@ -115,6 +120,37 @@ pub struct OptPublish {
 pub struct OptDoc {
     /// Target files
     pub files: Vec<PathBuf>,
+}
+
+/// Execute tests
+#[derive(Args)]
+pub struct OptTest {
+    /// Target files
+    pub files: Vec<PathBuf>,
+
+    /// Simulator
+    #[arg(long, value_enum)]
+    pub sim: Option<SimType>,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum SimType {
+    /// Verilator
+    Verilator,
+    /// Synopsys VCS
+    Vcs,
+    /// AMD Vivado Simulator
+    Vivado,
+}
+
+impl From<SimType> for veryl_metadata::SimType {
+    fn from(x: SimType) -> Self {
+        match x {
+            SimType::Verilator => veryl_metadata::SimType::Verilator,
+            SimType::Vcs => veryl_metadata::SimType::Vcs,
+            SimType::Vivado => veryl_metadata::SimType::Vivado,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Default, Debug, ValueEnum)]
@@ -239,6 +275,8 @@ fn main() -> Result<ExitCode> {
         }
     };
 
+    let now = Instant::now();
+
     let ret = match opt.command {
         Commands::New(x) => cmd_new::CmdNew::new(x).exec()?,
         Commands::Init(x) => cmd_init::CmdInit::new(x).exec()?,
@@ -251,7 +289,12 @@ fn main() -> Result<ExitCode> {
         Commands::Doc(x) => cmd_doc::CmdDoc::new(x).exec(&mut metadata)?,
         Commands::Metadata(x) => cmd_metadata::CmdMetadata::new(x).exec(&metadata)?,
         Commands::Dump(x) => cmd_dump::CmdDump::new(x).exec(&mut metadata)?,
+        Commands::Test(x) => cmd_test::CmdTest::new(x).exec(&mut metadata)?,
     };
+
+    let elapsed_time = now.elapsed();
+    debug!("Elapsed time ({} milliseconds)", elapsed_time.as_millis());
+
     if ret {
         Ok(ExitCode::SUCCESS)
     } else {

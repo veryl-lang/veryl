@@ -1,8 +1,7 @@
 use crate::OptClean;
-use log::{debug, info};
+use log::info;
 use miette::{IntoDiagnostic, Result};
 use std::fs;
-use std::time::Instant;
 use veryl_metadata::Metadata;
 
 pub struct CmdClean {
@@ -15,8 +14,6 @@ impl CmdClean {
     }
 
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
-        let now = Instant::now();
-
         let paths = metadata.paths::<&str>(&[])?;
         for path in &paths {
             if path.dst.exists() {
@@ -39,9 +36,6 @@ impl CmdClean {
             info!("Removing file ({})", filelist_path.to_string_lossy());
             fs::remove_file(&filelist_path).into_diagnostic()?;
         }
-
-        let elapsed_time = now.elapsed();
-        debug!("Elapsed time ({} milliseconds)", elapsed_time.as_millis());
 
         Ok(true)
     }

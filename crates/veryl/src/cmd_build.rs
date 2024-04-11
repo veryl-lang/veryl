@@ -7,7 +7,6 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
-use std::time::Instant;
 use veryl_analyzer::symbol::SymbolKind;
 use veryl_analyzer::{type_dag, Analyzer};
 use veryl_emitter::Emitter;
@@ -24,8 +23,6 @@ impl CmdBuild {
     }
 
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
-        let now = Instant::now();
-
         let paths = metadata.paths(&self.opt.files)?;
 
         let mut check_error = CheckError::default();
@@ -79,9 +76,6 @@ impl CmdBuild {
         }
 
         self.gen_filelist(metadata, &paths)?;
-
-        let elapsed_time = now.elapsed();
-        debug!("Elapsed time ({} milliseconds)", elapsed_time.as_millis());
 
         let _ = check_error.check_all()?;
         Ok(true)

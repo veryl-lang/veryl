@@ -18,8 +18,14 @@ indent_width = 4
 [doc]
 path = "target/veryl_doc"
 
+[test]
+simulator = "vcs"
+
+[test.vcs]
+compile_args = ["-full64"]
+
 [dependencies]
 "https://github.com/veryl-lang/sample" = [
-    {version = "0.9.0", name = "veryl_sample1"},
-    {version = "0.10.0", name = "veryl_sample2"},
+    {version = "0.11.0", name = "veryl_sample1"},
+    {version = "0.12.0", name = "veryl_sample2"},
 ]

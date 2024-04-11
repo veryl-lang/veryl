@@ -1,10 +1,9 @@
 use crate::doc_builder::DocBuilder;
 use crate::OptDoc;
-use log::{debug, info};
+use log::info;
 use miette::{IntoDiagnostic, Result, WrapErr};
 use std::collections::BTreeMap;
 use std::fs;
-use std::time::Instant;
 use veryl_analyzer::symbol::SymbolKind;
 use veryl_analyzer::Analyzer;
 use veryl_metadata::Metadata;
@@ -21,8 +20,6 @@ impl CmdDoc {
     }
 
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
-        let now = Instant::now();
-
         let paths = metadata.paths(&self.opt.files)?;
 
         let mut contexts = Vec::new();
@@ -72,9 +69,6 @@ impl CmdDoc {
 
         let builder = DocBuilder::new(metadata, modules, interfaces, packages)?;
         builder.build()?;
-
-        let elapsed_time = now.elapsed();
-        debug!("Elapsed time ({} milliseconds)", elapsed_time.as_millis());
 
         Ok(true)
     }

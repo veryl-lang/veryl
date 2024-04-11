@@ -66,6 +66,10 @@ impl AttributeTable {
     pub fn dump(&self) -> String {
         format!("{self}")
     }
+
+    pub fn get_all(&self) -> Vec<(TokenRange, Attribute)> {
+        self.table.values().flat_map(|x| x.clone()).collect()
+    }
 }
 
 impl fmt::Display for AttributeTable {
@@ -126,4 +130,8 @@ pub fn contains(token: &Token, attr: Attribute) -> bool {
 
 pub fn dump() -> String {
     ATTRIBUTE_TABLE.with(|f| f.borrow().dump())
+}
+
+pub fn get_all() -> Vec<(TokenRange, Attribute)> {
+    ATTRIBUTE_TABLE.with(|f| f.borrow().get_all())
 }

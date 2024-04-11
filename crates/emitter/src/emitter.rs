@@ -1517,7 +1517,11 @@ impl VerylWalker for Emitter {
                 if let Some(ref x) = arg.attribute_opt {
                     if let AttributeItem::Identifier(x) = &*x.attribute_list.attribute_item {
                         let test_name = x.identifier.identifier_token.to_string();
-                        let text = format!("`ifdef __veryl_test_{}__", test_name);
+                        let text = format!(
+                            "`ifdef __veryl_test_{}_{}__",
+                            self.project_name.unwrap(),
+                            test_name
+                        );
                         self.token(&arg.hash.hash_token.replace(&text));
                         self.attribute.push(AttributeType::Test);
                     }

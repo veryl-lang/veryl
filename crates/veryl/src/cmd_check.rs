@@ -1,8 +1,7 @@
 use crate::OptCheck;
-use log::{debug, info};
+use log::info;
 use miette::{self, Diagnostic, IntoDiagnostic, Result, Severity, WrapErr};
 use std::fs;
-use std::time::Instant;
 use thiserror::Error;
 use veryl_analyzer::{Analyzer, AnalyzerError};
 use veryl_metadata::Metadata;
@@ -52,8 +51,6 @@ impl CmdCheck {
     }
 
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
-        let now = Instant::now();
-
         let paths = metadata.paths(&self.opt.files)?;
 
         let mut check_error = CheckError::default();
@@ -83,9 +80,6 @@ impl CmdCheck {
             let mut errors = analyzer.analyze_pass3(&path.prj, input, &path.src, &parser.veryl);
             check_error = check_error.append(&mut errors).check_err()?;
         }
-
-        let elapsed_time = now.elapsed();
-        debug!("Elapsed time ({} milliseconds)", elapsed_time.as_millis());
 
         let _ = check_error.check_all()?;
         Ok(true)
