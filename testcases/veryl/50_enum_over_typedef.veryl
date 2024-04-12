@@ -1,0 +1,13 @@
+package Package50 {
+    enum EnumA: logic<1> {
+        memberA,
+        memberB,
+    }
+}
+
+module Module50 {
+    type EnumB = Package50::EnumA;
+
+    let _a: Package50::EnumA = Package50::EnumA::memberA;
+    let _b: EnumB            = EnumB::memberB;
+}

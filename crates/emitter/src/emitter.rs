@@ -340,12 +340,12 @@ impl Emitter {
     }
 
     fn path_identifier(&mut self, path: SymbolPathNamespace, args: &[VerylToken]) {
-        if let Ok(symbol) = symbol_table::resolve(path) {
+        if let Ok(symbol) = symbol_table::resolve(&path) {
             let symbol = symbol.found;
             match &symbol.kind {
                 SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_) => {
                     self.namespace(&symbol.namespace);
-                    self.str(&format!("{}", symbol.token.text));
+                    self.str(&symbol.token.text.to_string());
                 }
                 SymbolKind::Parameter(_)
                 | SymbolKind::Function(_)
@@ -355,24 +355,26 @@ impl Emitter {
                 | SymbolKind::Enum(_) => {
                     if args.len() > 1 {
                         self.namespace(&symbol.namespace);
-                        self.str(&format!("{}", symbol.token.text));
+                        self.str(&symbol.token.text.to_string());
                     } else {
                         self.veryl_token(&args[0]);
                     }
                 }
                 SymbolKind::EnumMember(x) => {
-                    if args.len() > 2 {
-                        self.namespace(&symbol.namespace);
-                        self.str(&format!("{}", symbol.token.text));
-                    } else {
-                        self.str(&x.prefix);
-                        self.str("_");
-                        self.veryl_token(&args[1]);
+                    let mut enum_namespace = symbol.namespace.clone();
+                    enum_namespace.pop();
+
+                    // if enum definition is not visible, explicit namespace is required
+                    if !path.1.included(&enum_namespace) {
+                        self.namespace(&enum_namespace);
                     }
+                    self.str(&x.prefix);
+                    self.str("_");
+                    self.veryl_token(args.last().unwrap());
                 }
                 SymbolKind::Modport(_) => {
                     self.namespace(&symbol.namespace);
-                    self.str(&format!("{}", symbol.token.text));
+                    self.str(&symbol.token.text.to_string());
                 }
                 SymbolKind::SystemVerilog => {
                     // arg[0] is "sv", it should be removed
@@ -384,7 +386,6 @@ impl Emitter {
                     }
                 }
                 SymbolKind::SystemFunction => {
-                    self.adjust_line = false;
                     self.veryl_token(&args[0]);
                 }
                 SymbolKind::Port(_)
