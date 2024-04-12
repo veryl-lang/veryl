@@ -3,6 +3,7 @@ use veryl_analyzer::attribute::Attribute as Attr;
 use veryl_analyzer::attribute_table;
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::SymbolKind;
+use veryl_analyzer::symbol::TypeModifier as SymTypeModifier;
 use veryl_analyzer::symbol_table::{self, SymbolPath, SymbolPathNamespace};
 use veryl_analyzer::{msb_table, namespace_table};
 use veryl_metadata::{Build, BuiltinType, ClockType, Format, Metadata, ResetType};
@@ -523,11 +524,6 @@ impl VerylWalker for Emitter {
         } else {
             self.veryl_token(&arg.comma_token);
         }
-    }
-
-    /// Semantic action for non-terminal 'Assign'
-    fn assign(&mut self, arg: &Assign) {
-        self.veryl_token(&arg.assign_token.replace("always_comb"));
     }
 
     /// Semantic action for non-terminal 'F32'
@@ -1498,6 +1494,13 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'LetDeclaration'
     fn let_declaration(&mut self, arg: &LetDeclaration) {
+        let is_tri = arg
+            .array_type
+            .scalar_type
+            .scalar_type_list
+            .iter()
+            .any(|x| matches!(x.type_modifier.as_ref(), TypeModifier::Tri(_)));
+
         self.scalar_type(&arg.array_type.scalar_type);
         self.space(1);
         self.identifier(&arg.identifier);
@@ -1507,7 +1510,11 @@ impl VerylWalker for Emitter {
         }
         self.str(";");
         self.newline();
-        self.str("always_comb");
+        if is_tri {
+            self.str("assign");
+        } else {
+            self.str("always_comb");
+        }
         self.space(1);
         self.str(&arg.identifier.identifier_token.to_string());
         self.space(1);
@@ -1704,7 +1711,28 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'AssignDeclaration'
     fn assign_declaration(&mut self, arg: &AssignDeclaration) {
-        self.assign(&arg.assign);
+        let emit_assign =
+            if let Ok(symbol) = symbol_table::resolve(arg.hierarchical_identifier.as_ref()) {
+                match &symbol.found.kind {
+                    SymbolKind::Variable(x) => x.r#type.modifier.contains(&SymTypeModifier::Tri),
+                    SymbolKind::Port(x) => {
+                        if let Some(ref x) = x.r#type {
+                            x.modifier.contains(&SymTypeModifier::Tri)
+                        } else {
+                            false
+                        }
+                    }
+                    _ => false,
+                }
+            } else {
+                // External symbols may be tri-state
+                true
+            };
+        if emit_assign {
+            self.assign(&arg.assign);
+        } else {
+            self.token(&arg.assign.assign_token.replace("always_comb"));
+        }
         self.space(1);
         self.hierarchical_identifier(&arg.hierarchical_identifier);
         self.space(1);

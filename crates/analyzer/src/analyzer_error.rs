@@ -310,6 +310,20 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(missing_tri),
+        help("add tri type modifier"),
+        url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#missing_tri")
+    )]
+    #[error("tri type modifier is required at inout port")]
+    MissingTri {
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(too_large_enum_variant),
         help(""),
         url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#too_large_enum_variant")
@@ -771,6 +785,13 @@ impl AnalyzerError {
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
             reset: reset.into(),
+        }
+    }
+
+    pub fn missing_tri(source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::MissingTri {
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
         }
     }
 
