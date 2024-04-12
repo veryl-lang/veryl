@@ -498,6 +498,7 @@ token_with_comments!(DotDotEqu);
 token_with_comments!(Dot);
 token_with_comments!(Equ);
 token_with_comments!(Hash);
+token_with_comments!(QuoteLBrace);
 token_with_comments!(LAngle);
 token_with_comments!(LBrace);
 token_with_comments!(LBracket);

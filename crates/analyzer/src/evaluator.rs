@@ -620,6 +620,9 @@ impl Evaluator {
             Factor::LBraceConcatenationListRBrace(x) => {
                 self.concatenation_list(&x.concatenation_list)
             }
+            Factor::QuoteLBraceArrayLiteralListRBrace(x) => {
+                self.array_literal_list(&x.array_literal_list)
+            }
             Factor::IfExpression(x) => self.if_expression(&x.if_expression),
             Factor::CaseExpression(x) => self.case_expression(&x.case_expression),
             Factor::StringLiteral(_) => Evaluated::Unknown,
@@ -630,6 +633,10 @@ impl Evaluator {
     }
 
     fn concatenation_list(&mut self, _arg: &ConcatenationList) -> Evaluated {
+        Evaluated::Unknown
+    }
+
+    fn array_literal_list(&mut self, _arg: &ArrayLiteralList) -> Evaluated {
         Evaluated::Unknown
     }
 

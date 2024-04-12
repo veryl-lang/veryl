@@ -50,6 +50,7 @@ DotTerm               : '.'                                                     
 EquTerm               : '='                                                                                   : Token;
 HashTerm              : '#'                                                                                   : Token;
 LAngleTerm            : '<'                                                                                   : Token;
+QuoteLBraceTerm       : "'\{"                                                                                 : Token;
 LBraceTerm            : <Embed, INITIAL>'{'                                                                   : Token;
 LBracketTerm          : '['                                                                                   : Token;
 LParenTerm            : '('                                                                                   : Token;
@@ -161,6 +162,7 @@ DotDotEquToken   : DotDotEquTerm   : Token Comments;
 DotToken         : DotTerm         : Token Comments;
 EquToken         : EquTerm         : Token Comments;
 HashToken        : HashTerm        : Token Comments;
+QuoteLBraceToken : QuoteLBraceTerm : Token Comments;
 LAngleToken      : LAngleTerm      : Token Comments;
 LBraceToken      : LBraceTerm      : Token Comments;
 LBracketToken    : LBracketTerm    : Token Comments;
@@ -280,6 +282,7 @@ DotDotEqu   : DotDotEquToken   : VerylToken;
 Dot         : DotToken         : VerylToken;
 Equ         : EquToken         : VerylToken;
 Hash        : HashToken        : VerylToken;
+QuoteLBrace : QuoteLBraceToken : VerylToken;
 LAngle      : LAngleToken      : VerylToken;
 LBrace      : LBraceToken      : VerylToken;
 LBracket    : LBracketToken    : VerylToken;
@@ -410,6 +413,7 @@ Factor: Number
       | ExpressionIdentifier [ FunctionCall ]
       | LParen Expression RParen
       | LBrace ConcatenationList RBrace
+      | QuoteLBrace ArrayLiteralList RBrace
       | IfExpression
       | CaseExpression
       | StringLiteral
@@ -427,6 +431,10 @@ ArgumentItem: Expression;
 ConcatenationList: ConcatenationItem { Comma ConcatenationItem } [ Comma ];
 
 ConcatenationItem: Expression [ Repeat Expression ];
+
+ArrayLiteralList: ArrayLiteralItem { Comma ArrayLiteralItem } [ Comma ];
+
+ArrayLiteralItem: ( Expression [ Repeat Expression ] | Defaul Colon Expression );
 
 IfExpression: If Expression LBrace Expression RBrace { Else If Expression LBrace Expression RBrace } Else LBrace Expression RBrace;
 

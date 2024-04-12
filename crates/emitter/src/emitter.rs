@@ -814,6 +814,41 @@ impl VerylWalker for Emitter {
         }
     }
 
+    /// Semantic action for non-terminal 'ArrayLiteralList'
+    fn array_literal_list(&mut self, arg: &ArrayLiteralList) {
+        self.array_literal_item(&arg.array_literal_item);
+        for x in &arg.array_literal_list_list {
+            self.comma(&x.comma);
+            self.space(1);
+            self.array_literal_item(&x.array_literal_item);
+        }
+        if let Some(ref x) = arg.array_literal_list_opt {
+            self.comma(&x.comma);
+        }
+    }
+
+    /// Semantic action for non-terminal 'ArrayLiteralItem'
+    fn array_literal_item(&mut self, arg: &ArrayLiteralItem) {
+        match &*arg.array_literal_item_group {
+            ArrayLiteralItemGroup::ExpressionArrayLiteralItemOpt(x) => {
+                if let Some(ref y) = x.array_literal_item_opt {
+                    self.expression(&y.expression);
+                    self.str("{");
+                    self.expression(&x.expression);
+                    self.str("}");
+                } else {
+                    self.expression(&x.expression);
+                }
+            }
+            ArrayLiteralItemGroup::DefaulColonExpression(x) => {
+                self.defaul(&x.defaul);
+                self.colon(&x.colon);
+                self.space(1);
+                self.expression(&x.expression);
+            }
+        }
+    }
+
     /// Semantic action for non-terminal 'IfExpression'
     fn if_expression(&mut self, arg: &IfExpression) {
         self.token(&arg.r#if.if_token.replace("(("));
