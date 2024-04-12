@@ -25,7 +25,7 @@ module veryl_testcase_Module04 #(
     always_comb _ddd = 1;
 
     always_comb bb  = 0;
-    always_comb bbb = 0;
+    assign bbb = 0;
 endmodule
 
 interface veryl_testcase_Interface04;

@@ -28,6 +28,31 @@ impl<'a> Handler for CheckDirection<'a> {
 }
 
 impl<'a> VerylGrammarTrait for CheckDirection<'a> {
+    fn port_declaration_item(&mut self, arg: &PortDeclarationItem) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            if let PortDeclarationItemGroup::DirectionArrayType(x) =
+                arg.port_declaration_item_group.as_ref()
+            {
+                if let Direction::Inout(_) = x.direction.as_ref() {
+                    let r#type = &x.array_type;
+                    let is_tri = r#type
+                        .scalar_type
+                        .scalar_type_list
+                        .iter()
+                        .any(|x| matches!(x.type_modifier.as_ref(), TypeModifier::Tri(_)));
+
+                    if !is_tri {
+                        self.errors.push(AnalyzerError::missing_tri(
+                            self.text,
+                            &r#type.as_ref().into(),
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn direction(&mut self, arg: &Direction) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             match arg {

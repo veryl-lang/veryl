@@ -324,7 +324,7 @@ pub enum TypeKind {
     UserDefined(Vec<StrId>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeModifier {
     Tri,
     Signed,

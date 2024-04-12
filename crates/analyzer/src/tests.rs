@@ -351,6 +351,19 @@ fn missing_reset_statement() {
 }
 
 #[test]
+fn missing_tri() {
+    let code = r#"
+    module ModuleA (
+        x: inout logic,
+    ) {
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MissingTri { .. }));
+}
+
+#[test]
 fn too_large_enum_variant() {
     let code = r#"
     module ModuleA {

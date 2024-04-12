@@ -245,6 +245,76 @@ impl From<&AlwaysFfDeclaration> for TokenRange {
     }
 }
 
+impl From<&FixedType> for TokenRange {
+    fn from(value: &FixedType) -> Self {
+        let beg = match value {
+            FixedType::U32(x) => x.u32.u32_token.token,
+            FixedType::U64(x) => x.u64.u64_token.token,
+            FixedType::I32(x) => x.i32.i32_token.token,
+            FixedType::I64(x) => x.i64.i64_token.token,
+            FixedType::F32(x) => x.f32.f32_token.token,
+            FixedType::F64(x) => x.f64.f64_token.token,
+            FixedType::Strin(x) => x.strin.string_token.token,
+        };
+        let end = beg;
+        TokenRange { beg, end }
+    }
+}
+
+impl From<&VariableType> for TokenRange {
+    fn from(value: &VariableType) -> Self {
+        let mut range = match &*value.variable_type_group {
+            VariableTypeGroup::Logic(x) => {
+                let beg = x.logic.logic_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+            VariableTypeGroup::Bit(x) => {
+                let beg = x.bit.bit_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+            VariableTypeGroup::ScopedIdentifier(x) => x.scoped_identifier.as_ref().into(),
+        };
+
+        if let Some(ref x) = value.variable_type_opt {
+            range.end = x.width.r_angle.r_angle_token.token;
+        }
+
+        range
+    }
+}
+
+impl From<&ScalarType> for TokenRange {
+    fn from(value: &ScalarType) -> Self {
+        let mut range: TokenRange = match &*value.scalar_type_group {
+            ScalarTypeGroup::VariableType(x) => x.variable_type.as_ref().into(),
+            ScalarTypeGroup::FixedType(x) => x.fixed_type.as_ref().into(),
+        };
+
+        if let Some(x) = value.scalar_type_list.first() {
+            range.beg = match &*x.type_modifier {
+                TypeModifier::Tri(x) => x.tri.tri_token.token,
+                TypeModifier::Signed(x) => x.r#signed.signed_token.token,
+            };
+        }
+
+        range
+    }
+}
+
+impl From<&ArrayType> for TokenRange {
+    fn from(value: &ArrayType) -> Self {
+        let mut range: TokenRange = value.scalar_type.as_ref().into();
+
+        if let Some(ref x) = value.array_type_opt {
+            range.end = x.array.r_bracket.r_bracket_token.token;
+        }
+
+        range
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct VerylToken {
     pub token: Token,
