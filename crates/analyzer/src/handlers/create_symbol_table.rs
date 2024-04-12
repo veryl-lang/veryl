@@ -107,10 +107,7 @@ impl<'a> Handler for CreateSymbolTable<'a> {
 
 fn scoped_identifier_tokens(arg: &ScopedIdentifier) -> Vec<Token> {
     let mut ret = Vec::new();
-    if let Some(ref x) = arg.scoped_identifier_opt {
-        ret.push(x.dollar.dollar_token.token);
-    }
-    ret.push(arg.identifier.identifier_token.token);
+    ret.push(arg.identifier().token);
     for x in &arg.scoped_identifier_list {
         ret.push(x.identifier.identifier_token.token);
     }
@@ -119,12 +116,9 @@ fn scoped_identifier_tokens(arg: &ScopedIdentifier) -> Vec<Token> {
 
 fn expression_identifier_tokens(arg: &ExpressionIdentifier) -> Vec<Token> {
     let mut ret = Vec::new();
-    if let Some(ref x) = arg.expression_identifier_opt {
-        ret.push(x.dollar.dollar_token.token);
-    }
-    ret.push(arg.identifier.identifier_token.token);
-    if let ExpressionIdentifierGroup::ExpressionIdentifierScoped(x) =
-        arg.expression_identifier_group.as_ref()
+    ret.push(arg.identifier().token);
+    if let ExpressionIdentifierGroup0::ExpressionIdentifierScoped(x) =
+        arg.expression_identifier_group0.as_ref()
     {
         let x = &x.expression_identifier_scoped;
         ret.push(x.identifier.identifier_token.token);
@@ -146,25 +140,36 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         Ok(())
     }
 
+    fn dollar_identifier(&mut self, arg: &DollarIdentifier) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            let id = arg.dollar_identifier_token.token.id;
+            if let TokenSource::File(file) = arg.dollar_identifier_token.token.source {
+                namespace_table::insert(id, file, &self.namespace);
+            }
+        }
+        Ok(())
+    }
+
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             // Add symbols under $sv namespace
-            if arg.scoped_identifier_opt.is_some()
-                && arg.identifier.identifier_token.to_string() == "sv"
+            if let ScopedIdentifierGroup::DollarIdentifier(x) = arg.scoped_identifier_group.as_ref()
             {
-                let mut namespace = Namespace::new();
-                for (i, token) in scoped_identifier_tokens(arg).iter().enumerate() {
-                    if i != 0 {
-                        let symbol = Symbol::new(
-                            token,
-                            SymbolKind::SystemVerilog,
-                            &namespace,
-                            false,
-                            DocComment::default(),
-                        );
-                        let _ = symbol_table::insert(token, symbol);
+                if x.dollar_identifier.dollar_identifier_token.to_string() == "$sv" {
+                    let mut namespace = Namespace::new();
+                    for (i, token) in scoped_identifier_tokens(arg).iter().enumerate() {
+                        if i != 0 {
+                            let symbol = Symbol::new(
+                                token,
+                                SymbolKind::SystemVerilog,
+                                &namespace,
+                                false,
+                                DocComment::default(),
+                            );
+                            let _ = symbol_table::insert(token, symbol);
+                        }
+                        namespace.push(token.text);
                     }
-                    namespace.push(token.text);
                 }
             }
         }
@@ -174,34 +179,33 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             // Add symbols under $sv namespace
-            if arg.expression_identifier_opt.is_some() {
-                if let ExpressionIdentifierGroup::ExpressionIdentifierScoped(_) =
-                    arg.expression_identifier_group.as_ref()
-                {
-                    if arg.identifier.identifier_token.to_string() == "sv" {
-                        let mut namespace = Namespace::new();
-                        for (i, token) in expression_identifier_tokens(arg).iter().enumerate() {
-                            if i != 0 {
-                                let symbol = Symbol::new(
-                                    token,
-                                    SymbolKind::SystemVerilog,
-                                    &namespace,
-                                    false,
-                                    DocComment::default(),
-                                );
-                                let _ = symbol_table::insert(token, symbol);
-                            }
-                            namespace.push(token.text);
+            if let ExpressionIdentifierGroup::DollarIdentifier(x) =
+                arg.expression_identifier_group.as_ref()
+            {
+                if x.dollar_identifier.dollar_identifier_token.to_string() == "$sv" {
+                    let mut namespace = Namespace::new();
+                    for (i, token) in expression_identifier_tokens(arg).iter().enumerate() {
+                        if i != 0 {
+                            let symbol = Symbol::new(
+                                token,
+                                SymbolKind::SystemVerilog,
+                                &namespace,
+                                false,
+                                DocComment::default(),
+                            );
+                            let _ = symbol_table::insert(token, symbol);
                         }
+                        namespace.push(token.text);
                     }
                 }
             }
 
-            if let ExpressionIdentifierGroup::ExpressionIdentifierMember(x) =
-                arg.expression_identifier_group.as_ref()
+            if let ExpressionIdentifierGroup0::ExpressionIdentifierMember(x) =
+                arg.expression_identifier_group0.as_ref()
             {
                 let mut target = Vec::new();
-                target.push(arg.identifier.identifier_token.token.text);
+                let text = arg.identifier().token.text;
+                target.push(text);
 
                 let x = &x.expression_identifier_member;
                 for x in &x.expression_identifier_member_list0 {

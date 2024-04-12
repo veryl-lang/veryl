@@ -14,7 +14,7 @@ use veryl_parser::{
     ParolError,
 };
 use veryl_parser::{
-    veryl_grammar_trait::Identifier,
+    veryl_token::VerylToken,
     veryl_walker::{Handler, HandlerPoint},
 };
 
@@ -137,7 +137,7 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
             if !self.ctx.is_empty() {
                 let path: SymbolPathNamespace = arg.into();
                 let name = to_string(arg);
-                let token = arg.identifier.identifier_token.token;
+                let token = arg.identifier().token;
                 let child = self.insert_node(&path, &name, &token);
                 if let (Some(parent), Some(child)) = (self.parent.last(), child) {
                     self.insert_edge(*parent, child, *self.ctx.last().unwrap());
@@ -251,7 +251,7 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
 
                         let path: SymbolPathNamespace = x.as_ref().into();
                         let name = to_string(x);
-                        let token = x.identifier.identifier_token.token;
+                        let token = x.identifier().token;
                         let child = self.insert_node(&path, &name, &token);
                         self.file_scope_import.push(child);
                     }
@@ -265,15 +265,15 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
 fn to_string(sid: &ScopedIdentifier) -> String {
     let mut rv: String = "".into();
 
-    let f = |id: &Identifier, scope: bool| -> String {
+    let f = |id: &VerylToken, scope: bool| -> String {
         let mut s: String = (if scope { "::" } else { "" }).into();
-        s.push_str(&id.identifier_token.to_string());
+        s.push_str(&id.to_string());
         s
     };
-    rv.push_str(&f(&sid.identifier, false));
+    rv.push_str(&f(sid.identifier(), false));
 
     for sidl in sid.scoped_identifier_list.iter() {
-        let id = sidl.identifier.as_ref();
+        let id = &sidl.identifier.identifier_token;
         rv.push_str(&f(id, true));
     }
 

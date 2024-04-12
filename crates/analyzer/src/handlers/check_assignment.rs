@@ -132,14 +132,14 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                     if can_assign(&full_path) {
                         let partial = match arg
                             .expression_identifier
-                            .expression_identifier_group
+                            .expression_identifier_group0
                             .as_ref()
                         {
-                            ExpressionIdentifierGroup::ExpressionIdentifierScoped(x) => !x
+                            ExpressionIdentifierGroup0::ExpressionIdentifierScoped(x) => !x
                                 .expression_identifier_scoped
                                 .expression_identifier_scoped_list0
                                 .is_empty(),
-                            ExpressionIdentifierGroup::ExpressionIdentifierMember(x) => {
+                            ExpressionIdentifierGroup0::ExpressionIdentifierMember(x) => {
                                 let x = &x.expression_identifier_member;
                                 !x.expression_identifier_member_list.is_empty()
                                     | x.expression_identifier_member_list0.iter().any(|x| {
@@ -155,7 +155,7 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                         symbol_table::add_assign(full_path, &self.assign_position, partial);
                         self.assign_position.pop();
                     } else {
-                        let token = &arg.expression_identifier.identifier.identifier_token.token;
+                        let token = arg.expression_identifier.identifier().token;
                         self.errors.push(AnalyzerError::invalid_assignment(
                             &token.to_string(),
                             self.text,

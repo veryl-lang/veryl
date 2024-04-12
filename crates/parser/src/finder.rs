@@ -65,7 +65,12 @@ impl VerylWalker for Finder {
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) {
         self.group_hit = false;
         self.in_group = true;
-        self.identifier(&arg.identifier);
+        match &*arg.scoped_identifier_group {
+            ScopedIdentifierGroup::Identifier(x) => self.identifier(&x.identifier),
+            ScopedIdentifierGroup::DollarIdentifier(x) => {
+                self.dollar_identifier(&x.dollar_identifier)
+            }
+        }
         self.in_group = false;
         for x in &arg.scoped_identifier_list {
             self.colon_colon(&x.colon_colon);
@@ -83,14 +88,16 @@ impl VerylWalker for Finder {
     /// Semantic action for non-terminal 'ExpressionIdentifier'
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) {
         self.group_hit = false;
-        if let Some(ref x) = arg.expression_identifier_opt {
-            self.dollar(&x.dollar);
-        }
         self.in_group = true;
-        self.identifier(&arg.identifier);
-        self.in_group = false;
         match &*arg.expression_identifier_group {
-            ExpressionIdentifierGroup::ExpressionIdentifierScoped(x) => {
+            ExpressionIdentifierGroup::Identifier(x) => self.identifier(&x.identifier),
+            ExpressionIdentifierGroup::DollarIdentifier(x) => {
+                self.dollar_identifier(&x.dollar_identifier)
+            }
+        }
+        self.in_group = false;
+        match &*arg.expression_identifier_group0 {
+            ExpressionIdentifierGroup0::ExpressionIdentifierScoped(x) => {
                 let x = &x.expression_identifier_scoped;
                 self.colon_colon(&x.colon_colon);
                 self.in_group = true;
@@ -106,7 +113,7 @@ impl VerylWalker for Finder {
                     self.select(&x.select);
                 }
             }
-            ExpressionIdentifierGroup::ExpressionIdentifierMember(x) => {
+            ExpressionIdentifierGroup0::ExpressionIdentifierMember(x) => {
                 let x = &x.expression_identifier_member;
                 for x in &x.expression_identifier_member_list {
                     self.select(&x.select);

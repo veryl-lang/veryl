@@ -188,13 +188,6 @@ pub trait VerylWalker {
         after!(self, comma, arg);
     }
 
-    /// Semantic action for non-terminal 'Dollar'
-    fn dollar(&mut self, arg: &Dollar) {
-        before!(self, dollar, arg);
-        self.veryl_token(&arg.dollar_token);
-        after!(self, dollar, arg);
-    }
-
     /// Semantic action for non-terminal 'DotDot'
     fn dot_dot(&mut self, arg: &DotDot) {
         before!(self, dot_dot, arg);
@@ -741,6 +734,13 @@ pub trait VerylWalker {
         after!(self, var, arg);
     }
 
+    /// Semantic action for non-terminal 'DollarIdentifier'
+    fn dollar_identifier(&mut self, arg: &DollarIdentifier) {
+        before!(self, dollar_identifier, arg);
+        self.veryl_token(&arg.dollar_identifier_token);
+        after!(self, dollar_identifier, arg);
+    }
+
     /// Semantic action for non-terminal 'Identifier'
     fn identifier(&mut self, arg: &Identifier) {
         before!(self, identifier, arg);
@@ -799,10 +799,12 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'ScopedIdentifier'
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) {
         before!(self, scoped_identifier, arg);
-        if let Some(ref x) = arg.scoped_identifier_opt {
-            self.dollar(&x.dollar);
+        match &*arg.scoped_identifier_group {
+            ScopedIdentifierGroup::Identifier(x) => self.identifier(&x.identifier),
+            ScopedIdentifierGroup::DollarIdentifier(x) => {
+                self.dollar_identifier(&x.dollar_identifier)
+            }
         }
-        self.identifier(&arg.identifier);
         for x in &arg.scoped_identifier_list {
             self.colon_colon(&x.colon_colon);
             self.identifier(&x.identifier);
@@ -813,15 +815,17 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'ExpressionIdentifier'
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) {
         before!(self, expression_identifier, arg);
-        if let Some(ref x) = arg.expression_identifier_opt {
-            self.dollar(&x.dollar);
-        }
-        self.identifier(&arg.identifier);
         match &*arg.expression_identifier_group {
-            ExpressionIdentifierGroup::ExpressionIdentifierScoped(x) => {
+            ExpressionIdentifierGroup::Identifier(x) => self.identifier(&x.identifier),
+            ExpressionIdentifierGroup::DollarIdentifier(x) => {
+                self.dollar_identifier(&x.dollar_identifier)
+            }
+        }
+        match &*arg.expression_identifier_group0 {
+            ExpressionIdentifierGroup0::ExpressionIdentifierScoped(x) => {
                 self.expression_identifier_scoped(&x.expression_identifier_scoped);
             }
-            ExpressionIdentifierGroup::ExpressionIdentifierMember(x) => {
+            ExpressionIdentifierGroup0::ExpressionIdentifierMember(x) => {
                 self.expression_identifier_member(&x.expression_identifier_member);
             }
         }
