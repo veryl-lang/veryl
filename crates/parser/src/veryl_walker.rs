@@ -223,6 +223,13 @@ pub trait VerylWalker {
         after!(self, hash, arg);
     }
 
+    /// Semantic action for non-terminal 'QuoteLBrace'
+    fn quote_l_brace(&mut self, arg: &QuoteLBrace) {
+        before!(self, quote_l_brace, arg);
+        self.veryl_token(&arg.quote_l_brace_token);
+        after!(self, quote_l_brace, arg);
+    }
+
     /// Semantic action for non-terminal 'LAngle'
     fn l_angle(&mut self, arg: &LAngle) {
         before!(self, l_angle, arg);
@@ -1035,6 +1042,11 @@ pub trait VerylWalker {
                 self.concatenation_list(&x.concatenation_list);
                 self.r_brace(&x.r_brace);
             }
+            Factor::QuoteLBraceArrayLiteralListRBrace(x) => {
+                self.quote_l_brace(&x.quote_l_brace);
+                self.array_literal_list(&x.array_literal_list);
+                self.r_brace(&x.r_brace);
+            }
             Factor::IfExpression(x) => {
                 self.if_expression(&x.if_expression);
             }
@@ -1113,6 +1125,40 @@ pub trait VerylWalker {
             self.expression(&x.expression);
         }
         after!(self, concatenation_item, arg);
+    }
+
+    /// Semantic action for non-terminal 'ArrayLiteralList'
+    fn array_literal_list(&mut self, arg: &ArrayLiteralList) {
+        before!(self, array_literal_list, arg);
+        self.array_literal_item(&arg.array_literal_item);
+        for x in &arg.array_literal_list_list {
+            self.comma(&x.comma);
+            self.array_literal_item(&x.array_literal_item);
+        }
+        if let Some(ref x) = arg.array_literal_list_opt {
+            self.comma(&x.comma);
+        }
+        after!(self, array_literal_list, arg);
+    }
+
+    /// Semantic action for non-terminal 'ArrayLiteralItem'
+    fn array_literal_item(&mut self, arg: &ArrayLiteralItem) {
+        before!(self, array_literal_item, arg);
+        match &*arg.array_literal_item_group {
+            ArrayLiteralItemGroup::ExpressionArrayLiteralItemOpt(x) => {
+                self.expression(&x.expression);
+                if let Some(ref x) = x.array_literal_item_opt {
+                    self.repeat(&x.repeat);
+                    self.expression(&x.expression);
+                }
+            }
+            ArrayLiteralItemGroup::DefaulColonExpression(x) => {
+                self.defaul(&x.defaul);
+                self.colon(&x.colon);
+                self.expression(&x.expression);
+            }
+        }
+        after!(self, array_literal_item, arg);
     }
 
     /// Semantic action for non-terminal 'IfExpression'
