@@ -32,11 +32,12 @@ impl<'a> VerylGrammarTrait for CheckFunction<'a> {
         if let HandlerPoint::Before = self.point {
             if let IdentifierStatementGroup::FunctionCall(_) = &*arg.identifier_statement_group {
                 // skip system function
-                if arg
-                    .expression_identifier
-                    .expression_identifier_opt
-                    .is_some()
-                {
+                if matches!(
+                    arg.expression_identifier
+                        .expression_identifier_group
+                        .as_ref(),
+                    ExpressionIdentifierGroup::DollarIdentifier(_)
+                ) {
                     return Ok(());
                 }
 
@@ -72,7 +73,10 @@ impl<'a> VerylGrammarTrait for CheckFunction<'a> {
                     return Ok(());
                 }
                 // skip system function
-                if x.expression_identifier.expression_identifier_opt.is_some() {
+                if matches!(
+                    x.expression_identifier.expression_identifier_group.as_ref(),
+                    ExpressionIdentifierGroup::DollarIdentifier(_)
+                ) {
                     return Ok(());
                 }
 

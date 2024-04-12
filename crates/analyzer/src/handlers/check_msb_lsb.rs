@@ -130,8 +130,7 @@ impl<'a> VerylGrammarTrait for CheckMsbLsb<'a> {
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                let namespace =
-                    namespace_table::get(arg.identifier.identifier_token.token.id).unwrap();
+                let namespace = namespace_table::get(arg.identifier().token.id).unwrap();
                 let symbol_path = SymbolPath::default();
                 self.identifier_path
                     .push(SymbolPathNamespace(symbol_path, namespace));

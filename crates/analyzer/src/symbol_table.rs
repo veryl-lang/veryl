@@ -6,7 +6,7 @@ use crate::symbol::{DocComment, Symbol, SymbolId, SymbolKind, TypeKind};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
-use veryl_parser::resource_table::{self, PathId, StrId, TokenId};
+use veryl_parser::resource_table::{PathId, StrId, TokenId};
 use veryl_parser::veryl_grammar_trait as syntax_tree;
 use veryl_parser::veryl_token::{Token, TokenSource};
 
@@ -97,10 +97,7 @@ impl From<&syntax_tree::HierarchicalIdentifier> for SymbolPath {
 impl From<&syntax_tree::ScopedIdentifier> for SymbolPath {
     fn from(value: &syntax_tree::ScopedIdentifier) -> Self {
         let mut path = Vec::new();
-        if let Some(ref x) = value.scoped_identifier_opt {
-            path.push(x.dollar.dollar_token.token.text);
-        }
-        path.push(value.identifier.identifier_token.token.text);
+        path.push(value.identifier().token.text);
         for x in &value.scoped_identifier_list {
             path.push(x.identifier.identifier_token.token.text);
         }
@@ -111,19 +108,16 @@ impl From<&syntax_tree::ScopedIdentifier> for SymbolPath {
 impl From<&syntax_tree::ExpressionIdentifier> for SymbolPath {
     fn from(value: &syntax_tree::ExpressionIdentifier) -> Self {
         let mut path = Vec::new();
-        if let Some(ref x) = value.expression_identifier_opt {
-            path.push(x.dollar.dollar_token.token.text);
-        }
-        path.push(value.identifier.identifier_token.token.text);
-        match &*value.expression_identifier_group {
-            syntax_tree::ExpressionIdentifierGroup::ExpressionIdentifierScoped(x) => {
+        path.push(value.identifier().token.text);
+        match &*value.expression_identifier_group0 {
+            syntax_tree::ExpressionIdentifierGroup0::ExpressionIdentifierScoped(x) => {
                 let x = &x.expression_identifier_scoped;
                 path.push(x.identifier.identifier_token.token.text);
                 for x in &x.expression_identifier_scoped_list {
                     path.push(x.identifier.identifier_token.token.text);
                 }
             }
-            syntax_tree::ExpressionIdentifierGroup::ExpressionIdentifierMember(x) => {
+            syntax_tree::ExpressionIdentifierGroup0::ExpressionIdentifierMember(x) => {
                 let x = &x.expression_identifier_member;
                 for x in &x.expression_identifier_member_list0 {
                     path.push(x.identifier.identifier_token.token.text);
@@ -186,14 +180,14 @@ impl From<&syntax_tree::HierarchicalIdentifier> for SymbolPathNamespace {
 
 impl From<&syntax_tree::ScopedIdentifier> for SymbolPathNamespace {
     fn from(value: &syntax_tree::ScopedIdentifier) -> Self {
-        let namespace = namespace_table::get(value.identifier.identifier_token.token.id).unwrap();
+        let namespace = namespace_table::get(value.identifier().token.id).unwrap();
         SymbolPathNamespace(value.into(), namespace)
     }
 }
 
 impl From<&syntax_tree::ExpressionIdentifier> for SymbolPathNamespace {
     fn from(value: &syntax_tree::ExpressionIdentifier) -> Self {
-        let namespace = namespace_table::get(value.identifier.identifier_token.token.id).unwrap();
+        let namespace = namespace_table::get(value.identifier().token.id).unwrap();
         SymbolPathNamespace(value.into(), namespace)
     }
 }
@@ -237,10 +231,8 @@ impl SymbolTable {
     pub fn new() -> Self {
         let mut ret = Self::default();
 
-        // add builtin symbols to $ namespace
-        let dollar = resource_table::insert_str("$");
-        let mut namespace = Namespace::new();
-        namespace.push(dollar);
+        // add builtin symbols to "" namespace
+        let namespace = Namespace::new();
 
         for func in DEFINED_NAMESPACES {
             let token = Token::new(func, 0, 0, 0, 0, TokenSource::Builtin);
@@ -332,7 +324,7 @@ impl SymbolTable {
                 let token = Token::new(&name.to_string(), 0, 0, 0, 0, TokenSource::External);
                 let symbol = Symbol::new(
                     &token,
-                    SymbolKind::SystemFunction,
+                    SymbolKind::SystemVerilog,
                     &context.namespace,
                     false,
                     DocComment::default(),
@@ -649,206 +641,206 @@ impl<'a> ResolveContext<'a> {
     }
 }
 
-const DEFINED_NAMESPACES: [&str; 1] = ["sv"];
+const DEFINED_NAMESPACES: [&str; 1] = ["$sv"];
 
 // Refer IEEE Std 1800-2012  Clause 20 and 21
 const DEFINED_SYSTEM_FUNCTIONS: [&str; 196] = [
-    "acos",
-    "acosh",
-    "asin",
-    "asinh",
-    "assertcontrol",
-    "assertfailoff",
-    "assertfailon",
-    "assertkill",
-    "assertnonvacuouson",
-    "assertoff",
-    "asserton",
-    "assertpassoff",
-    "assertpasson",
-    "assertvacuousoff",
-    "async$and$array",
-    "async$and$plane",
-    "async$nand$array",
-    "async$nand$plane",
-    "async$nor$array",
-    "async$nor$plane",
-    "async$or$array",
-    "async$or$plane",
-    "atan",
-    "atan2",
-    "atanh",
-    "bits",
-    "bitstoreal",
-    "bitstoshortreal",
-    "cast",
-    "ceil",
-    "changed",
-    "changed_gclk",
-    "changing_gclk",
-    "clog2",
-    "cos",
-    "cosh",
-    "countbits",
-    "countones",
-    "coverage_control",
-    "coverage_get",
-    "coverage_get_max",
-    "coverage_merge",
-    "coverage_save",
-    "dimensions",
-    "display",
-    "displayb",
-    "displayh",
-    "displayo",
-    "dist_chi_square",
-    "dist_erlang",
-    "dist_exponential",
-    "dist_normal",
-    "dist_poisson",
-    "dist_t",
-    "dist_uniform",
-    "dumpall",
-    "dumpfile",
-    "dumpflush",
-    "dumplimit",
-    "dumpoff",
-    "dumpon",
-    "dumpports",
-    "dumpportsall",
-    "dumpportsflush",
-    "dumpportslimit",
-    "dumpportsoff",
-    "dumpportson",
-    "dumpvars",
-    "error",
-    "exit",
-    "exp",
-    "falling_gclk",
-    "fatal",
-    "fclose",
-    "fdisplay",
-    "fdisplayb",
-    "fdisplayh",
-    "fdisplayo",
-    "fell",
-    "fell_gclk",
-    "feof",
-    "ferror",
-    "fflush",
-    "fgetc",
-    "fgets",
-    "finish",
-    "floor",
-    "fmonitor",
-    "fmonitorb",
-    "fmonitorh",
-    "fmonitoro",
-    "fopen",
-    "fread",
-    "fscanf",
-    "fseek",
-    "fstrobe",
-    "fstrobeb",
-    "fstrobeh",
-    "fstrobeo",
-    "ftell",
-    "future_gclk",
-    "fwrite",
-    "fwriteb",
-    "fwriteh",
-    "fwriteo",
-    "get_coverage",
-    "high",
-    "hypot",
-    "increment",
-    "info",
-    "isunbounded",
-    "isunknown",
-    "itor",
-    "left",
-    "ln",
-    "load_coverage_db",
-    "log10",
-    "low",
-    "monitor",
-    "monitorb",
-    "monitorh",
-    "monitoro",
-    "monitoroff",
-    "monitoron",
-    "onehot",
-    "onehot0",
-    "past",
-    "past_gclk",
-    "pow",
-    "printtimescale",
-    "q_add",
-    "q_exam",
-    "q_full",
-    "q_initialize",
-    "q_remove",
-    "random",
-    "readmemb",
-    "readmemh",
-    "realtime",
-    "realtobits",
-    "rewind",
-    "right",
-    "rising_gclk",
-    "rose",
-    "rose_gclk",
-    "rtoi",
-    "sampled",
-    "set_coverage_db_name",
-    "sformat",
-    "sformatf",
-    "shortrealtobits",
-    "signed",
-    "sin",
-    "sinh",
-    "size",
-    "sqrt",
-    "sscanf",
-    "stable",
-    "stable_gclk",
-    "steady_gclk",
-    "stime",
-    "stop",
-    "strobe",
-    "strobeb",
-    "strobeh",
-    "strobeo",
-    "swrite",
-    "swriteb",
-    "swriteh",
-    "swriteo",
-    "sync$and$array",
-    "sync$and$plane",
-    "sync$nand$array",
-    "sync$nand$plane",
-    "sync$nor$array",
-    "sync$nor$plane",
-    "sync$or$array",
-    "sync$or$plane",
-    "system",
-    "tan",
-    "tanh",
-    "test$plusargs",
-    "time",
-    "timeformat",
-    "typename",
-    "ungetc",
-    "unpacked_dimensions",
-    "unsigned",
-    "value$plusargs",
-    "warning",
-    "write",
-    "writeb",
-    "writeh",
-    "writememb",
-    "writememh",
-    "writeo",
+    "$acos",
+    "$acosh",
+    "$asin",
+    "$asinh",
+    "$assertcontrol",
+    "$assertfailoff",
+    "$assertfailon",
+    "$assertkill",
+    "$assertnonvacuouson",
+    "$assertoff",
+    "$asserton",
+    "$assertpassoff",
+    "$assertpasson",
+    "$assertvacuousoff",
+    "$async$and$array",
+    "$async$and$plane",
+    "$async$nand$array",
+    "$async$nand$plane",
+    "$async$nor$array",
+    "$async$nor$plane",
+    "$async$or$array",
+    "$async$or$plane",
+    "$atan",
+    "$atan2",
+    "$atanh",
+    "$bits",
+    "$bitstoreal",
+    "$bitstoshortreal",
+    "$cast",
+    "$ceil",
+    "$changed",
+    "$changed_gclk",
+    "$changing_gclk",
+    "$clog2",
+    "$cos",
+    "$cosh",
+    "$countbits",
+    "$countones",
+    "$coverage_control",
+    "$coverage_get",
+    "$coverage_get_max",
+    "$coverage_merge",
+    "$coverage_save",
+    "$dimensions",
+    "$display",
+    "$displayb",
+    "$displayh",
+    "$displayo",
+    "$dist_chi_square",
+    "$dist_erlang",
+    "$dist_exponential",
+    "$dist_normal",
+    "$dist_poisson",
+    "$dist_t",
+    "$dist_uniform",
+    "$dumpall",
+    "$dumpfile",
+    "$dumpflush",
+    "$dumplimit",
+    "$dumpoff",
+    "$dumpon",
+    "$dumpports",
+    "$dumpportsall",
+    "$dumpportsflush",
+    "$dumpportslimit",
+    "$dumpportsoff",
+    "$dumpportson",
+    "$dumpvars",
+    "$error",
+    "$exit",
+    "$exp",
+    "$falling_gclk",
+    "$fatal",
+    "$fclose",
+    "$fdisplay",
+    "$fdisplayb",
+    "$fdisplayh",
+    "$fdisplayo",
+    "$fell",
+    "$fell_gclk",
+    "$feof",
+    "$ferror",
+    "$fflush",
+    "$fgetc",
+    "$fgets",
+    "$finish",
+    "$floor",
+    "$fmonitor",
+    "$fmonitorb",
+    "$fmonitorh",
+    "$fmonitoro",
+    "$fopen",
+    "$fread",
+    "$fscanf",
+    "$fseek",
+    "$fstrobe",
+    "$fstrobeb",
+    "$fstrobeh",
+    "$fstrobeo",
+    "$ftell",
+    "$future_gclk",
+    "$fwrite",
+    "$fwriteb",
+    "$fwriteh",
+    "$fwriteo",
+    "$get_coverage",
+    "$high",
+    "$hypot",
+    "$increment",
+    "$info",
+    "$isunbounded",
+    "$isunknown",
+    "$itor",
+    "$left",
+    "$ln",
+    "$load_coverage_db",
+    "$log10",
+    "$low",
+    "$monitor",
+    "$monitorb",
+    "$monitorh",
+    "$monitoro",
+    "$monitoroff",
+    "$monitoron",
+    "$onehot",
+    "$onehot0",
+    "$past",
+    "$past_gclk",
+    "$pow",
+    "$printtimescale",
+    "$q_add",
+    "$q_exam",
+    "$q_full",
+    "$q_initialize",
+    "$q_remove",
+    "$random",
+    "$readmemb",
+    "$readmemh",
+    "$realtime",
+    "$realtobits",
+    "$rewind",
+    "$right",
+    "$rising_gclk",
+    "$rose",
+    "$rose_gclk",
+    "$rtoi",
+    "$sampled",
+    "$set_coverage_db_name",
+    "$sformat",
+    "$sformatf",
+    "$shortrealtobits",
+    "$signed",
+    "$sin",
+    "$sinh",
+    "$size",
+    "$sqrt",
+    "$sscanf",
+    "$stable",
+    "$stable_gclk",
+    "$steady_gclk",
+    "$stime",
+    "$stop",
+    "$strobe",
+    "$strobeb",
+    "$strobeh",
+    "$strobeo",
+    "$swrite",
+    "$swriteb",
+    "$swriteh",
+    "$swriteo",
+    "$sync$and$array",
+    "$sync$and$plane",
+    "$sync$nand$array",
+    "$sync$nand$plane",
+    "$sync$nor$array",
+    "$sync$nor$plane",
+    "$sync$or$array",
+    "$sync$or$plane",
+    "$system",
+    "$tan",
+    "$tanh",
+    "$test$plusargs",
+    "$time",
+    "$timeformat",
+    "$typename",
+    "$ungetc",
+    "$unpacked_dimensions",
+    "$unsigned",
+    "$value$plusargs",
+    "$warning",
+    "$write",
+    "$writeb",
+    "$writeh",
+    "$writememb",
+    "$writememh",
+    "$writeo",
 ];
 
 thread_local!(static SYMBOL_TABLE: RefCell<SymbolTable> = RefCell::new(SymbolTable::new()));
@@ -1338,10 +1330,10 @@ mod tests {
         check_found(symbol, "prj::ModuleA");
 
         let symbol = resolve(&["memberD", "memberA"], &["ModuleA"]);
-        check_found(symbol, "$::sv::SvTypeA");
+        check_found(symbol, "$sv::SvTypeA");
 
         let symbol = resolve(&["memberD", "memberA", "memberA", "memberA"], &["ModuleA"]);
-        check_found(symbol, "$::sv::SvTypeA");
+        check_found(symbol, "$sv::SvTypeA");
     }
 
     #[test]

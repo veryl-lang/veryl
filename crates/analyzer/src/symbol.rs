@@ -403,10 +403,14 @@ impl From<&syntax_tree::ScalarType> for Type {
                     syntax_tree::VariableTypeGroup::ScopedIdentifier(x) => {
                         let x = &x.scoped_identifier;
                         let mut name = Vec::new();
-                        if let Some(ref x) = x.scoped_identifier_opt {
-                            name.push(x.dollar.dollar_token.token.text);
+                        match &*x.scoped_identifier_group {
+                            syntax_tree::ScopedIdentifierGroup::Identifier(x) => {
+                                name.push(x.identifier.identifier_token.token.text);
+                            }
+                            syntax_tree::ScopedIdentifierGroup::DollarIdentifier(x) => {
+                                name.push(x.dollar_identifier.dollar_identifier_token.token.text);
+                            }
                         }
-                        name.push(x.identifier.identifier_token.token.text);
                         for x in &x.scoped_identifier_list {
                             name.push(x.identifier.identifier_token.token.text);
                         }

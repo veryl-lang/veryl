@@ -339,7 +339,7 @@ impl Emitter {
         self.str(&ret);
     }
 
-    fn path_identifier(&mut self, path: SymbolPathNamespace, args: &[Identifier]) {
+    fn path_identifier(&mut self, path: SymbolPathNamespace, args: &[VerylToken]) {
         if let Ok(symbol) = symbol_table::resolve(path) {
             let symbol = symbol.found;
             match &symbol.kind {
@@ -357,7 +357,7 @@ impl Emitter {
                         self.namespace(&symbol.namespace);
                         self.str(&format!("{}", symbol.token.text));
                     } else {
-                        self.identifier(&args[0]);
+                        self.veryl_token(&args[0]);
                     }
                 }
                 SymbolKind::EnumMember(x) => {
@@ -367,7 +367,7 @@ impl Emitter {
                     } else {
                         self.str(&x.prefix);
                         self.str("_");
-                        self.identifier(&args[1]);
+                        self.veryl_token(&args[1]);
                     }
                 }
                 SymbolKind::Modport(_) => {
@@ -380,13 +380,12 @@ impl Emitter {
                         if i != 0 {
                             self.str("::");
                         }
-                        self.identifier(arg);
+                        self.veryl_token(arg);
                     }
                 }
                 SymbolKind::SystemFunction => {
                     self.adjust_line = false;
-                    self.str("$");
-                    self.identifier(&args[0]);
+                    self.veryl_token(&args[0]);
                 }
                 SymbolKind::Port(_)
                 | SymbolKind::Variable(_)
@@ -594,47 +593,48 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ScopedIdentifier'
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) {
-        let mut path = vec![arg.identifier.as_ref().clone()];
+        let mut path = vec![arg.identifier().clone()];
         for x in &arg.scoped_identifier_list {
-            path.push(x.identifier.as_ref().clone());
+            path.push(x.identifier.identifier_token.clone());
         }
         self.path_identifier(arg.into(), &path);
     }
 
     /// Semantic action for non-terminal 'ExpressionIdentifier'
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) {
-        match &*arg.expression_identifier_group {
-            ExpressionIdentifierGroup::ExpressionIdentifierScoped(x) => {
+        match &*arg.expression_identifier_group0 {
+            ExpressionIdentifierGroup0::ExpressionIdentifierScoped(x) => {
                 let x = &x.expression_identifier_scoped;
-                let mut path = vec![
-                    arg.identifier.as_ref().clone(),
-                    x.identifier.as_ref().clone(),
-                ];
+                let mut path = vec![arg.identifier().clone()];
+                path.push(x.identifier.identifier_token.clone());
                 for x in &x.expression_identifier_scoped_list {
-                    path.push(x.identifier.as_ref().clone());
+                    path.push(x.identifier.identifier_token.clone());
                 }
                 self.path_identifier(arg.into(), &path);
                 for x in &x.expression_identifier_scoped_list0 {
                     self.select(&x.select);
                 }
             }
-            ExpressionIdentifierGroup::ExpressionIdentifierMember(x) => {
+            ExpressionIdentifierGroup0::ExpressionIdentifierMember(x) => {
                 let x = &x.expression_identifier_member;
-                // system function call
-                if arg.expression_identifier_opt.is_some() {
-                    let path = vec![arg.identifier.as_ref().clone()];
-                    self.path_identifier(arg.into(), &path);
-                } else {
-                    self.identifier(&arg.identifier);
-                    for x in &x.expression_identifier_member_list {
-                        self.select(&x.select);
-                    }
-                    for x in &x.expression_identifier_member_list0 {
-                        self.dot(&x.dot);
-                        self.identifier(&x.identifier);
-                        for x in &x.expression_identifier_member_list0_list {
+                match &*arg.expression_identifier_group {
+                    ExpressionIdentifierGroup::Identifier(y) => {
+                        self.identifier(&y.identifier);
+                        for x in &x.expression_identifier_member_list {
                             self.select(&x.select);
                         }
+                        for x in &x.expression_identifier_member_list0 {
+                            self.dot(&x.dot);
+                            self.identifier(&x.identifier);
+                            for x in &x.expression_identifier_member_list0_list {
+                                self.select(&x.select);
+                            }
+                        }
+                    }
+                    // system function call
+                    ExpressionIdentifierGroup::DollarIdentifier(y) => {
+                        let path = vec![y.dollar_identifier.dollar_identifier_token.clone()];
+                        self.path_identifier(arg.into(), &path);
                     }
                 }
             }

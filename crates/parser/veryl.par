@@ -44,7 +44,6 @@ UnaryOperatorTerm     : "~&|~\||!|~"                                            
 ColonColonTerm        : '::'                                                                                  : Token;
 ColonTerm             : ':'                                                                                   : Token;
 CommaTerm             : ','                                                                                   : Token;
-DollarTerm            : '$'                                                                                   : Token;
 DotDotEquTerm         : '..='                                                                                 : Token;
 DotDotTerm            : '..'                                                                                  : Token;
 DotTerm               : '.'                                                                                   : Token;
@@ -120,6 +119,7 @@ U32Term               : /(?-u:\b)u32(?-u:\b)/                                   
 U64Term               : /(?-u:\b)u64(?-u:\b)/                                                                 : Token;
 UnionTerm             : /(?-u:\b)union(?-u:\b)/                                                               : Token;
 VarTerm               : /(?-u:\b)var(?-u:\b)/                                                                 : Token;
+DollarIdentifierTerm  : /\$[a-zA-Z_][0-9a-zA-Z_$]*/                                                           : Token;
 IdentifierTerm        : /[a-zA-Z_][0-9a-zA-Z_$]*/                                                             : Token;
 AnyTerm               : <Embed>/[^{}]*/                                                                       : Token;
 
@@ -156,7 +156,6 @@ UnaryOperatorToken     : UnaryOperatorTerm     : Token Comments;
 ColonToken       : ColonTerm       : Token Comments;
 ColonColonToken  : ColonColonTerm  : Token Comments;
 CommaToken       : CommaTerm       : Token Comments;
-DollarToken      : DollarTerm      : Token Comments;
 DotDotToken      : DotDotTerm      : Token Comments;
 DotDotEquToken   : DotDotEquTerm   : Token Comments;
 DotToken         : DotTerm         : Token Comments;
@@ -237,7 +236,8 @@ U64Token       : U64Term       : Token Comments;
 UnionToken     : UnionTerm     : Token Comments;
 VarToken       : VarTerm       : Token Comments;
 
-IdentifierToken: IdentifierTerm: Token Comments;
+DollarIdentifierToken: DollarIdentifierTerm: Token Comments;
+IdentifierToken      : IdentifierTerm      : Token Comments;
 
 // ----------------------------------------------------------------------------
 // VerylToken
@@ -275,7 +275,6 @@ UnaryOperator     : UnaryOperatorToken     : VerylToken;
 Colon       : ColonToken       : VerylToken;
 ColonColon  : ColonColonToken  : VerylToken;
 Comma       : CommaToken       : VerylToken;
-Dollar      : DollarToken      : VerylToken;
 DotDot      : DotDotToken      : VerylToken;
 DotDotEqu   : DotDotEquToken   : VerylToken;
 Dot         : DotToken         : VerylToken;
@@ -358,7 +357,8 @@ Union     : UnionToken     : VerylToken;
 Var       : VarToken       : VerylToken;
 
 // Identifier
-Identifier: IdentifierToken: VerylToken;
+DollarIdentifier: DollarIdentifierToken: VerylToken;
+Identifier      : IdentifierToken      : VerylToken;
 
 // ----------------------------------------------------------------------------
 // Number
@@ -382,8 +382,8 @@ RealNumber: FixedPoint
 // ----------------------------------------------------------------------------
 
 HierarchicalIdentifier: Identifier { Select } { Dot Identifier { Select } };
-ScopedIdentifier      : [ Dollar ] Identifier { ColonColon Identifier };
-ExpressionIdentifier  : [ Dollar ] Identifier ( ExpressionIdentifierScoped | ExpressionIdentifierMember );
+ScopedIdentifier      : ( DollarIdentifier | Identifier ) { ColonColon Identifier };
+ExpressionIdentifier  : ( DollarIdentifier | Identifier ) ( ExpressionIdentifierScoped | ExpressionIdentifierMember );
 
 ExpressionIdentifierScoped: ColonColon Identifier { ColonColon Identifier } { Select };
 ExpressionIdentifierMember: { Select } { Dot Identifier { Select } };

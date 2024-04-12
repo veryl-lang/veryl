@@ -196,11 +196,8 @@ impl From<&HierarchicalIdentifier> for TokenRange {
 
 impl From<&ScopedIdentifier> for TokenRange {
     fn from(value: &ScopedIdentifier) -> Self {
-        let mut beg = value.identifier.identifier_token.token;
-        if let Some(ref x) = value.scoped_identifier_opt {
-            beg = x.dollar.dollar_token.token;
-        }
-        let mut end = value.identifier.identifier_token.token;
+        let beg = value.identifier().token;
+        let mut end = beg;
         if let Some(x) = value.scoped_identifier_list.last() {
             end = x.identifier.identifier_token.token;
         }
@@ -210,13 +207,10 @@ impl From<&ScopedIdentifier> for TokenRange {
 
 impl From<&ExpressionIdentifier> for TokenRange {
     fn from(value: &ExpressionIdentifier) -> Self {
-        let mut beg = value.identifier.identifier_token.token;
-        if let Some(ref x) = value.expression_identifier_opt {
-            beg = x.dollar.dollar_token.token;
-        }
-        let mut end = value.identifier.identifier_token.token;
-        match &*value.expression_identifier_group {
-            ExpressionIdentifierGroup::ExpressionIdentifierScoped(x) => {
+        let beg = value.identifier().token;
+        let mut end = beg;
+        match &*value.expression_identifier_group0 {
+            ExpressionIdentifierGroup0::ExpressionIdentifierScoped(x) => {
                 let x = &x.expression_identifier_scoped;
                 end = x.identifier.identifier_token.token;
                 if let Some(x) = x.expression_identifier_scoped_list.last() {
@@ -226,7 +220,7 @@ impl From<&ExpressionIdentifier> for TokenRange {
                     end = x.select.r_bracket.r_bracket_token.token;
                 }
             }
-            ExpressionIdentifierGroup::ExpressionIdentifierMember(x) => {
+            ExpressionIdentifierGroup0::ExpressionIdentifierMember(x) => {
                 let x = &x.expression_identifier_member;
                 if let Some(x) = x.expression_identifier_member_list.last() {
                     end = x.select.r_bracket.r_bracket_token.token;
@@ -289,6 +283,28 @@ impl fmt::Display for VerylToken {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let text = format!("{}", self.token);
         text.fmt(f)
+    }
+}
+
+impl ScopedIdentifier {
+    pub fn identifier(&self) -> &VerylToken {
+        match &*self.scoped_identifier_group {
+            ScopedIdentifierGroup::Identifier(x) => &x.identifier.identifier_token,
+            ScopedIdentifierGroup::DollarIdentifier(x) => {
+                &x.dollar_identifier.dollar_identifier_token
+            }
+        }
+    }
+}
+
+impl ExpressionIdentifier {
+    pub fn identifier(&self) -> &VerylToken {
+        match &*self.expression_identifier_group {
+            ExpressionIdentifierGroup::Identifier(x) => &x.identifier.identifier_token,
+            ExpressionIdentifierGroup::DollarIdentifier(x) => {
+                &x.dollar_identifier.dollar_identifier_token
+            }
+        }
     }
 }
 
@@ -407,7 +423,6 @@ token_with_comments!(AllBit);
 token_with_comments!(Colon);
 token_with_comments!(ColonColon);
 token_with_comments!(Comma);
-token_with_comments!(Dollar);
 token_with_comments!(DotDot);
 token_with_comments!(DotDotEqu);
 token_with_comments!(Dot);
@@ -502,6 +517,7 @@ token_with_comments!(U64);
 token_with_comments!(Union);
 token_with_comments!(Var);
 
+token_with_comments!(DollarIdentifier);
 token_with_comments!(Identifier);
 
 fn embed_item_to_string(x: &EmbedItem) -> String {

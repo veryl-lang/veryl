@@ -85,10 +85,11 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
 
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
+            let ident = arg.identifier().token;
             match symbol_table::resolve(arg) {
                 Ok(symbol) => {
                     for id in symbol.full_path {
-                        symbol_table::add_reference(id, &arg.identifier.identifier_token.token);
+                        symbol_table::add_reference(id, &ident);
                     }
                 }
                 Err(err) => {
@@ -101,15 +102,16 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
 
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
+            let ident = arg.identifier().token;
             match symbol_table::resolve(arg) {
                 Ok(symbol) => {
                     for id in symbol.full_path {
-                        symbol_table::add_reference(id, &arg.identifier.identifier_token.token);
+                        symbol_table::add_reference(id, &ident);
                     }
                 }
                 Err(err) => {
                     let is_single_identifier = SymbolPath::from(arg).as_slice().len() == 1;
-                    let name = arg.identifier.identifier_token.to_string();
+                    let name = ident.to_string();
                     if name == "_" && is_single_identifier {
                         return Ok(());
                     }
@@ -219,9 +221,8 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
     fn import_declaration(&mut self, arg: &ImportDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let is_wildcard = arg.import_declaration_opt.is_some();
-            let namespace =
-                namespace_table::get(arg.scoped_identifier.identifier.identifier_token.token.id)
-                    .unwrap();
+            let id = arg.scoped_identifier.identifier().token.id;
+            let namespace = namespace_table::get(id).unwrap();
             match symbol_table::resolve(arg.scoped_identifier.as_ref()) {
                 Ok(symbol) => {
                     let symbol = symbol.found;
