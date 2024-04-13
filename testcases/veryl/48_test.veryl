@@ -2,9 +2,31 @@ module Module48 {}
 
 #[test(test1)]
 embed (inline) sv{{{
-module test;
+module test1;
    initial begin
        $display("hello");
+       assert(0) else $info("info");
+       assert(0) else $warning("warning");
+       assert(0) else $error("error");
+       assert(0) else $fatal(1, "fatal");
+       $finish();
    end
+endmodule
+}}}
+
+#[test(test2)]
+embed (inline) sv{{{
+module test2;
+    // parse error
+    initial
+endmodule
+}}}
+
+#[test(test3)]
+embed (inline) sv{{{
+module test3;
+    // elaborate error
+    tri logic a;
+    always_comb a = 1;
 endmodule
 }}}

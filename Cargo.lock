@@ -4474,6 +4474,7 @@ dependencies = [
  "mdbook",
  "mdbook-wavedrom",
  "miette",
+ "once_cell",
  "regex",
  "serde",
  "serde_json",

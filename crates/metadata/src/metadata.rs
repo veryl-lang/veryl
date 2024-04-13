@@ -7,6 +7,7 @@ use crate::lockfile::Lockfile;
 use crate::project::Project;
 use crate::pubfile::{Pubfile, Release};
 use crate::publish::Publish;
+use crate::test::Test;
 use crate::{utils, FilelistType, MetadataError};
 use directories::ProjectDirs;
 use log::{debug, info};
@@ -50,6 +51,8 @@ pub struct Metadata {
     pub publish: Publish,
     #[serde(default)]
     pub doc: Doc,
+    #[serde(default)]
+    pub test: Test,
     #[serde(default)]
     pub dependencies: HashMap<Url, Dependency>,
     #[serde(skip)]

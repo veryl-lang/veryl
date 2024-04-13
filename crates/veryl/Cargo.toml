@@ -28,6 +28,7 @@ console         = "0.15.8"
 fern            = "0.6.2"
 handlebars      = "5.1"
 log             = {workspace = true}
+once_cell       = {workspace = true}
 mdbook          = {workspace = true}
 mdbook-wavedrom = "0.10.0"
 miette          = {workspace = true}

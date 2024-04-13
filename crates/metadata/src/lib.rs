@@ -9,6 +9,7 @@ mod metadata_error;
 mod project;
 mod pubfile;
 mod publish;
+mod test;
 #[cfg(test)]
 mod tests;
 mod utils;
@@ -23,3 +24,4 @@ pub use project::Project;
 pub use pubfile::{Pubfile, Release};
 pub use publish::Publish;
 pub use semver;
+pub use test::SimType;

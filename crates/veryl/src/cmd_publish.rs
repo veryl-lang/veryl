@@ -1,9 +1,8 @@
 use crate::cmd_check::CheckError;
 use crate::OptPublish;
-use log::{debug, info, warn};
+use log::{info, warn};
 use miette::{IntoDiagnostic, Result, WrapErr};
 use std::fs;
-use std::time::Instant;
 use veryl_analyzer::Analyzer;
 use veryl_metadata::Metadata;
 use veryl_parser::Parser;
@@ -18,8 +17,6 @@ impl CmdPublish {
     }
 
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
-        let now = Instant::now();
-
         let paths = metadata.paths::<&str>(&[])?;
 
         let mut check_error = CheckError::default();
@@ -62,8 +59,6 @@ impl CmdPublish {
 
         metadata.publish()?;
 
-        let elapsed_time = now.elapsed();
-        debug!("Elapsed time ({} milliseconds)", elapsed_time.as_millis());
         Ok(true)
     }
 }

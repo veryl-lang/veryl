@@ -8,7 +8,6 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
-use std::time::Instant;
 use veryl_formatter::Formatter;
 use veryl_metadata::Metadata;
 use veryl_parser::Parser;
@@ -23,8 +22,6 @@ impl CmdFmt {
     }
 
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
-        let now = Instant::now();
-
         let paths = metadata.paths(&self.opt.files)?;
 
         let mut all_pass = true;
@@ -57,9 +54,6 @@ impl CmdFmt {
                 }
             }
         }
-
-        let elapsed_time = now.elapsed();
-        debug!("Elapsed time ({} milliseconds)", elapsed_time.as_millis());
 
         Ok(all_pass)
     }
