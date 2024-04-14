@@ -31,6 +31,10 @@ impl<'a> Handler for CheckEnum<'a> {
     }
 }
 
+fn calc_width(value: usize) -> usize {
+    (usize::BITS - value.leading_zeros()) as usize
+}
+
 impl<'a> VerylGrammarTrait for CheckEnum<'a> {
     fn enum_declaration(&mut self, arg: &EnumDeclaration) -> Result<(), ParolError> {
         match self.point {
@@ -43,8 +47,7 @@ impl<'a> VerylGrammarTrait for CheckEnum<'a> {
                 let r#type: crate::symbol::Type = arg.scalar_type.as_ref().into();
                 let width = evaluator.type_width(r#type);
                 if let Some(width) = width {
-                    let max_members = 2_usize.pow(width as u32);
-                    if self.enum_variants > max_members {
+                    if calc_width(self.enum_variants - 1) > width {
                         let name = arg.identifier.identifier_token.to_string();
                         self.errors.push(AnalyzerError::too_much_enum_variant(
                             &name,
@@ -57,7 +60,7 @@ impl<'a> VerylGrammarTrait for CheckEnum<'a> {
 
                     for (enum_value, token) in &self.enum_member_values {
                         if let Evaluated::Fixed { value, .. } = enum_value {
-                            if *value as usize >= max_members {
+                            if calc_width(*value as usize) > width {
                                 self.errors.push(AnalyzerError::too_large_enum_variant(
                                     &token.to_string(),
                                     *value,
