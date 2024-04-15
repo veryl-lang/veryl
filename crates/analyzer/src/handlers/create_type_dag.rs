@@ -3,12 +3,13 @@ use crate::{
     symbol_table::SymbolPathNamespace,
     type_dag::{self, Context, DagError},
 };
+use std::collections::HashMap;
 use veryl_parser::{
     resource_table,
     veryl_grammar_trait::{
-        DescriptionItem, EnumDeclaration, InterfaceDeclaration, ModuleDeclaration,
-        PackageDeclaration, ScopedIdentifier, StructUnion, StructUnionDeclaration,
-        TypeDefDeclaration, Veryl, VerylGrammarTrait,
+        DescriptionItem, EnumDeclaration, InterfaceDeclaration, LocalDeclaration,
+        ModportDeclaration, ModuleDeclaration, PackageDeclaration, ScopedIdentifier, StructUnion,
+        StructUnionDeclaration, TypeDefDeclaration, Veryl, VerylGrammarTrait,
     },
     veryl_token::Token,
     ParolError,
@@ -26,6 +27,7 @@ pub struct CreateTypeDag<'a> {
     point: HandlerPoint,
     ctx: Vec<Context>,
     file_scope_import: Vec<Option<u32>>,
+    owned: HashMap<u32, Vec<u32>>,
 }
 
 impl<'a> CreateTypeDag<'a> {
@@ -80,6 +82,21 @@ impl<'a> CreateTypeDag<'a> {
             }
         }
     }
+
+    fn insert_owned(&mut self, parent: u32, child: u32) {
+        self.owned
+            .entry(parent)
+            .and_modify(|x| x.push(child))
+            .or_insert(vec![child]);
+    }
+
+    fn is_owned(&self, parent: u32, child: u32) -> bool {
+        if let Some(owned) = self.owned.get(&parent) {
+            owned.contains(&child)
+        } else {
+            false
+        }
+    }
 }
 
 impl<'a> Handler for CreateTypeDag<'a> {
@@ -96,6 +113,10 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
                 let name = arg.identifier.identifier_token.to_string();
                 let token = arg.identifier.identifier_token.token;
                 if let Some(x) = self.insert_node(&path, &name, &token) {
+                    if let Some(parent) = self.parent.last().cloned() {
+                        self.insert_edge(x, parent, *self.ctx.last().unwrap());
+                        self.insert_owned(parent, x);
+                    }
                     self.parent.push(x)
                 }
                 // Unused for now, but will be useful in the future
@@ -113,20 +134,31 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
         Ok(())
     }
 
-    fn type_def_declaration(&mut self, arg: &TypeDefDeclaration) -> Result<(), ParolError> {
-        match self.point {
-            HandlerPoint::Before => {
-                let path: SymbolPathNamespace = arg.identifier.as_ref().into();
-                let name = arg.identifier.identifier_token.to_string();
-                let token = arg.identifier.identifier_token.token;
-                if let Some(x) = self.insert_node(&path, &name, &token) {
-                    self.parent.push(x)
+    fn local_declaration(&mut self, arg: &LocalDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            let path: SymbolPathNamespace = arg.identifier.as_ref().into();
+            let name = arg.identifier.identifier_token.to_string();
+            let token = arg.identifier.identifier_token.token;
+            if let Some(x) = self.insert_node(&path, &name, &token) {
+                if let Some(parent) = self.parent.last().cloned() {
+                    self.insert_edge(x, parent, *self.ctx.last().unwrap());
+                    self.insert_owned(parent, x);
                 }
-                self.ctx.push(Context::TypeDef);
             }
-            HandlerPoint::After => {
-                self.parent.pop();
-                self.ctx.pop();
+        }
+        Ok(())
+    }
+
+    fn type_def_declaration(&mut self, arg: &TypeDefDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            let path: SymbolPathNamespace = arg.identifier.as_ref().into();
+            let name = arg.identifier.identifier_token.to_string();
+            let token = arg.identifier.identifier_token.token;
+            if let Some(x) = self.insert_node(&path, &name, &token) {
+                if let Some(parent) = self.parent.last().cloned() {
+                    self.insert_edge(x, parent, *self.ctx.last().unwrap());
+                    self.insert_owned(parent, x);
+                }
             }
         }
         Ok(())
@@ -140,8 +172,33 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
                 let token = arg.identifier().token;
                 let child = self.insert_node(&path, &name, &token);
                 if let (Some(parent), Some(child)) = (self.parent.last(), child) {
-                    self.insert_edge(*parent, child, *self.ctx.last().unwrap());
+                    if !self.is_owned(*parent, child) {
+                        self.insert_edge(*parent, child, *self.ctx.last().unwrap());
+                    }
                 }
+            }
+        }
+        Ok(())
+    }
+
+    fn modport_declaration(&mut self, arg: &ModportDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                let path: SymbolPathNamespace = arg.identifier.as_ref().into();
+                let name = arg.identifier.identifier_token.to_string();
+                let token = arg.identifier.identifier_token.token;
+                if let Some(x) = self.insert_node(&path, &name, &token) {
+                    if let Some(parent) = self.parent.last().cloned() {
+                        self.insert_edge(x, parent, *self.ctx.last().unwrap());
+                        self.insert_owned(parent, x);
+                    }
+                    self.parent.push(x)
+                }
+                self.ctx.push(Context::Modport);
+            }
+            HandlerPoint::After => {
+                self.parent.pop();
+                self.ctx.pop();
             }
         }
         Ok(())
@@ -154,6 +211,10 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
                 let name = arg.identifier.identifier_token.to_string();
                 let token = arg.identifier.identifier_token.token;
                 if let Some(x) = self.insert_node(&path, &name, &token) {
+                    if let Some(parent) = self.parent.last().cloned() {
+                        self.insert_edge(x, parent, *self.ctx.last().unwrap());
+                        self.insert_owned(parent, x);
+                    }
                     self.parent.push(x)
                 }
                 self.ctx.push(Context::Enum);
