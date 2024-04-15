@@ -25,3 +25,4 @@ pub use pubfile::{Pubfile, Release};
 pub use publish::Publish;
 pub use semver;
 pub use test::SimType;
+pub use test::Test;
