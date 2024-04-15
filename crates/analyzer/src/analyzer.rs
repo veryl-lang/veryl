@@ -6,7 +6,7 @@ use crate::namespace_table;
 use crate::symbol::{
     Direction, ParameterValue, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiniation,
 };
-use crate::symbol_table;
+use crate::symbol_table::{self, SymbolPath};
 use itertools::Itertools;
 use std::path::Path;
 use veryl_metadata::{Lint, Metadata};
@@ -67,23 +67,44 @@ impl<'a> AnalyzerPass3<'a> {
         }
     }
 
-    pub fn check_unused_variables(&self) -> Vec<AnalyzerError> {
+    pub fn check_variables(&self) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
 
         for symbol in &self.symbols {
             if symbol.token.source == self.path {
-                if let SymbolKind::Variable(_) = symbol.kind {
+                if let SymbolKind::Variable(ref x) = symbol.kind {
                     if symbol.references.is_empty() && !symbol.allow_unused {
                         let name = symbol.token.to_string();
-                        if name.starts_with('_') {
-                            continue;
+                        if !name.starts_with('_') {
+                            ret.push(AnalyzerError::unused_variable(
+                                &symbol.token.to_string(),
+                                self.text,
+                                &symbol.token.into(),
+                            ));
                         }
-
-                        ret.push(AnalyzerError::unused_variable(
-                            &symbol.token.to_string(),
-                            self.text,
-                            &symbol.token.into(),
-                        ));
+                    }
+                    if let TypeKind::UserDefined(ref x) = x.r#type.kind {
+                        if let Ok(x) =
+                            symbol_table::resolve((&SymbolPath::new(x), &symbol.namespace))
+                        {
+                            match x.found.kind {
+                                SymbolKind::Enum(_)
+                                | SymbolKind::Union(_)
+                                | SymbolKind::Struct(_)
+                                | SymbolKind::TypeDef(_)
+                                | SymbolKind::SystemVerilog => (),
+                                SymbolKind::Parameter(x) if x.r#type.kind == TypeKind::Type => (),
+                                _ => {
+                                    ret.push(AnalyzerError::mismatch_type(
+                                        &x.found.token.to_string(),
+                                        "enum or union or struct",
+                                        &x.found.kind.to_kind_name(),
+                                        self.text,
+                                        &symbol.token.into(),
+                                    ));
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -219,7 +240,7 @@ impl Analyzer {
 
         namespace_table::set_default(&[project_name.into()]);
         let pass3 = AnalyzerPass3::new(path.as_ref(), text);
-        ret.append(&mut pass3.check_unused_variables());
+        ret.append(&mut pass3.check_variables());
         ret.append(&mut pass3.check_assignment());
 
         ret
