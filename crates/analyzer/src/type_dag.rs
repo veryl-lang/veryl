@@ -37,6 +37,7 @@ pub enum Context {
     Module,
     Interface,
     Package,
+    Modport,
 }
 
 #[derive(Debug, Clone)]
@@ -134,7 +135,7 @@ impl TypeDag {
         let mut ret = "".to_string();
         for node in nodes {
             if let Some(path) = self.paths.get(&(node.index() as u32)) {
-                ret.push_str(&format!("{}\n", path.name,));
+                ret.push_str(&format!("{}\n", path.name));
                 let mut set = HashSet::new();
                 for parent in self.dag.parents(node).iter(&self.dag) {
                     let node = parent.1.index() as u32;
