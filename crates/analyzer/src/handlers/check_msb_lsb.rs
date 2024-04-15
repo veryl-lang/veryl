@@ -1,6 +1,8 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::msb_table;
+use crate::namespace::Namespace;
 use crate::namespace_table;
+use crate::symbol::Type as SymType;
 use crate::symbol::{SymbolKind, TypeKind};
 use crate::symbol_table::{self, SymbolPath, SymbolPathNamespace};
 use veryl_parser::veryl_grammar_trait::*;
@@ -37,6 +39,18 @@ impl<'a> Handler for CheckMsbLsb<'a> {
     }
 }
 
+fn trace_type(r#type: &SymType, namespace: &Namespace) -> Vec<SymType> {
+    let mut ret = vec![r#type.clone()];
+    if let TypeKind::UserDefined(ref x) = r#type.kind {
+        if let Ok(symbol) = symbol_table::resolve((&SymbolPath::new(x), namespace)) {
+            if let SymbolKind::TypeDef(ref x) = symbol.found.kind {
+                ret.append(&mut trace_type(&x.r#type, namespace));
+            }
+        }
+    }
+    ret
+}
+
 impl<'a> VerylGrammarTrait for CheckMsbLsb<'a> {
     fn lsb(&mut self, arg: &Lsb) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
@@ -58,24 +72,28 @@ impl<'a> VerylGrammarTrait for CheckMsbLsb<'a> {
                 {
                     let namespace = &x.found.namespace;
                     if let SymbolKind::Variable(x) = x.found.kind {
-                        let sv_type = if let TypeKind::UserDefined(ref x) = x.r#type.kind {
-                            let symbol = symbol_table::resolve((&SymbolPath::new(x), namespace));
-                            matches!(symbol.unwrap().found.kind, SymbolKind::SystemVerilog)
-                        } else {
-                            false
-                        };
+                        let types = trace_type(&x.r#type, namespace);
+                        let mut select_dimension = *self.select_dimension.last().unwrap();
 
-                        if sv_type {
-                            false
-                        } else {
-                            let select_dimension = *self.select_dimension.last().unwrap();
-                            let expression = if select_dimension >= x.r#type.array.len() {
-                                &x.r#type.width[select_dimension - x.r#type.array.len()]
-                            } else {
-                                &x.r#type.array[select_dimension]
-                            };
-                            msb_table::insert(arg.msb_token.token.id, expression);
+                        let mut expression = None;
+                        for t in types {
+                            if select_dimension < t.array.len() {
+                                expression = t.array.get(select_dimension).cloned();
+                                break;
+                            }
+                            select_dimension -= t.array.len();
+                            if select_dimension < t.width.len() {
+                                expression = t.width.get(select_dimension).cloned();
+                                break;
+                            }
+                            select_dimension -= t.width.len();
+                        }
+
+                        if let Some(expression) = expression {
+                            msb_table::insert(arg.msb_token.token.id, &expression);
                             true
+                        } else {
+                            false
                         }
                     } else {
                         false
