@@ -16,7 +16,7 @@ impl CmdDump {
     }
 
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
-        let paths = metadata.paths(&self.opt.files)?;
+        let paths = metadata.paths(&self.opt.files, true)?;
 
         let mut contexts = Vec::new();
 

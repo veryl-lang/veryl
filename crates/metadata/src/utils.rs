@@ -6,9 +6,10 @@ use walkdir::WalkDir;
 pub fn gather_files_with_extension<T: AsRef<Path>>(
     base_dir: T,
     ext: &str,
+    symlink: bool,
 ) -> Result<Vec<PathBuf>, MetadataError> {
     let mut ret = Vec::new();
-    for entry in WalkDir::new(base_dir) {
+    for entry in WalkDir::new(base_dir).follow_links(symlink) {
         let entry = entry?;
         if entry.file_type().is_file() {
             if let Some(x) = entry.path().extension() {

@@ -28,7 +28,7 @@ mod analyzer {
         let mut metadata = Metadata::load(&metadata_path).unwrap();
 
         if name == "25_dependency" {
-            let paths = metadata.paths::<&str>(&[]).unwrap();
+            let paths = metadata.paths::<&str>(&[], false).unwrap();
             let cache_path = Metadata::cache_path().canonicalize().unwrap();
             for path in paths {
                 if path.src.starts_with(&cache_path) {
@@ -110,7 +110,7 @@ mod emitter {
         let mut metadata = Metadata::load(&metadata_path).unwrap();
 
         if name == "25_dependency" {
-            let paths = metadata.paths::<&str>(&[]).unwrap();
+            let paths = metadata.paths::<&str>(&[], false).unwrap();
             let cache_path = Metadata::cache_path().canonicalize().unwrap();
             for path in paths {
                 if path.src.starts_with(&cache_path) {
