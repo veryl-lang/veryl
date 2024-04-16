@@ -242,6 +242,9 @@ impl Metadata {
                 Target::Directory { ref path } => {
                     base.join(path.join(src.with_extension("sv").file_name().unwrap()))
                 }
+                Target::Bundle { .. } => base.join(
+                    PathBuf::from("target").join(src.with_extension("sv").file_name().unwrap()),
+                ),
             };
             ret.push(PathPair {
                 prj: self.project.name.clone(),
