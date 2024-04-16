@@ -814,12 +814,9 @@ impl VerylWalker for Aligner {
         self.function(&arg.function);
         self.identifier(&arg.identifier);
         if let Some(ref x) = arg.function_declaration_opt {
-            self.with_parameter(&x.with_parameter);
-        }
-        if let Some(ref x) = arg.function_declaration_opt0 {
             self.port_declaration(&x.port_declaration);
         }
-        if let Some(ref x) = arg.function_declaration_opt1 {
+        if let Some(ref x) = arg.function_declaration_opt0 {
             self.minus_g_t(&x.minus_g_t);
             self.scalar_type(&x.scalar_type);
             self.reset_align();

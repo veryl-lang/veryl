@@ -644,7 +644,7 @@ Direction: Input
 // Function
 // ----------------------------------------------------------------------------
 
-FunctionDeclaration: Function Identifier [ WithParameter ] [ PortDeclaration ] [ MinusGT ScalarType ] LBrace { FunctionItem } RBrace;
+FunctionDeclaration: Function Identifier [ PortDeclaration ] [ MinusGT ScalarType ] LBrace { FunctionItem } RBrace;
 
 FunctionItem: VarDeclaration
             | Statement

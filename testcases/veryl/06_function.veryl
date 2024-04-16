@@ -13,19 +13,6 @@ module Module06 {
         return a + 2;
     }
 
-    // function with parameter
-    function FuncB #(
-        param ParamX: u32 = 1,
-    ) (
-        a: input  logic<ParamX>,
-        b: output logic<ParamX>,
-        c: ref    logic<ParamX>,
-    ) -> logic<ParamX> {
-        b = a + 1;
-        c = a / 1;
-        return a + 2;
-    }
-
     // void function
     function FuncC (
         a: input logic<ParamX>,
@@ -42,9 +29,6 @@ module Module06 {
 
     // function call
     assign d = FuncA(a, b, c);
-
-    // function call with parameter
-    //assign a = FuncB #(ParamX: 1) (a, b, c);
 
     // void function call
     initial {

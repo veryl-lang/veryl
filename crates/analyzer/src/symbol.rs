@@ -196,11 +196,7 @@ impl fmt::Display for SymbolKind {
                 format!("interface ({} params)", x.parameters.len())
             }
             SymbolKind::Function(x) => {
-                format!(
-                    "function ({} params, {} args)",
-                    x.parameters.len(),
-                    x.ports.len()
-                )
+                format!("function ({} args)", x.ports.len())
             }
             SymbolKind::Parameter(x) => {
                 let mut stringifier = Stringifier::new();
@@ -628,7 +624,6 @@ pub struct InterfaceProperty {
 #[derive(Debug, Clone)]
 pub struct FunctionProperty {
     pub range: TokenRange,
-    pub parameters: Vec<Parameter>,
     pub ports: Vec<Port>,
     pub ret: Option<Type>,
 }

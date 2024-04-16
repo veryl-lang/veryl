@@ -14,21 +14,6 @@ module veryl_testcase_Module06;
         return a + 2;
     endfunction
 
-    // function with parameter
-    module FuncB #(
-        parameter int unsigned ParamX = 1
-    );
-        function automatic logic [ParamX-1:0] FuncB(
-            input  logic [ParamX-1:0] a,
-            output logic [ParamX-1:0] b,
-            ref    logic [ParamX-1:0] c
-        ) ;
-            b = a + 1;
-            c = a / 1;
-            return a + 2;
-        endfunction
-    endmodule
-
     // void function
     function automatic void FuncC(
         input logic [ParamX-1:0] a,
@@ -48,9 +33,6 @@ module veryl_testcase_Module06;
 
     // function call
     always_comb d = FuncA(a, b, c);
-
-    // function call with parameter
-    //assign a = FuncB #(ParamX: 1) (a, b, c);
 
     // void function call
     initial begin
