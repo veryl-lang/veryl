@@ -200,7 +200,7 @@ impl Server {
             self.on_change(&metadata.project.name, url, text, version);
 
             if !url.as_str().contains(&self.cache_dir) {
-                if let Ok(paths) = metadata.paths::<&str>(&[]) {
+                if let Ok(paths) = metadata.paths::<&str>(&[], true) {
                     let total = paths.len();
                     let task = BackgroundTask {
                         metadata,
