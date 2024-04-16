@@ -489,6 +489,13 @@ pub trait VerylWalker {
         after!(self, r#in, arg);
     }
 
+    /// Semantic action for non-terminal 'Include'
+    fn include(&mut self, arg: &Include) {
+        before!(self, include, arg);
+        self.veryl_token(&arg.include_token);
+        after!(self, include, arg);
+    }
+
     /// Semantic action for non-terminal 'Initial'
     fn initial(&mut self, arg: &Initial) {
         before!(self, initial, arg);
@@ -2661,6 +2668,19 @@ pub trait VerylWalker {
         after!(self, embed_content, arg);
     }
 
+    /// Semantic action for non-terminal 'IncludeDeclaration'
+    fn include_declaration(&mut self, arg: &IncludeDeclaration) {
+        before!(self, include_declaration, arg);
+        self.include(&arg.include);
+        self.l_paren(&arg.l_paren);
+        self.identifier(&arg.identifier);
+        self.comma(&arg.comma);
+        self.string_literal(&arg.string_literal);
+        self.r_paren(&arg.r_paren);
+        self.semicolon(&arg.semicolon);
+        after!(self, include_declaration, arg);
+    }
+
     /// Semantic action for non-terminal 'DescriptionGroup'
     fn description_group(&mut self, arg: &DescriptionGroup) {
         before!(self, description_group, arg);
@@ -2693,6 +2713,9 @@ pub trait VerylWalker {
             }
             DescriptionItem::ImportDeclaration(x) => self.import_declaration(&x.import_declaration),
             DescriptionItem::EmbedDeclaration(x) => self.embed_declaration(&x.embed_declaration),
+            DescriptionItem::IncludeDeclaration(x) => {
+                self.include_declaration(&x.include_declaration)
+            }
         };
         after!(self, description_item, arg);
     }

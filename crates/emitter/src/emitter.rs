@@ -1,4 +1,5 @@
 use crate::aligner::{Aligner, Location};
+use std::fs;
 use veryl_analyzer::attribute::Attribute as Attr;
 use veryl_analyzer::attribute_table;
 use veryl_analyzer::namespace::Namespace;
@@ -9,7 +10,7 @@ use veryl_analyzer::{msb_table, namespace_table};
 use veryl_metadata::{Build, BuiltinType, ClockType, Format, Metadata, ResetType};
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::{Token, VerylToken};
+use veryl_parser::veryl_token::{Token, TokenSource, VerylToken};
 use veryl_parser::veryl_walker::VerylWalker;
 use veryl_parser::Stringifier;
 
@@ -2826,6 +2827,24 @@ impl VerylWalker for Emitter {
         }
     }
 
+    /// Semantic action for non-terminal 'IncludeDeclaration'
+    fn include_declaration(&mut self, arg: &IncludeDeclaration) {
+        if arg.identifier.identifier_token.to_string() == "inline" {
+            let path = arg.string_literal.string_literal_token.to_string();
+            let path = path.strip_prefix('"').unwrap();
+            let path = path.strip_suffix('"').unwrap();
+            if let TokenSource::File(x) = arg.identifier.identifier_token.token.source {
+                let base = resource_table::get_path_value(x).unwrap();
+                let base = base.parent().unwrap();
+                let path = base.join(path);
+                // File existence is checked at analyzer
+                let text = fs::read_to_string(path).unwrap();
+                let text = text.replace('\r', "");
+                self.str(&text);
+            }
+        }
+    }
+
     /// Semantic action for non-terminal 'DescriptionGroup'
     fn description_group(&mut self, arg: &DescriptionGroup) {
         for x in &arg.description_group_list {
@@ -2860,6 +2879,9 @@ impl VerylWalker for Emitter {
             // file scope import is not emitted at SystemVerilog
             DescriptionItem::ImportDeclaration(_) => (),
             DescriptionItem::EmbedDeclaration(x) => self.embed_declaration(&x.embed_declaration),
+            DescriptionItem::IncludeDeclaration(x) => {
+                self.include_declaration(&x.include_declaration)
+            }
         };
     }
 

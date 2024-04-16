@@ -551,6 +551,7 @@ token_with_comments!(I64);
 token_with_comments!(If);
 token_with_comments!(IfReset);
 token_with_comments!(Import);
+token_with_comments!(Include);
 token_with_comments!(Initial);
 token_with_comments!(Inout);
 token_with_comments!(Input);
