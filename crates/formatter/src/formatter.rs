@@ -1434,14 +1434,10 @@ impl VerylWalker for Formatter {
         self.identifier(&arg.identifier);
         self.space(1);
         if let Some(ref x) = arg.function_declaration_opt {
-            self.with_parameter(&x.with_parameter);
-            self.space(1);
-        }
-        if let Some(ref x) = arg.function_declaration_opt0 {
             self.port_declaration(&x.port_declaration);
             self.space(1);
         }
-        if let Some(ref x) = arg.function_declaration_opt1 {
+        if let Some(ref x) = arg.function_declaration_opt0 {
             self.minus_g_t(&x.minus_g_t);
             self.space(1);
             self.scalar_type(&x.scalar_type);

@@ -2327,31 +2327,22 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'FunctionDeclaration'
     fn function_declaration(&mut self, arg: &FunctionDeclaration) {
-        if let Some(ref x) = arg.function_declaration_opt {
-            self.str("module");
-            self.space(1);
-            self.identifier(&arg.identifier);
-            self.space(1);
-            self.with_parameter(&x.with_parameter);
-            self.str(";");
-            self.newline_push();
-        }
         self.function(&arg.function);
         self.space(1);
         self.str("automatic");
         self.space(1);
-        if let Some(ref x) = &arg.function_declaration_opt1 {
+        if let Some(ref x) = &arg.function_declaration_opt0 {
             self.scalar_type(&x.scalar_type);
         } else {
             self.str("void");
         }
         self.space(1);
         self.identifier(&arg.identifier);
-        if let Some(ref x) = arg.function_declaration_opt0 {
+        if let Some(ref x) = arg.function_declaration_opt {
             self.port_declaration(&x.port_declaration);
             self.space(1);
         }
-        if let Some(ref x) = arg.function_declaration_opt1 {
+        if let Some(ref x) = arg.function_declaration_opt0 {
             self.token(&x.minus_g_t.minus_g_t_token.replace(""));
         }
         self.str(";");
@@ -2371,13 +2362,7 @@ impl VerylWalker for Emitter {
             self.function_item_statement_only(&x.function_item);
         }
         self.newline_list_post(arg.function_declaration_list.is_empty());
-        if arg.function_declaration_opt.is_some() {
-            self.str("endfunction");
-            self.newline_pop();
-            self.token(&arg.r_brace.r_brace_token.replace("endmodule"));
-        } else {
-            self.token(&arg.r_brace.r_brace_token.replace("endfunction"));
-        }
+        self.token(&arg.r_brace.r_brace_token.replace("endfunction"));
     }
 
     /// Semantic action for non-terminal 'ImportDeclaration'

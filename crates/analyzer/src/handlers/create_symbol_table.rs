@@ -558,17 +558,8 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
     fn function_declaration(&mut self, arg: &FunctionDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                let mut parameters = Vec::new();
-                if let Some(ref x) = arg.function_declaration_opt {
-                    if let Some(ref x) = x.with_parameter.with_parameter_opt {
-                        let items: Vec<WithParameterItem> = x.with_parameter_list.as_ref().into();
-                        for item in items {
-                            parameters.push((&item).into());
-                        }
-                    }
-                }
                 let mut ports = Vec::new();
-                if let Some(ref x) = arg.function_declaration_opt0 {
+                if let Some(ref x) = arg.function_declaration_opt {
                     if let Some(ref x) = x.port_declaration.port_declaration_opt {
                         let items: Vec<PortDeclarationItem> =
                             x.port_declaration_list.as_ref().into();
@@ -578,17 +569,12 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     }
                 }
                 let ret = arg
-                    .function_declaration_opt1
+                    .function_declaration_opt0
                     .as_ref()
                     .map(|x| (&*x.scalar_type).into());
                 let range =
                     TokenRange::new(&arg.function.function_token, &arg.r_brace.r_brace_token);
-                let property = FunctionProperty {
-                    range,
-                    parameters,
-                    ports,
-                    ret,
-                };
+                let property = FunctionProperty { range, ports, ret };
                 self.insert_symbol(
                     &arg.identifier.identifier_token.token,
                     SymbolKind::Function(property),
