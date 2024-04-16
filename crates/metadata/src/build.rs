@@ -61,6 +61,8 @@ pub enum Target {
     Source,
     #[serde(rename = "directory")]
     Directory { path: PathBuf },
+    #[serde(rename = "bundle")]
+    Bundle { path: PathBuf },
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
