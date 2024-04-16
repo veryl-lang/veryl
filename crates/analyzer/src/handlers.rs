@@ -1,7 +1,7 @@
 pub mod check_assignment;
 pub mod check_attribute;
 pub mod check_direction;
-pub mod check_embed;
+pub mod check_embed_include;
 pub mod check_enum;
 pub mod check_function;
 pub mod check_identifier;
@@ -15,7 +15,7 @@ pub mod create_symbol_table;
 pub mod create_type_dag;
 use check_attribute::*;
 use check_direction::*;
-use check_embed::*;
+use check_embed_include::*;
 use check_enum::*;
 use check_function::*;
 use check_identifier::*;
@@ -36,7 +36,7 @@ use self::{check_assignment::CheckAssignment, create_type_dag::CreateTypeDag};
 pub struct Pass1Handlers<'a> {
     check_attribute: CheckAttribute<'a>,
     check_direction: CheckDirection<'a>,
-    check_embed: CheckEmbed<'a>,
+    check_embed_include: CheckEmbedInclude<'a>,
     check_identifier: CheckIdentifier<'a>,
     check_number: CheckNumber<'a>,
     check_reset: CheckReset<'a>,
@@ -49,7 +49,7 @@ impl<'a> Pass1Handlers<'a> {
         Self {
             check_attribute: CheckAttribute::new(text),
             check_direction: CheckDirection::new(text),
-            check_embed: CheckEmbed::new(text),
+            check_embed_include: CheckEmbedInclude::new(text),
             check_identifier: CheckIdentifier::new(text, lint_opt),
             check_number: CheckNumber::new(text),
             check_reset: CheckReset::new(text),
@@ -62,7 +62,7 @@ impl<'a> Pass1Handlers<'a> {
         vec![
             &mut self.check_attribute as &mut dyn Handler,
             &mut self.check_direction as &mut dyn Handler,
-            &mut self.check_embed as &mut dyn Handler,
+            &mut self.check_embed_include as &mut dyn Handler,
             &mut self.check_identifier as &mut dyn Handler,
             &mut self.check_number as &mut dyn Handler,
             &mut self.check_reset as &mut dyn Handler,
@@ -75,7 +75,7 @@ impl<'a> Pass1Handlers<'a> {
         let mut ret = Vec::new();
         ret.append(&mut self.check_attribute.errors);
         ret.append(&mut self.check_direction.errors);
-        ret.append(&mut self.check_embed.errors);
+        ret.append(&mut self.check_embed_include.errors);
         ret.append(&mut self.check_identifier.errors);
         ret.append(&mut self.check_number.errors);
         ret.append(&mut self.check_reset.errors);

@@ -22,6 +22,7 @@ pub const KEYWORDS: &[&str] = &[
     "if_reset",
     "if",
     "import",
+    "include",
     "initial",
     "inout",
     "input",

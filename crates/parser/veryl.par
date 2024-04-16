@@ -83,6 +83,7 @@ I64Term               : /(?-u:\b)i64(?-u:\b)/                                   
 IfResetTerm           : /(?-u:\b)if_reset(?-u:\b)/                                                            : Token;
 IfTerm                : /(?-u:\b)if(?-u:\b)/                                                                  : Token;
 ImportTerm            : /(?-u:\b)import(?-u:\b)/                                                              : Token;
+IncludeTerm           : /(?-u:\b)include(?-u:\b)/                                                             : Token;
 InitialTerm           : /(?-u:\b)initial(?-u:\b)/                                                             : Token;
 InoutTerm             : /(?-u:\b)inout(?-u:\b)/                                                               : Token;
 InputTerm             : /(?-u:\b)input(?-u:\b)/                                                               : Token;
@@ -200,6 +201,7 @@ I64Token       : I64Term       : Token Comments;
 IfResetToken   : IfResetTerm   : Token Comments;
 IfToken        : IfTerm        : Token Comments;
 ImportToken    : ImportTerm    : Token Comments;
+IncludeToken   : IncludeTerm   : Token Comments;
 InitialToken   : InitialTerm   : Token Comments;
 InoutToken     : InoutTerm     : Token Comments;
 InputToken     : InputTerm     : Token Comments;
@@ -323,6 +325,7 @@ If        : IfToken        : VerylToken;
 IfReset   : IfResetToken   : VerylToken;
 Import    : ImportToken    : VerylToken;
 In        : InToken        : VerylToken;
+Include   : IncludeToken   : VerylToken;
 Initial   : InitialToken   : VerylToken;
 Inout     : InoutToken     : VerylToken;
 Input     : InputToken     : VerylToken;
@@ -756,6 +759,12 @@ EmbedItem: LBraceTerm { EmbedItem } RBraceTerm
          | AnyTerm;
 
 // ----------------------------------------------------------------------------
+// Include
+// ----------------------------------------------------------------------------
+
+IncludeDeclaration: Include LParen Identifier Comma StringLiteral RParen Semicolon;
+
+// ----------------------------------------------------------------------------
 // Description
 // ----------------------------------------------------------------------------
 
@@ -766,6 +775,7 @@ DescriptionItem: ModuleDeclaration
                | PackageDeclaration
                | ImportDeclaration
                | EmbedDeclaration
+               | IncludeDeclaration
                ;
 
 // ----------------------------------------------------------------------------

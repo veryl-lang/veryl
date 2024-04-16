@@ -30,7 +30,7 @@
 				},
 				{
 					"name": "keyword.other.veryl",
-					"match": "\\b(module|interface|function|modport|package|param|local|posedge|negedge|async_high|async_low|sync_high|sync_low|always_ff|always_comb|assign|return|break|var|inst|import|export|as|initial|final|pub|let|embed)\\b"
+					"match": "\\b(module|interface|function|modport|package|param|local|posedge|negedge|async_high|async_low|sync_high|sync_low|always_ff|always_comb|assign|return|break|var|inst|import|export|as|initial|final|pub|let|embed|include)\\b"
 				}
 			]
 		},

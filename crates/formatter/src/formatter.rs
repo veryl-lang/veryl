@@ -1782,6 +1782,19 @@ impl VerylWalker for Formatter {
         self.str(&text);
     }
 
+    /// Semantic action for non-terminal 'IncludeDeclaration'
+    fn include_declaration(&mut self, arg: &IncludeDeclaration) {
+        self.include(&arg.include);
+        self.space(1);
+        self.l_paren(&arg.l_paren);
+        self.identifier(&arg.identifier);
+        self.comma(&arg.comma);
+        self.space(1);
+        self.string_literal(&arg.string_literal);
+        self.r_paren(&arg.r_paren);
+        self.semicolon(&arg.semicolon);
+    }
+
     /// Semantic action for non-terminal 'DescriptionGroup'
     fn description_group(&mut self, arg: &DescriptionGroup) {
         for x in &arg.description_group_list {

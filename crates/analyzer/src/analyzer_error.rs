@@ -441,6 +441,23 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(unknown_include_way),
+        help(""),
+        url(
+            "https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#unknown_include_way"
+        )
+    )]
+    #[error("\"{name}\" is not valid include way")]
+    UnknownIncludeWay {
+        name: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(unknown_member),
         help(""),
         url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#unknown_member")
@@ -591,6 +608,22 @@ pub enum AnalyzerError {
     #[error("{identifier} is reverved for compiler usage")]
     ReservedIdentifier {
         identifier: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(include_failure),
+        help(""),
+        url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#include_failure")
+    )]
+    #[error("\"{name}\" can't be read because \"{cause}\"")]
+    IncludeFailure {
+        name: String,
+        cause: String,
         #[source_code]
         input: NamedSource,
         #[label("Error location")]
@@ -890,6 +923,14 @@ impl AnalyzerError {
         }
     }
 
+    pub fn unknown_include_way(name: &str, source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::UnknownIncludeWay {
+            name: name.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
     pub fn unknown_member(name: &str, member: &str, source: &str, token: &TokenRange) -> Self {
         AnalyzerError::UnknownMember {
             name: name.to_string(),
@@ -973,6 +1014,15 @@ impl AnalyzerError {
     pub fn reserved_identifier(identifier: &str, source: &str, token: &TokenRange) -> Self {
         AnalyzerError::ReservedIdentifier {
             identifier: identifier.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn include_failure(name: &str, cause: &str, source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::IncludeFailure {
+            name: name.to_string(),
+            cause: cause.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
         }

@@ -1,0 +1,3 @@
+module Module52 {}
+
+include (inline, "52_include.sv");
