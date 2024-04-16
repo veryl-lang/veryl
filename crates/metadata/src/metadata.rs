@@ -222,11 +222,15 @@ impl Metadata {
         Ok(())
     }
 
-    pub fn paths<T: AsRef<Path>>(&mut self, files: &[T]) -> Result<Vec<PathPair>, MetadataError> {
+    pub fn paths<T: AsRef<Path>>(
+        &mut self,
+        files: &[T],
+        symlink: bool,
+    ) -> Result<Vec<PathPair>, MetadataError> {
         let base = self.project_path();
 
         let src_files = if files.is_empty() {
-            utils::gather_files_with_extension(&base, "veryl")?
+            utils::gather_files_with_extension(&base, "veryl", symlink)?
         } else {
             files.iter().map(|x| x.as_ref().to_path_buf()).collect()
         };

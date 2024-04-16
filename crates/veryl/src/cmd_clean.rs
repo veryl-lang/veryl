@@ -14,7 +14,7 @@ impl CmdClean {
     }
 
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
-        let paths = metadata.paths::<&str>(&[])?;
+        let paths = metadata.paths::<&str>(&[], true)?;
         for path in &paths {
             if path.dst.exists() {
                 info!("Removing file ({})", path.dst.to_string_lossy());

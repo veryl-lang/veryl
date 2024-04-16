@@ -1,7 +1,7 @@
 use crate::cmd_check::CheckError;
 use crate::OptPublish;
 use log::{info, warn};
-use miette::{IntoDiagnostic, Result, WrapErr};
+use miette::{bail, IntoDiagnostic, Result, WrapErr};
 use std::fs;
 use veryl_analyzer::Analyzer;
 use veryl_metadata::Metadata;
@@ -17,7 +17,17 @@ impl CmdPublish {
     }
 
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
-        let paths = metadata.paths::<&str>(&[])?;
+        let paths = metadata.paths::<&str>(&[], false)?;
+        let paths_symlink = metadata.paths::<&str>(&[], true)?;
+
+        for path in &paths_symlink {
+            if paths.iter().all(|x| x.src != path.src) {
+                bail!(
+                    "path \"{}\" is symbolic link, it can't be published",
+                    path.src.to_string_lossy()
+                );
+            }
+        }
 
         let mut check_error = CheckError::default();
         let mut contexts = Vec::new();
