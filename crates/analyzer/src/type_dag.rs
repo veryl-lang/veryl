@@ -117,6 +117,16 @@ impl TypeDag {
         }
     }
 
+    fn exist_edge(&self, start: u32, end: u32) -> bool {
+        self.dag.find_edge(start.into(), end.into()).is_some()
+    }
+
+    fn remove_edge(&mut self, start: u32, end: u32) {
+        if let Some(x) = self.dag.find_edge(start.into(), end.into()) {
+            self.dag.remove_edge(x);
+        }
+    }
+
     fn toposort(&self) -> Vec<Symbol> {
         let nodes = algo::toposort(self.dag.graph(), None).unwrap();
         let mut ret = vec![];
@@ -156,6 +166,14 @@ thread_local!(static TYPE_DAG: RefCell<TypeDag> = RefCell::new(TypeDag::new()));
 
 pub fn insert_edge(start: u32, end: u32, context: Context) -> Result<(), DagError> {
     TYPE_DAG.with(|f| f.borrow_mut().insert_edge(start, end, context))
+}
+
+pub fn exist_edge(start: u32, end: u32) -> bool {
+    TYPE_DAG.with(|f| f.borrow().exist_edge(start, end))
+}
+
+pub fn remove_edge(start: u32, end: u32) {
+    TYPE_DAG.with(|f| f.borrow_mut().remove_edge(start, end))
 }
 
 pub fn insert_node(start: &SymbolPathNamespace, id: &str, token: &Token) -> Result<u32, DagError> {
