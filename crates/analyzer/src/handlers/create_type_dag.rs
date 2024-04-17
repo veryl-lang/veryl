@@ -84,6 +84,11 @@ impl<'a> CreateTypeDag<'a> {
     }
 
     fn insert_owned(&mut self, parent: u32, child: u32) {
+        // If there is already edge to owned type, remove it.
+        // Argument order should be the same as insert_edge.
+        if type_dag::exist_edge(child, parent) {
+            type_dag::remove_edge(child, parent);
+        }
         self.owned
             .entry(parent)
             .and_modify(|x| x.push(child))
@@ -114,8 +119,8 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
                 let token = arg.identifier.identifier_token.token;
                 if let Some(x) = self.insert_node(&path, &name, &token) {
                     if let Some(parent) = self.parent.last().cloned() {
-                        self.insert_edge(x, parent, *self.ctx.last().unwrap());
                         self.insert_owned(parent, x);
+                        self.insert_edge(x, parent, *self.ctx.last().unwrap());
                     }
                     self.parent.push(x)
                 }
@@ -141,8 +146,8 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
             let token = arg.identifier.identifier_token.token;
             if let Some(x) = self.insert_node(&path, &name, &token) {
                 if let Some(parent) = self.parent.last().cloned() {
-                    self.insert_edge(x, parent, *self.ctx.last().unwrap());
                     self.insert_owned(parent, x);
+                    self.insert_edge(x, parent, *self.ctx.last().unwrap());
                 }
             }
         }
@@ -156,8 +161,8 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
             let token = arg.identifier.identifier_token.token;
             if let Some(x) = self.insert_node(&path, &name, &token) {
                 if let Some(parent) = self.parent.last().cloned() {
-                    self.insert_edge(x, parent, *self.ctx.last().unwrap());
                     self.insert_owned(parent, x);
+                    self.insert_edge(x, parent, *self.ctx.last().unwrap());
                 }
             }
         }
@@ -189,8 +194,8 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
                 let token = arg.identifier.identifier_token.token;
                 if let Some(x) = self.insert_node(&path, &name, &token) {
                     if let Some(parent) = self.parent.last().cloned() {
-                        self.insert_edge(x, parent, *self.ctx.last().unwrap());
                         self.insert_owned(parent, x);
+                        self.insert_edge(x, parent, *self.ctx.last().unwrap());
                     }
                     self.parent.push(x)
                 }
@@ -212,8 +217,8 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
                 let token = arg.identifier.identifier_token.token;
                 if let Some(x) = self.insert_node(&path, &name, &token) {
                     if let Some(parent) = self.parent.last().cloned() {
-                        self.insert_edge(x, parent, *self.ctx.last().unwrap());
                         self.insert_owned(parent, x);
+                        self.insert_edge(x, parent, *self.ctx.last().unwrap());
                     }
                     self.parent.push(x)
                 }
