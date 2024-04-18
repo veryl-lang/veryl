@@ -1,6 +1,8 @@
 # Change Log
 
-## [Unreleased](https://github.com/veryl-lang/veryl/compare/v0.8.2...Unreleased) - ReleaseDate
+## [Unreleased](https://github.com/veryl-lang/veryl/compare/v0.9.0...Unreleased) - ReleaseDate
+
+## [v0.9.0](https://github.com/veryl-lang/veryl/compare/v0.8.2...v0.9.0) - 2024-04-18
 
 ## [v0.8.2](https://github.com/veryl-lang/veryl/compare/v0.8.1...v0.8.2) - 2024-04-01
 
