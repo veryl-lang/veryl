@@ -1,6 +1,7 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::symbol::SymbolKind;
-use crate::symbol_table::{self, SymbolPath};
+use crate::symbol_path::SymbolPath;
+use crate::symbol_table;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
@@ -108,7 +109,7 @@ impl<'a> VerylGrammarTrait for CheckFunction<'a> {
                                     .last()
                                     .unwrap()
                             );
-                            self.errors.push(AnalyzerError::mismatch_arity(
+                            self.errors.push(AnalyzerError::mismatch_function_arity(
                                 &name,
                                 arity,
                                 args,

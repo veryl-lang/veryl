@@ -1,7 +1,6 @@
-use crate::{
-    symbol::{Symbol, SymbolId},
-    symbol_table::{self, SymbolPathNamespace},
-};
+use crate::symbol::{Symbol, SymbolId};
+use crate::symbol_path::SymbolPathNamespace;
+use crate::symbol_table;
 use bimap::BiMap;
 use std::{cell::RefCell, collections::HashMap, collections::HashSet};
 

@@ -1,0 +1,20 @@
+module Module55 {
+    inst u0: Module55A::<Module55B>;
+    inst u1: Module55A::<Module55C>;
+    inst u2: Module55E::<Module55C>;
+    inst u3: Module55E::<Module55D>;
+}
+
+module Module55A::<T> {
+    inst u: T;
+}
+
+module Module55B {}
+
+module Module55C {}
+
+module Module55D {}
+
+module Module55E::<T> {
+    inst u: Module55A::<T>;
+}

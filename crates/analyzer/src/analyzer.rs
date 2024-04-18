@@ -4,17 +4,21 @@ use crate::assign::{AssignPath, AssignPosition, AssignPositionTree, AssignPositi
 use crate::attribute_table;
 use crate::handlers::*;
 use crate::msb_table;
+use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::{
-    Direction, ParameterValue, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiniation,
+    Direction, DocComment, ParameterValue, Symbol, SymbolId, SymbolKind, TypeKind,
+    VariableAffiniation,
 };
-use crate::symbol_table::{self, SymbolPath};
+use crate::symbol_path::SymbolPath;
+use crate::symbol_table;
 use crate::type_dag;
 use itertools::Itertools;
 use std::path::Path;
 use veryl_metadata::{Lint, Metadata};
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
+use veryl_parser::veryl_token::{Token, TokenSource};
 use veryl_parser::veryl_walker::{Handler, VerylWalker};
 
 pub struct AnalyzerPass1<'a> {
@@ -179,15 +183,33 @@ pub struct Analyzer {
     lint_opt: Lint,
 }
 
+fn new_namespace(name: &str) -> (Token, Symbol) {
+    let token = Token::new(name, 0, 0, 0, 0, TokenSource::External);
+    let symbol = Symbol::new(
+        &token,
+        SymbolKind::Namespace,
+        &Namespace::new(),
+        false,
+        DocComment::default(),
+    );
+    (token, symbol)
+}
+
 impl Analyzer {
     pub fn new(metadata: &Metadata) -> Self {
         for locks in metadata.lockfile.lock_table.values() {
             for lock in locks {
                 let prj = resource_table::insert_str(&lock.name);
+                let (token, symbol) = new_namespace(&lock.name);
+                symbol_table::insert(&token, symbol);
                 for lock_dep in &lock.dependencies {
                     let from = resource_table::insert_str(&lock_dep.name);
                     let to = metadata.lockfile.lock_table.get(&lock_dep.url).unwrap();
                     let to = to.iter().find(|x| x.version == lock_dep.version).unwrap();
+
+                    let (token, symbol) = new_namespace(&to.name);
+                    symbol_table::insert(&token, symbol);
+
                     let to = resource_table::insert_str(&to.name);
                     symbol_table::add_project_local(prj, from, to);
                 }

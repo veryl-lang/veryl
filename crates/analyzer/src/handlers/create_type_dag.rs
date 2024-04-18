@@ -1,6 +1,6 @@
 use crate::{
     analyzer_error::AnalyzerError,
-    symbol_table::SymbolPathNamespace,
+    symbol_path::{GenericSymbolPath, SymbolPathNamespace},
     type_dag::{self, Context, DagError},
 };
 use std::collections::HashMap;
@@ -173,6 +173,11 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if !self.ctx.is_empty() && self.ctx.last() != Some(&Context::ExpressionIdentifier) {
+                let path: GenericSymbolPath = arg.into();
+                if path.is_generic_reference() {
+                    return Ok(());
+                }
+
                 let path: SymbolPathNamespace = arg.into();
                 let name = to_string(arg);
                 let token = arg.identifier().token;

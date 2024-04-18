@@ -2,7 +2,8 @@ use crate::analyzer_error::AnalyzerError;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::SymbolKind;
-use crate::symbol_table::{self, ResolveError, ResolveErrorCause, SymbolPath};
+use crate::symbol_path::{GenericSymbolPath, SymbolPath};
+use crate::symbol_table::{self, ResolveError, ResolveErrorCause};
 use veryl_parser::resource_table::TokenId;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::TokenRange;
@@ -17,7 +18,6 @@ pub struct CreateReference<'a> {
     top_level: bool,
     file_scope_imported_items: Vec<TokenId>,
     file_scope_imported_packages: Vec<Namespace>,
-    in_expression_identifier: Vec<()>,
 }
 
 impl<'a> CreateReference<'a> {
@@ -50,6 +50,57 @@ impl<'a> CreateReference<'a> {
                 .push(AnalyzerError::undefined_identifier(&name, self.text, token));
         } else {
             unreachable!();
+        }
+    }
+
+    fn generic_symbol_path(&mut self, path: &GenericSymbolPath, namespace: &Namespace) {
+        if path.is_generic_reference() {
+            return;
+        }
+
+        for i in 0..path.len() {
+            let base_path = path.base_path(i);
+
+            match symbol_table::resolve((&base_path, namespace)) {
+                Ok(symbol) => {
+                    symbol_table::add_reference(symbol.found.id, &path.paths[0].base);
+
+                    // Check number of arguments
+                    let params = symbol.found.generic_parameters().len();
+                    let args = path.paths[i].arguments.len();
+                    if params != args {
+                        self.errors.push(AnalyzerError::mismatch_generics_arity(
+                            &path.paths[i].base.to_string(),
+                            params,
+                            args,
+                            self.text,
+                            &path.range,
+                        ));
+                    } else if let Some((token, new_symbol)) =
+                        path.get_generic_instance(i, &symbol.found)
+                    {
+                        if let Some(ref x) = symbol_table::insert(&token, new_symbol) {
+                            symbol_table::add_generic_instance(symbol.found.id, *x);
+                        }
+
+                        let table = symbol.found.generic_table(&path.paths[i].arguments);
+                        let mut references = symbol.found.generic_references();
+                        for path in &mut references {
+                            path.apply_map(&table);
+                            self.generic_symbol_path(path, &symbol.found.inner_namespace());
+                        }
+                    }
+                }
+                Err(err) => {
+                    let single_path = path.paths.len() == 1;
+                    let anonymous = path.paths[0].base.to_string() == "_";
+                    if single_path && (anonymous || !path.resolvable) {
+                        return;
+                    }
+
+                    self.push_resolve_error(err, &path.range);
+                }
+            }
         }
     }
 }
@@ -86,48 +137,33 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
 
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            if self.in_expression_identifier.is_empty() {
-                let ident = arg.identifier().token;
-                match symbol_table::resolve(arg) {
-                    Ok(symbol) => {
-                        for id in symbol.full_path {
-                            symbol_table::add_reference(id, &ident);
-                        }
-                    }
-                    Err(err) => {
-                        self.push_resolve_error(err, &arg.into());
-                    }
-                }
-            }
+            let ident = arg.identifier().token;
+            let path: GenericSymbolPath = arg.into();
+            let namespace = namespace_table::get(ident.id).unwrap();
+
+            self.generic_symbol_path(&path, &namespace);
         }
         Ok(())
     }
 
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) -> Result<(), ParolError> {
-        match self.point {
-            HandlerPoint::Before => {
-                self.in_expression_identifier.push(());
+        // Should be executed after scoped_identifier to handle hierarchical access only
+        if let HandlerPoint::After = self.point {
+            let ident = arg.identifier().token;
+            let mut path: SymbolPath = arg.scoped_identifier.as_ref().into();
+            let namespace = namespace_table::get(ident.id).unwrap();
 
-                let ident = arg.identifier().token;
-                match symbol_table::resolve(arg) {
+            for x in &arg.expression_identifier_list0 {
+                path.push(x.identifier.identifier_token.token.text);
+
+                match symbol_table::resolve((&path, &namespace)) {
                     Ok(symbol) => {
-                        for id in symbol.full_path {
-                            symbol_table::add_reference(id, &ident);
-                        }
+                        symbol_table::add_reference(symbol.found.id, &ident);
                     }
                     Err(err) => {
-                        let is_single_identifier = SymbolPath::from(arg).as_slice().len() == 1;
-                        let name = ident.to_string();
-                        if name == "_" && is_single_identifier {
-                            return Ok(());
-                        }
-
                         self.push_resolve_error(err, &arg.into());
                     }
                 }
-            }
-            HandlerPoint::After => {
-                self.in_expression_identifier.pop();
             }
         }
         Ok(())

@@ -1,5 +1,7 @@
 use crate::evaluator::{Evaluated, Evaluator};
 use crate::namespace::Namespace;
+use crate::symbol_path::GenericSymbolPath;
+use crate::symbol_table;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::fmt;
@@ -44,6 +46,18 @@ impl DocComment {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct GenericMap {
+    pub name: String,
+    pub map: HashMap<StrId, GenericSymbolPath>,
+}
+
+impl GenericMap {
+    pub fn generic(&self) -> bool {
+        !self.map.is_empty()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Symbol {
     pub token: Token,
@@ -51,6 +65,7 @@ pub struct Symbol {
     pub kind: SymbolKind,
     pub namespace: Namespace,
     pub references: Vec<Token>,
+    pub generic_instances: Vec<SymbolId>,
     pub imported: Vec<Namespace>,
     pub evaluated: Cell<Option<Evaluated>>,
     pub allow_unused: bool,
@@ -72,6 +87,7 @@ impl Symbol {
             kind,
             namespace: namespace.to_owned(),
             references: Vec::new(),
+            generic_instances: Vec::new(),
             imported: Vec::new(),
             evaluated: Cell::new(None),
             allow_unused: false,
@@ -115,6 +131,100 @@ impl Symbol {
         ret.push(self.token.text);
         ret
     }
+
+    pub fn generic_maps(&self) -> Vec<GenericMap> {
+        let mut ret = Vec::new();
+
+        let prefix = if matches!(
+            self.kind,
+            SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)
+        ) {
+            format!("{}_", self.namespace)
+        } else {
+            "".to_string()
+        };
+
+        for i in &self.generic_instances {
+            let symbol = symbol_table::get(*i).unwrap();
+            let map = if let SymbolKind::GenericInstance(ref x) = symbol.kind {
+                self.generic_table(&x.arguments)
+            } else {
+                HashMap::new()
+            };
+            let name = format!("{}{}", prefix, symbol.token.text);
+            ret.push(GenericMap { name, map });
+        }
+
+        // empty map for non-generic
+        if ret.is_empty() {
+            ret.push(GenericMap::default());
+        }
+        ret
+    }
+
+    pub fn generic_table(
+        &self,
+        arguments: &[GenericSymbolPath],
+    ) -> HashMap<StrId, GenericSymbolPath> {
+        let generic_parameters = self.generic_parameters();
+        let mut ret = HashMap::new();
+
+        for (i, arg) in arguments.iter().enumerate() {
+            if let Some(p) = generic_parameters.get(i) {
+                ret.insert(*p, arg.clone());
+            }
+        }
+
+        ret
+    }
+
+    pub fn generic_parameters(&self) -> Vec<StrId> {
+        match &self.kind {
+            SymbolKind::Function(x) => x
+                .generic_parameters
+                .iter()
+                .map(|x| symbol_table::get(*x).unwrap().token.text)
+                .collect(),
+            SymbolKind::Module(x) => x
+                .generic_parameters
+                .iter()
+                .map(|x| symbol_table::get(*x).unwrap().token.text)
+                .collect(),
+            SymbolKind::Interface(x) => x
+                .generic_parameters
+                .iter()
+                .map(|x| symbol_table::get(*x).unwrap().token.text)
+                .collect(),
+            SymbolKind::Package(x) => x
+                .generic_parameters
+                .iter()
+                .map(|x| symbol_table::get(*x).unwrap().token.text)
+                .collect(),
+            SymbolKind::Struct(x) => x
+                .generic_parameters
+                .iter()
+                .map(|x| symbol_table::get(*x).unwrap().token.text)
+                .collect(),
+            SymbolKind::Union(x) => x
+                .generic_parameters
+                .iter()
+                .map(|x| symbol_table::get(*x).unwrap().token.text)
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    pub fn generic_references(&self) -> Vec<GenericSymbolPath> {
+        match &self.kind {
+            SymbolKind::Function(x) => x.generic_references.clone(),
+            SymbolKind::Module(x) => x.generic_references.clone(),
+            SymbolKind::Interface(x) => x.generic_references.clone(),
+            SymbolKind::Package(x) => x.generic_references.clone(),
+            SymbolKind::Struct(x) => x.generic_references.clone(),
+            SymbolKind::Union(x) => x.generic_references.clone(),
+            _ => Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -141,6 +251,8 @@ pub enum SymbolKind {
     SystemVerilog,
     Namespace,
     SystemFunction,
+    GenericParameter,
+    GenericInstance(GenericInstanceProperty),
 }
 
 impl SymbolKind {
@@ -168,6 +280,8 @@ impl SymbolKind {
             SymbolKind::SystemVerilog => "systemverilog item".to_string(),
             SymbolKind::Namespace => "namespace".to_string(),
             SymbolKind::SystemFunction => "system function".to_string(),
+            SymbolKind::GenericParameter => "generic parameter".to_string(),
+            SymbolKind::GenericInstance(_) => "generic instance".to_string(),
         }
     }
 }
@@ -187,16 +301,25 @@ impl fmt::Display for SymbolKind {
             }
             SymbolKind::Module(x) => {
                 format!(
-                    "module ({} params, {} ports)",
+                    "module ({} generic, {} params, {} ports)",
+                    x.generic_parameters.len(),
                     x.parameters.len(),
                     x.ports.len()
                 )
             }
             SymbolKind::Interface(x) => {
-                format!("interface ({} params)", x.parameters.len())
+                format!(
+                    "interface ({} generic, {} params)",
+                    x.generic_parameters.len(),
+                    x.parameters.len()
+                )
             }
             SymbolKind::Function(x) => {
-                format!("function ({} args)", x.ports.len())
+                format!(
+                    "function ({} generic, {} args)",
+                    x.generic_parameters.len(),
+                    x.ports.len()
+                )
             }
             SymbolKind::Parameter(x) => {
                 let mut stringifier = Stringifier::new();
@@ -224,7 +347,9 @@ impl fmt::Display for SymbolKind {
                 format!("instance ({type_name})")
             }
             SymbolKind::Block => "block".to_string(),
-            SymbolKind::Package(_) => "package".to_string(),
+            SymbolKind::Package(x) => {
+                format!("package ({} generic)", x.generic_parameters.len())
+            }
             SymbolKind::Struct(_) => "struct".to_string(),
             SymbolKind::StructMember(x) => {
                 format!("struct member ({})", x.r#type)
@@ -256,6 +381,8 @@ impl fmt::Display for SymbolKind {
             SymbolKind::SystemVerilog => "systemverilog item".to_string(),
             SymbolKind::Namespace => "namespace".to_string(),
             SymbolKind::SystemFunction => "system function".to_string(),
+            SymbolKind::GenericParameter => "generic parameter".to_string(),
+            SymbolKind::GenericInstance(_) => "generic instance".to_string(),
         };
         text.fmt(f)
     }
@@ -424,7 +551,9 @@ impl From<&syntax_tree::ScalarType> for Type {
                         let x = &x.scoped_identifier;
                         let mut name = Vec::new();
                         match &*x.scoped_identifier_group {
-                            syntax_tree::ScopedIdentifierGroup::Identifier(x) => {
+                            syntax_tree::ScopedIdentifierGroup::IdentifierScopedIdentifierOpt(
+                                x,
+                            ) => {
                                 name.push(x.identifier.identifier_token.token.text);
                             }
                             syntax_tree::ScopedIdentifierGroup::DollarIdentifier(x) => {
@@ -635,6 +764,8 @@ impl From<&syntax_tree::WithParameterItem> for Parameter {
 #[derive(Debug, Clone)]
 pub struct ModuleProperty {
     pub range: TokenRange,
+    pub generic_parameters: Vec<SymbolId>,
+    pub generic_references: Vec<GenericSymbolPath>,
     pub parameters: Vec<Parameter>,
     pub ports: Vec<Port>,
 }
@@ -642,12 +773,16 @@ pub struct ModuleProperty {
 #[derive(Debug, Clone)]
 pub struct InterfaceProperty {
     pub range: TokenRange,
+    pub generic_parameters: Vec<SymbolId>,
+    pub generic_references: Vec<GenericSymbolPath>,
     pub parameters: Vec<Parameter>,
 }
 
 #[derive(Debug, Clone)]
 pub struct FunctionProperty {
     pub range: TokenRange,
+    pub generic_parameters: Vec<SymbolId>,
+    pub generic_references: Vec<GenericSymbolPath>,
     pub ports: Vec<Port>,
     pub ret: Option<Type>,
 }
@@ -661,11 +796,15 @@ pub struct InstanceProperty {
 #[derive(Debug, Clone)]
 pub struct PackageProperty {
     pub range: TokenRange,
+    pub generic_parameters: Vec<SymbolId>,
+    pub generic_references: Vec<GenericSymbolPath>,
 }
 
 #[derive(Debug, Clone)]
 pub struct StructProperty {
     pub members: Vec<SymbolId>,
+    pub generic_parameters: Vec<SymbolId>,
+    pub generic_references: Vec<GenericSymbolPath>,
 }
 
 #[derive(Debug, Clone)]
@@ -676,6 +815,8 @@ pub struct StructMemberProperty {
 #[derive(Debug, Clone)]
 pub struct UnionProperty {
     pub members: Vec<SymbolId>,
+    pub generic_parameters: Vec<SymbolId>,
+    pub generic_references: Vec<GenericSymbolPath>,
 }
 
 #[derive(Debug, Clone)]
@@ -708,4 +849,10 @@ pub struct ModportProperty {
 #[derive(Debug, Clone)]
 pub struct ModportMemberProperty {
     pub direction: Direction,
+}
+
+#[derive(Debug, Clone)]
+pub struct GenericInstanceProperty {
+    pub base: SymbolId,
+    pub arguments: Vec<GenericSymbolPath>,
 }

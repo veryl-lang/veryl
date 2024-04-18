@@ -1049,6 +1049,9 @@ impl VerylWalker for Formatter {
         self.struct_union(&arg.struct_union);
         self.space(1);
         self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.struct_union_declaration_opt {
+            self.with_generic_parameter(&x.with_generic_parameter);
+        }
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
@@ -1348,6 +1351,32 @@ impl VerylWalker for Formatter {
         }
     }
 
+    /// Semantic action for non-terminal 'WithGenericParameterList'
+    fn with_generic_parameter_list(&mut self, arg: &WithGenericParameterList) {
+        self.with_generic_parameter_item(&arg.with_generic_parameter_item);
+        for x in &arg.with_generic_parameter_list_list {
+            self.comma(&x.comma);
+            self.space(1);
+            self.with_generic_parameter_item(&x.with_generic_parameter_item);
+        }
+        if let Some(ref x) = arg.with_generic_parameter_list_opt {
+            self.comma(&x.comma);
+        }
+    }
+
+    /// Semantic action for non-terminal 'WithGenericArgumentList'
+    fn with_generic_argument_list(&mut self, arg: &WithGenericArgumentList) {
+        self.with_generic_argument_item(&arg.with_generic_argument_item);
+        for x in &arg.with_generic_argument_list_list {
+            self.comma(&x.comma);
+            self.space(1);
+            self.with_generic_argument_item(&x.with_generic_argument_item);
+        }
+        if let Some(ref x) = arg.with_generic_argument_list_opt {
+            self.comma(&x.comma);
+        }
+    }
+
     /// Semantic action for non-terminal 'PortDeclaration'
     fn port_declaration(&mut self, arg: &PortDeclaration) {
         if let Some(ref x) = arg.port_declaration_opt {
@@ -1423,12 +1452,15 @@ impl VerylWalker for Formatter {
         self.function(&arg.function);
         self.space(1);
         self.identifier(&arg.identifier);
-        self.space(1);
         if let Some(ref x) = arg.function_declaration_opt {
+            self.with_generic_parameter(&x.with_generic_parameter);
+        }
+        self.space(1);
+        if let Some(ref x) = arg.function_declaration_opt0 {
             self.port_declaration(&x.port_declaration);
             self.space(1);
         }
-        if let Some(ref x) = arg.function_declaration_opt0 {
+        if let Some(ref x) = arg.function_declaration_opt1 {
             self.minus_g_t(&x.minus_g_t);
             self.space(1);
             self.scalar_type(&x.scalar_type);
@@ -1481,12 +1513,15 @@ impl VerylWalker for Formatter {
         self.module(&arg.module);
         self.space(1);
         self.identifier(&arg.identifier);
-        self.space(1);
         if let Some(ref x) = arg.module_declaration_opt0 {
+            self.with_generic_parameter(&x.with_generic_parameter);
+        }
+        self.space(1);
+        if let Some(ref x) = arg.module_declaration_opt1 {
             self.with_parameter(&x.with_parameter);
             self.space(1);
         }
-        if let Some(ref x) = arg.module_declaration_opt1 {
+        if let Some(ref x) = arg.module_declaration_opt2 {
             self.port_declaration(&x.port_declaration);
             self.space(1);
         }
@@ -1604,8 +1639,11 @@ impl VerylWalker for Formatter {
         self.interface(&arg.interface);
         self.space(1);
         self.identifier(&arg.identifier);
-        self.space(1);
         if let Some(ref x) = arg.interface_declaration_opt0 {
+            self.with_generic_parameter(&x.with_generic_parameter);
+        }
+        self.space(1);
+        if let Some(ref x) = arg.interface_declaration_opt1 {
             self.with_parameter(&x.with_parameter);
             self.space(1);
         }
@@ -1724,6 +1762,9 @@ impl VerylWalker for Formatter {
         self.package(&arg.package);
         self.space(1);
         self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.package_declaration_opt0 {
+            self.with_generic_parameter(&x.with_generic_parameter);
+        }
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
         for (i, x) in arg.package_declaration_list.iter().enumerate() {
