@@ -107,24 +107,11 @@ impl From<&syntax_tree::ScopedIdentifier> for SymbolPath {
 
 impl From<&syntax_tree::ExpressionIdentifier> for SymbolPath {
     fn from(value: &syntax_tree::ExpressionIdentifier) -> Self {
-        let mut path = Vec::new();
-        path.push(value.identifier().token.text);
-        match &*value.expression_identifier_group0 {
-            syntax_tree::ExpressionIdentifierGroup0::ExpressionIdentifierScoped(x) => {
-                let x = &x.expression_identifier_scoped;
-                path.push(x.identifier.identifier_token.token.text);
-                for x in &x.expression_identifier_scoped_list {
-                    path.push(x.identifier.identifier_token.token.text);
-                }
-            }
-            syntax_tree::ExpressionIdentifierGroup0::ExpressionIdentifierMember(x) => {
-                let x = &x.expression_identifier_member;
-                for x in &x.expression_identifier_member_list0 {
-                    path.push(x.identifier.identifier_token.token.text);
-                }
-            }
+        let mut path: SymbolPath = value.scoped_identifier.as_ref().into();
+        for x in &value.expression_identifier_list0 {
+            path.push(x.identifier.identifier_token.token.text);
         }
-        SymbolPath(path)
+        path
     }
 }
 

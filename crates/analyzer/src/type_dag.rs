@@ -38,6 +38,7 @@ pub enum Context {
     Interface,
     Package,
     Modport,
+    ExpressionIdentifier,
 }
 
 #[derive(Debug, Clone)]
@@ -122,7 +123,7 @@ impl TypeDag {
     }
 
     fn remove_edge(&mut self, start: u32, end: u32) {
-        if let Some(x) = self.dag.find_edge(start.into(), end.into()) {
+        while let Some(x) = self.dag.find_edge(start.into(), end.into()) {
             self.dag.remove_edge(x);
         }
     }

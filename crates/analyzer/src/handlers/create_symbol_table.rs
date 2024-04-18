@@ -114,21 +114,6 @@ fn scoped_identifier_tokens(arg: &ScopedIdentifier) -> Vec<Token> {
     ret
 }
 
-fn expression_identifier_tokens(arg: &ExpressionIdentifier) -> Vec<Token> {
-    let mut ret = Vec::new();
-    ret.push(arg.identifier().token);
-    if let ExpressionIdentifierGroup0::ExpressionIdentifierScoped(x) =
-        arg.expression_identifier_group0.as_ref()
-    {
-        let x = &x.expression_identifier_scoped;
-        ret.push(x.identifier.identifier_token.token);
-        for x in &x.expression_identifier_scoped_list {
-            ret.push(x.identifier.identifier_token.token);
-        }
-    }
-    ret
-}
-
 impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
     fn identifier(&mut self, arg: &Identifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
@@ -178,41 +163,8 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            // Add symbols under $sv namespace
-            if let ExpressionIdentifierGroup::DollarIdentifier(x) =
-                arg.expression_identifier_group.as_ref()
-            {
-                if x.dollar_identifier.dollar_identifier_token.to_string() == "$sv" {
-                    let mut namespace = Namespace::new();
-                    for (i, token) in expression_identifier_tokens(arg).iter().enumerate() {
-                        if i != 0 {
-                            let symbol = Symbol::new(
-                                token,
-                                SymbolKind::SystemVerilog,
-                                &namespace,
-                                false,
-                                DocComment::default(),
-                            );
-                            let _ = symbol_table::insert(token, symbol);
-                        }
-                        namespace.push(token.text);
-                    }
-                }
-            }
-
-            if let ExpressionIdentifierGroup0::ExpressionIdentifierMember(x) =
-                arg.expression_identifier_group0.as_ref()
-            {
-                let mut target = Vec::new();
-                let text = arg.identifier().token.text;
-                target.push(text);
-
-                let x = &x.expression_identifier_member;
-                for x in &x.expression_identifier_member_list0 {
-                    target.push(x.identifier.identifier_token.token.text);
-                }
-                self.connect_targets.push(target);
-            }
+            let path: SymbolPath = arg.into();
+            self.connect_targets.push(path.to_vec());
         }
         Ok(())
     }

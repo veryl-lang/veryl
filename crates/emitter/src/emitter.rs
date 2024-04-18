@@ -5,7 +5,7 @@ use veryl_analyzer::attribute_table;
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::SymbolKind;
 use veryl_analyzer::symbol::TypeModifier as SymTypeModifier;
-use veryl_analyzer::symbol_table::{self, SymbolPath, SymbolPathNamespace};
+use veryl_analyzer::symbol_table::{self, SymbolPath};
 use veryl_analyzer::{msb_table, namespace_table};
 use veryl_metadata::{Build, BuiltinType, ClockType, Format, Metadata, ResetType};
 use veryl_parser::resource_table::{self, StrId};
@@ -341,68 +341,6 @@ impl Emitter {
         self.str(&ret);
     }
 
-    fn path_identifier(&mut self, path: SymbolPathNamespace, args: &[VerylToken]) {
-        if let Ok(symbol) = symbol_table::resolve(&path) {
-            let symbol = symbol.found;
-            match &symbol.kind {
-                SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_) => {
-                    self.namespace(&symbol.namespace);
-                    self.str(&symbol.token.text.to_string());
-                }
-                SymbolKind::Parameter(_)
-                | SymbolKind::Function(_)
-                | SymbolKind::Struct(_)
-                | SymbolKind::Union(_)
-                | SymbolKind::TypeDef(_)
-                | SymbolKind::Enum(_) => {
-                    if args.len() > 1 {
-                        self.namespace(&symbol.namespace);
-                        self.str(&symbol.token.text.to_string());
-                    } else {
-                        self.veryl_token(&args[0]);
-                    }
-                }
-                SymbolKind::EnumMember(x) => {
-                    let mut enum_namespace = symbol.namespace.clone();
-                    enum_namespace.pop();
-
-                    // if enum definition is not visible, explicit namespace is required
-                    if !path.1.included(&enum_namespace) {
-                        self.namespace(&enum_namespace);
-                    }
-                    self.str(&x.prefix);
-                    self.str("_");
-                    self.veryl_token(args.last().unwrap());
-                }
-                SymbolKind::Modport(_) => {
-                    self.namespace(&symbol.namespace);
-                    self.str(&symbol.token.text.to_string());
-                }
-                SymbolKind::SystemVerilog => {
-                    // arg[0] is "sv", it should be removed
-                    for (i, arg) in args[1..].iter().enumerate() {
-                        if i != 0 {
-                            self.str("::");
-                        }
-                        self.veryl_token(arg);
-                    }
-                }
-                SymbolKind::SystemFunction => {
-                    self.veryl_token(&args[0]);
-                }
-                SymbolKind::Port(_)
-                | SymbolKind::Variable(_)
-                | SymbolKind::Instance(_)
-                | SymbolKind::Block
-                | SymbolKind::StructMember(_)
-                | SymbolKind::UnionMember(_)
-                | SymbolKind::ModportMember(_)
-                | SymbolKind::Genvar
-                | SymbolKind::Namespace => unreachable!(),
-            }
-        }
-    }
-
     fn statement_variable_declatation_only(&mut self, arg: &Statement) -> usize {
         self.adjust_line = false;
         match arg {
@@ -591,50 +529,78 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ScopedIdentifier'
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) {
-        let mut path = vec![arg.identifier().clone()];
-        for x in &arg.scoped_identifier_list {
-            path.push(x.identifier.identifier_token.clone());
+        if let Ok(symbol) = symbol_table::resolve(arg) {
+            let symbol = symbol.found;
+            match &symbol.kind {
+                SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_) => {
+                    self.namespace(&symbol.namespace);
+                    self.str(&symbol.token.text.to_string());
+                }
+                SymbolKind::Parameter(_)
+                | SymbolKind::Function(_)
+                | SymbolKind::Struct(_)
+                | SymbolKind::Union(_)
+                | SymbolKind::TypeDef(_)
+                | SymbolKind::Enum(_) => {
+                    if arg.scoped_identifier_list.is_empty() {
+                        self.veryl_token(arg.identifier());
+                    } else {
+                        self.namespace(&symbol.namespace);
+                        self.str(&symbol.token.text.to_string());
+                    }
+                }
+                SymbolKind::EnumMember(x) => {
+                    let mut enum_namespace = symbol.namespace.clone();
+                    enum_namespace.pop();
+
+                    // if enum definition is not visible, explicit namespace is required
+                    let namespace = namespace_table::get(arg.identifier().token.id).unwrap();
+                    if !namespace.included(&enum_namespace) {
+                        self.namespace(&enum_namespace);
+                    }
+                    self.str(&x.prefix);
+                    self.str("_");
+                    let enum_member_token = arg.scoped_identifier_list.last().unwrap();
+                    self.identifier(&enum_member_token.identifier);
+                }
+                SymbolKind::Modport(_) => {
+                    self.namespace(&symbol.namespace);
+                    self.str(&symbol.token.text.to_string());
+                }
+                SymbolKind::SystemVerilog => {
+                    // "$sv::" should be removed
+                    for (i, x) in arg.scoped_identifier_list.iter().enumerate() {
+                        if i != 0 {
+                            self.colon_colon(&x.colon_colon);
+                        }
+                        self.identifier(&x.identifier);
+                    }
+                }
+                SymbolKind::Port(_)
+                | SymbolKind::Variable(_)
+                | SymbolKind::Instance(_)
+                | SymbolKind::Block
+                | SymbolKind::StructMember(_)
+                | SymbolKind::UnionMember(_)
+                | SymbolKind::ModportMember(_)
+                | SymbolKind::Genvar
+                | SymbolKind::Namespace
+                | SymbolKind::SystemFunction => self.veryl_token(arg.identifier()),
+            }
         }
-        self.path_identifier(arg.into(), &path);
     }
 
     /// Semantic action for non-terminal 'ExpressionIdentifier'
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) {
-        match &*arg.expression_identifier_group0 {
-            ExpressionIdentifierGroup0::ExpressionIdentifierScoped(x) => {
-                let x = &x.expression_identifier_scoped;
-                let mut path = vec![arg.identifier().clone()];
-                path.push(x.identifier.identifier_token.clone());
-                for x in &x.expression_identifier_scoped_list {
-                    path.push(x.identifier.identifier_token.clone());
-                }
-                self.path_identifier(arg.into(), &path);
-                for x in &x.expression_identifier_scoped_list0 {
-                    self.select(&x.select);
-                }
-            }
-            ExpressionIdentifierGroup0::ExpressionIdentifierMember(x) => {
-                let x = &x.expression_identifier_member;
-                match &*arg.expression_identifier_group {
-                    ExpressionIdentifierGroup::Identifier(y) => {
-                        self.identifier(&y.identifier);
-                        for x in &x.expression_identifier_member_list {
-                            self.select(&x.select);
-                        }
-                        for x in &x.expression_identifier_member_list0 {
-                            self.dot(&x.dot);
-                            self.identifier(&x.identifier);
-                            for x in &x.expression_identifier_member_list0_list {
-                                self.select(&x.select);
-                            }
-                        }
-                    }
-                    // system function call
-                    ExpressionIdentifierGroup::DollarIdentifier(y) => {
-                        let path = vec![y.dollar_identifier.dollar_identifier_token.clone()];
-                        self.path_identifier(arg.into(), &path);
-                    }
-                }
+        self.scoped_identifier(&arg.scoped_identifier);
+        for x in &arg.expression_identifier_list {
+            self.select(&x.select);
+        }
+        for x in &arg.expression_identifier_list0 {
+            self.dot(&x.dot);
+            self.identifier(&x.identifier);
+            for x in &x.expression_identifier_list0_list {
+                self.select(&x.select);
             }
         }
     }

@@ -34,9 +34,10 @@ impl<'a> VerylGrammarTrait for CheckFunction<'a> {
                 // skip system function
                 if matches!(
                     arg.expression_identifier
-                        .expression_identifier_group
+                        .scoped_identifier
+                        .scoped_identifier_group
                         .as_ref(),
-                    ExpressionIdentifierGroup::DollarIdentifier(_)
+                    ScopedIdentifierGroup::DollarIdentifier(_)
                 ) {
                     return Ok(());
                 }
@@ -74,8 +75,11 @@ impl<'a> VerylGrammarTrait for CheckFunction<'a> {
                 }
                 // skip system function
                 if matches!(
-                    x.expression_identifier.expression_identifier_group.as_ref(),
-                    ExpressionIdentifierGroup::DollarIdentifier(_)
+                    x.expression_identifier
+                        .scoped_identifier
+                        .scoped_identifier_group
+                        .as_ref(),
+                    ScopedIdentifierGroup::DollarIdentifier(_)
                 ) {
                     return Ok(());
                 }

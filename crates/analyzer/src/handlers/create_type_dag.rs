@@ -7,9 +7,10 @@ use std::collections::HashMap;
 use veryl_parser::{
     resource_table,
     veryl_grammar_trait::{
-        DescriptionItem, EnumDeclaration, InterfaceDeclaration, LocalDeclaration,
-        ModportDeclaration, ModuleDeclaration, PackageDeclaration, ScopedIdentifier, StructUnion,
-        StructUnionDeclaration, TypeDefDeclaration, Veryl, VerylGrammarTrait,
+        DescriptionItem, EnumDeclaration, ExpressionIdentifier, InterfaceDeclaration,
+        LocalDeclaration, ModportDeclaration, ModuleDeclaration, PackageDeclaration,
+        ScopedIdentifier, StructUnion, StructUnionDeclaration, TypeDefDeclaration, Veryl,
+        VerylGrammarTrait,
     },
     veryl_token::Token,
     ParolError,
@@ -171,7 +172,7 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
 
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            if !self.ctx.is_empty() {
+            if !self.ctx.is_empty() && self.ctx.last() != Some(&Context::ExpressionIdentifier) {
                 let path: SymbolPathNamespace = arg.into();
                 let name = to_string(arg);
                 let token = arg.identifier().token;
@@ -181,6 +182,18 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
                         self.insert_edge(*parent, child, *self.ctx.last().unwrap());
                     }
                 }
+            }
+        }
+        Ok(())
+    }
+
+    fn expression_identifier(&mut self, _arg: &ExpressionIdentifier) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.ctx.push(Context::ExpressionIdentifier);
+            }
+            HandlerPoint::After => {
+                self.ctx.pop();
             }
         }
         Ok(())

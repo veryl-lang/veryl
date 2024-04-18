@@ -17,6 +17,7 @@ pub struct CreateReference<'a> {
     top_level: bool,
     file_scope_imported_items: Vec<TokenId>,
     file_scope_imported_packages: Vec<Namespace>,
+    in_expression_identifier: Vec<()>,
 }
 
 impl<'a> CreateReference<'a> {
@@ -85,15 +86,17 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
 
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let ident = arg.identifier().token;
-            match symbol_table::resolve(arg) {
-                Ok(symbol) => {
-                    for id in symbol.full_path {
-                        symbol_table::add_reference(id, &ident);
+            if self.in_expression_identifier.is_empty() {
+                let ident = arg.identifier().token;
+                match symbol_table::resolve(arg) {
+                    Ok(symbol) => {
+                        for id in symbol.full_path {
+                            symbol_table::add_reference(id, &ident);
+                        }
                     }
-                }
-                Err(err) => {
-                    self.push_resolve_error(err, &arg.into());
+                    Err(err) => {
+                        self.push_resolve_error(err, &arg.into());
+                    }
                 }
             }
         }
@@ -101,23 +104,30 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
     }
 
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            let ident = arg.identifier().token;
-            match symbol_table::resolve(arg) {
-                Ok(symbol) => {
-                    for id in symbol.full_path {
-                        symbol_table::add_reference(id, &ident);
-                    }
-                }
-                Err(err) => {
-                    let is_single_identifier = SymbolPath::from(arg).as_slice().len() == 1;
-                    let name = ident.to_string();
-                    if name == "_" && is_single_identifier {
-                        return Ok(());
-                    }
+        match self.point {
+            HandlerPoint::Before => {
+                self.in_expression_identifier.push(());
 
-                    self.push_resolve_error(err, &arg.into());
+                let ident = arg.identifier().token;
+                match symbol_table::resolve(arg) {
+                    Ok(symbol) => {
+                        for id in symbol.full_path {
+                            symbol_table::add_reference(id, &ident);
+                        }
+                    }
+                    Err(err) => {
+                        let is_single_identifier = SymbolPath::from(arg).as_slice().len() == 1;
+                        let name = ident.to_string();
+                        if name == "_" && is_single_identifier {
+                            return Ok(());
+                        }
+
+                        self.push_resolve_error(err, &arg.into());
+                    }
                 }
+            }
+            HandlerPoint::After => {
+                self.in_expression_identifier.pop();
             }
         }
         Ok(())

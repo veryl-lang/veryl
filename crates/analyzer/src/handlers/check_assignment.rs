@@ -130,23 +130,15 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                 if let Ok(x) = symbol_table::resolve(arg.expression_identifier.as_ref()) {
                     let full_path = x.full_path;
                     if can_assign(&full_path) {
-                        let partial = match arg
+                        let mut partial = !arg
                             .expression_identifier
-                            .expression_identifier_group0
-                            .as_ref()
-                        {
-                            ExpressionIdentifierGroup0::ExpressionIdentifierScoped(x) => !x
-                                .expression_identifier_scoped
-                                .expression_identifier_scoped_list0
-                                .is_empty(),
-                            ExpressionIdentifierGroup0::ExpressionIdentifierMember(x) => {
-                                let x = &x.expression_identifier_member;
-                                !x.expression_identifier_member_list.is_empty()
-                                    | x.expression_identifier_member_list0.iter().any(|x| {
-                                        !x.expression_identifier_member_list0_list.is_empty()
-                                    })
-                            }
-                        };
+                            .expression_identifier_list
+                            .is_empty();
+                        partial |= arg
+                            .expression_identifier
+                            .expression_identifier_list0
+                            .iter()
+                            .any(|x| !x.expression_identifier_list0_list.is_empty());
 
                         self.assign_position.push(AssignPositionType::Statement {
                             token,
