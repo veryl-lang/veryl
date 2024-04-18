@@ -87,46 +87,32 @@ impl VerylWalker for Finder {
 
     /// Semantic action for non-terminal 'ExpressionIdentifier'
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) {
+        let x = &arg.scoped_identifier;
         self.group_hit = false;
         self.in_group = true;
-        match &*arg.expression_identifier_group {
-            ExpressionIdentifierGroup::Identifier(x) => self.identifier(&x.identifier),
-            ExpressionIdentifierGroup::DollarIdentifier(x) => {
+        match &*x.scoped_identifier_group {
+            ScopedIdentifierGroup::Identifier(x) => self.identifier(&x.identifier),
+            ScopedIdentifierGroup::DollarIdentifier(x) => {
                 self.dollar_identifier(&x.dollar_identifier)
             }
         }
         self.in_group = false;
-        match &*arg.expression_identifier_group0 {
-            ExpressionIdentifierGroup0::ExpressionIdentifierScoped(x) => {
-                let x = &x.expression_identifier_scoped;
-                self.colon_colon(&x.colon_colon);
-                self.in_group = true;
-                self.identifier(&x.identifier);
-                self.in_group = false;
-                for x in &x.expression_identifier_scoped_list {
-                    self.colon_colon(&x.colon_colon);
-                    self.in_group = true;
-                    self.identifier(&x.identifier);
-                    self.in_group = false;
-                }
-                for x in &x.expression_identifier_scoped_list0 {
-                    self.select(&x.select);
-                }
-            }
-            ExpressionIdentifierGroup0::ExpressionIdentifierMember(x) => {
-                let x = &x.expression_identifier_member;
-                for x in &x.expression_identifier_member_list {
-                    self.select(&x.select);
-                }
-                for x in &x.expression_identifier_member_list0 {
-                    self.dot(&x.dot);
-                    self.in_group = true;
-                    self.identifier(&x.identifier);
-                    self.in_group = false;
-                    for x in &x.expression_identifier_member_list0_list {
-                        self.select(&x.select);
-                    }
-                }
+        for x in &x.scoped_identifier_list {
+            self.colon_colon(&x.colon_colon);
+            self.in_group = true;
+            self.identifier(&x.identifier);
+            self.in_group = false;
+        }
+        for x in &arg.expression_identifier_list {
+            self.select(&x.select);
+        }
+        for x in &arg.expression_identifier_list0 {
+            self.dot(&x.dot);
+            self.in_group = true;
+            self.identifier(&x.identifier);
+            self.in_group = false;
+            for x in &x.expression_identifier_list0_list {
+                self.select(&x.select);
             }
         }
         if self.group_hit {

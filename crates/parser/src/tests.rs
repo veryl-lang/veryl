@@ -1,5 +1,6 @@
 use crate::Parser;
 
+#[track_caller]
 fn success(code: &str) {
     let code = format!("module A {{ {} }}", code);
     let parser = Parser::parse(&code, &"");
@@ -7,6 +8,7 @@ fn success(code: &str) {
     assert!(parser.is_ok());
 }
 
+#[track_caller]
 fn failure(code: &str) {
     let code = format!("module A {{ {} }}", code);
     let parser = Parser::parse(&code, &"");
@@ -93,10 +95,10 @@ fn function_call() {
     success("let a: u32 = $a();");
     success("let a: u32 = a.a.a();");
     success("let a: u32 = a::a::a();");
+    success("let a: u32 = a::a::a.a.a();");
     success("let a: u32 = a(1, 1, 1);");
     success("let a: u32 = a(1, 1, 1,);");
     failure("let a: u32 = a(1 1, 1,);");
-    failure("let a: u32 = a::a::a.a.a();");
 }
 
 #[test]

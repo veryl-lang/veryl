@@ -207,33 +207,17 @@ impl From<&ScopedIdentifier> for TokenRange {
 
 impl From<&ExpressionIdentifier> for TokenRange {
     fn from(value: &ExpressionIdentifier) -> Self {
-        let beg = value.identifier().token;
-        let mut end = beg;
-        match &*value.expression_identifier_group0 {
-            ExpressionIdentifierGroup0::ExpressionIdentifierScoped(x) => {
-                let x = &x.expression_identifier_scoped;
-                end = x.identifier.identifier_token.token;
-                if let Some(x) = x.expression_identifier_scoped_list.last() {
-                    end = x.identifier.identifier_token.token;
-                }
-                if let Some(x) = x.expression_identifier_scoped_list0.last() {
-                    end = x.select.r_bracket.r_bracket_token.token;
-                }
-            }
-            ExpressionIdentifierGroup0::ExpressionIdentifierMember(x) => {
-                let x = &x.expression_identifier_member;
-                if let Some(x) = x.expression_identifier_member_list.last() {
-                    end = x.select.r_bracket.r_bracket_token.token;
-                }
-                if let Some(x) = x.expression_identifier_member_list0.last() {
-                    end = x.identifier.identifier_token.token;
-                    if let Some(x) = x.expression_identifier_member_list0_list.last() {
-                        end = x.select.r_bracket.r_bracket_token.token;
-                    }
-                }
+        let mut range: TokenRange = value.scoped_identifier.as_ref().into();
+        for x in &value.expression_identifier_list {
+            range.end = x.select.r_bracket.r_bracket_token.token;
+        }
+        for x in &value.expression_identifier_list0 {
+            range.end = x.identifier.identifier_token.token;
+            for x in &x.expression_identifier_list0_list {
+                range.end = x.select.r_bracket.r_bracket_token.token;
             }
         }
-        TokenRange { beg, end }
+        range
     }
 }
 
@@ -369,12 +353,7 @@ impl ScopedIdentifier {
 
 impl ExpressionIdentifier {
     pub fn identifier(&self) -> &VerylToken {
-        match &*self.expression_identifier_group {
-            ExpressionIdentifierGroup::Identifier(x) => &x.identifier.identifier_token,
-            ExpressionIdentifierGroup::DollarIdentifier(x) => {
-                &x.dollar_identifier.dollar_identifier_token
-            }
-        }
+        self.scoped_identifier.identifier()
     }
 }
 
