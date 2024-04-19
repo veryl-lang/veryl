@@ -5,8 +5,7 @@ use log::{error, info};
 use miette::Result;
 use veryl_analyzer::attribute::Attribute;
 use veryl_analyzer::attribute_table;
-use veryl_metadata::Metadata;
-use veryl_metadata::SimType;
+use veryl_metadata::{FilelistType, Metadata, SimType};
 
 pub struct CmdTest {
     opt: OptTest,
@@ -18,6 +17,9 @@ impl CmdTest {
     }
 
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
+        // force filelist_type to absolute which can be refered from temporary directory
+        metadata.build.filelist_type = FilelistType::Absolute;
+
         let build = CmdBuild::new(OptBuild {
             files: self.opt.files.clone(),
         });
