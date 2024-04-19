@@ -63,3 +63,28 @@ module _bin_decoder #(
         assign o_unary = {r_unary, r_unary} & {mask_top, mask_bot};
     }
 }
+
+#[test(test_binary_decoder)]
+embed (inline) sv{{{
+module test_binary_decoder;
+
+  parameter BIN_WIDTH = 8;
+  parameter UNARY_WIDTH = 1 << BIN_WIDTH;
+
+  logic i_en;
+  logic [BIN_WIDTH-1:0] i_bin;
+  logic [UNARY_WIDTH-1:0] o_unary;
+
+  std_binary_decoder #(BIN_WIDTH) dut (.*);
+
+  initial begin
+    i_en = 1'b1;
+
+    for (longint i = 0; i < UNARY_WIDTH; ++i) begin
+      i_bin = i;
+      #1 assert($onehot(o_unary));
+      assert(o_unary[i_bin] == 1'b1) else $error("error detected");
+    end
+  end
+endmodule
+}}}
