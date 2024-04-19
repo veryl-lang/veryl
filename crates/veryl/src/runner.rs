@@ -1,7 +1,7 @@
+use anstyle::{AnsiColor, Style};
 use log::{debug, log_enabled, Level};
 use miette::Result;
-use regex::Regex;
-use std::process::Output;
+use once_cell::sync::Lazy;
 use veryl_metadata::Metadata;
 use veryl_parser::resource_table::StrId;
 
@@ -12,88 +12,50 @@ pub use vcs::*;
 pub use verilator::*;
 pub use vivado::*;
 
-#[derive(Default)]
-pub struct LogRegex {
-    warning: Option<&'static Regex>,
-    error: Option<&'static Regex>,
-    fatal: Option<&'static Regex>,
-}
-
 pub trait Runner {
     fn run(&mut self, metadata: &Metadata, test: StrId) -> Result<bool>;
 
     fn name(&self) -> &'static str;
 
-    fn regex_compile(&self) -> LogRegex {
-        LogRegex::default()
-    }
+    fn failure(&mut self);
 
-    fn regex_elaborate(&self) -> LogRegex {
-        LogRegex::default()
-    }
-
-    fn regex_simulate(&self) -> LogRegex {
-        LogRegex::default()
-    }
-
-    fn parse_compile(&self, output: Output) -> bool {
-        self.parse(output, self.regex_compile())
-    }
-
-    fn parse_elaborate(&self, output: Output) -> bool {
-        self.parse(output, self.regex_elaborate())
-    }
-
-    fn parse_simulate(&self, output: Output) -> bool {
-        self.parse(output, self.regex_simulate())
-    }
-
-    fn parse(&self, output: Output, regex: LogRegex) -> bool {
-        let stdout = String::from_utf8_lossy(output.stdout.as_slice());
-        let stderr = String::from_utf8_lossy(output.stderr.as_slice());
-        let text = format!("{}{}", stdout, stderr);
-
-        let mut warnings = if let Some(x) = regex.warning {
-            x.find_iter(&text)
-                .map(|x| (x.start(), x.as_str().to_string()))
-                .collect()
-        } else {
-            vec![]
-        };
-
-        let mut errors = if let Some(x) = regex.error {
-            x.find_iter(&text)
-                .map(|x| (x.start(), x.as_str().to_string()))
-                .collect()
-        } else {
-            vec![]
-        };
-
-        let mut fatals = if let Some(x) = regex.fatal {
-            x.find_iter(&text)
-                .map(|x| (x.start(), x.as_str().to_string()))
-                .collect()
-        } else {
-            vec![]
-        };
-
-        let success = errors.is_empty() && fatals.is_empty();
-
+    fn debug(&self, line: &str) {
         if log_enabled!(Level::Debug) {
-            for line in text.lines() {
-                debug!("{} : {}", self.name(), line);
-            }
-        } else {
-            let mut all = Vec::new();
-            all.append(&mut warnings);
-            all.append(&mut errors);
-            all.append(&mut fatals);
-            all.sort_by(|x, y| x.0.cmp(&y.0));
-            for (_, log) in &all {
-                println!("{}", log);
-            }
+            debug!("{} : {}", self.name(), line);
         }
+    }
 
-        success
+    fn info(&self, line: &str) {
+        static STYLE: Lazy<Style> =
+            Lazy::new(|| Style::new().fg_color(Some(AnsiColor::Green.into())));
+        if !log_enabled!(Level::Debug) {
+            println!("{}{}{}", STYLE.render(), line, STYLE.render_reset());
+        }
+    }
+
+    fn warning(&mut self, line: &str) {
+        static STYLE: Lazy<Style> =
+            Lazy::new(|| Style::new().fg_color(Some(AnsiColor::Yellow.into())));
+        if !log_enabled!(Level::Debug) {
+            println!("{}{}{}", STYLE.render(), line, STYLE.render_reset());
+        }
+    }
+
+    fn error(&mut self, line: &str) {
+        static STYLE: Lazy<Style> =
+            Lazy::new(|| Style::new().fg_color(Some(AnsiColor::Red.into())));
+        if !log_enabled!(Level::Debug) {
+            println!("{}{}{}", STYLE.render(), line, STYLE.render_reset());
+        }
+        self.failure();
+    }
+
+    fn fatal(&mut self, line: &str) {
+        static STYLE: Lazy<Style> =
+            Lazy::new(|| Style::new().fg_color(Some(AnsiColor::Red.into())).bold());
+        if !log_enabled!(Level::Debug) {
+            println!("{}{}{}", STYLE.render(), line, STYLE.render_reset());
+        }
+        self.failure();
     }
 }
