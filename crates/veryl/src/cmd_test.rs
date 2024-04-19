@@ -1,6 +1,7 @@
 use crate::cmd_build::CmdBuild;
-use crate::runner::{Runner, Vcs, Verilator, Vivado};
+use crate::runner::{Vcs, Verilator, Vivado};
 use crate::{OptBuild, OptTest};
+use log::{error, info};
 use miette::Result;
 use veryl_analyzer::attribute::Attribute;
 use veryl_analyzer::attribute_table;
@@ -40,16 +41,27 @@ impl CmdTest {
         };
 
         let mut runner = match sim_type {
-            SimType::Verilator => Box::new(Verilator) as Box<dyn Runner>,
-            SimType::Vcs => Box::new(Vcs) as Box<dyn Runner>,
-            SimType::Vivado => Box::new(Vivado) as Box<dyn Runner>,
+            SimType::Verilator => Verilator::new().runner(),
+            SimType::Vcs => Vcs::new().runner(),
+            SimType::Vivado => Vivado::new().runner(),
         };
 
-        let mut ret = true;
+        let mut success = 0;
+        let mut failure = 0;
         for test in &tests {
-            ret &= runner.run(metadata, *test)?;
+            if runner.run(metadata, *test)? {
+                success += 1;
+            } else {
+                failure += 1;
+            }
         }
 
-        Ok(ret)
+        if failure == 0 {
+            info!("Completed tests : {} passed, {} failed", success, failure);
+            Ok(true)
+        } else {
+            error!("Completed tests : {} passed, {} failed", success, failure);
+            Ok(false)
+        }
     }
 }

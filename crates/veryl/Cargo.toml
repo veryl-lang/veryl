@@ -23,9 +23,11 @@ pre-release-replacements = [
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anstyle         = "1.0"
 clap            = {workspace = true}
 console         = "0.15.8"
 fern            = "0.6.2"
+futures         = {workspace = true}
 handlebars      = "5.1"
 log             = {workspace = true}
 once_cell       = {workspace = true}
@@ -38,6 +40,8 @@ serde_json      = {workspace = true}
 similar         = {version = "2.5.0", features = ["text", "inline"]}
 tempfile        = {workspace = true}
 thiserror       = {workspace = true}
+tokio           = {workspace = true}
+tokio-util      = "0.7.10"
 veryl-analyzer  = {version = "0.9.0", path = "../analyzer"}
 veryl-emitter   = {version = "0.9.0", path = "../emitter"}
 veryl-formatter = {version = "0.9.0", path = "../formatter"}
