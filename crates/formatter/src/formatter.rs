@@ -5,13 +5,17 @@ use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::{Token, VerylToken};
 use veryl_parser::veryl_walker::VerylWalker;
 
+#[cfg(target_os = "windows")]
+const NEWLINE: &str = "\r\n";
+#[cfg(not(target_os = "windows"))]
+const NEWLINE: &str = "\n";
+
 pub struct Formatter {
     format_opt: Format,
     string: String,
     indent: usize,
     line: u32,
     aligner: Aligner,
-    last_newline: u32,
     in_start_token: bool,
     consumed_next_newline: bool,
     single_line: bool,
@@ -27,7 +31,6 @@ impl Default for Formatter {
             indent: 0,
             line: 1,
             aligner: Aligner::new(),
-            last_newline: 0,
             in_start_token: false,
             consumed_next_newline: false,
             single_line: false,
@@ -81,7 +84,7 @@ impl Formatter {
     fn newline_push(&mut self) {
         self.unindent();
         if !self.consumed_next_newline {
-            self.str("\n");
+            self.str(NEWLINE);
         } else {
             self.consumed_next_newline = false;
         }
@@ -93,7 +96,7 @@ impl Formatter {
     fn newline_pop(&mut self) {
         self.unindent();
         if !self.consumed_next_newline {
-            self.str("\n");
+            self.str(NEWLINE);
         } else {
             self.consumed_next_newline = false;
         }
@@ -105,7 +108,7 @@ impl Formatter {
     fn newline(&mut self) {
         self.unindent();
         if !self.consumed_next_newline {
-            self.str("\n");
+            self.str(NEWLINE);
         } else {
             self.consumed_next_newline = false;
         }
@@ -131,11 +134,15 @@ impl Formatter {
         self.str(&" ".repeat(repeat));
     }
 
-    fn push_token(&mut self, x: &Token) {
+    fn consume_adjust_line(&mut self, x: &Token) {
         if self.adjust_line && x.line > self.line + 1 {
             self.newline();
         }
         self.adjust_line = false;
+    }
+
+    fn push_token(&mut self, x: &Token) {
+        self.consume_adjust_line(x);
         let text = resource_table::get_str_value(x.text).unwrap();
         let text = if text.ends_with('\n') {
             self.consumed_next_newline = true;
@@ -143,9 +150,9 @@ impl Formatter {
         } else {
             &text
         };
-        self.last_newline = text.matches('\n').count() as u32;
+        let newlines_in_text = text.matches('\n').count() as u32;
         self.str(text);
-        self.line = x.line;
+        self.line = x.line + newlines_in_text;
     }
 
     fn process_token(&mut self, x: &VerylToken, will_push: bool) {
@@ -167,9 +174,9 @@ impl Formatter {
             if x.line == self.line && !self.in_start_token {
                 self.space(1);
             }
-            for _ in 0..x.line - (self.line + self.last_newline) {
+            for _ in 0..x.line - self.line {
                 self.unindent();
-                self.str("\n");
+                self.str(NEWLINE);
                 self.indent();
             }
             self.push_token(x);
@@ -179,7 +186,7 @@ impl Formatter {
         }
         if self.consumed_next_newline {
             self.unindent();
-            self.str("\n");
+            self.str(NEWLINE);
             self.indent();
         }
     }
@@ -1773,9 +1780,7 @@ impl VerylWalker for Formatter {
         self.space(1);
         self.identifier(&arg.identifier0);
 
-        let text = arg.embed_content.embed_content_token.to_string();
-        let text = text.replace('\r', "");
-        self.str(&text);
+        self.embed_content(&arg.embed_content);
     }
 
     /// Semantic action for non-terminal 'IncludeDeclaration'

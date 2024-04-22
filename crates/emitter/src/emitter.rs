@@ -14,6 +14,11 @@ use veryl_parser::veryl_token::{Token, TokenSource, VerylToken};
 use veryl_parser::veryl_walker::VerylWalker;
 use veryl_parser::Stringifier;
 
+#[cfg(target_os = "windows")]
+const NEWLINE: &str = "\r\n";
+#[cfg(not(target_os = "windows"))]
+const NEWLINE: &str = "\n";
+
 pub enum AttributeType {
     Ifdef,
     Sv,
@@ -28,7 +33,6 @@ pub struct Emitter {
     indent: usize,
     line: u32,
     aligner: Aligner,
-    last_newline: u32,
     in_start_token: bool,
     consumed_next_newline: bool,
     single_line: bool,
@@ -56,7 +60,6 @@ impl Default for Emitter {
             indent: 0,
             line: 1,
             aligner: Aligner::new(),
-            last_newline: 0,
             in_start_token: false,
             consumed_next_newline: false,
             single_line: false,
@@ -126,7 +129,7 @@ impl Emitter {
     fn newline_push(&mut self) {
         self.unindent();
         if !self.consumed_next_newline {
-            self.str("\n");
+            self.str(NEWLINE);
         } else {
             self.consumed_next_newline = false;
         }
@@ -138,7 +141,7 @@ impl Emitter {
     fn newline_pop(&mut self) {
         self.unindent();
         if !self.consumed_next_newline {
-            self.str("\n");
+            self.str(NEWLINE);
         } else {
             self.consumed_next_newline = false;
         }
@@ -150,7 +153,7 @@ impl Emitter {
     fn newline(&mut self) {
         self.unindent();
         if !self.consumed_next_newline {
-            self.str("\n");
+            self.str(NEWLINE);
         } else {
             self.consumed_next_newline = false;
         }
@@ -178,11 +181,19 @@ impl Emitter {
         self.str(&" ".repeat(repeat));
     }
 
-    fn push_token(&mut self, x: &Token) {
+    fn consume_adjust_line(&mut self, x: &Token) {
         if self.adjust_line && x.line > self.line + 1 {
             self.newline();
         }
         self.adjust_line = false;
+    }
+
+    fn clear_adjust_line(&mut self) {
+        self.adjust_line = false;
+    }
+
+    fn push_token(&mut self, x: &Token) {
+        self.consume_adjust_line(x);
         let text = resource_table::get_str_value(x.text).unwrap();
         let text = if text.ends_with('\n') {
             self.consumed_next_newline = true;
@@ -190,9 +201,9 @@ impl Emitter {
         } else {
             &text
         };
-        self.last_newline = text.matches('\n').count() as u32;
+        let newlines_in_text = text.matches('\n').count() as u32;
         self.str(text);
-        self.line = x.line;
+        self.line = x.line + newlines_in_text;
     }
 
     fn process_token(&mut self, x: &VerylToken, will_push: bool, duplicated: Option<usize>) {
@@ -220,9 +231,9 @@ impl Emitter {
             if x.line == self.line && !self.in_start_token {
                 self.space(1);
             }
-            for _ in 0..x.line - (self.line + self.last_newline) {
+            for _ in 0..x.line - self.line {
                 self.unindent();
-                self.str("\n");
+                self.str(NEWLINE);
                 self.indent();
             }
             self.push_token(x);
@@ -232,7 +243,7 @@ impl Emitter {
         }
         if self.consumed_next_newline {
             self.unindent();
-            self.str("\n");
+            self.str(NEWLINE);
             self.indent();
         }
     }
@@ -342,7 +353,7 @@ impl Emitter {
     }
 
     fn statement_variable_declatation_only(&mut self, arg: &Statement) -> usize {
-        self.adjust_line = false;
+        self.clear_adjust_line();
         match arg {
             Statement::LetStatement(x) => {
                 let x = &x.let_statement;
@@ -361,7 +372,7 @@ impl Emitter {
     }
 
     fn function_item_variable_declatation_only(&mut self, arg: &FunctionItem) -> usize {
-        self.adjust_line = false;
+        self.clear_adjust_line();
         match arg {
             FunctionItem::VarDeclaration(x) => {
                 self.var_declaration(&x.var_declaration);
@@ -444,7 +455,8 @@ impl VerylWalker for Emitter {
             self.string.truncate(self.string.len() - "`endif".len());
 
             let trailing_endif = format!(
-                "`endif\n{}",
+                "`endif{}{}",
+                NEWLINE,
                 " ".repeat(self.indent * self.format_opt.indent_width)
             );
             let mut additional_endif = 0;
@@ -558,9 +570,10 @@ impl VerylWalker for Emitter {
                     if !namespace.included(&enum_namespace) {
                         self.namespace(&enum_namespace);
                     }
+                    let enum_member_token = arg.scoped_identifier_list.last().unwrap();
+                    self.consume_adjust_line(&enum_member_token.identifier.identifier_token.token);
                     self.str(&x.prefix);
                     self.str("_");
-                    let enum_member_token = arg.scoped_identifier_list.last().unwrap();
                     self.identifier(&enum_member_token.identifier);
                 }
                 SymbolKind::Modport(_) => {
@@ -1432,18 +1445,17 @@ impl VerylWalker for Emitter {
         match identifier.as_str() {
             "ifdef" | "ifndef" => {
                 if let Some(ref x) = arg.attribute_opt {
-                    self.adjust_line = false;
-
                     let comma = if self.string.trim_end().ends_with(',') {
                         self.unindent();
-                        self.string.truncate(self.string.len() - ",\n".len());
+                        self.string
+                            .truncate(self.string.len() - format!(",{}", NEWLINE).len());
                         self.newline();
                         true
                     } else {
                         false
                     };
 
-                    self.adjust_line = false;
+                    self.consume_adjust_line(&arg.identifier.identifier_token.token);
                     self.str("`");
                     self.identifier(&arg.identifier);
                     self.space(1);
@@ -1458,26 +1470,22 @@ impl VerylWalker for Emitter {
                         self.newline();
                     }
 
-                    self.adjust_line = false;
+                    self.clear_adjust_line();
                 }
             }
             "sv" => {
                 if let Some(ref x) = arg.attribute_opt {
-                    self.adjust_line = false;
-
                     self.str("(*");
                     self.space(1);
                     if let AttributeItem::StringLiteral(x) = &*x.attribute_list.attribute_item {
                         let text = x.string_literal.string_literal_token.to_string();
                         let text = &text[1..text.len() - 1];
                         let text = text.replace("\\\"", "\"");
-                        self.str(&text);
+                        self.token(&x.string_literal.string_literal_token.replace(&text));
                     }
                     self.space(1);
                     self.str("*)");
                     self.newline();
-
-                    self.adjust_line = false;
                 }
             }
             "test" => {
@@ -2773,8 +2781,7 @@ impl VerylWalker for Emitter {
             let text = arg.embed_content.embed_content_token.to_string();
             let text = text.strip_prefix("{{{").unwrap();
             let text = text.strip_suffix("}}}").unwrap();
-            let text = text.replace('\r', "");
-            self.str(&text);
+            self.str(text);
         }
     }
 
@@ -2790,7 +2797,6 @@ impl VerylWalker for Emitter {
                 let path = base.join(path);
                 // File existence is checked at analyzer
                 let text = fs::read_to_string(path).unwrap();
-                let text = text.replace('\r', "");
                 self.str(&text);
             }
         }

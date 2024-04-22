@@ -1,0 +1,15 @@
+module Module53 {
+    enum EnumA: logic {
+        A,
+    }
+
+    var _a: logic;
+    always_comb {
+        case EnumA::A {
+            /*
+            */
+            EnumA::A: _a = 0;
+            default : _a = 1;
+        }
+    }
+}
