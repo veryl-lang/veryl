@@ -1,5 +1,8 @@
+use crate::emitter::{symbol_string, SymbolContext};
 use std::collections::HashMap;
+use veryl_analyzer::symbol_table;
 use veryl_metadata::{Build, BuiltinType, Metadata};
+use veryl_parser::resource_table::StrId;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::{Token, VerylToken};
 use veryl_parser::veryl_walker::VerylWalker;
@@ -57,6 +60,9 @@ impl Align {
     }
 
     fn finish_item(&mut self) {
+        // check overlap from start to finish
+        assert!(self.enable);
+
         self.enable = false;
         if let Some(loc) = self.last_location {
             if loc.line - self.line > 1 {
@@ -72,6 +78,9 @@ impl Align {
     }
 
     fn start_item(&mut self) {
+        // check overlap from start to finish
+        assert!(!self.enable);
+
         self.enable = true;
         self.width = 0;
     }
@@ -123,6 +132,8 @@ pub struct Aligner {
     pub additions: HashMap<Location, u32>,
     aligns: [Align; 8],
     in_type_expression: bool,
+    in_import: bool,
+    project_name: Option<StrId>,
     build_opt: Build,
 }
 
@@ -132,6 +143,7 @@ impl Aligner {
     }
 
     pub fn set_metadata(&mut self, metadata: &Metadata) {
+        self.project_name = Some(metadata.project.name.as_str().into());
         self.build_opt = metadata.build.clone();
     }
 
@@ -237,6 +249,15 @@ impl VerylWalker for Aligner {
     /// Semantic action for non-terminal 'U64'
     fn u64(&mut self, arg: &U64) {
         self.veryl_token(&arg.u64_token.replace("longint unsigned"));
+    }
+
+    /// Semantic action for non-terminal 'ScopedIdentifier'
+    fn scoped_identifier(&mut self, arg: &ScopedIdentifier) {
+        if let Ok(symbol) = symbol_table::resolve(arg) {
+            let context: SymbolContext = self.into();
+            let text = symbol_string(arg.identifier(), &symbol.found, &context);
+            self.veryl_token(&arg.identifier().replace(&text));
+        }
     }
 
     /// Semantic action for non-terminal 'Expression'
@@ -613,9 +634,7 @@ impl VerylWalker for Aligner {
     /// Semantic action for non-terminal 'TypeDefDeclaration'
     fn type_def_declaration(&mut self, arg: &TypeDefDeclaration) {
         self.r#type(&arg.r#type);
-        self.aligns[align_kind::TYPE].start_item();
         self.scalar_type(&arg.array_type.scalar_type);
-        self.aligns[align_kind::TYPE].finish_item();
         self.aligns[align_kind::IDENTIFIER].start_item();
         self.identifier(&arg.identifier);
         self.aligns[align_kind::IDENTIFIER].finish_item();
@@ -826,5 +845,28 @@ impl VerylWalker for Aligner {
             self.function_item(&x.function_item);
         }
         self.r_brace(&arg.r_brace);
+    }
+
+    /// Semantic action for non-terminal 'ImportDeclaration'
+    fn import_declaration(&mut self, arg: &ImportDeclaration) {
+        self.in_import = true;
+        self.import(&arg.import);
+        self.scoped_identifier(&arg.scoped_identifier);
+        if let Some(ref x) = arg.import_declaration_opt {
+            self.colon_colon(&x.colon_colon);
+            self.star(&x.star);
+        }
+        self.semicolon(&arg.semicolon);
+        self.in_import = false;
+    }
+}
+
+impl From<&mut Aligner> for SymbolContext {
+    fn from(value: &mut Aligner) -> Self {
+        SymbolContext {
+            project_name: value.project_name,
+            build_opt: value.build_opt.clone(),
+            in_import: value.in_import,
+        }
     }
 }

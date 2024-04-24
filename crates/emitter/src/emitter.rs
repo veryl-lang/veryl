@@ -3,8 +3,8 @@ use std::fs;
 use veryl_analyzer::attribute::Attribute as Attr;
 use veryl_analyzer::attribute_table;
 use veryl_analyzer::namespace::Namespace;
-use veryl_analyzer::symbol::SymbolKind;
 use veryl_analyzer::symbol::TypeModifier as SymTypeModifier;
+use veryl_analyzer::symbol::{Symbol, SymbolKind};
 use veryl_analyzer::symbol_table::{self, SymbolPath};
 use veryl_analyzer::{msb_table, namespace_table};
 use veryl_metadata::{Build, BuiltinType, ClockType, Format, Metadata, ResetType};
@@ -41,6 +41,7 @@ pub struct Emitter {
     in_always_ff: bool,
     in_generate: bool,
     in_direction_modport: bool,
+    in_import: bool,
     signed: bool,
     reset_signal: Option<String>,
     default_block: Option<String>,
@@ -68,6 +69,7 @@ impl Default for Emitter {
             in_always_ff: false,
             in_generate: false,
             in_direction_modport: false,
+            in_import: false,
             signed: false,
             reset_signal: None,
             default_block: None,
@@ -318,40 +320,6 @@ impl Emitter {
             .contains(&BuiltinType::Type)
     }
 
-    fn namespace(&mut self, namespace: &Namespace) {
-        let mut ret = String::from("");
-        let mut resolve_namespace = Namespace::new();
-        for (i, path) in namespace.paths.iter().enumerate() {
-            if i > 0 {
-                let symbol_path = SymbolPath::new(&[*path]);
-                if let Ok(ref symbol) = symbol_table::resolve((&symbol_path, &resolve_namespace)) {
-                    let separator = match symbol.found.kind {
-                        SymbolKind::Package(_) => "::",
-                        SymbolKind::Interface(_) => ".",
-                        _ => "_",
-                    };
-                    ret.push_str(&format!("{}{}", path, separator));
-                } else {
-                    return self.str(&format!("{}", namespace));
-                }
-            } else {
-                let emit_prj_prefix = if self.build_opt.omit_project_prefix {
-                    self.project_name != Some(*path)
-                } else {
-                    true
-                };
-
-                // top level namespace is always `_`
-                if emit_prj_prefix {
-                    ret.push_str(&format!("{}_", path));
-                }
-            }
-
-            resolve_namespace.push(*path);
-        }
-        self.str(&ret);
-    }
-
     fn statement_variable_declatation_only(&mut self, arg: &Statement) -> usize {
         self.clear_adjust_line();
         match arg {
@@ -542,64 +510,9 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'ScopedIdentifier'
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) {
         if let Ok(symbol) = symbol_table::resolve(arg) {
-            let symbol = symbol.found;
-            match &symbol.kind {
-                SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_) => {
-                    self.namespace(&symbol.namespace);
-                    self.str(&symbol.token.text.to_string());
-                }
-                SymbolKind::Parameter(_)
-                | SymbolKind::Function(_)
-                | SymbolKind::Struct(_)
-                | SymbolKind::Union(_)
-                | SymbolKind::TypeDef(_)
-                | SymbolKind::Enum(_) => {
-                    if arg.scoped_identifier_list.is_empty() {
-                        self.veryl_token(arg.identifier());
-                    } else {
-                        self.namespace(&symbol.namespace);
-                        self.str(&symbol.token.text.to_string());
-                    }
-                }
-                SymbolKind::EnumMember(x) => {
-                    let mut enum_namespace = symbol.namespace.clone();
-                    enum_namespace.pop();
-
-                    // if enum definition is not visible, explicit namespace is required
-                    let namespace = namespace_table::get(arg.identifier().token.id).unwrap();
-                    if !namespace.included(&enum_namespace) {
-                        self.namespace(&enum_namespace);
-                    }
-                    let enum_member_token = arg.scoped_identifier_list.last().unwrap();
-                    self.consume_adjust_line(&enum_member_token.identifier.identifier_token.token);
-                    self.str(&x.prefix);
-                    self.str("_");
-                    self.identifier(&enum_member_token.identifier);
-                }
-                SymbolKind::Modport(_) => {
-                    self.namespace(&symbol.namespace);
-                    self.str(&symbol.token.text.to_string());
-                }
-                SymbolKind::SystemVerilog => {
-                    // "$sv::" should be removed
-                    for (i, x) in arg.scoped_identifier_list.iter().enumerate() {
-                        if i != 0 {
-                            self.colon_colon(&x.colon_colon);
-                        }
-                        self.identifier(&x.identifier);
-                    }
-                }
-                SymbolKind::Port(_)
-                | SymbolKind::Variable(_)
-                | SymbolKind::Instance(_)
-                | SymbolKind::Block
-                | SymbolKind::StructMember(_)
-                | SymbolKind::UnionMember(_)
-                | SymbolKind::ModportMember(_)
-                | SymbolKind::Genvar
-                | SymbolKind::Namespace
-                | SymbolKind::SystemFunction => self.veryl_token(arg.identifier()),
-            }
+            let context: SymbolContext = self.into();
+            let text = symbol_string(arg.identifier(), &symbol.found, &context);
+            self.veryl_token(&arg.identifier().replace(&text));
         }
     }
 
@@ -2341,6 +2254,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ImportDeclaration'
     fn import_declaration(&mut self, arg: &ImportDeclaration) {
+        self.in_import = true;
         self.import(&arg.import);
         self.space(1);
         self.scoped_identifier(&arg.scoped_identifier);
@@ -2349,6 +2263,7 @@ impl VerylWalker for Emitter {
             self.star(&x.star);
         }
         self.semicolon(&arg.semicolon);
+        self.in_import = false;
     }
 
     /// Semantic action for non-terminal 'ExportDeclaration'
@@ -2373,7 +2288,8 @@ impl VerylWalker for Emitter {
         self.module(&arg.module);
         self.space(1);
         if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
-            self.namespace(&symbol.found.namespace);
+            let context: SymbolContext = self.into();
+            self.str(&namespace_string(&symbol.found.namespace, &context));
         }
         self.identifier(&arg.identifier);
         let file_scope_import = self.file_scope_import.clone();
@@ -2556,7 +2472,8 @@ impl VerylWalker for Emitter {
         self.interface(&arg.interface);
         self.space(1);
         if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
-            self.namespace(&symbol.found.namespace);
+            let context: SymbolContext = self.into();
+            self.str(&namespace_string(&symbol.found.namespace, &context));
         }
         self.identifier(&arg.identifier);
         let file_scope_import = self.file_scope_import.clone();
@@ -2735,7 +2652,8 @@ impl VerylWalker for Emitter {
         self.package(&arg.package);
         self.space(1);
         if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
-            self.namespace(&symbol.found.namespace);
+            let context: SymbolContext = self.into();
+            self.str(&namespace_string(&symbol.found.namespace, &context));
         }
         self.identifier(&arg.identifier);
         self.token_will_push(&arg.l_brace.l_brace_token.replace(";"));
@@ -2873,4 +2791,119 @@ impl VerylWalker for Emitter {
         }
         self.newline();
     }
+}
+
+pub struct SymbolContext {
+    pub project_name: Option<StrId>,
+    pub build_opt: Build,
+    pub in_import: bool,
+}
+
+impl From<&mut Emitter> for SymbolContext {
+    fn from(value: &mut Emitter) -> Self {
+        SymbolContext {
+            project_name: value.project_name,
+            build_opt: value.build_opt.clone(),
+            in_import: value.in_import,
+        }
+    }
+}
+
+fn namespace_string(namespace: &Namespace, context: &SymbolContext) -> String {
+    let mut ret = String::from("");
+    let mut resolve_namespace = Namespace::new();
+    let mut in_sv_namespace = false;
+    for (i, path) in namespace.paths.iter().enumerate() {
+        if i == 0 {
+            // top level namespace is always `_`
+            let text = format!("{}_", path);
+
+            // "$sv" namespace should be removed
+            if text == "$sv_" {
+                in_sv_namespace = true;
+            } else {
+                let emit_prj_prefix = if context.build_opt.omit_project_prefix {
+                    context.project_name != Some(*path)
+                } else {
+                    true
+                };
+
+                if emit_prj_prefix {
+                    ret.push_str(&text);
+                }
+            }
+        } else {
+            let symbol_path = SymbolPath::new(&[*path]);
+            if let Ok(ref symbol) = symbol_table::resolve((&symbol_path, &resolve_namespace)) {
+                let separator = match symbol.found.kind {
+                    SymbolKind::Package(_) => "::",
+                    SymbolKind::Interface(_) => ".",
+                    _ if in_sv_namespace => "::",
+                    _ => "_",
+                };
+                ret.push_str(&format!("{}{}", path, separator));
+            } else {
+                return format!("{}", namespace);
+            }
+        }
+
+        resolve_namespace.push(*path);
+    }
+    ret
+}
+
+pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContext) -> String {
+    let mut ret = String::new();
+    let namespace = namespace_table::get(token.token.id).unwrap();
+    match &symbol.kind {
+        SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_) => {
+            ret.push_str(&namespace_string(&symbol.namespace, context));
+            ret.push_str(&symbol.token.to_string());
+        }
+        SymbolKind::Parameter(_)
+        | SymbolKind::Function(_)
+        | SymbolKind::Struct(_)
+        | SymbolKind::Union(_)
+        | SymbolKind::TypeDef(_)
+        | SymbolKind::Enum(_) => {
+            let visible = symbol_table::resolve((&symbol.token, &namespace)).is_ok();
+            if visible & !context.in_import {
+                ret.push_str(&symbol.token.to_string());
+            } else {
+                ret.push_str(&namespace_string(&symbol.namespace, context));
+                ret.push_str(&symbol.token.to_string());
+            }
+        }
+        SymbolKind::EnumMember(x) => {
+            let mut enum_namespace = symbol.namespace.clone();
+            enum_namespace.pop();
+
+            // if enum definition is not visible, explicit namespace is required
+            if !namespace.included(&enum_namespace) {
+                ret.push_str(&namespace_string(&enum_namespace, context));
+            }
+            ret.push_str(&x.prefix);
+            ret.push('_');
+            ret.push_str(&symbol.token.to_string());
+        }
+        SymbolKind::Modport(_) => {
+            ret.push_str(&namespace_string(&symbol.namespace, context));
+            ret.push_str(&symbol.token.to_string());
+        }
+        SymbolKind::SystemVerilog => {
+            ret.push_str(&namespace_string(&symbol.namespace, context));
+            ret.push_str(&symbol.token.to_string());
+        }
+        SymbolKind::Port(_)
+        | SymbolKind::Variable(_)
+        | SymbolKind::Instance(_)
+        | SymbolKind::Block
+        | SymbolKind::StructMember(_)
+        | SymbolKind::UnionMember(_)
+        | SymbolKind::ModportMember(_)
+        | SymbolKind::Genvar
+        | SymbolKind::Namespace
+        | SymbolKind::SystemFunction => ret.push_str(&symbol.token.to_string()),
+    }
+    ret
 }
