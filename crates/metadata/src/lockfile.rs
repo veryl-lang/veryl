@@ -121,15 +121,19 @@ impl Lockfile {
         let mut modified = false;
 
         for lock in &locks {
-            if let Some(old_locks) = old_table.get(&lock.url) {
-                if !old_locks
+            let add = if let Some(old_locks) = old_table.get(&lock.url) {
+                !old_locks
                     .iter()
                     .any(|x| x.version == lock.version && x.name == lock.name)
-                {
-                    info!("Adding dependency ({} @ {})", lock.url, lock.version);
-                    modified = true;
-                }
+            } else {
+                true
+            };
+
+            if add {
+                info!("Adding dependency ({} @ {})", lock.url, lock.version);
+                modified = true;
             }
+
             self.lock_table
                 .entry(lock.url.clone())
                 .and_modify(|x| x.push(lock.clone()))
