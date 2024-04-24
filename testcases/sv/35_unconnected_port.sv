@@ -3,7 +3,7 @@ module veryl_testcase_Module35;
     always_comb aa = 1;
 
     veryl_testcase_Module35B xx (
-        .aa   (aa),
+        .aa   (aa  ),
         .bb   (),
         .bbbb ()
     );

@@ -22,7 +22,7 @@ package veryl_testcase_Package19;
     import PackageA::*;
     import veryl_testcase_PackageA::A;
     import veryl_testcase_PackageA::*;
-    export veryl_testcase_PackageA::A;
+    export A;
     export *::*;
 endpackage
 

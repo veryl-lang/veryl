@@ -75,3 +75,11 @@ impl From<&SymbolPath> for Namespace {
         Namespace { paths }
     }
 }
+
+impl From<&[StrId]> for Namespace {
+    fn from(value: &[StrId]) -> Self {
+        Namespace {
+            paths: value.to_vec(),
+        }
+    }
+}

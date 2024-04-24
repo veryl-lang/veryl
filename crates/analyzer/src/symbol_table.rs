@@ -137,6 +137,13 @@ impl From<(&SymbolPath, &Namespace)> for SymbolPathNamespace {
     }
 }
 
+impl From<(&Token, &Namespace)> for SymbolPathNamespace {
+    fn from(value: (&Token, &Namespace)) -> Self {
+        let path = SymbolPath::new(&[value.0.text]);
+        SymbolPathNamespace(path, value.1.clone())
+    }
+}
+
 impl From<(&Vec<StrId>, &Namespace)> for SymbolPathNamespace {
     fn from(value: (&Vec<StrId>, &Namespace)) -> Self {
         let path = SymbolPath::new(value.0);

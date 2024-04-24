@@ -9,7 +9,7 @@ module veryl_testcase_Module53;
             /*
             */
             EnumA_A: _a = 0;
-            default : _a = 1;
+            default: _a = 1;
         endcase
     end
 endmodule
