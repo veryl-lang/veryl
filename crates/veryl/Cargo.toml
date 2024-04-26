@@ -12,6 +12,7 @@ edition               = "2021"
 
 [package.metadata.release]
 tag = true
+tag-name = "v{{version}}"
 pre-release-replacements = [
     {file="../../CHANGELOG.md", search="Unreleased", replace="v{{version}}"},
     {file="../../CHANGELOG.md", search="ReleaseDate", replace="{{date}}"},
