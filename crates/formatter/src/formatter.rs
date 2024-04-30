@@ -20,7 +20,7 @@ pub struct Formatter {
     consumed_next_newline: bool,
     single_line: bool,
     adjust_line: bool,
-    case_item_indent: Option<usize>,
+    case_item_indent: Vec<usize>,
 }
 
 impl Default for Formatter {
@@ -35,7 +35,7 @@ impl Default for Formatter {
             consumed_next_newline: false,
             single_line: false,
             adjust_line: false,
-            case_item_indent: None,
+            case_item_indent: Vec::new(),
         }
     }
 }
@@ -77,7 +77,7 @@ impl Formatter {
 
     fn indent(&mut self) {
         self.str(&" ".repeat(
-            self.indent * self.format_opt.indent_width + self.case_item_indent.unwrap_or(0),
+            self.indent * self.format_opt.indent_width + self.case_item_indent.last().unwrap_or(&0),
         ));
     }
 
@@ -780,7 +780,7 @@ impl VerylWalker for Formatter {
         }
         self.colon(&arg.colon);
         self.space(1);
-        self.case_item_indent = Some(self.column() - start);
+        self.case_item_indent.push(self.column() - start);
         match &*arg.case_item_group0 {
             CaseItemGroup0::Statement(x) => self.statement(&x.statement),
             CaseItemGroup0::LBraceCaseItemGroup0ListRBrace(x) => {
@@ -793,7 +793,7 @@ impl VerylWalker for Formatter {
                 self.r_brace(&x.r_brace);
             }
         }
-        self.case_item_indent = None;
+        self.case_item_indent.pop();
     }
 
     /// Semantic action for non-terminal 'AttributeList'
