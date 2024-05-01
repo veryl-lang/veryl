@@ -1,7 +1,7 @@
 module Module07 {
     var a  : logic;
     var aa : logic;
-    let clk: logic = 1;
+    let clk: clock = 1;
 
     always_comb {
         // assignment statement

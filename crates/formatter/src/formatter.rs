@@ -897,27 +897,11 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'AlwaysFfClock'
     fn always_ff_clock(&mut self, arg: &AlwaysFfClock) {
-        if let Some(ref x) = arg.always_ff_clock_opt {
-            match &*x.always_ff_clock_opt_group {
-                AlwaysFfClockOptGroup::Posedge(x) => self.posedge(&x.posedge),
-                AlwaysFfClockOptGroup::Negedge(x) => self.negedge(&x.negedge),
-            }
-            self.space(1);
-        }
         self.hierarchical_identifier(&arg.hierarchical_identifier);
     }
 
     /// Semantic action for non-terminal 'AlwaysFfReset'
     fn always_ff_reset(&mut self, arg: &AlwaysFfReset) {
-        if let Some(ref x) = arg.always_ff_reset_opt {
-            match &*x.always_ff_reset_opt_group {
-                AlwaysFfResetOptGroup::AsyncLow(x) => self.async_low(&x.async_low),
-                AlwaysFfResetOptGroup::AsyncHigh(x) => self.async_high(&x.async_high),
-                AlwaysFfResetOptGroup::SyncLow(x) => self.sync_low(&x.sync_low),
-                AlwaysFfResetOptGroup::SyncHigh(x) => self.sync_high(&x.sync_high),
-            }
-            self.space(1);
-        }
         self.hierarchical_identifier(&arg.hierarchical_identifier);
     }
 

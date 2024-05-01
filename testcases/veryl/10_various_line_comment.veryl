@@ -4,9 +4,9 @@ module //a
     i_clk // a
     : // a
      input //a
-     logic //a
+     clock //a
     ,
-    i_rst_n: input logic,
+    i_rst_n: input reset,
     i_up   : input logic,
 
     i_down : input  logic   ,

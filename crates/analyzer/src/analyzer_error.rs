@@ -197,6 +197,26 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
+    #[diagnostic(severity(Error), code(invalid_clock), help(""), url(""))]
+    #[error("#{identifier} can't be used as a clock because it is not 'clock' type nor a single bit signal")]
+    InvalidClock {
+        identifier: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(severity(Error), code(invalid_reset), help(""), url(""))]
+    #[error("#{identifier} can't be used as a reset because it is not 'reset' type nor a single bit signal")]
+    InvalidReset {
+        identifier: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
     #[diagnostic(
         severity(Error),
         code(mismatch_arity),
@@ -757,6 +777,22 @@ impl AnalyzerError {
         AnalyzerError::InvalidStatement {
             kind: kind.to_string(),
             input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn invalid_clock(identifier: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidClock {
+            identifier: identifier.into(),
+            input: AnalyzerError::named_source(identifier, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn invalid_reset(identifier: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidReset {
+            identifier: identifier.into(),
+            input: AnalyzerError::named_source(identifier, token),
             error_location: token.into(),
         }
     }

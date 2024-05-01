@@ -414,6 +414,14 @@ impl VerylWalker for Aligner {
     /// Semantic action for non-terminal 'VariableType'
     fn variable_type(&mut self, arg: &VariableType) {
         match &*arg.variable_type_group {
+            VariableTypeGroup::Clock(x) => self.clock(&x.clock),
+            VariableTypeGroup::ClockPosedge(x) => self.clock_posedge(&x.clock_posedge),
+            VariableTypeGroup::ClockNegedge(x) => self.clock_negedge(&x.clock_negedge),
+            VariableTypeGroup::Reset(x) => self.reset(&x.reset),
+            VariableTypeGroup::ResetAsyncHigh(x) => self.reset_async_high(&x.reset_async_high),
+            VariableTypeGroup::ResetAsyncLow(x) => self.reset_async_low(&x.reset_async_low),
+            VariableTypeGroup::ResetSyncHigh(x) => self.reset_sync_high(&x.reset_sync_high),
+            VariableTypeGroup::ResetSyncLow(x) => self.reset_sync_low(&x.reset_sync_low),
             VariableTypeGroup::Logic(x) => self.logic(&x.logic),
             VariableTypeGroup::Bit(x) => self.bit(&x.bit),
             VariableTypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),

@@ -307,6 +307,14 @@ pub struct Type {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeKind {
+    Clock,
+    ClockPosedge,
+    ClockNegedge,
+    Reset,
+    ResetAsyncHigh,
+    ResetAsyncLow,
+    ResetSyncHigh,
+    ResetSyncLow,
     Bit,
     Logic,
     U32,
@@ -336,6 +344,14 @@ impl fmt::Display for Type {
             }
         }
         match &self.kind {
+            TypeKind::Clock => text.push_str("clock"),
+            TypeKind::ClockPosedge => text.push_str("clock posedge"),
+            TypeKind::ClockNegedge => text.push_str("clock negedge"),
+            TypeKind::Reset => text.push_str("reset"),
+            TypeKind::ResetAsyncHigh => text.push_str("reset async high"),
+            TypeKind::ResetAsyncLow => text.push_str("reset async low"),
+            TypeKind::ResetSyncHigh => text.push_str("reset sync high"),
+            TypeKind::ResetSyncLow => text.push_str("reset sync low"),
             TypeKind::Bit => text.push_str("bit"),
             TypeKind::Logic => text.push_str("logic"),
             TypeKind::U32 => text.push_str("u32"),
@@ -394,6 +410,14 @@ impl From<&syntax_tree::ScalarType> for Type {
             syntax_tree::ScalarTypeGroup::VariableType(x) => {
                 let x = &x.variable_type;
                 let kind = match &*x.variable_type_group {
+                    syntax_tree::VariableTypeGroup::Clock(_) => TypeKind::Clock,
+                    syntax_tree::VariableTypeGroup::ClockPosedge(_) => TypeKind::ClockPosedge,
+                    syntax_tree::VariableTypeGroup::ClockNegedge(_) => TypeKind::ClockNegedge,
+                    syntax_tree::VariableTypeGroup::Reset(_) => TypeKind::Reset,
+                    syntax_tree::VariableTypeGroup::ResetAsyncHigh(_) => TypeKind::ResetAsyncHigh,
+                    syntax_tree::VariableTypeGroup::ResetAsyncLow(_) => TypeKind::ResetAsyncLow,
+                    syntax_tree::VariableTypeGroup::ResetSyncHigh(_) => TypeKind::ResetSyncHigh,
+                    syntax_tree::VariableTypeGroup::ResetSyncLow(_) => TypeKind::ResetSyncLow,
                     syntax_tree::VariableTypeGroup::Logic(_) => TypeKind::Logic,
                     syntax_tree::VariableTypeGroup::Bit(_) => TypeKind::Bit,
                     syntax_tree::VariableTypeGroup::ScopedIdentifier(x) => {

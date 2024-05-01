@@ -211,6 +211,46 @@ impl VerylWalker for Aligner {
         }
     }
 
+    /// Semantic action for non-terminal 'Clock'
+    fn clock(&mut self, arg: &Clock) {
+        self.veryl_token(&arg.clock_token.replace("logic"));
+    }
+
+    /// Semantic action for non-terminal 'ClockPosedge'
+    fn clock_posedge(&mut self, arg: &ClockPosedge) {
+        self.veryl_token(&arg.clock_posedge_token.replace("logic"));
+    }
+
+    /// Semantic action for non-terminal 'ClockNegedge'
+    fn clock_negedge(&mut self, arg: &ClockNegedge) {
+        self.veryl_token(&arg.clock_negedge_token.replace("logic"));
+    }
+
+    /// Semantic action for non-terminal 'Reset'
+    fn reset(&mut self, arg: &Reset) {
+        self.veryl_token(&arg.reset_token.replace("logic"));
+    }
+
+    /// Semantic action for non-terminal 'ResetAsyncHigh'
+    fn reset_async_high(&mut self, arg: &ResetAsyncHigh) {
+        self.veryl_token(&arg.reset_async_high_token.replace("logic"));
+    }
+
+    /// Semantic action for non-terminal 'ResetAsyncLow'
+    fn reset_async_low(&mut self, arg: &ResetAsyncLow) {
+        self.veryl_token(&arg.reset_async_low_token.replace("logic"));
+    }
+
+    /// Semantic action for non-terminal 'ResetSyncHigh'
+    fn reset_sync_high(&mut self, arg: &ResetSyncHigh) {
+        self.veryl_token(&arg.reset_sync_high_token.replace("logic"));
+    }
+
+    /// Semantic action for non-terminal 'ResetSyncLow'
+    fn reset_sync_low(&mut self, arg: &ResetSyncLow) {
+        self.veryl_token(&arg.reset_sync_low_token.replace("logic"));
+    }
+
     /// Semantic action for non-terminal 'F32'
     fn f32(&mut self, arg: &F32) {
         self.veryl_token(&arg.f32_token.replace("shortreal"));
@@ -441,6 +481,14 @@ impl VerylWalker for Aligner {
     /// Semantic action for non-terminal 'VariableType'
     fn variable_type(&mut self, arg: &VariableType) {
         match &*arg.variable_type_group {
+            VariableTypeGroup::Clock(x) => self.clock(&x.clock),
+            VariableTypeGroup::ClockPosedge(x) => self.clock_posedge(&x.clock_posedge),
+            VariableTypeGroup::ClockNegedge(x) => self.clock_negedge(&x.clock_negedge),
+            VariableTypeGroup::Reset(x) => self.reset(&x.reset),
+            VariableTypeGroup::ResetAsyncHigh(x) => self.reset_async_high(&x.reset_async_high),
+            VariableTypeGroup::ResetAsyncLow(x) => self.reset_async_low(&x.reset_async_low),
+            VariableTypeGroup::ResetSyncHigh(x) => self.reset_sync_high(&x.reset_sync_high),
+            VariableTypeGroup::ResetSyncLow(x) => self.reset_sync_low(&x.reset_sync_low),
             VariableTypeGroup::Logic(x) => self.logic(&x.logic),
             VariableTypeGroup::Bit(x) => self.bit(&x.bit),
             VariableTypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
