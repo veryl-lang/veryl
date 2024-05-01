@@ -1,4 +1,4 @@
-[![Veryl](support/logo/veryl_wide.png)](https://veryl-lang.org)
+[![Veryl](support/logo/veryl_wide.png)](https://veryl-lang.org/)
 
 [![Actions Status](https://github.com/veryl-lang/veryl/workflows/Regression/badge.svg)](https://github.com/veryl-lang/veryl/actions)
 [![Crates.io](https://img.shields.io/crates/v/veryl.svg)](https://crates.io/crates/veryl)
@@ -9,9 +9,9 @@ Veryl is a modern hardware description language.
 This project is under the exploration phase of language design.
 If you have any idea, please open [Issue](https://github.com/veryl-lang/veryl/issues).
 
-* [Document](https://doc.veryl-lang.org/book)
-    * [日本語](https://doc.veryl-lang.org/book/ja)
-* [PlayGround](https://doc.veryl-lang.org/playground)
+* [Document](https://doc.veryl-lang.org/book/)
+    * [日本語](https://doc.veryl-lang.org/book/ja/)
+* [PlayGround](https://doc.veryl-lang.org/playground/)
 
 ## Documentation quick links
 
@@ -135,7 +135,7 @@ veryl build
 veryl doc
 ```
 
-For detailed information, see [Document](https://doc.veryl-lang.org/book).
+For detailed information, see [Document](https://doc.veryl-lang.org/book/).
 
 ## License
 
