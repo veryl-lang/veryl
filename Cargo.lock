@@ -489,6 +489,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "collection_literals"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "186dce98367766de751c42c4f03970fc60fc012296e706ccbb9d5df9b6c1e271"
+
+[[package]]
 name = "colorchoice"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -932,19 +938,6 @@ checksum = "a12e6657c4c97ebab115a42dcee77225f7f482cdd841cf7088c657a42e9e00e7"
 dependencies = [
  "atty",
  "humantime",
- "log",
- "regex",
- "termcolor",
-]
-
-[[package]]
-name = "env_logger"
-version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cd405aab171cb85d6735e5c8d9db038c17d3ca007a4d2c25f337935c3d90580"
-dependencies = [
- "humantime",
- "is-terminal",
  "log",
  "regex",
  "termcolor",
@@ -2390,6 +2383,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "lalr"
+version = "0.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "106d7548f95adbe3019b4fc4954554d7b72535867aa9ce326d2f766b68958de7"
+
+[[package]]
 name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2865,9 +2864,9 @@ dependencies = [
 
 [[package]]
 name = "parol"
-version = "0.27.0"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fdef18ebe86e3ba5ad8e3f23232d1d2674bda15e21ee06f099766be45d89d3b"
+checksum = "f4f4e4f7cd4b6f115fd081fb09dbbd4217783738d7db807c44e996ec42530f7d"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -2875,13 +2874,14 @@ dependencies = [
  "cfg-if",
  "clap 4.5.4",
  "derive_builder",
- "env_logger 0.10.2",
+ "env_logger 0.11.3",
  "function_name",
  "graph-cycles",
+ "lalr",
  "num_cpus",
  "owo-colors 4.0.0",
  "parol-macros",
- "parol_runtime",
+ "parol_runtime 0.21.0",
  "petgraph",
  "rand",
  "rand_regex",
@@ -2913,6 +2913,27 @@ checksum = "19c4d943784ca239f3f6e641b214f6fce55eec3fdb098d2e54b4f28e114ce546"
 dependencies = [
  "anyhow",
  "codespan-reporting",
+ "derive_builder",
+ "function_name",
+ "log",
+ "once_cell",
+ "parol-macros",
+ "petgraph",
+ "regex-automata",
+ "syntree",
+ "syntree_layout",
+ "thiserror",
+]
+
+[[package]]
+name = "parol_runtime"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7ec386ba6b9516eba896069e6c8cb989fc8754e87c324497d7fa41ec5b8a178"
+dependencies = [
+ "anyhow",
+ "codespan-reporting",
+ "collection_literals",
  "derive_builder",
  "function_name",
  "log",
@@ -4577,7 +4598,7 @@ dependencies = [
  "miette",
  "once_cell",
  "parol",
- "parol_runtime",
+ "parol_runtime 0.20.2",
  "paste",
  "regex",
  "thiserror",
