@@ -90,7 +90,7 @@ impl Metadata {
         let path = path.as_ref().canonicalize()?;
         let text = fs::read_to_string(&path)?;
         let mut metadata: Metadata = Self::from_str(&text)?;
-        metadata.metadata_path = path.clone();
+        metadata.metadata_path.clone_from(&path);
         metadata.pubfile_path = path.with_file_name("Veryl.pub");
         metadata.lockfile_path = path.with_file_name("Veryl.lock");
         metadata.check()?;
