@@ -42,7 +42,7 @@ similar         = {version = "2.5.0", features = ["text", "inline"]}
 tempfile        = {workspace = true}
 thiserror       = {workspace = true}
 tokio           = {workspace = true}
-tokio-util      = "0.7.10"
+tokio-util      = "0.7.11"
 veryl-analyzer  = {version = "0.9.0", path = "../analyzer"}
 veryl-emitter   = {version = "0.9.0", path = "../emitter"}
 veryl-formatter = {version = "0.9.0", path = "../formatter"}
