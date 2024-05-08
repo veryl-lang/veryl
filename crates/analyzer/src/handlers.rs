@@ -1,5 +1,6 @@
 pub mod check_assignment;
 pub mod check_attribute;
+pub mod check_clock_reset;
 pub mod check_direction;
 pub mod check_embed_include;
 pub mod check_enum;
@@ -8,12 +9,12 @@ pub mod check_identifier;
 pub mod check_instance;
 pub mod check_msb_lsb;
 pub mod check_number;
-pub mod check_reset;
 pub mod check_statement;
 pub mod create_reference;
 pub mod create_symbol_table;
 pub mod create_type_dag;
 use check_attribute::*;
+use check_clock_reset::*;
 use check_direction::*;
 use check_embed_include::*;
 use check_enum::*;
@@ -22,7 +23,6 @@ use check_identifier::*;
 use check_instance::*;
 use check_msb_lsb::*;
 use check_number::*;
-use check_reset::*;
 use check_statement::*;
 use create_reference::*;
 use create_symbol_table::*;
@@ -39,7 +39,6 @@ pub struct Pass1Handlers<'a> {
     check_embed_include: CheckEmbedInclude<'a>,
     check_identifier: CheckIdentifier<'a>,
     check_number: CheckNumber<'a>,
-    check_reset: CheckReset<'a>,
     check_statement: CheckStatement<'a>,
     create_symbol_table: CreateSymbolTable<'a>,
 }
@@ -52,7 +51,6 @@ impl<'a> Pass1Handlers<'a> {
             check_embed_include: CheckEmbedInclude::new(text),
             check_identifier: CheckIdentifier::new(text, lint_opt),
             check_number: CheckNumber::new(text),
-            check_reset: CheckReset::new(text),
             check_statement: CheckStatement::new(text),
             create_symbol_table: CreateSymbolTable::new(text),
         }
@@ -65,7 +63,6 @@ impl<'a> Pass1Handlers<'a> {
             &mut self.check_embed_include as &mut dyn Handler,
             &mut self.check_identifier as &mut dyn Handler,
             &mut self.check_number as &mut dyn Handler,
-            &mut self.check_reset as &mut dyn Handler,
             &mut self.check_statement as &mut dyn Handler,
             &mut self.create_symbol_table as &mut dyn Handler,
         ]
@@ -78,7 +75,6 @@ impl<'a> Pass1Handlers<'a> {
         ret.append(&mut self.check_embed_include.errors);
         ret.append(&mut self.check_identifier.errors);
         ret.append(&mut self.check_number.errors);
-        ret.append(&mut self.check_reset.errors);
         ret.append(&mut self.check_statement.errors);
         ret.append(&mut self.create_symbol_table.errors);
         ret
@@ -91,6 +87,7 @@ pub struct Pass2Handlers<'a> {
     check_instance: CheckInstance<'a>,
     check_msb_lsb: CheckMsbLsb<'a>,
     check_assignment: CheckAssignment<'a>,
+    check_clock_reset: CheckClockReset<'a>,
     create_reference: CreateReference<'a>,
     create_type_dag: CreateTypeDag<'a>,
 }
@@ -103,6 +100,7 @@ impl<'a> Pass2Handlers<'a> {
             check_instance: CheckInstance::new(text),
             check_msb_lsb: CheckMsbLsb::new(text),
             check_assignment: CheckAssignment::new(text),
+            check_clock_reset: CheckClockReset::new(text),
             create_reference: CreateReference::new(text),
             create_type_dag: CreateTypeDag::new(text),
         }
@@ -115,6 +113,7 @@ impl<'a> Pass2Handlers<'a> {
             &mut self.check_instance as &mut dyn Handler,
             &mut self.check_msb_lsb as &mut dyn Handler,
             &mut self.check_assignment as &mut dyn Handler,
+            &mut self.check_clock_reset as &mut dyn Handler,
             &mut self.create_reference as &mut dyn Handler,
             &mut self.create_type_dag as &mut dyn Handler,
         ]
@@ -127,6 +126,7 @@ impl<'a> Pass2Handlers<'a> {
         ret.append(&mut self.check_instance.errors);
         ret.append(&mut self.check_msb_lsb.errors);
         ret.append(&mut self.check_assignment.errors);
+        ret.append(&mut self.check_clock_reset.errors);
         ret.append(&mut self.create_reference.errors);
         ret.append(&mut self.create_type_dag.errors);
         ret

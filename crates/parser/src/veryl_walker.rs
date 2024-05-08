@@ -349,20 +349,6 @@ pub trait VerylWalker {
         after!(self, assign, arg);
     }
 
-    /// Semantic action for non-terminal 'AsyncHigh'
-    fn async_high(&mut self, arg: &AsyncHigh) {
-        before!(self, async_high, arg);
-        self.veryl_token(&arg.async_high_token);
-        after!(self, async_high, arg);
-    }
-
-    /// Semantic action for non-terminal 'AsyncLow'
-    fn async_low(&mut self, arg: &AsyncLow) {
-        before!(self, async_low, arg);
-        self.veryl_token(&arg.async_low_token);
-        after!(self, async_low, arg);
-    }
-
     /// Semantic action for non-terminal 'Bit'
     fn bit(&mut self, arg: &Bit) {
         before!(self, bit, arg);
@@ -375,6 +361,27 @@ pub trait VerylWalker {
         before!(self, case, arg);
         self.veryl_token(&arg.case_token);
         after!(self, case, arg);
+    }
+
+    /// Semantic action for non-terminal 'Clock'
+    fn clock(&mut self, arg: &Clock) {
+        before!(self, clock, arg);
+        self.veryl_token(&arg.clock_token);
+        after!(self, clock, arg);
+    }
+
+    /// Semantic action for non-terminal 'ClockPosedge'
+    fn clock_posedge(&mut self, arg: &ClockPosedge) {
+        before!(self, clock_posedge, arg);
+        self.veryl_token(&arg.clock_posedge_token);
+        after!(self, clock_posedge, arg);
+    }
+
+    /// Semantic action for non-terminal 'ClockNegedge'
+    fn clock_negedge(&mut self, arg: &ClockNegedge) {
+        before!(self, clock_negedge, arg);
+        self.veryl_token(&arg.clock_negedge_token);
+        after!(self, clock_negedge, arg);
     }
 
     /// Semantic action for non-terminal 'Defaul'
@@ -587,13 +594,6 @@ pub trait VerylWalker {
         after!(self, msb, arg);
     }
 
-    /// Semantic action for non-terminal 'Negedge'
-    fn negedge(&mut self, arg: &Negedge) {
-        before!(self, negedge, arg);
-        self.veryl_token(&arg.negedge_token);
-        after!(self, negedge, arg);
-    }
-
     /// Semantic action for non-terminal 'Output'
     fn output(&mut self, arg: &Output) {
         before!(self, output, arg);
@@ -622,13 +622,6 @@ pub trait VerylWalker {
         after!(self, param, arg);
     }
 
-    /// Semantic action for non-terminal 'Posedge'
-    fn posedge(&mut self, arg: &Posedge) {
-        before!(self, posedge, arg);
-        self.veryl_token(&arg.posedge_token);
-        after!(self, posedge, arg);
-    }
-
     /// Semantic action for non-terminal 'Pub'
     fn r#pub(&mut self, arg: &Pub) {
         before!(self, r#pub, arg);
@@ -648,6 +641,41 @@ pub trait VerylWalker {
         before!(self, repeat, arg);
         self.veryl_token(&arg.repeat_token);
         after!(self, repeat, arg);
+    }
+
+    /// Semantic action for non-terminal 'Reset'
+    fn reset(&mut self, arg: &Reset) {
+        before!(self, reset, arg);
+        self.veryl_token(&arg.reset_token);
+        after!(self, reset, arg);
+    }
+
+    /// Semantic action for non-terminal 'ResetAsyncHigh'
+    fn reset_async_high(&mut self, arg: &ResetAsyncHigh) {
+        before!(self, reset_async_high, arg);
+        self.veryl_token(&arg.reset_async_high_token);
+        after!(self, reset_async_high, arg);
+    }
+
+    /// Semantic action for non-terminal 'ResetAsyncLow'
+    fn reset_async_low(&mut self, arg: &ResetAsyncLow) {
+        before!(self, reset_async_low, arg);
+        self.veryl_token(&arg.reset_async_low_token);
+        after!(self, reset_async_low, arg);
+    }
+
+    /// Semantic action for non-terminal 'ResetSyncHigh'
+    fn reset_sync_high(&mut self, arg: &ResetSyncHigh) {
+        before!(self, reset_sync_high, arg);
+        self.veryl_token(&arg.reset_sync_high_token);
+        after!(self, reset_sync_high, arg);
+    }
+
+    /// Semantic action for non-terminal 'ResetSyncLow'
+    fn reset_sync_low(&mut self, arg: &ResetSyncLow) {
+        before!(self, reset_sync_low, arg);
+        self.veryl_token(&arg.reset_sync_low_token);
+        after!(self, reset_sync_low, arg);
     }
 
     /// Semantic action for non-terminal 'Return'
@@ -697,20 +725,6 @@ pub trait VerylWalker {
         before!(self, union, arg);
         self.veryl_token(&arg.union_token);
         after!(self, union, arg);
-    }
-
-    /// Semantic action for non-terminal 'SyncHigh'
-    fn sync_high(&mut self, arg: &SyncHigh) {
-        before!(self, sync_high, arg);
-        self.veryl_token(&arg.sync_high_token);
-        after!(self, sync_high, arg);
-    }
-
-    /// Semantic action for non-terminal 'SyncLow'
-    fn sync_low(&mut self, arg: &SyncLow) {
-        before!(self, sync_low, arg);
-        self.veryl_token(&arg.sync_low_token);
-        after!(self, sync_low, arg);
     }
 
     /// Semantic action for non-terminal 'Tri'
@@ -1340,6 +1354,14 @@ pub trait VerylWalker {
     fn variable_type(&mut self, arg: &VariableType) {
         before!(self, variable_type, arg);
         match &*arg.variable_type_group {
+            VariableTypeGroup::Clock(x) => self.clock(&x.clock),
+            VariableTypeGroup::ClockPosedge(x) => self.clock_posedge(&x.clock_posedge),
+            VariableTypeGroup::ClockNegedge(x) => self.clock_negedge(&x.clock_negedge),
+            VariableTypeGroup::Reset(x) => self.reset(&x.reset),
+            VariableTypeGroup::ResetAsyncHigh(x) => self.reset_async_high(&x.reset_async_high),
+            VariableTypeGroup::ResetAsyncLow(x) => self.reset_async_low(&x.reset_async_low),
+            VariableTypeGroup::ResetSyncHigh(x) => self.reset_sync_high(&x.reset_sync_high),
+            VariableTypeGroup::ResetSyncLow(x) => self.reset_sync_low(&x.reset_sync_low),
             VariableTypeGroup::Logic(x) => self.logic(&x.logic),
             VariableTypeGroup::Bit(x) => self.bit(&x.bit),
             VariableTypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
@@ -1699,12 +1721,6 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'AlwaysFfClock'
     fn always_ff_clock(&mut self, arg: &AlwaysFfClock) {
         before!(self, always_ff_clock, arg);
-        if let Some(ref x) = arg.always_ff_clock_opt {
-            match &*x.always_ff_clock_opt_group {
-                AlwaysFfClockOptGroup::Posedge(x) => self.posedge(&x.posedge),
-                AlwaysFfClockOptGroup::Negedge(x) => self.negedge(&x.negedge),
-            }
-        }
         self.hierarchical_identifier(&arg.hierarchical_identifier);
         after!(self, always_ff_clock, arg);
     }
@@ -1712,14 +1728,6 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'AlwaysFfReset'
     fn always_ff_reset(&mut self, arg: &AlwaysFfReset) {
         before!(self, always_ff_reset, arg);
-        if let Some(ref x) = arg.always_ff_reset_opt {
-            match &*x.always_ff_reset_opt_group {
-                AlwaysFfResetOptGroup::AsyncLow(x) => self.async_low(&x.async_low),
-                AlwaysFfResetOptGroup::AsyncHigh(x) => self.async_high(&x.async_high),
-                AlwaysFfResetOptGroup::SyncLow(x) => self.sync_low(&x.sync_low),
-                AlwaysFfResetOptGroup::SyncHigh(x) => self.sync_high(&x.sync_high),
-            }
-        }
         self.hierarchical_identifier(&arg.hierarchical_identifier);
         after!(self, always_ff_reset, arg);
     }

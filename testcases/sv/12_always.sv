@@ -1,6 +1,12 @@
 module veryl_testcase_Module12 (
-    input logic i_clk,
-    input logic i_rst
+    input logic i_clk   ,
+    input logic i_clk_p ,
+    input logic i_clk_n ,
+    input logic i_rst   ,
+    input logic i_rst_ah,
+    input logic i_rst_al,
+    input logic i_rst_sh,
+    input logic i_rst_sl
 );
     logic a ;
     logic aa;
@@ -30,29 +36,29 @@ module veryl_testcase_Module12 (
     end
 
     // always_ff declaration with specified polarity
-    always_ff @ (posedge i_clk, posedge i_rst) begin
-        if (i_rst) begin
+    always_ff @ (posedge i_clk_p, posedge i_rst_ah) begin
+        if (i_rst_ah) begin
             a <= b;
         end else begin
             a <= c[5:0];
         end
     end
-    always_ff @ (negedge i_clk, negedge i_rst) begin
-        if (!i_rst) begin
+    always_ff @ (negedge i_clk_n, negedge i_rst_al) begin
+        if (!i_rst_al) begin
             a <= b;
         end else begin
             a <= c[5:0];
         end
     end
-    always_ff @ (posedge i_clk) begin
-        if (i_rst) begin
+    always_ff @ (posedge i_clk_p) begin
+        if (i_rst_sh) begin
             a <= b;
         end else begin
             a <= c[5:0];
         end
     end
-    always_ff @ (negedge i_clk) begin
-        if (!i_rst) begin
+    always_ff @ (negedge i_clk_n) begin
+        if (!i_rst_sl) begin
             a <= b;
         end else begin
             a <= c[5:0];

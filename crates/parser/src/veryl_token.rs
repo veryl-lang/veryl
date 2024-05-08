@@ -248,6 +248,46 @@ impl From<&FixedType> for TokenRange {
 impl From<&VariableType> for TokenRange {
     fn from(value: &VariableType) -> Self {
         let mut range = match &*value.variable_type_group {
+            VariableTypeGroup::Clock(x) => {
+                let beg = x.clock.clock_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+            VariableTypeGroup::ClockPosedge(x) => {
+                let beg = x.clock_posedge.clock_posedge_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+            VariableTypeGroup::ClockNegedge(x) => {
+                let beg = x.clock_negedge.clock_negedge_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+            VariableTypeGroup::Reset(x) => {
+                let beg = x.reset.reset_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+            VariableTypeGroup::ResetAsyncHigh(x) => {
+                let beg = x.reset_async_high.reset_async_high_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+            VariableTypeGroup::ResetAsyncLow(x) => {
+                let beg = x.reset_async_low.reset_async_low_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+            VariableTypeGroup::ResetSyncHigh(x) => {
+                let beg = x.reset_sync_high.reset_sync_high_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+            VariableTypeGroup::ResetSyncLow(x) => {
+                let beg = x.reset_sync_low.reset_sync_low_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
             VariableTypeGroup::Logic(x) => {
                 let beg = x.logic.logic_token.token;
                 let end = beg;
@@ -510,11 +550,12 @@ token_with_comments!(AlwaysComb);
 token_with_comments!(AlwaysFf);
 token_with_comments!(As);
 token_with_comments!(Assign);
-token_with_comments!(AsyncHigh);
-token_with_comments!(AsyncLow);
 token_with_comments!(Bit);
 token_with_comments!(Break);
 token_with_comments!(Case);
+token_with_comments!(Clock);
+token_with_comments!(ClockPosedge);
+token_with_comments!(ClockNegedge);
 token_with_comments!(Default);
 token_with_comments!(Else);
 token_with_comments!(Embed);
@@ -545,22 +586,23 @@ token_with_comments!(Lsb);
 token_with_comments!(Modport);
 token_with_comments!(Module);
 token_with_comments!(Msb);
-token_with_comments!(Negedge);
 token_with_comments!(Output);
 token_with_comments!(Outside);
 token_with_comments!(Package);
 token_with_comments!(Param);
-token_with_comments!(Posedge);
 token_with_comments!(Pub);
 token_with_comments!(Ref);
 token_with_comments!(Repeat);
+token_with_comments!(Reset);
+token_with_comments!(ResetAsyncHigh);
+token_with_comments!(ResetAsyncLow);
+token_with_comments!(ResetSyncHigh);
+token_with_comments!(ResetSyncLow);
 token_with_comments!(Return);
 token_with_comments!(Signed);
 token_with_comments!(Step);
 token_with_comments!(String);
 token_with_comments!(Struct);
-token_with_comments!(SyncHigh);
-token_with_comments!(SyncLow);
 token_with_comments!(Tri);
 token_with_comments!(Type);
 token_with_comments!(U32);

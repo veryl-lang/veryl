@@ -1,7 +1,7 @@
 module Module08 {
     local a    : u32   = 1;
     local b    : u32   = 1;
-    let i_clk: logic = 1;
+    let i_clk: clock = 1;
 
     // if declaration
     if a == 1 :label {

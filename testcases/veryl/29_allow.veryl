@@ -1,6 +1,6 @@
 module Module29 (
-    clk: input logic,
-    rst: input logic,
+    clk: input clock,
+    rst: input reset,
 ) {
     var a: logic;
     var b: logic;

@@ -63,11 +63,12 @@ StarTerm              : '*'                                                     
 AlwaysCombTerm        : /(?-u:\b)always_comb(?-u:\b)/                                                         : Token;
 AlwaysFfTerm          : /(?-u:\b)always_ff(?-u:\b)/                                                           : Token;
 AssignTerm            : /(?-u:\b)assign(?-u:\b)/                                                              : Token;
-AsyncHighTerm         : /(?-u:\b)async_high(?-u:\b)/                                                          : Token;
-AsyncLowTerm          : /(?-u:\b)async_low(?-u:\b)/                                                           : Token;
 AsTerm                : /(?-u:\b)as(?-u:\b)/                                                                  : Token;
 BitTerm               : /(?-u:\b)bit(?-u:\b)/                                                                 : Token;
 CaseTerm              : /(?-u:\b)case(?-u:\b)/                                                                : Token;
+ClockTerm             : /(?-u:\b)clock(?-u:\b)/                                                               : Token;
+ClockPosedgeTerm      : /(?-u:\b)clock_posedge(?-u:\b)/                                                       : Token;
+ClockNegedgeTerm      : /(?-u:\b)clock_negedge(?-u:\b)/                                                       : Token;
 DefaultTerm           : /(?-u:\b)default(?-u:\b)/                                                             : Token;
 ElseTerm              : /(?-u:\b)else(?-u:\b)/                                                                : Token;
 EmbedTerm             : /(?-u:\b)embed(?-u:\b)/                                                               : Token;
@@ -98,23 +99,24 @@ LsbTerm               : /(?-u:\b)lsb(?-u:\b)/                                   
 ModportTerm           : /(?-u:\b)modport(?-u:\b)/                                                             : Token;
 ModuleTerm            : /(?-u:\b)module(?-u:\b)/                                                              : Token;
 MsbTerm               : /(?-u:\b)msb(?-u:\b)/                                                                 : Token;
-NegedgeTerm           : /(?-u:\b)negedge(?-u:\b)/                                                             : Token;
 OutputTerm            : /(?-u:\b)output(?-u:\b)/                                                              : Token;
 OutsideTerm           : /(?-u:\b)outside(?-u:\b)/                                                             : Token;
 PackageTerm           : /(?-u:\b)package(?-u:\b)/                                                             : Token;
 ParamTerm             : /(?-u:\b)param(?-u:\b)/                                                               : Token;
-PosedgeTerm           : /(?-u:\b)posedge(?-u:\b)/                                                             : Token;
 PubTerm               : /(?-u:\b)pub(?-u:\b)/                                                                 : Token;
 RefTerm               : /(?-u:\b)ref(?-u:\b)/                                                                 : Token;
 RepeatTerm            : /(?-u:\b)repeat(?-u:\b)/                                                              : Token;
+ResetTerm             : /(?-u:\b)reset(?-u:\b)/                                                               : Token;
+ResetAsyncHighTerm    : /(?-u:\b)reset_async_high(?-u:\b)/                                                    : Token;
+ResetAsyncLowTerm     : /(?-u:\b)reset_async_low(?-u:\b)/                                                     : Token;
+ResetSyncHighTerm     : /(?-u:\b)reset_sync_high(?-u:\b)/                                                     : Token;
+ResetSyncLowTerm      : /(?-u:\b)reset_sync_low(?-u:\b)/                                                      : Token;
 ReturnTerm            : /(?-u:\b)return(?-u:\b)/                                                              : Token;
 BreakTerm             : /(?-u:\b)break(?-u:\b)/                                                               : Token;
 SignedTerm            : /(?-u:\b)signed(?-u:\b)/                                                              : Token;
 StepTerm              : /(?-u:\b)step(?-u:\b)/                                                                : Token;
 StringTerm            : /(?-u:\b)string(?-u:\b)/                                                              : Token;
 StructTerm            : /(?-u:\b)struct(?-u:\b)/                                                              : Token;
-SyncHighTerm          : /(?-u:\b)sync_high(?-u:\b)/                                                           : Token;
-SyncLowTerm           : /(?-u:\b)sync_low(?-u:\b)/                                                            : Token;
 TriTerm               : /(?-u:\b)tri(?-u:\b)/                                                                 : Token;
 TypeTerm              : /(?-u:\b)type(?-u:\b)/                                                                : Token;
 U32Term               : /(?-u:\b)u32(?-u:\b)/                                                                 : Token;
@@ -178,67 +180,69 @@ RParenToken      : RParenTerm      : Token Comments;
 SemicolonToken   : SemicolonTerm   : Token Comments;
 StarToken        : StarTerm        : Token Comments;
 
-AlwaysCombToken: AlwaysCombTerm: Token Comments;
-AlwaysFfToken  : AlwaysFfTerm  : Token Comments;
-AsToken        : AsTerm        : Token Comments;
-AssignToken    : AssignTerm    : Token Comments;
-AsyncHighToken : AsyncHighTerm : Token Comments;
-AsyncLowToken  : AsyncLowTerm  : Token Comments;
-BitToken       : BitTerm       : Token Comments;
-CaseToken      : CaseTerm      : Token Comments;
-DefaultToken   : DefaultTerm   : Token Comments;
-ElseToken      : ElseTerm      : Token Comments;
-EmbedToken     : EmbedTerm     : Token Comments;
-EnumToken      : EnumTerm      : Token Comments;
-ExportToken    : ExportTerm    : Token Comments;
-F32Token       : F32Term       : Token Comments;
-F64Token       : F64Term       : Token Comments;
-FinalToken     : FinalTerm     : Token Comments;
-ForToken       : ForTerm       : Token Comments;
-FunctionToken  : FunctionTerm  : Token Comments;
-I32Token       : I32Term       : Token Comments;
-I64Token       : I64Term       : Token Comments;
-IfResetToken   : IfResetTerm   : Token Comments;
-IfToken        : IfTerm        : Token Comments;
-ImportToken    : ImportTerm    : Token Comments;
-IncludeToken   : IncludeTerm   : Token Comments;
-InitialToken   : InitialTerm   : Token Comments;
-InoutToken     : InoutTerm     : Token Comments;
-InputToken     : InputTerm     : Token Comments;
-InsideToken    : InsideTerm    : Token Comments;
-InstToken      : InstTerm      : Token Comments;
-InterfaceToken : InterfaceTerm : Token Comments;
-InToken        : InTerm        : Token Comments;
-LetToken       : LetTerm       : Token Comments;
-LocalToken     : LocalTerm     : Token Comments;
-LogicToken     : LogicTerm     : Token Comments;
-LsbToken       : LsbTerm       : Token Comments;
-ModportToken   : ModportTerm   : Token Comments;
-ModuleToken    : ModuleTerm    : Token Comments;
-MsbToken       : MsbTerm       : Token Comments;
-NegedgeToken   : NegedgeTerm   : Token Comments;
-OutputToken    : OutputTerm    : Token Comments;
-OutsideToken   : OutsideTerm   : Token Comments;
-PackageToken   : PackageTerm   : Token Comments;
-ParamToken     : ParamTerm     : Token Comments;
-PosedgeToken   : PosedgeTerm   : Token Comments;
-PubToken       : PubTerm       : Token Comments;
-RefToken       : RefTerm       : Token Comments;
-RepeatToken    : RepeatTerm    : Token Comments;
-ReturnToken    : ReturnTerm    : Token Comments;
-BreakToken     : BreakTerm     : Token Comments;
-SignedToken    : SignedTerm    : Token Comments;
-StepToken      : StepTerm      : Token Comments;
-StringToken    : StringTerm    : Token Comments;
-StructToken    : StructTerm    : Token Comments;
-SyncHighToken  : SyncHighTerm  : Token Comments;
-SyncLowToken   : SyncLowTerm   : Token Comments;
-TriToken       : TriTerm       : Token Comments;
-TypeToken      : TypeTerm      : Token Comments;
-U32Token       : U32Term       : Token Comments;
-U64Token       : U64Term       : Token Comments;
-UnionToken     : UnionTerm     : Token Comments;
-VarToken       : VarTerm       : Token Comments;
+AlwaysCombToken    : AlwaysCombTerm    : Token Comments;
+AlwaysFfToken      : AlwaysFfTerm      : Token Comments;
+AsToken            : AsTerm            : Token Comments;
+AssignToken        : AssignTerm        : Token Comments;
+BitToken           : BitTerm           : Token Comments;
+CaseToken          : CaseTerm          : Token Comments;
+ClockToken         : ClockTerm         : Token Comments;
+ClockPosedgeToken  : ClockPosedgeTerm  : Token Comments;
+ClockNegedgeToken  : ClockNegedgeTerm  : Token Comments;
+DefaultToken       : DefaultTerm       : Token Comments;
+ElseToken          : ElseTerm          : Token Comments;
+EmbedToken         : EmbedTerm         : Token Comments;
+EnumToken          : EnumTerm          : Token Comments;
+ExportToken        : ExportTerm        : Token Comments;
+F32Token           : F32Term           : Token Comments;
+F64Token           : F64Term           : Token Comments;
+FinalToken         : FinalTerm         : Token Comments;
+ForToken           : ForTerm           : Token Comments;
+FunctionToken      : FunctionTerm      : Token Comments;
+I32Token           : I32Term           : Token Comments;
+I64Token           : I64Term           : Token Comments;
+IfResetToken       : IfResetTerm       : Token Comments;
+IfToken            : IfTerm            : Token Comments;
+ImportToken        : ImportTerm        : Token Comments;
+IncludeToken       : IncludeTerm       : Token Comments;
+InitialToken       : InitialTerm       : Token Comments;
+InoutToken         : InoutTerm         : Token Comments;
+InputToken         : InputTerm         : Token Comments;
+InsideToken        : InsideTerm        : Token Comments;
+InstToken          : InstTerm          : Token Comments;
+InterfaceToken     : InterfaceTerm     : Token Comments;
+InToken            : InTerm            : Token Comments;
+LetToken           : LetTerm           : Token Comments;
+LocalToken         : LocalTerm         : Token Comments;
+LogicToken         : LogicTerm         : Token Comments;
+LsbToken           : LsbTerm           : Token Comments;
+ModportToken       : ModportTerm       : Token Comments;
+ModuleToken        : ModuleTerm        : Token Comments;
+MsbToken           : MsbTerm           : Token Comments;
+OutputToken        : OutputTerm        : Token Comments;
+OutsideToken       : OutsideTerm       : Token Comments;
+PackageToken       : PackageTerm       : Token Comments;
+ParamToken         : ParamTerm         : Token Comments;
+PubToken           : PubTerm           : Token Comments;
+RefToken           : RefTerm           : Token Comments;
+RepeatToken        : RepeatTerm        : Token Comments;
+ResetToken         : ResetTerm         : Token Comments;
+ResetAsyncHighToken: ResetAsyncHighTerm: Token Comments;
+ResetAsyncLowToken : ResetAsyncLowTerm : Token Comments;
+ResetSyncHighToken : ResetSyncHighTerm : Token Comments;
+ResetSyncLowToken  : ResetSyncLowTerm  : Token Comments;
+ReturnToken        : ReturnTerm        : Token Comments;
+BreakToken         : BreakTerm         : Token Comments;
+SignedToken        : SignedTerm        : Token Comments;
+StepToken          : StepTerm          : Token Comments;
+StringToken        : StringTerm        : Token Comments;
+StructToken        : StructTerm        : Token Comments;
+TriToken           : TriTerm           : Token Comments;
+TypeToken          : TypeTerm          : Token Comments;
+U32Token           : U32Term           : Token Comments;
+U64Token           : U64Term           : Token Comments;
+UnionToken         : UnionTerm         : Token Comments;
+VarToken           : VarTerm           : Token Comments;
 
 DollarIdentifierToken: DollarIdentifierTerm: Token Comments;
 IdentifierToken      : IdentifierTerm      : Token Comments;
@@ -300,67 +304,69 @@ Semicolon   : SemicolonToken   : VerylToken;
 Star        : StarToken        : VerylToken;
 
 // Keyword
-AlwaysComb: AlwaysCombToken: VerylToken;
-AlwaysFf  : AlwaysFfToken  : VerylToken;
-As        : AsToken        : VerylToken;
-Assign    : AssignToken    : VerylToken;
-AsyncHigh : AsyncHighToken : VerylToken;
-AsyncLow  : AsyncLowToken  : VerylToken;
-Bit       : BitToken       : VerylToken;
-Break     : BreakToken     : VerylToken;
-Case      : CaseToken      : VerylToken;
-Defaul    : DefaultToken   : VerylToken; // avoid to conflict with Rust's Default trait
-Else      : ElseToken      : VerylToken;
-Embed     : EmbedToken     : VerylToken;
-Enum      : EnumToken      : VerylToken;
-Export    : ExportToken    : VerylToken;
-F32       : F32Token       : VerylToken;
-F64       : F64Token       : VerylToken;
-Final     : FinalToken     : VerylToken;
-For       : ForToken       : VerylToken;
-Function  : FunctionToken  : VerylToken;
-I32       : I32Token       : VerylToken;
-I64       : I64Token       : VerylToken;
-If        : IfToken        : VerylToken;
-IfReset   : IfResetToken   : VerylToken;
-Import    : ImportToken    : VerylToken;
-In        : InToken        : VerylToken;
-Include   : IncludeToken   : VerylToken;
-Initial   : InitialToken   : VerylToken;
-Inout     : InoutToken     : VerylToken;
-Input     : InputToken     : VerylToken;
-Inside    : InsideToken    : VerylToken;
-Inst      : InstToken      : VerylToken;
-Interface : InterfaceToken : VerylToken;
-Let       : LetToken       : VerylToken;
-Local     : LocalToken     : VerylToken;
-Logic     : LogicToken     : VerylToken;
-Lsb       : LsbToken       : VerylToken;
-Modport   : ModportToken   : VerylToken;
-Module    : ModuleToken    : VerylToken;
-Msb       : MsbToken       : VerylToken;
-Negedge   : NegedgeToken   : VerylToken;
-Output    : OutputToken    : VerylToken;
-Outside   : OutsideToken   : VerylToken;
-Package   : PackageToken   : VerylToken;
-Param     : ParamToken     : VerylToken;
-Posedge   : PosedgeToken   : VerylToken;
-Pub       : PubToken       : VerylToken;
-Ref       : RefToken       : VerylToken;
-Repeat    : RepeatToken    : VerylToken;
-Return    : ReturnToken    : VerylToken;
-Signed    : SignedToken    : VerylToken;
-Step      : StepToken      : VerylToken;
-Strin     : StringToken    : VerylToken; // avoid to conflict with Rust's String struct
-Struct    : StructToken    : VerylToken;
-SyncHigh  : SyncHighToken  : VerylToken;
-SyncLow   : SyncLowToken   : VerylToken;
-Tri       : TriToken       : VerylToken;
-Type      : TypeToken      : VerylToken;
-U32       : U32Token       : VerylToken;
-U64       : U64Token       : VerylToken;
-Union     : UnionToken     : VerylToken;
-Var       : VarToken       : VerylToken;
+AlwaysComb    : AlwaysCombToken    : VerylToken;
+AlwaysFf      : AlwaysFfToken      : VerylToken;
+As            : AsToken            : VerylToken;
+Assign        : AssignToken        : VerylToken;
+Bit           : BitToken           : VerylToken;
+Break         : BreakToken         : VerylToken;
+Case          : CaseToken          : VerylToken;
+Clock         : ClockToken         : VerylToken;
+ClockPosedge  : ClockPosedgeToken  : VerylToken;
+ClockNegedge  : ClockNegedgeToken  : VerylToken;
+Defaul        : DefaultToken       : VerylToken; // avoid to conflict with Rust's Default trait
+Else          : ElseToken          : VerylToken;
+Embed         : EmbedToken         : VerylToken;
+Enum          : EnumToken          : VerylToken;
+Export        : ExportToken        : VerylToken;
+F32           : F32Token           : VerylToken;
+F64           : F64Token           : VerylToken;
+Final         : FinalToken         : VerylToken;
+For           : ForToken           : VerylToken;
+Function      : FunctionToken      : VerylToken;
+I32           : I32Token           : VerylToken;
+I64           : I64Token           : VerylToken;
+If            : IfToken            : VerylToken;
+IfReset       : IfResetToken       : VerylToken;
+Import        : ImportToken        : VerylToken;
+In            : InToken            : VerylToken;
+Include       : IncludeToken       : VerylToken;
+Initial       : InitialToken       : VerylToken;
+Inout         : InoutToken         : VerylToken;
+Input         : InputToken         : VerylToken;
+Inside        : InsideToken        : VerylToken;
+Inst          : InstToken          : VerylToken;
+Interface     : InterfaceToken     : VerylToken;
+Let           : LetToken           : VerylToken;
+Local         : LocalToken         : VerylToken;
+Logic         : LogicToken         : VerylToken;
+Lsb           : LsbToken           : VerylToken;
+Modport       : ModportToken       : VerylToken;
+Module        : ModuleToken        : VerylToken;
+Msb           : MsbToken           : VerylToken;
+Output        : OutputToken        : VerylToken;
+Outside       : OutsideToken       : VerylToken;
+Package       : PackageToken       : VerylToken;
+Param         : ParamToken         : VerylToken;
+Pub           : PubToken           : VerylToken;
+Ref           : RefToken           : VerylToken;
+Repeat        : RepeatToken        : VerylToken;
+Reset         : ResetToken         : VerylToken;
+ResetAsyncHigh: ResetAsyncHighToken: VerylToken;
+ResetAsyncLow : ResetAsyncLowToken : VerylToken;
+ResetSyncHigh : ResetSyncHighToken : VerylToken;
+ResetSyncLow  : ResetSyncLowToken  : VerylToken;
+Return        : ReturnToken        : VerylToken;
+Signed        : SignedToken        : VerylToken;
+Step          : StepToken          : VerylToken;
+Strin         : StringToken        : VerylToken; // avoid to conflict with Rust's String struct
+Struct        : StructToken        : VerylToken;
+Tri           : TriToken           : VerylToken;
+Type          : TypeToken          : VerylToken;
+U32           : U32Token           : VerylToken;
+U64           : U64Token           : VerylToken;
+Union         : UnionToken         : VerylToken;
+Var           : VarToken           : VerylToken;
 
 // Identifier
 DollarIdentifier: DollarIdentifierToken: VerylToken;
@@ -480,7 +486,18 @@ RangeOperator: DotDot
 
 FixedType: U32 | U64 | I32 | I64 | F32 | F64 | Strin;
 
-VariableType: ( Logic | Bit | ScopedIdentifier ) [ Width ];
+VariableType: ( Clock
+              | ClockPosedge
+              | ClockNegedge
+              | Reset
+              | ResetAsyncHigh
+              | ResetAsyncLow
+              | ResetSyncHigh
+              | ResetSyncLow
+              | Logic
+              | Bit
+              | ScopedIdentifier
+              ) [ Width ];
 
 TypeModifier: Tri | Signed;
 
@@ -548,9 +565,9 @@ TypeDefDeclaration: Type Identifier Equ ArrayType Semicolon;
 
 AlwaysFfDeclaration: AlwaysFf LParen AlwaysFfClock [ Comma AlwaysFfReset ] RParen LBrace { Statement } RBrace;
 
-AlwaysFfClock: [ Posedge | Negedge ] HierarchicalIdentifier;
+AlwaysFfClock: HierarchicalIdentifier;
 
-AlwaysFfReset: [ AsyncLow | AsyncHigh | SyncLow | SyncHigh ] HierarchicalIdentifier;
+AlwaysFfReset: HierarchicalIdentifier;
 
 AlwaysCombDeclaration: AlwaysComb LBrace { Statement } RBrace;
 

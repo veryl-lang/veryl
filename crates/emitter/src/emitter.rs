@@ -4,7 +4,7 @@ use veryl_analyzer::attribute::Attribute as Attr;
 use veryl_analyzer::attribute_table;
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::TypeModifier as SymTypeModifier;
-use veryl_analyzer::symbol::{Symbol, SymbolKind};
+use veryl_analyzer::symbol::{Symbol, SymbolKind, TypeKind};
 use veryl_analyzer::symbol_table::{self, SymbolPath};
 use veryl_analyzer::{msb_table, namespace_table};
 use veryl_metadata::{Build, BuiltinType, ClockType, Format, Metadata, ResetType};
@@ -263,20 +263,25 @@ impl Emitter {
     }
 
     fn always_ff_reset_exist_in_sensitivity_list(&mut self, arg: &AlwaysFfReset) -> bool {
-        if let Some(ref x) = arg.always_ff_reset_opt {
-            match &*x.always_ff_reset_opt_group {
-                AlwaysFfResetOptGroup::AsyncLow(_) => true,
-                AlwaysFfResetOptGroup::AsyncHigh(_) => true,
-                AlwaysFfResetOptGroup::SyncLow(_) => false,
-                AlwaysFfResetOptGroup::SyncHigh(_) => false,
+        if let Ok(found) = symbol_table::resolve(arg.hierarchical_identifier.as_ref()) {
+            let reset_kind = match found.found.kind {
+                SymbolKind::Port(x) => x.r#type.clone().unwrap().kind,
+                SymbolKind::Variable(x) => x.r#type.kind,
+                _ => unreachable!(),
+            };
+
+            match reset_kind {
+                TypeKind::ResetAsyncHigh | TypeKind::ResetAsyncLow => true,
+                TypeKind::ResetSyncHigh | TypeKind::ResetSyncLow => false,
+                _ => match self.build_opt.reset_type {
+                    ResetType::AsyncLow => true,
+                    ResetType::AsyncHigh => true,
+                    ResetType::SyncLow => false,
+                    ResetType::SyncHigh => false,
+                },
             }
         } else {
-            match self.build_opt.reset_type {
-                ResetType::AsyncLow => true,
-                ResetType::AsyncHigh => true,
-                ResetType::SyncLow => false,
-                ResetType::SyncHigh => false,
-            }
+            unreachable!()
         }
     }
 
@@ -443,6 +448,46 @@ impl VerylWalker for Emitter {
         } else {
             self.veryl_token(&arg.comma_token);
         }
+    }
+
+    /// Semantic action for non-terminal 'Clock'
+    fn clock(&mut self, arg: &Clock) {
+        self.veryl_token(&arg.clock_token.replace("logic"));
+    }
+
+    /// Semantic action for non-terminal 'ClockPosedge'
+    fn clock_posedge(&mut self, arg: &ClockPosedge) {
+        self.veryl_token(&arg.clock_posedge_token.replace("logic"));
+    }
+
+    /// Semantic action for non-terminal 'ClockNegedge'
+    fn clock_negedge(&mut self, arg: &ClockNegedge) {
+        self.veryl_token(&arg.clock_negedge_token.replace("logic"));
+    }
+
+    /// Semantic action for non-terminal 'Reset'
+    fn reset(&mut self, arg: &Reset) {
+        self.veryl_token(&arg.reset_token.replace("logic"));
+    }
+
+    /// Semantic action for non-terminal 'ResetAsyncHigh'
+    fn reset_async_high(&mut self, arg: &ResetAsyncHigh) {
+        self.veryl_token(&arg.reset_async_high_token.replace("logic"));
+    }
+
+    /// Semantic action for non-terminal 'ResetAsyncLow'
+    fn reset_async_low(&mut self, arg: &ResetAsyncLow) {
+        self.veryl_token(&arg.reset_async_low_token.replace("logic"));
+    }
+
+    /// Semantic action for non-terminal 'ResetSyncHigh'
+    fn reset_sync_high(&mut self, arg: &ResetSyncHigh) {
+        self.veryl_token(&arg.reset_sync_high_token.replace("logic"));
+    }
+
+    /// Semantic action for non-terminal 'ResetSyncLow'
+    fn reset_sync_low(&mut self, arg: &ResetSyncLow) {
+        self.veryl_token(&arg.reset_sync_low_token.replace("logic"));
     }
 
     /// Semantic action for non-terminal 'F32'
@@ -949,6 +994,14 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'VariableType'
     fn variable_type(&mut self, arg: &VariableType) {
         match &*arg.variable_type_group {
+            VariableTypeGroup::Clock(x) => self.clock(&x.clock),
+            VariableTypeGroup::ClockPosedge(x) => self.clock_posedge(&x.clock_posedge),
+            VariableTypeGroup::ClockNegedge(x) => self.clock_negedge(&x.clock_negedge),
+            VariableTypeGroup::Reset(x) => self.reset(&x.reset),
+            VariableTypeGroup::ResetAsyncHigh(x) => self.reset_async_high(&x.reset_async_high),
+            VariableTypeGroup::ResetAsyncLow(x) => self.reset_async_low(&x.reset_async_low),
+            VariableTypeGroup::ResetSyncHigh(x) => self.reset_sync_high(&x.reset_sync_high),
+            VariableTypeGroup::ResetSyncLow(x) => self.reset_sync_low(&x.reset_sync_low),
             VariableTypeGroup::Logic(x) => self.logic(&x.logic),
             VariableTypeGroup::Bit(x) => self.bit(&x.bit),
             VariableTypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
@@ -1553,64 +1606,75 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'AlwaysFfClock'
     fn always_ff_clock(&mut self, arg: &AlwaysFfClock) {
-        if let Some(ref x) = arg.always_ff_clock_opt {
-            match &*x.always_ff_clock_opt_group {
-                AlwaysFfClockOptGroup::Posedge(x) => self.posedge(&x.posedge),
-                AlwaysFfClockOptGroup::Negedge(x) => self.negedge(&x.negedge),
+        if let Ok(found) = symbol_table::resolve(arg.hierarchical_identifier.as_ref()) {
+            let clock_type = match found.found.kind {
+                SymbolKind::Port(x) => x.r#type.clone().unwrap().kind,
+                SymbolKind::Variable(x) => x.r#type.kind,
+                _ => unreachable!(),
+            };
+
+            match clock_type {
+                TypeKind::ClockPosedge => self.str("posedge"),
+                TypeKind::ClockNegedge => self.str("negedge"),
+                TypeKind::Clock => match self.build_opt.clock_type {
+                    ClockType::PosEdge => self.str("posedge"),
+                    ClockType::NegEdge => self.str("negedge"),
+                },
+                _ => unreachable!(),
             }
+            self.space(1);
+            self.hierarchical_identifier(&arg.hierarchical_identifier);
         } else {
-            match self.build_opt.clock_type {
-                ClockType::PosEdge => self.str("posedge"),
-                ClockType::NegEdge => self.str("negedge"),
-            }
+            unreachable!()
         }
-        self.space(1);
-        self.hierarchical_identifier(&arg.hierarchical_identifier);
     }
 
     /// Semantic action for non-terminal 'AlwaysFfReset'
     fn always_ff_reset(&mut self, arg: &AlwaysFfReset) {
-        let prefix = if let Some(ref x) = arg.always_ff_reset_opt {
-            match &*x.always_ff_reset_opt_group {
-                AlwaysFfResetOptGroup::AsyncLow(x) => {
-                    self.token(&x.async_low.async_low_token.replace("negedge"));
-                    "!"
-                }
-                AlwaysFfResetOptGroup::AsyncHigh(x) => {
-                    self.token(&x.async_high.async_high_token.replace("posedge"));
-                    ""
-                }
-                AlwaysFfResetOptGroup::SyncLow(x) => {
-                    self.token(&x.sync_low.sync_low_token.replace(""));
-                    "!"
-                }
-                AlwaysFfResetOptGroup::SyncHigh(x) => {
-                    self.token(&x.sync_high.sync_high_token.replace(""));
-                    ""
-                }
-            }
-        } else {
-            match self.build_opt.reset_type {
-                ResetType::AsyncLow => {
-                    self.str("negedge");
-                    "!"
-                }
-                ResetType::AsyncHigh => {
+        if let Ok(found) = symbol_table::resolve(arg.hierarchical_identifier.as_ref()) {
+            let reset_type = match found.found.kind {
+                SymbolKind::Port(x) => x.r#type.clone().unwrap().kind,
+                SymbolKind::Variable(x) => x.r#type.kind,
+                _ => unreachable!(),
+            };
+
+            let prefix = match reset_type {
+                TypeKind::ResetAsyncHigh => {
                     self.str("posedge");
                     ""
                 }
-                ResetType::SyncLow => "!",
-                ResetType::SyncHigh => "",
-            }
-        };
-        if self.always_ff_reset_exist_in_sensitivity_list(arg) {
-            self.space(1);
-            self.hierarchical_identifier(&arg.hierarchical_identifier);
-        }
+                TypeKind::ResetAsyncLow => {
+                    self.str("negedge");
+                    "!"
+                }
+                TypeKind::ResetSyncHigh => "",
+                TypeKind::ResetSyncLow => "!",
+                TypeKind::Reset => match self.build_opt.reset_type {
+                    ResetType::AsyncHigh => {
+                        self.str("posedge");
+                        ""
+                    }
+                    ResetType::AsyncLow => {
+                        self.str("negedge");
+                        "!"
+                    }
+                    ResetType::SyncHigh => "",
+                    ResetType::SyncLow => "!",
+                },
+                _ => unreachable!(),
+            };
 
-        let mut stringifier = Stringifier::new();
-        stringifier.hierarchical_identifier(&arg.hierarchical_identifier);
-        self.reset_signal = Some(format!("{}{}", prefix, stringifier.as_str()));
+            if self.always_ff_reset_exist_in_sensitivity_list(arg) {
+                self.space(1);
+                self.hierarchical_identifier(&arg.hierarchical_identifier);
+            }
+
+            let mut stringifier = Stringifier::new();
+            stringifier.hierarchical_identifier(&arg.hierarchical_identifier);
+            self.reset_signal = Some(format!("{}{}", prefix, stringifier.as_str()));
+        } else {
+            unreachable!()
+        }
     }
 
     /// Semantic action for non-terminal 'AlwaysCombDeclaration'
