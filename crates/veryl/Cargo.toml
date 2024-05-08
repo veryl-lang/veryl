@@ -20,6 +20,7 @@ pre-release-replacements = [
     {file="../../README.md", search = "changelog-v[0-9\\.]+", replace = "changelog-v{{version}}" },
     {file="../../support/vscode/package.json", search = "\"version\": \"[0-9\\.]+\",", replace = "\"version\": \"{{version}}\"," },
 ]
+pre-release-hook = ["../../support/scripts/tag_submodule.sh", "{{version}}"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
