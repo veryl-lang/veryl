@@ -1,5 +1,6 @@
 use crate::emitter::{symbol_string, SymbolContext};
 use std::collections::HashMap;
+use veryl_analyzer::symbol::GenericMap;
 use veryl_analyzer::symbol_table;
 use veryl_metadata::{Build, BuiltinType, Metadata};
 use veryl_parser::resource_table::StrId;
@@ -135,6 +136,7 @@ pub struct Aligner {
     in_import: bool,
     project_name: Option<StrId>,
     build_opt: Build,
+    generic_map: GenericMap,
 }
 
 impl Aligner {
@@ -880,10 +882,10 @@ impl VerylWalker for Aligner {
     fn function_declaration(&mut self, arg: &FunctionDeclaration) {
         self.function(&arg.function);
         self.identifier(&arg.identifier);
-        if let Some(ref x) = arg.function_declaration_opt {
+        if let Some(ref x) = arg.function_declaration_opt0 {
             self.port_declaration(&x.port_declaration);
         }
-        if let Some(ref x) = arg.function_declaration_opt0 {
+        if let Some(ref x) = arg.function_declaration_opt1 {
             self.minus_g_t(&x.minus_g_t);
             self.scalar_type(&x.scalar_type);
             self.reset_align();
@@ -915,6 +917,7 @@ impl From<&mut Aligner> for SymbolContext {
             project_name: value.project_name,
             build_opt: value.build_opt.clone(),
             in_import: value.in_import,
+            generic_map: value.generic_map.clone(),
         }
     }
 }

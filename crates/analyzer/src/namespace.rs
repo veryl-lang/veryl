@@ -1,5 +1,6 @@
 use crate::namespace_table;
-use crate::symbol_table::SymbolPath;
+use crate::symbol_path::SymbolPath;
+use std::collections::HashMap;
 use std::fmt;
 use veryl_parser::resource_table::StrId;
 
@@ -44,6 +45,18 @@ impl Namespace {
         } else {
             self.included(x)
         }
+    }
+
+    pub fn replace(&self, table: &HashMap<StrId, StrId>) -> Self {
+        let mut paths = Vec::new();
+        for x in &self.paths {
+            if let Some(x) = table.get(x) {
+                paths.push(*x);
+            } else {
+                paths.push(*x);
+            }
+        }
+        Self { paths }
     }
 }
 

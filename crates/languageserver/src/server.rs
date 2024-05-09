@@ -9,7 +9,7 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::Client;
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::SymbolKind as VerylSymbolKind;
-use veryl_analyzer::symbol_table::SymbolPath;
+use veryl_analyzer::symbol_path::SymbolPath;
 use veryl_analyzer::{namespace_table, symbol_table, Analyzer, AnalyzerError};
 use veryl_formatter::Formatter;
 use veryl_metadata::{Metadata, PathPair};
@@ -328,6 +328,8 @@ impl Server {
                     VerylSymbolKind::SystemVerilog => SymbolKind::NAMESPACE,
                     VerylSymbolKind::Namespace => SymbolKind::NAMESPACE,
                     VerylSymbolKind::SystemFunction => SymbolKind::FUNCTION,
+                    VerylSymbolKind::GenericParameter => SymbolKind::TYPE_PARAMETER,
+                    VerylSymbolKind::GenericInstance(_) => SymbolKind::MODULE,
                 };
                 let location = to_location(&symbol.token);
                 #[allow(deprecated)]

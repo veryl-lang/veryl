@@ -10,6 +10,9 @@
     %auto_ws_off
 }
 
+%scanner Generic {
+}
+
 %%
 
 // ----------------------------------------------------------------------------
@@ -18,114 +21,115 @@
 
 // Longest match should be first
 
-CommentsTerm          : "(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+"                     : Token;
-StringLiteralTerm     : "\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}": Token;
-ExponentTerm          : /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/                   : Token;
-FixedPointTerm        : /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/                                              : Token;
-BasedTerm             : /(?:[0-9]+(?:_[0-9]+)*)?'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/                : Token;
-AllBitTerm            : /(?:[0-9]+(?:_[0-9]+)*)?'[01xzXZ]/                                                    : Token;
-BaseLessTerm          : /[0-9]+(?:_[0-9]+)*/                                                                  : Token;
-MinusColonTerm        : '-:'                                                                                  : Token;
-MinusGTTerm           : '->'                                                                                  : Token;
-PlusColonTerm         : '+:'                                                                                  : Token;
-AssignmentOperatorTerm: "\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<=|>>=|<<<=|>>>="                                       : Token;
-Operator11Term        : "\*\*"                                                                                : Token;
-Operator10Term        : "/|%"                                                                                 : Token;
-Operator09Term        : "\+|-"                                                                                : Token;
-Operator08Term        : "<<<|>>>|<<|>>"                                                                       : Token;
-Operator07Term        : "<=|>=|<:|>:"                                                                         : Token;
-Operator06Term        : "===|==\?|!==|!=\?|==|!="                                                             : Token;
-Operator02Term        : "&&"                                                                                  : Token;
-Operator01Term        : "\|\|"                                                                                : Token;
-Operator05Term        : "&"                                                                                   : Token;
-Operator04Term        : "\^~|\^|~\^"                                                                          : Token;
-Operator03Term        : "\|"                                                                                  : Token;
-UnaryOperatorTerm     : "~&|~\||!|~"                                                                          : Token;
-ColonColonTerm        : '::'                                                                                  : Token;
-ColonTerm             : ':'                                                                                   : Token;
-CommaTerm             : ','                                                                                   : Token;
-DotDotEquTerm         : '..='                                                                                 : Token;
-DotDotTerm            : '..'                                                                                  : Token;
-DotTerm               : '.'                                                                                   : Token;
-EquTerm               : '='                                                                                   : Token;
-HashTerm              : '#'                                                                                   : Token;
-LAngleTerm            : '<'                                                                                   : Token;
-QuoteLBraceTerm       : "'\{"                                                                                 : Token;
-LBraceTerm            : <Embed, INITIAL>'{'                                                                   : Token;
-LBracketTerm          : '['                                                                                   : Token;
-LParenTerm            : '('                                                                                   : Token;
-RAngleTerm            : '>'                                                                                   : Token;
-RBraceTerm            : <Embed, INITIAL>'}'                                                                   : Token;
-RBracketTerm          : ']'                                                                                   : Token;
-RParenTerm            : ')'                                                                                   : Token;
-SemicolonTerm         : ';'                                                                                   : Token;
-StarTerm              : '*'                                                                                   : Token;
-AlwaysCombTerm        : /(?-u:\b)always_comb(?-u:\b)/                                                         : Token;
-AlwaysFfTerm          : /(?-u:\b)always_ff(?-u:\b)/                                                           : Token;
-AssignTerm            : /(?-u:\b)assign(?-u:\b)/                                                              : Token;
-AsTerm                : /(?-u:\b)as(?-u:\b)/                                                                  : Token;
-BitTerm               : /(?-u:\b)bit(?-u:\b)/                                                                 : Token;
-CaseTerm              : /(?-u:\b)case(?-u:\b)/                                                                : Token;
-ClockTerm             : /(?-u:\b)clock(?-u:\b)/                                                               : Token;
-ClockPosedgeTerm      : /(?-u:\b)clock_posedge(?-u:\b)/                                                       : Token;
-ClockNegedgeTerm      : /(?-u:\b)clock_negedge(?-u:\b)/                                                       : Token;
-DefaultTerm           : /(?-u:\b)default(?-u:\b)/                                                             : Token;
-ElseTerm              : /(?-u:\b)else(?-u:\b)/                                                                : Token;
-EmbedTerm             : /(?-u:\b)embed(?-u:\b)/                                                               : Token;
-EnumTerm              : /(?-u:\b)enum(?-u:\b)/                                                                : Token;
-ExportTerm            : /(?-u:\b)export(?-u:\b)/                                                              : Token;
-F32Term               : /(?-u:\b)f32(?-u:\b)/                                                                 : Token;
-F64Term               : /(?-u:\b)f64(?-u:\b)/                                                                 : Token;
-FinalTerm             : /(?-u:\b)final(?-u:\b)/                                                               : Token;
-ForTerm               : /(?-u:\b)for(?-u:\b)/                                                                 : Token;
-FunctionTerm          : /(?-u:\b)function(?-u:\b)/                                                            : Token;
-I32Term               : /(?-u:\b)i32(?-u:\b)/                                                                 : Token;
-I64Term               : /(?-u:\b)i64(?-u:\b)/                                                                 : Token;
-IfResetTerm           : /(?-u:\b)if_reset(?-u:\b)/                                                            : Token;
-IfTerm                : /(?-u:\b)if(?-u:\b)/                                                                  : Token;
-ImportTerm            : /(?-u:\b)import(?-u:\b)/                                                              : Token;
-IncludeTerm           : /(?-u:\b)include(?-u:\b)/                                                             : Token;
-InitialTerm           : /(?-u:\b)initial(?-u:\b)/                                                             : Token;
-InoutTerm             : /(?-u:\b)inout(?-u:\b)/                                                               : Token;
-InputTerm             : /(?-u:\b)input(?-u:\b)/                                                               : Token;
-InsideTerm            : /(?-u:\b)inside(?-u:\b)/                                                              : Token;
-InstTerm              : /(?-u:\b)inst(?-u:\b)/                                                                : Token;
-InterfaceTerm         : /(?-u:\b)interface(?-u:\b)/                                                           : Token;
-InTerm                : /(?-u:\b)in(?-u:\b)/                                                                  : Token;
-LetTerm               : /(?-u:\b)let(?-u:\b)/                                                                 : Token;
-LocalTerm             : /(?-u:\b)local(?-u:\b)/                                                               : Token;
-LogicTerm             : /(?-u:\b)logic(?-u:\b)/                                                               : Token;
-LsbTerm               : /(?-u:\b)lsb(?-u:\b)/                                                                 : Token;
-ModportTerm           : /(?-u:\b)modport(?-u:\b)/                                                             : Token;
-ModuleTerm            : /(?-u:\b)module(?-u:\b)/                                                              : Token;
-MsbTerm               : /(?-u:\b)msb(?-u:\b)/                                                                 : Token;
-OutputTerm            : /(?-u:\b)output(?-u:\b)/                                                              : Token;
-OutsideTerm           : /(?-u:\b)outside(?-u:\b)/                                                             : Token;
-PackageTerm           : /(?-u:\b)package(?-u:\b)/                                                             : Token;
-ParamTerm             : /(?-u:\b)param(?-u:\b)/                                                               : Token;
-PubTerm               : /(?-u:\b)pub(?-u:\b)/                                                                 : Token;
-RefTerm               : /(?-u:\b)ref(?-u:\b)/                                                                 : Token;
-RepeatTerm            : /(?-u:\b)repeat(?-u:\b)/                                                              : Token;
-ResetTerm             : /(?-u:\b)reset(?-u:\b)/                                                               : Token;
-ResetAsyncHighTerm    : /(?-u:\b)reset_async_high(?-u:\b)/                                                    : Token;
-ResetAsyncLowTerm     : /(?-u:\b)reset_async_low(?-u:\b)/                                                     : Token;
-ResetSyncHighTerm     : /(?-u:\b)reset_sync_high(?-u:\b)/                                                     : Token;
-ResetSyncLowTerm      : /(?-u:\b)reset_sync_low(?-u:\b)/                                                      : Token;
-ReturnTerm            : /(?-u:\b)return(?-u:\b)/                                                              : Token;
-BreakTerm             : /(?-u:\b)break(?-u:\b)/                                                               : Token;
-SignedTerm            : /(?-u:\b)signed(?-u:\b)/                                                              : Token;
-StepTerm              : /(?-u:\b)step(?-u:\b)/                                                                : Token;
-StringTerm            : /(?-u:\b)string(?-u:\b)/                                                              : Token;
-StructTerm            : /(?-u:\b)struct(?-u:\b)/                                                              : Token;
-TriTerm               : /(?-u:\b)tri(?-u:\b)/                                                                 : Token;
-TypeTerm              : /(?-u:\b)type(?-u:\b)/                                                                : Token;
-U32Term               : /(?-u:\b)u32(?-u:\b)/                                                                 : Token;
-U64Term               : /(?-u:\b)u64(?-u:\b)/                                                                 : Token;
-UnionTerm             : /(?-u:\b)union(?-u:\b)/                                                               : Token;
-VarTerm               : /(?-u:\b)var(?-u:\b)/                                                                 : Token;
-DollarIdentifierTerm  : /\$[a-zA-Z_][0-9a-zA-Z_$]*/                                                           : Token;
-IdentifierTerm        : /[a-zA-Z_][0-9a-zA-Z_$]*/                                                             : Token;
-AnyTerm               : <Embed>/[^{}]*/                                                                       : Token;
+CommentsTerm          : <INITIAL, Generic       >"(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+"                     : Token;
+StringLiteralTerm     : <INITIAL, Generic       >"\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}": Token;
+ExponentTerm          : <INITIAL, Generic       >/[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/                   : Token;
+FixedPointTerm        : <INITIAL, Generic       >/[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/                                              : Token;
+BasedTerm             : <INITIAL, Generic       >/(?:[0-9]+(?:_[0-9]+)*)?'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/                : Token;
+AllBitTerm            : <INITIAL, Generic       >/(?:[0-9]+(?:_[0-9]+)*)?'[01xzXZ]/                                                    : Token;
+BaseLessTerm          : <INITIAL, Generic       >/[0-9]+(?:_[0-9]+)*/                                                                  : Token;
+MinusColonTerm        : <INITIAL                >'-:'                                                                                  : Token;
+MinusGTTerm           : <INITIAL                >'->'                                                                                  : Token;
+PlusColonTerm         : <INITIAL                >'+:'                                                                                  : Token;
+AssignmentOperatorTerm: <INITIAL                >"\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<=|>>=|<<<=|>>>="                                       : Token;
+Operator11Term        : <INITIAL                >"\*\*"                                                                                : Token;
+Operator10Term        : <INITIAL                >"/|%"                                                                                 : Token;
+Operator09Term        : <INITIAL                >"\+|-"                                                                                : Token;
+Operator08Term        : <INITIAL                >"<<<|>>>|<<|>>"                                                                       : Token;
+Operator07Term        : <INITIAL                >"<=|>=|<:|>:"                                                                         : Token;
+Operator06Term        : <INITIAL                >"===|==\?|!==|!=\?|==|!="                                                             : Token;
+Operator02Term        : <INITIAL                >"&&"                                                                                  : Token;
+Operator01Term        : <INITIAL                >"\|\|"                                                                                : Token;
+Operator05Term        : <INITIAL                >"&"                                                                                   : Token;
+Operator04Term        : <INITIAL                >"\^~|\^|~\^"                                                                          : Token;
+Operator03Term        : <INITIAL                >"\|"                                                                                  : Token;
+UnaryOperatorTerm     : <INITIAL                >"~&|~\||!|~"                                                                          : Token;
+ColonColonLAngleTerm  : <INITIAL, Generic       >'::<'                                                                                 : Token;
+ColonColonTerm        : <INITIAL, Generic       >'::'                                                                                  : Token;
+ColonTerm             : <INITIAL, Generic       >':'                                                                                   : Token;
+CommaTerm             : <INITIAL, Generic       >','                                                                                   : Token;
+DotDotEquTerm         : <INITIAL, Generic       >'..='                                                                                 : Token;
+DotDotTerm            : <INITIAL, Generic       >'..'                                                                                  : Token;
+DotTerm               : <INITIAL, Generic       >'.'                                                                                   : Token;
+EquTerm               : <INITIAL, Generic       >'='                                                                                   : Token;
+HashTerm              : <INITIAL, Generic       >'#'                                                                                   : Token;
+LAngleTerm            : <INITIAL, Generic       >'<'                                                                                   : Token;
+QuoteLBraceTerm       : <INITIAL, Generic       >"'\{"                                                                                 : Token;
+LBraceTerm            : <INITIAL, Generic, Embed>'{'                                                                                   : Token;
+LBracketTerm          : <INITIAL, Generic       >'['                                                                                   : Token;
+LParenTerm            : <INITIAL, Generic       >'('                                                                                   : Token;
+RAngleTerm            : <INITIAL, Generic       >'>'                                                                                   : Token;
+RBraceTerm            : <INITIAL, Generic, Embed>'}'                                                                                   : Token;
+RBracketTerm          : <INITIAL, Generic       >']'                                                                                   : Token;
+RParenTerm            : <INITIAL, Generic       >')'                                                                                   : Token;
+SemicolonTerm         : <INITIAL, Generic       >';'                                                                                   : Token;
+StarTerm              : <INITIAL, Generic       >'*'                                                                                   : Token;
+AlwaysCombTerm        : <INITIAL, Generic       >/(?-u:\b)always_comb(?-u:\b)/                                                         : Token;
+AlwaysFfTerm          : <INITIAL, Generic       >/(?-u:\b)always_ff(?-u:\b)/                                                           : Token;
+AssignTerm            : <INITIAL, Generic       >/(?-u:\b)assign(?-u:\b)/                                                              : Token;
+AsTerm                : <INITIAL, Generic       >/(?-u:\b)as(?-u:\b)/                                                                  : Token;
+BitTerm               : <INITIAL, Generic       >/(?-u:\b)bit(?-u:\b)/                                                                 : Token;
+CaseTerm              : <INITIAL, Generic       >/(?-u:\b)case(?-u:\b)/                                                                : Token;
+ClockTerm             : <INITIAL, Generic       >/(?-u:\b)clock(?-u:\b)/                                                               : Token;
+ClockPosedgeTerm      : <INITIAL, Generic       >/(?-u:\b)clock_posedge(?-u:\b)/                                                       : Token;
+ClockNegedgeTerm      : <INITIAL, Generic       >/(?-u:\b)clock_negedge(?-u:\b)/                                                       : Token;
+DefaultTerm           : <INITIAL, Generic       >/(?-u:\b)default(?-u:\b)/                                                             : Token;
+ElseTerm              : <INITIAL, Generic       >/(?-u:\b)else(?-u:\b)/                                                                : Token;
+EmbedTerm             : <INITIAL, Generic       >/(?-u:\b)embed(?-u:\b)/                                                               : Token;
+EnumTerm              : <INITIAL, Generic       >/(?-u:\b)enum(?-u:\b)/                                                                : Token;
+ExportTerm            : <INITIAL, Generic       >/(?-u:\b)export(?-u:\b)/                                                              : Token;
+F32Term               : <INITIAL, Generic       >/(?-u:\b)f32(?-u:\b)/                                                                 : Token;
+F64Term               : <INITIAL, Generic       >/(?-u:\b)f64(?-u:\b)/                                                                 : Token;
+FinalTerm             : <INITIAL, Generic       >/(?-u:\b)final(?-u:\b)/                                                               : Token;
+ForTerm               : <INITIAL, Generic       >/(?-u:\b)for(?-u:\b)/                                                                 : Token;
+FunctionTerm          : <INITIAL, Generic       >/(?-u:\b)function(?-u:\b)/                                                            : Token;
+I32Term               : <INITIAL, Generic       >/(?-u:\b)i32(?-u:\b)/                                                                 : Token;
+I64Term               : <INITIAL, Generic       >/(?-u:\b)i64(?-u:\b)/                                                                 : Token;
+IfResetTerm           : <INITIAL, Generic       >/(?-u:\b)if_reset(?-u:\b)/                                                            : Token;
+IfTerm                : <INITIAL, Generic       >/(?-u:\b)if(?-u:\b)/                                                                  : Token;
+ImportTerm            : <INITIAL, Generic       >/(?-u:\b)import(?-u:\b)/                                                              : Token;
+IncludeTerm           : <INITIAL, Generic       >/(?-u:\b)include(?-u:\b)/                                                             : Token;
+InitialTerm           : <INITIAL, Generic       >/(?-u:\b)initial(?-u:\b)/                                                             : Token;
+InoutTerm             : <INITIAL, Generic       >/(?-u:\b)inout(?-u:\b)/                                                               : Token;
+InputTerm             : <INITIAL, Generic       >/(?-u:\b)input(?-u:\b)/                                                               : Token;
+InsideTerm            : <INITIAL, Generic       >/(?-u:\b)inside(?-u:\b)/                                                              : Token;
+InstTerm              : <INITIAL, Generic       >/(?-u:\b)inst(?-u:\b)/                                                                : Token;
+InterfaceTerm         : <INITIAL, Generic       >/(?-u:\b)interface(?-u:\b)/                                                           : Token;
+InTerm                : <INITIAL, Generic       >/(?-u:\b)in(?-u:\b)/                                                                  : Token;
+LetTerm               : <INITIAL, Generic       >/(?-u:\b)let(?-u:\b)/                                                                 : Token;
+LocalTerm             : <INITIAL, Generic       >/(?-u:\b)local(?-u:\b)/                                                               : Token;
+LogicTerm             : <INITIAL, Generic       >/(?-u:\b)logic(?-u:\b)/                                                               : Token;
+LsbTerm               : <INITIAL, Generic       >/(?-u:\b)lsb(?-u:\b)/                                                                 : Token;
+ModportTerm           : <INITIAL, Generic       >/(?-u:\b)modport(?-u:\b)/                                                             : Token;
+ModuleTerm            : <INITIAL, Generic       >/(?-u:\b)module(?-u:\b)/                                                              : Token;
+MsbTerm               : <INITIAL, Generic       >/(?-u:\b)msb(?-u:\b)/                                                                 : Token;
+OutputTerm            : <INITIAL, Generic       >/(?-u:\b)output(?-u:\b)/                                                              : Token;
+OutsideTerm           : <INITIAL, Generic       >/(?-u:\b)outside(?-u:\b)/                                                             : Token;
+PackageTerm           : <INITIAL, Generic       >/(?-u:\b)package(?-u:\b)/                                                             : Token;
+ParamTerm             : <INITIAL, Generic       >/(?-u:\b)param(?-u:\b)/                                                               : Token;
+PubTerm               : <INITIAL, Generic       >/(?-u:\b)pub(?-u:\b)/                                                                 : Token;
+RefTerm               : <INITIAL, Generic       >/(?-u:\b)ref(?-u:\b)/                                                                 : Token;
+RepeatTerm            : <INITIAL, Generic       >/(?-u:\b)repeat(?-u:\b)/                                                              : Token;
+ResetTerm             : <INITIAL, Generic       >/(?-u:\b)reset(?-u:\b)/                                                               : Token;
+ResetAsyncHighTerm    : <INITIAL, Generic       >/(?-u:\b)reset_async_high(?-u:\b)/                                                    : Token;
+ResetAsyncLowTerm     : <INITIAL, Generic       >/(?-u:\b)reset_async_low(?-u:\b)/                                                     : Token;
+ResetSyncHighTerm     : <INITIAL, Generic       >/(?-u:\b)reset_sync_high(?-u:\b)/                                                     : Token;
+ResetSyncLowTerm      : <INITIAL, Generic       >/(?-u:\b)reset_sync_low(?-u:\b)/                                                      : Token;
+ReturnTerm            : <INITIAL, Generic       >/(?-u:\b)return(?-u:\b)/                                                              : Token;
+BreakTerm             : <INITIAL, Generic       >/(?-u:\b)break(?-u:\b)/                                                               : Token;
+SignedTerm            : <INITIAL, Generic       >/(?-u:\b)signed(?-u:\b)/                                                              : Token;
+StepTerm              : <INITIAL, Generic       >/(?-u:\b)step(?-u:\b)/                                                                : Token;
+StringTerm            : <INITIAL, Generic       >/(?-u:\b)string(?-u:\b)/                                                              : Token;
+StructTerm            : <INITIAL, Generic       >/(?-u:\b)struct(?-u:\b)/                                                              : Token;
+TriTerm               : <INITIAL, Generic       >/(?-u:\b)tri(?-u:\b)/                                                                 : Token;
+TypeTerm              : <INITIAL, Generic       >/(?-u:\b)type(?-u:\b)/                                                                : Token;
+U32Term               : <INITIAL, Generic       >/(?-u:\b)u32(?-u:\b)/                                                                 : Token;
+U64Term               : <INITIAL, Generic       >/(?-u:\b)u64(?-u:\b)/                                                                 : Token;
+UnionTerm             : <INITIAL, Generic       >/(?-u:\b)union(?-u:\b)/                                                               : Token;
+VarTerm               : <INITIAL, Generic       >/(?-u:\b)var(?-u:\b)/                                                                 : Token;
+DollarIdentifierTerm  : <INITIAL, Generic       >/\$[a-zA-Z_][0-9a-zA-Z_$]*/                                                           : Token;
+IdentifierTerm        : <INITIAL, Generic       >/[a-zA-Z_][0-9a-zA-Z_$]*/                                                             : Token;
+AnyTerm               : <                  Embed>/[^{}]*/                                                                              : Token;
 
 // ----------------------------------------------------------------------------
 // Token
@@ -157,28 +161,29 @@ Operator10Token        : Operator10Term        : Token Comments;
 Operator11Token        : Operator11Term        : Token Comments;
 UnaryOperatorToken     : UnaryOperatorTerm     : Token Comments;
 
-ColonToken       : ColonTerm       : Token Comments;
-ColonColonToken  : ColonColonTerm  : Token Comments;
-CommaToken       : CommaTerm       : Token Comments;
-DotDotToken      : DotDotTerm      : Token Comments;
-DotDotEquToken   : DotDotEquTerm   : Token Comments;
-DotToken         : DotTerm         : Token Comments;
-EquToken         : EquTerm         : Token Comments;
-HashToken        : HashTerm        : Token Comments;
-QuoteLBraceToken : QuoteLBraceTerm : Token Comments;
-LAngleToken      : LAngleTerm      : Token Comments;
-LBraceToken      : LBraceTerm      : Token Comments;
-LBracketToken    : LBracketTerm    : Token Comments;
-LParenToken      : LParenTerm      : Token Comments;
-MinusColonToken  : MinusColonTerm  : Token Comments;
-MinusGTToken     : MinusGTTerm     : Token Comments;
-PlusColonToken   : PlusColonTerm   : Token Comments;
-RAngleToken      : RAngleTerm      : Token Comments;
-RBraceToken      : RBraceTerm      : Token Comments;
-RBracketToken    : RBracketTerm    : Token Comments;
-RParenToken      : RParenTerm      : Token Comments;
-SemicolonToken   : SemicolonTerm   : Token Comments;
-StarToken        : StarTerm        : Token Comments;
+ColonToken           : ColonTerm           : Token Comments;
+ColonColonLAngleToken: ColonColonLAngleTerm: Token Comments;
+ColonColonToken      : ColonColonTerm      : Token Comments;
+CommaToken           : CommaTerm           : Token Comments;
+DotDotToken          : DotDotTerm          : Token Comments;
+DotDotEquToken       : DotDotEquTerm       : Token Comments;
+DotToken             : DotTerm             : Token Comments;
+EquToken             : EquTerm             : Token Comments;
+HashToken            : HashTerm            : Token Comments;
+QuoteLBraceToken     : QuoteLBraceTerm     : Token Comments;
+LAngleToken          : LAngleTerm          : Token Comments;
+LBraceToken          : LBraceTerm          : Token Comments;
+LBracketToken        : LBracketTerm        : Token Comments;
+LParenToken          : LParenTerm          : Token Comments;
+MinusColonToken      : MinusColonTerm      : Token Comments;
+MinusGTToken         : MinusGTTerm         : Token Comments;
+PlusColonToken       : PlusColonTerm       : Token Comments;
+RAngleToken          : RAngleTerm          : Token Comments;
+RBraceToken          : RBraceTerm          : Token Comments;
+RBracketToken        : RBracketTerm        : Token Comments;
+RParenToken          : RParenTerm          : Token Comments;
+SemicolonToken       : SemicolonTerm       : Token Comments;
+StarToken            : StarTerm            : Token Comments;
 
 AlwaysCombToken    : AlwaysCombTerm    : Token Comments;
 AlwaysFfToken      : AlwaysFfTerm      : Token Comments;
@@ -280,28 +285,29 @@ Operator11        : Operator11Token        : VerylToken;
 UnaryOperator     : UnaryOperatorToken     : VerylToken;
 
 // Symbol
-Colon       : ColonToken       : VerylToken;
-ColonColon  : ColonColonToken  : VerylToken;
-Comma       : CommaToken       : VerylToken;
-DotDot      : DotDotToken      : VerylToken;
-DotDotEqu   : DotDotEquToken   : VerylToken;
-Dot         : DotToken         : VerylToken;
-Equ         : EquToken         : VerylToken;
-Hash        : HashToken        : VerylToken;
-QuoteLBrace : QuoteLBraceToken : VerylToken;
-LAngle      : LAngleToken      : VerylToken;
-LBrace      : LBraceToken      : VerylToken;
-LBracket    : LBracketToken    : VerylToken;
-LParen      : LParenToken      : VerylToken;
-MinusColon  : MinusColonToken  : VerylToken;
-MinusGT     : MinusGTToken     : VerylToken;
-PlusColon   : PlusColonToken   : VerylToken;
-RAngle      : RAngleToken      : VerylToken;
-RBrace      : RBraceToken      : VerylToken;
-RBracket    : RBracketToken    : VerylToken;
-RParen      : RParenToken      : VerylToken;
-Semicolon   : SemicolonToken   : VerylToken;
-Star        : StarToken        : VerylToken;
+Colon           : ColonToken           : VerylToken;
+ColonColonLAngle: ColonColonLAngleToken: VerylToken;
+ColonColon      : ColonColonToken      : VerylToken;
+Comma           : CommaToken           : VerylToken;
+DotDot          : DotDotToken          : VerylToken;
+DotDotEqu       : DotDotEquToken       : VerylToken;
+Dot             : DotToken             : VerylToken;
+Equ             : EquToken             : VerylToken;
+Hash            : HashToken            : VerylToken;
+QuoteLBrace     : QuoteLBraceToken     : VerylToken;
+LAngle          : LAngleToken          : VerylToken;
+LBrace          : LBraceToken          : VerylToken;
+LBracket        : LBracketToken        : VerylToken;
+LParen          : LParenToken          : VerylToken;
+MinusColon      : MinusColonToken      : VerylToken;
+MinusGT         : MinusGTToken         : VerylToken;
+PlusColon       : PlusColonToken       : VerylToken;
+RAngle          : RAngleToken          : VerylToken;
+RBrace          : RBraceToken          : VerylToken;
+RBracket        : RBracketToken        : VerylToken;
+RParen          : RParenToken          : VerylToken;
+Semicolon       : SemicolonToken       : VerylToken;
+Star            : StarToken            : VerylToken;
 
 // Keyword
 AlwaysComb    : AlwaysCombToken    : VerylToken;
@@ -394,7 +400,7 @@ RealNumber: FixedPoint
 // ----------------------------------------------------------------------------
 
 HierarchicalIdentifier: Identifier { Select } { Dot Identifier { Select } };
-ScopedIdentifier      : ( DollarIdentifier | Identifier ) { ColonColon Identifier };
+ScopedIdentifier      : ( DollarIdentifier | Identifier [ WithGenericArgument ] ) { ColonColon Identifier [ WithGenericArgument ] };
 ExpressionIdentifier  : ScopedIdentifier { Select } { Dot Identifier { Select } };
 
 // ----------------------------------------------------------------------------
@@ -591,7 +597,7 @@ EnumItem: Identifier [ Equ Expression ];
 
 StructUnion: Struct | Union;
 
-StructUnionDeclaration: StructUnion Identifier LBrace StructUnionList RBrace;
+StructUnionDeclaration: StructUnion Identifier [ WithGenericParameter ] LBrace StructUnionList RBrace;
 
 StructUnionList: StructUnionGroup { Comma StructUnionGroup } [ Comma ];
 
@@ -636,6 +642,28 @@ WithParameterGroup: { Attribute } ( LBrace WithParameterList RBrace | WithParame
 WithParameterItem: ( Param | Local ) Identifier Colon ( ArrayType Equ Expression | Type Equ TypeExpression );
 
 // ----------------------------------------------------------------------------
+// WithGenericParameter
+// ----------------------------------------------------------------------------
+
+WithGenericParameter: ColonColonLAngle WithGenericParameterList RAngle;
+
+WithGenericParameterList: WithGenericParameterItem { Comma WithGenericParameterItem } [ Comma ];
+
+WithGenericParameterItem: Identifier;
+
+// ----------------------------------------------------------------------------
+// WithGenericArgument
+// ----------------------------------------------------------------------------
+
+WithGenericArgument: ColonColonLAngle %push(Generic) WithGenericArgumentList RAngle %pop();
+
+WithGenericArgumentList: WithGenericArgumentItem { Comma WithGenericArgumentItem } [ Comma ];
+
+WithGenericArgumentItem: ScopedIdentifier
+                       | Number
+                       ;
+
+// ----------------------------------------------------------------------------
 // PortDeclaration
 // ----------------------------------------------------------------------------
 
@@ -658,7 +686,7 @@ Direction: Input
 // Function
 // ----------------------------------------------------------------------------
 
-FunctionDeclaration: Function Identifier [ PortDeclaration ] [ MinusGT ScalarType ] LBrace { FunctionItem } RBrace;
+FunctionDeclaration: Function Identifier [ WithGenericParameter ] [ PortDeclaration ] [ MinusGT ScalarType ] LBrace { FunctionItem } RBrace;
 
 FunctionItem: VarDeclaration
             | Statement
@@ -676,7 +704,7 @@ ExportDeclaration: Export ( Star | ScopedIdentifier [ ColonColon Star ] ) Semico
 // Module
 // ----------------------------------------------------------------------------
 
-ModuleDeclaration: [ Pub ] Module Identifier [ WithParameter ] [ PortDeclaration ] LBrace { ModuleGroup } RBrace;
+ModuleDeclaration: [ Pub ] Module Identifier [ WithGenericParameter ] [ WithParameter ] [ PortDeclaration ] LBrace { ModuleGroup } RBrace;
 
 ModuleIfDeclaration: If Expression ModuleNamedBlock { Else If Expression ModuleOptionalNamedBlock } [ Else ModuleOptionalNamedBlock ];
 
@@ -711,7 +739,7 @@ ModuleItem: LetDeclaration
 // Interface
 // ----------------------------------------------------------------------------
 
-InterfaceDeclaration: [ Pub ] Interface Identifier [ WithParameter ] LBrace { InterfaceGroup } RBrace;
+InterfaceDeclaration: [ Pub ] Interface Identifier [ WithGenericParameter ] [ WithParameter ] LBrace { InterfaceGroup } RBrace;
 
 InterfaceIfDeclaration: If Expression InterfaceNamedBlock { Else If Expression InterfaceOptionalNamedBlock } [ Else InterfaceOptionalNamedBlock ];
 
@@ -743,7 +771,7 @@ InterfaceItem: LetDeclaration
 // Package
 // ----------------------------------------------------------------------------
 
-PackageDeclaration: [ Pub ] Package Identifier LBrace { PackageGroup } RBrace;
+PackageDeclaration: [ Pub ] Package Identifier [ WithGenericParameter ] LBrace { PackageGroup } RBrace;
 
 PackageGroup: { Attribute } ( LBrace { PackageGroup } RBrace | PackageItem );
 

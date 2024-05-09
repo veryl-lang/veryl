@@ -66,7 +66,12 @@ impl VerylWalker for Finder {
         self.group_hit = false;
         self.in_group = true;
         match &*arg.scoped_identifier_group {
-            ScopedIdentifierGroup::Identifier(x) => self.identifier(&x.identifier),
+            ScopedIdentifierGroup::IdentifierScopedIdentifierOpt(x) => {
+                self.identifier(&x.identifier);
+                if let Some(ref x) = x.scoped_identifier_opt {
+                    self.with_generic_argument(&x.with_generic_argument);
+                }
+            }
             ScopedIdentifierGroup::DollarIdentifier(x) => {
                 self.dollar_identifier(&x.dollar_identifier)
             }
@@ -77,6 +82,9 @@ impl VerylWalker for Finder {
             self.in_group = true;
             self.identifier(&x.identifier);
             self.in_group = false;
+            if let Some(ref x) = x.scoped_identifier_opt0 {
+                self.with_generic_argument(&x.with_generic_argument);
+            }
         }
         if self.group_hit {
             self.lock_group = true;
@@ -91,7 +99,12 @@ impl VerylWalker for Finder {
         self.group_hit = false;
         self.in_group = true;
         match &*x.scoped_identifier_group {
-            ScopedIdentifierGroup::Identifier(x) => self.identifier(&x.identifier),
+            ScopedIdentifierGroup::IdentifierScopedIdentifierOpt(x) => {
+                self.identifier(&x.identifier);
+                if let Some(ref x) = x.scoped_identifier_opt {
+                    self.with_generic_argument(&x.with_generic_argument);
+                }
+            }
             ScopedIdentifierGroup::DollarIdentifier(x) => {
                 self.dollar_identifier(&x.dollar_identifier)
             }
@@ -102,6 +115,9 @@ impl VerylWalker for Finder {
             self.in_group = true;
             self.identifier(&x.identifier);
             self.in_group = false;
+            if let Some(ref x) = x.scoped_identifier_opt0 {
+                self.with_generic_argument(&x.with_generic_argument);
+            }
         }
         for x in &arg.expression_identifier_list {
             self.select(&x.select);

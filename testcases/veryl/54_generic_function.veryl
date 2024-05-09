@@ -1,0 +1,10 @@
+module Module54 {
+    function FuncA::<T> (
+        a: input logic<T>,
+    ) -> logic<T> {
+        return a + 1;
+    }
+
+    let _a: logic<10> = FuncA::<10>(1);
+    let _b: logic<20> = FuncA::<20>(1);
+}

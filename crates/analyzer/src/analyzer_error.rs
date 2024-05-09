@@ -219,12 +219,31 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
-        code(mismatch_arity),
+        code(mismatch_function_arity),
         help("fix function arguments"),
-        url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#mismatch_arity")
+        url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#mismatch_function_arity")
     )]
     #[error("function \"{name}\" has {arity} arguments, but {args} arguments are supplied")]
-    MismatchArity {
+    MismatchFunctionArity {
+        name: String,
+        arity: usize,
+        args: usize,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(mismatch_generics_arity),
+        help("fix generics arguments"),
+        url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#mismatch_generics_arity")
+    )]
+    #[error(
+        "generics \"{name}\" has {arity} generic arguments, but {args} arguments are supplied"
+    )]
+    MismatchGenericsArity {
         name: String,
         arity: usize,
         args: usize,
@@ -797,14 +816,30 @@ impl AnalyzerError {
         }
     }
 
-    pub fn mismatch_arity(
+    pub fn mismatch_function_arity(
         name: &str,
         arity: usize,
         args: usize,
         source: &str,
         token: &TokenRange,
     ) -> Self {
-        AnalyzerError::MismatchArity {
+        AnalyzerError::MismatchFunctionArity {
+            name: name.to_string(),
+            arity,
+            args,
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn mismatch_generics_arity(
+        name: &str,
+        arity: usize,
+        args: usize,
+        source: &str,
+        token: &TokenRange,
+    ) -> Self {
+        AnalyzerError::MismatchGenericsArity {
             name: name.to_string(),
             arity,
             args,

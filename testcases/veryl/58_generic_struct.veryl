@@ -1,0 +1,16 @@
+module Module58 {
+    struct StructA::<T> {
+        A: T,
+    }
+
+    type C = i32;
+
+    var _a: StructA::<Package58::B>;
+    var _b: StructA::<Package58::C>;
+    var _c: StructA::<C>           ;
+}
+
+package Package58 {
+    type B = u32;
+    type C = u64;
+}

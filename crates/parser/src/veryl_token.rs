@@ -106,7 +106,7 @@ impl From<Token> for miette::SourceSpan {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TokenRange {
     pub beg: Token,
     pub end: Token,
@@ -383,7 +383,9 @@ impl fmt::Display for VerylToken {
 impl ScopedIdentifier {
     pub fn identifier(&self) -> &VerylToken {
         match &*self.scoped_identifier_group {
-            ScopedIdentifierGroup::Identifier(x) => &x.identifier.identifier_token,
+            ScopedIdentifierGroup::IdentifierScopedIdentifierOpt(x) => {
+                &x.identifier.identifier_token
+            }
             ScopedIdentifierGroup::DollarIdentifier(x) => {
                 &x.dollar_identifier.dollar_identifier_token
             }
@@ -511,6 +513,7 @@ token_with_comments!(AllBit);
 
 token_with_comments!(Colon);
 token_with_comments!(ColonColon);
+token_with_comments!(ColonColonLAngle);
 token_with_comments!(Comma);
 token_with_comments!(DotDot);
 token_with_comments!(DotDotEqu);

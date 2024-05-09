@@ -1,190 +1,13 @@
 use crate::assign::{Assign, AssignPath, AssignPosition};
 use crate::evaluator::Evaluated;
 use crate::namespace::Namespace;
-use crate::namespace_table;
 use crate::symbol::{DocComment, Symbol, SymbolId, SymbolKind, TypeKind};
+use crate::symbol_path::{SymbolPath, SymbolPathNamespace};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
 use veryl_parser::resource_table::{PathId, StrId, TokenId};
-use veryl_parser::veryl_grammar_trait as syntax_tree;
 use veryl_parser::veryl_token::{Token, TokenSource};
-
-#[derive(Debug, Default, Clone, PartialEq)]
-pub struct SymbolPath(Vec<StrId>);
-
-impl SymbolPath {
-    pub fn new(x: &[StrId]) -> Self {
-        Self(x.to_vec())
-    }
-
-    pub fn push(&mut self, x: StrId) {
-        self.0.push(x)
-    }
-
-    pub fn pop(&mut self) -> Option<StrId> {
-        self.0.pop()
-    }
-
-    pub fn clear(&mut self) {
-        self.0.clear()
-    }
-
-    pub fn as_slice(&self) -> &[StrId] {
-        self.0.as_slice()
-    }
-
-    pub fn to_vec(self) -> Vec<StrId> {
-        self.0
-    }
-}
-
-impl fmt::Display for SymbolPath {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut text = String::new();
-        for path in self.as_slice() {
-            text.push_str(&format!("{path} "));
-        }
-        text.fmt(f)
-    }
-}
-
-impl From<&[Token]> for SymbolPath {
-    fn from(value: &[Token]) -> Self {
-        let mut path = Vec::new();
-        for x in value {
-            path.push(x.text);
-        }
-        SymbolPath(path)
-    }
-}
-
-impl From<&Token> for SymbolPath {
-    fn from(value: &Token) -> Self {
-        let path = vec![value.text];
-        SymbolPath(path)
-    }
-}
-
-impl From<&syntax_tree::Identifier> for SymbolPath {
-    fn from(value: &syntax_tree::Identifier) -> Self {
-        let path = vec![value.identifier_token.token.text];
-        SymbolPath(path)
-    }
-}
-
-impl From<&[syntax_tree::Identifier]> for SymbolPath {
-    fn from(value: &[syntax_tree::Identifier]) -> Self {
-        let mut path = Vec::new();
-        for x in value {
-            path.push(x.identifier_token.token.text);
-        }
-        SymbolPath(path)
-    }
-}
-
-impl From<&syntax_tree::HierarchicalIdentifier> for SymbolPath {
-    fn from(value: &syntax_tree::HierarchicalIdentifier) -> Self {
-        let mut path = Vec::new();
-        path.push(value.identifier.identifier_token.token.text);
-        for x in &value.hierarchical_identifier_list0 {
-            path.push(x.identifier.identifier_token.token.text);
-        }
-        SymbolPath(path)
-    }
-}
-
-impl From<&syntax_tree::ScopedIdentifier> for SymbolPath {
-    fn from(value: &syntax_tree::ScopedIdentifier) -> Self {
-        let mut path = Vec::new();
-        path.push(value.identifier().token.text);
-        for x in &value.scoped_identifier_list {
-            path.push(x.identifier.identifier_token.token.text);
-        }
-        SymbolPath(path)
-    }
-}
-
-impl From<&syntax_tree::ExpressionIdentifier> for SymbolPath {
-    fn from(value: &syntax_tree::ExpressionIdentifier) -> Self {
-        let mut path: SymbolPath = value.scoped_identifier.as_ref().into();
-        for x in &value.expression_identifier_list0 {
-            path.push(x.identifier.identifier_token.token.text);
-        }
-        path
-    }
-}
-
-#[derive(Clone, Default, Debug)]
-pub struct SymbolPathNamespace(pub SymbolPath, pub Namespace);
-
-impl From<&Token> for SymbolPathNamespace {
-    fn from(value: &Token) -> Self {
-        let namespace = namespace_table::get(value.id).unwrap();
-        SymbolPathNamespace(value.into(), namespace)
-    }
-}
-
-impl From<&SymbolPathNamespace> for SymbolPathNamespace {
-    fn from(value: &SymbolPathNamespace) -> Self {
-        value.clone()
-    }
-}
-
-impl From<(&SymbolPath, &Namespace)> for SymbolPathNamespace {
-    fn from(value: (&SymbolPath, &Namespace)) -> Self {
-        SymbolPathNamespace(value.0.clone(), value.1.clone())
-    }
-}
-
-impl From<(&Token, &Namespace)> for SymbolPathNamespace {
-    fn from(value: (&Token, &Namespace)) -> Self {
-        let path = SymbolPath::new(&[value.0.text]);
-        SymbolPathNamespace(path, value.1.clone())
-    }
-}
-
-impl From<(&Vec<StrId>, &Namespace)> for SymbolPathNamespace {
-    fn from(value: (&Vec<StrId>, &Namespace)) -> Self {
-        let path = SymbolPath::new(value.0);
-        SymbolPathNamespace(path, value.1.clone())
-    }
-}
-
-impl From<&syntax_tree::Identifier> for SymbolPathNamespace {
-    fn from(value: &syntax_tree::Identifier) -> Self {
-        let namespace = namespace_table::get(value.identifier_token.token.id).unwrap();
-        SymbolPathNamespace(value.into(), namespace)
-    }
-}
-
-impl From<&[syntax_tree::Identifier]> for SymbolPathNamespace {
-    fn from(value: &[syntax_tree::Identifier]) -> Self {
-        let namespace = namespace_table::get(value[0].identifier_token.token.id).unwrap();
-        SymbolPathNamespace(value.into(), namespace)
-    }
-}
-
-impl From<&syntax_tree::HierarchicalIdentifier> for SymbolPathNamespace {
-    fn from(value: &syntax_tree::HierarchicalIdentifier) -> Self {
-        let namespace = namespace_table::get(value.identifier.identifier_token.token.id).unwrap();
-        SymbolPathNamespace(value.into(), namespace)
-    }
-}
-
-impl From<&syntax_tree::ScopedIdentifier> for SymbolPathNamespace {
-    fn from(value: &syntax_tree::ScopedIdentifier) -> Self {
-        let namespace = namespace_table::get(value.identifier().token.id).unwrap();
-        SymbolPathNamespace(value.into(), namespace)
-    }
-}
-
-impl From<&syntax_tree::ExpressionIdentifier> for SymbolPathNamespace {
-    fn from(value: &syntax_tree::ExpressionIdentifier) -> Self {
-        let namespace = namespace_table::get(value.identifier().token.id).unwrap();
-        SymbolPathNamespace(value.into(), namespace)
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct ResolveResult {
@@ -404,6 +227,18 @@ impl SymbolTable {
                             }
                             context.inner = true;
                         }
+                        SymbolKind::GenericInstance(ref x) => {
+                            let symbol = self.symbol_table.get(&x.base).unwrap();
+                            context.namespace = symbol.inner_namespace();
+                            context.inner = true;
+                            context
+                                .generic_namespace_map
+                                .insert(symbol.token.text, found.token.text);
+                        }
+                        SymbolKind::GenericParameter => {
+                            context.namespace = found.inner_namespace();
+                            context.inner = true;
+                        }
                         // don't trace inner item
                         SymbolKind::Function(_)
                         | SymbolKind::Struct(_)
@@ -429,8 +264,14 @@ impl SymbolTable {
             }
         }
         if let Some(found) = context.found {
+            let mut found = found.clone();
+
+            // replace namespace path to generic version
+            let generic_namespace = found.namespace.replace(&context.generic_namespace_map);
+            found.namespace = generic_namespace;
+
             Ok(ResolveResult {
-                found: found.clone(),
+                found,
                 full_path: context.full_path,
             })
         } else {
@@ -508,6 +349,16 @@ impl SymbolTable {
         for (_, symbol) in self.symbol_table.iter_mut() {
             if symbol.id == target {
                 symbol.references.push(token.to_owned());
+                break;
+            }
+        }
+    }
+
+    pub fn add_generic_instance(&mut self, target: SymbolId, instance: SymbolId) {
+        for (_, symbol) in self.symbol_table.iter_mut() {
+            if symbol.id == target && !symbol.generic_instances.contains(&instance) {
+                symbol.generic_instances.push(instance);
+                break;
             }
         }
     }
@@ -620,6 +471,7 @@ struct ResolveContext<'a> {
     last_found: Option<&'a Symbol>,
     full_path: Vec<SymbolId>,
     namespace: Namespace,
+    generic_namespace_map: HashMap<StrId, StrId>,
     inner: bool,
     other_prj: bool,
     sv_member: bool,
@@ -632,6 +484,7 @@ impl<'a> ResolveContext<'a> {
             last_found: None,
             full_path: vec![],
             namespace: namespace.clone(),
+            generic_namespace_map: HashMap::new(),
             inner: false,
             other_prj: false,
             sv_member: false,
@@ -874,6 +727,10 @@ pub fn drop(file_path: PathId) {
 
 pub fn add_reference(target: SymbolId, token: &Token) {
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_reference(target, token))
+}
+
+pub fn add_generic_instance(target: SymbolId, instance: SymbolId) {
+    SYMBOL_TABLE.with(|f| f.borrow_mut().add_generic_instance(target, instance))
 }
 
 pub fn add_imported_item(target: TokenId, namespace: &Namespace) {

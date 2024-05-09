@@ -574,7 +574,7 @@ fn invalid_statement() {
 }
 
 #[test]
-fn mismatch_arity() {
+fn mismatch_function_arity() {
     let code = r#"
     module ModuleA {
         function FuncA (
@@ -586,7 +586,45 @@ fn mismatch_arity() {
     "#;
 
     let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::MismatchArity { .. }));
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchFunctionArity { .. }
+    ));
+}
+
+#[test]
+fn mismatch_generics_arity() {
+    let code = r#"
+    module ModuleA {
+        function FuncA::<T> (
+            a: input logic<T>,
+        ) -> logic<T> {}
+
+        let _a: logic = FuncA::<1, 2>(1);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchGenericsArity { .. }
+    ));
+
+    let code = r#"
+    module ModuleB {
+        function FuncA::<T, U> (
+            a: input logic<T>,
+        ) -> logic<T> {}
+
+        let _a: logic = FuncA::<1>(1);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchGenericsArity { .. }
+    ));
 }
 
 #[test]

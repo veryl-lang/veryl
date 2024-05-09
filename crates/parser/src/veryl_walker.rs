@@ -181,6 +181,13 @@ pub trait VerylWalker {
         after!(self, colon_colon, arg);
     }
 
+    /// Semantic action for non-terminal 'ColonColonLAngle'
+    fn colon_colon_l_angle(&mut self, arg: &ColonColonLAngle) {
+        before!(self, colon_colon_l_angle, arg);
+        self.veryl_token(&arg.colon_colon_l_angle_token);
+        after!(self, colon_colon_l_angle, arg);
+    }
+
     /// Semantic action for non-terminal 'Comma'
     fn comma(&mut self, arg: &Comma) {
         before!(self, comma, arg);
@@ -828,7 +835,12 @@ pub trait VerylWalker {
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) {
         before!(self, scoped_identifier, arg);
         match &*arg.scoped_identifier_group {
-            ScopedIdentifierGroup::Identifier(x) => self.identifier(&x.identifier),
+            ScopedIdentifierGroup::IdentifierScopedIdentifierOpt(x) => {
+                self.identifier(&x.identifier);
+                if let Some(ref x) = x.scoped_identifier_opt {
+                    self.with_generic_argument(&x.with_generic_argument);
+                }
+            }
             ScopedIdentifierGroup::DollarIdentifier(x) => {
                 self.dollar_identifier(&x.dollar_identifier)
             }
@@ -836,6 +848,9 @@ pub trait VerylWalker {
         for x in &arg.scoped_identifier_list {
             self.colon_colon(&x.colon_colon);
             self.identifier(&x.identifier);
+            if let Some(ref x) = x.scoped_identifier_opt0 {
+                self.with_generic_argument(&x.with_generic_argument);
+            }
         }
         after!(self, scoped_identifier, arg);
     }
@@ -1866,6 +1881,9 @@ pub trait VerylWalker {
         before!(self, struct_union_declaration, arg);
         self.struct_union(&arg.struct_union);
         self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.struct_union_declaration_opt {
+            self.with_generic_parameter(&x.with_generic_parameter);
+        }
         self.l_brace(&arg.l_brace);
         self.struct_union_list(&arg.struct_union_list);
         self.r_brace(&arg.r_brace);
@@ -2142,6 +2160,73 @@ pub trait VerylWalker {
         after!(self, with_parameter_item, arg);
     }
 
+    /// Semantic action for non-terminal 'WithGenericParameter'
+    fn with_generic_parameter(&mut self, arg: &WithGenericParameter) {
+        before!(self, with_generic_parameter, arg);
+        self.colon_colon_l_angle(&arg.colon_colon_l_angle);
+        self.with_generic_parameter_list(&arg.with_generic_parameter_list);
+        self.r_angle(&arg.r_angle);
+        after!(self, with_generic_parameter, arg);
+    }
+
+    /// Semantic action for non-terminal 'WithGenericParameterList'
+    fn with_generic_parameter_list(&mut self, arg: &WithGenericParameterList) {
+        before!(self, with_generic_parameter_list, arg);
+        self.with_generic_parameter_item(&arg.with_generic_parameter_item);
+        for x in &arg.with_generic_parameter_list_list {
+            self.comma(&x.comma);
+            self.with_generic_parameter_item(&x.with_generic_parameter_item);
+        }
+        if let Some(ref x) = arg.with_generic_parameter_list_opt {
+            self.comma(&x.comma);
+        }
+        after!(self, with_generic_parameter_list, arg);
+    }
+
+    /// Semantic action for non-terminal 'WithGenericParameterItem'
+    fn with_generic_parameter_item(&mut self, arg: &WithGenericParameterItem) {
+        before!(self, with_generic_parameter_item, arg);
+        self.identifier(&arg.identifier);
+        after!(self, with_generic_parameter_item, arg);
+    }
+
+    /// Semantic action for non-terminal 'WithGenericArgument'
+    fn with_generic_argument(&mut self, arg: &WithGenericArgument) {
+        before!(self, with_generic_argument, arg);
+        self.colon_colon_l_angle(&arg.colon_colon_l_angle);
+        self.with_generic_argument_list(&arg.with_generic_argument_list);
+        self.r_angle(&arg.r_angle);
+        after!(self, with_generic_argument, arg);
+    }
+
+    /// Semantic action for non-terminal 'WithGenericArgumentList'
+    fn with_generic_argument_list(&mut self, arg: &WithGenericArgumentList) {
+        before!(self, with_generic_argument_list, arg);
+        self.with_generic_argument_item(&arg.with_generic_argument_item);
+        for x in &arg.with_generic_argument_list_list {
+            self.comma(&x.comma);
+            self.with_generic_argument_item(&x.with_generic_argument_item);
+        }
+        if let Some(ref x) = arg.with_generic_argument_list_opt {
+            self.comma(&x.comma);
+        }
+        after!(self, with_generic_argument_list, arg);
+    }
+
+    /// Semantic action for non-terminal 'WithGenericArgumentItem'
+    fn with_generic_argument_item(&mut self, arg: &WithGenericArgumentItem) {
+        before!(self, with_generic_argument_item, arg);
+        match arg {
+            WithGenericArgumentItem::ScopedIdentifier(x) => {
+                self.scoped_identifier(&x.scoped_identifier);
+            }
+            WithGenericArgumentItem::Number(x) => {
+                self.number(&x.number);
+            }
+        }
+        after!(self, with_generic_argument_item, arg);
+    }
+
     /// Semantic action for non-terminal 'PortDeclaration'
     fn port_declaration(&mut self, arg: &PortDeclaration) {
         before!(self, port_declaration, arg);
@@ -2225,9 +2310,12 @@ pub trait VerylWalker {
         self.function(&arg.function);
         self.identifier(&arg.identifier);
         if let Some(ref x) = arg.function_declaration_opt {
-            self.port_declaration(&x.port_declaration);
+            self.with_generic_parameter(&x.with_generic_parameter);
         }
         if let Some(ref x) = arg.function_declaration_opt0 {
+            self.port_declaration(&x.port_declaration);
+        }
+        if let Some(ref x) = arg.function_declaration_opt1 {
             self.minus_g_t(&x.minus_g_t);
             self.scalar_type(&x.scalar_type);
         }
@@ -2289,9 +2377,12 @@ pub trait VerylWalker {
         self.module(&arg.module);
         self.identifier(&arg.identifier);
         if let Some(ref x) = arg.module_declaration_opt0 {
-            self.with_parameter(&x.with_parameter);
+            self.with_generic_parameter(&x.with_generic_parameter);
         }
         if let Some(ref x) = arg.module_declaration_opt1 {
+            self.with_parameter(&x.with_parameter);
+        }
+        if let Some(ref x) = arg.module_declaration_opt2 {
             self.port_declaration(&x.port_declaration);
         }
         self.l_brace(&arg.l_brace);
@@ -2430,6 +2521,9 @@ pub trait VerylWalker {
         self.interface(&arg.interface);
         self.identifier(&arg.identifier);
         if let Some(ref x) = arg.interface_declaration_opt0 {
+            self.with_generic_parameter(&x.with_generic_parameter);
+        }
+        if let Some(ref x) = arg.interface_declaration_opt1 {
             self.with_parameter(&x.with_parameter);
         }
         self.l_brace(&arg.l_brace);
@@ -2568,6 +2662,9 @@ pub trait VerylWalker {
         }
         self.package(&arg.package);
         self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.package_declaration_opt0 {
+            self.with_generic_parameter(&x.with_generic_parameter);
+        }
         self.l_brace(&arg.l_brace);
         for x in &arg.package_declaration_list {
             self.package_group(&x.package_group);

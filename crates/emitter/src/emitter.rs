@@ -4,8 +4,9 @@ use veryl_analyzer::attribute::Attribute as Attr;
 use veryl_analyzer::attribute_table;
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::TypeModifier as SymTypeModifier;
-use veryl_analyzer::symbol::{Symbol, SymbolKind, TypeKind};
-use veryl_analyzer::symbol_table::{self, SymbolPath};
+use veryl_analyzer::symbol::{GenericMap, Symbol, SymbolKind, TypeKind};
+use veryl_analyzer::symbol_path::{GenericSymbolPath, SymbolPath};
+use veryl_analyzer::symbol_table;
 use veryl_analyzer::{msb_table, namespace_table};
 use veryl_metadata::{Build, BuiltinType, ClockType, Format, Metadata, ResetType};
 use veryl_parser::resource_table::{self, StrId};
@@ -49,6 +50,7 @@ pub struct Emitter {
     file_scope_import: Vec<String>,
     attribute: Vec<AttributeType>,
     assignment_lefthand_side: Option<ExpressionIdentifier>,
+    generic_map: GenericMap,
 }
 
 impl Default for Emitter {
@@ -77,6 +79,7 @@ impl Default for Emitter {
             file_scope_import: Vec::new(),
             attribute: Vec::new(),
             assignment_lefthand_side: None,
+            generic_map: GenericMap::default(),
         }
     }
 }
@@ -554,9 +557,16 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ScopedIdentifier'
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) {
-        if let Ok(symbol) = symbol_table::resolve(arg) {
+        let mut path: GenericSymbolPath = arg.into();
+        path.apply_map(&self.generic_map.map);
+        let namespace = namespace_table::get(arg.identifier().token.id).unwrap();
+        if let Ok(symbol) = symbol_table::resolve((&path.mangled_path(), &namespace)) {
             let context: SymbolContext = self.into();
             let text = symbol_string(arg.identifier(), &symbol.found, &context);
+            self.veryl_token(&arg.identifier().replace(&text));
+        } else if !path.resolvable {
+            // emit literal by generics
+            let text = path.base_path(0).0[0].to_string();
             self.veryl_token(&arg.identifier().replace(&text));
         }
     }
@@ -1850,24 +1860,38 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'StructUnionDeclaration'
     fn struct_union_declaration(&mut self, arg: &StructUnionDeclaration) {
-        match &*arg.struct_union {
-            StructUnion::Struct(ref x) => {
-                self.token(&x.r#struct.struct_token.append("typedef ", " packed"));
+        let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
+        let maps = symbol.found.generic_maps();
+
+        for (i, map) in maps.iter().enumerate() {
+            if i != 0 {
+                self.newline();
             }
-            StructUnion::Union(ref x) => {
-                self.token(&x.union.union_token.append("typedef ", " packed"));
+            self.generic_map = map.clone();
+
+            match &*arg.struct_union {
+                StructUnion::Struct(ref x) => {
+                    self.token(&x.r#struct.struct_token.append("typedef ", " packed"));
+                }
+                StructUnion::Union(ref x) => {
+                    self.token(&x.union.union_token.append("typedef ", " packed"));
+                }
             }
+            self.space(1);
+            self.token_will_push(&arg.l_brace.l_brace_token);
+            self.newline_push();
+            self.struct_union_list(&arg.struct_union_list);
+            self.newline_pop();
+            self.str("}");
+            self.space(1);
+            if map.generic() {
+                self.str(&self.generic_map.name.clone());
+            } else {
+                self.identifier(&arg.identifier);
+            }
+            self.str(";");
+            self.token(&arg.r_brace.r_brace_token.replace(""));
         }
-        self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token);
-        self.newline_push();
-        self.struct_union_list(&arg.struct_union_list);
-        self.newline_pop();
-        self.str("}");
-        self.space(1);
-        self.identifier(&arg.identifier);
-        self.str(";");
-        self.token(&arg.r_brace.r_brace_token.replace(""));
     }
 
     /// Semantic action for non-terminal 'StructUnionList'
@@ -2278,42 +2302,56 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'FunctionDeclaration'
     fn function_declaration(&mut self, arg: &FunctionDeclaration) {
-        self.function(&arg.function);
-        self.space(1);
-        self.str("automatic");
-        self.space(1);
-        if let Some(ref x) = &arg.function_declaration_opt0 {
-            self.scalar_type(&x.scalar_type);
-        } else {
-            self.str("void");
-        }
-        self.space(1);
-        self.identifier(&arg.identifier);
-        if let Some(ref x) = arg.function_declaration_opt {
-            self.port_declaration(&x.port_declaration);
+        let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
+        let maps = symbol.found.generic_maps();
+
+        for (i, map) in maps.iter().enumerate() {
+            if i != 0 {
+                self.newline();
+            }
+            self.generic_map = map.clone();
+
+            self.function(&arg.function);
             self.space(1);
+            self.str("automatic");
+            self.space(1);
+            if let Some(ref x) = &arg.function_declaration_opt1 {
+                self.scalar_type(&x.scalar_type);
+            } else {
+                self.str("void");
+            }
+            self.space(1);
+            if map.generic() {
+                self.str(&self.generic_map.name.clone());
+            } else {
+                self.identifier(&arg.identifier);
+            }
+            if let Some(ref x) = arg.function_declaration_opt0 {
+                self.port_declaration(&x.port_declaration);
+                self.space(1);
+            }
+            if let Some(ref x) = arg.function_declaration_opt1 {
+                self.token(&x.minus_g_t.minus_g_t_token.replace(""));
+            }
+            self.str(";");
+            self.token_will_push(&arg.l_brace.l_brace_token.replace(""));
+            let mut base = 0;
+            for (i, x) in arg
+                .function_declaration_list
+                .iter()
+                .filter(|x| is_func_let_statement(&x.function_item))
+                .enumerate()
+            {
+                self.newline_list(i);
+                base += self.function_item_variable_declatation_only(&x.function_item);
+            }
+            for (i, x) in arg.function_declaration_list.iter().enumerate() {
+                self.newline_list(base + i);
+                self.function_item_statement_only(&x.function_item);
+            }
+            self.newline_list_post(arg.function_declaration_list.is_empty());
+            self.token(&arg.r_brace.r_brace_token.replace("endfunction"));
         }
-        if let Some(ref x) = arg.function_declaration_opt0 {
-            self.token(&x.minus_g_t.minus_g_t_token.replace(""));
-        }
-        self.str(";");
-        self.token_will_push(&arg.l_brace.l_brace_token.replace(""));
-        let mut base = 0;
-        for (i, x) in arg
-            .function_declaration_list
-            .iter()
-            .filter(|x| is_func_let_statement(&x.function_item))
-            .enumerate()
-        {
-            self.newline_list(i);
-            base += self.function_item_variable_declatation_only(&x.function_item);
-        }
-        for (i, x) in arg.function_declaration_list.iter().enumerate() {
-            self.newline_list(base + i);
-            self.function_item_statement_only(&x.function_item);
-        }
-        self.newline_list_post(arg.function_declaration_list.is_empty());
-        self.token(&arg.r_brace.r_brace_token.replace("endfunction"));
     }
 
     /// Semantic action for non-terminal 'ImportDeclaration'
@@ -2349,41 +2387,55 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ModuleDeclaration'
     fn module_declaration(&mut self, arg: &ModuleDeclaration) {
-        self.module(&arg.module);
-        self.space(1);
-        if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
-            let context: SymbolContext = self.into();
-            self.str(&namespace_string(&symbol.found.namespace, &context));
-        }
-        self.identifier(&arg.identifier);
-        let file_scope_import = self.file_scope_import.clone();
-        if !file_scope_import.is_empty() {
-            self.newline_push();
-        }
-        for (i, x) in file_scope_import.iter().enumerate() {
+        let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
+        let maps = symbol.found.generic_maps();
+
+        for (i, map) in maps.iter().enumerate() {
             if i != 0 {
                 self.newline();
             }
-            self.str(x);
-        }
-        if !file_scope_import.is_empty() {
-            self.newline_pop();
-        }
-        if let Some(ref x) = arg.module_declaration_opt0 {
+            self.generic_map = map.clone();
+
+            self.module(&arg.module);
             self.space(1);
-            self.with_parameter(&x.with_parameter);
+            if map.generic() {
+                self.str(&self.generic_map.name.clone());
+            } else {
+                if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
+                    let context: SymbolContext = self.into();
+                    self.str(&namespace_string(&symbol.found.namespace, &context));
+                }
+                self.identifier(&arg.identifier);
+            }
+            let file_scope_import = self.file_scope_import.clone();
+            if !file_scope_import.is_empty() {
+                self.newline_push();
+            }
+            for (i, x) in file_scope_import.iter().enumerate() {
+                if i != 0 {
+                    self.newline();
+                }
+                self.str(x);
+            }
+            if !file_scope_import.is_empty() {
+                self.newline_pop();
+            }
+            if let Some(ref x) = arg.module_declaration_opt1 {
+                self.space(1);
+                self.with_parameter(&x.with_parameter);
+            }
+            if let Some(ref x) = arg.module_declaration_opt2 {
+                self.space(1);
+                self.port_declaration(&x.port_declaration);
+            }
+            self.token_will_push(&arg.l_brace.l_brace_token.replace(";"));
+            for (i, x) in arg.module_declaration_list.iter().enumerate() {
+                self.newline_list(i);
+                self.module_group(&x.module_group);
+            }
+            self.newline_list_post(arg.module_declaration_list.is_empty());
+            self.token(&arg.r_brace.r_brace_token.replace("endmodule"));
         }
-        if let Some(ref x) = arg.module_declaration_opt1 {
-            self.space(1);
-            self.port_declaration(&x.port_declaration);
-        }
-        self.token_will_push(&arg.l_brace.l_brace_token.replace(";"));
-        for (i, x) in arg.module_declaration_list.iter().enumerate() {
-            self.newline_list(i);
-            self.module_group(&x.module_group);
-        }
-        self.newline_list_post(arg.module_declaration_list.is_empty());
-        self.token(&arg.r_brace.r_brace_token.replace("endmodule"));
     }
 
     /// Semantic action for non-terminal 'ModuleIfDeclaration'
@@ -2533,37 +2585,51 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'InterfaceDeclaration'
     fn interface_declaration(&mut self, arg: &InterfaceDeclaration) {
-        self.interface(&arg.interface);
-        self.space(1);
-        if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
-            let context: SymbolContext = self.into();
-            self.str(&namespace_string(&symbol.found.namespace, &context));
-        }
-        self.identifier(&arg.identifier);
-        let file_scope_import = self.file_scope_import.clone();
-        if !file_scope_import.is_empty() {
-            self.newline_push();
-        }
-        for (i, x) in file_scope_import.iter().enumerate() {
+        let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
+        let maps = symbol.found.generic_maps();
+
+        for (i, map) in maps.iter().enumerate() {
             if i != 0 {
                 self.newline();
             }
-            self.str(x);
-        }
-        if !file_scope_import.is_empty() {
-            self.newline_pop();
-        }
-        if let Some(ref x) = arg.interface_declaration_opt0 {
+            self.generic_map = map.clone();
+
+            self.interface(&arg.interface);
             self.space(1);
-            self.with_parameter(&x.with_parameter);
+            if map.generic() {
+                self.str(&self.generic_map.name.clone());
+            } else {
+                if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
+                    let context: SymbolContext = self.into();
+                    self.str(&namespace_string(&symbol.found.namespace, &context));
+                }
+                self.identifier(&arg.identifier);
+            }
+            let file_scope_import = self.file_scope_import.clone();
+            if !file_scope_import.is_empty() {
+                self.newline_push();
+            }
+            for (i, x) in file_scope_import.iter().enumerate() {
+                if i != 0 {
+                    self.newline();
+                }
+                self.str(x);
+            }
+            if !file_scope_import.is_empty() {
+                self.newline_pop();
+            }
+            if let Some(ref x) = arg.interface_declaration_opt1 {
+                self.space(1);
+                self.with_parameter(&x.with_parameter);
+            }
+            self.token_will_push(&arg.l_brace.l_brace_token.replace(";"));
+            for (i, x) in arg.interface_declaration_list.iter().enumerate() {
+                self.newline_list(i);
+                self.interface_group(&x.interface_group);
+            }
+            self.newline_list_post(arg.interface_declaration_list.is_empty());
+            self.token(&arg.r_brace.r_brace_token.replace("endinterface"));
         }
-        self.token_will_push(&arg.l_brace.l_brace_token.replace(";"));
-        for (i, x) in arg.interface_declaration_list.iter().enumerate() {
-            self.newline_list(i);
-            self.interface_group(&x.interface_group);
-        }
-        self.newline_list_post(arg.interface_declaration_list.is_empty());
-        self.token(&arg.r_brace.r_brace_token.replace("endinterface"));
     }
 
     /// Semantic action for non-terminal 'InterfaceIfDeclaration'
@@ -2713,27 +2779,41 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'PackageDeclaration'
     fn package_declaration(&mut self, arg: &PackageDeclaration) {
-        self.package(&arg.package);
-        self.space(1);
-        if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
-            let context: SymbolContext = self.into();
-            self.str(&namespace_string(&symbol.found.namespace, &context));
-        }
-        self.identifier(&arg.identifier);
-        self.token_will_push(&arg.l_brace.l_brace_token.replace(";"));
-        for (i, x) in arg.package_declaration_list.iter().enumerate() {
-            self.newline_list(i);
-            if i == 0 {
-                let file_scope_import = self.file_scope_import.clone();
-                for x in &file_scope_import {
-                    self.str(x);
-                    self.newline();
-                }
+        let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
+        let maps = symbol.found.generic_maps();
+
+        for (i, map) in maps.iter().enumerate() {
+            if i != 0 {
+                self.newline();
             }
-            self.package_group(&x.package_group);
+            self.generic_map = map.clone();
+
+            self.package(&arg.package);
+            self.space(1);
+            if map.generic() {
+                self.str(&self.generic_map.name.clone());
+            } else {
+                if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
+                    let context: SymbolContext = self.into();
+                    self.str(&namespace_string(&symbol.found.namespace, &context));
+                }
+                self.identifier(&arg.identifier);
+            }
+            self.token_will_push(&arg.l_brace.l_brace_token.replace(";"));
+            for (i, x) in arg.package_declaration_list.iter().enumerate() {
+                self.newline_list(i);
+                if i == 0 {
+                    let file_scope_import = self.file_scope_import.clone();
+                    for x in &file_scope_import {
+                        self.str(x);
+                        self.newline();
+                    }
+                }
+                self.package_group(&x.package_group);
+            }
+            self.newline_list_post(arg.package_declaration_list.is_empty());
+            self.token(&arg.r_brace.r_brace_token.replace("endpackage"));
         }
-        self.newline_list_post(arg.package_declaration_list.is_empty());
-        self.token(&arg.r_brace.r_brace_token.replace("endpackage"));
     }
 
     /// Semantic action for non-terminal 'PackageGroup'
@@ -2861,6 +2941,7 @@ pub struct SymbolContext {
     pub project_name: Option<StrId>,
     pub build_opt: Build,
     pub in_import: bool,
+    pub generic_map: GenericMap,
 }
 
 impl From<&mut Emitter> for SymbolContext {
@@ -2869,6 +2950,7 @@ impl From<&mut Emitter> for SymbolContext {
             project_name: value.project_name,
             build_opt: value.build_opt.clone(),
             in_import: value.in_import,
+            generic_map: value.generic_map.clone(),
         }
     }
 }
@@ -2901,6 +2983,7 @@ fn namespace_string(namespace: &Namespace, context: &SymbolContext) -> String {
             if let Ok(ref symbol) = symbol_table::resolve((&symbol_path, &resolve_namespace)) {
                 let separator = match symbol.found.kind {
                     SymbolKind::Package(_) => "::",
+                    SymbolKind::GenericInstance(_) => "::",
                     SymbolKind::Interface(_) => ".",
                     _ if in_sv_namespace => "::",
                     _ => "_",
@@ -2958,6 +3041,39 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
             ret.push_str(&namespace_string(&symbol.namespace, context));
             ret.push_str(&symbol.token.to_string());
         }
+        //SymbolKind::GenericParameter => {
+        //    if let Some(generic_arg) = context.generic_map.get(&symbol.token.text) {
+        //        let path = generic_arg.base_path();
+
+        //        let emit_namespace = match symbol_table::resolve((&path, &namespace)) {
+        //            Ok(symbol) => matches!(
+        //                symbol.found.kind,
+        //                SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)
+        //            ),
+        //            Err(_) => true,
+        //        };
+
+        //        if emit_namespace {
+        //            if let Ok(symbol) = symbol_table::resolve((&path, &symbol.namespace)) {
+        //                ret.push_str(&namespace_string(&symbol.found.namespace, context));
+        //            }
+        //        }
+        //        ret.push_str(&generic_arg.to_string());
+        //    }
+        //}
+        SymbolKind::GenericInstance(x) => {
+            let base = symbol_table::get(x.base).unwrap();
+            let visible = symbol_table::resolve((&symbol.token, &namespace)).is_ok();
+            let top_level = matches!(
+                base.kind,
+                SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)
+            );
+            if !visible | top_level {
+                ret.push_str(&namespace_string(&base.namespace, context));
+            }
+            ret.push_str(&symbol.token.to_string());
+        }
+        SymbolKind::GenericParameter => (),
         SymbolKind::Port(_)
         | SymbolKind::Variable(_)
         | SymbolKind::Instance(_)
