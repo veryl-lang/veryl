@@ -38,6 +38,10 @@ impl NamespaceTable {
     pub fn get_default(&self) -> Namespace {
         self.default.clone()
     }
+
+    pub fn clear(&mut self) {
+        self.table.clear()
+    }
 }
 
 impl Default for NamespaceTable {
@@ -100,4 +104,8 @@ pub fn set_default(id: &[StrId]) {
 
 pub fn get_default() -> Namespace {
     NAMESPACE_TABLE.with(|f| f.borrow().get_default())
+}
+
+pub fn clear() {
+    NAMESPACE_TABLE.with(|f| f.borrow_mut().clear())
 }

@@ -2556,6 +2556,11 @@ dependencies = [
  "regex",
  "semver",
  "serde_json",
+ "similar",
+ "toml 0.7.8",
+ "veryl-analyzer",
+ "veryl-formatter",
+ "veryl-metadata",
  "veryl-parser",
 ]
 

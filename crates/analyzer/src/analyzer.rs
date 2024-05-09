@@ -1,12 +1,15 @@
 use crate::analyzer::resource_table::PathId;
 use crate::analyzer_error::AnalyzerError;
 use crate::assign::{AssignPath, AssignPosition, AssignPositionTree, AssignPositionType};
+use crate::attribute_table;
 use crate::handlers::*;
+use crate::msb_table;
 use crate::namespace_table;
 use crate::symbol::{
     Direction, ParameterValue, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiniation,
 };
 use crate::symbol_table::{self, SymbolPath};
+use crate::type_dag;
 use itertools::Itertools;
 use std::path::Path;
 use veryl_metadata::{Lint, Metadata};
@@ -244,6 +247,14 @@ impl Analyzer {
         ret.append(&mut pass3.check_assignment());
 
         ret
+    }
+
+    pub fn clear(&self) {
+        attribute_table::clear();
+        msb_table::clear();
+        namespace_table::clear();
+        symbol_table::clear();
+        type_dag::clear();
     }
 }
 

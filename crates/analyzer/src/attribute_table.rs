@@ -70,6 +70,10 @@ impl AttributeTable {
     pub fn get_all(&self) -> Vec<(TokenRange, Attribute)> {
         self.table.values().flat_map(|x| x.clone()).collect()
     }
+
+    pub fn clear(&mut self) {
+        self.table.clear()
+    }
 }
 
 impl fmt::Display for AttributeTable {
@@ -134,4 +138,8 @@ pub fn dump() -> String {
 
 pub fn get_all() -> Vec<(TokenRange, Attribute)> {
     ATTRIBUTE_TABLE.with(|f| f.borrow().get_all())
+}
+
+pub fn clear() {
+    ATTRIBUTE_TABLE.with(|f| f.borrow_mut().clear())
 }

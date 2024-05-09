@@ -13,12 +13,17 @@ edition               = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow         = {workspace = true}
-clap           = {workspace = true}
-line-col       = "0.2.1"
-mdbook         = {workspace = true}
-pulldown-cmark = "0.10.3"
-regex          = {workspace = true}
-semver         = {workspace = true}
-serde_json     = {workspace = true}
-veryl-parser   = {version = "0.9.0", path = "../parser"}
+anyhow          = {workspace = true}
+clap            = {workspace = true}
+line-col        = "0.2.1"
+mdbook          = {workspace = true}
+pulldown-cmark  = "0.10.3"
+regex           = {workspace = true}
+semver          = {workspace = true}
+serde_json      = {workspace = true}
+similar         = {workspace = true}
+toml            = {workspace = true}
+veryl-analyzer  = {version = "0.9.0", path = "../analyzer"}
+veryl-formatter = {version = "0.9.0", path = "../formatter"}
+veryl-metadata  = {version = "0.9.0", path = "../metadata"}
+veryl-parser    = {version = "0.9.0", path = "../parser"}

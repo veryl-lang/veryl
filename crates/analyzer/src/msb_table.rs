@@ -16,6 +16,10 @@ impl MsbTable {
     pub fn get(&self, id: TokenId) -> Option<&Expression> {
         self.table.get(&id)
     }
+
+    pub fn clear(&mut self) {
+        self.table.clear()
+    }
 }
 
 thread_local!(static MSB_TABLE: RefCell<MsbTable> = RefCell::new(MsbTable::default()));
@@ -26,4 +30,8 @@ pub fn insert(id: TokenId, expression: &Expression) {
 
 pub fn get(id: TokenId) -> Option<Expression> {
     MSB_TABLE.with(|f| f.borrow().get(id).cloned())
+}
+
+pub fn clear() {
+    MSB_TABLE.with(|f| f.borrow_mut().clear())
 }

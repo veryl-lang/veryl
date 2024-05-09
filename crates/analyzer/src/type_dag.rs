@@ -8,7 +8,7 @@ use std::{cell::RefCell, collections::HashMap, collections::HashSet};
 use daggy::{petgraph::algo, Dag, Walker};
 use veryl_parser::veryl_token::Token;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct TypeDag {
     dag: Dag<(), Context, u32>,
     /// One-to-one relation between SymbolId and DAG NodeIdx
@@ -161,6 +161,10 @@ impl TypeDag {
         }
         ret
     }
+
+    fn clear(&mut self) {
+        self.clone_from(&Self::new());
+    }
 }
 
 thread_local!(static TYPE_DAG: RefCell<TypeDag> = RefCell::new(TypeDag::new()));
@@ -191,4 +195,8 @@ pub fn toposort() -> Vec<Symbol> {
 
 pub fn dump() -> String {
     TYPE_DAG.with(|f| f.borrow().dump())
+}
+
+pub fn clear() {
+    TYPE_DAG.with(|f| f.borrow_mut().clear())
 }

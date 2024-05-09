@@ -6,8 +6,12 @@ use mdbook::preprocess::{CmdPreprocessor, Preprocessor, PreprocessorContext};
 use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
 use regex::Regex;
 use semver::{Version, VersionReq};
+use similar::{ChangeTag, TextDiff};
 use std::io;
 use std::process;
+use veryl_analyzer::Analyzer;
+use veryl_formatter::Formatter;
+use veryl_metadata::Metadata;
 
 pub fn make_app() -> Command {
     Command::new("veryl")
@@ -81,6 +85,7 @@ impl Preprocessor for Veryl {
         let re_hiding_code_line = Regex::new("(?m)^# .*\n").unwrap();
         let re_hiding_code_indicator = Regex::new("(?m)^# ").unwrap();
         let mut in_code = false;
+        let mut in_playground = false;
         let mut total_success = true;
         book.for_each_mut(|item| {
             if let BookItem::Chapter(chapter) = item {
@@ -99,9 +104,13 @@ impl Preprocessor for Veryl {
                             if x.as_ref().starts_with("veryl") {
                                 in_code = true;
                             }
+                            if x.as_ref().starts_with("veryl,playground") {
+                                in_playground = true;
+                            }
                         }
                         Event::End(TagEnd::CodeBlock) => {
                             in_code = false;
+                            in_playground = false;
                         }
                         Event::Text(x) => {
                             if in_code {
@@ -110,12 +119,68 @@ impl Preprocessor for Veryl {
 
                                 chapter_skip = false;
                                 let x = re_hiding_code_indicator.replace_all(x.as_ref(), "");
+
                                 let ret = veryl_parser::Parser::parse(&x, &"");
+
                                 let (line, col) = lookup.get(range.start);
-                                if ret.is_err() {
-                                    eprintln!("veryl parse failed : {path}:{line}:{col}");
-                                    total_success = false;
-                                    chapter_success = false;
+                                match ret {
+                                    Err(err) => {
+                                        eprintln!("veryl parse failed : {path}:{line}:{col}");
+                                        eprintln!("{err}");
+                                        total_success = false;
+                                        chapter_success = false;
+                                    }
+                                    Ok(ret) if in_playground => {
+                                        let metadata: Metadata = toml::from_str(
+                                            &Metadata::create_default_toml(&"codeblock").unwrap(),
+                                        )
+                                        .unwrap();
+                                        let prj = &metadata.project.name;
+
+                                        let mut formatter = Formatter::new(&metadata);
+                                        formatter.format(&ret.veryl);
+
+                                        if x != formatter.as_str() {
+                                            eprintln!("veryl format failed : {path}:{line}:{col}");
+                                            let diff = TextDiff::from_lines(
+                                                x.as_ref(),
+                                                formatter.as_str(),
+                                            );
+                                            for change in diff.iter_all_changes() {
+                                                match change.tag() {
+                                                    ChangeTag::Delete => eprint!("-{}", change),
+                                                    ChangeTag::Insert => eprint!("+{}", change),
+                                                    ChangeTag::Equal => (),
+                                                }
+                                            }
+                                            total_success = false;
+                                            chapter_success = false;
+                                        }
+
+                                        let analyzer = Analyzer::new(&metadata);
+                                        analyzer.clear();
+
+                                        let mut errors = vec![];
+                                        errors.append(
+                                            &mut analyzer.analyze_pass1(&prj, &x, &"", &ret.veryl),
+                                        );
+                                        errors.append(
+                                            &mut analyzer.analyze_pass2(&prj, &x, &"", &ret.veryl),
+                                        );
+                                        errors.append(
+                                            &mut analyzer.analyze_pass3(&prj, &x, &"", &ret.veryl),
+                                        );
+
+                                        if !errors.is_empty() {
+                                            eprintln!("veryl analyze failed : {path}:{line}:{col}");
+                                            for err in errors {
+                                                eprintln!("{err}");
+                                            }
+                                            total_success = false;
+                                            chapter_success = false;
+                                        }
+                                    }
+                                    _ => (),
                                 }
                             }
                         }
@@ -123,9 +188,9 @@ impl Preprocessor for Veryl {
                     }
                 }
                 if chapter_skip {
-                    eprintln!("veryl parse skipped: {path}");
+                    eprintln!("veryl check skipped: {path}");
                 } else if chapter_success {
-                    eprintln!("veryl parse success: {path}");
+                    eprintln!("veryl check success: {path}");
                 }
                 for (code_block, replaced_code) in code_blocks {
                     chapter.content = chapter.content.replace(&code_block, &replaced_code);
@@ -136,7 +201,7 @@ impl Preprocessor for Veryl {
         if total_success {
             Ok(book)
         } else {
-            Err(Error::msg("veryl parse check failed!!!"))
+            Err(Error::msg("veryl check failed!!!"))
         }
     }
 

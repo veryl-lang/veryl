@@ -558,6 +558,10 @@ impl SymbolTable {
     pub fn get_assign_list(&self) -> Vec<Assign> {
         self.assign_list.clone()
     }
+
+    pub fn clear(&mut self) {
+        self.clone_from(&Self::new());
+    }
 }
 
 impl fmt::Display for SymbolTable {
@@ -894,6 +898,10 @@ pub fn add_assign(full_path: Vec<SymbolId>, position: &AssignPosition, partial: 
 
 pub fn get_assign_list() -> Vec<Assign> {
     SYMBOL_TABLE.with(|f| f.borrow_mut().get_assign_list())
+}
+
+pub fn clear() {
+    SYMBOL_TABLE.with(|f| f.borrow_mut().clear())
 }
 
 #[cfg(test)]
