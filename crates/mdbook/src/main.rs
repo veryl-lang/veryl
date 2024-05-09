@@ -132,7 +132,7 @@ impl Preprocessor for Veryl {
                                     }
                                     Ok(ret) if in_playground => {
                                         let metadata: Metadata = toml::from_str(
-                                            &Metadata::create_default_toml(&"codeblock").unwrap(),
+                                            &Metadata::create_default_toml("codeblock").unwrap(),
                                         )
                                         .unwrap();
                                         let prj = &metadata.project.name;
@@ -162,13 +162,13 @@ impl Preprocessor for Veryl {
 
                                         let mut errors = vec![];
                                         errors.append(
-                                            &mut analyzer.analyze_pass1(&prj, &x, &"", &ret.veryl),
+                                            &mut analyzer.analyze_pass1(prj, &x, "", &ret.veryl),
                                         );
                                         errors.append(
-                                            &mut analyzer.analyze_pass2(&prj, &x, &"", &ret.veryl),
+                                            &mut analyzer.analyze_pass2(prj, &x, "", &ret.veryl),
                                         );
                                         errors.append(
-                                            &mut analyzer.analyze_pass3(&prj, &x, &"", &ret.veryl),
+                                            &mut analyzer.analyze_pass3(prj, &x, "", &ret.veryl),
                                         );
 
                                         if !errors.is_empty() {
