@@ -59,8 +59,8 @@ With these features, Veryl provides powerful support for designers to efficientl
 pub module Delay #( // visibility control by `pub` keyword
     param WIDTH: u32 = 1, // trailing comma is allowed
 ) (
-    i_clk : input logic       ,
-    i_rst : input logic       ,
+    i_clk : input clock       ,
+    i_rst : input reset       ,
     i_data: input logic<WIDTH>,
     o_data: input logic<WIDTH>,
 ) {
