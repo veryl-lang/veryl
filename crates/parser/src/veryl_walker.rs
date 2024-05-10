@@ -1718,19 +1718,28 @@ pub trait VerylWalker {
     fn always_ff_declaration(&mut self, arg: &AlwaysFfDeclaration) {
         before!(self, always_ff_declaration, arg);
         self.always_ff(&arg.always_ff);
-        self.l_paren(&arg.l_paren);
-        self.always_ff_clock(&arg.always_ff_clock);
         if let Some(ref x) = arg.always_ff_declaration_opt {
-            self.comma(&x.comma);
-            self.always_ff_reset(&x.always_ff_reset);
+            self.alwayf_ff_event_list(&x.alwayf_ff_event_list);
         }
-        self.r_paren(&arg.r_paren);
         self.l_brace(&arg.l_brace);
         for x in &arg.always_ff_declaration_list {
             self.statement(&x.statement);
         }
         self.r_brace(&arg.r_brace);
         after!(self, always_ff_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'AlwayfFfEventList'
+    fn alwayf_ff_event_list(&mut self, arg: &AlwayfFfEventList) {
+        before!(self, alwayf_ff_event_list, arg);
+        self.l_paren(&arg.l_paren);
+        self.always_ff_clock(&arg.always_ff_clock);
+        if let Some(ref x) = arg.alwayf_ff_event_list_opt {
+            self.comma(&x.comma);
+            self.always_ff_reset(&x.always_ff_reset);
+        }
+        self.r_paren(&arg.r_paren);
+        after!(self, alwayf_ff_event_list, arg);
     }
 
     /// Semantic action for non-terminal 'AlwaysFfClock'

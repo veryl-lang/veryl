@@ -1,4 +1,24 @@
-module veryl_testcase_Module12 (
+module veryl_testcase_Module12_1 (
+    input logic i_clk,
+    input logic i_rst
+);
+    logic a;
+    logic b;
+
+    always_ff @ (posedge i_clk, negedge i_rst) begin
+        if (!i_rst) begin
+            a <= 0;
+        end else begin
+            a <= ~a;
+        end
+    end
+
+    always_ff @ (posedge i_clk) begin
+        b <= a;
+    end
+endmodule
+
+module veryl_testcase_Module12_2 (
     input logic i_clk   ,
     input logic i_clk_p ,
     input logic i_clk_n ,

@@ -67,7 +67,9 @@ pub module Delay #( // visibility control by `pub` keyword
     // unused variable which is not started with `_` are warned
     var _unused_variable: logic;
 
-    always_ff (i_clk, i_rst) {
+    // clock and reset signals can be omitted
+    // because Veryl can infer these signals
+    always_ff {
         // abstraction syntax of reset polarity and synchronicity
         if_reset {
             o_data = '0;

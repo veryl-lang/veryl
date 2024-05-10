@@ -29,6 +29,7 @@ pub struct CreateSymbolTable<'a> {
     text: &'a str,
     point: HandlerPoint,
     namespace: Namespace,
+    module_namspace_depth: usize,
     default_block: Option<StrId>,
     for_identifier: Option<Token>,
     anonymous_namespace: usize,
@@ -42,6 +43,8 @@ pub struct CreateSymbolTable<'a> {
     connects: HashMap<Token, Vec<Vec<StrId>>>,
     generic_parameters: Vec<SymbolId>,
     generic_references: Vec<GenericSymbolPath>,
+    default_clock_candidates: Vec<SymbolId>,
+    defualt_reset_candidates: Vec<SymbolId>,
 }
 
 #[derive(Clone)]
@@ -99,6 +102,78 @@ impl<'a> CreateSymbolTable<'a> {
             ));
         }
         id
+    }
+
+    fn is_default_clock_candidate(&self, kind: SymbolKind) -> bool {
+        if *self.affiniation.last().unwrap() != VariableAffiniation::Module
+            || self.namespace.depth() != self.module_namspace_depth
+        {
+            return false;
+        }
+
+        match kind {
+            SymbolKind::Port(x) => {
+                if let Some(clock) = x.r#type.clone() {
+                    match clock.kind {
+                        TypeKind::Clock | TypeKind::ClockPosedge | TypeKind::ClockNegedge => {
+                            clock.array.is_empty() && clock.width.is_empty()
+                        }
+                        _ => false,
+                    }
+                } else {
+                    false
+                }
+            }
+            SymbolKind::Variable(x) => {
+                let clock = &x.r#type;
+                match clock.kind {
+                    TypeKind::Clock | TypeKind::ClockPosedge | TypeKind::ClockNegedge => {
+                        clock.array.is_empty() && clock.width.is_empty()
+                    }
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
+    }
+
+    fn is_default_reset_candidate(&self, kind: SymbolKind) -> bool {
+        if *self.affiniation.last().unwrap() != VariableAffiniation::Module
+            || self.namespace.depth() != self.module_namspace_depth
+        {
+            return false;
+        }
+
+        match kind {
+            SymbolKind::Port(x) => {
+                if let Some(reset) = x.r#type.clone() {
+                    match reset.kind {
+                        TypeKind::Reset
+                        | TypeKind::ResetAsyncHigh
+                        | TypeKind::ResetAsyncLow
+                        | TypeKind::ResetSyncHigh
+                        | TypeKind::ResetSyncLow => {
+                            reset.array.is_empty() && reset.width.is_empty()
+                        }
+                        _ => false,
+                    }
+                } else {
+                    false
+                }
+            }
+            SymbolKind::Variable(x) => {
+                let reset = &x.r#type;
+                match reset.kind {
+                    TypeKind::Reset
+                    | TypeKind::ResetAsyncHigh
+                    | TypeKind::ResetAsyncLow
+                    | TypeKind::ResetSyncHigh
+                    | TypeKind::ResetSyncLow => reset.array.is_empty() && reset.width.is_empty(),
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
     }
 }
 
@@ -197,7 +272,16 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 affiniation,
             };
             let kind = SymbolKind::Variable(property);
-            self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
+
+            if let Some(id) =
+                self.insert_symbol(&arg.identifier.identifier_token.token, kind.clone(), false)
+            {
+                if self.is_default_clock_candidate(kind.clone()) {
+                    self.default_clock_candidates.push(id);
+                } else if self.is_default_reset_candidate(kind.clone()) {
+                    self.defualt_reset_candidates.push(id);
+                }
+            }
         }
         Ok(())
     }
@@ -235,7 +319,16 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 affiniation,
             };
             let kind = SymbolKind::Variable(property);
-            self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
+
+            if let Some(id) =
+                self.insert_symbol(&arg.identifier.identifier_token.token, kind.clone(), false)
+            {
+                if self.is_default_clock_candidate(kind.clone()) {
+                    self.default_clock_candidates.push(id);
+                } else if self.is_default_reset_candidate(kind.clone()) {
+                    self.defualt_reset_candidates.push(id);
+                }
+            }
         }
         Ok(())
     }
@@ -249,7 +342,16 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 affiniation,
             };
             let kind = SymbolKind::Variable(property);
-            self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
+
+            if let Some(id) =
+                self.insert_symbol(&arg.identifier.identifier_token.token, kind.clone(), false)
+            {
+                if self.is_default_clock_candidate(kind.clone()) {
+                    self.default_clock_candidates.push(id);
+                } else if self.is_default_reset_candidate(kind.clone()) {
+                    self.defualt_reset_candidates.push(id);
+                }
+            }
         }
         Ok(())
     }
@@ -541,7 +643,16 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 },
             };
             let kind = SymbolKind::Port(property);
-            self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
+
+            if let Some(id) =
+                self.insert_symbol(&arg.identifier.identifier_token.token, kind.clone(), false)
+            {
+                if self.is_default_clock_candidate(kind.clone()) {
+                    self.default_clock_candidates.push(id);
+                } else if self.is_default_reset_candidate(kind.clone()) {
+                    self.defualt_reset_candidates.push(id);
+                }
+            }
         }
         Ok(())
     }
@@ -603,13 +714,29 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             HandlerPoint::Before => {
                 self.namespace.push(name);
                 self.affiniation.push(VariableAffiniation::Module);
+                self.module_namspace_depth = self.namespace.depth();
             }
             HandlerPoint::After => {
                 self.namespace.pop();
                 self.affiniation.pop();
+                self.module_namspace_depth = 0;
 
                 let generic_parameters: Vec<_> = self.generic_parameters.drain(..).collect();
                 let generic_references: Vec<_> = self.generic_references.drain(..).collect();
+
+                let default_clock = if self.default_clock_candidates.len() == 1 {
+                    Some(self.default_clock_candidates[0])
+                } else {
+                    None
+                };
+                let default_reset = if self.defualt_reset_candidates.len() == 1 {
+                    Some(self.defualt_reset_candidates[0])
+                } else {
+                    None
+                };
+
+                self.default_clock_candidates.clear();
+                self.defualt_reset_candidates.clear();
 
                 // TODO as the same as generic_parameters
                 let mut parameters = Vec::new();
@@ -642,6 +769,8 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     generic_references,
                     parameters,
                     ports,
+                    default_clock,
+                    default_reset,
                 };
                 let public = arg.module_declaration_opt.is_some();
                 self.insert_symbol(
