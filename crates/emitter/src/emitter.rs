@@ -1557,6 +1557,7 @@ impl VerylWalker for Emitter {
                             test_name
                         );
                         self.token(&arg.hash.hash_token.replace(&text));
+                        self.newline();
                         self.attribute.push(AttributeType::Test);
                     }
                 }

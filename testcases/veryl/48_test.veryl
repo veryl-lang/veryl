@@ -30,3 +30,10 @@ module test3;
     always_comb a = 1;
 endmodule
 }}}
+
+#[test(test4)]
+module test4 {
+    initial {
+        $display("test4");
+    }
+}
