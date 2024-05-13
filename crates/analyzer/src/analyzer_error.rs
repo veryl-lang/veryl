@@ -197,7 +197,12 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(severity(Error), code(invalid_clock), help(""), url(""))]
+    #[diagnostic(
+        severity(Error),
+        code(invalid_clock),
+        help(""),
+        url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#invalid_clock")
+    )]
     #[error("#{identifier} can't be used as a clock because it is not 'clock' type nor a single bit signal")]
     InvalidClock {
         identifier: String,
@@ -207,7 +212,12 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(severity(Error), code(invalid_reset), help(""), url(""))]
+    #[diagnostic(
+        severity(Error),
+        code(invalid_reset),
+        help(""),
+        url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#invalid_reset")
+    )]
     #[error("#{identifier} can't be used as a reset because it is not 'reset' type nor a single bit signal")]
     InvalidReset {
         identifier: String,
@@ -320,7 +330,7 @@ pub enum AnalyzerError {
         severity(Error),
         code(missing_clock_signal),
         help("add clock port"),
-        url("")
+        url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#missing_clock_signal")
     )]
     #[error("clock signal is required for always_ff statement")]
     MissingClockSignal {
