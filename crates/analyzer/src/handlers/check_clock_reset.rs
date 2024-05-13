@@ -172,6 +172,7 @@ impl<'a> VerylGrammarTrait for CheckClockReset<'a> {
                             .token;
                         self.errors.push(AnalyzerError::invalid_clock(
                             &token.to_string(),
+                            self.text,
                             &arg.hierarchical_identifier.as_ref().into(),
                         ));
                     }
@@ -223,6 +224,7 @@ impl<'a> VerylGrammarTrait for CheckClockReset<'a> {
                             .token;
                         self.errors.push(AnalyzerError::invalid_reset(
                             &token.to_string(),
+                            self.text,
                             &arg.hierarchical_identifier.as_ref().into(),
                         ));
                     }

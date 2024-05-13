@@ -814,18 +814,18 @@ impl AnalyzerError {
         }
     }
 
-    pub fn invalid_clock(identifier: &str, token: &TokenRange) -> Self {
+    pub fn invalid_clock(identifier: &str, source: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidClock {
             identifier: identifier.into(),
-            input: AnalyzerError::named_source(identifier, token),
+            input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
         }
     }
 
-    pub fn invalid_reset(identifier: &str, token: &TokenRange) -> Self {
+    pub fn invalid_reset(identifier: &str, source: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidReset {
             identifier: identifier.into(),
-            input: AnalyzerError::named_source(identifier, token),
+            input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
         }
     }
