@@ -8,9 +8,9 @@ pub module delay #(
     param TYPE: type = logic<WIDTH>,
 ) (
     /// Clock
-    i_clk: input logic,
+    i_clk: input clock,
     /// Reset
-    i_rst: input logic,
+    i_rst: input reset,
     /// Input
     i_d: input TYPE,
     /// Output

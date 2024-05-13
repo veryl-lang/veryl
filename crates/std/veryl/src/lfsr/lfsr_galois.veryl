@@ -73,7 +73,7 @@ pub module lfsr_galois #(
 
 ) (
     /// Clock
-    i_clk: input logic,
+    i_clk: input clock,
     /// Enable - LFSR shifts only when enabled.  Active high.
     i_en: input logic,
     /// Flag to set value of LFSR.  Active High.

@@ -14,9 +14,9 @@ pub module counter #(
     local COUNT: type = logic<WIDTH>,
 ) (
     /// Clock
-    i_clk: input logic,
+    i_clk: input clock,
     /// Reset
-    i_rst: input logic,
+    i_rst: input reset,
     /// Clear counter
     i_clear: input logic,
     /// Set counter to a value
