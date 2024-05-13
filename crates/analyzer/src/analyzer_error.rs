@@ -318,6 +318,20 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(missing_clock_signal),
+        help("add clock port"),
+        url("")
+    )]
+    #[error("clock signal is required for always_ff statement")]
+    MissingClockSignal {
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(missing_reset_signal),
         help("add reset port"),
         url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#missing_reset_signal")
@@ -859,6 +873,13 @@ impl AnalyzerError {
             name: name.to_string(),
             expected: expected.to_string(),
             actual: actual.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn missing_clock_signal(source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::MissingClockSignal {
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
         }

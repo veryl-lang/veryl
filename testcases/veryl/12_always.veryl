@@ -1,4 +1,24 @@
-module Module12 (
+module Module12_1 (
+    i_clk: input clock,
+    i_rst: input reset,
+) {
+    var a: logic;
+    var b: logic;
+
+    always_ff {
+        if_reset {
+            a = 0;
+        } else {
+            a = ~a;
+        }
+    }
+
+    always_ff {
+        b = a;
+    }
+}
+
+module Module12_2 (
     i_clk   : input clock           ,
     i_clk_p : input clock_posedge   ,
     i_clk_n : input clock_negedge   ,

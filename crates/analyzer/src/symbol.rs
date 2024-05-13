@@ -768,6 +768,8 @@ pub struct ModuleProperty {
     pub generic_references: Vec<GenericSymbolPath>,
     pub parameters: Vec<Parameter>,
     pub ports: Vec<Port>,
+    pub default_clock: Option<SymbolId>,
+    pub default_reset: Option<SymbolId>,
 }
 
 #[derive(Debug, Clone)]

@@ -877,15 +877,9 @@ impl VerylWalker for Formatter {
     fn always_ff_declaration(&mut self, arg: &AlwaysFfDeclaration) {
         self.always_ff(&arg.always_ff);
         self.space(1);
-        self.l_paren(&arg.l_paren);
-        self.always_ff_clock(&arg.always_ff_clock);
         if let Some(ref x) = arg.always_ff_declaration_opt {
-            self.comma(&x.comma);
-            self.space(1);
-            self.always_ff_reset(&x.always_ff_reset);
+            self.alwayf_ff_event_list(&x.alwayf_ff_event_list);
         }
-        self.r_paren(&arg.r_paren);
-        self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
         for (i, x) in arg.always_ff_declaration_list.iter().enumerate() {
             self.newline_list(i);
@@ -893,6 +887,19 @@ impl VerylWalker for Formatter {
         }
         self.newline_list_post(arg.always_ff_declaration_list.is_empty());
         self.r_brace(&arg.r_brace);
+    }
+
+    /// Semantic action for non-terminal 'AlwayfFfEventList'
+    fn alwayf_ff_event_list(&mut self, arg: &AlwayfFfEventList) {
+        self.l_paren(&arg.l_paren);
+        self.always_ff_clock(&arg.always_ff_clock);
+        if let Some(ref x) = arg.alwayf_ff_event_list_opt {
+            self.comma(&x.comma);
+            self.space(1);
+            self.always_ff_reset(&x.always_ff_reset);
+        }
+        self.r_paren(&arg.r_paren);
+        self.space(1);
     }
 
     /// Semantic action for non-terminal 'AlwaysFfClock'

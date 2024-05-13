@@ -569,7 +569,9 @@ LocalDeclaration: Local Identifier Colon ( ArrayType Equ Expression | Type Equ T
 
 TypeDefDeclaration: Type Identifier Equ ArrayType Semicolon;
 
-AlwaysFfDeclaration: AlwaysFf LParen AlwaysFfClock [ Comma AlwaysFfReset ] RParen LBrace { Statement } RBrace;
+AlwaysFfDeclaration: AlwaysFf [ AlwayfFfEventList ] LBrace { Statement } RBrace;
+
+AlwayfFfEventList: LParen AlwaysFfClock [ Comma AlwaysFfReset ] RParen;
 
 AlwaysFfClock: HierarchicalIdentifier;
 

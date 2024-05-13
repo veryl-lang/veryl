@@ -689,13 +689,189 @@ fn missing_port() {
 }
 
 #[test]
+fn missing_clock_signal() {
+    let code = r#"
+    module ModuleA (
+        clk: input clock
+    ){
+        always_ff {}
+        always_ff (clk) {}
+        for i in 0..1 : g {
+            always_ff {}
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleB (
+        clk: input logic
+    ){
+        always_ff {}
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MissingClockSignal { .. }
+    ));
+
+    let code = r#"
+    module ModuleC (
+        clk_0: input clock,
+        clk_1: input clock
+    ){
+        always_ff {}
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MissingClockSignal { .. }
+    ));
+
+    let code = r#"
+    module ModuleD (
+        clk: input clock<2>
+    ){
+        always_ff {}
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MissingClockSignal { .. }
+    ));
+
+    let code = r#"
+    module ModuleE (){
+        for i in 0..1 : g {
+            let _clk: clock = 0;
+            always_ff {}
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MissingClockSignal { .. }
+    ));
+}
+
+#[test]
 fn missing_reset_signal() {
     let code = r#"
     module ModuleA (
         clk: input clock,
+        rst: input reset
     ) {
-        always_ff(clk) {
+        always_ff {
             if_reset {}
+        }
+        always_ff (clk) {
+            if_reset {}
+        }
+        always_ff (clk, rst) {
+            if_reset {}
+        }
+        for i in 0..1 : g {
+            always_ff {
+                if_reset {}
+            }
+            always_ff (clk) {
+                if_reset {}
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleB (
+        clk: input clock,
+        rst: input logic
+    ) {
+        always_ff {
+            if_reset {}
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MissingResetSignal { .. }
+    ));
+
+    let code = r#"
+    module ModuleC (
+        clk: input clock,
+        rst: input logic
+    ) {
+        always_ff (clk) {
+            if_reset {}
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MissingResetSignal { .. }
+    ));
+
+    let code = r#"
+    module ModuleD (
+        clk:   input clock,
+        rst_0: input reset,
+        rst_1: input reset
+    ) {
+        always_ff {
+            if_reset {}
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MissingResetSignal { .. }
+    ));
+
+    let code = r#"
+    module ModuleE (
+        clk: input clock,
+        rst: input reset<2>
+    ) {
+        always_ff {
+            if_reset {}
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MissingResetSignal { .. }
+    ));
+
+    let code = r#"
+    module ModuleF (
+        clk: input clock
+    ) {
+        for i in 0..1 : g {
+            let _rst: reset = 0;
+            always_ff {
+                if_reset {}
+            }
         }
     }
     "#;
