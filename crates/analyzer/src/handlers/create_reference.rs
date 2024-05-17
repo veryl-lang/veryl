@@ -1,12 +1,12 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol::SymbolKind;
-use crate::symbol_path::{GenericSymbolPath, SymbolPath};
+use crate::symbol::{DocComment, GenericInstanceProperty, Symbol, SymbolKind};
+use crate::symbol_path::{GenericSymbol, GenericSymbolPath, SymbolPath};
 use crate::symbol_table::{self, ResolveError, ResolveErrorCause};
 use veryl_parser::resource_table::TokenId;
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::TokenRange;
+use veryl_parser::veryl_token::{Token, TokenRange};
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
@@ -66,24 +66,40 @@ impl<'a> CreateReference<'a> {
                     symbol_table::add_reference(symbol.found.id, &path.paths[0].base);
 
                     // Check number of arguments
-                    let params = symbol.found.generic_parameters().len();
-                    let args = path.paths[i].arguments.len();
-                    if params != args {
+                    let params = symbol.found.generic_parameters();
+                    let n_args = path.paths[i].arguments.len();
+                    let match_artiy = if params.len() > n_args {
+                        params[n_args].1.is_some()
+                    } else {
+                        params.len() == n_args
+                    };
+
+                    if !match_artiy {
                         self.errors.push(AnalyzerError::mismatch_generics_arity(
                             &path.paths[i].base.to_string(),
-                            params,
-                            args,
+                            params.len(),
+                            n_args,
                             self.text,
                             &path.range,
                         ));
-                    } else if let Some((token, new_symbol)) =
-                        path.get_generic_instance(i, &symbol.found)
+                        break;
+                    }
+
+                    let mut path = path.paths[i].clone();
+
+                    for param in params.iter().skip(n_args) {
+                        //  apply default value
+                        path.arguments.push(param.1.as_ref().unwrap().clone());
+                    }
+
+                    if let Some((token, new_symbol)) =
+                        self.get_generic_instance(&symbol.found, &path)
                     {
                         if let Some(ref x) = symbol_table::insert(&token, new_symbol) {
                             symbol_table::add_generic_instance(symbol.found.id, *x);
                         }
 
-                        let table = symbol.found.generic_table(&path.paths[i].arguments);
+                        let table = symbol.found.generic_table(&path.arguments);
                         let mut references = symbol.found.generic_references();
                         for path in &mut references {
                             path.apply_map(&table);
@@ -101,6 +117,29 @@ impl<'a> CreateReference<'a> {
                     self.push_resolve_error(err, &path.range);
                 }
             }
+        }
+    }
+
+    fn get_generic_instance(&self, base: &Symbol, path: &GenericSymbol) -> Option<(Token, Symbol)> {
+        if path.arguments.is_empty() {
+            None
+        } else {
+            let property = GenericInstanceProperty {
+                base: base.id,
+                arguments: path.arguments.clone(),
+            };
+            let kind = SymbolKind::GenericInstance(property);
+            let token = &path.base;
+            let token = Token::new(
+                &path.mangled().to_string(),
+                token.line,
+                token.column,
+                token.length,
+                token.pos,
+                token.source,
+            );
+            let symbol = Symbol::new(&token, kind, &base.namespace, false, DocComment::default());
+            Some((token, symbol))
         }
     }
 }

@@ -7,11 +7,11 @@ use crate::namespace_table;
 use crate::symbol::Direction as SymDirection;
 use crate::symbol::Type as SymType;
 use crate::symbol::{
-    DocComment, EnumMemberProperty, EnumProperty, FunctionProperty, InstanceProperty,
-    InterfaceProperty, ModportMemberProperty, ModportProperty, ModuleProperty, PackageProperty,
-    ParameterProperty, ParameterScope, ParameterValue, PortProperty, StructMemberProperty,
-    StructProperty, Symbol, SymbolId, SymbolKind, TypeDefProperty, TypeKind, UnionMemberProperty,
-    UnionProperty, VariableAffiniation, VariableProperty,
+    DocComment, EnumMemberProperty, EnumProperty, FunctionProperty, GenericParameterProperty,
+    InstanceProperty, InterfaceProperty, ModportMemberProperty, ModportProperty, ModuleProperty,
+    PackageProperty, ParameterProperty, ParameterScope, ParameterValue, PortProperty,
+    StructMemberProperty, StructProperty, Symbol, SymbolId, SymbolKind, TypeDefProperty, TypeKind,
+    UnionMemberProperty, UnionProperty, VariableAffiniation, VariableProperty,
 };
 use crate::symbol_path::{GenericSymbolPath, SymbolPath};
 use crate::symbol_table;
@@ -173,6 +173,18 @@ impl<'a> CreateSymbolTable<'a> {
                 }
             }
             _ => false,
+        }
+    }
+
+    fn push_generic_parameter_item(
+        &mut self,
+        item: &WithGenericParameterItem,
+        default_value: Option<GenericSymbolPath>,
+    ) {
+        let property = GenericParameterProperty { default_value };
+        let kind = SymbolKind::GenericParameter(property);
+        if let Some(id) = self.insert_symbol(&item.identifier.identifier_token.token, kind, false) {
+            self.generic_parameters.push(id);
         }
     }
 }
@@ -608,16 +620,57 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         Ok(())
     }
 
-    fn with_generic_parameter_item(
+    fn with_generic_parameter_list(
         &mut self,
-        arg: &WithGenericParameterItem,
+        arg: &WithGenericParameterList,
     ) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let kind = SymbolKind::GenericParameter;
-            if let Some(id) =
-                self.insert_symbol(&arg.identifier.identifier_token.token, kind, false)
-            {
-                self.generic_parameters.push(id);
+            let default_value: Option<GenericSymbolPath> =
+                if let Some(x) = &arg.with_generic_parameter_list_opt {
+                    match &*x.with_generic_argument_item {
+                        WithGenericArgumentItem::ScopedIdentifier(x) => {
+                            Some(x.scoped_identifier.as_ref().into())
+                        }
+                        WithGenericArgumentItem::Number(x) => Some(x.number.as_ref().into()),
+                    }
+                } else {
+                    None
+                };
+
+            if arg.with_generic_parameter_list_list.is_empty() {
+                self.push_generic_parameter_item(
+                    &arg.with_generic_parameter_item,
+                    default_value.clone(),
+                );
+            } else {
+                self.push_generic_parameter_item(&arg.with_generic_parameter_item, None);
+            }
+
+            for i in 0..arg.with_generic_parameter_list_list.len() {
+                if (i + 1) == arg.with_generic_parameter_list_list.len() {
+                    self.push_generic_parameter_item(
+                        &arg.with_generic_parameter_list_list[i].with_generic_parameter_item,
+                        default_value.clone(),
+                    );
+                } else {
+                    self.push_generic_parameter_item(
+                        &arg.with_generic_parameter_list_list[i].with_generic_parameter_item,
+                        None,
+                    );
+                }
+            }
+
+            if let Some(x) = &arg.with_generic_parameter_list_opt {
+                for x in &x.with_generic_parameter_list_opt_list {
+                    let default_value: Option<GenericSymbolPath> =
+                        match &*x.with_generic_argument_item {
+                            WithGenericArgumentItem::ScopedIdentifier(x) => {
+                                Some(x.scoped_identifier.as_ref().into())
+                            }
+                            WithGenericArgumentItem::Number(x) => Some(x.number.as_ref().into()),
+                        };
+                    self.push_generic_parameter_item(&x.with_generic_parameter_item, default_value);
+                }
             }
         }
         Ok(())

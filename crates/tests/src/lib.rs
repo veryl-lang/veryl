@@ -47,12 +47,15 @@ mod analyzer {
         let prj = &metadata.project.name;
         let analyzer = Analyzer::new(&metadata);
         let errors = analyzer.analyze_pass1(&prj, &input, &file, &ret.veryl);
+        dbg!(&errors);
         assert!(errors.is_empty());
 
         let errors = analyzer.analyze_pass2(&prj, &input, &file, &ret.veryl);
+        dbg!(&errors);
         assert!(errors.is_empty());
 
         let errors = analyzer.analyze_pass3(&prj, &input, &file, &ret.veryl);
+        dbg!(&errors);
         assert!(errors.is_empty());
     }
 

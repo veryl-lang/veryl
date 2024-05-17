@@ -47,6 +47,20 @@ impl Namespace {
         }
     }
 
+    pub fn is_subset(&self, x: &Namespace) -> bool {
+        if self.paths.len() < x.paths.len() {
+            return false;
+        } else {
+            for (i, x) in x.paths.iter().enumerate() {
+                if self.paths[i] != *x {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
+
     pub fn replace(&self, table: &HashMap<StrId, StrId>) -> Self {
         let mut paths = Vec::new();
         for x in &self.paths {

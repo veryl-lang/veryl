@@ -170,47 +170,60 @@ impl Symbol {
         let mut ret = HashMap::new();
 
         for (i, arg) in arguments.iter().enumerate() {
-            if let Some(p) = generic_parameters.get(i) {
+            if let Some((p, _)) = generic_parameters.get(i) {
                 ret.insert(*p, arg.clone());
             }
+        }
+
+        for param in generic_parameters.iter().skip(arguments.len()) {
+            ret.insert(param.0, param.1.as_ref().unwrap().clone());
         }
 
         ret
     }
 
-    pub fn generic_parameters(&self) -> Vec<StrId> {
+    pub fn generic_parameters(&self) -> Vec<(StrId, Option<GenericSymbolPath>)> {
         match &self.kind {
             SymbolKind::Function(x) => x
                 .generic_parameters
                 .iter()
-                .map(|x| symbol_table::get(*x).unwrap().token.text)
+                .map(|x| self.get_generic_parameter(*x))
                 .collect(),
             SymbolKind::Module(x) => x
                 .generic_parameters
                 .iter()
-                .map(|x| symbol_table::get(*x).unwrap().token.text)
+                .map(|x| self.get_generic_parameter(*x))
                 .collect(),
             SymbolKind::Interface(x) => x
                 .generic_parameters
                 .iter()
-                .map(|x| symbol_table::get(*x).unwrap().token.text)
+                .map(|x| self.get_generic_parameter(*x))
                 .collect(),
             SymbolKind::Package(x) => x
                 .generic_parameters
                 .iter()
-                .map(|x| symbol_table::get(*x).unwrap().token.text)
+                .map(|x| self.get_generic_parameter(*x))
                 .collect(),
             SymbolKind::Struct(x) => x
                 .generic_parameters
                 .iter()
-                .map(|x| symbol_table::get(*x).unwrap().token.text)
+                .map(|x| self.get_generic_parameter(*x))
                 .collect(),
             SymbolKind::Union(x) => x
                 .generic_parameters
                 .iter()
-                .map(|x| symbol_table::get(*x).unwrap().token.text)
+                .map(|x| self.get_generic_parameter(*x))
                 .collect(),
             _ => Vec::new(),
+        }
+    }
+
+    fn get_generic_parameter(&self, id: SymbolId) -> (StrId, Option<GenericSymbolPath>) {
+        let symbol = symbol_table::get(id).unwrap();
+        if let SymbolKind::GenericParameter(x) = symbol.kind {
+            (symbol.token.text, x.default_value)
+        } else {
+            unreachable!()
         }
     }
 
@@ -251,7 +264,7 @@ pub enum SymbolKind {
     SystemVerilog,
     Namespace,
     SystemFunction,
-    GenericParameter,
+    GenericParameter(GenericParameterProperty),
     GenericInstance(GenericInstanceProperty),
 }
 
@@ -280,7 +293,7 @@ impl SymbolKind {
             SymbolKind::SystemVerilog => "systemverilog item".to_string(),
             SymbolKind::Namespace => "namespace".to_string(),
             SymbolKind::SystemFunction => "system function".to_string(),
-            SymbolKind::GenericParameter => "generic parameter".to_string(),
+            SymbolKind::GenericParameter(_) => "generic parameter".to_string(),
             SymbolKind::GenericInstance(_) => "generic instance".to_string(),
         }
     }
@@ -381,7 +394,7 @@ impl fmt::Display for SymbolKind {
             SymbolKind::SystemVerilog => "systemverilog item".to_string(),
             SymbolKind::Namespace => "namespace".to_string(),
             SymbolKind::SystemFunction => "system function".to_string(),
-            SymbolKind::GenericParameter => "generic parameter".to_string(),
+            SymbolKind::GenericParameter(_) => "generic parameter".to_string(),
             SymbolKind::GenericInstance(_) => "generic instance".to_string(),
         };
         text.fmt(f)
@@ -851,6 +864,11 @@ pub struct ModportProperty {
 #[derive(Debug, Clone)]
 pub struct ModportMemberProperty {
     pub direction: Direction,
+}
+
+#[derive(Debug, Clone)]
+pub struct GenericParameterProperty {
+    pub default_value: Option<GenericSymbolPath>,
 }
 
 #[derive(Debug, Clone)]

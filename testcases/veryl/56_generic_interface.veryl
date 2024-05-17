@@ -1,10 +1,16 @@
 module Module56 {
     inst u0: Interface56A::<Package56A>;
     inst u1: Interface56A::<Package56B>;
+    inst u2: Interface56B::<Package56A>;
+    inst u3: Interface56B::<>;
 }
 
 interface Interface56A::<T> {
     var _a: logic<T::X>;
+}
+
+interface Interface56B::<T = Package56B> {
+    var _b: logic<T::X>;
 }
 
 package Package56A {

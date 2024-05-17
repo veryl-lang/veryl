@@ -3,6 +3,8 @@ module Module55 {
     inst u1: Module55A::<Module55C>;
     inst u2: Module55E::<Module55C>;
     inst u3: Module55E::<Module55D>;
+    inst u4: Module55F::<Module55C>;
+    inst u5: Module55F::<>;
 }
 
 module Module55A::<T> {
@@ -17,4 +19,8 @@ module Module55D {}
 
 module Module55E::<T> {
     inst u: Module55A::<T>;
+}
+
+module Module55F::<T = Module55B> {
+    inst u: T;
 }

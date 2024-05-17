@@ -1,8 +1,14 @@
 module Module57 {
-    local A: u32 = Package57::<1>::X;
-    local B: u64 = Package57::<2>::X;
+    local A: u32 = Package57A::<1>::X;
+    local B: u64 = Package57A::<2>::X;
+    local C: u32 = Package57B::<3>::X;
+    local D: u64 = Package57B::<>::X;
 }
 
-package Package57::<T> {
+package Package57A::<T> {
+    local X: u32 = T;
+}
+
+package Package57B::<T = 4> {
     local X: u32 = T;
 }

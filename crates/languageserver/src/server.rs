@@ -328,7 +328,7 @@ impl Server {
                     VerylSymbolKind::SystemVerilog => SymbolKind::NAMESPACE,
                     VerylSymbolKind::Namespace => SymbolKind::NAMESPACE,
                     VerylSymbolKind::SystemFunction => SymbolKind::FUNCTION,
-                    VerylSymbolKind::GenericParameter => SymbolKind::TYPE_PARAMETER,
+                    VerylSymbolKind::GenericParameter(_) => SymbolKind::TYPE_PARAMETER,
                     VerylSymbolKind::GenericInstance(_) => SymbolKind::MODULE,
                 };
                 let location = to_location(&symbol.token);
