@@ -82,7 +82,7 @@ impl<'a> CreateReference<'a> {
                             self.text,
                             &path.range,
                         ));
-                        break;
+                        continue;
                     }
 
                     let mut path = path.paths[i].clone();
