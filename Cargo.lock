@@ -2908,7 +2908,7 @@ dependencies = [
  "num_cpus",
  "owo-colors 4.0.0",
  "parol-macros",
- "parol_runtime",
+ "parol_runtime 0.21.0",
  "petgraph",
  "rand",
  "rand_regex",
@@ -2937,6 +2937,27 @@ name = "parol_runtime"
 version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7ec386ba6b9516eba896069e6c8cb989fc8754e87c324497d7fa41ec5b8a178"
+dependencies = [
+ "anyhow",
+ "codespan-reporting",
+ "collection_literals",
+ "derive_builder",
+ "function_name",
+ "log",
+ "once_cell",
+ "parol-macros",
+ "petgraph",
+ "regex-automata",
+ "syntree",
+ "syntree_layout",
+ "thiserror",
+]
+
+[[package]]
+name = "parol_runtime"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43937f8fbc23ff97b3157d619ee5a5496f5efbcd3b093bfc050eab8dac51deba"
 dependencies = [
  "anyhow",
  "codespan-reporting",
@@ -3018,9 +3039,9 @@ dependencies = [
 
 [[package]]
 name = "petgraph"
-version = "0.6.4"
+version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1d3afd2628e69da2be385eb6f2fd57c8ac7977ceeff6dc166ff1657b0e386a9"
+checksum = "b4c5cc86750666a3ed20bdaf5ca2a0344f9c67674cae0515bec2da16fbaa47db"
 dependencies = [
  "fixedbitset",
  "indexmap 2.2.6",
@@ -4645,7 +4666,7 @@ dependencies = [
  "miette",
  "once_cell",
  "parol",
- "parol_runtime",
+ "parol_runtime 0.22.0",
  "paste",
  "regex",
  "thiserror",
