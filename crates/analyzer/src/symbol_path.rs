@@ -1,6 +1,6 @@
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol::SymbolKind;
+use crate::symbol::{DocComment, GenericInstanceProperty, Symbol, SymbolKind};
 use crate::symbol_table;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -211,6 +211,29 @@ impl GenericSymbol {
                 }
             }
             resource_table::insert_str(&text)
+        }
+    }
+
+    pub fn get_generic_instance(&self, base: &Symbol) -> Option<(Token, Symbol)> {
+        if self.arguments.is_empty() {
+            None
+        } else {
+            let property = GenericInstanceProperty {
+                base: base.id,
+                arguments: self.arguments.clone(),
+            };
+            let kind = SymbolKind::GenericInstance(property);
+            let token = &self.base;
+            let token = Token::new(
+                &self.mangled().to_string(),
+                token.line,
+                token.column,
+                token.length,
+                token.pos,
+                token.source,
+            );
+            let symbol = Symbol::new(&token, kind, &base.namespace, false, DocComment::default());
+            Some((token, symbol))
         }
     }
 }

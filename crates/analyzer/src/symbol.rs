@@ -183,47 +183,47 @@ impl Symbol {
     }
 
     pub fn generic_parameters(&self) -> Vec<(StrId, Option<GenericSymbolPath>)> {
+        fn get_generic_parameter(id: SymbolId) -> (StrId, Option<GenericSymbolPath>) {
+            let symbol = symbol_table::get(id).unwrap();
+            if let SymbolKind::GenericParameter(x) = symbol.kind {
+                (symbol.token.text, x.default_value)
+            } else {
+                unreachable!()
+            }
+        }
+
         match &self.kind {
             SymbolKind::Function(x) => x
                 .generic_parameters
                 .iter()
-                .map(|x| self.get_generic_parameter(*x))
+                .map(|x| get_generic_parameter(*x))
                 .collect(),
             SymbolKind::Module(x) => x
                 .generic_parameters
                 .iter()
-                .map(|x| self.get_generic_parameter(*x))
+                .map(|x| get_generic_parameter(*x))
                 .collect(),
             SymbolKind::Interface(x) => x
                 .generic_parameters
                 .iter()
-                .map(|x| self.get_generic_parameter(*x))
+                .map(|x| get_generic_parameter(*x))
                 .collect(),
             SymbolKind::Package(x) => x
                 .generic_parameters
                 .iter()
-                .map(|x| self.get_generic_parameter(*x))
+                .map(|x| get_generic_parameter(*x))
                 .collect(),
             SymbolKind::Struct(x) => x
                 .generic_parameters
                 .iter()
-                .map(|x| self.get_generic_parameter(*x))
+                .map(|x| get_generic_parameter(*x))
                 .collect(),
             SymbolKind::Union(x) => x
                 .generic_parameters
                 .iter()
-                .map(|x| self.get_generic_parameter(*x))
+                .map(|x| get_generic_parameter(*x))
                 .collect(),
             _ => Vec::new(),
-        }
-    }
-
-    fn get_generic_parameter(&self, id: SymbolId) -> (StrId, Option<GenericSymbolPath>) {
-        let symbol = symbol_table::get(id).unwrap();
-        if let SymbolKind::GenericParameter(x) = symbol.kind {
-            (symbol.token.text, x.default_value)
-        } else {
-            unreachable!()
         }
     }
 

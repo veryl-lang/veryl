@@ -3122,7 +3122,7 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
         | SymbolKind::Union(_)
         | SymbolKind::TypeDef(_)
         | SymbolKind::Enum(_) => {
-            let visible = namespace.is_subset(&symbol.namespace)
+            let visible = namespace.included(&symbol.namespace)
                 || symbol.imported.iter().any(|x| *x == namespace);
             if visible & !context.in_import {
                 ret.push_str(&symbol.token.to_string());
@@ -3173,7 +3173,7 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
         //}
         SymbolKind::GenericInstance(x) => {
             let base = symbol_table::get(x.base).unwrap();
-            let visible = namespace.is_subset(&base.namespace)
+            let visible = namespace.included(&base.namespace)
                 || base.imported.iter().any(|x| *x == namespace);
             let top_level = matches!(
                 base.kind,

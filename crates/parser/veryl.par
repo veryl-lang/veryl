@@ -649,11 +649,9 @@ WithParameterItem: ( Param | Local ) Identifier Colon ( ArrayType Equ Expression
 
 WithGenericParameter: ColonColonLAngle WithGenericParameterList RAngle;
 
-WithGenericParameterList:
-      WithGenericParameterItem { Comma WithGenericParameterItem }
-            [ Equ WithGenericArgumentItem { Comma WithGenericParameterItem Equ WithGenericArgumentItem } ] [ Comma ];
+WithGenericParameterList: WithGenericParameterItem { Comma WithGenericParameterItem } [ Comma ];
 
-WithGenericParameterItem: Identifier;
+WithGenericParameterItem: Identifier [ Equ WithGenericArgumentItem ];
 
 // ----------------------------------------------------------------------------
 // WithGenericArgument

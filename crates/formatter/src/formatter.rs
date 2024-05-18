@@ -1367,21 +1367,18 @@ impl VerylWalker for Formatter {
             self.with_generic_parameter_item(&x.with_generic_parameter_item);
         }
         if let Some(ref x) = arg.with_generic_parameter_list_opt {
+            self.comma(&x.comma);
+        }
+    }
+
+    /// Semantic action for non-terminal 'WithGenericParameterItem'
+    fn with_generic_parameter_item(&mut self, arg: &WithGenericParameterItem) {
+        self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.with_generic_parameter_item_opt {
             self.space(1);
             self.equ(&x.equ);
             self.space(1);
             self.with_generic_argument_item(&x.with_generic_argument_item);
-            for x in &x.with_generic_parameter_list_opt_list {
-                self.comma(&x.comma);
-                self.with_generic_argument_item(&x.with_generic_argument_item);
-                self.space(1);
-                self.equ(&x.equ);
-                self.space(1);
-                self.with_generic_argument_item(&x.with_generic_argument_item);
-            }
-        }
-        if let Some(ref x) = arg.with_generic_parameter_list_opt0 {
-            self.comma(&x.comma);
         }
     }
 

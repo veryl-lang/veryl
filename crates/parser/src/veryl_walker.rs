@@ -2187,16 +2187,6 @@ pub trait VerylWalker {
             self.with_generic_parameter_item(&x.with_generic_parameter_item);
         }
         if let Some(ref x) = arg.with_generic_parameter_list_opt {
-            self.equ(&x.equ);
-            self.with_generic_argument_item(&x.with_generic_argument_item);
-            for x in &x.with_generic_parameter_list_opt_list {
-                self.comma(&x.comma);
-                self.with_generic_parameter_item(&x.with_generic_parameter_item);
-                self.equ(&x.equ);
-                self.with_generic_argument_item(&x.with_generic_argument_item);
-            }
-        }
-        if let Some(ref x) = arg.with_generic_parameter_list_opt0 {
             self.comma(&x.comma);
         }
         after!(self, with_generic_parameter_list, arg);
@@ -2206,6 +2196,10 @@ pub trait VerylWalker {
     fn with_generic_parameter_item(&mut self, arg: &WithGenericParameterItem) {
         before!(self, with_generic_parameter_item, arg);
         self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.with_generic_parameter_item_opt {
+            self.equ(&x.equ);
+            self.with_generic_argument_item(&x.with_generic_argument_item);
+        }
         after!(self, with_generic_parameter_item, arg);
     }
 

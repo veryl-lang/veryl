@@ -42,6 +42,7 @@ pub struct CreateSymbolTable<'a> {
     connect_targets: Vec<Vec<StrId>>,
     connects: HashMap<Token, Vec<Vec<StrId>>>,
     generic_parameters: Vec<SymbolId>,
+    needs_default_generic_argument: bool,
     generic_references: Vec<GenericSymbolPath>,
     default_clock_candidates: Vec<SymbolId>,
     defualt_reset_candidates: Vec<SymbolId>,
@@ -173,18 +174,6 @@ impl<'a> CreateSymbolTable<'a> {
                 }
             }
             _ => false,
-        }
-    }
-
-    fn push_generic_parameter_item(
-        &mut self,
-        item: &WithGenericParameterItem,
-        default_value: Option<GenericSymbolPath>,
-    ) {
-        let property = GenericParameterProperty { default_value };
-        let kind = SymbolKind::GenericParameter(property);
-        if let Some(id) = self.insert_symbol(&item.identifier.identifier_token.token, kind, false) {
-            self.generic_parameters.push(id);
         }
     }
 }
@@ -622,11 +611,22 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
     fn with_generic_parameter_list(
         &mut self,
-        arg: &WithGenericParameterList,
+        _arg: &WithGenericParameterList,
+    ) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            self.needs_default_generic_argument = false;
+        }
+        Ok(())
+    }
+
+    fn with_generic_parameter_item(
+        &mut self,
+        arg: &WithGenericParameterItem,
     ) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let default_value: Option<GenericSymbolPath> =
-                if let Some(x) = &arg.with_generic_parameter_list_opt {
+                if let Some(ref x) = arg.with_generic_parameter_item_opt {
+                    self.needs_default_generic_argument = true;
                     match &*x.with_generic_argument_item {
                         WithGenericArgumentItem::ScopedIdentifier(x) => {
                             Some(x.scoped_identifier.as_ref().into())
@@ -637,40 +637,20 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     None
                 };
 
-            if arg.with_generic_parameter_list_list.is_empty() {
-                self.push_generic_parameter_item(
-                    &arg.with_generic_parameter_item,
-                    default_value.clone(),
-                );
+            if !self.needs_default_generic_argument || default_value.is_some() {
+                let property = GenericParameterProperty { default_value };
+                let kind = SymbolKind::GenericParameter(property);
+                if let Some(id) =
+                    self.insert_symbol(&arg.identifier.identifier_token.token, kind, false)
+                {
+                    self.generic_parameters.push(id);
+                }
             } else {
-                self.push_generic_parameter_item(&arg.with_generic_parameter_item, None);
-            }
-
-            for i in 0..arg.with_generic_parameter_list_list.len() {
-                if (i + 1) == arg.with_generic_parameter_list_list.len() {
-                    self.push_generic_parameter_item(
-                        &arg.with_generic_parameter_list_list[i].with_generic_parameter_item,
-                        default_value.clone(),
-                    );
-                } else {
-                    self.push_generic_parameter_item(
-                        &arg.with_generic_parameter_list_list[i].with_generic_parameter_item,
-                        None,
-                    );
-                }
-            }
-
-            if let Some(x) = &arg.with_generic_parameter_list_opt {
-                for x in &x.with_generic_parameter_list_opt_list {
-                    let default_value: Option<GenericSymbolPath> =
-                        match &*x.with_generic_argument_item {
-                            WithGenericArgumentItem::ScopedIdentifier(x) => {
-                                Some(x.scoped_identifier.as_ref().into())
-                            }
-                            WithGenericArgumentItem::Number(x) => Some(x.number.as_ref().into()),
-                        };
-                    self.push_generic_parameter_item(&x.with_generic_parameter_item, default_value);
-                }
+                self.errors.push(AnalyzerError::missing_default_argument(
+                    &arg.identifier.identifier_token.token.to_string(),
+                    self.text,
+                    &arg.identifier.as_ref().into(),
+                ));
             }
         }
         Ok(())
