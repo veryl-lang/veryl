@@ -7,11 +7,11 @@ use crate::namespace_table;
 use crate::symbol::Direction as SymDirection;
 use crate::symbol::Type as SymType;
 use crate::symbol::{
-    DocComment, EnumMemberProperty, EnumProperty, FunctionProperty, InstanceProperty,
-    InterfaceProperty, ModportMemberProperty, ModportProperty, ModuleProperty, PackageProperty,
-    ParameterProperty, ParameterScope, ParameterValue, PortProperty, StructMemberProperty,
-    StructProperty, Symbol, SymbolId, SymbolKind, TypeDefProperty, TypeKind, UnionMemberProperty,
-    UnionProperty, VariableAffiniation, VariableProperty,
+    DocComment, EnumMemberProperty, EnumProperty, FunctionProperty, GenericParameterProperty,
+    InstanceProperty, InterfaceProperty, ModportMemberProperty, ModportProperty, ModuleProperty,
+    PackageProperty, ParameterProperty, ParameterScope, ParameterValue, PortProperty,
+    StructMemberProperty, StructProperty, Symbol, SymbolId, SymbolKind, TypeDefProperty, TypeKind,
+    UnionMemberProperty, UnionProperty, VariableAffiniation, VariableProperty,
 };
 use crate::symbol_path::{GenericSymbolPath, SymbolPath};
 use crate::symbol_table;
@@ -42,6 +42,7 @@ pub struct CreateSymbolTable<'a> {
     connect_targets: Vec<Vec<StrId>>,
     connects: HashMap<Token, Vec<Vec<StrId>>>,
     generic_parameters: Vec<SymbolId>,
+    needs_default_generic_argument: bool,
     generic_references: Vec<GenericSymbolPath>,
     default_clock_candidates: Vec<SymbolId>,
     defualt_reset_candidates: Vec<SymbolId>,
@@ -608,16 +609,48 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         Ok(())
     }
 
+    fn with_generic_parameter_list(
+        &mut self,
+        _arg: &WithGenericParameterList,
+    ) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            self.needs_default_generic_argument = false;
+        }
+        Ok(())
+    }
+
     fn with_generic_parameter_item(
         &mut self,
         arg: &WithGenericParameterItem,
     ) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let kind = SymbolKind::GenericParameter;
-            if let Some(id) =
-                self.insert_symbol(&arg.identifier.identifier_token.token, kind, false)
-            {
-                self.generic_parameters.push(id);
+            let default_value: Option<GenericSymbolPath> =
+                if let Some(ref x) = arg.with_generic_parameter_item_opt {
+                    self.needs_default_generic_argument = true;
+                    match &*x.with_generic_argument_item {
+                        WithGenericArgumentItem::ScopedIdentifier(x) => {
+                            Some(x.scoped_identifier.as_ref().into())
+                        }
+                        WithGenericArgumentItem::Number(x) => Some(x.number.as_ref().into()),
+                    }
+                } else {
+                    None
+                };
+
+            if !self.needs_default_generic_argument || default_value.is_some() {
+                let property = GenericParameterProperty { default_value };
+                let kind = SymbolKind::GenericParameter(property);
+                if let Some(id) =
+                    self.insert_symbol(&arg.identifier.identifier_token.token, kind, false)
+                {
+                    self.generic_parameters.push(id);
+                }
+            } else {
+                self.errors.push(AnalyzerError::missing_default_argument(
+                    &arg.identifier.identifier_token.token.to_string(),
+                    self.text,
+                    &arg.identifier.as_ref().into(),
+                ));
             }
         }
         Ok(())

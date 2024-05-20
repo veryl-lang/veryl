@@ -1,6 +1,8 @@
 module veryl_testcase_Module56;
     veryl_testcase___Interface56A__Package56A u0 ();
     veryl_testcase___Interface56A__Package56B u1 ();
+    veryl_testcase___Interface56B__Package56A u2 ();
+    veryl_testcase___Interface56B__Package56B u3 ();
 endmodule
 
 interface veryl_testcase___Interface56A__Package56A;
@@ -8,6 +10,13 @@ interface veryl_testcase___Interface56A__Package56A;
 endinterface
 interface veryl_testcase___Interface56A__Package56B;
     logic [veryl_testcase_Package56B::X-1:0] _a;
+endinterface
+
+interface veryl_testcase___Interface56B__Package56A;
+    logic [veryl_testcase_Package56A::X-1:0] _b;
+endinterface
+interface veryl_testcase___Interface56B__Package56B;
+    logic [veryl_testcase_Package56B::X-1:0] _b;
 endinterface
 
 package veryl_testcase_Package56A;

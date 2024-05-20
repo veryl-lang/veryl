@@ -66,24 +66,38 @@ impl<'a> CreateReference<'a> {
                     symbol_table::add_reference(symbol.found.id, &path.paths[0].base);
 
                     // Check number of arguments
-                    let params = symbol.found.generic_parameters().len();
-                    let args = path.paths[i].arguments.len();
-                    if params != args {
+                    let params = symbol.found.generic_parameters();
+                    let n_args = path.paths[i].arguments.len();
+                    let match_artiy = if params.len() > n_args {
+                        params[n_args].1.is_some()
+                    } else {
+                        params.len() == n_args
+                    };
+
+                    if !match_artiy {
                         self.errors.push(AnalyzerError::mismatch_generics_arity(
                             &path.paths[i].base.to_string(),
-                            params,
-                            args,
+                            params.len(),
+                            n_args,
                             self.text,
                             &path.range,
                         ));
-                    } else if let Some((token, new_symbol)) =
-                        path.get_generic_instance(i, &symbol.found)
-                    {
+                        continue;
+                    }
+
+                    let mut path = path.paths[i].clone();
+
+                    for param in params.iter().skip(n_args) {
+                        //  apply default value
+                        path.arguments.push(param.1.as_ref().unwrap().clone());
+                    }
+
+                    if let Some((token, new_symbol)) = path.get_generic_instance(&symbol.found) {
                         if let Some(ref x) = symbol_table::insert(&token, new_symbol) {
                             symbol_table::add_generic_instance(symbol.found.id, *x);
                         }
 
-                        let table = symbol.found.generic_table(&path.paths[i].arguments);
+                        let table = symbol.found.generic_table(&path.arguments);
                         let mut references = symbol.found.generic_references();
                         for path in &mut references {
                             path.apply_map(&table);

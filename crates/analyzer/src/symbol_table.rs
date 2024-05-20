@@ -235,7 +235,7 @@ impl SymbolTable {
                                 .generic_namespace_map
                                 .insert(symbol.token.text, found.token.text);
                         }
-                        SymbolKind::GenericParameter => {
+                        SymbolKind::GenericParameter(_) => {
                             context.namespace = found.inner_namespace();
                             context.inner = true;
                         }

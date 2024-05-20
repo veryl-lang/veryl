@@ -593,6 +593,60 @@ fn mismatch_function_arity() {
 }
 
 #[test]
+fn missing_default_generic_argument() {
+    let code = r#"
+    module ModuleA {
+        function FuncA::<A> () -> logic<A> {}
+        let _a: logic = FuncA::<1>();
+
+        function FuncB::<A, B, C> () -> logic<A + B + C> {}
+        let _b: logic = FuncB::<1, 2, 3>();
+
+        function FuncC::<A = 1> () -> logic<A> {}
+        let _c: logic = FuncC::<>();
+
+        function FuncD::<A = 1, B = 2, C = 3> () -> logic<A + B + C> {}
+        let _d: logic = FuncD::<>();
+
+        function FuncE::<A, B = 2, C = 3> () -> logic<A + B + C> {}
+        let _e: logic = FuncE::<1>();
+
+        function FuncF::<A, B, C = 3> () -> logic<A + B + C> {}
+        let _f: logic = FuncF::<1, 2>();
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+        module ModuleB {
+            function FuncA::<A = 1, B, C = 3> () -> logic<A + B + C> {}
+            let _a: logic = FuncA::<1, 2, 3> ();
+        }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MissingDefaultArgument { .. }
+    ));
+
+    let code = r#"
+        module ModuleC {
+            function FuncA::<A = 1, B = 2, Ccd> () -> logic<A + B + C> {}
+            let _a: logic = FuncA::<1, 2, 3>();
+        }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MissingDefaultArgument { .. }
+    ));
+}
+
+#[test]
 fn mismatch_generics_arity() {
     let code = r#"
     module ModuleA {

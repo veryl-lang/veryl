@@ -213,6 +213,29 @@ impl GenericSymbol {
             resource_table::insert_str(&text)
         }
     }
+
+    pub fn get_generic_instance(&self, base: &Symbol) -> Option<(Token, Symbol)> {
+        if self.arguments.is_empty() {
+            None
+        } else {
+            let property = GenericInstanceProperty {
+                base: base.id,
+                arguments: self.arguments.clone(),
+            };
+            let kind = SymbolKind::GenericInstance(property);
+            let token = &self.base;
+            let token = Token::new(
+                &self.mangled().to_string(),
+                token.line,
+                token.column,
+                token.length,
+                token.pos,
+                token.source,
+            );
+            let symbol = Symbol::new(&token, kind, &base.namespace, false, DocComment::default());
+            Some((token, symbol))
+        }
+    }
 }
 
 impl GenericSymbolPath {
@@ -243,31 +266,6 @@ impl GenericSymbolPath {
         SymbolPath::new(&path)
     }
 
-    pub fn get_generic_instance(&self, i: usize, base: &Symbol) -> Option<(Token, Symbol)> {
-        if self.paths[i].arguments.is_empty() {
-            None
-        } else {
-            let path = &self.paths[i];
-            let arguments = path.arguments.clone();
-            let property = GenericInstanceProperty {
-                base: base.id,
-                arguments,
-            };
-            let kind = SymbolKind::GenericInstance(property);
-            let token = &path.base;
-            let token = Token::new(
-                &path.mangled().to_string(),
-                token.line,
-                token.column,
-                token.length,
-                token.pos,
-                token.source,
-            );
-            let symbol = Symbol::new(&token, kind, &base.namespace, false, DocComment::default());
-            Some((token, symbol))
-        }
-    }
-
     pub fn is_generic(&self) -> bool {
         for path in &self.paths {
             if !path.arguments.is_empty() {
@@ -284,7 +282,7 @@ impl GenericSymbolPath {
         }
         let head = &self.paths[0];
         if let Ok(symbol) = symbol_table::resolve(&head.base) {
-            if matches!(symbol.found.kind, SymbolKind::GenericParameter) {
+            if matches!(symbol.found.kind, SymbolKind::GenericParameter(_)) {
                 return true;
             }
         }
@@ -297,7 +295,7 @@ impl GenericSymbolPath {
                 }
                 let head = &arg.paths[0];
                 if let Ok(symbol) = symbol_table::resolve(&head.base) {
-                    if matches!(symbol.found.kind, SymbolKind::GenericParameter) {
+                    if matches!(symbol.found.kind, SymbolKind::GenericParameter(_)) {
                         return true;
                     }
                 }
@@ -369,18 +367,17 @@ impl From<&syntax_tree::ScopedIdentifier> for GenericSymbolPath {
                 let mut arguments = Vec::new();
 
                 if let Some(ref x) = x.scoped_identifier_opt {
-                    let list: Vec<syntax_tree::WithGenericArgumentItem> = x
-                        .with_generic_argument
-                        .with_generic_argument_list
-                        .as_ref()
-                        .into();
-                    for x in list {
-                        match x {
-                            syntax_tree::WithGenericArgumentItem::ScopedIdentifier(x) => {
-                                arguments.push(x.scoped_identifier.as_ref().into());
-                            }
-                            syntax_tree::WithGenericArgumentItem::Number(x) => {
-                                arguments.push(x.number.as_ref().into());
+                    if let Some(ref x) = x.with_generic_argument.with_generic_argument_opt {
+                        let list: Vec<syntax_tree::WithGenericArgumentItem> =
+                            x.with_generic_argument_list.as_ref().into();
+                        for x in &list {
+                            match x {
+                                syntax_tree::WithGenericArgumentItem::ScopedIdentifier(x) => {
+                                    arguments.push(x.scoped_identifier.as_ref().into());
+                                }
+                                syntax_tree::WithGenericArgumentItem::Number(x) => {
+                                    arguments.push(x.number.as_ref().into());
+                                }
                             }
                         }
                     }
@@ -395,18 +392,17 @@ impl From<&syntax_tree::ScopedIdentifier> for GenericSymbolPath {
             let mut arguments = Vec::new();
 
             if let Some(ref x) = x.scoped_identifier_opt0 {
-                let list: Vec<syntax_tree::WithGenericArgumentItem> = x
-                    .with_generic_argument
-                    .with_generic_argument_list
-                    .as_ref()
-                    .into();
-                for x in list {
-                    match x {
-                        syntax_tree::WithGenericArgumentItem::ScopedIdentifier(x) => {
-                            arguments.push(x.scoped_identifier.as_ref().into());
-                        }
-                        syntax_tree::WithGenericArgumentItem::Number(x) => {
-                            arguments.push(x.number.as_ref().into());
+                if let Some(ref x) = x.with_generic_argument.with_generic_argument_opt {
+                    let list: Vec<syntax_tree::WithGenericArgumentItem> =
+                        x.with_generic_argument_list.as_ref().into();
+                    for x in &list {
+                        match x {
+                            syntax_tree::WithGenericArgumentItem::ScopedIdentifier(x) => {
+                                arguments.push(x.scoped_identifier.as_ref().into());
+                            }
+                            syntax_tree::WithGenericArgumentItem::Number(x) => {
+                                arguments.push(x.number.as_ref().into());
+                            }
                         }
                     }
                 }

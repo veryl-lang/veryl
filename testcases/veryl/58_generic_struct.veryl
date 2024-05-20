@@ -5,9 +5,15 @@ module Module58 {
 
     type C = i32;
 
+    struct StructB::<T = C> {
+        B: T,
+    }
+
     var _a: StructA::<Package58::B>;
     var _b: StructA::<Package58::C>;
     var _c: StructA::<C>           ;
+    var _d: StructB::<Package58::C>;
+    var _e: StructB::<>            ;
 }
 
 package Package58 {

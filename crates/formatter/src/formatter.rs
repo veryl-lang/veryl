@@ -1371,6 +1371,17 @@ impl VerylWalker for Formatter {
         }
     }
 
+    /// Semantic action for non-terminal 'WithGenericParameterItem'
+    fn with_generic_parameter_item(&mut self, arg: &WithGenericParameterItem) {
+        self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.with_generic_parameter_item_opt {
+            self.space(1);
+            self.equ(&x.equ);
+            self.space(1);
+            self.with_generic_argument_item(&x.with_generic_argument_item);
+        }
+    }
+
     /// Semantic action for non-terminal 'WithGenericArgumentList'
     fn with_generic_argument_list(&mut self, arg: &WithGenericArgumentList) {
         self.with_generic_argument_item(&arg.with_generic_argument_item);

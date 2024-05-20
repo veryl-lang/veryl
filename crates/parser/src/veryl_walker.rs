@@ -2196,6 +2196,10 @@ pub trait VerylWalker {
     fn with_generic_parameter_item(&mut self, arg: &WithGenericParameterItem) {
         before!(self, with_generic_parameter_item, arg);
         self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.with_generic_parameter_item_opt {
+            self.equ(&x.equ);
+            self.with_generic_argument_item(&x.with_generic_argument_item);
+        }
         after!(self, with_generic_parameter_item, arg);
     }
 
@@ -2203,7 +2207,9 @@ pub trait VerylWalker {
     fn with_generic_argument(&mut self, arg: &WithGenericArgument) {
         before!(self, with_generic_argument, arg);
         self.colon_colon_l_angle(&arg.colon_colon_l_angle);
-        self.with_generic_argument_list(&arg.with_generic_argument_list);
+        if let Some(x) = &arg.with_generic_argument_opt {
+            self.with_generic_argument_list(&x.with_generic_argument_list);
+        }
         self.r_angle(&arg.r_angle);
         after!(self, with_generic_argument, arg);
     }
