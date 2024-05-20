@@ -101,7 +101,7 @@ impl<'a> VerylGrammarTrait for CheckInstance<'a> {
                     }
                     SymbolKind::Interface(_) => (),
                     SymbolKind::SystemVerilog => (),
-                    SymbolKind::GenericParameter => (),
+                    SymbolKind::GenericParameter(_) => (),
                     _ => {
                         self.errors.push(AnalyzerError::mismatch_type(
                             name,

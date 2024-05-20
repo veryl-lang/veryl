@@ -7,4 +7,13 @@ module Module54 {
 
     let _a: logic<10> = FuncA::<10>(1);
     let _b: logic<20> = FuncA::<20>(1);
+
+    function FuncB::<A, B = 2> (
+        a: input logic<A + B>,
+    ) -> logic<A + B> {
+        return a + 1;
+    }
+
+    let _c: logic<12> = FuncB::<10>(1);
+    let _d: logic<14> = FuncB::<10, 4>(1);
 }

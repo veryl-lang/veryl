@@ -640,9 +640,24 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ScopedIdentifier'
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) {
-        let mut path: GenericSymbolPath = arg.into();
-        path.apply_map(&self.generic_map.map);
         let namespace = namespace_table::get(arg.identifier().token.id).unwrap();
+        let mut path: GenericSymbolPath = arg.into();
+
+        for i in 0..path.len() {
+            let base_path = path.base_path(i);
+            if let Ok(symbol) = symbol_table::resolve((&base_path, &namespace)) {
+                let params = symbol.found.generic_parameters();
+                let n_args = path.paths[i].arguments.len();
+
+                for param in params.iter().skip(n_args) {
+                    path.paths[i]
+                        .arguments
+                        .push(param.1.as_ref().unwrap().clone());
+                }
+            }
+        }
+
+        path.apply_map(&self.generic_map.map);
         if let Ok(symbol) = symbol_table::resolve((&path.mangled_path(), &namespace)) {
             let context: SymbolContext = self.into();
             let text = symbol_string(arg.identifier(), &symbol.found, &context);
@@ -3107,7 +3122,8 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
         | SymbolKind::Union(_)
         | SymbolKind::TypeDef(_)
         | SymbolKind::Enum(_) => {
-            let visible = symbol_table::resolve((&symbol.token, &namespace)).is_ok();
+            let visible = namespace.included(&symbol.namespace)
+                || symbol.imported.iter().any(|x| *x == namespace);
             if visible & !context.in_import {
                 ret.push_str(&symbol.token.to_string());
             } else {
@@ -3157,7 +3173,8 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
         //}
         SymbolKind::GenericInstance(x) => {
             let base = symbol_table::get(x.base).unwrap();
-            let visible = symbol_table::resolve((&symbol.token, &namespace)).is_ok();
+            let visible = namespace.included(&base.namespace)
+                || base.imported.iter().any(|x| *x == namespace);
             let top_level = matches!(
                 base.kind,
                 SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)
@@ -3167,7 +3184,7 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
             }
             ret.push_str(&symbol.token.to_string());
         }
-        SymbolKind::GenericParameter => (),
+        SymbolKind::GenericParameter(_) => (),
         SymbolKind::Port(_)
         | SymbolKind::Variable(_)
         | SymbolKind::Instance(_)

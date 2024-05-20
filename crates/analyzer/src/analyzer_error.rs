@@ -229,6 +229,21 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(missing_default_argument),
+        help("give default argument"),
+        url("")
+    )]
+    #[error("missing default argument for parameter {identifier}")]
+    MissingDefaultArgument {
+        identifier: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(mismatch_function_arity),
         help("fix function arguments"),
         url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#mismatch_function_arity")
@@ -834,6 +849,14 @@ impl AnalyzerError {
 
     pub fn invalid_reset(identifier: &str, source: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidReset {
+            identifier: identifier.into(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn missing_default_argument(identifier: &str, source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::MissingDefaultArgument {
             identifier: identifier.into(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
