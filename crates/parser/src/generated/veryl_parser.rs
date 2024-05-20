@@ -8,7 +8,7 @@ use parol_runtime::once_cell::sync::Lazy;
 #[allow(unused_imports)]
 use parol_runtime::parser::{LLKParser, LookaheadDFA, ParseTreeType, ParseType, Production, Trans};
 use parol_runtime::{ParolError, ParseTree, TerminalIndex};
-use parol_runtime::{TokenStream, Tokenizer};
+use parol_runtime::{ScannerConfig, TokenStream, Tokenizer};
 use std::path::Path;
 
 use crate::veryl_grammar::VerylGrammar;
@@ -21531,19 +21531,22 @@ pub const PRODUCTIONS: &[Production; 911] = &[
     },
 ];
 
-static TOKENIZERS: Lazy<Vec<(&'static str, Tokenizer)>> = Lazy::new(|| {
+static SCANNERS: Lazy<Vec<ScannerConfig>> = Lazy::new(|| {
     vec![
-        (
+        ScannerConfig::new(
             "INITIAL",
             Tokenizer::build(TERMINALS, SCANNER_0.0, SCANNER_0.1).unwrap(),
+            &[],
         ),
-        (
+        ScannerConfig::new(
             "Embed",
             Tokenizer::build(TERMINALS, SCANNER_1.0, SCANNER_1.1).unwrap(),
+            &[],
         ),
-        (
+        ScannerConfig::new(
             "Generic",
             Tokenizer::build(TERMINALS, SCANNER_2.0, SCANNER_2.1).unwrap(),
+            &[],
         ),
     ]
 });
@@ -21568,7 +21571,7 @@ where
     // Initialize wrapper
     let mut user_actions = VerylGrammarAuto::new(user_actions);
     llk_parser.parse(
-        TokenStream::new(input, file_name, &TOKENIZERS, MAX_K).unwrap(),
+        TokenStream::new(input, file_name, &SCANNERS, MAX_K).unwrap(),
         &mut user_actions,
     )
 }

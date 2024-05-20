@@ -4,8 +4,11 @@
 %user_type Token = crate::veryl_token::Token
 %user_type VerylToken = crate::veryl_token::VerylToken
 
-%scanner Embed { %auto_newline_off %auto_ws_off }
-%scanner Generic {  }
+%scanner Embed {
+    %auto_newline_off
+    %auto_ws_off
+}
+%scanner Generic {}
 
 %%
 
