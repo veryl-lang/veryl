@@ -1,4 +1,5 @@
 /// A binary decoder.
+///
 /// Converts a bit vector from a binary encoding to
 /// a bit vector with a unary encoding.
 pub module binary_decoder #(

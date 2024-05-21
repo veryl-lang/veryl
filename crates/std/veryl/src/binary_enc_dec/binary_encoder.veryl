@@ -1,4 +1,5 @@
 /// A binary encoder.
+///
 /// Transforms a unary encoded value into a binary encoding.
 pub module binary_encoder #(
     /// Width of the input unary vector
