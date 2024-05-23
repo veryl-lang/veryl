@@ -640,6 +640,8 @@ impl From<&syntax_tree::ArrayType> for Type {
 pub struct VariableProperty {
     pub r#type: Type,
     pub affiniation: VariableAffiniation,
+    pub prefix: Option<String>,
+    pub suffix: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -655,6 +657,8 @@ pub struct PortProperty {
     pub token: Token,
     pub r#type: Option<Type>,
     pub direction: Direction,
+    pub prefix: Option<String>,
+    pub suffix: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -681,6 +685,8 @@ impl From<&syntax_tree::PortDeclarationItem> for Port {
                     token,
                     r#type: Some(r#type),
                     direction,
+                    prefix: None,
+                    suffix: None,
                 }
             }
             syntax_tree::PortDeclarationItemGroup::InterfacePortDeclarationItemOpt(_) => {
@@ -688,6 +694,8 @@ impl From<&syntax_tree::PortDeclarationItem> for Port {
                     token,
                     r#type: None,
                     direction: Direction::Interface,
+                    prefix: None,
+                    suffix: None,
                 }
             }
         };

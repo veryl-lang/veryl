@@ -28,7 +28,7 @@ use create_reference::*;
 use create_symbol_table::*;
 
 use crate::analyzer_error::AnalyzerError;
-use veryl_metadata::Lint;
+use veryl_metadata::{Build, Lint};
 use veryl_parser::veryl_walker::Handler;
 
 use self::{check_assignment::CheckAssignment, create_type_dag::CreateTypeDag};
@@ -44,7 +44,7 @@ pub struct Pass1Handlers<'a> {
 }
 
 impl<'a> Pass1Handlers<'a> {
-    pub fn new(text: &'a str, lint_opt: &'a Lint) -> Self {
+    pub fn new(text: &'a str, build_opt: &'a Build, lint_opt: &'a Lint) -> Self {
         Self {
             check_attribute: CheckAttribute::new(text),
             check_direction: CheckDirection::new(text),
@@ -52,7 +52,7 @@ impl<'a> Pass1Handlers<'a> {
             check_identifier: CheckIdentifier::new(text, lint_opt),
             check_number: CheckNumber::new(text),
             check_statement: CheckStatement::new(text),
-            create_symbol_table: CreateSymbolTable::new(text),
+            create_symbol_table: CreateSymbolTable::new(text, build_opt),
         }
     }
 
@@ -93,7 +93,7 @@ pub struct Pass2Handlers<'a> {
 }
 
 impl<'a> Pass2Handlers<'a> {
-    pub fn new(text: &'a str, _lint_opt: &'a Lint) -> Self {
+    pub fn new(text: &'a str, _build_opt: &'a Build, _lint_opt: &'a Lint) -> Self {
         Self {
             check_enum: CheckEnum::new(text),
             check_function: CheckFunction::new(text),

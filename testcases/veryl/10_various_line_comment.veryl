@@ -6,8 +6,8 @@ module //a
      input //a
      clock //a
     ,
-    i_rst_n: input reset,
-    i_up   : input logic,
+    i_rst: input reset,
+    i_up : input logic,
 
     i_down : input  logic   ,
     o_count: output logic<8>,
@@ -34,7 +34,7 @@ module //a
     always_ff // a
      (i_clk // a
     , // a
-     i_rst_n // a
+     i_rst // a
     ) // a
      {
         if_reset // a

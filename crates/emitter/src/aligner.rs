@@ -1,6 +1,6 @@
 use crate::emitter::{symbol_string, SymbolContext};
 use std::collections::HashMap;
-use veryl_analyzer::symbol::GenericMap;
+use veryl_analyzer::symbol::{GenericMap, SymbolKind};
 use veryl_analyzer::symbol_table;
 use veryl_metadata::{Build, BuiltinType, Metadata};
 use veryl_parser::resource_table::StrId;
@@ -203,6 +203,20 @@ impl Aligner {
             .implicit_parameter_types
             .contains(&BuiltinType::Type)
     }
+
+    fn identifier_with_prefix_suffix(
+        &mut self,
+        identifier: &Identifier,
+        prefix: &Option<String>,
+        suffix: &Option<String>,
+    ) {
+        if prefix.is_some() || suffix.is_some() {
+            let token = identifier.identifier_token.append(prefix, suffix);
+            self.veryl_token(&token);
+        } else {
+            self.veryl_token(&identifier.identifier_token);
+        }
+    }
 }
 
 impl VerylWalker for Aligner {
@@ -291,6 +305,56 @@ impl VerylWalker for Aligner {
     /// Semantic action for non-terminal 'U64'
     fn u64(&mut self, arg: &U64) {
         self.veryl_token(&arg.u64_token.replace("longint unsigned"));
+    }
+
+    /// Semantic action for non-terminal 'Identifier'
+    fn identifier(&mut self, arg: &Identifier) {
+        let (prefix, suffix) = if let Ok(found) = symbol_table::resolve(arg) {
+            match &found.found.kind {
+                SymbolKind::Port(x) => (x.prefix.clone(), x.suffix.clone()),
+                SymbolKind::Variable(x) => (x.prefix.clone(), x.suffix.clone()),
+                _ => (None, None),
+            }
+        } else {
+            (None, None)
+        };
+        self.identifier_with_prefix_suffix(arg, &prefix, &suffix);
+    }
+
+    /// Semantic action for non-terminal 'HierarchicalIdentifier'
+    fn hierarchical_identifier(&mut self, arg: &HierarchicalIdentifier) {
+        let list_len = &arg.hierarchical_identifier_list0.len();
+        let (prefix, suffix) = if let Ok(found) = symbol_table::resolve(arg) {
+            match &found.found.kind {
+                SymbolKind::Port(x) => (x.prefix.clone(), x.suffix.clone()),
+                SymbolKind::Variable(x) => (x.prefix.clone(), x.suffix.clone()),
+                _ => (None, None),
+            }
+        } else {
+            unreachable!()
+        };
+
+        if *list_len == 0 {
+            self.identifier_with_prefix_suffix(&arg.identifier, &prefix, &suffix);
+        } else {
+            self.identifier(&arg.identifier);
+        }
+
+        for x in &arg.hierarchical_identifier_list {
+            self.select(&x.select);
+        }
+
+        for (i, x) in arg.hierarchical_identifier_list0.iter().enumerate() {
+            self.dot(&x.dot);
+            if (i + 1) == *list_len {
+                self.identifier_with_prefix_suffix(&x.identifier, &prefix, &suffix);
+            } else {
+                self.identifier(&x.identifier);
+            }
+            for x in &x.hierarchical_identifier_list0_list {
+                self.select(&x.select);
+            }
+        }
     }
 
     /// Semantic action for non-terminal 'ScopedIdentifier'

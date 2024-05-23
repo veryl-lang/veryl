@@ -362,8 +362,18 @@ impl VerylToken {
         ret
     }
 
-    pub fn append(&self, prefix: &str, postfix: &str) -> Self {
-        let text = format!("{}{}{}", prefix, self.token.text, postfix);
+    pub fn append(&self, prefix: &Option<String>, suffix: &Option<String>) -> Self {
+        let prefix_str = if let Some(ref x) = prefix {
+            x.as_str()
+        } else {
+            ""
+        };
+        let suffix_str = if let Some(ref x) = suffix {
+            x.as_str()
+        } else {
+            ""
+        };
+        let text = format!("{}{}{}", prefix_str, self.token.text, suffix_str);
         let length = text.len();
         let text = resource_table::insert_str(&text);
         let mut ret = self.clone();

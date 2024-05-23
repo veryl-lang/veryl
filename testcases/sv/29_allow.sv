@@ -1,6 +1,6 @@
 module veryl_testcase_Module29 (
-    input logic clk,
-    input logic rst
+    input logic clk  ,
+    input logic rst_n
 );
     logic a;
     logic b;
@@ -8,8 +8,8 @@ module veryl_testcase_Module29 (
     logic c;
     always_comb c = 1;
 
-    always_ff @ (posedge clk, negedge rst) begin
-        if (!rst) begin
+    always_ff @ (posedge clk, negedge rst_n) begin
+        if (!rst_n) begin
             a <= 0;
         end else begin
             a <= 0;
