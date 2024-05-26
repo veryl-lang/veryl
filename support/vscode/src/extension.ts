@@ -68,7 +68,7 @@ export function activate(context: vscode.ExtensionContext) {
 	console.log('Congratulations, your extension "vscode-veryl" is now active!');
 
 	context.subscriptions.push(
-		commands.registerCommand("vscode-veryl.restartVerylLs", () => {
+		commands.registerCommand("vscode-veryl.restartServer", () => {
 			stopServer().then(function () {startServer(context);}, startServer);
 		})
 	);
