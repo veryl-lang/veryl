@@ -16,6 +16,8 @@ use crate::symbol::{
 use crate::symbol_path::{GenericSymbolPath, SymbolPath};
 use crate::symbol_table;
 use std::collections::{HashMap, HashSet};
+use veryl_metadata::ClockType;
+use veryl_metadata::{Build, ResetType};
 use veryl_parser::doc_comment_table;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::veryl_grammar_trait::*;
@@ -27,6 +29,7 @@ use veryl_parser::ParolError;
 pub struct CreateSymbolTable<'a> {
     pub errors: Vec<AnalyzerError>,
     text: &'a str,
+    build_opt: Build,
     point: HandlerPoint,
     namespace: Namespace,
     module_namspace_depth: usize,
@@ -55,9 +58,10 @@ enum StructOrUnion {
 }
 
 impl<'a> CreateSymbolTable<'a> {
-    pub fn new(text: &'a str) -> Self {
+    pub fn new(text: &'a str, build_opt: &'a Build) -> Self {
         Self {
             text,
+            build_opt: build_opt.clone(),
             ..Default::default()
         }
     }
@@ -103,6 +107,37 @@ impl<'a> CreateSymbolTable<'a> {
             ));
         }
         id
+    }
+
+    fn get_signal_prefix_suffix(&self, kind: TypeKind) -> (Option<String>, Option<String>) {
+        match kind {
+            TypeKind::Clock => match self.build_opt.clock_type {
+                ClockType::PosEdge => {
+                    let prefix = self.build_opt.clock_posedge_prefix.clone();
+                    let suffix = self.build_opt.clock_posedge_suffix.clone();
+                    return (prefix, suffix);
+                }
+                ClockType::NegEdge => {
+                    let prefix = self.build_opt.clock_negedge_prefix.clone();
+                    let suffix = self.build_opt.clock_negedge_suffix.clone();
+                    return (prefix, suffix);
+                }
+            },
+            TypeKind::Reset => match self.build_opt.reset_type {
+                ResetType::AsyncHigh | ResetType::SyncHigh => {
+                    let prefix = self.build_opt.reset_high_prefix.clone();
+                    let suffix = self.build_opt.reset_high_suffix.clone();
+                    return (prefix, suffix);
+                }
+                ResetType::AsyncLow | ResetType::SyncLow => {
+                    let prefix = self.build_opt.reset_low_prefix.clone();
+                    let suffix = self.build_opt.reset_low_suffix.clone();
+                    return (prefix, suffix);
+                }
+            },
+            _ => {}
+        }
+        (None, None)
     }
 
     fn is_default_clock_candidate(&self, kind: SymbolKind) -> bool {
@@ -268,9 +303,12 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         if let HandlerPoint::Before = self.point {
             let r#type: SymType = arg.array_type.as_ref().into();
             let affiniation = self.affiniation.last().cloned().unwrap();
+            let (prefix, suffix) = self.get_signal_prefix_suffix(r#type.kind.clone());
             let property = VariableProperty {
                 r#type,
                 affiniation,
+                prefix,
+                suffix,
             };
             let kind = SymbolKind::Variable(property);
 
@@ -300,6 +338,8 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 let property = VariableProperty {
                     r#type,
                     affiniation,
+                    prefix: None,
+                    suffix: None,
                 };
                 let kind = SymbolKind::Variable(property);
                 self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
@@ -315,9 +355,12 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         if let HandlerPoint::Before = self.point {
             let r#type: SymType = arg.array_type.as_ref().into();
             let affiniation = self.affiniation.last().cloned().unwrap();
+            let (prefix, suffix) = self.get_signal_prefix_suffix(r#type.kind.clone());
             let property = VariableProperty {
                 r#type,
                 affiniation,
+                prefix,
+                suffix,
             };
             let kind = SymbolKind::Variable(property);
 
@@ -338,9 +381,12 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         if let HandlerPoint::Before = self.point {
             let r#type: SymType = arg.array_type.as_ref().into();
             let affiniation = self.affiniation.last().cloned().unwrap();
+            let (prefix, suffix) = self.get_signal_prefix_suffix(r#type.kind.clone());
             let property = VariableProperty {
                 r#type,
                 affiniation,
+                prefix,
+                suffix,
             };
             let kind = SymbolKind::Variable(property);
 
@@ -663,16 +709,21 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 PortDeclarationItemGroup::DirectionArrayType(x) => {
                     let r#type: SymType = x.array_type.as_ref().into();
                     let direction: SymDirection = x.direction.as_ref().into();
+                    let (prefix, suffix) = self.get_signal_prefix_suffix(r#type.kind.clone());
                     PortProperty {
                         token,
                         r#type: Some(r#type),
                         direction,
+                        prefix,
+                        suffix,
                     }
                 }
                 PortDeclarationItemGroup::InterfacePortDeclarationItemOpt(_) => PortProperty {
                     token,
                     r#type: None,
                     direction: SymDirection::Interface,
+                    prefix: None,
+                    suffix: None,
                 },
             };
             let kind = SymbolKind::Port(property);

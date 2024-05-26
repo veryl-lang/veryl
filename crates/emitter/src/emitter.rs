@@ -269,6 +269,20 @@ impl Emitter {
         self.process_token(x, false, Some(i))
     }
 
+    fn identifier_with_prefix_suffix(
+        &mut self,
+        identifier: &Identifier,
+        prefix: &Option<String>,
+        suffix: &Option<String>,
+    ) {
+        if prefix.is_some() || suffix.is_some() {
+            let token = &identifier.identifier_token.append(prefix, suffix);
+            self.veryl_token(token);
+        } else {
+            self.veryl_token(&identifier.identifier_token);
+        }
+    }
+
     fn always_ff_implicit_event_list(&mut self, arg: &AlwaysFfDeclaration) {
         self.str("(");
         self.always_ff_implicit_clock_event();
@@ -280,12 +294,16 @@ impl Emitter {
 
     fn always_ff_implicit_clock_event(&mut self) {
         let symbol = symbol_table::get(self.default_clock.unwrap()).unwrap();
-        let clock = match symbol.kind {
-            SymbolKind::Port(x) => (x.r#type.clone().unwrap().kind, symbol.token),
-            SymbolKind::Variable(x) => (x.r#type.kind, symbol.token),
+        let (clock_kind, prefix, suffix) = match symbol.kind {
+            SymbolKind::Port(x) => (
+                x.r#type.clone().unwrap().kind,
+                x.prefix.clone(),
+                x.suffix.clone(),
+            ),
+            SymbolKind::Variable(x) => (x.r#type.kind, x.prefix.clone(), x.suffix.clone()),
             _ => unreachable!(),
         };
-        let clock_type = match clock.0 {
+        let clock_type = match clock_kind {
             TypeKind::ClockPosedge => ClockType::PosEdge,
             TypeKind::ClockNegedge => ClockType::NegEdge,
             TypeKind::Clock => self.build_opt.clock_type,
@@ -297,7 +315,13 @@ impl Emitter {
             ClockType::NegEdge => self.str("negedge"),
         }
         self.space(1);
-        self.str(&clock.1.to_string());
+
+        if prefix.is_some() || suffix.is_some() {
+            let token = VerylToken::new(symbol.token).append(&prefix, &suffix);
+            self.str(&token.token.to_string());
+        } else {
+            self.str(&symbol.token.to_string());
+        }
     }
 
     fn always_ff_if_reset_exists(&mut self, arg: &AlwaysFfDeclaration) -> bool {
@@ -310,12 +334,16 @@ impl Emitter {
 
     fn always_ff_implicit_reset_event(&mut self) {
         let symbol = symbol_table::get(self.default_reset.unwrap()).unwrap();
-        let reset = match symbol.kind {
-            SymbolKind::Port(x) => (x.r#type.clone().unwrap().kind, symbol.token),
-            SymbolKind::Variable(x) => (x.r#type.kind, symbol.token),
+        let (reset_kind, prefix, suffix) = match symbol.kind {
+            SymbolKind::Port(x) => (
+                x.r#type.clone().unwrap().kind,
+                x.prefix.clone(),
+                x.suffix.clone(),
+            ),
+            SymbolKind::Variable(x) => (x.r#type.kind, x.prefix.clone(), x.suffix.clone()),
             _ => unreachable!(),
         };
-        let reset_type = match reset.0 {
+        let reset_type = match reset_kind {
             TypeKind::ResetAsyncHigh => ResetType::AsyncHigh,
             TypeKind::ResetAsyncLow => ResetType::AsyncLow,
             TypeKind::ResetSyncHigh => ResetType::SyncHigh,
@@ -324,13 +352,19 @@ impl Emitter {
             _ => unreachable!(),
         };
 
-        let prefix = match reset_type {
+        let token = if prefix.is_some() || suffix.is_some() {
+            VerylToken::new(symbol.token).append(&prefix, &suffix).token
+        } else {
+            symbol.token
+        };
+
+        let prefix_op = match reset_type {
             ResetType::AsyncHigh => {
                 self.str(",");
                 self.space(1);
                 self.str("posedge");
                 self.space(1);
-                self.str(&reset.1.to_string());
+                self.str(&token.to_string());
                 ""
             }
             ResetType::AsyncLow => {
@@ -338,14 +372,14 @@ impl Emitter {
                 self.space(1);
                 self.str("negedge");
                 self.space(1);
-                self.str(&reset.1.to_string());
+                self.str(&token.to_string());
                 "!"
             }
             ResetType::SyncHigh => "",
             ResetType::SyncLow => "!",
         };
 
-        self.reset_signal = Some(format!("{}{}", prefix, reset.1));
+        self.reset_signal = Some(format!("{}{}", prefix_op, token));
     }
 
     fn always_ff_reset_exist_in_sensitivity_list(&mut self, arg: &AlwaysFfReset) -> bool {
@@ -627,6 +661,56 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'U64'
     fn u64(&mut self, arg: &U64) {
         self.veryl_token(&arg.u64_token.replace("longint unsigned"));
+    }
+
+    /// Semantic action for non-terminal 'Identifier'
+    fn identifier(&mut self, arg: &Identifier) {
+        let (prefix, suffix) = if let Ok(found) = symbol_table::resolve(arg) {
+            match &found.found.kind {
+                SymbolKind::Port(x) => (x.prefix.clone(), x.suffix.clone()),
+                SymbolKind::Variable(x) => (x.prefix.clone(), x.suffix.clone()),
+                _ => (None, None),
+            }
+        } else {
+            (None, None)
+        };
+        self.identifier_with_prefix_suffix(arg, &prefix, &suffix);
+    }
+
+    /// Semantic action for non-terminal 'HierarchicalIdentifier'
+    fn hierarchical_identifier(&mut self, arg: &HierarchicalIdentifier) {
+        let list_len = &arg.hierarchical_identifier_list0.len();
+        let (prefix, suffix) = if let Ok(found) = symbol_table::resolve(arg) {
+            match &found.found.kind {
+                SymbolKind::Port(x) => (x.prefix.clone(), x.suffix.clone()),
+                SymbolKind::Variable(x) => (x.prefix.clone(), x.suffix.clone()),
+                _ => (None, None),
+            }
+        } else {
+            unreachable!()
+        };
+
+        if *list_len == 0 {
+            self.identifier_with_prefix_suffix(&arg.identifier, &prefix, &suffix);
+        } else {
+            self.identifier_with_prefix_suffix(&arg.identifier, &None, &None);
+        }
+
+        for x in &arg.hierarchical_identifier_list {
+            self.select(&x.select);
+        }
+
+        for (i, x) in arg.hierarchical_identifier_list0.iter().enumerate() {
+            self.dot(&x.dot);
+            if (i + 1) == *list_len {
+                self.identifier_with_prefix_suffix(&x.identifier, &prefix, &suffix);
+            } else {
+                self.identifier_with_prefix_suffix(&x.identifier, &None, &None);
+            }
+            for x in &x.hierarchical_identifier_list0_list {
+                self.select(&x.select);
+            }
+        }
     }
 
     /// Semantic action for non-terminal 'Operator07'
@@ -1751,12 +1835,16 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'AlwaysFfReset'
     fn always_ff_reset(&mut self, arg: &AlwaysFfReset) {
         if let Ok(found) = symbol_table::resolve(arg.hierarchical_identifier.as_ref()) {
-            let reset = match found.found.kind {
-                SymbolKind::Port(x) => x.r#type.clone().unwrap().kind,
-                SymbolKind::Variable(x) => x.r#type.kind,
+            let (reset_kind, prefix, suffix) = match found.found.kind {
+                SymbolKind::Port(x) => (
+                    x.r#type.clone().unwrap().kind,
+                    x.prefix.clone(),
+                    x.suffix.clone(),
+                ),
+                SymbolKind::Variable(x) => (x.r#type.kind, x.prefix.clone(), x.suffix.clone()),
                 _ => unreachable!(),
             };
-            let reset_type = match reset {
+            let reset_type = match reset_kind {
                 TypeKind::ResetAsyncHigh => ResetType::AsyncHigh,
                 TypeKind::ResetAsyncLow => ResetType::AsyncLow,
                 TypeKind::ResetSyncHigh => ResetType::SyncHigh,
@@ -1764,7 +1852,7 @@ impl VerylWalker for Emitter {
                 TypeKind::Reset => self.build_opt.reset_type,
                 _ => unreachable!(),
             };
-            let prefix = match reset_type {
+            let prefix_op = match reset_type {
                 ResetType::AsyncHigh => {
                     self.str("posedge");
                     self.space(1);
@@ -1782,8 +1870,12 @@ impl VerylWalker for Emitter {
             };
 
             let mut stringifier = Stringifier::new();
-            stringifier.hierarchical_identifier(&arg.hierarchical_identifier);
-            self.reset_signal = Some(format!("{}{}", prefix, stringifier.as_str()));
+            stringifier.hierarchical_identifier_with_prefix_suffix(
+                &arg.hierarchical_identifier,
+                &prefix,
+                &suffix,
+            );
+            self.reset_signal = Some(format!("{}{}", prefix_op, stringifier.as_str()));
         } else {
             unreachable!()
         }
@@ -1903,7 +1995,11 @@ impl VerylWalker for Emitter {
                 self.enum_member_prefix = Some(x.to_string());
             }
         }
-        self.token(&arg.r#enum.enum_token.append("typedef ", ""));
+        self.token(
+            &arg.r#enum
+                .enum_token
+                .append(&Some(String::from("typedef ")), &None),
+        );
         self.space(1);
         self.scalar_type(&arg.scalar_type);
         self.space(1);
@@ -1951,7 +2047,7 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'EnumItem'
     fn enum_item(&mut self, arg: &EnumItem) {
         let prefix = format!("{}_", self.enum_member_prefix.clone().unwrap());
-        self.token(&arg.identifier.identifier_token.append(&prefix, ""));
+        self.token(&arg.identifier.identifier_token.append(&Some(prefix), &None));
         if let Some(ref x) = arg.enum_item_opt {
             self.space(1);
             self.equ(&x.equ);
@@ -1973,10 +2069,14 @@ impl VerylWalker for Emitter {
 
             match &*arg.struct_union {
                 StructUnion::Struct(ref x) => {
-                    self.token(&x.r#struct.struct_token.append("typedef ", " packed"));
+                    let prefix = Some(String::from("typedef "));
+                    let suffix = Some(String::from(" packed"));
+                    self.token(&x.r#struct.struct_token.append(&prefix, &suffix));
                 }
                 StructUnion::Union(ref x) => {
-                    self.token(&x.union.union_token.append("typedef ", " packed"));
+                    let prefix = Some(String::from("typedef "));
+                    let suffix = Some(String::from(" packed"));
+                    self.token(&x.union.union_token.append(&prefix, &suffix));
                 }
             }
             self.space(1);

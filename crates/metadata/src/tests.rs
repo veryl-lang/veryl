@@ -17,6 +17,7 @@ version = "0.1.0"
 [build]
 clock_type = "posedge"
 reset_type = "async_low"
+reset_low_suffix = "_n"
 target = {type = "source"}
 #target = {type = "directory", path = "aaa"}
 
@@ -131,6 +132,14 @@ fn check_toml() {
     assert_eq!(metadata.project.version, Version::parse("0.1.0").unwrap());
     assert_eq!(metadata.build.clock_type, ClockType::PosEdge);
     assert_eq!(metadata.build.reset_type, ResetType::AsyncLow);
+    assert!(metadata.build.clock_posedge_prefix.is_none());
+    assert!(metadata.build.clock_posedge_suffix.is_none());
+    assert!(metadata.build.clock_negedge_prefix.is_none());
+    assert!(metadata.build.clock_negedge_suffix.is_none());
+    assert!(metadata.build.reset_high_prefix.is_none());
+    assert!(metadata.build.reset_high_suffix.is_none());
+    assert!(metadata.build.reset_low_prefix.is_none());
+    assert_eq!(metadata.build.reset_low_suffix.unwrap(), "_n");
     assert_eq!(metadata.format.indent_width, 4);
 }
 

@@ -8,6 +8,14 @@ pub struct Build {
     pub clock_type: ClockType,
     #[serde(default)]
     pub reset_type: ResetType,
+    pub clock_posedge_prefix: Option<String>,
+    pub clock_posedge_suffix: Option<String>,
+    pub clock_negedge_prefix: Option<String>,
+    pub clock_negedge_suffix: Option<String>,
+    pub reset_high_prefix: Option<String>,
+    pub reset_high_suffix: Option<String>,
+    pub reset_low_prefix: Option<String>,
+    pub reset_low_suffix: Option<String>,
     #[serde(default)]
     pub filelist_type: FilelistType,
     #[serde(default)]
