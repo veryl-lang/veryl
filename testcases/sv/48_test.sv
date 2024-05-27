@@ -13,7 +13,6 @@ module test1;
        $finish();
    end
 endmodule
-
 `endif
 
 `ifdef __veryl_test_veryl_testcase_test2__
@@ -22,7 +21,6 @@ module test2;
     // parse error
     initial
 endmodule
-
 `endif
 
 `ifdef __veryl_test_veryl_testcase_test3__
@@ -32,7 +30,6 @@ module test3;
     tri logic a;
     always_comb a = 1;
 endmodule
-
 `endif
 
 `ifdef __veryl_test_veryl_testcase_test4__

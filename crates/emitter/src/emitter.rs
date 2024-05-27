@@ -3052,7 +3052,7 @@ impl VerylWalker for Emitter {
             let text = arg.embed_content.embed_content_token.to_string();
             let text = text.strip_prefix("{{{").unwrap();
             let text = text.strip_suffix("}}}").unwrap();
-            self.str(text);
+            self.veryl_token(&arg.embed_content.embed_content_token.replace(text));
         }
     }
 
