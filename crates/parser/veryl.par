@@ -797,7 +797,7 @@ EmbedDeclaration: Embed LParen Identifier RParen Identifier EmbedContent;
 
 EmbedContent: EmbedContentToken: VerylToken;
 
-EmbedContentToken: LBraceTerm %push(Embed) LBraceTerm LBraceTerm { EmbedItem } RBraceTerm RBraceTerm RBraceTerm %pop();
+EmbedContentToken: LBraceTerm %push(Embed) LBraceTerm LBraceTerm { EmbedItem } RBraceTerm RBraceTerm RBraceTerm %pop() Comments;
 
 EmbedItem: LBraceTerm { EmbedItem } RBraceTerm
          | AnyTerm;

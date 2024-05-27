@@ -903,7 +903,7 @@
 /* 888 */ PackageItem: FinalDeclaration;
 /* 889 */ EmbedDeclaration: Embed LParen Identifier RParen Identifier EmbedContent;
 /* 890 */ EmbedContent: EmbedContentToken : VerylToken;
-/* 891 */ EmbedContentToken: LBraceTerm %push(Embed) LBraceTerm LBraceTerm EmbedContentTokenList /* Vec */ RBraceTerm RBraceTerm RBraceTerm %pop();
+/* 891 */ EmbedContentToken: LBraceTerm %push(Embed) LBraceTerm LBraceTerm EmbedContentTokenList /* Vec */ RBraceTerm RBraceTerm RBraceTerm %pop() Comments;
 /* 892 */ EmbedContentTokenList /* Vec<T>::Push */: EmbedItem EmbedContentTokenList;
 /* 893 */ EmbedContentTokenList /* Vec<T>::New */: ;
 /* 894 */ EmbedItem: LBraceTerm EmbedItemList /* Vec */ RBraceTerm;

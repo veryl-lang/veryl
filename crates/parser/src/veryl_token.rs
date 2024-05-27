@@ -664,10 +664,13 @@ impl TryFrom<&EmbedContentToken> for VerylToken {
         text.push_str(&x.r_brace_term0.r_brace_term.to_string());
         text.push_str(&x.r_brace_term1.r_brace_term.to_string());
 
+        let mut comments = Vec::new();
+        if let Some(ref x) = x.comments.comments_opt {
+            let mut tokens = split_comment_token(x.comments_term.comments_term);
+            comments.append(&mut tokens)
+        }
+
         let token = Token::new(&text, line, column, length, pos, source);
-        Ok(VerylToken {
-            token,
-            comments: Vec::new(),
-        })
+        Ok(VerylToken { token, comments })
     }
 }

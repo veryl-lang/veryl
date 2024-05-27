@@ -21482,10 +21482,11 @@ pub const PRODUCTIONS: &[Production; 915] = &[
         lhs: 133,
         production: &[ParseType::N(134)],
     },
-    // 891 - EmbedContentToken: LBraceTerm Push(1) LBraceTerm LBraceTerm EmbedContentTokenList /* Vec */ RBraceTerm RBraceTerm RBraceTerm Pop;
+    // 891 - EmbedContentToken: LBraceTerm Push(1) LBraceTerm LBraceTerm EmbedContentTokenList /* Vec */ RBraceTerm RBraceTerm RBraceTerm Pop Comments;
     Production {
         lhs: 134,
         production: &[
+            ParseType::N(100),
             ParseType::Pop,
             ParseType::N(499),
             ParseType::N(499),

@@ -5906,6 +5906,7 @@ pub struct EmbedContentToken {
     pub r_brace_term: Box<RBraceTerm>,
     pub r_brace_term0: Box<RBraceTerm>,
     pub r_brace_term1: Box<RBraceTerm>,
+    pub comments: Box<Comments>,
 }
 
 ///
@@ -32550,7 +32551,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 891:
     ///
-    /// `EmbedContentToken: LBraceTerm %push(Embed) LBraceTerm LBraceTerm EmbedContentTokenList /* Vec */ RBraceTerm RBraceTerm RBraceTerm %pop();`
+    /// `EmbedContentToken: LBraceTerm %push(Embed) LBraceTerm LBraceTerm EmbedContentTokenList /* Vec */ RBraceTerm RBraceTerm RBraceTerm %pop() Comments;`
     ///
     #[parol_runtime::function_name::named]
     fn embed_content_token(
@@ -32562,9 +32563,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         _r_brace_term: &ParseTreeType<'t>,
         _r_brace_term0: &ParseTreeType<'t>,
         _r_brace_term1: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
+        let comments = pop_item!(self, comments, Comments, context);
         let r_brace_term1 = pop_item!(self, r_brace_term1, RBraceTerm, context);
         let r_brace_term0 = pop_item!(self, r_brace_term0, RBraceTerm, context);
         let r_brace_term = pop_item!(self, r_brace_term, RBraceTerm, context);
@@ -32585,6 +32588,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             r_brace_term: Box::new(r_brace_term),
             r_brace_term0: Box::new(r_brace_term0),
             r_brace_term1: Box::new(r_brace_term1),
+            comments: Box::new(comments),
         };
         // Calling user action here
         self.user_grammar
@@ -34351,6 +34355,7 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 &children[5],
                 &children[6],
+                &children[7],
             ),
             892 => self.embed_content_token_list_0(&children[0], &children[1]),
             893 => self.embed_content_token_list_1(),
