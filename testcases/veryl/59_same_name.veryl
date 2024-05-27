@@ -1,0 +1,7 @@
+package Package59A {
+    local XLEN: u32 = 32;
+}
+
+package Package59B {
+    local XLEN: u32 = Package59A::XLEN;
+}
