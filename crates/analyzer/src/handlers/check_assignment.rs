@@ -407,17 +407,19 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                                 };
 
                                 if dir_output | dir_unknown {
-                                    if let Ok(x) =
-                                        symbol_table::resolve((target, &symbol.found.namespace))
-                                    {
+                                    if let Ok(x) = symbol_table::resolve((
+                                        &target.path(),
+                                        &symbol.found.namespace,
+                                    )) {
                                         self.assign_position.push(AssignPositionType::Connect {
                                             token: *token,
                                             maybe: dir_unknown,
                                         });
+                                        let partial = target.is_partial();
                                         symbol_table::add_assign(
                                             x.full_path,
                                             &self.assign_position,
-                                            false,
+                                            partial,
                                         );
                                         self.assign_position.pop();
                                     }
