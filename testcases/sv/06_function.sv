@@ -42,3 +42,4 @@ module veryl_testcase_Module06;
     // system function call
     always_comb e = $clog2(a);
 endmodule
+//# sourceMappingURL=../map/testcases/sv/06_function.sv.map

@@ -1,0 +1,17 @@
+[package]
+name                  = "veryl-sourcemap"
+version               = "0.10.1"
+edition               = "2021"
+authors.workspace     = true
+repository.workspace  = true
+keywords.workspace    = true
+categories.workspace  = true
+license.workspace     = true
+readme.workspace      = true
+description.workspace = true
+
+[dependencies]
+miette        = {workspace = true}
+relative-path = "1.9"
+sourcemap     = "8.0"
+thiserror     = {workspace = true}

@@ -8,3 +8,4 @@ module veryl_testcase_Module34;
     localparam int unsigned a6 = 10'bxxxxxxxxxx;
     localparam int unsigned a7 = 10'bzzzzzzzzzz;
 endmodule
+//# sourceMappingURL=../map/testcases/sv/34_width_all_set.sv.map

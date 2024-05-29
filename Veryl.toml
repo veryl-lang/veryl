@@ -12,6 +12,7 @@ reset_type       = "async_low"
 reset_low_suffix = "_n"
 filelist_type    = "absolute"
 target           = {type = "directory", path = "testcases/sv"}
+sourcemap_target = {type = "directory", path = "testcases/map"}
 
 [format]
 indent_width = 4

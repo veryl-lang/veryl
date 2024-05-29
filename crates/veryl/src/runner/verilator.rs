@@ -1,4 +1,4 @@
-use crate::runner::Runner;
+use crate::runner::{remap_msg_by_regex, Runner};
 use futures::prelude::*;
 use log::{error, info};
 use miette::{IntoDiagnostic, Result};
@@ -33,6 +33,14 @@ fn parse_msg(line: &str) -> String {
     }
 }
 
+fn remap_msg(line: &str) -> String {
+    static RE: Lazy<Regex> = Lazy::new(|| {
+        Regex::new(r"(?<path>[^: ]+):(?<line>[0-9]+)(?::(?<column>[0-9]+))?").unwrap()
+    });
+
+    remap_msg_by_regex(line, &RE)
+}
+
 impl Verilator {
     pub fn new() -> Self {
         Self {
@@ -60,34 +68,34 @@ impl Verilator {
                     self.fatal(&parse_msg(line));
                 } else if line.starts_with("%Warning:") {
                     self.state = State::CompileWarning;
-                    self.warning(line);
+                    self.warning(&remap_msg(line));
                 } else if line.starts_with("%Error:") {
                     self.state = State::CompileError;
-                    self.error(line);
+                    self.error(&remap_msg(line));
                 }
             }
             State::CompileWarning => {
                 if line.starts_with(' ') {
-                    self.warning(line);
-                } else if line.starts_with("%Warning-") {
+                    self.warning(&remap_msg(line));
+                } else if line.starts_with("%Warning") {
                     self.state = State::CompileWarning;
-                    self.warning(line);
-                } else if line.starts_with("%Error:") {
+                    self.warning(&remap_msg(line));
+                } else if line.starts_with("%Error") {
                     self.state = State::CompileError;
-                    self.error(line);
+                    self.error(&remap_msg(line));
                 } else {
                     self.state = State::Idle;
                 }
             }
             State::CompileError => {
                 if line.starts_with(' ') {
-                    self.error(line);
-                } else if line.starts_with("%Warning-") {
+                    self.error(&remap_msg(line));
+                } else if line.starts_with("%Warning") {
                     self.state = State::CompileWarning;
-                    self.warning(line);
-                } else if line.starts_with("%Error:") {
+                    self.warning(&remap_msg(line));
+                } else if line.starts_with("%Error") {
                     self.state = State::CompileError;
-                    self.error(line);
+                    self.error(&remap_msg(line));
                 } else {
                     self.state = State::Idle;
                 }

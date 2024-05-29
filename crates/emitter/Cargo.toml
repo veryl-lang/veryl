@@ -18,3 +18,4 @@ strnum_bitwidth = {workspace = true}
 veryl-analyzer  = {version = "0.10.1", path = "../analyzer"}
 veryl-metadata  = {version = "0.10.1", path = "../metadata"}
 veryl-parser    = {version = "0.10.1", path = "../parser"}
+veryl-sourcemap = {version = "0.10.1", path = "../sourcemap"}

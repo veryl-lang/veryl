@@ -13,7 +13,7 @@ mod test;
 #[cfg(test)]
 mod tests;
 mod utils;
-pub use build::{Build, BuiltinType, ClockType, FilelistType, ResetType, Target};
+pub use build::{Build, BuiltinType, ClockType, FilelistType, ResetType, SourceMapTarget, Target};
 pub use doc::Doc;
 pub use format::Format;
 pub use lint::{Case, Lint};

@@ -6,3 +6,4 @@ module veryl_testcase_Module51;
     logic _c [0:2-1];
     always_comb _c = '{default: 1};
 endmodule
+//# sourceMappingURL=../map/testcases/sv/51_array_literal.sv.map

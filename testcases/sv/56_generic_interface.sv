@@ -26,3 +26,4 @@ endpackage
 package veryl_testcase_Package56B;
     localparam int unsigned X = 2;
 endpackage
+//# sourceMappingURL=../map/testcases/sv/56_generic_interface.sv.map

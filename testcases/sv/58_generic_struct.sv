@@ -29,3 +29,4 @@ package veryl_testcase_Package58;
     typedef int unsigned     B;
     typedef longint unsigned C;
 endpackage
+//# sourceMappingURL=../map/testcases/sv/58_generic_struct.sv.map

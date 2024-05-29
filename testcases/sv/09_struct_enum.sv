@@ -28,3 +28,4 @@ module veryl_testcase_Module09;
     always_comb b     = B_X;
     always_comb c     = FOO_C_0;
 endmodule
+//# sourceMappingURL=../map/testcases/sv/09_struct_enum.sv.map

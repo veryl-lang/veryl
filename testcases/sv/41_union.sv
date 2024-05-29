@@ -15,3 +15,4 @@ module veryl_testcase_Module41;
     A bar  ;
     always_comb bar.c = Boolean_True;
 endmodule
+//# sourceMappingURL=../map/testcases/sv/41_union.sv.map

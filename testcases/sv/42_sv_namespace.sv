@@ -21,3 +21,4 @@ module veryl_testcase_Module42 (
         .o_d     (o_d    )
     );
 endmodule
+//# sourceMappingURL=../map/testcases/sv/42_sv_namespace.sv.map

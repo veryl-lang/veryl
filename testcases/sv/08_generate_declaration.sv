@@ -43,3 +43,4 @@ module veryl_testcase_Module08;
         end
     end
 endmodule
+//# sourceMappingURL=../map/testcases/sv/08_generate_declaration.sv.map

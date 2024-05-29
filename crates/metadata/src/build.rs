@@ -26,6 +26,8 @@ pub struct Build {
     pub omit_project_prefix: bool,
     #[serde(default)]
     pub strip_comments: bool,
+    #[serde(default)]
+    pub sourcemap_target: SourceMapTarget,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -71,6 +73,18 @@ pub enum Target {
     Directory { path: PathBuf },
     #[serde(rename = "bundle")]
     Bundle { path: PathBuf },
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type")]
+pub enum SourceMapTarget {
+    #[default]
+    #[serde(rename = "target")]
+    Target,
+    #[serde(rename = "directory")]
+    Directory { path: PathBuf },
+    #[serde(rename = "none")]
+    None,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
