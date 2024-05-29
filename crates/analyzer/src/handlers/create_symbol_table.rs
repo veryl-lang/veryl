@@ -7,11 +7,12 @@ use crate::namespace_table;
 use crate::symbol::Direction as SymDirection;
 use crate::symbol::Type as SymType;
 use crate::symbol::{
-    DocComment, EnumMemberProperty, EnumProperty, FunctionProperty, GenericParameterProperty,
-    InstanceProperty, InterfaceProperty, ModportMemberProperty, ModportProperty, ModuleProperty,
-    PackageProperty, ParameterProperty, ParameterScope, ParameterValue, PortProperty,
-    StructMemberProperty, StructProperty, Symbol, SymbolId, SymbolKind, TypeDefProperty, TypeKind,
-    UnionMemberProperty, UnionProperty, VariableAffiniation, VariableProperty,
+    ConnectTarget, DocComment, EnumMemberProperty, EnumProperty, FunctionProperty,
+    GenericParameterProperty, InstanceProperty, InterfaceProperty, ModportMemberProperty,
+    ModportProperty, ModuleProperty, PackageProperty, ParameterProperty, ParameterScope,
+    ParameterValue, PortProperty, StructMemberProperty, StructProperty, Symbol, SymbolId,
+    SymbolKind, TypeDefProperty, TypeKind, UnionMemberProperty, UnionProperty, VariableAffiniation,
+    VariableProperty,
 };
 use crate::symbol_path::{GenericSymbolPath, SymbolPath};
 use crate::symbol_table;
@@ -42,8 +43,8 @@ pub struct CreateSymbolTable<'a> {
     enum_members: Vec<Option<SymbolId>>,
     struct_union_members: Vec<Option<SymbolId>>,
     affiniation: Vec<VariableAffiniation>,
-    connect_targets: Vec<Vec<StrId>>,
-    connects: HashMap<Token, Vec<Vec<StrId>>>,
+    connect_targets: Vec<ConnectTarget>,
+    connects: HashMap<Token, Vec<ConnectTarget>>,
     generic_parameters: Vec<SymbolId>,
     needs_default_generic_argument: bool,
     generic_references: Vec<GenericSymbolPath>,
@@ -286,8 +287,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let path: SymbolPath = arg.into();
-            self.connect_targets.push(path.to_vec());
+            self.connect_targets.push(arg.into());
         }
         Ok(())
     }
@@ -607,7 +607,10 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 let targets = if arg.inst_port_item_opt.is_some() {
                     self.connect_targets.drain(0..).collect()
                 } else {
-                    vec![vec![port.text]]
+                    let target = ConnectTarget {
+                        path: vec![(port.text, vec![])],
+                    };
+                    vec![target]
                 };
                 self.connects.insert(port, targets);
             }

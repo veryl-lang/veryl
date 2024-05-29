@@ -1,6 +1,6 @@
 use crate::evaluator::{Evaluated, Evaluator};
 use crate::namespace::Namespace;
-use crate::symbol_path::GenericSymbolPath;
+use crate::symbol_path::{GenericSymbolPath, SymbolPath};
 use crate::symbol_table;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -811,9 +811,59 @@ pub struct FunctionProperty {
 }
 
 #[derive(Debug, Clone)]
+pub struct ConnectTarget {
+    pub path: Vec<(StrId, Vec<syntax_tree::Expression>)>,
+}
+
+impl ConnectTarget {
+    pub fn path(&self) -> Vec<StrId> {
+        self.path.iter().map(|x| x.0).collect()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.path.is_empty()
+    }
+
+    pub fn is_partial(&self) -> bool {
+        self.path.iter().any(|x| !x.1.is_empty())
+    }
+}
+
+impl From<&syntax_tree::ExpressionIdentifier> for ConnectTarget {
+    fn from(value: &syntax_tree::ExpressionIdentifier) -> Self {
+        let path: SymbolPath = value.scoped_identifier.as_ref().into();
+
+        let mut ret = vec![];
+        for (i, x) in path.as_slice().iter().enumerate() {
+            if i == path.as_slice().len() - 1 {
+                let select: Vec<_> = value
+                    .expression_identifier_list
+                    .iter()
+                    .map(|x| x.select.expression.as_ref().clone())
+                    .collect();
+                ret.push((*x, select));
+            } else {
+                ret.push((*x, vec![]));
+            }
+        }
+
+        for x in &value.expression_identifier_list0 {
+            let text = x.identifier.identifier_token.token.text;
+            let select: Vec<_> = x
+                .expression_identifier_list0_list
+                .iter()
+                .map(|x| x.select.expression.as_ref().clone())
+                .collect();
+            ret.push((text, select));
+        }
+        Self { path: ret }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct InstanceProperty {
     pub type_name: Vec<StrId>,
-    pub connects: HashMap<Token, Vec<Vec<StrId>>>,
+    pub connects: HashMap<Token, Vec<ConnectTarget>>,
 }
 
 #[derive(Debug, Clone)]
