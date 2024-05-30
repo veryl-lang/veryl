@@ -497,6 +497,61 @@ fn invalid_direction() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidDirection { .. }));
+
+    let code = r#"
+    module ModuleB (
+        b: import logic,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidDirection { .. }));
+
+    let code = r#"
+    module ModuleC {
+        function FuncC (
+            c: import logic,
+        ) {}
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidDirection { .. }));
+
+    let code = r#"
+    module ModuleD {
+        function FuncD (
+            D: modport logic,
+        ) {}
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidDirection { .. }));
+
+    let code = r#"
+    interface InterfaceE {
+        var e: logic;
+        modport mp {
+            e: ref,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidDirection { .. }));
+
+    let code = r#"
+    interface InterfaceF {
+        var f: logic;
+        modport mp {
+            f: modport,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidDirection { .. }));
 }
 
 #[test]
@@ -574,6 +629,64 @@ fn invalid_statement() {
 }
 
 #[test]
+fn invalid_modport_item() {
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        function f -> logic {
+            return 1;
+        }
+
+        modport mp {
+            a: input ,
+            f: import,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    interface InterfaceB {
+        var a: logic;
+        function f -> logic {
+            return 1;
+        }
+
+        modport mp {
+            f: input,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidModportVariableItem { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceC {
+        var a: logic;
+        function f -> logic {
+            return 1;
+        }
+
+        modport mp {
+            a: import,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidModportFunctionItem { .. }
+    ));
+}
+
+#[test]
 fn mismatch_function_arity() {
     let code = r#"
     module ModuleA {
@@ -582,6 +695,49 @@ fn mismatch_function_arity() {
         ) -> logic {}
 
         let _a: logic = FuncA(1, 2);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchFunctionArity { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceB {
+        function FuncB (
+            a: input logic,
+        ) -> logic {}
+    }
+
+    module ModuleB {
+        inst instB: InterfaceB();
+        let _b: logic = instB.FuncB(1, 2);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchFunctionArity { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceC {
+        function FuncC (
+            a: input logic,
+        ) -> logic {}
+
+        modport mp {
+            FuncC: import,
+        }
+    }
+
+    module ModuleC (
+        ifc: modport InterfaceC::mp,
+    ) {
+        let _c: logic = ifc.FuncC(1, 2);
     }
     "#;
 
@@ -1160,6 +1316,44 @@ fn unused_return() {
 
         initial {
             FuncA();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnusedReturn { .. }));
+
+    let code = r#"
+    interface InterfaceB {
+        function FuncB () -> logic {
+            return 1;
+        }
+    }
+    module ModuleB {
+        inst ifb: InterfaceB ();
+        initial {
+            ifb.FuncB();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnusedReturn { .. }));
+
+    let code = r#"
+    interface InterfaceC {
+        modport mp {
+            FuncC: import,
+        }
+        function FuncC() -> logic {
+            return 1;
+        }
+    }
+    module ModuleC (
+        ifc: modport InterfaceC::mp,
+    ){
+        initial {
+            ifc.FuncC();
         }
     }
     "#;

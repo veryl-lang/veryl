@@ -96,6 +96,11 @@ impl SymbolTable {
         self.symbol_table.get(&id).cloned()
     }
 
+    pub fn update(&mut self, symbol: Symbol) {
+        let id = symbol.id;
+        self.symbol_table.insert(id, symbol);
+    }
+
     fn trace_user_defined<'a>(
         &self,
         mut context: ResolveContext<'a>,
@@ -195,7 +200,7 @@ impl SymbolTable {
                                 context = self.trace_user_defined(context, &x.kind)?;
                             }
                         }
-                        SymbolKind::ModportMember(_) => {
+                        SymbolKind::ModportVariableMember(_) => {
                             let path = SymbolPath::new(&[found.token.text]);
                             context.namespace = found.namespace.clone();
                             context.namespace.pop();
@@ -244,6 +249,7 @@ impl SymbolTable {
                         | SymbolKind::Struct(_)
                         | SymbolKind::Union(_)
                         | SymbolKind::Modport(_)
+                        | SymbolKind::ModportFunctionMember(_)
                         | SymbolKind::EnumMember(_)
                         | SymbolKind::Block
                         | SymbolKind::SystemFunction
@@ -702,6 +708,10 @@ pub fn insert(token: &Token, symbol: Symbol) -> Option<SymbolId> {
 
 pub fn get(id: SymbolId) -> Option<Symbol> {
     SYMBOL_TABLE.with(|f| f.borrow().get(id))
+}
+
+pub fn update(symbol: Symbol) {
+    SYMBOL_TABLE.with(|f| f.borrow_mut().update(symbol))
 }
 
 pub fn resolve<T: Into<SymbolPathNamespace>>(path: T) -> Result<ResolveResult, ResolveError> {

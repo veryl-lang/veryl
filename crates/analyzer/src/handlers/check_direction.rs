@@ -10,6 +10,7 @@ pub struct CheckDirection<'a> {
     point: HandlerPoint,
     in_function: bool,
     in_module: bool,
+    in_modport: bool,
 }
 
 impl<'a> CheckDirection<'a> {
@@ -66,11 +67,20 @@ impl<'a> VerylGrammarTrait for CheckDirection<'a> {
                     }
                 }
                 Direction::Modport(x) => {
-                    if !self.in_module {
+                    if !self.in_module || self.in_function {
                         self.errors.push(AnalyzerError::invalid_direction(
                             "modport",
                             self.text,
                             &x.modport.modport_token.token.into(),
+                        ));
+                    }
+                }
+                Direction::Import(x) => {
+                    if !self.in_modport {
+                        self.errors.push(AnalyzerError::invalid_direction(
+                            "import",
+                            self.text,
+                            &x.import.import_token.token.into(),
                         ));
                     }
                 }
@@ -92,6 +102,14 @@ impl<'a> VerylGrammarTrait for CheckDirection<'a> {
         match self.point {
             HandlerPoint::Before => self.in_module = true,
             HandlerPoint::After => self.in_module = false,
+        }
+        Ok(())
+    }
+
+    fn modport_declaration(&mut self, _arg: &ModportDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => self.in_modport = true,
+            HandlerPoint::After => self.in_modport = false,
         }
         Ok(())
     }

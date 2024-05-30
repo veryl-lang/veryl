@@ -260,7 +260,8 @@ pub enum SymbolKind {
     EnumMember(EnumMemberProperty),
     Modport(ModportProperty),
     Genvar,
-    ModportMember(ModportMemberProperty),
+    ModportVariableMember(ModportVariableMemberProperty),
+    ModportFunctionMember(ModportFunctionMemberProperty),
     SystemVerilog,
     Namespace,
     SystemFunction,
@@ -289,7 +290,8 @@ impl SymbolKind {
             SymbolKind::EnumMember(_) => "enum member".to_string(),
             SymbolKind::Modport(_) => "modport".to_string(),
             SymbolKind::Genvar => "genvar".to_string(),
-            SymbolKind::ModportMember(_) => "modport member".to_string(),
+            SymbolKind::ModportVariableMember(_) => "modport variable member".to_string(),
+            SymbolKind::ModportFunctionMember(_) => "modport function member".to_string(),
             SymbolKind::SystemVerilog => "systemverilog item".to_string(),
             SymbolKind::Namespace => "namespace".to_string(),
             SymbolKind::SystemFunction => "system function".to_string(),
@@ -390,7 +392,10 @@ impl fmt::Display for SymbolKind {
                 format!("modport ({} ports)", x.members.len())
             }
             SymbolKind::Genvar => "genvar".to_string(),
-            SymbolKind::ModportMember(x) => format!("modport member ({})", x.direction),
+            SymbolKind::ModportVariableMember(x) => {
+                format!("modport variable member ({})", x.direction)
+            }
+            SymbolKind::ModportFunctionMember(_) => "modport function member".to_string(),
             SymbolKind::SystemVerilog => "systemverilog item".to_string(),
             SymbolKind::Namespace => "namespace".to_string(),
             SymbolKind::SystemFunction => "system function".to_string(),
@@ -409,6 +414,7 @@ pub enum Direction {
     Ref,
     Interface,
     Modport,
+    Import,
 }
 
 impl fmt::Display for Direction {
@@ -420,6 +426,7 @@ impl fmt::Display for Direction {
             Direction::Ref => "ref".to_string(),
             Direction::Interface => "interface".to_string(),
             Direction::Modport => "modport".to_string(),
+            Direction::Import => "import".to_string(),
         };
         text.fmt(f)
     }
@@ -433,6 +440,7 @@ impl From<&syntax_tree::Direction> for Direction {
             syntax_tree::Direction::Inout(_) => Direction::Inout,
             syntax_tree::Direction::Ref(_) => Direction::Ref,
             syntax_tree::Direction::Modport(_) => Direction::Modport,
+            syntax_tree::Direction::Import(_) => Direction::Import,
         }
     }
 }
@@ -920,8 +928,13 @@ pub struct ModportProperty {
 }
 
 #[derive(Debug, Clone)]
-pub struct ModportMemberProperty {
+pub struct ModportVariableMemberProperty {
     pub direction: Direction,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModportFunctionMemberProperty {
+    pub function: SymbolId,
 }
 
 #[derive(Debug, Clone)]

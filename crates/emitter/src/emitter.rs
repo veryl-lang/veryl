@@ -2499,6 +2499,7 @@ impl VerylWalker for Emitter {
             Direction::Inout(x) => self.inout(&x.inout),
             Direction::Ref(x) => self.r#ref(&x.r#ref),
             Direction::Modport(_) => (),
+            Direction::Import(x) => self.import(&x.import),
         };
     }
 
@@ -3291,7 +3292,8 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
         | SymbolKind::Block
         | SymbolKind::StructMember(_)
         | SymbolKind::UnionMember(_)
-        | SymbolKind::ModportMember(_)
+        | SymbolKind::ModportVariableMember(_)
+        | SymbolKind::ModportFunctionMember(_)
         | SymbolKind::Genvar
         | SymbolKind::Namespace
         | SymbolKind::SystemFunction => ret.push_str(&symbol.token.to_string()),
