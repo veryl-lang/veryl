@@ -8,7 +8,7 @@ BIN_NAMES = veryl veryl-ls
 
 export LONG_VERSION
 
-.PHONY: all test clean release_lnx release_win release_mac
+.PHONY: all test clean lint release_lnx release_win release_mac
 
 all:
 	cargo build
@@ -18,6 +18,10 @@ test:
 
 clean:
 	cargo clean
+
+lint:
+	cargo fmt --check
+	cargo clippy -- -D warnings
 
 release_lnx:
 	cargo build --locked --release --target=x86_64-unknown-linux-musl $(addprefix --bin , ${BIN_NAMES})
