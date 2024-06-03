@@ -229,6 +229,208 @@ impl From<&AlwaysFfDeclaration> for TokenRange {
     }
 }
 
+impl From<&Expression12ListGroup> for TokenRange {
+    fn from(value: &Expression12ListGroup) -> Self {
+        let beg = match value {
+            Expression12ListGroup::UnaryOperator(x) => x.unary_operator.unary_operator_token.token,
+            Expression12ListGroup::Operator09(x) => x.operator09.operator09_token.token,
+            Expression12ListGroup::Operator05(x) => x.operator05.operator05_token.token,
+            Expression12ListGroup::Operator04(x) => x.operator04.operator04_token.token,
+            Expression12ListGroup::Operator03(x) => x.operator03.operator03_token.token,
+        };
+        let end = beg;
+        TokenRange { beg, end }
+    }
+}
+
+impl From<&IntegralNumber> for TokenRange {
+    fn from(value: &IntegralNumber) -> Self {
+        let beg = match value {
+            IntegralNumber::Based(x) => x.based.based_token.token,
+            IntegralNumber::BaseLess(x) => x.base_less.base_less_token.token,
+            IntegralNumber::AllBit(x) => x.all_bit.all_bit_token.token,
+        };
+        let end = beg;
+        TokenRange { beg, end }
+    }
+}
+
+impl From<&RealNumber> for TokenRange {
+    fn from(value: &RealNumber) -> Self {
+        let beg = match value {
+            RealNumber::FixedPoint(x) => x.fixed_point.fixed_point_token.token,
+            RealNumber::Exponent(x) => x.exponent.exponent_token.token,
+        };
+        let end = beg;
+        TokenRange { beg, end }
+    }
+}
+
+impl From<&Number> for TokenRange {
+    fn from(value: &Number) -> Self {
+        match value {
+            Number::IntegralNumber(x) => x.integral_number.as_ref().into(),
+            Number::RealNumber(x) => x.real_number.as_ref().into(),
+        }
+    }
+}
+
+macro_rules! impl_token_range {
+    ($typename:ty, $first:ident, $firsttok:ident, $last:ident, $lasttok:ident) => {
+        impl From<&$typename> for TokenRange {
+            fn from(value: &$typename) -> Self {
+                let beg = value.$first.$firsttok.token;
+                let end = value.$last.$lasttok.token;
+                TokenRange { beg, end }
+            }
+        }
+    };
+}
+
+macro_rules! impl_token_range_singular {
+    ($typename:ty, $first:ident) => {
+        impl From<&$typename> for TokenRange {
+            fn from(value: &$typename) -> Self {
+                let beg = value.$first.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+        }
+    };
+}
+
+macro_rules! impl_token_range_dual {
+    ($typename:ty, $first:ident, $second:ident) => {
+        impl From<&$typename> for TokenRange {
+            fn from(value: &$typename) -> Self {
+                let beg = value.$first.$second.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+        }
+    };
+}
+
+impl_token_range!(IfExpression, r#if, if_token, r_brace0, r_brace_token);
+impl_token_range!(CaseExpression, case, case_token, r_brace, r_brace_token);
+impl_token_range!(
+    FactorLParenExpressionRParen,
+    l_paren,
+    l_paren_token,
+    r_paren,
+    r_paren_token
+);
+impl_token_range!(
+    FactorLBraceConcatenationListRBrace,
+    l_brace,
+    l_brace_token,
+    r_brace,
+    r_brace_token
+);
+impl_token_range!(
+    FactorQuoteLBraceArrayLiteralListRBrace,
+    quote_l_brace,
+    quote_l_brace_token,
+    r_brace,
+    r_brace_token
+);
+impl_token_range_singular!(StringLiteral, string_literal_token);
+impl_token_range_dual!(FactorGroupMsb, msb, msb_token);
+impl_token_range_dual!(FactorGroupLsb, lsb, lsb_token);
+impl_token_range_singular!(Inside, inside_token);
+impl_token_range!(
+    InsideExpression,
+    inside,
+    inside_token,
+    r_brace,
+    r_brace_token
+);
+impl_token_range!(
+    OutsideExpression,
+    outside,
+    outside_token,
+    r_brace,
+    r_brace_token
+);
+
+impl From<&FactorGroup> for TokenRange {
+    fn from(value: &FactorGroup) -> Self {
+        match value {
+            FactorGroup::Msb(x) => x.into(),
+            FactorGroup::Lsb(x) => x.into(),
+        }
+    }
+}
+
+impl From<&Factor> for TokenRange {
+    fn from(value: &Factor) -> Self {
+        match value {
+            Factor::Number(x) => x.number.as_ref().into(),
+            Factor::ExpressionIdentifierFactorOpt(x) => x.expression_identifier.as_ref().into(),
+            Factor::LParenExpressionRParen(x) => x.into(),
+            Factor::LBraceConcatenationListRBrace(x) => x.into(),
+            Factor::QuoteLBraceArrayLiteralListRBrace(x) => x.into(),
+            Factor::IfExpression(x) => x.if_expression.as_ref().into(),
+            Factor::CaseExpression(x) => x.case_expression.as_ref().into(),
+            Factor::StringLiteral(x) => x.string_literal.as_ref().into(),
+            Factor::FactorGroup(x) => x.factor_group.as_ref().into(),
+            Factor::InsideExpression(x) => x.inside_expression.as_ref().into(),
+            Factor::OutsideExpression(x) => x.outside_expression.as_ref().into(),
+        }
+    }
+}
+
+impl From<&Expression12> for TokenRange {
+    fn from(value: &Expression12) -> Self {
+        let end: TokenRange = value.factor.as_ref().into();
+        let end = end.end;
+        let beg = if value.expression12_list.is_empty() {
+            end
+        } else {
+            let first = value.expression12_list.first().unwrap();
+            let t: TokenRange = first.expression12_list_group.as_ref().into();
+            t.beg
+        };
+        TokenRange { beg, end }
+    }
+}
+
+macro_rules! expression_token_range {
+    ($typename:ty, $beg:ident, $list:ident, $prev:ident) => {
+        impl From<&$typename> for TokenRange {
+            fn from(value: &$typename) -> Self {
+                let beg: TokenRange = value.$beg.as_ref().into();
+                let beg = beg.beg;
+                let end = if value.$list.is_empty() {
+                    beg
+                } else {
+                    let last = value.$list.last().unwrap();
+                    let end: TokenRange = last.$prev.as_ref().into();
+                    end.end
+                };
+                TokenRange { beg, end }
+            }
+        }
+    };
+}
+expression_token_range!(
+    Expression11,
+    expression12,
+    expression11_list,
+    scoped_identifier
+);
+expression_token_range!(Expression10, expression11, expression10_list, expression11);
+expression_token_range!(Expression09, expression10, expression09_list, expression10);
+expression_token_range!(Expression08, expression09, expression08_list, expression09);
+expression_token_range!(Expression07, expression08, expression07_list, expression08);
+expression_token_range!(Expression06, expression07, expression06_list, expression07);
+expression_token_range!(Expression05, expression06, expression05_list, expression06);
+expression_token_range!(Expression04, expression05, expression04_list, expression05);
+expression_token_range!(Expression03, expression04, expression03_list, expression04);
+expression_token_range!(Expression02, expression03, expression02_list, expression03);
+expression_token_range!(Expression01, expression02, expression01_list, expression02);
+expression_token_range!(Expression, expression01, expression_list, expression01);
+
 impl From<&FixedType> for TokenRange {
     fn from(value: &FixedType) -> Self {
         let beg = match value {

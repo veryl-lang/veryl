@@ -229,6 +229,20 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_reset_non_elaborative),
+        help(""),
+        url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#invalid_reset_value")
+    )]
+    #[error("Reset-value cannot be used because it is not evaluable at elaboration time")]
+    InvalidResetNonElaborative {
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(missing_default_argument),
         help("give default argument"),
         url("")
@@ -850,6 +864,13 @@ impl AnalyzerError {
     pub fn invalid_reset(identifier: &str, source: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidReset {
             identifier: identifier.into(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn invalid_reset_non_elaborative(source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidResetNonElaborative {
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
         }
