@@ -348,23 +348,25 @@ impl<'a> VerylGrammarTrait for CheckIdentifier<'a> {
     }
 
     fn var_declaration(&mut self, arg: &VarDeclaration) -> Result<(), ParolError> {
-        let token = arg.identifier.identifier_token.token;
-        let identifier: String = token.to_string();
+        if let HandlerPoint::Before = self.point {
+            let token = arg.identifier.identifier_token.token;
+            let identifier: String = token.to_string();
 
-        if identifier.starts_with("__") {
-            self.errors.push(AnalyzerError::reserved_identifier(
-                &identifier,
-                self.text,
-                &token.into(),
-            ));
-        }
+            if identifier.starts_with("__") {
+                self.errors.push(AnalyzerError::reserved_identifier(
+                    &identifier,
+                    self.text,
+                    &token.into(),
+                ));
+            }
 
-        if is_sv_keyword(&identifier) {
-            self.errors.push(AnalyzerError::sv_keyword_usage(
-                &identifier,
-                self.text,
-                &token.into(),
-            ))
+            if is_sv_keyword(&identifier) {
+                self.errors.push(AnalyzerError::sv_keyword_usage(
+                    &identifier,
+                    self.text,
+                    &token.into(),
+                ))
+            }
         }
         Ok(())
     }
