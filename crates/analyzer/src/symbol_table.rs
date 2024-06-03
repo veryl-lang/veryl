@@ -748,10 +748,7 @@ const SYSTEMVERILOG_KEYWORDS: [&str; 248] = [
 ];
 
 pub fn is_sv_keyword(s: &str) -> bool {
-    match SYSTEMVERILOG_KEYWORDS.binary_search(&s) {
-        Ok(_) => true,
-        Err(_) => false,
-    }
+    SYSTEMVERILOG_KEYWORDS.binary_search(&s).is_ok()
 }
 
 // Refer IEEE Std 1800-2012  Clause 20 and 21
