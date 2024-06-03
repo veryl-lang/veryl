@@ -383,14 +383,14 @@ impl From<&Factor> for TokenRange {
 impl From<&Expression12> for TokenRange {
     fn from(value: &Expression12) -> Self {
         let end: TokenRange = value.factor.as_ref().into();
-        let end = end.end;
         let beg = if value.expression12_list.is_empty() {
-            end
+            end.beg
         } else {
             let first = value.expression12_list.first().unwrap();
             let t: TokenRange = first.expression12_list_group.as_ref().into();
             t.beg
         };
+        let end = end.end;
         TokenRange { beg, end }
     }
 }
@@ -400,19 +400,20 @@ macro_rules! expression_token_range {
         impl From<&$typename> for TokenRange {
             fn from(value: &$typename) -> Self {
                 let beg: TokenRange = value.$beg.as_ref().into();
-                let beg = beg.beg;
                 let end = if value.$list.is_empty() {
-                    beg
+                    beg.end
                 } else {
                     let last = value.$list.last().unwrap();
                     let end: TokenRange = last.$prev.as_ref().into();
                     end.end
                 };
+                let beg = beg.beg;
                 TokenRange { beg, end }
             }
         }
     };
 }
+
 expression_token_range!(
     Expression11,
     expression12,

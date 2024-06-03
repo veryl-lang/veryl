@@ -2,6 +2,7 @@ use crate::analyzer_error::AnalyzerError;
 use crate::attribute::AllowItem;
 use crate::attribute::Attribute as Attr;
 use crate::attribute_table;
+use crate::evaluator::Evaluator;
 use crate::symbol::SymbolKind;
 use crate::symbol_table;
 use veryl_parser::resource_table;
@@ -13,6 +14,7 @@ pub struct CheckInstance<'a> {
     pub errors: Vec<AnalyzerError>,
     text: &'a str,
     point: HandlerPoint,
+    evaluator: Evaluator,
 }
 
 impl<'a> CheckInstance<'a> {
@@ -21,6 +23,7 @@ impl<'a> CheckInstance<'a> {
             errors: Vec::new(),
             text,
             point: HandlerPoint::Before,
+            evaluator: Evaluator::new(),
         }
     }
 }
@@ -40,6 +43,13 @@ impl<'a> VerylGrammarTrait for CheckInstance<'a> {
                     let items: Vec<InstParameterItem> = x.inst_parameter_list.as_ref().into();
                     for item in items {
                         connected_params.push(item.identifier.identifier_token.token.text);
+                        // match self.evaluator.inst_parameter_item(&item) {
+                        //     crate::evaluator::Evaluated::Fixed { .. } => todo!(),
+                        //     crate::evaluator::Evaluated::Variable { _ } |
+                        //     crate::evaluator::Evaluated::Unknown => {
+                        //         pass!()
+                        //     }
+                        // }
                     }
                 }
             }

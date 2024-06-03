@@ -1,5 +1,5 @@
 use crate::symbol::{Type, TypeKind};
-use crate::symbol_table;
+use crate::symbol_table::{self, ResolveError, ResolveResult};
 use veryl_parser::veryl_grammar_trait::*;
 
 #[derive(Clone, Copy, Debug)]
@@ -595,6 +595,36 @@ impl Evaluator {
         ret
     }
 
+    pub fn inst_parameter_item(&mut self, arg: &InstParameterItem) -> Evaluated {
+        if let Some(opt) = &arg.inst_parameter_item_opt {
+            self.expression(opt.expression.as_ref())
+        } else {
+            self.identifier(arg.identifier.as_ref())
+        }
+    }
+
+    fn identifier_helper(&mut self, symbol: Result<ResolveResult, ResolveError>) -> Evaluated {
+        if let Ok(symbol) = symbol {
+            if let Some(evaluated) = symbol.found.evaluated.get() {
+                evaluated
+            } else {
+                Evaluated::Unknown
+            }
+        } else {
+            Evaluated::Unknown
+        }
+    }
+
+    fn identifier(&mut self, arg: &Identifier) -> Evaluated {
+        let symbol = symbol_table::resolve(arg);
+        self.identifier_helper(symbol)
+    }
+
+    fn expression_identifier(&mut self, arg: &ExpressionIdentifier) -> Evaluated {
+        let symbol = symbol_table::resolve(arg);
+        self.identifier_helper(symbol)
+    }
+
     fn factor(&mut self, arg: &Factor) -> Evaluated {
         match arg {
             Factor::Number(x) => self.number(&x.number),
@@ -604,16 +634,7 @@ impl Evaluator {
                     Evaluated::Unknown
                 } else {
                     // Identifier
-                    let symbol = symbol_table::resolve(x.expression_identifier.as_ref());
-                    if let Ok(symbol) = symbol {
-                        if let Some(evaluated) = symbol.found.evaluated.get() {
-                            evaluated
-                        } else {
-                            Evaluated::Unknown
-                        }
-                    } else {
-                        Evaluated::Unknown
-                    }
+                    self.expression_identifier(x.expression_identifier.as_ref())
                 }
             }
             Factor::LParenExpressionRParen(x) => self.expression(&x.expression),

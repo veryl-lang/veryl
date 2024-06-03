@@ -2,9 +2,7 @@ use crate::analyzer_error::AnalyzerError;
 use crate::evaluator::Evaluator;
 use crate::symbol::{SymbolKind, TypeKind};
 use crate::symbol_table;
-use miette::SourceSpan;
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::TokenRange;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
