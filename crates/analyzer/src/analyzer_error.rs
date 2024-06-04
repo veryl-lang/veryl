@@ -105,6 +105,22 @@ pub enum AnalyzerError {
     },
 
     #[diagnostic(
+        severity(Error),
+        code(invalid_factor),
+        help("remove {kind} from expression"),
+        url("")
+    )]
+    #[error("{identifier} of kind \"{kind}\" cannot be used as a factor in an expression")]
+    InvalidFactor {
+        identifier: String,
+        kind: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
         severity(Warning),
         code(invalid_identifier),
         help("follow naming rule"),
@@ -806,6 +822,15 @@ impl AnalyzerError {
 
     pub fn invalid_direction(kind: &str, source: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidDirection {
+            kind: kind.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn invalid_factor(identifier: &str, kind: &str, source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidFactor {
+            identifier: identifier.to_string(),
             kind: kind.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),

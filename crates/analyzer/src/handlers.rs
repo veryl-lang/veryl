@@ -4,6 +4,7 @@ pub mod check_clock_reset;
 pub mod check_direction;
 pub mod check_embed_include;
 pub mod check_enum;
+pub mod check_expression;
 pub mod check_function;
 pub mod check_identifier;
 pub mod check_instance;
@@ -19,6 +20,7 @@ use check_clock_reset::*;
 use check_direction::*;
 use check_embed_include::*;
 use check_enum::*;
+use check_expression::*;
 use check_function::*;
 use check_identifier::*;
 use check_instance::*;
@@ -93,6 +95,7 @@ pub struct Pass2Handlers<'a> {
     check_clock_reset: CheckClockReset<'a>,
     create_reference: CreateReference<'a>,
     create_type_dag: CreateTypeDag<'a>,
+    check_expression: CheckExpression<'a>,
 }
 
 impl<'a> Pass2Handlers<'a> {
@@ -107,6 +110,7 @@ impl<'a> Pass2Handlers<'a> {
             check_clock_reset: CheckClockReset::new(text),
             create_reference: CreateReference::new(text),
             create_type_dag: CreateTypeDag::new(text),
+            check_expression: CheckExpression::new(text),
         }
     }
 
@@ -121,6 +125,7 @@ impl<'a> Pass2Handlers<'a> {
             &mut self.check_clock_reset as &mut dyn Handler,
             &mut self.create_reference as &mut dyn Handler,
             &mut self.create_type_dag as &mut dyn Handler,
+            &mut self.check_expression as &mut dyn Handler,
         ]
     }
 
@@ -135,6 +140,7 @@ impl<'a> Pass2Handlers<'a> {
         ret.append(&mut self.check_clock_reset.errors);
         ret.append(&mut self.create_reference.errors);
         ret.append(&mut self.create_type_dag.errors);
+        ret.append(&mut self.check_expression.errors);
         ret
     }
 }
