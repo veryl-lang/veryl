@@ -255,7 +255,8 @@ impl<'a> VerylGrammarTrait for CheckClockReset<'a> {
             if self.in_if_reset {
                 // Check to see right hand side of reset is const evaluable
                 match self.evaluator.expression(&arg.expression) {
-                    crate::evaluator::Evaluated::Fixed { .. } => {}
+                    crate::evaluator::Evaluated::UnknownStatic
+                    | crate::evaluator::Evaluated::Fixed { .. } => {}
                     crate::evaluator::Evaluated::Variable { .. }
                     | crate::evaluator::Evaluated::Unknown => {
                         self.errors
