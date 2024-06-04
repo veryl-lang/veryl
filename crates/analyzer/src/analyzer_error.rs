@@ -214,6 +214,36 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_modport_variable_item),
+        help(""),
+        url("")
+    )]
+    #[error("#{identifier} is not a variable")]
+    InvalidModportVariableItem {
+        identifier: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(invalid_modport_function_item),
+        help(""),
+        url("")
+    )]
+    #[error("#{identifier} is not a function")]
+    InvalidModportFunctionItem {
+        identifier: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(invalid_reset),
         help(""),
         url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#invalid_reset")
@@ -855,6 +885,18 @@ impl AnalyzerError {
 
     pub fn invalid_clock(identifier: &str, source: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidClock {
+            identifier: identifier.into(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn invalid_modport_variable_item(
+        identifier: &str,
+        source: &str,
+        token: &TokenRange,
+    ) -> Self {
+        AnalyzerError::InvalidModportVariableItem {
             identifier: identifier.into(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),

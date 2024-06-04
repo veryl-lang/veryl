@@ -2,17 +2,24 @@ module Module39 (
     mst: modport Interface39::master,
     slv: modport Interface39::slave ,
 ) {
-    assign mst.a = slv.a;
+    var a    : logic;
+    assign mst.a = a;
+    assign a     = slv.get_a();
 }
 
 interface Interface39 {
     var a: logic;
+
+    function get_a () -> logic {
+        return a;
+    }
 
     modport master {
         a: output,
     }
 
     modport slave {
-        a: input,
+        a    : input ,
+        get_a: import,
     }
 }

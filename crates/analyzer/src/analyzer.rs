@@ -292,7 +292,7 @@ fn is_assignable(direction: &Direction) -> bool {
 fn must_be_assigned(kind: &SymbolKind) -> bool {
     match kind {
         SymbolKind::Port(x) => x.direction == Direction::Output,
-        SymbolKind::ModportMember(x) => x.direction == Direction::Output,
+        SymbolKind::ModportVariableMember(x) => x.direction == Direction::Output,
         SymbolKind::Variable(_) => true,
         SymbolKind::StructMember(_) => true,
         _ => false,
@@ -378,7 +378,7 @@ fn traverse_type_symbol(id: SymbolId, path: &AssignPath) -> Vec<AssignPath> {
                 }
                 return ret;
             }
-            SymbolKind::ModportMember(x) if is_assignable(&x.direction) => {
+            SymbolKind::ModportVariableMember(x) if is_assignable(&x.direction) => {
                 if let Ok(symbol) = symbol_table::resolve(&symbol.token) {
                     return traverse_type_symbol(symbol.found.id, path);
                 }
