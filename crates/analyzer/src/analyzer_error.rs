@@ -891,6 +891,21 @@ impl AnalyzerError {
         }
     }
 
+    pub fn invalid_reset(identifier: &str, source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidReset {
+            identifier: identifier.into(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn invalid_reset_non_elaborative(source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidResetNonElaborative {
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
     pub fn invalid_modport_variable_item(
         identifier: &str,
         source: &str,
@@ -903,16 +918,13 @@ impl AnalyzerError {
         }
     }
 
-    pub fn invalid_reset(identifier: &str, source: &str, token: &TokenRange) -> Self {
-        AnalyzerError::InvalidReset {
+    pub fn invalid_modport_function_item(
+        identifier: &str,
+        source: &str,
+        token: &TokenRange,
+    ) -> Self {
+        AnalyzerError::InvalidModportFunctionItem {
             identifier: identifier.into(),
-            input: AnalyzerError::named_source(source, token),
-            error_location: token.into(),
-        }
-    }
-
-    pub fn invalid_reset_non_elaborative(source: &str, token: &TokenRange) -> Self {
-        AnalyzerError::InvalidResetNonElaborative {
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
         }
