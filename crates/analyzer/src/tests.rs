@@ -1433,3 +1433,29 @@ fn reserved_identifier() {
         AnalyzerError::ReservedIdentifier { .. }
     ));
 }
+
+#[test]
+fn reset_value_non_elaborative() {
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_rst: input reset,
+    ) {
+        var a: logic;
+        var b: logic;
+
+        always_ff {
+            if_reset {
+                a = b;
+            } else {
+                a = 1'b0;
+            }
+        }
+    }"#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidResetNonElaborative { .. }
+    ));
+}
