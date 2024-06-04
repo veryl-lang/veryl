@@ -1452,3 +1452,23 @@ fn invalid_factor_kind() {
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
 }
+
+#[test]
+fn call_non_function() {
+    let code = r#"
+    module ModuleA {
+        function f (
+            a: input logic,
+        ) -> logic {
+            return a;
+        }
+
+        var a: logic;
+        var b: logic;
+
+        assign a = b() + 1;
+    }"#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::CallNonFunction { .. }));
+}

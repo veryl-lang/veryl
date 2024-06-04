@@ -6,6 +6,22 @@ use veryl_parser::veryl_token::TokenRange;
 pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
+        code(call_non_function),
+        help("remove call to non-function symbol"),
+        url("")
+    )]
+    #[error("Calling non-function symbol \"{identifier}\" which has kind \"{kind}\"")]
+    CallNonFunction {
+        identifier: String,
+        kind: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(cyclice_type_dependency),
         help(""),
         url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#cyclic_type_dependency")
@@ -758,6 +774,20 @@ pub enum AnalyzerError {
 impl AnalyzerError {
     fn named_source(source: &str, token: &TokenRange) -> NamedSource {
         NamedSource::new(token.beg.source.to_string(), source.to_string())
+    }
+
+    pub fn call_non_function(
+        identifier: &str,
+        kind: &str,
+        source: &str,
+        token: &TokenRange,
+    ) -> Self {
+        AnalyzerError::CallNonFunction {
+            identifier: identifier.into(),
+            kind: kind.into(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
     }
 
     pub fn cyclic_type_dependency(

@@ -1,4 +1,5 @@
 use crate::analyzer_error::AnalyzerError;
+use crate::symbol::SymbolKind;
 use crate::symbol_table;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::TokenRange;
@@ -36,9 +37,9 @@ impl<'a> VerylGrammarTrait for CheckExpression<'a> {
                     let identifier = rr.found.token.to_string();
                     let token: TokenRange = x.expression_identifier.as_ref().into();
                     match rr.found.kind {
-                        crate::symbol::SymbolKind::Function(_)
-                        | crate::symbol::SymbolKind::ModportFunctionMember(_)
-                        | crate::symbol::SymbolKind::SystemFunction => {
+                        SymbolKind::Function(_)
+                        | SymbolKind::ModportFunctionMember(_)
+                        | SymbolKind::SystemFunction => {
                             if x.factor_opt.is_none() {
                                 self.errors.push(AnalyzerError::invalid_factor(
                                     &identifier,
@@ -48,17 +49,17 @@ impl<'a> VerylGrammarTrait for CheckExpression<'a> {
                                 ));
                             }
                         }
-                        crate::symbol::SymbolKind::Module(_)
-                        | crate::symbol::SymbolKind::Interface(_)
-                        | crate::symbol::SymbolKind::Instance(_)
-                        | crate::symbol::SymbolKind::Block
-                        | crate::symbol::SymbolKind::Package(_)
-                        | crate::symbol::SymbolKind::TypeDef(_)
-                        | crate::symbol::SymbolKind::Enum(_)
-                        | crate::symbol::SymbolKind::Modport(_)
-                        | crate::symbol::SymbolKind::ModportVariableMember(_)
-                        | crate::symbol::SymbolKind::Namespace
-                        | crate::symbol::SymbolKind::GenericInstance(_) => {
+                        SymbolKind::Module(_)
+                        | SymbolKind::Interface(_)
+                        | SymbolKind::Instance(_)
+                        | SymbolKind::Block
+                        | SymbolKind::Package(_)
+                        | SymbolKind::TypeDef(_)
+                        | SymbolKind::Enum(_)
+                        | SymbolKind::Modport(_)
+                        | SymbolKind::ModportVariableMember(_)
+                        | SymbolKind::Namespace
+                        | SymbolKind::GenericInstance(_) => {
                             self.errors.push(AnalyzerError::invalid_factor(
                                 &identifier,
                                 &rr.found.kind.to_kind_name(),
@@ -67,6 +68,29 @@ impl<'a> VerylGrammarTrait for CheckExpression<'a> {
                             ));
                         }
                         _ => {}
+                    }
+                }
+
+                if x.factor_opt.is_some() {
+                    // Must be a function call
+                    let expid = x.expression_identifier.as_ref();
+                    if let Ok(rr) = symbol_table::resolve(expid) {
+                        match rr.found.kind {
+                            SymbolKind::Function(_)
+                            | SymbolKind::SystemVerilog
+                            | SymbolKind::ModportFunctionMember(..)
+                            | SymbolKind::SystemFunction => {}
+                            _ => {
+                                let identifier = rr.found.token.to_string();
+                                let token: TokenRange = x.expression_identifier.as_ref().into();
+                                self.errors.push(AnalyzerError::call_non_function(
+                                    &identifier,
+                                    &rr.found.kind.to_kind_name(),
+                                    self.text,
+                                    &token,
+                                ));
+                            }
+                        }
                     }
                 }
             }
