@@ -229,6 +229,36 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_modport_variable_item),
+        help(""),
+        url("")
+    )]
+    #[error("#{identifier} is not a variable")]
+    InvalidModportVariableItem {
+        identifier: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(invalid_modport_function_item),
+        help(""),
+        url("")
+    )]
+    #[error("#{identifier} is not a function")]
+    InvalidModportFunctionItem {
+        identifier: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(missing_default_argument),
         help("give default argument"),
         url("")
@@ -849,6 +879,30 @@ impl AnalyzerError {
 
     pub fn invalid_reset(identifier: &str, source: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidReset {
+            identifier: identifier.into(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn invalid_modport_variable_item(
+        identifier: &str,
+        source: &str,
+        token: &TokenRange,
+    ) -> Self {
+        AnalyzerError::InvalidModportVariableItem {
+            identifier: identifier.into(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn invalid_modport_function_item(
+        identifier: &str,
+        source: &str,
+        token: &TokenRange,
+    ) -> Self {
+        AnalyzerError::InvalidModportFunctionItem {
             identifier: identifier.into(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),

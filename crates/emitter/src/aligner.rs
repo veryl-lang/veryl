@@ -936,6 +936,7 @@ impl VerylWalker for Aligner {
             Direction::Inout(x) => self.inout(&x.inout),
             Direction::Ref(x) => self.r#ref(&x.r#ref),
             Direction::Modport(_) => (),
+            Direction::Import(x) => self.import(&x.import),
         };
         if !matches!(arg, Direction::Modport(_)) {
             self.aligns[align_kind::DIRECTION].finish_item();

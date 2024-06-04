@@ -7,6 +7,7 @@ pub mod check_enum;
 pub mod check_function;
 pub mod check_identifier;
 pub mod check_instance;
+pub mod check_modport;
 pub mod check_msb_lsb;
 pub mod check_number;
 pub mod check_statement;
@@ -21,6 +22,7 @@ use check_enum::*;
 use check_function::*;
 use check_identifier::*;
 use check_instance::*;
+use check_modport::*;
 use check_msb_lsb::*;
 use check_number::*;
 use check_statement::*;
@@ -83,6 +85,7 @@ impl<'a> Pass1Handlers<'a> {
 
 pub struct Pass2Handlers<'a> {
     check_enum: CheckEnum<'a>,
+    check_modport: CheckModport<'a>,
     check_function: CheckFunction<'a>,
     check_instance: CheckInstance<'a>,
     check_msb_lsb: CheckMsbLsb<'a>,
@@ -96,6 +99,7 @@ impl<'a> Pass2Handlers<'a> {
     pub fn new(text: &'a str, _build_opt: &'a Build, _lint_opt: &'a Lint) -> Self {
         Self {
             check_enum: CheckEnum::new(text),
+            check_modport: CheckModport::new(text),
             check_function: CheckFunction::new(text),
             check_instance: CheckInstance::new(text),
             check_msb_lsb: CheckMsbLsb::new(text),
@@ -109,6 +113,7 @@ impl<'a> Pass2Handlers<'a> {
     pub fn get_handlers(&mut self) -> Vec<&mut dyn Handler> {
         vec![
             &mut self.check_enum as &mut dyn Handler,
+            &mut self.check_modport as &mut dyn Handler,
             &mut self.check_function as &mut dyn Handler,
             &mut self.check_instance as &mut dyn Handler,
             &mut self.check_msb_lsb as &mut dyn Handler,
@@ -122,6 +127,7 @@ impl<'a> Pass2Handlers<'a> {
     pub fn get_errors(&mut self) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
         ret.append(&mut self.check_enum.errors);
+        ret.append(&mut self.check_modport.errors);
         ret.append(&mut self.check_function.errors);
         ret.append(&mut self.check_instance.errors);
         ret.append(&mut self.check_msb_lsb.errors);
