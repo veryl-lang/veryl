@@ -43,6 +43,8 @@ pub struct LintNaming {
     #[serde(default)]
     pub case_union: Option<Case>,
     #[serde(default)]
+    pub case_var: Option<Case>,
+    #[serde(default)]
     pub case_wire: Option<Case>,
     #[serde(default)]
     pub prefix_enum: Option<String>,
@@ -74,6 +76,8 @@ pub struct LintNaming {
     pub prefix_struct: Option<String>,
     #[serde(default)]
     pub prefix_union: Option<String>,
+    #[serde(default)]
+    pub prefix_var: Option<String>,
     #[serde(default)]
     pub prefix_wire: Option<String>,
     #[serde(default, with = "serde_regex")]
@@ -107,6 +111,8 @@ pub struct LintNaming {
     #[serde(default, with = "serde_regex")]
     pub re_forbidden_union: Option<Regex>,
     #[serde(default, with = "serde_regex")]
+    pub re_forbidden_var: Option<Regex>,
+    #[serde(default, with = "serde_regex")]
     pub re_forbidden_wire: Option<Regex>,
     #[serde(default, with = "serde_regex")]
     pub re_required_enum: Option<Regex>,
@@ -138,6 +144,8 @@ pub struct LintNaming {
     pub re_required_struct: Option<Regex>,
     #[serde(default, with = "serde_regex")]
     pub re_required_union: Option<Regex>,
+    #[serde(default, with = "serde_regex")]
+    pub re_required_var: Option<Regex>,
     #[serde(default, with = "serde_regex")]
     pub re_required_wire: Option<Regex>,
 }

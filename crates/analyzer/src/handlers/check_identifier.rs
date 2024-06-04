@@ -36,6 +36,7 @@ enum Kind {
     Reg,
     Struct,
     Union,
+    Var,
     Wire,
 }
 
@@ -70,6 +71,7 @@ impl<'a> CheckIdentifier<'a> {
             Kind::Reg => &opt.prefix_reg,
             Kind::Struct => &opt.prefix_struct,
             Kind::Union => &opt.prefix_union,
+            Kind::Var => &opt.prefix_var,
             Kind::Wire => &opt.prefix_wire,
         };
 
@@ -89,6 +91,7 @@ impl<'a> CheckIdentifier<'a> {
             Kind::Reg => &opt.case_reg,
             Kind::Struct => &opt.case_struct,
             Kind::Union => &opt.case_union,
+            Kind::Var => &opt.case_var,
             Kind::Wire => &opt.case_wire,
         };
 
@@ -108,6 +111,7 @@ impl<'a> CheckIdentifier<'a> {
             Kind::Reg => &opt.re_required_reg,
             Kind::Struct => &opt.re_required_struct,
             Kind::Union => &opt.re_required_union,
+            Kind::Var => &opt.re_required_var,
             Kind::Wire => &opt.re_required_wire,
         };
 
@@ -127,6 +131,7 @@ impl<'a> CheckIdentifier<'a> {
             Kind::Reg => &opt.re_forbidden_reg,
             Kind::Struct => &opt.re_forbidden_struct,
             Kind::Union => &opt.re_forbidden_union,
+            Kind::Var => &opt.re_forbidden_var,
             Kind::Wire => &opt.re_forbidden_wire,
         };
 
@@ -349,24 +354,7 @@ impl<'a> VerylGrammarTrait for CheckIdentifier<'a> {
 
     fn var_declaration(&mut self, arg: &VarDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let token = arg.identifier.identifier_token.token;
-            let identifier: String = token.to_string();
-
-            if identifier.starts_with("__") {
-                self.errors.push(AnalyzerError::reserved_identifier(
-                    &identifier,
-                    self.text,
-                    &token.into(),
-                ));
-            }
-
-            if is_sv_keyword(&identifier) {
-                self.errors.push(AnalyzerError::sv_keyword_usage(
-                    &identifier,
-                    self.text,
-                    &token.into(),
-                ))
-            }
+            self.check(&arg.identifier.identifier_token.token, Kind::Var)
         }
         Ok(())
     }
