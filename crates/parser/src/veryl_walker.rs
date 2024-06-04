@@ -2315,6 +2315,7 @@ pub trait VerylWalker {
             Direction::Inout(x) => self.inout(&x.inout),
             Direction::Ref(x) => self.r#ref(&x.r#ref),
             Direction::Modport(x) => self.modport(&x.modport),
+            Direction::Import(x) => self.import(&x.import),
         };
         after!(self, direction, arg);
     }

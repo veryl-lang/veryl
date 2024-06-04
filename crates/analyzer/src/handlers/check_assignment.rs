@@ -53,9 +53,9 @@ fn can_assign(full_path: &[SymbolId]) -> bool {
                 SymbolKind::Port(x) if x.direction == Direction::Output => true,
                 SymbolKind::Port(x) if x.direction == Direction::Ref => true,
                 SymbolKind::Port(x) if x.direction == Direction::Inout => true,
-                SymbolKind::ModportMember(x) if x.direction == Direction::Output => true,
-                SymbolKind::ModportMember(x) if x.direction == Direction::Ref => true,
-                SymbolKind::ModportMember(x) if x.direction == Direction::Inout => true,
+                SymbolKind::ModportVariableMember(x) if x.direction == Direction::Output => true,
+                SymbolKind::ModportVariableMember(x) if x.direction == Direction::Ref => true,
+                SymbolKind::ModportVariableMember(x) if x.direction == Direction::Inout => true,
                 _ => false,
             };
             if can_assign {

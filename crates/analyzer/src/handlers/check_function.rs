@@ -44,7 +44,14 @@ impl<'a> VerylGrammarTrait for CheckFunction<'a> {
                 }
 
                 if let Ok(symbol) = symbol_table::resolve(arg.expression_identifier.as_ref()) {
-                    if let SymbolKind::Function(x) = symbol.found.kind {
+                    let function_symbol = match symbol.found.kind {
+                        SymbolKind::Function(_) => symbol.found,
+                        SymbolKind::ModportFunctionMember(x) => {
+                            symbol_table::get(x.function).unwrap()
+                        }
+                        _ => return Ok(()),
+                    };
+                    if let SymbolKind::Function(x) = function_symbol.kind {
                         if x.ret.is_some() {
                             let name = format!(
                                 "{}",
@@ -86,10 +93,18 @@ impl<'a> VerylGrammarTrait for CheckFunction<'a> {
                 }
 
                 if let Ok(symbol) = symbol_table::resolve(x.expression_identifier.as_ref()) {
-                    let arity = if let SymbolKind::Function(x) = symbol.found.kind {
-                        Some(x.ports.len())
-                    } else {
-                        None
+                    let arity = match symbol.found.kind {
+                        SymbolKind::Function(x) => Some(x.ports.len()),
+                        SymbolKind::ModportFunctionMember(x) => {
+                            if let SymbolKind::Function(x) =
+                                symbol_table::get(x.function).unwrap().kind
+                            {
+                                Some(x.ports.len())
+                            } else {
+                                unreachable!();
+                            }
+                        }
+                        _ => None,
                     };
 
                     let mut args = 0;

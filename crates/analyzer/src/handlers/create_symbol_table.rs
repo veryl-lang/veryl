@@ -8,11 +8,11 @@ use crate::symbol::Direction as SymDirection;
 use crate::symbol::Type as SymType;
 use crate::symbol::{
     ConnectTarget, DocComment, EnumMemberProperty, EnumProperty, FunctionProperty,
-    GenericParameterProperty, InstanceProperty, InterfaceProperty, ModportMemberProperty,
-    ModportProperty, ModuleProperty, PackageProperty, ParameterProperty, ParameterScope,
-    ParameterValue, PortProperty, StructMemberProperty, StructProperty, Symbol, SymbolId,
-    SymbolKind, TypeDefProperty, TypeKind, UnionMemberProperty, UnionProperty, VariableAffiniation,
-    VariableProperty,
+    GenericParameterProperty, InstanceProperty, InterfaceProperty, ModportFunctionMemberProperty,
+    ModportProperty, ModportVariableMemberProperty, ModuleProperty, PackageProperty,
+    ParameterProperty, ParameterScope, ParameterValue, PortProperty, StructMemberProperty,
+    StructProperty, Symbol, SymbolId, SymbolKind, TypeDefProperty, TypeKind, UnionMemberProperty,
+    UnionProperty, VariableAffiniation, VariableProperty,
 };
 use crate::symbol_path::{GenericSymbolPath, SymbolPath};
 use crate::symbol_table;
@@ -50,6 +50,8 @@ pub struct CreateSymbolTable<'a> {
     generic_references: Vec<GenericSymbolPath>,
     default_clock_candidates: Vec<SymbolId>,
     defualt_reset_candidates: Vec<SymbolId>,
+    modport_member_ids: Vec<SymbolId>,
+    function_ids: HashMap<StrId, SymbolId>,
 }
 
 #[derive(Clone)]
@@ -448,19 +450,33 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 .push(arg.identifier.identifier_token.token.text);
 
             for item in items {
-                let direction: crate::symbol::Direction = item.direction.as_ref().into();
-                let property = ModportMemberProperty { direction };
-                let id = self.insert_symbol(
-                    &item.identifier.identifier_token.token,
-                    SymbolKind::ModportMember(property),
-                    false,
-                );
-                members.push(id);
+                let kind = match &*item.direction {
+                    Direction::Ref(_) | Direction::Modport(_) => {
+                        continue;
+                    }
+                    Direction::Import(_) => {
+                        let property = ModportFunctionMemberProperty {
+                            function: SymbolId::default(),
+                        };
+                        SymbolKind::ModportFunctionMember(property)
+                    }
+                    _ => {
+                        let direction: crate::symbol::Direction = item.direction.as_ref().into();
+                        let property = ModportVariableMemberProperty { direction };
+                        SymbolKind::ModportVariableMember(property)
+                    }
+                };
+
+                if let Some(id) =
+                    self.insert_symbol(&item.identifier.identifier_token.token, kind, false)
+                {
+                    members.push(id);
+                    self.modport_member_ids.push(id);
+                }
             }
 
             self.namespace.pop();
 
-            let members: Vec<_> = members.into_iter().flatten().collect();
             let property = ModportProperty { members };
             let kind = SymbolKind::Modport(property);
             self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
@@ -785,11 +801,15 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     ports,
                     ret,
                 };
-                self.insert_symbol(
+
+                if let Some(id) = self.insert_symbol(
                     &arg.identifier.identifier_token.token,
                     SymbolKind::Function(property),
                     false,
-                );
+                ) {
+                    self.function_ids
+                        .insert(arg.identifier.identifier_token.token.text, id);
+                }
             }
         }
         Ok(())
@@ -802,6 +822,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 self.namespace.push(name);
                 self.affiniation.push(VariableAffiniation::Module);
                 self.module_namspace_depth = self.namespace.depth();
+                self.function_ids.clear();
             }
             HandlerPoint::After => {
                 self.namespace.pop();
@@ -941,6 +962,8 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             HandlerPoint::Before => {
                 self.namespace.push(name);
                 self.affiniation.push(VariableAffiniation::Intarface);
+                self.function_ids.clear();
+                self.modport_member_ids.clear();
             }
             HandlerPoint::After => {
                 self.namespace.pop();
@@ -975,6 +998,19 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     SymbolKind::Interface(property),
                     public,
                 );
+
+                //  link modport function
+                for id in &self.modport_member_ids {
+                    let mut mp_member = symbol_table::get(*id).unwrap();
+                    if let SymbolKind::ModportFunctionMember(_) = mp_member.kind {
+                        if let Some(id) = self.function_ids.get(&mp_member.token.text) {
+                            let property = ModportFunctionMemberProperty { function: *id };
+                            let kind = SymbolKind::ModportFunctionMember(property);
+                            mp_member.kind = kind;
+                            symbol_table::update(mp_member);
+                        }
+                    }
+                }
             }
         }
         Ok(())
@@ -1054,6 +1090,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             HandlerPoint::Before => {
                 self.namespace.push(name);
                 self.affiniation.push(VariableAffiniation::Package);
+                self.function_ids.clear();
             }
             HandlerPoint::After => {
                 self.namespace.pop();
