@@ -1,5 +1,5 @@
 use crate::symbol::{Type, TypeKind};
-use crate::symbol_table;
+use crate::symbol_table::{self, ResolveError, ResolveResult};
 use veryl_parser::veryl_grammar_trait::*;
 
 #[derive(Clone, Copy, Debug)]
@@ -7,9 +7,15 @@ pub enum Evaluated {
     Fixed { width: usize, value: isize },
     Variable { width: usize },
     Unknown,
+    UnknownStatic, // A temporary enum value to indicate that a value is knowable statically,
+                   // even if, currently, the compiler doesn't know what its value is
 }
 
 impl Evaluated {
+    fn is_known_static(&self) -> bool {
+        matches!(self, Evaluated::Fixed { .. } | Evaluated::UnknownStatic)
+    }
+
     fn binary_op<T: Fn(usize, usize) -> usize, U: Fn(isize, isize) -> Option<isize>>(
         left: Evaluated,
         right: Evaluated,
@@ -595,6 +601,36 @@ impl Evaluator {
         ret
     }
 
+    pub fn inst_parameter_item(&mut self, arg: &InstParameterItem) -> Evaluated {
+        if let Some(opt) = &arg.inst_parameter_item_opt {
+            self.expression(opt.expression.as_ref())
+        } else {
+            self.identifier(arg.identifier.as_ref())
+        }
+    }
+
+    fn identifier_helper(&mut self, symbol: Result<ResolveResult, ResolveError>) -> Evaluated {
+        if let Ok(symbol) = symbol {
+            if let Some(evaluated) = symbol.found.evaluated.get() {
+                evaluated
+            } else {
+                Evaluated::Unknown
+            }
+        } else {
+            Evaluated::Unknown
+        }
+    }
+
+    fn identifier(&mut self, arg: &Identifier) -> Evaluated {
+        let symbol = symbol_table::resolve(arg);
+        self.identifier_helper(symbol)
+    }
+
+    fn expression_identifier(&mut self, arg: &ExpressionIdentifier) -> Evaluated {
+        let symbol = symbol_table::resolve(arg);
+        self.identifier_helper(symbol)
+    }
+
     fn factor(&mut self, arg: &Factor) -> Evaluated {
         match arg {
             Factor::Number(x) => self.number(&x.number),
@@ -604,16 +640,7 @@ impl Evaluator {
                     Evaluated::Unknown
                 } else {
                     // Identifier
-                    let symbol = symbol_table::resolve(x.expression_identifier.as_ref());
-                    if let Ok(symbol) = symbol {
-                        if let Some(evaluated) = symbol.found.evaluated.get() {
-                            evaluated
-                        } else {
-                            Evaluated::Unknown
-                        }
-                    } else {
-                        Evaluated::Unknown
-                    }
+                    self.expression_identifier(x.expression_identifier.as_ref())
                 }
             }
             Factor::LParenExpressionRParen(x) => self.expression(&x.expression),
@@ -632,12 +659,127 @@ impl Evaluator {
         }
     }
 
-    fn concatenation_list(&mut self, _arg: &ConcatenationList) -> Evaluated {
-        Evaluated::Unknown
+    fn do_concatenation(&mut self, exp: Evaluated, rep: Evaluated) -> Evaluated {
+        match exp {
+            Evaluated::Fixed {
+                width: ewidth,
+                value: eval,
+            } => match rep {
+                Evaluated::Fixed {
+                    width: rwidth,
+                    value: rval,
+                } => {
+                    let width = ewidth * rwidth;
+                    let mut value = eval;
+                    for _ in 0..rval {
+                        value <<= ewidth;
+                        value |= eval;
+                    }
+                    Evaluated::Fixed { width, value }
+                }
+                Evaluated::Variable { width: rwidth } => Evaluated::Variable {
+                    width: ewidth * rwidth,
+                },
+                Evaluated::Unknown => Evaluated::Unknown,
+                Evaluated::UnknownStatic => Evaluated::UnknownStatic,
+            },
+            Evaluated::Variable { width: ewidth } => match rep {
+                Evaluated::Fixed { width: rwidth, .. } | Evaluated::Variable { width: rwidth } => {
+                    Evaluated::Variable {
+                        width: ewidth * rwidth,
+                    }
+                }
+                Evaluated::Unknown => Evaluated::Unknown,
+                Evaluated::UnknownStatic => Evaluated::UnknownStatic,
+            },
+            Evaluated::Unknown => Evaluated::Unknown,
+            Evaluated::UnknownStatic => Evaluated::UnknownStatic,
+        }
     }
 
-    fn array_literal_list(&mut self, _arg: &ArrayLiteralList) -> Evaluated {
-        Evaluated::Unknown
+    fn concatenation_item(&mut self, arg: &ConcatenationItem) -> Evaluated {
+        let e = self.expression(arg.expression.as_ref());
+        if let Some(cio) = &arg.concatenation_item_opt {
+            let c = self.expression(cio.expression.as_ref());
+            self.do_concatenation(e, c)
+        } else {
+            e
+        }
+    }
+
+    fn concatenation_list_list(&mut self, arg: &ConcatenationListList) -> Evaluated {
+        self.concatenation_item(arg.concatenation_item.as_ref())
+    }
+
+    fn concatenation_list(&mut self, arg: &ConcatenationList) -> Evaluated {
+        let mut eval_vec = vec![];
+        eval_vec.push(self.concatenation_item(arg.concatenation_item.as_ref()));
+        for cll in arg.concatenation_list_list.iter() {
+            eval_vec.push(self.concatenation_list_list(cll));
+        }
+        eval_vec.reverse();
+        let default_value = Evaluated::Fixed { width: 1, value: 0 };
+        eval_vec
+            .iter()
+            .fold(default_value, |acc, x| self.do_concatenation(acc, *x))
+    }
+
+    fn array_literal_item_group_default_colon_expression(
+        &mut self,
+        arg: &ArrayLiteralItemGroupDefaulColonExpression,
+    ) -> Evaluated {
+        match self.expression(arg.expression.as_ref()) {
+            Evaluated::Fixed { .. } => Evaluated::UnknownStatic,
+            Evaluated::Variable { .. } => Evaluated::Unknown,
+            Evaluated::Unknown => Evaluated::Unknown,
+            Evaluated::UnknownStatic => unreachable!(),
+        }
+    }
+
+    fn array_literal_item_group(&mut self, arg: &ArrayLiteralItemGroup) -> Evaluated {
+        match arg {
+            ArrayLiteralItemGroup::ExpressionArrayLiteralItemOpt(x) => {
+                let exp_eval = self.expression(x.expression.as_ref());
+                if let Some(alio) = &x.array_literal_item_opt {
+                    let repeat_exp = self.expression(alio.expression.as_ref());
+                    self.do_concatenation(exp_eval, repeat_exp)
+                } else {
+                    exp_eval
+                }
+            }
+            ArrayLiteralItemGroup::DefaulColonExpression(x) => {
+                self.array_literal_item_group_default_colon_expression(x)
+            }
+        }
+    }
+
+    fn array_literal_item(&mut self, arg: &ArrayLiteralItem) -> Evaluated {
+        self.array_literal_item_group(arg.array_literal_item_group.as_ref())
+    }
+
+    fn array_literal_list_list(&mut self, arg: &ArrayLiteralListList) -> Evaluated {
+        self.array_literal_item(arg.array_literal_item.as_ref())
+    }
+
+    fn array_literal_list(&mut self, arg: &ArrayLiteralList) -> Evaluated {
+        // Currently only checking for `Defaul Colon Expression` syntax
+        let e = self.array_literal_item(arg.array_literal_item.as_ref());
+        if arg.array_literal_list_list.is_empty() {
+            e
+        } else if e.is_known_static() {
+            let is_known_static: bool = arg
+                .array_literal_list_list
+                .iter()
+                .map(|x| self.array_literal_list_list(x).is_known_static())
+                .fold(true, |acc, b| acc & b);
+            if is_known_static {
+                Evaluated::UnknownStatic
+            } else {
+                Evaluated::Unknown
+            }
+        } else {
+            Evaluated::Unknown
+        }
     }
 
     fn if_expression(&mut self, _arg: &IfExpression) -> Evaluated {

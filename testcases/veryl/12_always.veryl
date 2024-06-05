@@ -36,7 +36,7 @@ module Module12_2 (
     // always_ff declaration with default polarity
     always_ff (i_clk, i_rst) {
         if_reset {
-            a = b;
+            a = 1'b0;
         } else if a {
             a = b[0];
         } else {
@@ -56,28 +56,28 @@ module Module12_2 (
     // always_ff declaration with specified polarity
     always_ff (i_clk_p, i_rst_ah) {
         if_reset {
-            a = b;
+            a = 1'b0;
         } else {
             a = c[5:0];
         }
     }
     always_ff (i_clk_n, i_rst_al) {
         if_reset {
-            a = b;
+            a = 1'b0;
         } else {
             a = c[5:0];
         }
     }
     always_ff (i_clk_p, i_rst_sh) {
         if_reset {
-            a = b;
+            a = 1'b0;
         } else {
             a = c[5:0];
         }
     }
     always_ff (i_clk_n, i_rst_sl) {
         if_reset {
-            a = b;
+            a = 1'b0;
         } else {
             a = c[5:0];
         }

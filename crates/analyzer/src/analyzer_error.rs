@@ -246,21 +246,6 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
-        code(invalid_reset),
-        help(""),
-        url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#invalid_reset")
-    )]
-    #[error("#{identifier} can't be used as a reset because it is not 'reset' type nor a single bit signal")]
-    InvalidReset {
-        identifier: String,
-        #[source_code]
-        input: NamedSource,
-        #[label("Error location")]
-        error_location: SourceSpan,
-    },
-
-    #[diagnostic(
-        severity(Error),
         code(invalid_modport_variable_item),
         help(""),
         url("")
@@ -283,6 +268,35 @@ pub enum AnalyzerError {
     #[error("#{identifier} is not a function")]
     InvalidModportFunctionItem {
         identifier: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(invalid_reset),
+        help(""),
+        url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#invalid_reset")
+    )]
+    #[error("#{identifier} can't be used as a reset because it is not 'reset' type nor a single bit signal")]
+    InvalidReset {
+        identifier: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(invalid_reset_non_elaborative),
+        help(""),
+        url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#invalid_reset_value")
+    )]
+    #[error("Reset-value cannot be used because it is not evaluable at elaboration time")]
+    InvalidResetNonElaborative {
         #[source_code]
         input: NamedSource,
         #[label("Error location")]
@@ -950,6 +964,13 @@ impl AnalyzerError {
     pub fn invalid_reset(identifier: &str, source: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidReset {
             identifier: identifier.into(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn invalid_reset_non_elaborative(source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidResetNonElaborative {
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
         }

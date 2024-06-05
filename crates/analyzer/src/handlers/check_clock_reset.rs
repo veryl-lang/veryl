@@ -1,4 +1,5 @@
 use crate::analyzer_error::AnalyzerError;
+use crate::evaluator::{Evaluated, Evaluator};
 use crate::symbol::{SymbolKind, TypeKind};
 use crate::symbol_table;
 use veryl_parser::veryl_grammar_trait::*;
@@ -17,6 +18,7 @@ pub struct CheckClockReset<'a> {
     n_of_select: usize,
     default_clock_exists: bool,
     default_reset_exists: bool,
+    evaluator: Evaluator,
 }
 
 impl<'a> CheckClockReset<'a> {
@@ -244,6 +246,26 @@ impl<'a> VerylGrammarTrait for CheckClockReset<'a> {
     fn dot(&mut self, _arg: &Dot) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             self.n_of_select = 0;
+        }
+        Ok(())
+    }
+
+    fn assignment(&mut self, arg: &Assignment) -> Result<(), ParolError> {
+        use Evaluated::*;
+        if let HandlerPoint::Before = self.point {
+            if self.in_if_reset {
+                // Check to see right hand side of reset is const evaluable
+                match self.evaluator.expression(&arg.expression) {
+                    UnknownStatic | Fixed { .. } => {}
+                    Variable { .. } | Unknown => {
+                        self.errors
+                            .push(AnalyzerError::invalid_reset_non_elaborative(
+                                self.text,
+                                &arg.expression.as_ref().into(),
+                            ));
+                    }
+                }
+            }
         }
         Ok(())
     }

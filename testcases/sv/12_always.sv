@@ -38,7 +38,7 @@ module veryl_testcase_Module12_2 (
     // always_ff declaration with default polarity
     always_ff @ (posedge i_clk, negedge i_rst_n) begin
         if (!i_rst_n) begin
-            a <= b;
+            a <= 1'b0;
         end else if (a) begin
             a <= b[0];
         end else begin
@@ -58,28 +58,28 @@ module veryl_testcase_Module12_2 (
     // always_ff declaration with specified polarity
     always_ff @ (posedge i_clk_p, posedge i_rst_ah) begin
         if (i_rst_ah) begin
-            a <= b;
+            a <= 1'b0;
         end else begin
             a <= c[5:0];
         end
     end
     always_ff @ (negedge i_clk_n, negedge i_rst_al) begin
         if (!i_rst_al) begin
-            a <= b;
+            a <= 1'b0;
         end else begin
             a <= c[5:0];
         end
     end
     always_ff @ (posedge i_clk_p) begin
         if (i_rst_sh) begin
-            a <= b;
+            a <= 1'b0;
         end else begin
             a <= c[5:0];
         end
     end
     always_ff @ (negedge i_clk_n) begin
         if (!i_rst_sl) begin
-            a <= b;
+            a <= 1'b0;
         end else begin
             a <= c[5:0];
         end
