@@ -1,9 +1,8 @@
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol::{DocComment, GenericInstanceProperty, Symbol, SymbolKind};
+use crate::symbol::{DocComment, GenericInstanceProperty, GenericMap, Symbol, SymbolKind};
 use crate::symbol_table;
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::fmt;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::veryl_grammar_trait as syntax_tree;
@@ -305,22 +304,28 @@ impl GenericSymbolPath {
         false
     }
 
-    pub fn apply_map(&mut self, map: &HashMap<StrId, GenericSymbolPath>) {
-        let head = &self.paths[0];
-        if let Some(x) = map.get(&head.base()) {
-            let mut paths: Vec<_> = self.paths.drain(1..).collect();
-            self.paths.clone_from(&x.paths);
-            self.paths.append(&mut paths);
-            self.resolvable = x.resolvable;
+    pub fn apply_map(&mut self, maps: &[GenericMap]) {
+        for map in maps.iter().rev() {
+            let head = &self.paths[0];
+            if let Some(x) = map.map.get(&head.base()) {
+                let mut paths: Vec<_> = self.paths.drain(1..).collect();
+                self.paths.clone_from(&x.paths);
+                self.paths.append(&mut paths);
+                self.resolvable = x.resolvable;
+                break;
+            }
         }
 
         for path in &mut self.paths {
             for arg in &mut path.arguments {
-                let head = &arg.paths[0];
-                if let Some(x) = map.get(&head.base()) {
-                    let mut paths: Vec<_> = arg.paths.drain(1..).collect();
-                    arg.paths.clone_from(&x.paths);
-                    arg.paths.append(&mut paths);
+                for map in maps.iter().rev() {
+                    let head = &arg.paths[0];
+                    if let Some(x) = map.map.get(&head.base()) {
+                        let mut paths: Vec<_> = arg.paths.drain(1..).collect();
+                        arg.paths.clone_from(&x.paths);
+                        arg.paths.append(&mut paths);
+                        break;
+                    }
                 }
             }
         }

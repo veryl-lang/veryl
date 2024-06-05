@@ -136,7 +136,7 @@ pub struct Aligner {
     in_import: bool,
     project_name: Option<StrId>,
     build_opt: Build,
-    generic_map: GenericMap,
+    generic_map: Vec<GenericMap>,
 }
 
 impl Aligner {

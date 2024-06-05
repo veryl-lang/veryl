@@ -52,7 +52,7 @@ pub struct Emitter {
     file_scope_import: Vec<String>,
     attribute: Vec<AttributeType>,
     assignment_lefthand_side: Option<ExpressionIdentifier>,
-    generic_map: GenericMap,
+    generic_map: Vec<GenericMap>,
 }
 
 impl Default for Emitter {
@@ -83,7 +83,7 @@ impl Default for Emitter {
             file_scope_import: Vec::new(),
             attribute: Vec::new(),
             assignment_lefthand_side: None,
-            generic_map: GenericMap::default(),
+            generic_map: Vec::new(),
         }
     }
 }
@@ -741,7 +741,7 @@ impl VerylWalker for Emitter {
             }
         }
 
-        path.apply_map(&self.generic_map.map);
+        path.apply_map(&self.generic_map);
         if let Ok(symbol) = symbol_table::resolve((&path.mangled_path(), &namespace)) {
             let context: SymbolContext = self.into();
             let text = symbol_string(arg.identifier(), &symbol.found, &context);
@@ -2065,7 +2065,7 @@ impl VerylWalker for Emitter {
             if i != 0 {
                 self.newline();
             }
-            self.generic_map = map.clone();
+            self.generic_map.push(map.clone());
 
             match &*arg.struct_union {
                 StructUnion::Struct(ref x) => {
@@ -2087,12 +2087,14 @@ impl VerylWalker for Emitter {
             self.str("}");
             self.space(1);
             if map.generic() {
-                self.str(&self.generic_map.name.clone());
+                self.str(&map.name.clone());
             } else {
                 self.identifier(&arg.identifier);
             }
             self.str(";");
             self.token(&arg.r_brace.r_brace_token.replace(""));
+
+            self.generic_map.pop();
         }
     }
 
@@ -2512,7 +2514,7 @@ impl VerylWalker for Emitter {
             if i != 0 {
                 self.newline();
             }
-            self.generic_map = map.clone();
+            self.generic_map.push(map.clone());
 
             self.function(&arg.function);
             self.space(1);
@@ -2525,7 +2527,7 @@ impl VerylWalker for Emitter {
             }
             self.space(1);
             if map.generic() {
-                self.str(&self.generic_map.name.clone());
+                self.str(&map.name.clone());
             } else {
                 self.identifier(&arg.identifier);
             }
@@ -2554,6 +2556,8 @@ impl VerylWalker for Emitter {
             }
             self.newline_list_post(arg.function_declaration_list.is_empty());
             self.token(&arg.r_brace.r_brace_token.replace("endfunction"));
+
+            self.generic_map.pop();
         }
     }
 
@@ -2601,12 +2605,12 @@ impl VerylWalker for Emitter {
             if i != 0 {
                 self.newline();
             }
-            self.generic_map = map.clone();
+            self.generic_map.push(map.clone());
 
             self.module(&arg.module);
             self.space(1);
             if map.generic() {
-                self.str(&self.generic_map.name.clone());
+                self.str(&map.name.clone());
             } else {
                 if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
                     let context: SymbolContext = self.into();
@@ -2642,6 +2646,8 @@ impl VerylWalker for Emitter {
             }
             self.newline_list_post(arg.module_declaration_list.is_empty());
             self.token(&arg.r_brace.r_brace_token.replace("endmodule"));
+
+            self.generic_map.pop();
         }
 
         self.default_clock = None;
@@ -2802,12 +2808,12 @@ impl VerylWalker for Emitter {
             if i != 0 {
                 self.newline();
             }
-            self.generic_map = map.clone();
+            self.generic_map.push(map.clone());
 
             self.interface(&arg.interface);
             self.space(1);
             if map.generic() {
-                self.str(&self.generic_map.name.clone());
+                self.str(&map.name.clone());
             } else {
                 if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
                     let context: SymbolContext = self.into();
@@ -2839,6 +2845,8 @@ impl VerylWalker for Emitter {
             }
             self.newline_list_post(arg.interface_declaration_list.is_empty());
             self.token(&arg.r_brace.r_brace_token.replace("endinterface"));
+
+            self.generic_map.pop();
         }
     }
 
@@ -2996,12 +3004,12 @@ impl VerylWalker for Emitter {
             if i != 0 {
                 self.newline();
             }
-            self.generic_map = map.clone();
+            self.generic_map.push(map.clone());
 
             self.package(&arg.package);
             self.space(1);
             if map.generic() {
-                self.str(&self.generic_map.name.clone());
+                self.str(&map.name.clone());
             } else {
                 if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
                     let context: SymbolContext = self.into();
@@ -3023,6 +3031,8 @@ impl VerylWalker for Emitter {
             }
             self.newline_list_post(arg.package_declaration_list.is_empty());
             self.token(&arg.r_brace.r_brace_token.replace("endpackage"));
+
+            self.generic_map.pop();
         }
     }
 
@@ -3151,7 +3161,7 @@ pub struct SymbolContext {
     pub project_name: Option<StrId>,
     pub build_opt: Build,
     pub in_import: bool,
-    pub generic_map: GenericMap,
+    pub generic_map: Vec<GenericMap>,
 }
 
 impl From<&mut Emitter> for SymbolContext {

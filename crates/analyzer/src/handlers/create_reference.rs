@@ -1,7 +1,7 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol::SymbolKind;
+use crate::symbol::{GenericMap, SymbolKind};
 use crate::symbol_path::{GenericSymbolPath, SymbolPath};
 use crate::symbol_table::{self, ResolveError, ResolveErrorCause};
 use veryl_parser::resource_table::TokenId;
@@ -98,9 +98,13 @@ impl<'a> CreateReference<'a> {
                         }
 
                         let table = symbol.found.generic_table(&path.arguments);
+                        let map = vec![GenericMap {
+                            name: "".to_string(),
+                            map: table,
+                        }];
                         let mut references = symbol.found.generic_references();
                         for path in &mut references {
-                            path.apply_map(&table);
+                            path.apply_map(&map);
                             self.generic_symbol_path(path, &symbol.found.inner_namespace());
                         }
                     }
