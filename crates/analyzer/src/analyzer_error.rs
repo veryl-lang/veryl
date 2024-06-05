@@ -464,6 +464,21 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(sv_keyword_usage),
+        help("Change the identifier to a non-SystemVerilog keyword"),
+        url("")
+    )]
+    #[error("SystemVerilog keyword may not be used as identifier")]
+    SvKeywordUsage {
+        identifier: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(too_large_enum_variant),
         help(""),
         url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#too_large_enum_variant")
@@ -1080,6 +1095,14 @@ impl AnalyzerError {
         AnalyzerError::MissingPort {
             name: name.to_string(),
             port: port.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn sv_keyword_usage(identifier: &str, source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::SvKeywordUsage {
+            identifier: identifier.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
         }
