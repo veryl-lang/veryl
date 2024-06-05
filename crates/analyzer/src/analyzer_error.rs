@@ -6,6 +6,22 @@ use veryl_parser::veryl_token::TokenRange;
 pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
+        code(call_non_function),
+        help("remove call to non-function symbol"),
+        url("")
+    )]
+    #[error("Calling non-function symbol \"{identifier}\" which has kind \"{kind}\"")]
+    CallNonFunction {
+        identifier: String,
+        kind: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(cyclice_type_dependency),
         help(""),
         url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#cyclic_type_dependency")
@@ -97,6 +113,22 @@ pub enum AnalyzerError {
     )]
     #[error("{kind} direction can't be placed at here")]
     InvalidDirection {
+        kind: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(invalid_factor),
+        help("remove {kind} from expression"),
+        url("")
+    )]
+    #[error("{identifier} of kind \"{kind}\" cannot be used as a factor in an expression")]
+    InvalidFactor {
+        identifier: String,
         kind: String,
         #[source_code]
         input: NamedSource,
@@ -446,6 +478,21 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(sv_keyword_usage),
+        help("Change the identifier to a non-SystemVerilog keyword"),
+        url("")
+    )]
+    #[error("SystemVerilog keyword may not be used as identifier")]
+    SvKeywordUsage {
+        identifier: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(too_large_enum_variant),
         help(""),
         url("https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#too_large_enum_variant")
@@ -758,6 +805,20 @@ impl AnalyzerError {
         NamedSource::new(token.beg.source.to_string(), source.to_string())
     }
 
+    pub fn call_non_function(
+        identifier: &str,
+        kind: &str,
+        source: &str,
+        token: &TokenRange,
+    ) -> Self {
+        AnalyzerError::CallNonFunction {
+            identifier: identifier.into(),
+            kind: kind.into(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
     pub fn cyclic_type_dependency(
         source: &str,
         start: &str,
@@ -820,6 +881,15 @@ impl AnalyzerError {
 
     pub fn invalid_direction(kind: &str, source: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidDirection {
+            kind: kind.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn invalid_factor(identifier: &str, kind: &str, source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidFactor {
+            identifier: identifier.to_string(),
             kind: kind.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
@@ -1046,6 +1116,14 @@ impl AnalyzerError {
         AnalyzerError::MissingPort {
             name: name.to_string(),
             port: port.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn sv_keyword_usage(identifier: &str, source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::SvKeywordUsage {
+            identifier: identifier.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
         }
