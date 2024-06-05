@@ -1433,3 +1433,15 @@ fn reserved_identifier() {
         AnalyzerError::ReservedIdentifier { .. }
     ));
 }
+
+#[test]
+fn sv_keyword_usage() {
+    let code = r#"
+    module ModuleA {
+        var pure: logic;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
+}
