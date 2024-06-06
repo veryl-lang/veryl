@@ -48,13 +48,15 @@ impl<'a> CreateTypeDag<'a> {
         match type_dag::insert_node(path, name, token) {
             Ok(n) => Some(n),
             Err(e) => {
-                self.errors.push(self.to_analyzer_error(e));
+                if let Some(x) = self.to_analyzer_error(e) {
+                    self.errors.push(x);
+                }
                 None
             }
         }
     }
 
-    fn to_analyzer_error(&self, de: DagError) -> AnalyzerError {
+    fn to_analyzer_error(&self, de: DagError) -> Option<AnalyzerError> {
         match de {
             DagError::Cyclic(s, e) => {
                 let start = match resource_table::get_str_value(s.token.text) {
@@ -65,11 +67,16 @@ impl<'a> CreateTypeDag<'a> {
                     Some(s) => s,
                     None => "<unknown StrId>".into(),
                 };
-                AnalyzerError::cyclic_type_dependency(self.text, &start, &end, &e.token.into())
+                Some(AnalyzerError::cyclic_type_dependency(
+                    self.text,
+                    &start,
+                    &end,
+                    &e.token.into(),
+                ))
             }
-            DagError::UnableToResolve(b) => {
-                let t = b.as_ref();
-                AnalyzerError::undefined_identifier(&t.name, self.text, &t.token.into())
+            DagError::UnableToResolve(_) => {
+                // undefined_identifier will be reported at create_reference
+                None
             }
         }
     }
@@ -79,7 +86,9 @@ impl<'a> CreateTypeDag<'a> {
         match type_dag::insert_edge(e, s, edge) {
             Ok(_) => {}
             Err(er) => {
-                self.errors.push(self.to_analyzer_error(er));
+                if let Some(x) = self.to_analyzer_error(er) {
+                    self.errors.push(x);
+                }
             }
         }
     }
