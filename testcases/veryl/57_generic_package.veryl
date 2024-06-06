@@ -3,6 +3,9 @@ module Module57 {
     local B: u64 = Package57A::<2>::X;
     local C: u32 = Package57B::<3>::X;
     local D: u64 = Package57B::<>::X;
+
+    var _e  : Package57C::<2>::StructC;
+    assign _e.c = 1;
 }
 
 package Package57A::<T> {
@@ -11,4 +14,10 @@ package Package57A::<T> {
 
 package Package57B::<T = 4> {
     local X: u32 = T;
+}
+
+package Package57C::<W> {
+    struct StructC {
+        c: logic<W>,
+    }
 }

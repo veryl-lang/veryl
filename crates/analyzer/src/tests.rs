@@ -790,7 +790,7 @@ fn missing_default_generic_argument() {
 
     let code = r#"
         module ModuleC {
-            function FuncA::<A = 1, B = 2, Ccd> () -> logic<A + B + C> {}
+            function FuncA::<A = 1, B = 2, C> () -> logic<A + B + C> {}
             let _a: logic = FuncA::<1, 2, 3>();
         }
     "#;
@@ -835,6 +835,21 @@ fn mismatch_generics_arity() {
         errors[0],
         AnalyzerError::MismatchGenericsArity { .. }
     ));
+
+    let code = r#"
+    package PackageC::<W> {
+        struct StructC {
+            c: logic<W>,
+        }
+    }
+    module ModuleC {
+        var c: PackageC::<2>::StructC;
+        assign c.c = 1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
