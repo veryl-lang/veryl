@@ -12,7 +12,6 @@ pub mod check_modport;
 pub mod check_msb_lsb;
 pub mod check_number;
 pub mod check_statement;
-pub mod check_types;
 pub mod create_reference;
 pub mod create_symbol_table;
 pub mod create_type_dag;
