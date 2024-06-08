@@ -105,6 +105,24 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_assignment_to_const),
+        help("remove the assignment"),
+        url(
+            "https://doc.veryl-lang.org/book/06_appendix/02_semantic_error.html#invalid_assignment"
+        )
+    )]
+    #[error("{identifier} can't be assigned because it is const")]
+    InvalidAssignmentToConst {
+        identifier: String,
+        kind: String,
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(invalid_direction),
         help("remove {kind} direction"),
         url(
@@ -872,6 +890,20 @@ impl AnalyzerError {
         token: &TokenRange,
     ) -> Self {
         AnalyzerError::InvalidAssignment {
+            identifier: identifier.into(),
+            kind: kind.into(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn invalid_assignment_to_const(
+        identifier: &str,
+        source: &str,
+        kind: &str,
+        token: &TokenRange,
+    ) -> Self {
+        AnalyzerError::InvalidAssignmentToConst {
             identifier: identifier.into(),
             kind: kind.into(),
             input: AnalyzerError::named_source(source, token),
