@@ -113,7 +113,7 @@ endmodule
 
 ## Installation
 
-See [Document](https://doc.veryl-lang.org/book/02_getting_started/01_installation.html).
+See [Document](https://doc.veryl-lang.org/book/03_getting_started/01_installation.html).
 
 ## Usage
 
