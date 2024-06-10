@@ -35,8 +35,9 @@ impl<'a> VerylGrammarTrait for CheckNumber<'a> {
             let token = &arg.based_token.token;
             let text = token.to_string();
             let (width, tail) = text.split_once('\'').unwrap();
-            let base = &tail[0..1];
-            let number = &tail[1..];
+            let signed = &tail[0..1] == "s";
+            let base = if signed { &tail[1..2] } else { &tail[0..1] };
+            let number = if signed { &tail[2..] } else { &tail[1..] };
 
             let width: Option<usize> = if width.is_empty() {
                 None

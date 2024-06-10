@@ -5062,7 +5062,7 @@ pub struct Based {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct BasedTerm {
-    pub based_term: crate::veryl_token::Token, /* (?:[0-9]+(?:_[0-9]+)*)?'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)* */
+    pub based_term: crate::veryl_token::Token, /* (?:[0-9]+(?:_[0-9]+)*)?'s?[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)* */
 }
 
 ///
@@ -12255,7 +12255,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 4:
     ///
-    /// `BasedTerm: <INITIAL, Generic>/(?:[0-9]+(?:_[0-9]+)*)?'[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/ : Token;`
+    /// `BasedTerm: <INITIAL, Generic>/(?:[0-9]+(?:_[0-9]+)*)?'s?[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn based_term(&mut self, based_term: &ParseTreeType<'t>) -> Result<()> {

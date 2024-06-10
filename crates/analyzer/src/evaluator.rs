@@ -384,6 +384,8 @@ impl Evaluator {
     fn based(&mut self, arg: &Based) -> Evaluated {
         let text = arg.based_token.to_string().replace('_', "");
         if let Some((width, rest)) = text.split_once('\'') {
+            let signed = &rest[0..1] == "s";
+            let rest = if signed { &rest[1..] } else { rest };
             let (base, value) = rest.split_at(1);
             let radix = match base {
                 "b" => 2,
