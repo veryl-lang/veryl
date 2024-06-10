@@ -1551,3 +1551,32 @@ fn invalid_assignment_to_const() {
         AnalyzerError::InvalidAssignmentToConst { .. }
     ));
 }
+
+#[test]
+fn enum_non_const_exception() {
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_rst: input reset,
+    ) {
+    
+        enum State: logic<3> {
+            Idle = 3'bxx1,
+            Run0 = 3'b000,
+            Run1 = 3'b010,
+            Run2 = 3'b100,
+            Done = 3'b110,
+        }
+    
+        var state: State;
+    
+        always_ff {
+            if_reset {
+                state = State::Idle;
+            }
+        }
+    
+    }"#;
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
