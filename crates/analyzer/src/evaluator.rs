@@ -616,7 +616,8 @@ impl Evaluator {
             if let Some(evaluated) = symbol.found.evaluated.get() {
                 evaluated
             } else {
-                Evaluated::Unknown
+                let eval = symbol.found.evaluate();
+                eval
             }
         } else {
             Evaluated::Unknown
