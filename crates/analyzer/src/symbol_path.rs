@@ -324,6 +324,7 @@ impl GenericSymbolPath {
                         let mut paths: Vec<_> = arg.paths.drain(1..).collect();
                         arg.paths.clone_from(&x.paths);
                         arg.paths.append(&mut paths);
+                        arg.resolvable = x.resolvable;
                         break;
                     }
                 }

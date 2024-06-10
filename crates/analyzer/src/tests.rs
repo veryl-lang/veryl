@@ -850,6 +850,24 @@ fn mismatch_generics_arity() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    package PackageD {
+        function FuncD::<W> -> logic<W> {
+            return 0;
+        }
+    }
+    module SubD::<W> {
+        let _d: logic<W> = PackageD::FuncD::<W>();
+    }
+    module TopD {
+        inst u_subd_1: SubD::<1>();
+        inst u_subd_2: SubD::<2>();
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -1512,4 +1530,24 @@ fn call_non_function() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::CallNonFunction { .. }));
+}
+
+#[test]
+fn invalid_assignment_to_const() {
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_rst: input reset,
+    ) {
+        always_comb {
+            let y: logic = 1;
+            y = 0;
+        }
+    }"#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidAssignmentToConst { .. }
+    ));
 }

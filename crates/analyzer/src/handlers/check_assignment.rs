@@ -155,6 +155,19 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                             &arg.expression_identifier.as_ref().into(),
                         ));
                     }
+
+                    // Check to confirm not assigning to constant
+                    if let SymbolKind::Variable(v) = x.found.kind.clone() {
+                        if v.r#type.is_const {
+                            let token = arg.expression_identifier.identifier().token;
+                            self.errors.push(AnalyzerError::invalid_assignment_to_const(
+                                &token.to_string(),
+                                self.text,
+                                &x.found.kind.to_kind_name(),
+                                &arg.expression_identifier.as_ref().into(),
+                            ));
+                        }
+                    }
                 }
             }
         }
