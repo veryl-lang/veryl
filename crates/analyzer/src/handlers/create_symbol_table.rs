@@ -4,6 +4,7 @@ use crate::attribute::Attribute as Attr;
 use crate::attribute_table;
 use crate::namespace::Namespace;
 use crate::namespace_table;
+use crate::symbol;
 use crate::symbol::Direction as SymDirection;
 use crate::symbol::Type as SymType;
 use crate::symbol::{
@@ -70,6 +71,16 @@ impl<'a> CreateSymbolTable<'a> {
     }
 
     fn insert_symbol(&mut self, token: &Token, kind: SymbolKind, public: bool) -> Option<SymbolId> {
+        self.insert_symbol_with_type(token, kind, public, None)
+    }
+
+    fn insert_symbol_with_type(
+        &mut self,
+        token: &Token,
+        kind: SymbolKind,
+        public: bool,
+        r#type: Option<symbol::Type>,
+    ) -> Option<SymbolId> {
         let line = token.line;
         let doc_comment = if let TokenSource::File(file) = token.source {
             if line == 0 {
@@ -101,6 +112,7 @@ impl<'a> CreateSymbolTable<'a> {
             symbol.allow_unused = true;
         }
 
+        symbol.r#type = r#type;
         let id = symbol_table::insert(token, symbol);
         if id.is_none() {
             self.errors.push(AnalyzerError::duplicated_identifier(
@@ -303,7 +315,8 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
     fn let_statement(&mut self, arg: &LetStatement) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let r#type: SymType = arg.array_type.as_ref().into();
+            let mut r#type: SymType = arg.array_type.as_ref().into();
+            r#type.is_const = true;
             let affiniation = self.affiniation.last().cloned().unwrap();
             let (prefix, suffix) = self.get_signal_prefix_suffix(r#type.kind.clone());
             let property = VariableProperty {
@@ -355,7 +368,8 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
     fn let_declaration(&mut self, arg: &LetDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let r#type: SymType = arg.array_type.as_ref().into();
+            let mut r#type: SymType = arg.array_type.as_ref().into();
+            r#type.is_const = true;
             let affiniation = self.affiniation.last().cloned().unwrap();
             let (prefix, suffix) = self.get_signal_prefix_suffix(r#type.kind.clone());
             let property = VariableProperty {
@@ -366,9 +380,12 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             };
             let kind = SymbolKind::Variable(property);
 
-            if let Some(id) =
-                self.insert_symbol(&arg.identifier.identifier_token.token, kind.clone(), false)
-            {
+            if let Some(id) = self.insert_symbol_with_type(
+                &arg.identifier.identifier_token.token,
+                kind.clone(),
+                false,
+                None,
+            ) {
                 if self.is_default_clock_candidate(kind.clone()) {
                     self.default_clock_candidates.push(id);
                 } else if self.is_default_reset_candidate(kind.clone()) {
@@ -425,6 +442,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                         kind: TypeKind::Type,
                         width: vec![],
                         array: vec![],
+                        is_const: false,
                     };
                     let value = ParameterValue::TypeExpression(*x.type_expression.clone());
                     ParameterProperty {
@@ -659,6 +677,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                         kind: TypeKind::Type,
                         width: vec![],
                         array: vec![],
+                        is_const: false,
                     };
                     let value = ParameterValue::TypeExpression(*x.type_expression.clone());
                     ParameterProperty {

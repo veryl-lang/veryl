@@ -71,6 +71,7 @@ pub struct Symbol {
     pub allow_unused: bool,
     pub public: bool,
     pub doc_comment: DocComment,
+    pub r#type: Option<Type>,
 }
 
 impl Symbol {
@@ -93,6 +94,7 @@ impl Symbol {
             allow_unused: false,
             public,
             doc_comment,
+            r#type: None,
         }
     }
 
@@ -451,6 +453,7 @@ pub struct Type {
     pub kind: TypeKind,
     pub width: Vec<syntax_tree::Expression>,
     pub array: Vec<syntax_tree::Expression>,
+    pub is_const: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -600,6 +603,7 @@ impl From<&syntax_tree::ScalarType> for Type {
                     modifier,
                     width,
                     array: vec![],
+                    is_const: false,
                 }
             }
             syntax_tree::ScalarTypeGroup::FixedType(x) => {
@@ -618,6 +622,7 @@ impl From<&syntax_tree::ScalarType> for Type {
                     modifier,
                     width: vec![],
                     array: vec![],
+                    is_const: false,
                 }
             }
         }
@@ -640,6 +645,7 @@ impl From<&syntax_tree::ArrayType> for Type {
             modifier: scalar_type.modifier,
             width: scalar_type.width,
             array,
+            is_const: false,
         }
     }
 }
@@ -774,6 +780,7 @@ impl From<&syntax_tree::WithParameterItem> for Parameter {
                     kind: TypeKind::Type,
                     width: vec![],
                     array: vec![],
+                    is_const: false,
                 };
                 let property = ParameterProperty {
                     token,

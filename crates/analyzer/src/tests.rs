@@ -1513,3 +1513,23 @@ fn call_non_function() {
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::CallNonFunction { .. }));
 }
+
+#[test]
+fn invalid_assignment_to_const() {
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_rst: input reset,
+    ) {
+        always_comb {
+            let y: logic = 1;
+            y = 0;
+        }
+    }"#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidAssignmentToConst { .. }
+    ));
+}
