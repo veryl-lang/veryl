@@ -488,12 +488,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "collection_literals"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "186dce98367766de751c42c4f03970fc60fc012296e706ccbb9d5df9b6c1e271"
-
-[[package]]
 name = "colorchoice"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2393,10 +2387,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "lalr"
-version = "0.0.2"
+name = "lalry"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "106d7548f95adbe3019b4fc4954554d7b72535867aa9ce326d2f766b68958de7"
+checksum = "82b5cf5d262f1b646b4b4fc864c6026753dab5ba0ea9d94ec1589509d12175ea"
 
 [[package]]
 name = "lazy_static"
@@ -2891,9 +2885,9 @@ dependencies = [
 
 [[package]]
 name = "parol"
-version = "0.29.0"
+version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e2b7342387d6b789343150d0d29f4cf604c31a5a4dea83c352aae79df236b79"
+checksum = "5fbf2f6c296a20fe2cfeb8de0d9cea3cf519297f026a6a0cac3d6a228befcb1b"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -2904,7 +2898,7 @@ dependencies = [
  "env_logger 0.11.3",
  "function_name",
  "graph-cycles",
- "lalr",
+ "lalry",
  "num_cpus",
  "owo-colors 4.0.0",
  "parol-macros",
@@ -2934,13 +2928,12 @@ checksum = "bdd646301a99589f85ed580e3807ee2f7aa6529b900fd703f5a14716b7426b28"
 
 [[package]]
 name = "parol_runtime"
-version = "0.22.0"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43937f8fbc23ff97b3157d619ee5a5496f5efbcd3b093bfc050eab8dac51deba"
+checksum = "0f563d0adf0ffb93e5c58856edd3ec8c87e61e97666207b9097ff05bf68c43da"
 dependencies = [
  "anyhow",
  "codespan-reporting",
- "collection_literals",
  "derive_builder",
  "function_name",
  "log",
