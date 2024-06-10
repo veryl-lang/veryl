@@ -123,7 +123,6 @@ impl Symbol {
                 }
                 SymbolKind::EnumMember(_) => {
                     // TODO: Actually Evaluate its Width
-                    println!("Evaluating EnumMember!");
                     Evaluated::UnknownStatic
                 }
                 _ => Evaluated::Unknown,
