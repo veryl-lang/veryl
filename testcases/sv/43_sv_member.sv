@@ -4,3 +4,4 @@ module veryl_testcase_Module43;
 
     always_comb b = a.memberA;
 endmodule
+//# sourceMappingURL=../map/testcases/sv/43_sv_member.sv.map

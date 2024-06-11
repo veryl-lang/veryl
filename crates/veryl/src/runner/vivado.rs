@@ -1,7 +1,9 @@
-use crate::runner::Runner;
+use crate::runner::{remap_msg_by_regex, Runner};
 use futures::prelude::*;
 use log::{error, info};
-use miette::{IntoDiagnostic, Result};
+use miette::{IntoDiagnostic, Result, WrapErr};
+use once_cell::sync::Lazy;
+use regex::Regex;
 use std::process::Stdio;
 use tokio::process::{Child, Command};
 use tokio::runtime::Runtime;
@@ -21,6 +23,14 @@ enum State {
 pub struct Vivado {
     state: State,
     success: bool,
+}
+
+fn remap_msg(line: &str) -> String {
+    static RE: Lazy<Regex> = Lazy::new(|| {
+        Regex::new(r"(?<path>[^: \[\]]+):(?<line>[0-9]+)(?::(?<column>[0-9]+))?").unwrap()
+    });
+
+    remap_msg_by_regex(line, &RE)
 }
 
 impl Vivado {
@@ -53,9 +63,9 @@ impl Vivado {
                     self.state = State::SimulateFatal;
                     self.fatal(line.strip_prefix("Fatal: ").unwrap());
                 } else if line.starts_with("WARNING:") {
-                    self.warning(line);
+                    self.warning(&remap_msg(line));
                 } else if line.starts_with("ERROR:") {
-                    self.error(line);
+                    self.error(&remap_msg(line));
                 }
             }
             State::SimulateInfo => {
@@ -108,7 +118,8 @@ impl Runner for Vivado {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .spawn()
-                .into_diagnostic()?;
+                .into_diagnostic()
+                .wrap_err("Failed to run \"xvlog\"")?;
 
             self.parse(compile).await
         })?;
@@ -128,7 +139,8 @@ impl Runner for Vivado {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .spawn()
-                .into_diagnostic()?;
+                .into_diagnostic()
+                .wrap_err("Failed to run \"xelab\"")?;
 
             self.parse(elaborate).await
         })?;
@@ -149,7 +161,8 @@ impl Runner for Vivado {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .spawn()
-                .into_diagnostic()?;
+                .into_diagnostic()
+                .wrap_err("Failed to run \"xsim\"")?;
 
             self.parse(simulate).await
         })?;

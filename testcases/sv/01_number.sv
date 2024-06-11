@@ -38,3 +38,4 @@ module veryl_testcase_Module01;
     localparam int unsigned gggg  = 0123456789.0123456789E+0123456789;
     localparam int unsigned ggggg = 0123456789.0123456789E-0123456789;
 endmodule
+//# sourceMappingURL=../map/testcases/sv/01_number.sv.map

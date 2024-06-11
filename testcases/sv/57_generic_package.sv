@@ -27,3 +27,4 @@ package veryl_testcase___Package57C__2;
         logic [2-1:0] c;
     } StructC;
 endpackage
+//# sourceMappingURL=../map/testcases/sv/57_generic_package.sv.map

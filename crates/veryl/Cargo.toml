@@ -49,3 +49,4 @@ veryl-emitter   = {version = "0.10.1", path = "../emitter"}
 veryl-formatter = {version = "0.10.1", path = "../formatter"}
 veryl-metadata  = {version = "0.10.1", path = "../metadata"}
 veryl-parser    = {version = "0.10.1", path = "../parser"}
+veryl-sourcemap = {version = "0.10.1", path = "../sourcemap"}

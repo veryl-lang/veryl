@@ -13,3 +13,4 @@ module veryl_testcase_Module50;
     EnumB                           _b;
     always_comb _b = veryl_testcase_Package50::EnumA_memberB;
 endmodule
+//# sourceMappingURL=../map/testcases/sv/50_enum_over_typedef.sv.map

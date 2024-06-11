@@ -11,7 +11,7 @@ use tempfile::TempDir;
 use veryl_analyzer::symbol::SymbolKind;
 use veryl_analyzer::{type_dag, Analyzer};
 use veryl_emitter::Emitter;
-use veryl_metadata::{FilelistType, Metadata, PathPair, Target};
+use veryl_metadata::{FilelistType, Metadata, PathPair, SourceMapTarget, Target};
 use veryl_parser::{veryl_token::TokenSource, Parser};
 
 pub struct CmdBuild {
@@ -60,10 +60,7 @@ impl CmdBuild {
             None
         };
 
-        for (path, _, parser, _) in &contexts {
-            let mut emitter = Emitter::new(metadata);
-            emitter.emit(&path.prj, &parser.veryl);
-
+        for (path, input, parser, _) in &contexts {
             let dst = if let Some(ref temp_dir) = temp_dir {
                 temp_dir.path().join(
                     path.dst
@@ -73,6 +70,26 @@ impl CmdBuild {
             } else {
                 path.dst.clone()
             };
+
+            let map = match &metadata.build.sourcemap_target {
+                SourceMapTarget::Directory { path: map_dir } => {
+                    let dst = path
+                        .dst
+                        .strip_prefix(metadata.project_path())
+                        .into_diagnostic()?;
+                    let mut map = dst.to_path_buf();
+                    map.set_extension("sv.map");
+                    metadata.project_path().join(map_dir).join(map)
+                }
+                _ => {
+                    let mut map = dst.clone();
+                    map.set_extension("sv.map");
+                    map
+                }
+            };
+
+            let mut emitter = Emitter::new(metadata, &path.src, &dst, &map);
+            emitter.emit(&path.prj, &parser.veryl);
 
             let dst_dir = dst.parent().unwrap();
             if !dst_dir.exists() {
@@ -90,6 +107,28 @@ impl CmdBuild {
             file.flush().into_diagnostic()?;
 
             debug!("Output file ({})", dst.to_string_lossy());
+
+            if metadata.build.sourcemap_target != SourceMapTarget::None {
+                let source_map = emitter.source_map();
+                source_map.set_source_content(input);
+                let source_map = source_map.to_bytes().into_diagnostic()?;
+
+                let map_dir = map.parent().unwrap();
+                if !map_dir.exists() {
+                    std::fs::create_dir_all(map.parent().unwrap()).into_diagnostic()?;
+                }
+
+                let mut file = OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .truncate(true)
+                    .open(&map)
+                    .into_diagnostic()?;
+                file.write_all(&source_map).into_diagnostic()?;
+                file.flush().into_diagnostic()?;
+
+                debug!("Output map ({})", map.to_string_lossy());
+            }
         }
 
         self.gen_filelist(metadata, &paths, temp_dir)?;

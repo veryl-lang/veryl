@@ -17,3 +17,4 @@ package veryl_testcase_Package37;
         return 0;
     endfunction
 endpackage
+//# sourceMappingURL=../map/testcases/sv/37_package_ref.sv.map

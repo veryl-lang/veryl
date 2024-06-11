@@ -1,5 +1,6 @@
 use crate::aligner::{Aligner, Location};
 use std::fs;
+use std::path::Path;
 use veryl_analyzer::attribute::Attribute as Attr;
 use veryl_analyzer::attribute_table;
 use veryl_analyzer::namespace::Namespace;
@@ -8,12 +9,13 @@ use veryl_analyzer::symbol::{GenericMap, Symbol, SymbolId, SymbolKind, TypeKind}
 use veryl_analyzer::symbol_path::{GenericSymbolPath, SymbolPath};
 use veryl_analyzer::symbol_table;
 use veryl_analyzer::{msb_table, namespace_table};
-use veryl_metadata::{Build, BuiltinType, ClockType, Format, Metadata, ResetType};
+use veryl_metadata::{Build, BuiltinType, ClockType, Format, Metadata, ResetType, SourceMapTarget};
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::{Token, TokenSource, VerylToken};
 use veryl_parser::veryl_walker::VerylWalker;
 use veryl_parser::Stringifier;
+use veryl_sourcemap::SourceMap;
 
 #[cfg(target_os = "windows")]
 const NEWLINE: &str = "\r\n";
@@ -32,7 +34,9 @@ pub struct Emitter {
     format_opt: Format,
     string: String,
     indent: usize,
-    line: u32,
+    src_line: u32,
+    dst_line: u32,
+    dst_column: u32,
     aligner: Aligner,
     in_start_token: bool,
     consumed_next_newline: bool,
@@ -53,6 +57,7 @@ pub struct Emitter {
     attribute: Vec<AttributeType>,
     assignment_lefthand_side: Option<ExpressionIdentifier>,
     generic_map: Vec<GenericMap>,
+    source_map: Option<SourceMap>,
 }
 
 impl Default for Emitter {
@@ -63,7 +68,9 @@ impl Default for Emitter {
             format_opt: Format::default(),
             string: String::new(),
             indent: 0,
-            line: 1,
+            src_line: 1,
+            dst_line: 1,
+            dst_column: 1,
             aligner: Aligner::new(),
             in_start_token: false,
             consumed_next_newline: false,
@@ -84,19 +91,24 @@ impl Default for Emitter {
             attribute: Vec::new(),
             assignment_lefthand_side: None,
             generic_map: Vec::new(),
+            source_map: None,
         }
     }
 }
 
 impl Emitter {
-    pub fn new(metadata: &Metadata) -> Self {
+    pub fn new(metadata: &Metadata, src_path: &Path, dst_path: &Path, map_path: &Path) -> Self {
         let mut aligner = Aligner::new();
         aligner.set_metadata(metadata);
+
+        let source_map = SourceMap::new(src_path, dst_path, map_path);
+
         Self {
             project_name: Some(metadata.project.name.as_str().into()),
             build_opt: metadata.build.clone(),
             format_opt: metadata.format.clone(),
             aligner,
+            source_map: Some(source_map),
             ..Default::default()
         }
     }
@@ -111,12 +123,32 @@ impl Emitter {
         &self.string
     }
 
-    fn column(&self) -> usize {
-        self.string.len() - self.string.rfind('\n').unwrap_or(0)
+    pub fn source_map(&mut self) -> &mut SourceMap {
+        self.source_map.as_mut().unwrap()
     }
 
     fn str(&mut self, x: &str) {
         self.string.push_str(x);
+
+        let new_lines = x.matches('\n').count() as u32;
+        self.dst_line += new_lines;
+        if new_lines == 0 {
+            self.dst_column += x.len() as u32;
+        } else {
+            self.dst_column = (x.len() - x.rfind('\n').unwrap_or(0)) as u32;
+        }
+    }
+
+    fn truncate(&mut self, x: usize) {
+        let removed = self.string.split_off(x);
+
+        let removed_lines = removed.matches('\n').count() as u32;
+        if removed_lines == 0 {
+            self.dst_column -= removed.len() as u32;
+        } else {
+            self.dst_line -= removed_lines;
+            self.dst_column = (self.string.len() - self.string.rfind('\n').unwrap_or(0)) as u32;
+        }
     }
 
     fn unindent(&mut self) {
@@ -124,8 +156,7 @@ impl Emitter {
             .string
             .ends_with(&" ".repeat(self.indent * self.format_opt.indent_width))
         {
-            self.string
-                .truncate(self.string.len() - self.indent * self.format_opt.indent_width);
+            self.truncate(self.string.len() - self.indent * self.format_opt.indent_width);
         }
     }
 
@@ -191,7 +222,7 @@ impl Emitter {
     }
 
     fn consume_adjust_line(&mut self, x: &Token) {
-        if self.adjust_line && x.line > self.line + 1 {
+        if self.adjust_line && x.line > self.src_line + 1 {
             self.newline();
         }
         self.adjust_line = false;
@@ -210,9 +241,16 @@ impl Emitter {
         } else {
             &text
         };
+
+        if x.line != 0 && x.column != 0 {
+            if let Some(ref mut map) = self.source_map {
+                map.add(self.dst_line, self.dst_column, x.line, x.column, text);
+            }
+        }
+
         let newlines_in_text = text.matches('\n').count() as u32;
         self.str(text);
-        self.line = x.line + newlines_in_text;
+        self.src_line = x.line + newlines_in_text;
     }
 
     fn process_token(&mut self, x: &VerylToken, will_push: bool, duplicated: Option<usize>) {
@@ -237,10 +275,10 @@ impl Emitter {
         self.consumed_next_newline = false;
         for x in &x.comments {
             // insert space between comments in the same line
-            if x.line == self.line && !self.in_start_token {
+            if x.line == self.src_line && !self.in_start_token {
                 self.space(1);
             }
-            for _ in 0..x.line - self.line {
+            for _ in 0..x.line - self.src_line {
                 self.unindent();
                 self.str(NEWLINE);
                 self.indent();
@@ -545,7 +583,7 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'Comma'
     fn comma(&mut self, arg: &Comma) {
         if self.string.ends_with("`endif") {
-            self.string.truncate(self.string.len() - "`endif".len());
+            self.truncate(self.string.len() - "`endif".len());
 
             let trailing_endif = format!(
                 "`endif{}{}",
@@ -554,8 +592,7 @@ impl VerylWalker for Emitter {
             );
             let mut additional_endif = 0;
             while self.string.ends_with(&trailing_endif) {
-                self.string
-                    .truncate(self.string.len() - trailing_endif.len());
+                self.truncate(self.string.len() - trailing_endif.len());
                 additional_endif += 1;
             }
 
@@ -1557,7 +1594,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'CaseItem'
     fn case_item(&mut self, arg: &CaseItem) {
-        let start = self.column();
+        let start = self.dst_column;
         match &*arg.case_item_group {
             CaseItemGroup::ExpressionCaseItemGroupList(x) => {
                 self.expression(&x.expression);
@@ -1571,7 +1608,7 @@ impl VerylWalker for Emitter {
         }
         self.colon(&arg.colon);
         self.space(1);
-        self.case_item_indent = Some(self.column() - start);
+        self.case_item_indent = Some((self.dst_column - start) as usize);
         match &*arg.case_item_group0 {
             CaseItemGroup0::Statement(x) => self.statement(&x.statement),
             CaseItemGroup0::LBraceCaseItemGroup0ListRBrace(x) => {
@@ -1605,8 +1642,7 @@ impl VerylWalker for Emitter {
                 if let Some(ref x) = arg.attribute_opt {
                     let comma = if self.string.trim_end().ends_with(',') {
                         self.unindent();
-                        self.string
-                            .truncate(self.string.len() - format!(",{}", NEWLINE).len());
+                        self.truncate(self.string.len() - format!(",{}", NEWLINE).len());
                         self.newline();
                         true
                     } else {
@@ -3154,6 +3190,13 @@ impl VerylWalker for Emitter {
             self.description_group(&x.description_group);
         }
         self.newline();
+
+        // build map and insert link to map
+        if self.build_opt.sourcemap_target != SourceMapTarget::None {
+            self.source_map.as_mut().unwrap().build();
+            self.str(&self.source_map.as_ref().unwrap().get_link());
+            self.newline();
+        }
     }
 }
 

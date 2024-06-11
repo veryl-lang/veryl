@@ -12,3 +12,4 @@ module veryl_testcase_Module28;
     logic _y;
     always_comb _y = b[((WIDTH0 + 10) - 1) - 3][((WIDTH1) - 1) + 5:0];
 endmodule
+//# sourceMappingURL=../map/testcases/sv/28_msblsb.sv.map
