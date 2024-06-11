@@ -783,7 +783,7 @@ impl VerylWalker for Emitter {
             let context: SymbolContext = self.into();
             let text = symbol_string(arg.identifier(), &symbol.found, &context);
             self.veryl_token(&arg.identifier().replace(&text));
-        } else if !path.resolvable {
+        } else if !path.is_resolvable() {
             // emit literal by generics
             let text = path.base_path(0).0[0].to_string();
             self.veryl_token(&arg.identifier().replace(&text));

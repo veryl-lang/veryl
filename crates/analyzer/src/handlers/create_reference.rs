@@ -112,7 +112,7 @@ impl<'a> CreateReference<'a> {
                 Err(err) => {
                     let single_path = path.paths.len() == 1;
                     let anonymous = path.paths[0].base.to_string() == "_";
-                    if single_path && (anonymous || !path.resolvable) {
+                    if single_path && (anonymous || !path.is_resolvable()) {
                         return;
                     }
 

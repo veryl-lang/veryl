@@ -1,3 +1,4 @@
+pub mod check_variable_type;
 use crate::analyzer::resource_table::PathId;
 use crate::analyzer_error::AnalyzerError;
 use crate::assign::{AssignPath, AssignPosition, AssignPositionTree, AssignPositionType};
@@ -10,9 +11,9 @@ use crate::symbol::{
     Direction, DocComment, ParameterValue, Symbol, SymbolId, SymbolKind, TypeKind,
     VariableAffiniation,
 };
-use crate::symbol_path::SymbolPath;
 use crate::symbol_table;
 use crate::type_dag;
+use check_variable_type::*;
 use itertools::Itertools;
 use std::path::Path;
 use veryl_metadata::{Build, Lint, Metadata};
@@ -74,12 +75,18 @@ impl<'a> AnalyzerPass3<'a> {
         }
     }
 
+    pub fn check_variable_type(&self, input: &Veryl) -> Vec<AnalyzerError> {
+        let mut check_variable_type = CheckVariableType::new(self.text);
+        check_variable_type.veryl(input);
+        check_variable_type.errors
+    }
+
     pub fn check_variables(&self) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
 
         for symbol in &self.symbols {
             if symbol.token.source == self.path {
-                if let SymbolKind::Variable(ref x) = symbol.kind {
+                if let SymbolKind::Variable(_) = symbol.kind {
                     if symbol.references.is_empty() && !symbol.allow_unused {
                         let name = symbol.token.to_string();
                         if !name.starts_with('_') {
@@ -88,29 +95,6 @@ impl<'a> AnalyzerPass3<'a> {
                                 self.text,
                                 &symbol.token.into(),
                             ));
-                        }
-                    }
-                    if let TypeKind::UserDefined(ref x) = x.r#type.kind {
-                        if let Ok(x) =
-                            symbol_table::resolve((&SymbolPath::new(x), &symbol.namespace))
-                        {
-                            match x.found.kind {
-                                SymbolKind::Enum(_)
-                                | SymbolKind::Union(_)
-                                | SymbolKind::Struct(_)
-                                | SymbolKind::TypeDef(_)
-                                | SymbolKind::SystemVerilog => (),
-                                SymbolKind::Parameter(x) if x.r#type.kind == TypeKind::Type => (),
-                                _ => {
-                                    ret.push(AnalyzerError::mismatch_type(
-                                        &x.found.token.to_string(),
-                                        "enum or union or struct",
-                                        &x.found.kind.to_kind_name(),
-                                        self.text,
-                                        &symbol.token.into(),
-                                    ));
-                                }
-                            }
                         }
                     }
                 }
@@ -261,12 +245,13 @@ impl Analyzer {
         project_name: &str,
         text: &str,
         path: T,
-        _input: &Veryl,
+        input: &Veryl,
     ) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
 
         namespace_table::set_default(&[project_name.into()]);
         let pass3 = AnalyzerPass3::new(path.as_ref(), text);
+        ret.append(&mut pass3.check_variable_type(input));
         ret.append(&mut pass3.check_variables());
         ret.append(&mut pass3.check_assignment());
 
