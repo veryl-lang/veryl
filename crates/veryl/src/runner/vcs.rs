@@ -1,7 +1,7 @@
 use crate::runner::{remap_msg_by_regex, Runner};
 use futures::prelude::*;
 use log::{error, info};
-use miette::{IntoDiagnostic, Result};
+use miette::{IntoDiagnostic, Result, WrapErr};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::process::Stdio;
@@ -134,7 +134,8 @@ impl Runner for Vcs {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .spawn()
-                .into_diagnostic()?;
+                .into_diagnostic()
+                .wrap_err("Failed to run \"vcs\"")?;
 
             self.parse(compile).await
         })?;
@@ -153,7 +154,8 @@ impl Runner for Vcs {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .spawn()
-                .into_diagnostic()?;
+                .into_diagnostic()
+                .wrap_err("Failed to run simulation binary")?;
 
             self.parse(simulate).await
         })?;
