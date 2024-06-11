@@ -31,3 +31,4 @@ package veryl_testcase_PackageA;
     import PackageA::*;
     localparam int unsigned A = 0;
 endpackage
+//# sourceMappingURL=../map/testcases/sv/19_import_export.sv.map

@@ -31,3 +31,4 @@ module veryl_testcase_Module54;
     logic [14-1:0] _d;
     always_comb _d = __FuncB__10__4(1);
 endmodule
+//# sourceMappingURL=../map/testcases/sv/54_generic_function.sv.map

@@ -200,3 +200,4 @@ module veryl_testcase_Module49;
         a = $writeo();
     end
 endmodule
+//# sourceMappingURL=../map/testcases/sv/49_system_function.sv.map

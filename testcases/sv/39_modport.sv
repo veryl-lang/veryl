@@ -23,3 +23,4 @@ interface veryl_testcase_Interface39;
         import get_a
     );
 endinterface
+//# sourceMappingURL=../map/testcases/sv/39_modport.sv.map

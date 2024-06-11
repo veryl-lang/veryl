@@ -11,3 +11,4 @@ veryl_testcase.*
 /dependencies/
 /book/po/messages.pot
 /book/po/*~
+/testcases/map/dependencies/

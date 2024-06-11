@@ -1,7 +1,9 @@
-use crate::runner::Runner;
+use crate::runner::{remap_msg_by_regex, Runner};
 use futures::prelude::*;
 use log::{error, info};
 use miette::{IntoDiagnostic, Result};
+use once_cell::sync::Lazy;
+use regex::Regex;
 use std::process::Stdio;
 use tokio::process::{Child, Command};
 use tokio::runtime::Runtime;
@@ -23,6 +25,13 @@ enum State {
 pub struct Vcs {
     state: State,
     success: bool,
+}
+
+fn remap_msg(line: &str) -> String {
+    static RE: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r###""?(?<path>[^: "]+)"?, (?<line>[0-9]+)"###).unwrap());
+
+    remap_msg_by_regex(line, &RE)
 }
 
 impl Vcs {
@@ -52,10 +61,10 @@ impl Vcs {
                     self.state = State::SimulateFatal;
                 } else if line.starts_with("Warning-") {
                     self.state = State::CompileWarning;
-                    self.warning(line);
+                    self.warning(&remap_msg(line));
                 } else if line.starts_with("Error-") {
                     self.state = State::CompileError;
-                    self.error(line);
+                    self.error(&remap_msg(line));
                 }
             }
             State::SimulateInfo => {
@@ -78,14 +87,14 @@ impl Vcs {
                 if line.is_empty() {
                     self.state = State::Idle;
                 } else {
-                    self.warning(line);
+                    self.warning(&remap_msg(line));
                 }
             }
             State::CompileError => {
                 if line.is_empty() {
                     self.state = State::Idle;
                 } else {
-                    self.error(line);
+                    self.error(&remap_msg(line));
                 }
             }
         }

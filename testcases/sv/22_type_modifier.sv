@@ -8,3 +8,4 @@ module veryl_testcase_Module22;
     logic            [10-1:0] _d;
     always_comb _d = 1;
 endmodule
+//# sourceMappingURL=../map/testcases/sv/22_type_modifier.sv.map

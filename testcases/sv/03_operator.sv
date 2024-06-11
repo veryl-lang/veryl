@@ -91,3 +91,4 @@ module veryl_testcase_Module03;
     logic _hh;
     always_comb _hh = 1 || 1;
 endmodule
+//# sourceMappingURL=../map/testcases/sv/03_operator.sv.map

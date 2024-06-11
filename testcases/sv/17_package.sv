@@ -32,3 +32,4 @@ package veryl_testcase_Package17;
         return a + 2;
     endfunction
 endpackage
+//# sourceMappingURL=../map/testcases/sv/17_package.sv.map

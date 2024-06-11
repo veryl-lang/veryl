@@ -13,3 +13,4 @@ module veryl_testcase_Module53;
         endcase
     end
 endmodule
+//# sourceMappingURL=../map/testcases/sv/53_multiline_comment_case.sv.map

@@ -1,0 +1,1 @@
+{"version":3,"file":"15_named_block.sv.map","sources":["../../../veryl/15_named_block.veryl"],"names":["","module","Module15",";","logic","_a","=","1",":","label","end","label1","endmodule"],"mappings":"AAAAA,AAAAC,sBAAOC,QAASC;IACJC,MAAJC;mBAAUC,EAAEC,CAACJ;;IAEjBK,CAACC,KAAMT;QACKI,MAAJC;uBAAUC,EAAEC,CAACJ;IACrBO;;IAEAF,CAACG,MAAOX;QACII,MAAJC;uBAAUC,EAAEC,CAACJ;IACrBO;AACJE"}

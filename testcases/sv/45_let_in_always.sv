@@ -16,3 +16,4 @@ module veryl_testcase_Module45;
         c = y * 1;
     end
 endmodule
+//# sourceMappingURL=../map/testcases/sv/45_let_in_always.sv.map

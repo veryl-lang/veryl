@@ -232,7 +232,11 @@ impl Metadata {
         let src_files = if files.is_empty() {
             utils::gather_files_with_extension(&base, "veryl", symlink)?
         } else {
-            files.iter().map(|x| x.as_ref().to_path_buf()).collect()
+            let mut ret = Vec::new();
+            for file in files {
+                ret.push(fs::canonicalize(file.as_ref())?);
+            }
+            ret
         };
 
         let mut ret = Vec::new();

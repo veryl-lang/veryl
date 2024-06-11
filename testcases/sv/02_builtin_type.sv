@@ -47,3 +47,4 @@ module veryl_testcase_Module02;
     real             _ffffff [0:10-1];
     always_comb _ffffff = 1;
 endmodule
+//# sourceMappingURL=../map/testcases/sv/02_builtin_type.sv.map

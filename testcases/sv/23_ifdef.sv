@@ -51,3 +51,4 @@ endmodule
 module veryl_testcase_Module23_C;
 endmodule
 `endif
+//# sourceMappingURL=../map/testcases/sv/23_ifdef.sv.map

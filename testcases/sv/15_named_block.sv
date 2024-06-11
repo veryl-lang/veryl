@@ -12,3 +12,4 @@ module veryl_testcase_Module15;
         always_comb _a = 1;
     end
 endmodule
+//# sourceMappingURL=../map/testcases/sv/15_named_block.sv.map

@@ -89,3 +89,4 @@ module veryl_testcase_Module07;
         a <= a >>> (1);
     end
 endmodule
+//# sourceMappingURL=../map/testcases/sv/07_statement.sv.map

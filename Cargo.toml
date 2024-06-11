@@ -7,6 +7,7 @@ members = [
     "crates/mdbook",
     "crates/metadata",
     "crates/parser",
+    "crates/sourcemap",
     "crates/tests",
     "crates/veryl",
 ]

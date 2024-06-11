@@ -18,3 +18,4 @@ endpackage
 package veryl_testcase_Package44B;
     localparam int unsigned y = 0;
 endpackage
+//# sourceMappingURL=../map/testcases/sv/44_import_resolve.sv.map

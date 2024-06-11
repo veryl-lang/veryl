@@ -15,3 +15,4 @@ module veryl_testcase_Module21;
 
     always_comb a = EnumA'(EnumB'(b));
 endmodule
+//# sourceMappingURL=../map/testcases/sv/21_cast.sv.map
