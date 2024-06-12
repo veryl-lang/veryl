@@ -6,7 +6,7 @@ module veryl_testcase_Module16;
     always_comb y = 1;
 
     always_comb begin
-        case (x)
+        case (x) inside
             0: a = 1;
             1: a = 1;
             2: begin

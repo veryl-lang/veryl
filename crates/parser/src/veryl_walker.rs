@@ -1192,27 +1192,19 @@ pub trait VerylWalker {
         self.case(&arg.case);
         self.expression(&arg.expression);
         self.l_brace(&arg.l_brace);
-        self.expression(&arg.expression0);
-        for x in &arg.case_expression_list {
-            self.comma(&x.comma);
-            self.expression(&x.expression);
-        }
+        self.case_condition(&arg.case_condition);
         self.colon(&arg.colon);
-        self.expression(&arg.expression1);
+        self.expression(&arg.expression0);
         self.comma(&arg.comma);
-        for x in &arg.case_expression_list0 {
-            self.expression(&x.expression);
-            for x in &x.case_expression_list0_list {
-                self.comma(&x.comma);
-                self.expression(&x.expression);
-            }
+        for x in &arg.case_expression_list {
+            self.case_condition(&x.case_condition);
             self.colon(&x.colon);
-            self.expression(&x.expression0);
+            self.expression(&x.expression);
             self.comma(&x.comma);
         }
         self.defaul(&arg.defaul);
         self.colon(&arg.colon0);
-        self.expression(&arg.expression2);
+        self.expression(&arg.expression1);
         if let Some(ref x) = arg.case_expression_opt {
             self.comma(&x.comma);
         }
@@ -1595,13 +1587,7 @@ pub trait VerylWalker {
     fn case_item(&mut self, arg: &CaseItem) {
         before!(self, case_item, arg);
         match &*arg.case_item_group {
-            CaseItemGroup::ExpressionCaseItemGroupList(x) => {
-                self.expression(&x.expression);
-                for x in &x.case_item_group_list {
-                    self.comma(&x.comma);
-                    self.expression(&x.expression);
-                }
-            }
+            CaseItemGroup::CaseCondition(x) => self.case_condition(&x.case_condition),
             CaseItemGroup::Defaul(x) => self.defaul(&x.defaul),
         }
         self.colon(&arg.colon);
@@ -1616,6 +1602,17 @@ pub trait VerylWalker {
             }
         }
         after!(self, case_item, arg);
+    }
+
+    /// Semantic action for non-terminal 'CaseCondition'
+    fn case_condition(&mut self, arg: &CaseCondition) {
+        before!(self, case_condition, arg);
+        self.expression(&arg.expression);
+        for x in &arg.case_condition_list {
+            self.comma(&x.comma);
+            self.expression(&x.expression);
+        }
+        after!(self, case_condition, arg);
     }
 
     /// Semantic action for non-terminal 'Attribute'

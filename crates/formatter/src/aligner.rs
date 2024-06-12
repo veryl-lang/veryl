@@ -324,34 +324,24 @@ impl VerylWalker for Aligner {
         self.expression(&arg.expression);
         self.l_brace(&arg.l_brace);
         self.aligns[align_kind::EXPRESSION].start_item();
-        self.expression(&arg.expression0);
-        for x in &arg.case_expression_list {
-            self.comma(&x.comma);
-            self.space(1);
-            self.expression(&arg.expression);
-        }
+        self.case_condition(&arg.case_condition);
         self.aligns[align_kind::EXPRESSION].finish_item();
         self.colon(&arg.colon);
-        self.expression(&arg.expression1);
+        self.expression(&arg.expression0);
         self.comma(&arg.comma);
-        for x in &arg.case_expression_list0 {
+        for x in &arg.case_expression_list {
             self.aligns[align_kind::EXPRESSION].start_item();
-            self.expression(&x.expression);
-            for x in &x.case_expression_list0_list {
-                self.comma(&x.comma);
-                self.space(1);
-                self.expression(&x.expression);
-            }
+            self.case_condition(&x.case_condition);
             self.aligns[align_kind::EXPRESSION].finish_item();
             self.colon(&x.colon);
-            self.expression(&x.expression0);
+            self.expression(&x.expression);
             self.comma(&x.comma);
         }
         self.aligns[align_kind::EXPRESSION].start_item();
         self.defaul(&arg.defaul);
         self.aligns[align_kind::EXPRESSION].finish_item();
         self.colon(&arg.colon0);
-        self.expression(&arg.expression2);
+        self.expression(&arg.expression1);
         if let Some(ref x) = arg.case_expression_opt {
             self.comma(&x.comma);
         }
@@ -525,14 +515,7 @@ impl VerylWalker for Aligner {
     fn case_item(&mut self, arg: &CaseItem) {
         self.aligns[align_kind::EXPRESSION].start_item();
         match &*arg.case_item_group {
-            CaseItemGroup::ExpressionCaseItemGroupList(x) => {
-                self.expression(&x.expression);
-                for x in &x.case_item_group_list {
-                    self.comma(&x.comma);
-                    self.space(1);
-                    self.expression(&x.expression);
-                }
-            }
+            CaseItemGroup::CaseCondition(x) => self.case_condition(&x.case_condition),
             CaseItemGroup::Defaul(x) => self.defaul(&x.defaul),
         }
         self.aligns[align_kind::EXPRESSION].finish_item();
@@ -546,6 +529,16 @@ impl VerylWalker for Aligner {
                 }
                 self.r_brace(&x.r_brace);
             }
+        }
+    }
+
+    /// Semantic action for non-terminal 'CaseCondition'
+    fn case_condition(&mut self, arg: &CaseCondition) {
+        self.expression(&arg.expression);
+        for x in &arg.case_condition_list {
+            self.comma(&x.comma);
+            self.space(1);
+            self.expression(&x.expression);
         }
     }
 

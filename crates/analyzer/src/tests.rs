@@ -1643,7 +1643,7 @@ fn enum_non_const_exception() {
         i_clk: input clock,
         i_rst: input reset,
     ) {
-    
+
         enum State: logic<3> {
             Idle = 3'bxx1,
             Run0 = 3'b000,
@@ -1651,16 +1651,93 @@ fn enum_non_const_exception() {
             Run2 = 3'b100,
             Done = 3'b110,
         }
-    
+
         var state: State;
-    
+
         always_ff {
             if_reset {
                 state = State::Idle;
             }
         }
-    
+
     }"#;
     let errors = analyze(code);
     assert!(errors.is_empty());
+}
+
+#[test]
+fn invalid_case_condition_expression() {
+    let code = r#"
+    module ModuleA (
+        i_sel: input  logic<2>,
+        i_a  : input  logic<3>,
+        o_b  : output logic,
+        o_c  : output logic,
+    ) {
+        local ONE: bit <2> = 2'd1;
+
+        always_comb {
+          case i_sel {
+            2'd0   : o_b = i_a[0];
+            ONE    : o_b = i_a[1];
+            2'b1x  : o_b = i_a[2];
+            default: o_b = i_a[2];
+          }
+        }
+
+        assign o_c = case i_sel {
+            2'd0   : i_a[0],
+            ONE    : i_a[1],
+            2'b1x  : i_a[2],
+            default: i_a[2],
+        };
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleB (
+        i_sel: input  logic<2>,
+        i_a  : input  logic<3>,
+        o_b  : output logic,
+    ) {
+        let c: logic<2> = 2'd0;
+
+        always_comb {
+          case i_sel {
+            c      : o_b = i_a[0];
+            default: o_b = i_a[1];
+          }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidCaseConditionNonElaborative { .. }
+    ));
+
+    let code = r#"
+    module ModuleC (
+        i_sel: input  logic<2>,
+        i_a  : input  logic<3>,
+        o_b  : output logic,
+    ) {
+        let c: logic<2> = 2'd0;
+
+        assign o_b = case i_sel {
+            c      : i_a[0],
+            default: i_a[1],
+        };
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidCaseConditionNonElaborative { .. }
+    ));
 }

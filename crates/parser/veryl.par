@@ -450,7 +450,7 @@ ArrayLiteralItem: ( Expression [ Repeat Expression ] | Defaul Colon Expression )
 
 IfExpression: If Expression LBrace Expression RBrace { Else If Expression LBrace Expression RBrace } Else LBrace Expression RBrace;
 
-CaseExpression: Case Expression LBrace Expression { Comma Expression } Colon Expression Comma { Expression { Comma Expression } Colon Expression Comma } Defaul Colon Expression [ Comma ] RBrace;
+CaseExpression: Case Expression LBrace CaseCondition Colon Expression Comma { CaseCondition Colon Expression Comma } Defaul Colon Expression [ Comma ] RBrace;
 
 TypeExpression: ScalarType
               | Type LParen Expression RParen
@@ -543,7 +543,9 @@ ForStatement: For Identifier Colon ScalarType In Range [ Step AssignmentOperator
 
 CaseStatement: Case Expression LBrace { CaseItem } RBrace;
 
-CaseItem: ( Expression { Comma Expression } | Defaul ) Colon ( Statement | LBrace { Statement } RBrace );
+CaseItem: ( CaseCondition | Defaul ) Colon ( Statement | LBrace { Statement } RBrace );
+
+CaseCondition: Expression { Comma Expression } ;
 
 // ----------------------------------------------------------------------------
 // Attribute

@@ -325,6 +325,20 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_case_condition_non_elaborative),
+        help(""),
+        url("")
+    )]
+    #[error("Case condition value cannot be used because it is not evaluable at elaboration time")]
+    InvalidCaseConditionNonElaborative {
+        #[source_code]
+        input: NamedSource,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(missing_default_argument),
         help("give default argument"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#missing_default_argument")
@@ -1005,6 +1019,13 @@ impl AnalyzerError {
 
     pub fn invalid_reset_non_elaborative(source: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidResetNonElaborative {
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn invalid_case_condition_non_elaborative(source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidCaseConditionNonElaborative {
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
         }

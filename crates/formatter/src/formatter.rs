@@ -455,34 +455,24 @@ impl VerylWalker for Formatter {
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
-        self.expression(&arg.expression0);
-        for x in &arg.case_expression_list {
-            self.comma(&x.comma);
-            self.space(1);
-            self.expression(&x.expression);
-        }
+        self.case_condition(&arg.case_condition);
         self.colon(&arg.colon);
         self.space(1);
-        self.expression(&arg.expression1);
+        self.expression(&arg.expression0);
         self.comma(&arg.comma);
         self.newline();
-        for x in &arg.case_expression_list0 {
-            self.expression(&x.expression);
-            for x in &x.case_expression_list0_list {
-                self.comma(&x.comma);
-                self.space(1);
-                self.expression(&x.expression);
-            }
+        for x in &arg.case_expression_list {
+            self.case_condition(&x.case_condition);
             self.colon(&x.colon);
             self.space(1);
-            self.expression(&x.expression0);
+            self.expression(&x.expression);
             self.comma(&x.comma);
             self.newline();
         }
         self.defaul(&arg.defaul);
         self.colon(&arg.colon0);
         self.space(1);
-        self.expression(&arg.expression2);
+        self.expression(&arg.expression1);
         if let Some(ref x) = arg.case_expression_opt {
             self.comma(&x.comma);
         } else {
@@ -768,14 +758,7 @@ impl VerylWalker for Formatter {
     fn case_item(&mut self, arg: &CaseItem) {
         let start = self.column();
         match &*arg.case_item_group {
-            CaseItemGroup::ExpressionCaseItemGroupList(x) => {
-                self.expression(&x.expression);
-                for x in &x.case_item_group_list {
-                    self.comma(&x.comma);
-                    self.space(1);
-                    self.expression(&x.expression);
-                }
-            }
+            CaseItemGroup::CaseCondition(x) => self.case_condition(&x.case_condition),
             CaseItemGroup::Defaul(x) => self.defaul(&x.defaul),
         }
         self.colon(&arg.colon);
@@ -794,6 +777,16 @@ impl VerylWalker for Formatter {
             }
         }
         self.case_item_indent.pop();
+    }
+
+    /// Semantic action for non-terminal 'CaseCondition'
+    fn case_condition(&mut self, arg: &CaseCondition) {
+        self.expression(&arg.expression);
+        for x in &arg.case_condition_list {
+            self.comma(&x.comma);
+            self.space(1);
+            self.expression(&x.expression);
+        }
     }
 
     /// Semantic action for non-terminal 'AttributeList'

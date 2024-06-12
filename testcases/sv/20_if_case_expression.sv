@@ -16,13 +16,13 @@ module veryl_testcase_Module20;
         ))
     ));
 
-    always_comb b = ((a == 1) ? (
+    always_comb b = ((a ==? 1) ? (
         0
-    ) : (a == 2) ? (
+    ) : (a ==? 2) ? (
         1
-    ) : (a == 3) ? (
+    ) : (a ==? 3) ? (
         2
-    ) : (a == 4) ? (
+    ) : (a ==? 4) ? (
         2
     ) : (
         3

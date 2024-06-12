@@ -1052,52 +1052,52 @@ impl VerylWalker for Emitter {
         self.token(&arg.case.case_token.replace("(("));
         self.expression(&arg.expression);
         self.space(1);
-        self.str("==");
+        self.str("==?");
         self.space(1);
-        self.expression(&arg.expression0);
+        self.expression(&arg.case_condition.expression);
         self.str(") ? (");
         self.newline_push();
-        self.expression(&arg.expression1);
+        self.expression(&arg.expression0);
         self.newline_pop();
-        for x in &arg.case_expression_list {
+        for x in &arg.case_condition.case_condition_list {
             self.token(&x.comma.comma_token.replace(")"));
             self.space(1);
             self.str(": (");
             self.expression(&arg.expression);
             self.space(1);
-            self.str("==");
+            self.str("==?");
             self.space(1);
             self.expression(&x.expression);
             self.str(") ? (");
             self.newline_push();
-            self.expression(&arg.expression1);
+            self.expression(&arg.expression0);
             self.newline_pop();
         }
         self.str(")");
         self.space(1);
-        for x in &arg.case_expression_list0 {
+        for x in &arg.case_expression_list {
             self.str(": (");
             self.expression(&arg.expression);
             self.space(1);
-            self.str("==");
+            self.str("==?");
             self.space(1);
-            self.expression(&x.expression);
+            self.expression(&x.case_condition.expression);
             self.str(") ? (");
             self.newline_push();
-            self.expression(&x.expression0);
+            self.expression(&x.expression);
             self.newline_pop();
-            for y in &x.case_expression_list0_list {
+            for y in &x.case_condition.case_condition_list {
                 self.token(&x.comma.comma_token.replace(")"));
                 self.space(1);
                 self.str(": (");
                 self.expression(&arg.expression);
                 self.space(1);
-                self.str("==");
+                self.str("==?");
                 self.space(1);
                 self.expression(&y.expression);
                 self.str(") ? (");
                 self.newline_push();
-                self.expression(&x.expression0);
+                self.expression(&x.expression);
                 self.newline_pop();
             }
             self.token(&x.comma.comma_token.replace(")"));
@@ -1105,7 +1105,7 @@ impl VerylWalker for Emitter {
         }
         self.str(": (");
         self.newline_push();
-        self.expression(&arg.expression2);
+        self.expression(&arg.expression1);
         self.newline_pop();
         self.token(&arg.r_brace.r_brace_token.replace("))"));
     }
@@ -1583,7 +1583,7 @@ impl VerylWalker for Emitter {
         self.space(1);
         self.str("(");
         self.expression(&arg.expression);
-        self.token_will_push(&arg.l_brace.l_brace_token.replace(")"));
+        self.token_will_push(&arg.l_brace.l_brace_token.replace(") inside"));
         for (i, x) in arg.case_statement_list.iter().enumerate() {
             self.newline_list(i);
             self.case_item(&x.case_item);
@@ -1596,9 +1596,9 @@ impl VerylWalker for Emitter {
     fn case_item(&mut self, arg: &CaseItem) {
         let start = self.dst_column;
         match &*arg.case_item_group {
-            CaseItemGroup::ExpressionCaseItemGroupList(x) => {
-                self.expression(&x.expression);
-                for x in &x.case_item_group_list {
+            CaseItemGroup::CaseCondition(x) => {
+                self.expression(&x.case_condition.expression);
+                for x in &x.case_condition.case_condition_list {
                     self.comma(&x.comma);
                     self.space(1);
                     self.expression(&x.expression);
