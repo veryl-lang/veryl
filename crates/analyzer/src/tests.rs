@@ -897,6 +897,90 @@ fn mismatch_type() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    module ModuleB_0 {}
+    module ModuleB_1 {
+        inst u: ModuleB_0;
+        let _b: u = 1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    module ModuleC {
+        function FuncC() -> logic {
+            return 0;
+        }
+        let _c: FuncC = 1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    module ModuleD_0 {}
+    module ModuleD_1 {
+        let _d: ModuleD_0 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    interface InterfaceE {}
+    module ModuleE {
+        let _e: InterfaceE = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    package PackageF {}
+    module ModuleF {
+        let _f: PackageF = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    module ModuleG {
+        function FuncG::<T> -> T {
+            var g: T;
+            g = 0;
+            return g;
+        }
+
+        let _g: logic = FuncG::<2>();
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    module ModuleH {
+        function FuncH::<T> -> T {
+            var h: T;
+            h = 0;
+            return h;
+        }
+
+        type my_logic = logic;
+        let _h: logic = FuncH::<my_logic>();
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

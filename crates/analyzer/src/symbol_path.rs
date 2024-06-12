@@ -180,10 +180,34 @@ impl From<&syntax_tree::ExpressionIdentifier> for SymbolPathNamespace {
     }
 }
 
+#[derive(Copy, Debug, Clone, PartialEq, Eq)]
+pub enum GenericSymbolPathKind {
+    Identifier,
+    IntegerBased,
+    IntegerBaseLess,
+    IntegerAllBit,
+    RealExponent,
+    RealFixedPoint,
+}
+
+impl fmt::Display for GenericSymbolPathKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let text = match self {
+            GenericSymbolPathKind::Identifier => "identifier".to_string(),
+            GenericSymbolPathKind::IntegerBased => "integer based".to_string(),
+            GenericSymbolPathKind::IntegerBaseLess => "integer base less".to_string(),
+            GenericSymbolPathKind::IntegerAllBit => "integer all bit".to_string(),
+            GenericSymbolPathKind::RealExponent => "real exponent".to_string(),
+            GenericSymbolPathKind::RealFixedPoint => "read fixed point".to_string(),
+        };
+        text.fmt(f)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GenericSymbolPath {
     pub paths: Vec<GenericSymbol>,
-    pub resolvable: bool,
+    pub kind: GenericSymbolPathKind,
     pub range: TokenRange,
 }
 
@@ -265,6 +289,10 @@ impl GenericSymbolPath {
         SymbolPath::new(&path)
     }
 
+    pub fn is_resolvable(&self) -> bool {
+        self.kind == GenericSymbolPathKind::Identifier
+    }
+
     pub fn is_generic(&self) -> bool {
         for path in &self.paths {
             if !path.arguments.is_empty() {
@@ -276,7 +304,7 @@ impl GenericSymbolPath {
 
     pub fn is_generic_reference(&self) -> bool {
         // path starts with generic parameter
-        if !self.resolvable {
+        if !self.is_resolvable() {
             return false;
         }
         let head = &self.paths[0];
@@ -289,7 +317,7 @@ impl GenericSymbolPath {
         // path contains generic parameter as generic argument
         for path in &self.paths {
             for arg in &path.arguments {
-                if !arg.resolvable {
+                if !arg.is_resolvable() {
                     continue;
                 }
                 let head = &arg.paths[0];
@@ -311,7 +339,7 @@ impl GenericSymbolPath {
                 let mut paths: Vec<_> = self.paths.drain(1..).collect();
                 self.paths.clone_from(&x.paths);
                 self.paths.append(&mut paths);
-                self.resolvable = x.resolvable;
+                self.kind = x.kind;
                 break;
             }
         }
@@ -324,7 +352,7 @@ impl GenericSymbolPath {
                         let mut paths: Vec<_> = arg.paths.drain(1..).collect();
                         arg.paths.clone_from(&x.paths);
                         arg.paths.append(&mut paths);
-                        arg.resolvable = x.resolvable;
+                        arg.kind = x.kind;
                         break;
                     }
                 }
@@ -335,23 +363,39 @@ impl GenericSymbolPath {
 
 impl From<&syntax_tree::Number> for GenericSymbolPath {
     fn from(value: &syntax_tree::Number) -> Self {
-        let token = match value {
+        let (token, kind) = match value {
             syntax_tree::Number::IntegralNumber(x) => match x.integral_number.as_ref() {
-                syntax_tree::IntegralNumber::Based(x) => x.based.based_token.token,
-                syntax_tree::IntegralNumber::AllBit(x) => x.all_bit.all_bit_token.token,
-                syntax_tree::IntegralNumber::BaseLess(x) => x.base_less.base_less_token.token,
+                syntax_tree::IntegralNumber::Based(x) => (
+                    x.based.based_token.token,
+                    GenericSymbolPathKind::IntegerBased,
+                ),
+                syntax_tree::IntegralNumber::AllBit(x) => (
+                    x.all_bit.all_bit_token.token,
+                    GenericSymbolPathKind::IntegerAllBit,
+                ),
+                syntax_tree::IntegralNumber::BaseLess(x) => (
+                    x.base_less.base_less_token.token,
+                    GenericSymbolPathKind::IntegerBaseLess,
+                ),
             },
             syntax_tree::Number::RealNumber(x) => match x.real_number.as_ref() {
-                syntax_tree::RealNumber::Exponent(x) => x.exponent.exponent_token.token,
-                syntax_tree::RealNumber::FixedPoint(x) => x.fixed_point.fixed_point_token.token,
+                syntax_tree::RealNumber::Exponent(x) => (
+                    x.exponent.exponent_token.token,
+                    GenericSymbolPathKind::RealExponent,
+                ),
+                syntax_tree::RealNumber::FixedPoint(x) => (
+                    x.fixed_point.fixed_point_token.token,
+                    GenericSymbolPathKind::RealFixedPoint,
+                ),
             },
         };
+
         GenericSymbolPath {
             paths: vec![GenericSymbol {
                 base: token,
                 arguments: Vec::new(),
             }],
-            resolvable: false,
+            kind,
             range: token.into(),
         }
     }
@@ -419,7 +463,7 @@ impl From<&syntax_tree::ScopedIdentifier> for GenericSymbolPath {
 
         GenericSymbolPath {
             paths,
-            resolvable: true,
+            kind: GenericSymbolPathKind::Identifier,
             range: value.into(),
         }
     }
