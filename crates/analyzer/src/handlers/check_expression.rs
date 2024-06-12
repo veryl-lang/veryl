@@ -1,5 +1,5 @@
 use crate::analyzer_error::AnalyzerError;
-use crate::symbol::SymbolKind;
+use crate::symbol::{Direction, SymbolKind};
 use crate::symbol_table;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::TokenRange;
@@ -11,6 +11,13 @@ pub struct CheckExpression<'a> {
     pub errors: Vec<AnalyzerError>,
     text: &'a str,
     point: HandlerPoint,
+    call_stack_kind: Vec<FunctionKind>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum FunctionKind {
+    System,
+    NonSystem,
 }
 
 impl<'a> CheckExpression<'a> {
@@ -36,17 +43,25 @@ impl<'a> VerylGrammarTrait for CheckExpression<'a> {
                 if let Ok(rr) = symbol_table::resolve(expid) {
                     let identifier = rr.found.token.to_string();
                     let token: TokenRange = x.expression_identifier.as_ref().into();
+                    let error = AnalyzerError::invalid_factor(
+                        &identifier,
+                        &rr.found.kind.to_kind_name(),
+                        self.text,
+                        &token,
+                    );
                     match rr.found.kind {
-                        SymbolKind::Function(_)
-                        | SymbolKind::ModportFunctionMember(_)
-                        | SymbolKind::SystemFunction => {
+                        SymbolKind::Function(_) | SymbolKind::ModportFunctionMember(_) => {
                             if x.factor_opt.is_none() {
-                                self.errors.push(AnalyzerError::invalid_factor(
-                                    &identifier,
-                                    &rr.found.kind.to_kind_name(),
-                                    self.text,
-                                    &token,
-                                ));
+                                self.errors.push(error);
+                            } else {
+                                self.call_stack_kind.push(FunctionKind::NonSystem);
+                            }
+                        }
+                        SymbolKind::SystemFunction => {
+                            if x.factor_opt.is_none() {
+                                self.errors.push(error);
+                            } else {
+                                self.call_stack_kind.push(FunctionKind::System);
                             }
                         }
                         SymbolKind::Module(_)
@@ -55,19 +70,35 @@ impl<'a> VerylGrammarTrait for CheckExpression<'a> {
                         | SymbolKind::Block
                         | SymbolKind::Package(_)
                         | SymbolKind::TypeDef(_)
-                        | SymbolKind::Enum(_)
                         | SymbolKind::Modport(_)
-                        | SymbolKind::ModportVariableMember(_)
                         | SymbolKind::Namespace
                         | SymbolKind::GenericInstance(_) => {
-                            self.errors.push(AnalyzerError::invalid_factor(
-                                &identifier,
-                                &rr.found.kind.to_kind_name(),
-                                self.text,
-                                &token,
-                            ));
+                            self.errors.push(error);
                         }
-                        _ => {}
+                        SymbolKind::Port(x) => match x.direction {
+                            Direction::Interface | Direction::Modport => {
+                                self.errors.push(error);
+                            }
+                            _ => {}
+                        },
+                        SymbolKind::Parameter(_)
+                        | SymbolKind::EnumMember(_)
+                        | SymbolKind::Genvar
+                        | SymbolKind::ModportVariableMember(_)
+                        | SymbolKind::SystemVerilog
+                        | SymbolKind::GenericParameter(_)
+                        | SymbolKind::Variable(_) => {}
+
+                        SymbolKind::Enum(_)
+                        | SymbolKind::Union(_)
+                        | SymbolKind::Struct(_)
+                        | SymbolKind::StructMember(_)
+                        | SymbolKind::UnionMember(_) => {
+                            if let Some(FunctionKind::System) = self.call_stack_kind.last() {
+                            } else {
+                                self.errors.push(error);
+                            }
+                        }
                     }
                 }
 
