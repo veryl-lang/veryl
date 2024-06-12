@@ -57,7 +57,6 @@ impl<'a> VerylGrammarTrait for CheckExpression<'a> {
                         | SymbolKind::TypeDef(_)
                         | SymbolKind::Enum(_)
                         | SymbolKind::Modport(_)
-                        | SymbolKind::ModportVariableMember(_)
                         | SymbolKind::Namespace
                         | SymbolKind::GenericInstance(_) => {
                             self.errors.push(AnalyzerError::invalid_factor(
