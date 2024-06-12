@@ -1705,14 +1705,17 @@ fn test_factors() {
             $display("%d", foo());
             $display("%d", $bits(S));
             $display("%d", $bits(U));
+            $display("%d", bar($bits(State)));
             $display("%d", $bits(State));
             $display("%d", bar(S));
             $display("%d", bar(U));
             $display("%d", bar(State));
+            $display("%d", $bits(bar(State)));
         }
     }"#;
 
     let errors = analyze(code);
+    assert!(errors.len() == 4);
     for error in errors {
         assert!(matches!(error, AnalyzerError::InvalidFactor { .. }));
     }
