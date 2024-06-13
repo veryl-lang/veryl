@@ -1,6 +1,7 @@
 module veryl_testcase_Module20;
     logic a;
     logic b;
+    logic c;
     logic x;
     always_comb x = 1;
     logic y;
@@ -27,5 +28,17 @@ module veryl_testcase_Module20;
     ) : (
         3
     ));
+
+    always_comb c = (((a == 1) == 1'b1) ? (
+        0
+    ) : ((a == 2) == 1'b1) ? (
+        1
+    ) : ((a == 3) == 1'b1) ? (
+        2
+    ) : ((a == 4) == 1'b1) ? (
+        2
+    ) : (
+        3
+    ));
 endmodule
-//# sourceMappingURL=../map/testcases/sv/20_if_case_expression.sv.map
+//# sourceMappingURL=../map/testcases/sv/20_if_case_switch_expression.sv.map

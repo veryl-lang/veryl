@@ -684,6 +684,34 @@ impl VerylWalker for Aligner {
         }
     }
 
+    /// Semantic action for non-terminal 'SwitchItem'
+    fn switch_item(&mut self, arg: &SwitchItem) {
+        self.aligns[align_kind::EXPRESSION].start_item();
+        match &*arg.switch_item_group {
+            SwitchItemGroup::SwitchCondition(x) => {
+                self.expression(&x.switch_condition.expression);
+                for x in &x.switch_condition.switch_condition_list {
+                    self.comma(&x.comma);
+                    self.space(1);
+                    self.expression(&x.expression);
+                }
+            }
+            SwitchItemGroup::Defaul(x) => self.defaul(&x.defaul),
+        }
+        self.aligns[align_kind::EXPRESSION].finish_item();
+        self.colon(&arg.colon);
+        match &*arg.switch_item_group0 {
+            SwitchItemGroup0::Statement(x) => self.statement(&x.statement),
+            SwitchItemGroup0::LBraceSwitchItemGroup0ListRBrace(x) => {
+                self.l_brace(&x.l_brace);
+                for x in &x.switch_item_group0_list {
+                    self.statement(&x.statement);
+                }
+                self.r_brace(&x.r_brace);
+            }
+        }
+    }
+
     /// Semantic action for non-terminal 'LetDeclaration'
     fn let_declaration(&mut self, arg: &LetDeclaration) {
         self.r#let(&arg.r#let);

@@ -1,6 +1,7 @@
 module Module20 {
     var a: logic;
     var b: logic;
+    var c: logic;
     let x: logic = 1;
     let y: logic = 1;
 
@@ -19,5 +20,12 @@ module Module20 {
         2      : 1,
         3, 4   : 2,
         default: 3,
+    };
+
+    assign c = switch {
+        a == 1        : 0,
+        a == 2        : 1,
+        a == 3, a == 4: 2,
+        default       : 3,
     };
 }

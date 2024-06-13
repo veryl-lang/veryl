@@ -121,6 +121,7 @@ SignedTerm            : <INITIAL, Generic       >/(?-u:\b)signed(?-u:\b)/       
 StepTerm              : <INITIAL, Generic       >/(?-u:\b)step(?-u:\b)/                                                                : Token;
 StringTerm            : <INITIAL, Generic       >/(?-u:\b)string(?-u:\b)/                                                              : Token;
 StructTerm            : <INITIAL, Generic       >/(?-u:\b)struct(?-u:\b)/                                                              : Token;
+SwitchTerm            : <INITIAL, Generic       >/(?-u:\b)switch(?-u:\b)/                                                              : Token;
 TriTerm               : <INITIAL, Generic       >/(?-u:\b)tri(?-u:\b)/                                                                 : Token;
 TypeTerm              : <INITIAL, Generic       >/(?-u:\b)type(?-u:\b)/                                                                : Token;
 U32Term               : <INITIAL, Generic       >/(?-u:\b)u32(?-u:\b)/                                                                 : Token;
@@ -242,6 +243,7 @@ SignedToken        : SignedTerm        : Token Comments;
 StepToken          : StepTerm          : Token Comments;
 StringToken        : StringTerm        : Token Comments;
 StructToken        : StructTerm        : Token Comments;
+SwitchToken        : SwitchTerm        : Token Comments;
 TriToken           : TriTerm           : Token Comments;
 TypeToken          : TypeTerm          : Token Comments;
 U32Token           : U32Term           : Token Comments;
@@ -367,6 +369,7 @@ Signed        : SignedToken        : VerylToken;
 Step          : StepToken          : VerylToken;
 Strin         : StringToken        : VerylToken; // avoid to conflict with Rust's String struct
 Struct        : StructToken        : VerylToken;
+Switch        : SwitchToken        : VerylToken;
 Tri           : TriToken           : VerylToken;
 Type          : TypeToken          : VerylToken;
 U32           : U32Token           : VerylToken;
@@ -428,6 +431,7 @@ Factor: Number
       | QuoteLBrace ArrayLiteralList RBrace
       | IfExpression
       | CaseExpression
+      | SwitchExpression
       | StringLiteral
       | ( Msb | Lsb )
       | InsideExpression
@@ -451,6 +455,8 @@ ArrayLiteralItem: ( Expression [ Repeat Expression ] | Defaul Colon Expression )
 IfExpression: If Expression LBrace Expression RBrace { Else If Expression LBrace Expression RBrace } Else LBrace Expression RBrace;
 
 CaseExpression: Case Expression LBrace CaseCondition Colon Expression Comma { CaseCondition Colon Expression Comma } Defaul Colon Expression [ Comma ] RBrace;
+
+SwitchExpression: Switch LBrace SwitchCondition Colon Expression Comma { SwitchCondition Colon Expression Comma } Defaul Colon Expression [ Comma ] RBrace;
 
 TypeExpression: ScalarType
               | Type LParen Expression RParen
@@ -523,6 +529,7 @@ Statement: LetStatement
          | BreakStatement
          | ForStatement
          | CaseStatement
+         | SwitchStatement
          ;
 
 LetStatement: Let Identifier Colon ArrayType Equ Expression Semicolon;
@@ -546,6 +553,12 @@ CaseStatement: Case Expression LBrace { CaseItem } RBrace;
 CaseItem: ( CaseCondition | Defaul ) Colon ( Statement | LBrace { Statement } RBrace );
 
 CaseCondition: Expression { Comma Expression } ;
+
+SwitchStatement: Switch LBrace { SwitchItem } RBrace;
+
+SwitchItem: ( SwitchCondition | Defaul ) Colon ( Statement | LBrace { Statement } RBrace );
+
+SwitchCondition: Expression { Comma Expression } ;
 
 // ----------------------------------------------------------------------------
 // Attribute

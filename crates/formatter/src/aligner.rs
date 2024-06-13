@@ -348,6 +348,35 @@ impl VerylWalker for Aligner {
         self.r_brace(&arg.r_brace);
     }
 
+    /// Semantic action for non-terminal 'SwitchExpression'
+    fn switch_expression(&mut self, arg: &SwitchExpression) {
+        self.switch(&arg.switch);
+        self.l_brace(&arg.l_brace);
+        self.aligns[align_kind::EXPRESSION].start_item();
+        self.switch_condition(&arg.switch_condition);
+        self.aligns[align_kind::EXPRESSION].finish_item();
+        self.colon(&arg.colon);
+        self.expression(&arg.expression);
+        self.comma(&arg.comma);
+        for x in &arg.switch_expression_list {
+            self.aligns[align_kind::EXPRESSION].start_item();
+            self.switch_condition(&x.switch_condition);
+            self.aligns[align_kind::EXPRESSION].finish_item();
+            self.colon(&x.colon);
+            self.expression(&x.expression);
+            self.comma(&x.comma);
+        }
+        self.aligns[align_kind::EXPRESSION].start_item();
+        self.defaul(&arg.defaul);
+        self.aligns[align_kind::EXPRESSION].finish_item();
+        self.colon(&arg.colon0);
+        self.expression(&arg.expression0);
+        if let Some(ref x) = arg.switch_expression_opt {
+            self.comma(&x.comma);
+        }
+        self.r_brace(&arg.r_brace);
+    }
+
     /// Semantic action for non-terminal 'TypeExpression'
     fn type_expression(&mut self, arg: &TypeExpression) {
         self.in_type_expression = true;
@@ -536,6 +565,37 @@ impl VerylWalker for Aligner {
     fn case_condition(&mut self, arg: &CaseCondition) {
         self.expression(&arg.expression);
         for x in &arg.case_condition_list {
+            self.comma(&x.comma);
+            self.space(1);
+            self.expression(&x.expression);
+        }
+    }
+
+    /// Semantic action for non-terminal 'SwitchItem'
+    fn switch_item(&mut self, arg: &SwitchItem) {
+        self.aligns[align_kind::EXPRESSION].start_item();
+        match &*arg.switch_item_group {
+            SwitchItemGroup::SwitchCondition(x) => self.switch_condition(&x.switch_condition),
+            SwitchItemGroup::Defaul(x) => self.defaul(&x.defaul),
+        }
+        self.aligns[align_kind::EXPRESSION].finish_item();
+        self.colon(&arg.colon);
+        match &*arg.switch_item_group0 {
+            SwitchItemGroup0::Statement(x) => self.statement(&x.statement),
+            SwitchItemGroup0::LBraceSwitchItemGroup0ListRBrace(x) => {
+                self.l_brace(&x.l_brace);
+                for x in &x.switch_item_group0_list {
+                    self.statement(&x.statement);
+                }
+                self.r_brace(&x.r_brace);
+            }
+        }
+    }
+
+    /// Semantic action for non-terminal 'SwitchCondition'
+    fn switch_condition(&mut self, arg: &SwitchCondition) {
+        self.expression(&arg.expression);
+        for x in &arg.switch_condition_list {
             self.comma(&x.comma);
             self.space(1);
             self.expression(&x.expression);
