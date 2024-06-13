@@ -121,6 +121,10 @@ impl Symbol {
                         ParameterValue::TypeExpression(_) => Evaluated::Unknown,
                     }
                 }
+                SymbolKind::EnumMember(_) => {
+                    // TODO: Actually Evaluate its Width
+                    Evaluated::UnknownStatic
+                }
                 _ => Evaluated::Unknown,
             };
             self.evaluated.replace(Some(evaluated));

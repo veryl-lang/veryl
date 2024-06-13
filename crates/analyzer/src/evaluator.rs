@@ -613,11 +613,7 @@ impl Evaluator {
 
     fn identifier_helper(&mut self, symbol: Result<ResolveResult, ResolveError>) -> Evaluated {
         if let Ok(symbol) = symbol {
-            if let Some(evaluated) = symbol.found.evaluated.get() {
-                evaluated
-            } else {
-                Evaluated::Unknown
-            }
+            symbol.found.evaluate()
         } else {
             Evaluated::Unknown
         }
