@@ -394,7 +394,7 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                         match x.found.kind {
                             SymbolKind::Module(ref x) => {
                                 for port in &x.ports {
-                                    dirs.insert(port.name, port.property.direction);
+                                    dirs.insert(port.name, port.property().direction);
                                 }
                             }
                             SymbolKind::SystemVerilog => dir_unknown = true,

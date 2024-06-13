@@ -1,0 +1,22 @@
+module Module61A (
+    i_dat: input  'a logic,
+    o_dat: output 'b logic,
+) {
+    unsafe (cdc) {
+        assign o_dat = i_dat;
+    }
+}
+
+module Module61B (
+    i_clk: input  'b clock,
+    i_dat: input  'a logic,
+    o_dat: output 'b logic,
+) {
+    unsafe (cdc) {
+        inst u_sync: $sv::Synchronizer (
+            c: i_clk,
+            d: i_dat,
+            q: o_dat,
+        );
+    }
+}

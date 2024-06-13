@@ -253,7 +253,8 @@ impl SymbolTable {
                         | SymbolKind::EnumMember(_)
                         | SymbolKind::Block
                         | SymbolKind::SystemFunction
-                        | SymbolKind::Genvar => (),
+                        | SymbolKind::Genvar
+                        | SymbolKind::ClockDomain => (),
                     }
                 } else {
                     return Err(ResolveError::new(

@@ -21,6 +21,7 @@ pub struct CheckIdentifier<'a> {
 }
 
 enum Kind {
+    ClockDomain,
     Enum,
     Function,
     Instance,
@@ -56,6 +57,7 @@ impl<'a> CheckIdentifier<'a> {
         let opt = &self.lint_opt.naming;
 
         let prefix = match kind {
+            Kind::ClockDomain => &opt.prefix_clock_domain,
             Kind::Enum => &opt.prefix_enum,
             Kind::Function => &opt.prefix_function,
             Kind::Instance => &opt.prefix_instance,
@@ -76,6 +78,7 @@ impl<'a> CheckIdentifier<'a> {
         };
 
         let case = match kind {
+            Kind::ClockDomain => &opt.case_clock_domain,
             Kind::Enum => &opt.case_enum,
             Kind::Function => &opt.case_function,
             Kind::Instance => &opt.case_instance,
@@ -96,6 +99,7 @@ impl<'a> CheckIdentifier<'a> {
         };
 
         let re_required = match kind {
+            Kind::ClockDomain => &opt.re_required_clock_domain,
             Kind::Enum => &opt.re_required_enum,
             Kind::Function => &opt.re_required_function,
             Kind::Instance => &opt.re_required_instance,
@@ -116,6 +120,7 @@ impl<'a> CheckIdentifier<'a> {
         };
 
         let re_forbidden = match kind {
+            Kind::ClockDomain => &opt.re_forbidden_clock_domain,
             Kind::Enum => &opt.re_forbidden_enum,
             Kind::Function => &opt.re_forbidden_function,
             Kind::Instance => &opt.re_forbidden_instance,
@@ -219,6 +224,13 @@ impl<'a> Handler for CheckIdentifier<'a> {
 }
 
 impl<'a> VerylGrammarTrait for CheckIdentifier<'a> {
+    fn clock_domain(&mut self, arg: &ClockDomain) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            self.check(&arg.identifier.identifier_token.token, Kind::ClockDomain);
+        }
+        Ok(())
+    }
+
     fn identifier_statement(&mut self, arg: &IdentifierStatement) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let token = arg.expression_identifier.identifier().token;
@@ -285,13 +297,12 @@ impl<'a> VerylGrammarTrait for CheckIdentifier<'a> {
     fn port_declaration_item(&mut self, arg: &PortDeclarationItem) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let direction = match &*arg.port_declaration_item_group {
-                PortDeclarationItemGroup::DirectionArrayType(x) => {
+                PortDeclarationItemGroup::PortTypeConcrete(x) => {
+                    let x = x.port_type_concrete.as_ref();
                     let direction: SymDirection = x.direction.as_ref().into();
                     direction
                 }
-                PortDeclarationItemGroup::InterfacePortDeclarationItemOpt(_) => {
-                    SymDirection::Interface
-                }
+                PortDeclarationItemGroup::PortTypeAbstract(_) => SymDirection::Interface,
             };
             let kind = match direction {
                 SymDirection::Input => Some(Kind::PortInput),

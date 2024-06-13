@@ -218,6 +218,10 @@ pub struct OptDump {
     /// output attribute table
     #[arg(long)]
     pub attribute_table: bool,
+
+    /// output unsafe table
+    #[arg(long)]
+    pub unsafe_table: bool,
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

@@ -627,6 +627,10 @@ impl VerylWalker for Formatter {
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
         self.space(1);
+        if let Some(ref x) = arg.let_statement_opt {
+            self.clock_domain(&x.clock_domain);
+            self.space(1);
+        }
         self.array_type(&arg.array_type);
         self.space(1);
         self.equ(&arg.equ);
@@ -888,6 +892,10 @@ impl VerylWalker for Formatter {
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
         self.space(1);
+        if let Some(ref x) = arg.let_declaration_opt {
+            self.clock_domain(&x.clock_domain);
+            self.space(1);
+        }
         self.array_type(&arg.array_type);
         self.space(1);
         self.equ(&arg.equ);
@@ -903,6 +911,10 @@ impl VerylWalker for Formatter {
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
         self.space(1);
+        if let Some(ref x) = arg.var_declaration_opt {
+            self.clock_domain(&x.clock_domain);
+            self.space(1);
+        }
         self.array_type(&arg.array_type);
         self.semicolon(&arg.semicolon);
     }
@@ -1522,18 +1534,36 @@ impl VerylWalker for Formatter {
         self.colon(&arg.colon);
         self.space(1);
         match &*arg.port_declaration_item_group {
-            PortDeclarationItemGroup::DirectionArrayType(x) => {
-                self.direction(&x.direction);
-                self.space(1);
-                self.array_type(&x.array_type);
+            PortDeclarationItemGroup::PortTypeConcrete(x) => {
+                self.port_type_concrete(&x.port_type_concrete);
             }
-            PortDeclarationItemGroup::InterfacePortDeclarationItemOpt(x) => {
-                self.interface(&x.interface);
-                if let Some(ref x) = x.port_declaration_item_opt {
-                    self.space(1);
-                    self.array(&x.array);
-                }
+            PortDeclarationItemGroup::PortTypeAbstract(x) => {
+                self.port_type_abstract(&x.port_type_abstract);
             }
+        }
+    }
+
+    /// Semantic action for non-terminal 'PortTypeConcrete'
+    fn port_type_concrete(&mut self, arg: &PortTypeConcrete) {
+        self.direction(&arg.direction);
+        self.space(1);
+        if let Some(ref x) = arg.port_type_concrete_opt {
+            self.clock_domain(&x.clock_domain);
+            self.space(1);
+        }
+        self.array_type(&arg.array_type);
+    }
+
+    /// Semantic action for non-terminal 'PortTypeAbstract'
+    fn port_type_abstract(&mut self, arg: &PortTypeAbstract) {
+        if let Some(ref x) = arg.port_type_abstract_opt {
+            self.clock_domain(&x.clock_domain);
+            self.space(1);
+        }
+        self.interface(&arg.interface);
+        if let Some(ref x) = arg.port_type_abstract_opt0 {
+            self.space(1);
+            self.array(&x.array);
         }
     }
 
@@ -1592,6 +1622,23 @@ impl VerylWalker for Formatter {
             }
         }
         self.semicolon(&arg.semicolon);
+    }
+
+    /// Semantic action for non-terminal 'UnsafeBlock'
+    fn unsafe_block(&mut self, arg: &UnsafeBlock) {
+        self.r#unsafe(&arg.r#unsafe);
+        self.space(1);
+        self.l_paren(&arg.l_paren);
+        self.identifier(&arg.identifier);
+        self.r_paren(&arg.r_paren);
+        self.space(1);
+        self.token_will_push(&arg.l_brace.l_brace_token);
+        for (i, x) in arg.unsafe_block_list.iter().enumerate() {
+            self.newline_list(i);
+            self.module_group(&x.module_group);
+        }
+        self.newline_list_post(arg.unsafe_block_list.is_empty());
+        self.r_brace(&arg.r_brace);
     }
 
     /// Semantic action for non-terminal 'ModuleDeclaration'

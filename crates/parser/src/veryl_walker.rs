@@ -237,6 +237,13 @@ pub trait VerylWalker {
         after!(self, quote_l_brace, arg);
     }
 
+    /// Semantic action for non-terminal 'Quote'
+    fn quote(&mut self, arg: &Quote) {
+        before!(self, quote, arg);
+        self.veryl_token(&arg.quote_token);
+        after!(self, quote, arg);
+    }
+
     /// Semantic action for non-terminal 'LAngle'
     fn l_angle(&mut self, arg: &LAngle) {
         before!(self, l_angle, arg);
@@ -739,6 +746,13 @@ pub trait VerylWalker {
         before!(self, union, arg);
         self.veryl_token(&arg.union_token);
         after!(self, union, arg);
+    }
+
+    /// Semantic action for non-terminal 'Unsafe'
+    fn r#unsafe(&mut self, arg: &Unsafe) {
+        before!(self, r#unsafe, arg);
+        self.veryl_token(&arg.unsafe_token);
+        after!(self, r#unsafe, arg);
     }
 
     /// Semantic action for non-terminal 'Tri'
@@ -1447,6 +1461,14 @@ pub trait VerylWalker {
         after!(self, array_type, arg);
     }
 
+    /// Semantic action for non-terminal 'ClockDomain'
+    fn clock_domain(&mut self, arg: &ClockDomain) {
+        before!(self, clock_domain, arg);
+        self.quote(&arg.quote);
+        self.identifier(&arg.identifier);
+        after!(self, clock_domain, arg);
+    }
+
     /// Semantic action for non-terminal 'Statement'
     fn statement(&mut self, arg: &Statement) {
         before!(self, statement, arg);
@@ -1470,6 +1492,9 @@ pub trait VerylWalker {
         self.r#let(&arg.r#let);
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
+        if let Some(ref x) = arg.let_statement_opt {
+            self.clock_domain(&x.clock_domain);
+        }
         self.array_type(&arg.array_type);
         self.equ(&arg.equ);
         self.expression(&arg.expression);
@@ -1740,6 +1765,9 @@ pub trait VerylWalker {
         self.r#let(&arg.r#let);
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
+        if let Some(ref x) = arg.let_declaration_opt {
+            self.clock_domain(&x.clock_domain);
+        }
         self.array_type(&arg.array_type);
         self.equ(&arg.equ);
         self.expression(&arg.expression);
@@ -1753,6 +1781,9 @@ pub trait VerylWalker {
         self.var(&arg.var);
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
+        if let Some(ref x) = arg.var_declaration_opt {
+            self.clock_domain(&x.clock_domain);
+        }
         self.array_type(&arg.array_type);
         self.semicolon(&arg.semicolon);
         after!(self, var_declaration, arg);
@@ -2369,18 +2400,34 @@ pub trait VerylWalker {
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
         match &*arg.port_declaration_item_group {
-            PortDeclarationItemGroup::DirectionArrayType(x) => {
-                self.direction(&x.direction);
-                self.array_type(&x.array_type);
+            PortDeclarationItemGroup::PortTypeConcrete(x) => {
+                self.port_type_concrete(&x.port_type_concrete);
             }
-            PortDeclarationItemGroup::InterfacePortDeclarationItemOpt(x) => {
-                self.interface(&x.interface);
-                if let Some(ref x) = x.port_declaration_item_opt {
-                    self.array(&x.array);
-                }
+            PortDeclarationItemGroup::PortTypeAbstract(x) => {
+                self.port_type_abstract(&x.port_type_abstract);
             }
         }
         after!(self, port_declaration_item, arg);
+    }
+
+    /// Semantic action for non-terminal 'PortTypeConcrete'
+    fn port_type_concrete(&mut self, arg: &PortTypeConcrete) {
+        if let Some(ref x) = arg.port_type_concrete_opt {
+            self.clock_domain(&x.clock_domain);
+        }
+        self.direction(&arg.direction);
+        self.array_type(&arg.array_type);
+    }
+
+    /// Semantic action for non-terminal 'PortTypeAbstract'
+    fn port_type_abstract(&mut self, arg: &PortTypeAbstract) {
+        if let Some(ref x) = arg.port_type_abstract_opt {
+            self.clock_domain(&x.clock_domain);
+        }
+        self.interface(&arg.interface);
+        if let Some(ref x) = arg.port_type_abstract_opt0 {
+            self.array(&x.array);
+        }
     }
 
     /// Semantic action for non-terminal 'Direction'
@@ -2459,6 +2506,21 @@ pub trait VerylWalker {
         }
         self.semicolon(&arg.semicolon);
         after!(self, export_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'UnsafeBlock'
+    fn unsafe_block(&mut self, arg: &UnsafeBlock) {
+        before!(self, unsafe_block, arg);
+        self.r#unsafe(&arg.r#unsafe);
+        self.l_paren(&arg.l_paren);
+        self.identifier(&arg.identifier);
+        self.r_paren(&arg.r_paren);
+        self.l_brace(&arg.l_brace);
+        for x in &arg.unsafe_block_list {
+            self.module_group(&x.module_group);
+        }
+        self.r_brace(&arg.r_brace);
+        after!(self, unsafe_block, arg);
     }
 
     /// Semantic action for non-terminal 'ModuleDeclaration'
@@ -2601,6 +2663,7 @@ pub trait VerylWalker {
             ModuleItem::ImportDeclaration(x) => self.import_declaration(&x.import_declaration),
             ModuleItem::InitialDeclaration(x) => self.initial_declaration(&x.initial_declaration),
             ModuleItem::FinalDeclaration(x) => self.final_declaration(&x.final_declaration),
+            ModuleItem::UnsafeBlock(x) => self.unsafe_block(&x.unsafe_block),
         };
         after!(self, module_item, arg);
     }

@@ -31,9 +31,10 @@ impl<'a> Handler for CheckDirection<'a> {
 impl<'a> VerylGrammarTrait for CheckDirection<'a> {
     fn port_declaration_item(&mut self, arg: &PortDeclarationItem) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            if let PortDeclarationItemGroup::DirectionArrayType(x) =
+            if let PortDeclarationItemGroup::PortTypeConcrete(x) =
                 arg.port_declaration_item_group.as_ref()
             {
+                let x = x.port_type_concrete.as_ref();
                 if let Direction::Inout(_) = x.direction.as_ref() {
                     let r#type = &x.array_type;
                     let is_tri = r#type

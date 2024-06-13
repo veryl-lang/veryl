@@ -5,13 +5,14 @@ use crate::attribute_table;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol;
+use crate::symbol::ClockDomain as SymClockDomain;
 use crate::symbol::Direction as SymDirection;
 use crate::symbol::Type as SymType;
 use crate::symbol::{
     ConnectTarget, DocComment, EnumMemberProperty, EnumProperty, FunctionProperty,
     GenericParameterProperty, InstanceProperty, InterfaceProperty, ModportFunctionMemberProperty,
-    ModportProperty, ModportVariableMemberProperty, ModuleProperty, PackageProperty,
-    ParameterProperty, ParameterScope, ParameterValue, PortProperty, StructMemberProperty,
+    ModportProperty, ModportVariableMemberProperty, ModuleProperty, PackageProperty, Parameter,
+    ParameterProperty, ParameterScope, ParameterValue, Port, PortProperty, StructMemberProperty,
     StructProperty, Symbol, SymbolId, SymbolKind, TypeDefProperty, TypeKind, UnionMemberProperty,
     UnionProperty, VariableAffiniation, VariableProperty,
 };
@@ -47,6 +48,8 @@ pub struct CreateSymbolTable<'a> {
     connect_targets: Vec<ConnectTarget>,
     connects: HashMap<Token, Vec<ConnectTarget>>,
     generic_parameters: Vec<Vec<SymbolId>>,
+    parameters: Vec<Vec<Parameter>>,
+    ports: Vec<Vec<Port>>,
     needs_default_generic_argument: bool,
     generic_references: Vec<GenericSymbolPath>,
     default_clock_candidates: Vec<SymbolId>,
@@ -122,6 +125,31 @@ impl<'a> CreateSymbolTable<'a> {
             ));
         }
         id
+    }
+
+    fn insert_clock_domain(&mut self, clock_domain: &ClockDomain) -> SymClockDomain {
+        // '_ is implicit clock domain
+        if clock_domain.identifier.identifier_token.to_string() == "_" {
+            return SymClockDomain::Implicit;
+        }
+
+        let id = if let Ok(symbol) = symbol_table::resolve((
+            &clock_domain.identifier.identifier_token.token,
+            &self.namespace,
+        )) {
+            symbol.found.id
+        } else {
+            let token = &clock_domain.identifier.identifier_token.token;
+            let symbol = Symbol::new(
+                token,
+                SymbolKind::ClockDomain,
+                &self.namespace,
+                false,
+                DocComment::default(),
+            );
+            symbol_table::insert(token, symbol).unwrap()
+        };
+        SymClockDomain::Explicit(id)
     }
 
     fn get_signal_prefix_suffix(&self, kind: TypeKind) -> (Option<String>, Option<String>) {
@@ -319,11 +347,19 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             r#type.is_const = true;
             let affiniation = self.affiniation.last().cloned().unwrap();
             let (prefix, suffix) = self.get_signal_prefix_suffix(r#type.kind.clone());
+            let clock_domain = if let Some(ref x) = arg.let_statement_opt {
+                self.insert_clock_domain(&x.clock_domain)
+            } else if affiniation == VariableAffiniation::Module {
+                SymClockDomain::Implicit
+            } else {
+                SymClockDomain::None
+            };
             let property = VariableProperty {
                 r#type,
                 affiniation,
                 prefix,
                 suffix,
+                clock_domain,
             };
             let kind = SymbolKind::Variable(property);
 
@@ -355,6 +391,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     affiniation,
                     prefix: None,
                     suffix: None,
+                    clock_domain: SymClockDomain::None,
                 };
                 let kind = SymbolKind::Variable(property);
                 self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
@@ -372,11 +409,19 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             r#type.is_const = true;
             let affiniation = self.affiniation.last().cloned().unwrap();
             let (prefix, suffix) = self.get_signal_prefix_suffix(r#type.kind.clone());
+            let clock_domain = if let Some(ref x) = arg.let_declaration_opt {
+                self.insert_clock_domain(&x.clock_domain)
+            } else if affiniation == VariableAffiniation::Module {
+                SymClockDomain::Implicit
+            } else {
+                SymClockDomain::None
+            };
             let property = VariableProperty {
                 r#type,
                 affiniation,
                 prefix,
                 suffix,
+                clock_domain,
             };
             let kind = SymbolKind::Variable(property);
 
@@ -401,11 +446,19 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             let r#type: SymType = arg.array_type.as_ref().into();
             let affiniation = self.affiniation.last().cloned().unwrap();
             let (prefix, suffix) = self.get_signal_prefix_suffix(r#type.kind.clone());
+            let clock_domain = if let Some(ref x) = arg.var_declaration_opt {
+                self.insert_clock_domain(&x.clock_domain)
+            } else if affiniation == VariableAffiniation::Module {
+                SymClockDomain::Implicit
+            } else {
+                SymClockDomain::None
+            };
             let property = VariableProperty {
                 r#type,
                 affiniation,
                 prefix,
                 suffix,
+                clock_domain,
             };
             let kind = SymbolKind::Variable(property);
 
@@ -689,7 +742,15 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 }
             };
             let kind = SymbolKind::Parameter(property);
-            self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
+            if let Some(id) =
+                self.insert_symbol(&arg.identifier.identifier_token.token, kind, false)
+            {
+                let parameter = Parameter {
+                    name: arg.identifier.identifier_token.token.text,
+                    symbol: id,
+                };
+                self.parameters.last_mut().unwrap().push(parameter);
+            }
         }
         Ok(())
     }
@@ -744,32 +805,58 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
     fn port_declaration_item(&mut self, arg: &PortDeclarationItem) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let token = arg.identifier.identifier_token.token;
+            let affiniation = self.affiniation.last().cloned().unwrap();
             let property = match &*arg.port_declaration_item_group {
-                PortDeclarationItemGroup::DirectionArrayType(x) => {
+                PortDeclarationItemGroup::PortTypeConcrete(x) => {
+                    let x = x.port_type_concrete.as_ref();
                     let r#type: SymType = x.array_type.as_ref().into();
                     let direction: SymDirection = x.direction.as_ref().into();
                     let (prefix, suffix) = self.get_signal_prefix_suffix(r#type.kind.clone());
+                    let clock_domain = if let Some(ref x) = x.port_type_concrete_opt {
+                        self.insert_clock_domain(&x.clock_domain)
+                    } else if affiniation == VariableAffiniation::Module {
+                        SymClockDomain::Implicit
+                    } else {
+                        SymClockDomain::None
+                    };
                     PortProperty {
                         token,
                         r#type: Some(r#type),
                         direction,
                         prefix,
                         suffix,
+                        clock_domain,
                     }
                 }
-                PortDeclarationItemGroup::InterfacePortDeclarationItemOpt(_) => PortProperty {
-                    token,
-                    r#type: None,
-                    direction: SymDirection::Interface,
-                    prefix: None,
-                    suffix: None,
-                },
+                PortDeclarationItemGroup::PortTypeAbstract(x) => {
+                    let x = &x.port_type_abstract;
+                    let clock_domain = if let Some(ref x) = x.port_type_abstract_opt {
+                        self.insert_clock_domain(&x.clock_domain)
+                    } else if affiniation == VariableAffiniation::Module {
+                        SymClockDomain::Implicit
+                    } else {
+                        SymClockDomain::None
+                    };
+                    PortProperty {
+                        token,
+                        r#type: None,
+                        direction: SymDirection::Interface,
+                        prefix: None,
+                        suffix: None,
+                        clock_domain,
+                    }
+                }
             };
             let kind = SymbolKind::Port(property);
 
             if let Some(id) =
                 self.insert_symbol(&arg.identifier.identifier_token.token, kind.clone(), false)
             {
+                let port = Port {
+                    name: arg.identifier.identifier_token.token.text,
+                    symbol: id,
+                };
+                self.ports.last_mut().unwrap().push(port);
                 if self.is_default_clock_candidate(kind.clone()) {
                     self.default_clock_candidates.push(id);
                 } else if self.is_default_reset_candidate(kind.clone()) {
@@ -786,6 +873,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             HandlerPoint::Before => {
                 self.namespace.push(name);
                 self.generic_parameters.push(Vec::new());
+                self.ports.push(Vec::new());
                 self.affiniation.push(VariableAffiniation::Function);
             }
             HandlerPoint::After => {
@@ -794,18 +882,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
                 let generic_parameters: Vec<_> = self.generic_parameters.pop().unwrap();
                 let generic_references: Vec<_> = self.generic_references.drain(..).collect();
-
-                // TODO as the same as generic_parameters
-                let mut ports = Vec::new();
-                if let Some(ref x) = arg.function_declaration_opt0 {
-                    if let Some(ref x) = x.port_declaration.port_declaration_opt {
-                        let items: Vec<PortDeclarationItem> =
-                            x.port_declaration_list.as_ref().into();
-                        for item in items {
-                            ports.push((&item).into());
-                        }
-                    }
-                }
+                let ports: Vec<_> = self.ports.pop().unwrap();
 
                 let ret = arg
                     .function_declaration_opt1
@@ -842,6 +919,8 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             HandlerPoint::Before => {
                 self.namespace.push(name);
                 self.generic_parameters.push(Vec::new());
+                self.parameters.push(Vec::new());
+                self.ports.push(Vec::new());
                 self.affiniation.push(VariableAffiniation::Module);
                 self.module_namspace_depth = self.namespace.depth();
                 self.function_ids.clear();
@@ -853,6 +932,8 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
                 let generic_parameters: Vec<_> = self.generic_parameters.pop().unwrap();
                 let generic_references: Vec<_> = self.generic_references.drain(..).collect();
+                let parameters: Vec<_> = self.parameters.pop().unwrap();
+                let ports: Vec<_> = self.ports.pop().unwrap();
 
                 let default_clock = if self.default_clock_candidates.len() == 1 {
                     Some(self.default_clock_candidates[0])
@@ -867,29 +948,6 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
                 self.default_clock_candidates.clear();
                 self.defualt_reset_candidates.clear();
-
-                // TODO as the same as generic_parameters
-                let mut parameters = Vec::new();
-                if let Some(ref x) = arg.module_declaration_opt1 {
-                    if let Some(ref x) = x.with_parameter.with_parameter_opt {
-                        let items: Vec<WithParameterItem> = x.with_parameter_list.as_ref().into();
-                        for item in items {
-                            parameters.push((&item).into());
-                        }
-                    }
-                }
-
-                // TODO as the same as generic_parameters
-                let mut ports = Vec::new();
-                if let Some(ref x) = arg.module_declaration_opt2 {
-                    if let Some(ref x) = x.port_declaration.port_declaration_opt {
-                        let items: Vec<PortDeclarationItem> =
-                            x.port_declaration_list.as_ref().into();
-                        for item in items {
-                            ports.push((&item).into());
-                        }
-                    }
-                }
 
                 let range = TokenRange::new(&arg.module.module_token, &arg.r_brace.r_brace_token);
 
@@ -984,6 +1042,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             HandlerPoint::Before => {
                 self.namespace.push(name);
                 self.generic_parameters.push(Vec::new());
+                self.parameters.push(Vec::new());
                 self.affiniation.push(VariableAffiniation::Intarface);
                 self.function_ids.clear();
                 self.modport_member_ids.clear();
@@ -994,17 +1053,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
                 let generic_parameters: Vec<_> = self.generic_parameters.pop().unwrap();
                 let generic_references: Vec<_> = self.generic_references.drain(..).collect();
-
-                // TODO as the same as generic_parameters
-                let mut parameters = Vec::new();
-                if let Some(ref x) = arg.interface_declaration_opt1 {
-                    if let Some(ref x) = x.with_parameter.with_parameter_opt {
-                        let items: Vec<WithParameterItem> = x.with_parameter_list.as_ref().into();
-                        for item in items {
-                            parameters.push((&item).into());
-                        }
-                    }
-                }
+                let parameters: Vec<_> = self.parameters.pop().unwrap();
 
                 let range =
                     TokenRange::new(&arg.interface.interface_token, &arg.r_brace.r_brace_token);
