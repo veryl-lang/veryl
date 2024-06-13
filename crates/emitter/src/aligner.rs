@@ -661,11 +661,11 @@ impl VerylWalker for Aligner {
         self.aligns[align_kind::EXPRESSION].start_item();
         match &*arg.case_item_group {
             CaseItemGroup::CaseCondition(x) => {
-                self.expression(&x.case_condition.expression);
+                self.range_item(&x.case_condition.range_item);
                 for x in &x.case_condition.case_condition_list {
                     self.comma(&x.comma);
                     self.space(1);
-                    self.expression(&x.expression);
+                    self.range_item(&x.range_item);
                 }
             }
             CaseItemGroup::Defaul(x) => self.defaul(&x.defaul),

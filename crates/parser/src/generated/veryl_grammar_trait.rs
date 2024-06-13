@@ -5279,7 +5279,7 @@ pub struct Case {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct CaseCondition {
-    pub expression: Box<Expression>,
+    pub range_item: Box<RangeItem>,
     pub case_condition_list: Vec<CaseConditionList>,
 }
 
@@ -5291,7 +5291,7 @@ pub struct CaseCondition {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct CaseConditionList {
     pub comma: Box<Comma>,
-    pub expression: Box<Expression>,
+    pub range_item: Box<RangeItem>,
 }
 
 ///
@@ -25305,21 +25305,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 577:
     ///
-    /// `CaseCondition: Expression CaseConditionList /* Vec */;`
+    /// `CaseCondition: RangeItem CaseConditionList /* Vec */;`
     ///
     #[parol_runtime::function_name::named]
     fn case_condition(
         &mut self,
-        _expression: &ParseTreeType<'t>,
+        _range_item: &ParseTreeType<'t>,
         _case_condition_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let case_condition_list =
             pop_and_reverse_item!(self, case_condition_list, CaseConditionList, context);
-        let expression = pop_item!(self, expression, Expression, context);
+        let range_item = pop_item!(self, range_item, RangeItem, context);
         let case_condition_built = CaseCondition {
-            expression: Box::new(expression),
+            range_item: Box::new(range_item),
             case_condition_list,
         };
         // Calling user action here
@@ -25330,23 +25330,23 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 578:
     ///
-    /// `CaseConditionList /* Vec<T>::Push */: Comma Expression CaseConditionList;`
+    /// `CaseConditionList /* Vec<T>::Push */: Comma RangeItem CaseConditionList;`
     ///
     #[parol_runtime::function_name::named]
     fn case_condition_list_0(
         &mut self,
         _comma: &ParseTreeType<'t>,
-        _expression: &ParseTreeType<'t>,
+        _range_item: &ParseTreeType<'t>,
         _case_condition_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let mut case_condition_list =
             pop_item!(self, case_condition_list, CaseConditionList, context);
-        let expression = pop_item!(self, expression, Expression, context);
+        let range_item = pop_item!(self, range_item, RangeItem, context);
         let comma = pop_item!(self, comma, Comma, context);
         let case_condition_list_0_built = CaseConditionList {
-            expression: Box::new(expression),
+            range_item: Box::new(range_item),
             comma: Box::new(comma),
         };
         // Add an element to the vector

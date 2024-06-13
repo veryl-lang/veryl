@@ -25,8 +25,10 @@ module veryl_testcase_Module20;
         2
     ) : (a ==? 4) ? (
         2
-    ) : (
+    ) : ((a) inside {[5:7]}) ? (
         3
+    ) : (
+        4
     ));
 
     always_comb c = (((a == 1) == 1'b1) ? (

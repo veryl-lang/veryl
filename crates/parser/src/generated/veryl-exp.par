@@ -589,8 +589,8 @@
 /* 574 */ CaseItemGroup0List /* Vec<T>::New */: ;
 /* 575 */ CaseItemGroup: CaseCondition;
 /* 576 */ CaseItemGroup: Defaul;
-/* 577 */ CaseCondition: Expression CaseConditionList /* Vec */;
-/* 578 */ CaseConditionList /* Vec<T>::Push */: Comma Expression CaseConditionList;
+/* 577 */ CaseCondition: RangeItem CaseConditionList /* Vec */;
+/* 578 */ CaseConditionList /* Vec<T>::Push */: Comma RangeItem CaseConditionList;
 /* 579 */ CaseConditionList /* Vec<T>::New */: ;
 /* 580 */ SwitchStatement: Switch LBrace SwitchStatementList /* Vec */ RBrace;
 /* 581 */ SwitchStatementList /* Vec<T>::Push */: SwitchItem SwitchStatementList;

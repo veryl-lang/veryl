@@ -1643,10 +1643,10 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'CaseCondition'
     fn case_condition(&mut self, arg: &CaseCondition) {
         before!(self, case_condition, arg);
-        self.expression(&arg.expression);
+        self.range_item(&arg.range_item);
         for x in &arg.case_condition_list {
             self.comma(&x.comma);
-            self.expression(&x.expression);
+            self.range_item(&x.range_item);
         }
         after!(self, case_condition, arg);
     }

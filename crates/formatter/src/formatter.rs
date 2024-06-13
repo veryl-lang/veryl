@@ -812,11 +812,11 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'CaseCondition'
     fn case_condition(&mut self, arg: &CaseCondition) {
-        self.expression(&arg.expression);
+        self.range_item(&arg.range_item);
         for x in &arg.case_condition_list {
             self.comma(&x.comma);
             self.space(1);
-            self.expression(&x.expression);
+            self.range_item(&x.range_item);
         }
     }
 

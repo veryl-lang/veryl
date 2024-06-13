@@ -18,6 +18,7 @@ module veryl_testcase_Module16;
                    a = 1;
                end
             3, 4   : a = 1;
+            [5:7  ]: a = 1;
             y - 1  : a = 1;
             default: a = 1;
         endcase

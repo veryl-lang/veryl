@@ -552,7 +552,7 @@ CaseStatement: Case Expression LBrace { CaseItem } RBrace;
 
 CaseItem: ( CaseCondition | Defaul ) Colon ( Statement | LBrace { Statement } RBrace );
 
-CaseCondition: Expression { Comma Expression } ;
+CaseCondition: RangeItem { Comma RangeItem } ;
 
 SwitchStatement: Switch LBrace { SwitchItem } RBrace;
 
