@@ -1703,8 +1703,10 @@ fn test_factors() {
             $display("%d", K);
             $display("%d", J);
             $display("%d", foo());
+            // Using $bits as a placeholder SystemFunciton.
             $display("%d", $bits(S));
             $display("%d", $bits(U));
+            $display("%d", $bits(foo(), State));
             $display("%d", bar($bits(State)));
             $display("%d", $bits(State));
             $display("%d", bar(S));

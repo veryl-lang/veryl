@@ -125,6 +125,21 @@ impl<'a> VerylGrammarTrait for CheckExpression<'a> {
                     }
                 }
             }
+        } else {
+            if let Factor::ExpressionIdentifierFactorOpt(x) = arg {
+                let expid = x.expression_identifier.as_ref();
+                if let Ok(rr) = symbol_table::resolve(expid) {
+                    match rr.found.kind {
+                        SymbolKind::Function(_) | SymbolKind::ModportFunctionMember(_) => {
+                            self.call_stack_kind.pop();
+                        }
+                        SymbolKind::SystemFunction => {
+                            self.call_stack_kind.push(FunctionKind::System);
+                        }
+                        _ => {}
+                    }
+                }
+            }
         }
         Ok(())
     }
