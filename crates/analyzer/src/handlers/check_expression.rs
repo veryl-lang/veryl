@@ -133,7 +133,7 @@ impl<'a> VerylGrammarTrait for CheckExpression<'a> {
                         self.call_stack_kind.pop();
                     }
                     SymbolKind::SystemFunction => {
-                        self.call_stack_kind.push(FunctionKind::System);
+                        self.call_stack_kind.pop();
                     }
                     _ => {}
                 }
