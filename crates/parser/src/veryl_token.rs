@@ -352,6 +352,13 @@ impl_token_range!(
     r_brace,
     r_brace_token
 );
+impl_token_range!(
+    SwitchExpression,
+    switch,
+    switch_token,
+    r_brace,
+    r_brace_token
+);
 
 impl From<&FactorGroup> for TokenRange {
     fn from(value: &FactorGroup) -> Self {
@@ -372,6 +379,7 @@ impl From<&Factor> for TokenRange {
             Factor::QuoteLBraceArrayLiteralListRBrace(x) => x.into(),
             Factor::IfExpression(x) => x.if_expression.as_ref().into(),
             Factor::CaseExpression(x) => x.case_expression.as_ref().into(),
+            Factor::SwitchExpression(x) => x.switch_expression.as_ref().into(),
             Factor::StringLiteral(x) => x.string_literal.as_ref().into(),
             Factor::FactorGroup(x) => x.factor_group.as_ref().into(),
             Factor::InsideExpression(x) => x.inside_expression.as_ref().into(),
@@ -819,6 +827,7 @@ token_with_comments!(Signed);
 token_with_comments!(Step);
 token_with_comments!(String);
 token_with_comments!(Struct);
+token_with_comments!(Switch);
 token_with_comments!(Tri);
 token_with_comments!(Type);
 token_with_comments!(U32);

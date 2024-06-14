@@ -727,6 +727,13 @@ pub trait VerylWalker {
         after!(self, r#struct, arg);
     }
 
+    /// Semantic action for non-terminal 'Switch'
+    fn switch(&mut self, arg: &Switch) {
+        before!(self, switch, arg);
+        self.veryl_token(&arg.switch_token);
+        after!(self, switch, arg);
+    }
+
     /// Semantic action for non-terminal 'Union'
     fn union(&mut self, arg: &Union) {
         before!(self, union, arg);
@@ -1055,6 +1062,9 @@ pub trait VerylWalker {
             Factor::CaseExpression(x) => {
                 self.case_expression(&x.case_expression);
             }
+            Factor::SwitchExpression(x) => {
+                self.switch_expression(&x.switch_expression);
+            }
             Factor::StringLiteral(x) => {
                 self.string_literal(&x.string_literal);
             }
@@ -1192,32 +1202,49 @@ pub trait VerylWalker {
         self.case(&arg.case);
         self.expression(&arg.expression);
         self.l_brace(&arg.l_brace);
-        self.expression(&arg.expression0);
-        for x in &arg.case_expression_list {
-            self.comma(&x.comma);
-            self.expression(&x.expression);
-        }
+        self.case_condition(&arg.case_condition);
         self.colon(&arg.colon);
-        self.expression(&arg.expression1);
+        self.expression(&arg.expression0);
         self.comma(&arg.comma);
-        for x in &arg.case_expression_list0 {
-            self.expression(&x.expression);
-            for x in &x.case_expression_list0_list {
-                self.comma(&x.comma);
-                self.expression(&x.expression);
-            }
+        for x in &arg.case_expression_list {
+            self.case_condition(&x.case_condition);
             self.colon(&x.colon);
-            self.expression(&x.expression0);
+            self.expression(&x.expression);
             self.comma(&x.comma);
         }
         self.defaul(&arg.defaul);
         self.colon(&arg.colon0);
-        self.expression(&arg.expression2);
+        self.expression(&arg.expression1);
         if let Some(ref x) = arg.case_expression_opt {
             self.comma(&x.comma);
         }
         self.r_brace(&arg.r_brace);
         after!(self, case_expression, arg);
+    }
+
+    /// Semantic action for non-terminal 'SwitchExpression'
+    fn switch_expression(&mut self, arg: &SwitchExpression) {
+        before!(self, switch_expression, arg);
+        self.switch(&arg.switch);
+        self.l_brace(&arg.l_brace);
+        self.switch_condition(&arg.switch_condition);
+        self.colon(&arg.colon);
+        self.expression(&arg.expression);
+        self.comma(&arg.comma);
+        for x in &arg.switch_expression_list {
+            self.switch_condition(&x.switch_condition);
+            self.colon(&x.colon);
+            self.expression(&x.expression);
+            self.comma(&x.comma);
+        }
+        self.defaul(&arg.defaul);
+        self.colon(&arg.colon0);
+        self.expression(&arg.expression0);
+        if let Some(ref x) = arg.switch_expression_opt {
+            self.comma(&x.comma);
+        }
+        self.r_brace(&arg.r_brace);
+        after!(self, switch_expression, arg);
     }
 
     /// Semantic action for non-terminal 'TypeExpression'
@@ -1432,6 +1459,7 @@ pub trait VerylWalker {
             Statement::BreakStatement(x) => self.break_statement(&x.break_statement),
             Statement::ForStatement(x) => self.for_statement(&x.for_statement),
             Statement::CaseStatement(x) => self.case_statement(&x.case_statement),
+            Statement::SwitchStatement(x) => self.switch_statement(&x.switch_statement),
         };
         after!(self, statement, arg);
     }
@@ -1595,13 +1623,7 @@ pub trait VerylWalker {
     fn case_item(&mut self, arg: &CaseItem) {
         before!(self, case_item, arg);
         match &*arg.case_item_group {
-            CaseItemGroup::ExpressionCaseItemGroupList(x) => {
-                self.expression(&x.expression);
-                for x in &x.case_item_group_list {
-                    self.comma(&x.comma);
-                    self.expression(&x.expression);
-                }
-            }
+            CaseItemGroup::CaseCondition(x) => self.case_condition(&x.case_condition),
             CaseItemGroup::Defaul(x) => self.defaul(&x.defaul),
         }
         self.colon(&arg.colon);
@@ -1616,6 +1638,61 @@ pub trait VerylWalker {
             }
         }
         after!(self, case_item, arg);
+    }
+
+    /// Semantic action for non-terminal 'CaseCondition'
+    fn case_condition(&mut self, arg: &CaseCondition) {
+        before!(self, case_condition, arg);
+        self.range_item(&arg.range_item);
+        for x in &arg.case_condition_list {
+            self.comma(&x.comma);
+            self.range_item(&x.range_item);
+        }
+        after!(self, case_condition, arg);
+    }
+
+    /// Semantic action for non-terminal 'SwitchStatement'
+    fn switch_statement(&mut self, arg: &SwitchStatement) {
+        before!(self, switch_statement, arg);
+        self.switch(&arg.switch);
+        self.l_brace(&arg.l_brace);
+        for x in &arg.switch_statement_list {
+            self.switch_item(&x.switch_item);
+        }
+        self.r_brace(&arg.r_brace);
+        after!(self, switch_statement, arg);
+    }
+
+    /// Semantic action for non-terminal 'SwitchItem'
+    fn switch_item(&mut self, arg: &SwitchItem) {
+        before!(self, switch_item, arg);
+        match &*arg.switch_item_group {
+            SwitchItemGroup::SwitchCondition(x) => self.switch_condition(&x.switch_condition),
+            SwitchItemGroup::Defaul(x) => self.defaul(&x.defaul),
+        }
+        self.colon(&arg.colon);
+        match &*arg.switch_item_group0 {
+            SwitchItemGroup0::Statement(x) => self.statement(&x.statement),
+            SwitchItemGroup0::LBraceSwitchItemGroup0ListRBrace(x) => {
+                self.l_brace(&x.l_brace);
+                for x in &x.switch_item_group0_list {
+                    self.statement(&x.statement);
+                }
+                self.r_brace(&x.r_brace);
+            }
+        }
+        after!(self, switch_item, arg);
+    }
+
+    /// Semantic action for non-terminal 'SwitchCondition'
+    fn switch_condition(&mut self, arg: &SwitchCondition) {
+        before!(self, switch_condition, arg);
+        self.expression(&arg.expression);
+        for x in &arg.switch_condition_list {
+            self.comma(&x.comma);
+            self.expression(&x.expression);
+        }
+        after!(self, switch_condition, arg);
     }
 
     /// Semantic action for non-terminal 'Attribute'

@@ -5,7 +5,7 @@ module veryl_testcase_Module53;
 
     logic _a;
     always_comb begin
-        case (EnumA_A)
+        case (EnumA_A) inside
             /*
             */
             EnumA_A: _a = 0;

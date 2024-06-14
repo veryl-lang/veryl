@@ -650,6 +650,7 @@ impl Evaluator {
             }
             Factor::IfExpression(x) => self.if_expression(&x.if_expression),
             Factor::CaseExpression(x) => self.case_expression(&x.case_expression),
+            Factor::SwitchExpression(x) => self.switch_expression(&x.switch_expression),
             Factor::StringLiteral(_) => Evaluated::Unknown,
             Factor::FactorGroup(_) => Evaluated::Unknown,
             Factor::InsideExpression(_) => Evaluated::Unknown,
@@ -785,6 +786,10 @@ impl Evaluator {
     }
 
     fn case_expression(&mut self, _arg: &CaseExpression) -> Evaluated {
+        Evaluated::Unknown
+    }
+
+    fn switch_expression(&mut self, _arg: &SwitchExpression) -> Evaluated {
         Evaluated::Unknown
     }
 }
