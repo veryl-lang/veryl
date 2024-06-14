@@ -660,12 +660,12 @@ impl VerylWalker for Aligner {
     fn case_item(&mut self, arg: &CaseItem) {
         self.aligns[align_kind::EXPRESSION].start_item();
         match &*arg.case_item_group {
-            CaseItemGroup::ExpressionCaseItemGroupList(x) => {
-                self.expression(&x.expression);
-                for x in &x.case_item_group_list {
+            CaseItemGroup::CaseCondition(x) => {
+                self.range_item(&x.case_condition.range_item);
+                for x in &x.case_condition.case_condition_list {
                     self.comma(&x.comma);
                     self.space(1);
-                    self.expression(&x.expression);
+                    self.range_item(&x.range_item);
                 }
             }
             CaseItemGroup::Defaul(x) => self.defaul(&x.defaul),
@@ -677,6 +677,34 @@ impl VerylWalker for Aligner {
             CaseItemGroup0::LBraceCaseItemGroup0ListRBrace(x) => {
                 self.l_brace(&x.l_brace);
                 for x in &x.case_item_group0_list {
+                    self.statement(&x.statement);
+                }
+                self.r_brace(&x.r_brace);
+            }
+        }
+    }
+
+    /// Semantic action for non-terminal 'SwitchItem'
+    fn switch_item(&mut self, arg: &SwitchItem) {
+        self.aligns[align_kind::EXPRESSION].start_item();
+        match &*arg.switch_item_group {
+            SwitchItemGroup::SwitchCondition(x) => {
+                self.expression(&x.switch_condition.expression);
+                for x in &x.switch_condition.switch_condition_list {
+                    self.comma(&x.comma);
+                    self.space(1);
+                    self.expression(&x.expression);
+                }
+            }
+            SwitchItemGroup::Defaul(x) => self.defaul(&x.defaul),
+        }
+        self.aligns[align_kind::EXPRESSION].finish_item();
+        self.colon(&arg.colon);
+        match &*arg.switch_item_group0 {
+            SwitchItemGroup0::Statement(x) => self.statement(&x.statement),
+            SwitchItemGroup0::LBraceSwitchItemGroup0ListRBrace(x) => {
+                self.l_brace(&x.l_brace);
+                for x in &x.switch_item_group0_list {
                     self.statement(&x.statement);
                 }
                 self.r_brace(&x.r_brace);

@@ -1,4 +1,5 @@
 use crate::analyzer_error::AnalyzerError;
+use crate::evaluator::{Evaluated, Evaluator};
 use crate::symbol::{Direction, SymbolKind};
 use crate::symbol_table;
 use veryl_parser::veryl_grammar_trait::*;
@@ -11,6 +12,8 @@ pub struct CheckExpression<'a> {
     pub errors: Vec<AnalyzerError>,
     text: &'a str,
     point: HandlerPoint,
+    case_condition_depth: usize,
+    evaluator: Evaluator,
     call_stack_kind: Vec<FunctionKind>,
 }
 
@@ -36,6 +39,30 @@ impl<'a> Handler for CheckExpression<'a> {
 }
 
 impl<'a> VerylGrammarTrait for CheckExpression<'a> {
+    fn case_condition(&mut self, _arg: &CaseCondition) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => self.case_condition_depth += 1,
+            HandlerPoint::After => self.case_condition_depth -= 1,
+        }
+        Ok(())
+    }
+
+    fn expression(&mut self, arg: &Expression) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            if self.case_condition_depth >= 1 {
+                let result = matches!(self.evaluator.expression(arg), Evaluated::Variable { .. });
+                if result {
+                    self.errors
+                        .push(AnalyzerError::invalid_case_condition_non_elaborative(
+                            self.text,
+                            &arg.into(),
+                        ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn factor(&mut self, arg: &Factor) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if let Factor::ExpressionIdentifierFactorOpt(x) = arg {

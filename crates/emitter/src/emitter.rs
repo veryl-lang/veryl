@@ -321,6 +321,24 @@ impl Emitter {
         }
     }
 
+    fn case_expression_condition(&mut self, lhs: &Expression, rhs: &RangeItem) {
+        if rhs.range.range_opt.is_some() {
+            self.str("(");
+            self.expression(lhs);
+            self.str(")");
+            self.space(1);
+            self.str("inside {");
+            self.range(&rhs.range);
+            self.str("}");
+        } else {
+            self.expression(lhs);
+            self.space(1);
+            self.str("==?");
+            self.space(1);
+            self.range(&rhs.range);
+        }
+    }
+
     fn always_ff_implicit_event_list(&mut self, arg: &AlwaysFfDeclaration) {
         self.str("(");
         self.always_ff_implicit_clock_event();
@@ -690,6 +708,11 @@ impl VerylWalker for Emitter {
         self.veryl_token(&arg.param_token.replace("parameter"));
     }
 
+    /// Semantic action for non-terminal 'Switch'
+    fn switch(&mut self, arg: &Switch) {
+        self.veryl_token(&arg.switch_token.replace("case"));
+    }
+
     /// Semantic action for non-terminal 'U32'
     fn u32(&mut self, arg: &U32) {
         self.veryl_token(&arg.u32_token.replace("int unsigned"));
@@ -1050,54 +1073,38 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'CaseExpression'
     fn case_expression(&mut self, arg: &CaseExpression) {
         self.token(&arg.case.case_token.replace("(("));
-        self.expression(&arg.expression);
-        self.space(1);
-        self.str("==");
-        self.space(1);
-        self.expression(&arg.expression0);
+        self.case_expression_condition(&arg.expression, &arg.case_condition.range_item);
         self.str(") ? (");
         self.newline_push();
-        self.expression(&arg.expression1);
+        self.expression(&arg.expression0);
         self.newline_pop();
-        for x in &arg.case_expression_list {
+        for x in &arg.case_condition.case_condition_list {
             self.token(&x.comma.comma_token.replace(")"));
             self.space(1);
             self.str(": (");
-            self.expression(&arg.expression);
-            self.space(1);
-            self.str("==");
-            self.space(1);
-            self.expression(&x.expression);
+            self.case_expression_condition(&arg.expression, &x.range_item);
             self.str(") ? (");
             self.newline_push();
-            self.expression(&arg.expression1);
+            self.expression(&arg.expression0);
             self.newline_pop();
         }
         self.str(")");
         self.space(1);
-        for x in &arg.case_expression_list0 {
+        for x in &arg.case_expression_list {
             self.str(": (");
-            self.expression(&arg.expression);
-            self.space(1);
-            self.str("==");
-            self.space(1);
-            self.expression(&x.expression);
+            self.case_expression_condition(&arg.expression, &x.case_condition.range_item);
             self.str(") ? (");
             self.newline_push();
-            self.expression(&x.expression0);
+            self.expression(&x.expression);
             self.newline_pop();
-            for y in &x.case_expression_list0_list {
-                self.token(&x.comma.comma_token.replace(")"));
+            for y in &x.case_condition.case_condition_list {
+                self.token(&y.comma.comma_token.replace(")"));
                 self.space(1);
                 self.str(": (");
-                self.expression(&arg.expression);
-                self.space(1);
-                self.str("==");
-                self.space(1);
-                self.expression(&y.expression);
+                self.case_expression_condition(&arg.expression, &y.range_item);
                 self.str(") ? (");
                 self.newline_push();
-                self.expression(&x.expression0);
+                self.expression(&x.expression);
                 self.newline_pop();
             }
             self.token(&x.comma.comma_token.replace(")"));
@@ -1105,7 +1112,62 @@ impl VerylWalker for Emitter {
         }
         self.str(": (");
         self.newline_push();
-        self.expression(&arg.expression2);
+        self.expression(&arg.expression1);
+        self.newline_pop();
+        self.token(&arg.r_brace.r_brace_token.replace("))"));
+    }
+
+    /// Semantic action for non-terminal 'SwitchExpression'
+    fn switch_expression(&mut self, arg: &SwitchExpression) {
+        self.token(&arg.switch.switch_token.replace("((("));
+        self.expression(&arg.switch_condition.expression);
+        self.str(")");
+        self.space(1);
+        self.str("== 1'b1) ? (");
+        self.newline_push();
+        self.expression(&arg.expression);
+        self.newline_pop();
+        for x in &arg.switch_condition.switch_condition_list {
+            self.token(&x.comma.comma_token.replace(")"));
+            self.space(1);
+            self.str(": ((");
+            self.expression(&x.expression);
+            self.str(")");
+            self.space(1);
+            self.str("== 1'b1) ? (");
+            self.newline_push();
+            self.expression(&arg.expression);
+            self.newline_pop();
+        }
+        self.str(")");
+        self.space(1);
+        for x in &arg.switch_expression_list {
+            self.str(": ((");
+            self.expression(&x.switch_condition.expression);
+            self.str(")");
+            self.space(1);
+            self.str("== 1'b1) ? (");
+            self.newline_push();
+            self.expression(&x.expression);
+            self.newline_pop();
+            for y in &x.switch_condition.switch_condition_list {
+                self.token(&y.comma.comma_token.replace(")"));
+                self.space(1);
+                self.str(": ((");
+                self.expression(&y.expression);
+                self.str(")");
+                self.space(1);
+                self.str("== 1'b1) ? (");
+                self.newline_push();
+                self.expression(&x.expression);
+                self.newline_pop();
+            }
+            self.token(&x.comma.comma_token.replace(")"));
+            self.space(1);
+        }
+        self.str(": (");
+        self.newline_push();
+        self.expression(&arg.expression0);
         self.newline_pop();
         self.token(&arg.r_brace.r_brace_token.replace("))"));
     }
@@ -1583,7 +1645,7 @@ impl VerylWalker for Emitter {
         self.space(1);
         self.str("(");
         self.expression(&arg.expression);
-        self.token_will_push(&arg.l_brace.l_brace_token.replace(")"));
+        self.token_will_push(&arg.l_brace.l_brace_token.replace(") inside"));
         for (i, x) in arg.case_statement_list.iter().enumerate() {
             self.newline_list(i);
             self.case_item(&x.case_item);
@@ -1596,12 +1658,12 @@ impl VerylWalker for Emitter {
     fn case_item(&mut self, arg: &CaseItem) {
         let start = self.dst_column;
         match &*arg.case_item_group {
-            CaseItemGroup::ExpressionCaseItemGroupList(x) => {
-                self.expression(&x.expression);
-                for x in &x.case_item_group_list {
+            CaseItemGroup::CaseCondition(x) => {
+                self.range_item(&x.case_condition.range_item);
+                for x in &x.case_condition.case_condition_list {
                     self.comma(&x.comma);
                     self.space(1);
-                    self.expression(&x.expression);
+                    self.range_item(&x.range_item);
                 }
             }
             CaseItemGroup::Defaul(x) => self.defaul(&x.defaul),
@@ -1628,6 +1690,61 @@ impl VerylWalker for Emitter {
                     self.statement(&x.statement);
                 }
                 self.newline_list_post(x.case_item_group0_list.is_empty());
+                self.token(&x.r_brace.r_brace_token.replace("end"));
+            }
+        }
+        self.case_item_indent = None;
+    }
+
+    /// Semantic action for non-terminal 'SwitchStatement'
+    fn switch_statement(&mut self, arg: &SwitchStatement) {
+        self.switch(&arg.switch);
+        self.space(1);
+        self.token_will_push(&arg.l_brace.l_brace_token.replace("(1'b1)"));
+        for (i, x) in arg.switch_statement_list.iter().enumerate() {
+            self.newline_list(i);
+            self.switch_item(&x.switch_item);
+        }
+        self.newline_list_post(arg.switch_statement_list.is_empty());
+        self.token(&arg.r_brace.r_brace_token.replace("endcase"));
+    }
+
+    /// Semantic action for non-terminal 'SwitchItem'
+    fn switch_item(&mut self, arg: &SwitchItem) {
+        let start = self.dst_column;
+        match &*arg.switch_item_group {
+            SwitchItemGroup::SwitchCondition(x) => {
+                self.expression(&x.switch_condition.expression);
+                for x in &x.switch_condition.switch_condition_list {
+                    self.comma(&x.comma);
+                    self.space(1);
+                    self.expression(&x.expression);
+                }
+            }
+            SwitchItemGroup::Defaul(x) => self.defaul(&x.defaul),
+        }
+        self.colon(&arg.colon);
+        self.space(1);
+        self.case_item_indent = Some((self.dst_column - start) as usize);
+        match &*arg.switch_item_group0 {
+            SwitchItemGroup0::Statement(x) => self.statement(&x.statement),
+            SwitchItemGroup0::LBraceSwitchItemGroup0ListRBrace(x) => {
+                self.token_will_push(&x.l_brace.l_brace_token.replace("begin"));
+                let mut base = 0;
+                for (i, x) in x
+                    .switch_item_group0_list
+                    .iter()
+                    .filter(|x| is_let_statement(&x.statement))
+                    .enumerate()
+                {
+                    self.newline_list(i);
+                    base += self.statement_variable_declatation_only(&x.statement);
+                }
+                for (i, x) in x.switch_item_group0_list.iter().enumerate() {
+                    self.newline_list(base + i);
+                    self.statement(&x.statement);
+                }
+                self.newline_list_post(x.switch_item_group0_list.is_empty());
                 self.token(&x.r_brace.r_brace_token.replace("end"));
             }
         }

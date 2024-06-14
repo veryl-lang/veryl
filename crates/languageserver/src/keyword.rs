@@ -56,6 +56,7 @@ pub const KEYWORDS: &[&str] = &[
     "step",
     "string",
     "struct",
+    "switch",
     "tri",
     "type",
     "u32",
