@@ -1637,6 +1637,92 @@ fn invalid_assignment_to_const() {
 }
 
 #[test]
+fn test_factors() {
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport master {
+            a: input,
+        }
+    }
+
+    module ModuleA #(
+        param K: i32 = 32,
+    ) (
+        i_clk: input   clock             ,
+        i_rst: input   reset             ,
+        mst  : modport InterfaceA::master,
+    ) {
+
+        enum State: logic<3> {
+            Idle = 3'bxx1,
+            Run0 = 3'b000,
+            Run1 = 3'b010,
+            Run2 = 3'b100,
+            Done = 3'b110,
+        }
+
+        struct S {
+            v: logic,
+        }
+
+        union U {
+            v: logic,
+            w: logic,
+        }
+
+        let state: State = State::Run1;
+        var u    : U    ;
+        var s    : S    ;
+        local J    : i32   = 32;
+
+        for i in 0..1 :g_display {
+            always_ff {
+                $display("%d", i);
+            }
+        }
+
+        function foo () -> logic {
+            return 1'b1;
+        }
+
+        function bar (
+            l: input logic,
+        ) -> logic {
+            return foo();
+        }
+
+        assign u.v = 1'b1;
+        assign s.v = 1'b1;
+        initial {
+            $display("%d", u);
+            $display("%d", s);
+            $display("%d", state);
+            $display("%d", mst.a);
+            $display("%d", i_clk);
+            $display("%d", K);
+            $display("%d", J);
+            $display("%d", foo());
+            // Using $bits as a placeholder SystemFunciton.
+            $display("%d", $bits(S));
+            $display("%d", $bits(U));
+            $display("%d", $bits(foo(), State));
+            $display("%d", bar($bits(State)));
+            $display("%d", $bits(State));
+            $display("%d", bar(S));
+            $display("%d", bar(U));
+            $display("%d", bar(State));
+            $display("%d", $bits(bar(State)));
+        }
+    }"#;
+
+    let errors = analyze(code);
+    assert!(errors.len() == 4);
+    for error in errors {
+        assert!(matches!(error, AnalyzerError::InvalidFactor { .. }));
+    }
+}
+
 fn enum_non_const_exception() {
     let code = r#"
     module ModuleA (
@@ -1651,7 +1737,6 @@ fn enum_non_const_exception() {
             Run2 = 3'b100,
             Done = 3'b110,
         }
-
         var state: State;
 
         always_ff {
