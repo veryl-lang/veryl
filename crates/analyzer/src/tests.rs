@@ -1723,6 +1723,7 @@ fn test_factors() {
     }
 }
 
+#[test]
 fn enum_non_const_exception() {
     let code = r#"
     module ModuleA (
