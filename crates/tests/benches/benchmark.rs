@@ -8,9 +8,14 @@ use veryl_parser::Parser;
 #[cfg(target_os = "linux")]
 mod perf;
 
+const EXCLUDES: [&str; 1] = [r"52_include.veryl"];
+
 fn criterion_benchmark(c: &mut Criterion) {
     let mut text = String::new();
     for testcase in TESTCASES {
+        if EXCLUDES.iter().any(|x| testcase.contains(x)) {
+            continue;
+        }
         let input = fs::read_to_string(testcase).unwrap();
         text.push_str(&input);
     }
