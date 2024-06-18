@@ -767,6 +767,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "dashmap"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23fadfd577acfd4485fb258011b0fd080882ea83359b6fd41304900b94ccf487"
+dependencies = [
+ "cfg-if",
+ "crossbeam-utils",
+ "hashbrown 0.14.5",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core",
+]
+
+[[package]]
 name = "data-encoding"
 version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1562,7 +1576,7 @@ checksum = "c75e30de8be2920d0bac069cb937fbfd37848c8b125e157d0a0b5363fc8585fc"
 dependencies = [
  "bytesize",
  "clru",
- "dashmap",
+ "dashmap 5.5.3",
  "git-chunk",
  "git-diff",
  "git-features",
@@ -1753,7 +1767,7 @@ version = "3.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48a308d2630132831d4ecb7e46558f56ff64a501b00a0cde158ab46080e929f7"
 dependencies = [
- "dashmap",
+ "dashmap 5.5.3",
  "libc",
  "once_cell",
  "signal-hook",
@@ -4400,7 +4414,7 @@ dependencies = [
  "async-trait",
  "auto_impl",
  "bytes",
- "dashmap",
+ "dashmap 5.5.3",
  "futures",
  "httparse",
  "lsp-types",
@@ -4716,7 +4730,7 @@ name = "veryl-ls"
 version = "0.10.1"
 dependencies = [
  "async-channel",
- "dashmap",
+ "dashmap 6.0.0",
  "futures",
  "glob",
  "miette",
