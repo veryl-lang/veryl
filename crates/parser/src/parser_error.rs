@@ -23,7 +23,7 @@ pub enum ParserError {
 pub struct SyntaxError {
     pub cause: String,
     #[source_code]
-    pub input: NamedSource,
+    input: NamedSource<FileSource>,
     #[label("Error location")]
     pub error_location: SourceSpan,
     pub unexpected_tokens: Vec<UnexpectedToken>,
@@ -433,7 +433,7 @@ impl miette::SourceCode for FileSource {
     }
 }
 
-impl From<FileSource> for NamedSource {
+impl From<FileSource> for NamedSource<FileSource> {
     fn from(file_source: FileSource) -> Self {
         let file_name = file_source.0.file_name.clone();
         let file_name = file_name.to_str().unwrap_or("<Bad file name>");
@@ -447,7 +447,7 @@ impl From<Location> for SourceSpan {
     fn from(location: Location) -> Self {
         SourceSpan::new(
             (location.0.scanner_switch_pos + location.0.offset - location.0.length as usize).into(),
-            (location.0.length as usize).into(),
+            location.0.length as usize,
         )
     }
 }

@@ -17,7 +17,7 @@ pub enum AnalyzerError {
         identifier: String,
         kind: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -33,7 +33,7 @@ pub enum AnalyzerError {
         start: String,
         end: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -48,7 +48,7 @@ pub enum AnalyzerError {
     DuplicatedIdentifier {
         identifier: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -63,7 +63,7 @@ pub enum AnalyzerError {
     MultipleAssignment {
         identifier: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
         #[label("Assigned")]
@@ -82,7 +82,7 @@ pub enum AnalyzerError {
     InvalidAllow {
         identifier: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -100,7 +100,7 @@ pub enum AnalyzerError {
         identifier: String,
         kind: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -118,7 +118,7 @@ pub enum AnalyzerError {
         identifier: String,
         kind: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -135,7 +135,7 @@ pub enum AnalyzerError {
     InvalidDirection {
         kind: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -151,7 +151,7 @@ pub enum AnalyzerError {
         identifier: String,
         kind: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -169,7 +169,7 @@ pub enum AnalyzerError {
         identifier: String,
         rule: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -183,7 +183,7 @@ pub enum AnalyzerError {
     #[error("This item can't be imported")]
     InvalidImport {
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -197,7 +197,7 @@ pub enum AnalyzerError {
     #[error("lsb can't be placed at here")]
     InvalidLsb {
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -211,7 +211,7 @@ pub enum AnalyzerError {
     #[error("msb can't be placed at here")]
     InvalidMsb {
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -227,7 +227,7 @@ pub enum AnalyzerError {
         cause: char,
         kind: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -244,7 +244,7 @@ pub enum AnalyzerError {
     InvalidStatement {
         kind: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -259,7 +259,7 @@ pub enum AnalyzerError {
     InvalidClock {
         identifier: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -274,7 +274,7 @@ pub enum AnalyzerError {
     InvalidModportVariableItem {
         identifier: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -289,7 +289,7 @@ pub enum AnalyzerError {
     InvalidModportFunctionItem {
         identifier: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -304,7 +304,7 @@ pub enum AnalyzerError {
     InvalidReset {
         identifier: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -318,7 +318,7 @@ pub enum AnalyzerError {
     #[error("Reset-value cannot be used because it is not evaluable at elaboration time")]
     InvalidResetNonElaborative {
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -332,7 +332,7 @@ pub enum AnalyzerError {
     #[error("Case condition value cannot be used because it is not evaluable at elaboration time")]
     InvalidCaseConditionNonElaborative {
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -347,7 +347,7 @@ pub enum AnalyzerError {
     MissingDefaultArgument {
         identifier: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -364,7 +364,7 @@ pub enum AnalyzerError {
         arity: usize,
         args: usize,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -383,7 +383,7 @@ pub enum AnalyzerError {
         arity: usize,
         args: usize,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -399,7 +399,7 @@ pub enum AnalyzerError {
         name: String,
         expected: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -416,7 +416,7 @@ pub enum AnalyzerError {
         expected: String,
         actual: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -430,7 +430,7 @@ pub enum AnalyzerError {
     #[error("if_reset statement is required for always_ff with reset signal")]
     MissingIfReset {
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -446,7 +446,7 @@ pub enum AnalyzerError {
         name: String,
         port: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -460,7 +460,7 @@ pub enum AnalyzerError {
     #[error("clock signal is required for always_ff statement")]
     MissingClockSignal {
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -474,7 +474,7 @@ pub enum AnalyzerError {
     #[error("reset signal is required for always_ff with if_reset statement")]
     MissingResetSignal {
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -489,7 +489,7 @@ pub enum AnalyzerError {
     MissingResetStatement {
         name: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
         #[label("Not reset")]
@@ -505,7 +505,7 @@ pub enum AnalyzerError {
     #[error("tri type modifier is required at inout port")]
     MissingTri {
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -520,7 +520,7 @@ pub enum AnalyzerError {
     SvKeywordUsage {
         identifier: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -537,7 +537,7 @@ pub enum AnalyzerError {
         value: isize,
         width: usize,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -552,7 +552,7 @@ pub enum AnalyzerError {
     TooLargeNumber {
         width: usize,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -571,7 +571,7 @@ pub enum AnalyzerError {
         number: usize,
         width: usize,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -586,7 +586,7 @@ pub enum AnalyzerError {
     UndefinedIdentifier {
         identifier: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -603,7 +603,7 @@ pub enum AnalyzerError {
     UnknownAttribute {
         name: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -620,7 +620,7 @@ pub enum AnalyzerError {
     UnknownEmbedLang {
         name: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -637,7 +637,7 @@ pub enum AnalyzerError {
     UnknownEmbedWay {
         name: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -654,7 +654,7 @@ pub enum AnalyzerError {
     UnknownIncludeWay {
         name: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -670,7 +670,7 @@ pub enum AnalyzerError {
         name: String,
         member: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -685,7 +685,7 @@ pub enum AnalyzerError {
     PrivateMember {
         name: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -699,7 +699,7 @@ pub enum AnalyzerError {
     #[error("resolving msb is failed")]
     UnknownMsb {
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -715,7 +715,7 @@ pub enum AnalyzerError {
         name: String,
         port: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -731,7 +731,7 @@ pub enum AnalyzerError {
         name: String,
         param: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -746,7 +746,7 @@ pub enum AnalyzerError {
     UnusedVariable {
         identifier: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -761,7 +761,7 @@ pub enum AnalyzerError {
     UnusedReturn {
         identifier: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -778,7 +778,7 @@ pub enum AnalyzerError {
     UnassignVariable {
         identifier: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -793,7 +793,7 @@ pub enum AnalyzerError {
     UncoveredBranch {
         identifier: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
         #[label("Uncovered")]
@@ -812,7 +812,7 @@ pub enum AnalyzerError {
     ReservedIdentifier {
         identifier: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
@@ -828,14 +828,14 @@ pub enum AnalyzerError {
         name: String,
         cause: String,
         #[source_code]
-        input: NamedSource,
+        input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
     },
 }
 
 impl AnalyzerError {
-    fn named_source(source: &str, token: &TokenRange) -> NamedSource {
+    fn named_source(source: &str, token: &TokenRange) -> NamedSource<String> {
         NamedSource::new(token.beg.source.to_string(), source.to_string())
     }
 
