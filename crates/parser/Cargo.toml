@@ -17,7 +17,7 @@ exclude               = ["build.rs"]
 anyhow        = {workspace = true}
 bimap         = "0.6.3"
 once_cell     = {workspace = true}
-parol_runtime = {version = "0.23.0", features = ["auto_generation"]}
+parol_runtime = {version = "0.24.0", features = ["auto_generation"]}
 paste         = "1.0"
 regex         = {workspace = true}
 thiserror     = {workspace = true}
@@ -30,5 +30,5 @@ miette        = {workspace = true, features = ["fancy"]}
 
 [build-dependencies]
 parol         =  "0.30.0"
-parol_runtime = {version = "0.23.0", features = ["auto_generation"]}
+parol_runtime = {version = "0.24.0", features = ["auto_generation"]}
 walkdir       = "2.5.0"
