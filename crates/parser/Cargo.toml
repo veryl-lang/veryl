@@ -16,12 +16,17 @@ exclude               = ["build.rs"]
 [dependencies]
 anyhow        = {workspace = true}
 bimap         = "0.6.3"
-miette        = {workspace = true}
 once_cell     = {workspace = true}
 parol_runtime = {version = "0.23.0", features = ["auto_generation"]}
 paste         = "1.0"
 regex         = {workspace = true}
 thiserror     = {workspace = true}
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+miette        = {workspace = true, features = ["fancy-no-syscall"]}
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+miette        = {workspace = true, features = ["fancy"]}
 
 [build-dependencies]
 parol         =  "0.30.0"

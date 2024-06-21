@@ -15,13 +15,18 @@ edition               = "2021"
 [dependencies]
 Inflector       = "0.11.4"
 itertools       = "0.13.0"
-miette          = {workspace = true}
 strnum_bitwidth = {workspace = true}
 thiserror       = {workspace = true}
 veryl-metadata  = {version = "0.10.1", path = "../metadata"}
 veryl-parser    = {version = "0.10.1", path = "../parser"}
 daggy           = "0.8.0"
 bimap           = "0.6.3"
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+miette          = {workspace = true, features = ["fancy-no-syscall"]}
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+miette          = {workspace = true, features = ["fancy"]}
 
 [dev-dependencies]
 toml = {workspace = true}
