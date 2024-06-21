@@ -449,11 +449,11 @@ impl DocBuilder {
             let parameters: Vec<_> = property
                 .parameters
                 .iter()
-                .filter(|x| matches!(x.property.scope, ParameterScope::Global,))
+                .filter(|x| matches!(x.property().scope, ParameterScope::Global,))
                 .map(|x| ParameterData {
                     name: resource_table::get_str_value(x.name).unwrap(),
-                    typ: format!("{}", x.property.r#type),
-                    description: get_comment_from_token(&x.property.token),
+                    typ: format!("{}", x.property().r#type),
+                    description: get_comment_from_token(&x.property().token),
                 })
                 .collect();
 
@@ -462,9 +462,9 @@ impl DocBuilder {
                 .iter()
                 .map(|x| PortData {
                     name: resource_table::get_str_value(x.name).unwrap(),
-                    direction: format!("{}", x.property.direction),
-                    typ: x.property.r#type.as_ref().map(|x| format!("{}", x)),
-                    description: get_comment_from_token(&x.property.token),
+                    direction: format!("{}", x.property().direction),
+                    typ: x.property().r#type.as_ref().map(|x| format!("{}", x)),
+                    description: get_comment_from_token(&x.property().token),
                 })
                 .collect();
 
@@ -488,11 +488,11 @@ impl DocBuilder {
             let parameters: Vec<_> = property
                 .parameters
                 .iter()
-                .filter(|x| matches!(x.property.scope, ParameterScope::Global,))
+                .filter(|x| matches!(x.property().scope, ParameterScope::Global,))
                 .map(|x| ParameterData {
                     name: resource_table::get_str_value(x.name).unwrap(),
-                    typ: format!("{}", x.property.r#type),
-                    description: get_comment_from_token(&x.property.token),
+                    typ: format!("{}", x.property().r#type),
+                    description: get_comment_from_token(&x.property().token),
                 })
                 .collect();
 

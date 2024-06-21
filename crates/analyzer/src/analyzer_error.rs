@@ -423,6 +423,24 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(mismatch_clock_domain),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mismatch_clock_domain")
+    )]
+    #[error("Clock domain crossing is detected")]
+    MismatchClockDomain {
+        clock_domain: String,
+        other_domain: String,
+        #[source_code]
+        input: NamedSource<String>,
+        #[label("clock domain {clock_domain}")]
+        error_location: SourceSpan,
+        #[label("clock domain {other_domain}")]
+        other_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(missing_if_reset),
         help("add if_reset statement"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#missing_if_reset")
@@ -669,6 +687,21 @@ pub enum AnalyzerError {
     UnknownMember {
         name: String,
         member: String,
+        #[source_code]
+        input: NamedSource<String>,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(unknown_unsafe),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unknown_unsafe")
+    )]
+    #[error("\"{name}\" is not valid unsafe identifier")]
+    UnknownUnsafe {
+        name: String,
         #[source_code]
         input: NamedSource<String>,
         #[label("Error location")]
@@ -1111,6 +1144,22 @@ impl AnalyzerError {
         }
     }
 
+    pub fn mismatch_clock_domain(
+        clock_domain: &str,
+        other_domain: &str,
+        source: &str,
+        token: &TokenRange,
+        other_token: &TokenRange,
+    ) -> Self {
+        AnalyzerError::MismatchClockDomain {
+            clock_domain: clock_domain.to_string(),
+            other_domain: other_domain.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+            other_location: other_token.into(),
+        }
+    }
+
     pub fn missing_clock_signal(source: &str, token: &TokenRange) -> Self {
         AnalyzerError::MissingClockSignal {
             input: AnalyzerError::named_source(source, token),
@@ -1268,6 +1317,14 @@ impl AnalyzerError {
         AnalyzerError::UnknownMember {
             name: name.to_string(),
             member: member.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn unknown_unsafe(name: &str, source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::UnknownUnsafe {
+            name: name.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
         }

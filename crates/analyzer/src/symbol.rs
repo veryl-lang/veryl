@@ -273,6 +273,7 @@ pub enum SymbolKind {
     SystemFunction,
     GenericParameter(GenericParameterProperty),
     GenericInstance(GenericInstanceProperty),
+    ClockDomain,
 }
 
 impl SymbolKind {
@@ -303,6 +304,7 @@ impl SymbolKind {
             SymbolKind::SystemFunction => "system function".to_string(),
             SymbolKind::GenericParameter(_) => "generic parameter".to_string(),
             SymbolKind::GenericInstance(_) => "generic instance".to_string(),
+            SymbolKind::ClockDomain => "clock domain".to_string(),
         }
     }
 }
@@ -407,6 +409,7 @@ impl fmt::Display for SymbolKind {
             SymbolKind::SystemFunction => "system function".to_string(),
             SymbolKind::GenericParameter(_) => "generic parameter".to_string(),
             SymbolKind::GenericInstance(_) => "generic instance".to_string(),
+            SymbolKind::ClockDomain => "clock domain".to_string(),
         };
         text.fmt(f)
     }
@@ -654,12 +657,41 @@ impl From<&syntax_tree::ArrayType> for Type {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ClockDomain {
+    Explicit(SymbolId),
+    Implicit,
+    None,
+}
+
+impl ClockDomain {
+    pub fn compatible(&self, x: &ClockDomain) -> bool {
+        match (self, x) {
+            (ClockDomain::None, _) => true,
+            (_, ClockDomain::None) => true,
+            (x, y) => x == y,
+        }
+    }
+}
+
+impl fmt::Display for ClockDomain {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let text = match self {
+            ClockDomain::Explicit(x) => format!("'{}", symbol_table::get(*x).unwrap().token),
+            ClockDomain::Implicit => "'_".to_string(),
+            ClockDomain::None => "".to_string(),
+        };
+        text.fmt(f)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct VariableProperty {
     pub r#type: Type,
     pub affiniation: VariableAffiniation,
     pub prefix: Option<String>,
     pub suffix: Option<String>,
+    pub clock_domain: ClockDomain,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -677,49 +709,28 @@ pub struct PortProperty {
     pub direction: Direction,
     pub prefix: Option<String>,
     pub suffix: Option<String>,
+    pub clock_domain: ClockDomain,
 }
 
 #[derive(Debug, Clone)]
 pub struct Port {
     pub name: StrId,
-    pub property: PortProperty,
+    pub symbol: SymbolId,
 }
 
 impl fmt::Display for Port {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let text = format!("{} [{}]", self.name, self.property.direction);
+        let text = format!("{} [{}]", self.name, self.property().direction);
         text.fmt(f)
     }
 }
 
-impl From<&syntax_tree::PortDeclarationItem> for Port {
-    fn from(value: &syntax_tree::PortDeclarationItem) -> Self {
-        let token = value.identifier.identifier_token.token;
-        let property = match &*value.port_declaration_item_group {
-            syntax_tree::PortDeclarationItemGroup::DirectionArrayType(x) => {
-                let r#type: Type = x.array_type.as_ref().into();
-                let direction: Direction = x.direction.as_ref().into();
-                PortProperty {
-                    token,
-                    r#type: Some(r#type),
-                    direction,
-                    prefix: None,
-                    suffix: None,
-                }
-            }
-            syntax_tree::PortDeclarationItemGroup::InterfacePortDeclarationItemOpt(_) => {
-                PortProperty {
-                    token,
-                    r#type: None,
-                    direction: Direction::Interface,
-                    prefix: None,
-                    suffix: None,
-                }
-            }
-        };
-        Port {
-            name: value.identifier.identifier_token.token.text,
-            property,
+impl Port {
+    pub fn property(&self) -> PortProperty {
+        if let SymbolKind::Port(x) = symbol_table::get(self.symbol).unwrap().kind {
+            x.clone()
+        } else {
+            unreachable!()
         }
     }
 }
@@ -747,56 +758,22 @@ pub enum ParameterValue {
 #[derive(Debug, Clone)]
 pub struct Parameter {
     pub name: StrId,
-    pub property: ParameterProperty,
+    pub symbol: SymbolId,
 }
 
 impl fmt::Display for Parameter {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let text = format!("{} [{}]", self.name, self.property.r#type);
+        let text = format!("{} [{}]", self.name, self.property().r#type);
         text.fmt(f)
     }
 }
 
-impl From<&syntax_tree::WithParameterItem> for Parameter {
-    fn from(value: &syntax_tree::WithParameterItem) -> Self {
-        let token = value.identifier.identifier_token.token;
-        let scope = match &*value.with_parameter_item_group {
-            syntax_tree::WithParameterItemGroup::Param(_) => ParameterScope::Global,
-            syntax_tree::WithParameterItemGroup::Local(_) => ParameterScope::Local,
-        };
-        match &*value.with_parameter_item_group0 {
-            syntax_tree::WithParameterItemGroup0::ArrayTypeEquExpression(x) => {
-                let r#type: Type = x.array_type.as_ref().into();
-                let property = ParameterProperty {
-                    token,
-                    r#type,
-                    scope,
-                    value: ParameterValue::Expression(*x.expression.clone()),
-                };
-                Parameter {
-                    name: value.identifier.identifier_token.token.text,
-                    property,
-                }
-            }
-            syntax_tree::WithParameterItemGroup0::TypeEquTypeExpression(x) => {
-                let r#type: Type = Type {
-                    modifier: vec![],
-                    kind: TypeKind::Type,
-                    width: vec![],
-                    array: vec![],
-                    is_const: false,
-                };
-                let property = ParameterProperty {
-                    token,
-                    r#type,
-                    scope,
-                    value: ParameterValue::TypeExpression(*x.type_expression.clone()),
-                };
-                Parameter {
-                    name: value.identifier.identifier_token.token.text,
-                    property,
-                }
-            }
+impl Parameter {
+    pub fn property(&self) -> ParameterProperty {
+        if let SymbolKind::Parameter(x) = symbol_table::get(self.symbol).unwrap().kind {
+            x.clone()
+        } else {
+            unreachable!()
         }
     }
 }

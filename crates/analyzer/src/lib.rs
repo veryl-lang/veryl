@@ -8,10 +8,13 @@ pub mod handlers;
 pub mod msb_table;
 pub mod namespace;
 pub mod namespace_table;
+pub mod range_table;
 pub mod symbol;
 pub mod symbol_path;
 pub mod symbol_table;
 pub mod type_dag;
+pub mod r#unsafe;
+pub mod unsafe_table;
 pub use analyzer::Analyzer;
 pub use analyzer_error::AnalyzerError;
 #[cfg(test)]

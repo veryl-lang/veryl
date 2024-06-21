@@ -134,7 +134,8 @@ impl<'a> VerylWalker for CheckVariableType<'a> {
 
     /// Semantic action for non-terminal 'PortDeclarationItem'
     fn port_declaration_item(&mut self, arg: &PortDeclarationItem) {
-        if let PortDeclarationItemGroup::DirectionArrayType(x) = &*arg.port_declaration_item_group {
+        if let PortDeclarationItemGroup::PortTypeConcrete(x) = &*arg.port_declaration_item_group {
+            let x = x.port_type_concrete.as_ref();
             let is_modport = matches!(&*x.direction, Direction::Modport(_));
             if !is_modport {
                 self.array_type(&x.array_type);

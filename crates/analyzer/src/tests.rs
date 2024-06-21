@@ -1873,3 +1873,164 @@ fn invalid_case_condition_expression() {
         AnalyzerError::InvalidCaseConditionNonElaborative { .. }
     ));
 }
+
+#[test]
+fn clock_domain() {
+    let code = r#"
+    module ModuleA (
+        i_clk: input  'a clock,
+        i_dat: input  'a logic,
+        o_dat: output 'b logic,
+    ) {
+        assign o_dat = i_dat;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchClockDomain { .. }
+    ));
+
+    let code = r#"
+    module ModuleB (
+        i_clk : input  'a clock,
+        i_dat0: input  'a logic,
+        i_dat1: input  'b logic,
+        o_dat : output 'a logic,
+    ) {
+        assign o_dat = {i_dat0, i_dat1};
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchClockDomain { .. }
+    ));
+
+    let code = r#"
+    module ModuleC (
+        i_clk : input  'a clock,
+        i_dat0: input  'a logic,
+        i_dat1: input  'b logic,
+        o_dat : output 'a logic,
+    ) {
+        inst u: ModuleD (
+            i_dat: i_dat1,
+            o_dat,
+        );
+    }
+
+    module ModuleD (
+        i_dat: input  logic,
+        o_dat: output logic,
+    ) {
+        assign o_dat = i_dat;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchClockDomain { .. }
+    ));
+
+    let code = r#"
+    module ModuleE (
+        i_clk : input  'a clock,
+        i_dat0: input  'a logic,
+        i_dat1: input  'b logic,
+        o_dat : output 'a logic,
+    ) {
+        inst u: $sv::Module (
+            i_dat: i_dat1,
+            o_dat,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchClockDomain { .. }
+    ));
+
+    let code = r#"
+    module ModuleF (
+        i_clk : input  'a clock,
+        i_dat0: input  'a logic,
+        i_dat1: input  'b logic,
+        o_dat : output 'b logic,
+    ) {
+        var r_dat: 'b logic;
+
+        always_ff {
+            r_dat = i_dat1;
+        }
+
+        assign o_dat = r_dat;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchClockDomain { .. }
+    ));
+
+    let code = r#"
+    module ModuleG (
+        i_clk: input   'a clock,
+        i_dat: input   'a logic,
+        o_dat: modport 'b InterfaceA::port,
+    ) {
+        assign o_dat.a = i_dat;
+    }
+
+    interface InterfaceA {
+        var a: logic;
+
+        modport port {
+            a: output,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchClockDomain { .. }
+    ));
+
+    let code = r#"
+    module ModuleH (
+        i_clk: input  'a clock,
+        i_dat: input  'a logic,
+        o_dat: output 'b logic,
+    ) {
+        always_comb {
+            o_dat = i_dat;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchClockDomain { .. }
+    ));
+}
+
+#[test]
+fn r#unsafe() {
+    let code = r#"
+    module ModuleA {
+        unsafe(x) {
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnknownUnsafe { .. }));
+}

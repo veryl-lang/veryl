@@ -62,5 +62,6 @@ pub const KEYWORDS: &[&str] = &[
     "u32",
     "u64",
     "union",
+    "unsafe",
     "var",
 ];

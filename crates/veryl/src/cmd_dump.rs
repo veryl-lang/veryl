@@ -61,6 +61,10 @@ impl CmdDump {
             println!("{}", veryl_analyzer::attribute_table::dump());
         }
 
+        if self.opt.unsafe_table {
+            println!("{}", veryl_analyzer::unsafe_table::dump());
+        }
+
         Ok(true)
     }
 }

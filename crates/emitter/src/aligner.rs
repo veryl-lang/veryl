@@ -940,13 +940,15 @@ impl VerylWalker for Aligner {
         self.aligns[align_kind::IDENTIFIER].finish_item();
         self.colon(&arg.colon);
         match &*arg.port_declaration_item_group {
-            PortDeclarationItemGroup::DirectionArrayType(x) => {
+            PortDeclarationItemGroup::PortTypeConcrete(x) => {
+                let x = x.port_type_concrete.as_ref();
                 self.direction(&x.direction);
                 self.array_type(&x.array_type);
             }
-            PortDeclarationItemGroup::InterfacePortDeclarationItemOpt(x) => {
+            PortDeclarationItemGroup::PortTypeAbstract(x) => {
+                let x = x.port_type_abstract.as_ref();
                 self.interface(&x.interface);
-                if let Some(ref x) = x.port_declaration_item_opt {
+                if let Some(ref x) = x.port_type_abstract_opt0 {
                     self.array(&x.array);
                 }
             }

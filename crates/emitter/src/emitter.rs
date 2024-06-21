@@ -2618,7 +2618,8 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'PortDeclarationItem'
     fn port_declaration_item(&mut self, arg: &PortDeclarationItem) {
         match &*arg.port_declaration_item_group {
-            PortDeclarationItemGroup::DirectionArrayType(x) => {
+            PortDeclarationItemGroup::PortTypeConcrete(x) => {
+                let x = x.port_type_concrete.as_ref();
                 self.direction(&x.direction);
                 if let Direction::Modport(_) = *x.direction {
                     self.in_direction_modport = true;
@@ -2634,11 +2635,12 @@ impl VerylWalker for Emitter {
                 }
                 self.in_direction_modport = false;
             }
-            PortDeclarationItemGroup::InterfacePortDeclarationItemOpt(x) => {
+            PortDeclarationItemGroup::PortTypeAbstract(x) => {
+                let x = x.port_type_abstract.as_ref();
                 self.interface(&x.interface);
                 self.space(1);
                 self.identifier(&arg.identifier);
-                if let Some(ref x) = x.port_declaration_item_opt {
+                if let Some(ref x) = x.port_type_abstract_opt0 {
                     self.space(1);
                     self.array(&x.array);
                 }
@@ -2743,6 +2745,16 @@ impl VerylWalker for Emitter {
             }
         }
         self.semicolon(&arg.semicolon);
+    }
+
+    /// Semantic action for non-terminal 'UnsafeBlock'
+    fn unsafe_block(&mut self, arg: &UnsafeBlock) {
+        for (i, x) in arg.unsafe_block_list.iter().enumerate() {
+            if i != 0 {
+                self.newline();
+            }
+            self.module_group(&x.module_group);
+        }
     }
 
     /// Semantic action for non-terminal 'ModuleDeclaration'
@@ -3422,26 +3434,6 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
             ret.push_str(&namespace_string(&symbol.namespace, context));
             ret.push_str(&symbol.token.to_string());
         }
-        //SymbolKind::GenericParameter => {
-        //    if let Some(generic_arg) = context.generic_map.get(&symbol.token.text) {
-        //        let path = generic_arg.base_path();
-
-        //        let emit_namespace = match symbol_table::resolve((&path, &namespace)) {
-        //            Ok(symbol) => matches!(
-        //                symbol.found.kind,
-        //                SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)
-        //            ),
-        //            Err(_) => true,
-        //        };
-
-        //        if emit_namespace {
-        //            if let Ok(symbol) = symbol_table::resolve((&path, &symbol.namespace)) {
-        //                ret.push_str(&namespace_string(&symbol.found.namespace, context));
-        //            }
-        //        }
-        //        ret.push_str(&generic_arg.to_string());
-        //    }
-        //}
         SymbolKind::GenericInstance(x) => {
             let base = symbol_table::get(x.base).unwrap();
             let visible = namespace.included(&base.namespace)
@@ -3467,6 +3459,7 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
         | SymbolKind::Genvar
         | SymbolKind::Namespace
         | SymbolKind::SystemFunction => ret.push_str(&symbol.token.to_string()),
+        SymbolKind::ClockDomain => unreachable!(),
     }
     ret
 }

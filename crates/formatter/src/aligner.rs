@@ -110,12 +110,13 @@ mod align_kind {
     pub const ASSIGNMENT: usize = 5;
     pub const PARAMETER: usize = 6;
     pub const DIRECTION: usize = 7;
+    pub const CLOCK_DOMAIN: usize = 8;
 }
 
 #[derive(Default)]
 pub struct Aligner {
     pub additions: HashMap<Location, u32>,
-    aligns: [Align; 8],
+    aligns: [Align; 9],
     in_type_expression: bool,
 }
 
@@ -505,6 +506,16 @@ impl VerylWalker for Aligner {
         self.identifier(&arg.identifier);
         self.aligns[align_kind::IDENTIFIER].finish_item();
         self.colon(&arg.colon);
+        if let Some(ref x) = arg.let_statement_opt {
+            self.aligns[align_kind::CLOCK_DOMAIN].start_item();
+            self.clock_domain(&x.clock_domain);
+            self.space(1);
+            self.aligns[align_kind::CLOCK_DOMAIN].finish_item();
+        } else {
+            self.aligns[align_kind::CLOCK_DOMAIN].start_item();
+            self.aligns[align_kind::CLOCK_DOMAIN].dummy_token(&arg.colon.colon_token);
+            self.aligns[align_kind::CLOCK_DOMAIN].finish_item();
+        }
         self.array_type(&arg.array_type);
         self.equ(&arg.equ);
         self.expression(&arg.expression);
@@ -609,6 +620,16 @@ impl VerylWalker for Aligner {
         self.identifier(&arg.identifier);
         self.aligns[align_kind::IDENTIFIER].finish_item();
         self.colon(&arg.colon);
+        if let Some(ref x) = arg.let_declaration_opt {
+            self.aligns[align_kind::CLOCK_DOMAIN].start_item();
+            self.clock_domain(&x.clock_domain);
+            self.space(1);
+            self.aligns[align_kind::CLOCK_DOMAIN].finish_item();
+        } else {
+            self.aligns[align_kind::CLOCK_DOMAIN].start_item();
+            self.aligns[align_kind::CLOCK_DOMAIN].dummy_token(&arg.colon.colon_token);
+            self.aligns[align_kind::CLOCK_DOMAIN].finish_item();
+        }
         self.array_type(&arg.array_type);
         self.equ(&arg.equ);
         self.expression(&arg.expression);
@@ -622,6 +643,16 @@ impl VerylWalker for Aligner {
         self.identifier(&arg.identifier);
         self.aligns[align_kind::IDENTIFIER].finish_item();
         self.colon(&arg.colon);
+        if let Some(ref x) = arg.var_declaration_opt {
+            self.aligns[align_kind::CLOCK_DOMAIN].start_item();
+            self.clock_domain(&x.clock_domain);
+            self.space(1);
+            self.aligns[align_kind::CLOCK_DOMAIN].finish_item();
+        } else {
+            self.aligns[align_kind::CLOCK_DOMAIN].start_item();
+            self.aligns[align_kind::CLOCK_DOMAIN].dummy_token(&arg.colon.colon_token);
+            self.aligns[align_kind::CLOCK_DOMAIN].finish_item();
+        }
         self.array_type(&arg.array_type);
         self.semicolon(&arg.semicolon);
     }
@@ -800,13 +831,51 @@ impl VerylWalker for Aligner {
         self.aligns[align_kind::IDENTIFIER].finish_item();
         self.colon(&arg.colon);
         match &*arg.port_declaration_item_group {
-            PortDeclarationItemGroup::DirectionArrayType(x) => {
+            PortDeclarationItemGroup::PortTypeConcrete(x) => {
+                let x = x.port_type_concrete.as_ref();
                 self.direction(&x.direction);
+                if let Some(ref x) = x.port_type_concrete_opt {
+                    self.aligns[align_kind::CLOCK_DOMAIN].start_item();
+                    self.clock_domain(&x.clock_domain);
+                    self.space(1);
+                    self.aligns[align_kind::CLOCK_DOMAIN].finish_item();
+                } else {
+                    self.aligns[align_kind::CLOCK_DOMAIN].start_item();
+                    match x.direction.as_ref() {
+                        Direction::Input(x) => {
+                            self.aligns[align_kind::CLOCK_DOMAIN].dummy_token(&x.input.input_token)
+                        }
+                        Direction::Output(x) => self.aligns[align_kind::CLOCK_DOMAIN]
+                            .dummy_token(&x.output.output_token),
+                        Direction::Inout(x) => {
+                            self.aligns[align_kind::CLOCK_DOMAIN].dummy_token(&x.inout.inout_token)
+                        }
+                        Direction::Ref(x) => {
+                            self.aligns[align_kind::CLOCK_DOMAIN].dummy_token(&x.r#ref.ref_token)
+                        }
+                        Direction::Modport(x) => self.aligns[align_kind::CLOCK_DOMAIN]
+                            .dummy_token(&x.modport.modport_token),
+                        Direction::Import(x) => self.aligns[align_kind::CLOCK_DOMAIN]
+                            .dummy_token(&x.import.import_token),
+                    }
+                    self.aligns[align_kind::CLOCK_DOMAIN].finish_item();
+                }
                 self.array_type(&x.array_type);
             }
-            PortDeclarationItemGroup::InterfacePortDeclarationItemOpt(x) => {
+            PortDeclarationItemGroup::PortTypeAbstract(x) => {
+                let x = x.port_type_abstract.as_ref();
+                if let Some(ref x) = x.port_type_abstract_opt {
+                    self.aligns[align_kind::CLOCK_DOMAIN].start_item();
+                    self.clock_domain(&x.clock_domain);
+                    self.space(1);
+                    self.aligns[align_kind::CLOCK_DOMAIN].finish_item();
+                } else {
+                    self.aligns[align_kind::CLOCK_DOMAIN].start_item();
+                    self.aligns[align_kind::CLOCK_DOMAIN].dummy_token(&arg.colon.colon_token);
+                    self.aligns[align_kind::CLOCK_DOMAIN].finish_item();
+                }
                 self.interface(&x.interface);
-                if let Some(ref x) = x.port_declaration_item_opt {
+                if let Some(ref x) = x.port_type_abstract_opt0 {
                     self.array(&x.array);
                 }
             }
