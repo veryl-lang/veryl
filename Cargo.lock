@@ -2939,9 +2939,9 @@ dependencies = [
 
 [[package]]
 name = "parol"
-version = "0.30.0"
+version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5fbf2f6c296a20fe2cfeb8de0d9cea3cf519297f026a6a0cac3d6a228befcb1b"
+checksum = "4035f08652ee59c6fdfb8a30788a90e55b6af9341a2e2d009126b9ae9846df54"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -2982,9 +2982,9 @@ checksum = "bdd646301a99589f85ed580e3807ee2f7aa6529b900fd703f5a14716b7426b28"
 
 [[package]]
 name = "parol_runtime"
-version = "0.23.0"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f563d0adf0ffb93e5c58856edd3ec8c87e61e97666207b9097ff05bf68c43da"
+checksum = "1c7f251e2b8d6afa56120392299244db295e1ea80f45c1971b968680d1187f9e"
 dependencies = [
  "anyhow",
  "codespan-reporting",
@@ -4461,9 +4461,9 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "ts-rs"
-version = "8.1.0"
+version = "9.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09d3fa4606cdab1e9b668cc65ce2545941d01f52bc27536a195c66c55b91cb84"
+checksum = "5e2dcf58e612adda9a83800731e8e4aba04d8a302b9029617b0b6e4b021d5357"
 dependencies = [
  "thiserror",
  "ts-rs-macros",
@@ -4471,11 +4471,10 @@ dependencies = [
 
 [[package]]
 name = "ts-rs-macros"
-version = "8.1.0"
+version = "9.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f86ae36cbb2d58b86677ad413054feeb0712e382e822131cf9a4a1e580c419b5"
+checksum = "cbdee324e50a7402416d9c25270d3df4241ed528af5d36dda18b6f219551c577"
 dependencies = [
- "Inflector",
  "proc-macro2",
  "quote",
  "syn",
