@@ -1,0 +1,23 @@
+name: Manual Release
+
+on:
+  workflow_run:
+
+jobs:
+  vsce:
+    needs: build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: support/vscode
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Install Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: 16.x
+    - run: npm install
+    - run: make publish
+      env:
+        VSCE_PAT: ${{ secrets.VSCE_PAT }}
