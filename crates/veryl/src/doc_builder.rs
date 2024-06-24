@@ -3,12 +3,12 @@ use mdbook::{Config, MDBook};
 use mdbook_wavedrom::Wavedrom;
 use miette::{IntoDiagnostic, Result};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::PathBuf;
 use tempfile::TempDir;
-use veryl_analyzer::symbol::{ParameterScope, Symbol, SymbolKind};
+use veryl_analyzer::symbol::{ClockDomain, ParameterScope, Symbol, SymbolKind};
 use veryl_analyzer::symbol_table;
 use veryl_metadata::Metadata;
 use veryl_parser::resource_table;
@@ -123,6 +123,7 @@ const MODULE_TMPL: &str = r#"
 
 {{description}}
 
+{{#if parameters}}
 ### Parameters
 ---
 
@@ -137,7 +138,24 @@ const MODULE_TMPL: &str = r#"
 {{/each}}
 </tbody>
 </table>
+{{/if}}
 
+{{#if clock_domains}}
+### Clock Domains
+---
+
+<table class="table_list">
+<tbody>
+{{#each clock_domains}}
+<tr>
+    <th class="table_list_item">{{this}}</th>
+</tr>
+{{/each}}
+</tbody>
+</table>
+{{/if}}
+
+{{#if ports}}
 ### Ports
 ---
 
@@ -146,12 +164,13 @@ const MODULE_TMPL: &str = r#"
 {{#each ports}}
 <tr>
     <th class="table_list_item">{{this.name}}</th>
-    <td class="table_list_item"><span class="hljs-keyword">{{this.direction}}</span> <span class="hljs-type">{{this.typ}}</span></td>
+    <td class="table_list_item"><span class="hljs-keyword">{{this.direction}}</span> <span class="hljs-attribute">{{this.clock_domain}}</span> <span class="hljs-type">{{this.typ}}</span></td>
     <td class="table_list_item">{{this.description}}</td>
 </tr>
 {{/each}}
 </tbody>
 </table>
+{{/if}}
 "#;
 
 #[derive(Serialize)]
@@ -159,6 +178,7 @@ struct ModuleData {
     name: String,
     description: String,
     parameters: Vec<ParameterData>,
+    clock_domains: Vec<String>,
     ports: Vec<PortData>,
 }
 
@@ -173,6 +193,7 @@ struct ParameterData {
 struct PortData {
     name: String,
     direction: String,
+    clock_domain: Option<String>,
     typ: Option<String>,
     description: Option<String>,
 }
@@ -182,6 +203,7 @@ const INTERFACE_TMPL: &str = r#"
 
 {{description}}
 
+{{#if parameters}}
 ### Parameters
 ---
 
@@ -196,6 +218,7 @@ const INTERFACE_TMPL: &str = r#"
 {{/each}}
 </tbody>
 </table>
+{{/if}}
 "#;
 
 #[derive(Serialize)]
@@ -457,14 +480,36 @@ impl DocBuilder {
                 })
                 .collect();
 
+            let clock_domains: HashSet<_> = property
+                .ports
+                .iter()
+                .filter_map(|x| {
+                    if let ClockDomain::Explicit(_) = x.property().clock_domain {
+                        Some(x.property().clock_domain.to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            let mut clock_domains: Vec<_> = clock_domains.into_iter().collect();
+            clock_domains.sort();
+
             let ports: Vec<_> = property
                 .ports
                 .iter()
-                .map(|x| PortData {
-                    name: resource_table::get_str_value(x.name).unwrap(),
-                    direction: format!("{}", x.property().direction),
-                    typ: x.property().r#type.as_ref().map(|x| format!("{}", x)),
-                    description: get_comment_from_token(&x.property().token),
+                .map(|x| {
+                    let clock_domain = if let ClockDomain::Explicit(_) = x.property().clock_domain {
+                        Some(x.property().clock_domain.to_string())
+                    } else {
+                        None
+                    };
+                    PortData {
+                        name: resource_table::get_str_value(x.name).unwrap(),
+                        direction: format!("{}", x.property().direction),
+                        clock_domain,
+                        typ: x.property().r#type.as_ref().map(|x| format!("{}", x)),
+                        description: get_comment_from_token(&x.property().token),
+                    }
                 })
                 .collect();
 
@@ -472,6 +517,7 @@ impl DocBuilder {
                 name: name.to_string(),
                 description: symbol.doc_comment.format(false),
                 parameters,
+                clock_domains,
                 ports,
             };
 
