@@ -25,7 +25,7 @@ spdx           = "0.10.6"
 thiserror      = {workspace = true}
 toml           = {workspace = true}
 url            = {workspace = true}
-uuid           = {version = "1.8", default-features = false, features = ["v5", "serde"]}
+uuid           = {version = "1.9", default-features = false, features = ["v5", "serde"]}
 veryl-parser   = {version = "0.11.0", path = "../parser"}
 walkdir        = "2.5.0"
 
