@@ -2034,3 +2034,16 @@ fn r#unsafe() {
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UnknownUnsafe { .. }));
 }
+
+#[test]
+fn detect_recursive() {
+    let code = r#"
+    module ModuleA (
+        x: input x,
+    ) {
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+}

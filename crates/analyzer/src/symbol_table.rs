@@ -107,6 +107,13 @@ impl SymbolTable {
         kind: &TypeKind,
     ) -> Result<ResolveContext<'a>, ResolveError> {
         if let TypeKind::UserDefined(ref x) = kind {
+            // Detect infinite loop in trace_user_defined
+            if let Some(last_found) = context.last_found {
+                if *x.first().unwrap() == last_found.token.text {
+                    return Ok(context);
+                }
+            }
+
             let symbol = self.resolve(&SymbolPath::new(x), &context.namespace)?;
             match symbol.found.kind {
                 SymbolKind::SystemVerilog => context.sv_member = true,
