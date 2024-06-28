@@ -1,0 +1,104 @@
+pub module onehot #(
+    param W: u32 = 16,
+) (
+    i_data: input logic<W>,
+    /// 1'b1 iff i_data contains exactly one set bit
+    o_onehot: output logic,
+    /// 1'b1 iff i_data is zero
+    o_zero: output logic,
+) {
+    var o_gt_one: logic;
+
+    inst u_onehot: _onehot #(
+        W       : W,
+    ) (
+        i_data     ,
+        o_zero     ,
+        o_onehot   ,
+        o_gt_one   ,
+    );
+}
+
+module _onehot #(
+    param W: u32 = 16,
+) (
+    i_data  : input  logic<W>,
+    o_onehot: output logic   ,
+    o_zero  : output logic   ,
+    o_gt_one: output logic   ,
+) {
+    if (W == 1) :gen_base_case {
+        assign o_onehot = i_data;
+        assign o_zero   = ~i_data;
+    } else :gen_rec_case {
+        local WBOT      : u32         = W / 2;
+        local WTOP      : u32         = W - WBOT;
+        let data_bot  : logic<WBOT> = i_data[WBOT - 1:0];
+        let data_top  : logic<WTOP> = i_data[W - 1:WBOT];
+        var onehot_top: logic      ;
+        var onehot_bot: logic      ;
+        var zero_top  : logic      ;
+        var zero_bot  : logic      ;
+        var gt_one_top: logic      ;
+        var gt_one_bot: logic      ;
+
+        inst u_bot: _onehot #(
+            W: WBOT,
+        ) (
+            i_data  : data_bot  ,
+            o_onehot: onehot_bot,
+            o_zero  : zero_bot  ,
+            o_gt_one: gt_one_bot,
+        );
+        inst u_top: _onehot #(
+            W: WTOP,
+        ) (
+            i_data  : data_top  ,
+            o_onehot: onehot_top,
+            o_zero  : zero_top  ,
+            o_gt_one: gt_one_top,
+        );
+        assign o_zero   = zero_top & zero_bot;
+        assign o_onehot = (onehot_top ^ onehot_bot) & ~gt_one_top & ~gt_one_bot;
+        assign o_gt_one = gt_one_top | gt_one_bot | (onehot_top & onehot_bot);
+    }
+
+}
+
+#[test(test_countones)]
+embed (inline) sv{{{
+module test_countones;
+
+  parameter MIN = 1;
+  parameter MAX = 20;
+  logic [MAX:MIN] done;
+
+  // initial begin $display("Hello, World!\n"); $finish; end
+  for (genvar i = MIN; i <= MAX; ++i) begin : gen_duts
+    bit [i-1:0] i_data;
+    logic o_onehot, o_zero;
+    std_onehot #(i) u_dut(.*);
+
+    initial begin
+      done[i] = 1'b0;
+      for (int j = 0; j < (1 << i); ++j) begin
+        i_data = j;
+        #1;
+        assert(o_onehot == $onehot(i_data)) else begin
+          $display("$onehot(%b) == %b of len %d", i_data, o_onehot, i);
+        end
+        assert(o_zero == (i_data == '0)) else begin
+          $display("zero(%b) == %b of len %d", i_data, o_zero, i_data, i);
+        end
+      end
+      $display("Done verifying onehot#(%2d)", i);
+    end
+  end
+
+  always_comb begin
+    if (done == '1)
+      $finish;
+  end
+  
+endmodule
+}}}
