@@ -10,12 +10,12 @@ pub module onehot #(
     var o_gt_one: logic;
 
     inst u_onehot: _onehot #(
-        W       : W,
+        W: W,
     ) (
-        i_data     ,
-        o_zero     ,
-        o_onehot   ,
-        o_gt_one   ,
+        i_data    ,
+        o_zero    ,
+        o_onehot  ,
+        o_gt_one  ,
     );
 }
 
