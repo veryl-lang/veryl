@@ -158,6 +158,16 @@ impl<'a> CheckIdentifier<'a> {
             ))
         }
 
+        if let Some(x) = identifier.strip_prefix("r#") {
+            if is_sv_keyword(x) {
+                self.errors.push(AnalyzerError::sv_keyword_usage(
+                    &identifier,
+                    self.text,
+                    &token.into(),
+                ))
+            }
+        }
+
         if let Some(prefix) = prefix {
             if !identifier.starts_with(prefix) {
                 self.errors.push(AnalyzerError::invalid_identifier(
