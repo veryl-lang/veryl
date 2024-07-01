@@ -1,0 +1,6 @@
+module Module62 {
+    var r#clock: logic;
+    var r#reset: logic;
+    assign r#clock = 1;
+    assign r#reset = 1;
+}

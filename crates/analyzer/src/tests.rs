@@ -2047,3 +2047,26 @@ fn detect_recursive() {
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 }
+
+#[test]
+fn sv_keyword_usage() {
+    let code = r#"
+    module ModuleA {
+        var always: logic;
+        assign always = 1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
+
+    let code = r#"
+    module ModuleA {
+        var r#always: logic;
+        assign r#always = 1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
+}

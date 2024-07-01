@@ -314,10 +314,12 @@ impl Emitter {
         suffix: &Option<String>,
     ) {
         if prefix.is_some() || suffix.is_some() {
-            let token = &identifier.identifier_token.append(prefix, suffix);
+            let token = &identifier.identifier_token.strip_prefix("r#");
+            let token = &token.append(prefix, suffix);
             self.veryl_token(token);
         } else {
-            self.veryl_token(&identifier.identifier_token);
+            let token = &identifier.identifier_token.strip_prefix("r#");
+            self.veryl_token(token);
         }
     }
 

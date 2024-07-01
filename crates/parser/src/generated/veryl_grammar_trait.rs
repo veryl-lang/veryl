@@ -7343,7 +7343,7 @@ pub enum IdentifierStatementGroup {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct IdentifierTerm {
-    pub identifier_term: crate::veryl_token::Token, /* [a-zA-Z_][0-9a-zA-Z_$]* */
+    pub identifier_term: crate::veryl_token::Token, /* (?:r#)?[a-zA-Z_][0-9a-zA-Z_$]* */
 }
 
 ///
@@ -14860,7 +14860,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 110:
     ///
-    /// `IdentifierTerm: <INITIAL, Generic>/[a-zA-Z_][0-9a-zA-Z_$]*/ : Token;`
+    /// `IdentifierTerm: <INITIAL, Generic>/(?:r#)?[a-zA-Z_][0-9a-zA-Z_$]*/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn identifier_term(&mut self, identifier_term: &ParseTreeType<'t>) -> Result<()> {

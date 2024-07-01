@@ -135,7 +135,7 @@ pub const TERMINALS: &[&str; 118] = &[
     /* 112 */ r"(?-u:\b)unsafe(?-u:\b)",
     /* 113 */ r"(?-u:\b)var(?-u:\b)",
     /* 114 */ r"\$[a-zA-Z_][0-9a-zA-Z_$]*",
-    /* 115 */ r"[a-zA-Z_][0-9a-zA-Z_$]*",
+    /* 115 */ r"(?:r#)?[a-zA-Z_][0-9a-zA-Z_$]*",
     /* 116 */ r"[^{}]*",
     /* 117 */ ERROR_TOKEN,
 ];
@@ -18002,7 +18002,7 @@ pub const PRODUCTIONS: &[Production; 959] = &[
         lhs: 118,
         production: &[ParseType::T(114)],
     },
-    // 110 - IdentifierTerm: /[a-zA-Z_][0-9a-zA-Z_$]*/;
+    // 110 - IdentifierTerm: /(?:r#)?[a-zA-Z_][0-9a-zA-Z_$]*/;
     Production {
         lhs: 248,
         production: &[ParseType::T(115)],

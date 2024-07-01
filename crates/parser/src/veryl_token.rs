@@ -592,6 +592,20 @@ impl VerylToken {
         ret.token.length = length as u32;
         ret
     }
+
+    pub fn strip_prefix(&self, prefix: &str) -> Self {
+        let text = self.token.text.to_string();
+        if let Some(text) = text.strip_prefix(prefix) {
+            let length = text.len();
+            let text = resource_table::insert_str(text);
+            let mut ret = self.clone();
+            ret.token.text = text;
+            ret.token.length = length as u32;
+            ret
+        } else {
+            self.clone()
+        }
+    }
 }
 
 impl fmt::Display for VerylToken {
