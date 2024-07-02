@@ -104,7 +104,7 @@ impl<'a> VerylGrammarTrait for CheckExpression<'a> {
                             self.errors.push(error);
                         }
                         SymbolKind::Port(x) => match x.direction {
-                            Direction::Interface | Direction::Modport => {
+                            Direction::Interface => {
                                 self.errors.push(error);
                             }
                             _ => {}

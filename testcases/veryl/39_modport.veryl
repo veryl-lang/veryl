@@ -5,6 +5,11 @@ module Module39 (
     var a    : logic;
     assign mst.a = a;
     assign a     = slv.get_a();
+
+    inst module_another: ModuleAnother (
+        mst  ,
+        slv  ,
+    );
 }
 
 interface Interface39 {
@@ -23,3 +28,8 @@ interface Interface39 {
         get_a: import,
     }
 }
+
+module ModuleAnother (
+    mst: modport Interface39::master,
+    slv: modport Interface39::slave ,
+) {}
