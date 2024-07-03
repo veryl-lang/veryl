@@ -7,3 +7,6 @@
 [submodule "std"]
 	path = std
 	url = https://github.com/veryl-lang/std
+[submodule "support/sourcemap-resolver"]
+	path = support/sourcemap-resolver
+	url = https://github.com/veryl-lang/sourcemap-resolver
