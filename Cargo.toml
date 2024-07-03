@@ -11,9 +11,6 @@ members = [
     "crates/tests",
     "crates/veryl",
 ]
-exclude = [
-    "support/sourcemap-resolver",
-]
 resolver = "2"
 
 [workspace.package]
