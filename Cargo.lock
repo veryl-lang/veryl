@@ -2616,7 +2616,7 @@ dependencies = [
 
 [[package]]
 name = "mdbook-veryl"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "anyhow",
  "clap 4.5.8",
@@ -4635,7 +4635,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 
 [[package]]
 name = "veryl"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "anstyle",
  "clap 4.5.8",
@@ -4666,7 +4666,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-analyzer"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "Inflector",
  "bimap",
@@ -4682,7 +4682,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-emitter"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "serde",
  "strnum_bitwidth",
@@ -4694,7 +4694,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-formatter"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "veryl-metadata",
  "veryl-parser",
@@ -4702,7 +4702,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-ls"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "async-channel",
  "dashmap 6.0.1",
@@ -4721,7 +4721,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-metadata"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "directories",
  "fs4",
@@ -4745,7 +4745,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-parser"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "anyhow",
  "bimap",
@@ -4761,7 +4761,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-sourcemap"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "miette",
  "relative-path",
