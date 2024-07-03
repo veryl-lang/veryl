@@ -25,7 +25,7 @@ lint:
 
 release_lnx:
 	cargo build --locked --release --target=x86_64-unknown-linux-musl $(addprefix --bin , ${BIN_NAMES})
-	cd ./support/sourcemap-resolver; cargo build --locked --release --target=x86_64-unknown-linux-musl
+	cd ./support/sourcemap-resolver && cargo build --locked --release --target=x86_64-unknown-linux-musl
 	zip -j ${ZIP_NAME}-x86_64-linux.zip $(addprefix target/x86_64-unknown-linux-musl/release/, ${BIN_NAMES}) \
 		                                ./support/sourcemap-resolver/target/x86_64-unknown-linux-musl/release/sourcemap-resolver
 
@@ -39,8 +39,8 @@ release_win:
 release_mac:
 	cargo build --locked --release --target=x86_64-apple-darwin $(addprefix --bin , ${BIN_NAMES})
 	cargo build --locked --release --target=aarch64-apple-darwin $(addprefix --bin , ${BIN_NAMES})
-	cd ./support/sourcemap-resolver; cargo build --locked --release --target=x86_64-apple-darwin
-	cd ./support/sourcemap-resolver; cargo build --locked --release --target=aarch64-apple-darwin
+	cd ./support/sourcemap-resolver && cargo build --locked --release --target=x86_64-apple-darwin
+	cd ./support/sourcemap-resolver && cargo build --locked --release --target=aarch64-apple-darwin
 	zip -j ${ZIP_NAME}-x86_64-mac.zip $(addprefix target/x86_64-apple-darwin/release/, ${BIN_NAMES}) \
 		                              ./support/sourcemap-resolver/target/x86_64-apple-darwin/release/sourcemap-resolver
 	zip -j ${ZIP_NAME}-aarch64-mac.zip $(addprefix target/aarch64-apple-darwin/release/, ${BIN_NAMES}) \
