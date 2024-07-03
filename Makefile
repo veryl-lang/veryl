@@ -31,7 +31,7 @@ release_lnx:
 
 release_win:
 	cargo build --locked --release --target=x86_64-pc-windows-msvc $(addprefix --bin , ${BIN_NAMES})
-	cd ./support/sourcemap-resolver; cargo build --locked --release --target=x86_64-pc-windows-msvc
+	cd ./support/sourcemap-resolver && cargo build --locked --release --target=x86_64-pc-windows-msvc
 	mv -v $(addsuffix .exe, $(addprefix target/x86_64-pc-windows-msvc/release/, ${BIN_NAMES})) ./
 	mv -v ./support/sourcemap-resolver/target/x86_64-pc-windows-msvc/release/sourcemap-resolver.exe ./
 	7z a ${ZIP_NAME}-x86_64-windows.zip $(addsuffix .exe, ${BIN_NAMES}) sourcemap-resolver.exe
