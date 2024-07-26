@@ -1922,6 +1922,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "handlebars"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5226a0e122dc74917f3a701484482bed3ee86d016c7356836abbaa033133a157"
+dependencies = [
+ "log",
+ "pest",
+ "pest_derive",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2592,7 +2606,7 @@ dependencies = [
  "elasticlunr-rs",
  "env_logger 0.11.3",
  "futures-util",
- "handlebars",
+ "handlebars 5.1.2",
  "ignore",
  "log",
  "memchr",
@@ -4653,7 +4667,7 @@ dependencies = [
  "console",
  "fern",
  "futures",
- "handlebars",
+ "handlebars 6.0.0",
  "log",
  "mdbook",
  "mdbook-wavedrom",

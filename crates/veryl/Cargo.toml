@@ -30,7 +30,7 @@ clap            = {workspace = true}
 console         = "0.15.8"
 fern            = "0.6.2"
 futures         = {workspace = true}
-handlebars      = "5.1"
+handlebars      = "6.0"
 log             = {workspace = true}
 once_cell       = {workspace = true}
 mdbook          = {workspace = true}
