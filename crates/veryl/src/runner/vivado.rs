@@ -133,7 +133,7 @@ impl Runner for Vivado {
 
         rt.block_on(async {
             let elaborate = Command::new("xelab")
-                .arg(&test.to_string())
+                .arg(test.to_string())
                 .args(&metadata.test.vivado.elaborate_args)
                 .current_dir(temp_dir.path())
                 .stdout(Stdio::piped())
