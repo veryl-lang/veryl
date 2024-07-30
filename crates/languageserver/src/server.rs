@@ -199,7 +199,7 @@ impl Server {
             self.background_done = false;
             self.on_change(&metadata.project.name, url, text, version);
 
-            if !url.as_str().contains(&self.cache_dir) {
+            if !url.path().contains(&self.cache_dir) {
                 if let Ok(paths) = metadata.paths::<&str>(&[], true) {
                     let total = paths.len();
                     let task = BackgroundTask {
@@ -269,7 +269,7 @@ impl Server {
     }
 
     fn goto_definition(&mut self, url: &Url, line: usize, column: usize) {
-        let path = url.as_str();
+        let path = url.path();
 
         if let Some(parser) = self.parser_map.get(path) {
             let mut finder = Finder::new();
@@ -350,7 +350,7 @@ impl Server {
     }
 
     fn hover(&mut self, url: &Url, line: usize, column: usize) {
-        let path = url.as_str();
+        let path = url.path();
 
         if let Some(parser) = self.parser_map.get(path) {
             let mut finder = Finder::new();
@@ -382,7 +382,7 @@ impl Server {
     }
 
     fn references(&mut self, url: &Url, line: usize, column: usize) {
-        let path = url.as_str();
+        let path = url.path();
 
         let mut ret = Vec::new();
         if let Some(parser) = self.parser_map.get(path) {
@@ -412,7 +412,7 @@ impl Server {
     }
 
     fn semantic_tokens(&mut self, url: &Url) {
-        let path = url.as_str();
+        let path = url.path();
 
         let ret = if let Some(path) = resource_table::get_path_id(Path::new(path).to_path_buf()) {
             let mut tokens = Vec::new();
@@ -479,7 +479,7 @@ impl Server {
     }
 
     fn formatting(&mut self, url: &Url) {
-        let path = url.as_str();
+        let path = url.path();
 
         if let Some(metadata) = self.get_metadata(url) {
             if let Some(rope) = self.document_map.get(path) {
@@ -591,7 +591,7 @@ impl Server {
     }
 
     fn get_metadata(&mut self, url: &Url) -> Option<Metadata> {
-        let path = url.as_str();
+        let path = url.path();
         if let Some(metadata) = self.metadata_map.get(path) {
             return Some(metadata.to_owned());
         } else if let Ok(metadata_path) = Metadata::search_from(path) {
@@ -604,7 +604,7 @@ impl Server {
     }
 
     fn on_change(&mut self, prj: &str, url: &Url, text: &str, version: i32) {
-        let path = url.as_str();
+        let path = url.path();
         let rope = Rope::from_str(text);
 
         if path.contains(&self.cache_dir) {
@@ -655,6 +655,11 @@ impl Server {
             block_on(
                 self.client
                     .publish_diagnostics(url.clone(), diag, Some(version)),
+            );
+        } else {
+            block_on(
+                self.client
+                    .log_message(MessageType::INFO, format!("failed to load metadata: {url}")),
             );
         }
 
@@ -901,7 +906,7 @@ fn completion_symbol(
 }
 
 fn current_namespace(url: &Url, line: usize, column: usize) -> Option<Namespace> {
-    let url = resource_table::get_path_id(Path::new(url.as_str()).to_path_buf()).unwrap();
+    let url = resource_table::get_path_id(Path::new(url.path()).to_path_buf()).unwrap();
 
     let mut ret = None;
     let mut ret_func = None;
