@@ -567,25 +567,26 @@ impl Server {
     }
 
     fn background_analyze(&self, path: &PathPair, metadata: &Metadata) {
-        if let Ok(text) = std::fs::read_to_string(&path.src) {
-            if let Ok(uri) = Url::from_file_path(&path.src) {
-                let uri = uri.as_str();
-                if self.document_map.contains_key(uri) {
-                    return;
+        let src = path.src.clone();
+        if let Ok(text) = std::fs::read_to_string(&src) {
+            if self
+                .document_map
+                .contains_key(&src.to_string_lossy().into_owned())
+            {
+                return;
+            }
+            if let Ok(x) = Parser::parse(&text, &src) {
+                if let Some(src) = resource_table::get_path_id(&src) {
+                    symbol_table::drop(src);
+                    namespace_table::drop(src);
                 }
-                if let Ok(x) = Parser::parse(&text, &uri) {
-                    if let Some(uri) = resource_table::get_path_id(Path::new(uri).to_path_buf()) {
-                        symbol_table::drop(uri);
-                        namespace_table::drop(uri);
-                    }
-                    let analyzer = Analyzer::new(metadata);
-                    let _ = analyzer.analyze_pass1(&path.prj, &text, uri, &x.veryl);
+                let analyzer = Analyzer::new(metadata);
+                let _ = analyzer.analyze_pass1(&path.prj, &text, &src, &x.veryl);
 
-                    block_on(
-                        self.client
-                            .log_message(MessageType::INFO, format!("background_analyze: {uri}")),
-                    );
-                }
+                block_on(self.client.log_message(
+                    MessageType::INFO,
+                    format!("background_analyze: {}", src.to_string_lossy()),
+                ));
             }
         }
     }
