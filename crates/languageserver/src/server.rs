@@ -732,7 +732,7 @@ fn to_location(token: &Token) -> Location {
     let line = token.line - 1;
     let column = token.column - 1;
     let length = token.length;
-    let uri = Url::parse(&token.source.to_string()).unwrap();
+    let uri = Url::from_file_path(token.source.to_string()).unwrap();
     let range = Range::new(
         Position::new(line, column),
         Position::new(line, column + length),
