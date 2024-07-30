@@ -4,7 +4,7 @@ use crate::metadata_error::MetadataError;
 use crate::pubfile::{Pubfile, Release};
 use crate::{utils, PathPair};
 #[cfg(not(target_family = "wasm"))]
-use fs4::FileExt;
+use fs4::fs_std::FileExt;
 use log::info;
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
