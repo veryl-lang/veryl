@@ -1,10 +1,10 @@
 module veryl_testcase_Module16;
+    localparam bit y = 1;
+
     logic         a;
     logic         b;
     logic         x;
     always_comb x = 1;
-    logic         y;
-    always_comb y = 1;
     logic [3-1:0] z;
     always_comb z = 1;
 
