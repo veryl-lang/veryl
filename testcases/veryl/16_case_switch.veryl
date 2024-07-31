@@ -1,8 +1,9 @@
 module Module16 {
+    local y: bit = 1;
+
     var a: logic   ;
     var b: logic   ;
     let x: logic    = 1;
-    let y: logic    = 1;
     let z: logic<3> = 1;
 
     always_comb {

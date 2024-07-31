@@ -365,6 +365,8 @@ impl Evaluator {
                     } else {
                         None
                     }
+                } else if x.width.is_empty() {
+                    Some(1)
                 } else {
                     None
                 }

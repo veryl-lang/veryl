@@ -1296,6 +1296,24 @@ fn too_much_enum_variant() {
         errors[0],
         AnalyzerError::TooMuchEnumVariant { .. }
     ));
+
+    let code = r#"
+    module ModuleB {
+        enum EnumB: logic {
+            A,
+            B,
+            C,
+            D,
+            E,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::TooMuchEnumVariant { .. }
+    ));
 }
 
 #[test]
