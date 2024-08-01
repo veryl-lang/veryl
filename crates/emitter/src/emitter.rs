@@ -307,22 +307,6 @@ impl Emitter {
         self.process_token(x, false, Some(i))
     }
 
-    fn identifier_with_prefix_suffix(
-        &mut self,
-        identifier: &Identifier,
-        prefix: &Option<String>,
-        suffix: &Option<String>,
-    ) {
-        if prefix.is_some() || suffix.is_some() {
-            let token = &identifier.identifier_token.strip_prefix("r#");
-            let token = &token.append(prefix, suffix);
-            self.veryl_token(token);
-        } else {
-            let token = &identifier.identifier_token.strip_prefix("r#");
-            self.veryl_token(token);
-        }
-    }
-
     fn case_expression_condition(&mut self, lhs: &Expression, rhs: &RangeItem) {
         if rhs.range.range_opt.is_some() {
             self.str("(");
@@ -736,7 +720,7 @@ impl VerylWalker for Emitter {
         } else {
             (None, None)
         };
-        self.identifier_with_prefix_suffix(arg, &prefix, &suffix);
+        self.veryl_token(&identifier_with_prefix_suffix(arg, &prefix, &suffix));
     }
 
     /// Semantic action for non-terminal 'HierarchicalIdentifier'
@@ -753,9 +737,17 @@ impl VerylWalker for Emitter {
         };
 
         if *list_len == 0 {
-            self.identifier_with_prefix_suffix(&arg.identifier, &prefix, &suffix);
+            self.veryl_token(&identifier_with_prefix_suffix(
+                &arg.identifier,
+                &prefix,
+                &suffix,
+            ));
         } else {
-            self.identifier_with_prefix_suffix(&arg.identifier, &None, &None);
+            self.veryl_token(&identifier_with_prefix_suffix(
+                &arg.identifier,
+                &None,
+                &None,
+            ));
         }
 
         for x in &arg.hierarchical_identifier_list {
@@ -765,9 +757,13 @@ impl VerylWalker for Emitter {
         for (i, x) in arg.hierarchical_identifier_list0.iter().enumerate() {
             self.dot(&x.dot);
             if (i + 1) == *list_len {
-                self.identifier_with_prefix_suffix(&x.identifier, &prefix, &suffix);
+                self.veryl_token(&identifier_with_prefix_suffix(
+                    &x.identifier,
+                    &prefix,
+                    &suffix,
+                ));
             } else {
-                self.identifier_with_prefix_suffix(&x.identifier, &None, &None);
+                self.veryl_token(&identifier_with_prefix_suffix(&x.identifier, &None, &None));
             }
             for x in &x.hierarchical_identifier_list0_list {
                 self.select(&x.select);
@@ -2483,7 +2479,18 @@ impl VerylWalker for Emitter {
                 self.expression(&x.expression);
             }
         } else {
-            self.duplicated_token(&arg.identifier.identifier_token, 0);
+            let (prefix, suffix) = if let Ok(found) = symbol_table::resolve(arg.identifier.as_ref())
+            {
+                match &found.found.kind {
+                    SymbolKind::Port(x) => (x.prefix.clone(), x.suffix.clone()),
+                    SymbolKind::Variable(x) => (x.prefix.clone(), x.suffix.clone()),
+                    _ => (None, None),
+                }
+            } else {
+                unreachable!()
+            };
+            let token = identifier_with_prefix_suffix(&arg.identifier, &prefix, &suffix);
+            self.duplicated_token(&token, 0);
         }
         self.str(")");
     }
@@ -3450,9 +3457,25 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
             ret.push_str(&symbol.token.to_string());
         }
         SymbolKind::GenericParameter(_) => (),
-        SymbolKind::Port(_)
-        | SymbolKind::Variable(_)
-        | SymbolKind::Instance(_)
+        SymbolKind::Port(x) => {
+            if let Some(ref x) = x.prefix {
+                ret.push_str(x);
+            }
+            ret.push_str(&symbol.token.to_string());
+            if let Some(ref x) = x.suffix {
+                ret.push_str(x);
+            }
+        }
+        SymbolKind::Variable(x) => {
+            if let Some(ref x) = x.prefix {
+                ret.push_str(x);
+            }
+            ret.push_str(&symbol.token.to_string());
+            if let Some(ref x) = x.suffix {
+                ret.push_str(x);
+            }
+        }
+        SymbolKind::Instance(_)
         | SymbolKind::Block
         | SymbolKind::StructMember(_)
         | SymbolKind::UnionMember(_)
@@ -3464,4 +3487,17 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
         SymbolKind::ClockDomain => unreachable!(),
     }
     ret
+}
+
+fn identifier_with_prefix_suffix(
+    identifier: &Identifier,
+    prefix: &Option<String>,
+    suffix: &Option<String>,
+) -> VerylToken {
+    if prefix.is_some() || suffix.is_some() {
+        let token = &identifier.identifier_token.strip_prefix("r#");
+        token.append(prefix, suffix)
+    } else {
+        identifier.identifier_token.strip_prefix("r#")
+    }
 }

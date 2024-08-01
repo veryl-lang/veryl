@@ -1,0 +1,26 @@
+module Module63 (
+    i_clk: input clock,
+    i_rst: input reset,
+) {
+    inst u: Module63A (
+        i_clk  ,
+        i_rst  ,
+    );
+
+    var a: logic;
+
+    always_ff {
+        if_reset {
+            a = 0;
+        } else {
+            a = 1;
+        }
+    }
+
+    let _b: logic = i_rst;
+}
+
+module Module63A (
+    i_clk: input clock,
+    i_rst: input reset,
+) {}
