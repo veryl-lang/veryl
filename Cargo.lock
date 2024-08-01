@@ -445,9 +445,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.12"
+version = "4.5.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c53aa12ec67affac065e7c7dd20a42fa2a4094921b655711d5d3107bb3d52bed"
+checksum = "0fbb260a053428790f3de475e304ff84cdbc4face759ea7a3e64c1edd938a7fc"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -455,9 +455,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.12"
+version = "4.5.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efbdf2dd5fe10889e0c61942ff5d948aaf12fd0b4504408ab0cbb1916c2cffa9"
+checksum = "64b17d7ea74e9f833c7dbf2cbe4fb12ff26783eda4782a8975b72f895c9b4d99"
 dependencies = [
  "anstream",
  "anstyle",
@@ -472,14 +472,14 @@ version = "4.5.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c6ae69fbb0833c6fcd5a8d4b8609f108c7ad95fc11e248d853ff2c42a90df26a"
 dependencies = [
- "clap 4.5.12",
+ "clap 4.5.13",
 ]
 
 [[package]]
 name = "clap_derive"
-version = "4.5.11"
+version = "4.5.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d029b67f89d30bbb547c89fd5161293c0aec155fc691d7924b64550662db93e"
+checksum = "501d359d5f3dcaf6ecdeee48833ae73ec6e42723a1e52419c79abf9507eec0a0"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -610,7 +610,7 @@ dependencies = [
  "anes",
  "cast",
  "ciborium",
- "clap 4.5.12",
+ "clap 4.5.13",
  "criterion-plot",
  "is-terminal",
  "itertools 0.10.5",
@@ -2601,7 +2601,7 @@ dependencies = [
  "ammonia",
  "anyhow",
  "chrono",
- "clap 4.5.12",
+ "clap 4.5.13",
  "clap_complete",
  "elasticlunr-rs",
  "env_logger 0.11.5",
@@ -2633,7 +2633,7 @@ name = "mdbook-veryl"
 version = "0.11.1"
 dependencies = [
  "anyhow",
- "clap 4.5.12",
+ "clap 4.5.13",
  "line-col",
  "mdbook",
  "pulldown-cmark 0.11.0",
@@ -2973,7 +2973,7 @@ dependencies = [
  "assert_cmd",
  "bitflags 2.6.0",
  "cfg-if",
- "clap 4.5.12",
+ "clap 4.5.13",
  "derive_builder",
  "env_logger 0.11.5",
  "function_name",
@@ -4667,7 +4667,7 @@ name = "veryl"
 version = "0.11.1"
 dependencies = [
  "anstyle",
- "clap 4.5.12",
+ "clap 4.5.13",
  "console",
  "fern",
  "futures",
