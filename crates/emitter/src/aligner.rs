@@ -1,4 +1,4 @@
-use crate::emitter::{symbol_string, SymbolContext};
+use crate::emitter::{identifier_with_prefix_suffix, symbol_string, SymbolContext};
 use std::collections::HashMap;
 use veryl_analyzer::symbol::{GenericMap, SymbolKind};
 use veryl_analyzer::symbol_table;
@@ -203,20 +203,6 @@ impl Aligner {
             .implicit_parameter_types
             .contains(&BuiltinType::Type)
     }
-
-    fn identifier_with_prefix_suffix(
-        &mut self,
-        identifier: &Identifier,
-        prefix: &Option<String>,
-        suffix: &Option<String>,
-    ) {
-        if prefix.is_some() || suffix.is_some() {
-            let token = identifier.identifier_token.append(prefix, suffix);
-            self.veryl_token(&token);
-        } else {
-            self.veryl_token(&identifier.identifier_token);
-        }
-    }
 }
 
 impl VerylWalker for Aligner {
@@ -318,7 +304,7 @@ impl VerylWalker for Aligner {
         } else {
             (None, None)
         };
-        self.identifier_with_prefix_suffix(arg, &prefix, &suffix);
+        self.veryl_token(&identifier_with_prefix_suffix(arg, &prefix, &suffix));
     }
 
     /// Semantic action for non-terminal 'HierarchicalIdentifier'
@@ -335,7 +321,11 @@ impl VerylWalker for Aligner {
         };
 
         if *list_len == 0 {
-            self.identifier_with_prefix_suffix(&arg.identifier, &prefix, &suffix);
+            self.veryl_token(&identifier_with_prefix_suffix(
+                &arg.identifier,
+                &prefix,
+                &suffix,
+            ));
         } else {
             self.identifier(&arg.identifier);
         }
@@ -347,7 +337,11 @@ impl VerylWalker for Aligner {
         for (i, x) in arg.hierarchical_identifier_list0.iter().enumerate() {
             self.dot(&x.dot);
             if (i + 1) == *list_len {
-                self.identifier_with_prefix_suffix(&x.identifier, &prefix, &suffix);
+                self.veryl_token(&identifier_with_prefix_suffix(
+                    &x.identifier,
+                    &prefix,
+                    &suffix,
+                ));
             } else {
                 self.identifier(&x.identifier);
             }
@@ -881,9 +875,19 @@ impl VerylWalker for Aligner {
             self.expression(&x.expression);
             self.aligns[align_kind::EXPRESSION].finish_item();
         } else {
+            let (prefix, suffix) = if let Ok(found) = symbol_table::resolve(arg.identifier.as_ref())
+            {
+                match &found.found.kind {
+                    SymbolKind::Port(x) => (x.prefix.clone(), x.suffix.clone()),
+                    SymbolKind::Variable(x) => (x.prefix.clone(), x.suffix.clone()),
+                    _ => (None, None),
+                }
+            } else {
+                unreachable!()
+            };
+            let token = identifier_with_prefix_suffix(&arg.identifier, &prefix, &suffix);
             self.aligns[align_kind::EXPRESSION].start_item();
-            self.aligns[align_kind::EXPRESSION]
-                .duplicated_token(&arg.identifier.identifier_token, 0);
+            self.aligns[align_kind::EXPRESSION].duplicated_token(&token, 0);
             self.aligns[align_kind::EXPRESSION].finish_item();
         }
     }

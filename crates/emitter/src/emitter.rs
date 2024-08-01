@@ -743,11 +743,7 @@ impl VerylWalker for Emitter {
                 &suffix,
             ));
         } else {
-            self.veryl_token(&identifier_with_prefix_suffix(
-                &arg.identifier,
-                &None,
-                &None,
-            ));
+            self.identifier(&arg.identifier);
         }
 
         for x in &arg.hierarchical_identifier_list {
@@ -763,7 +759,7 @@ impl VerylWalker for Emitter {
                     &suffix,
                 ));
             } else {
-                self.veryl_token(&identifier_with_prefix_suffix(&x.identifier, &None, &None));
+                self.identifier(&x.identifier);
             }
             for x in &x.hierarchical_identifier_list0_list {
                 self.select(&x.select);
@@ -3489,7 +3485,7 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
     ret
 }
 
-fn identifier_with_prefix_suffix(
+pub fn identifier_with_prefix_suffix(
     identifier: &Identifier,
     prefix: &Option<String>,
     suffix: &Option<String>,

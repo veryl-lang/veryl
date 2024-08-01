@@ -1,10 +1,12 @@
 module Module63 (
-    i_clk: input clock,
-    i_rst: input reset,
+    i_clk   : input clock,
+    i_rst   : input reset,
+    i_data_a: input logic,
 ) {
     inst u: Module63A (
-        i_clk  ,
-        i_rst  ,
+        i_clk     ,
+        i_rst     ,
+        i_data_a  ,
     );
 
     var a: logic;
@@ -21,6 +23,7 @@ module Module63 (
 }
 
 module Module63A (
-    i_clk: input clock,
-    i_rst: input reset,
+    i_clk   : input clock,
+    i_rst   : input reset,
+    i_data_a: input logic,
 ) {}
