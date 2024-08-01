@@ -4715,6 +4715,7 @@ version = "0.11.1"
 dependencies = [
  "serde",
  "strnum_bitwidth",
+ "toml 0.8.19",
  "veryl-analyzer",
  "veryl-metadata",
  "veryl-parser",
