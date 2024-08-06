@@ -1,11 +1,13 @@
 #![recursion_limit = "256"]
 
-use tower_lsp::{LspService, Server};
-
 mod backend;
 mod keyword;
 mod server;
+#[cfg(test)]
+mod tests;
+
 use backend::Backend;
+use tower_lsp::{LspService, Server};
 
 #[tokio::main]
 async fn main() {
