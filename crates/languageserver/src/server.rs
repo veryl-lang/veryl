@@ -4,7 +4,7 @@ use dashmap::DashMap;
 use futures::executor::block_on;
 use ropey::Rope;
 use std::collections::VecDeque;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tower_lsp::lsp_types::*;
 use tower_lsp::Client;
 use veryl_analyzer::namespace::Namespace;
@@ -99,10 +99,10 @@ pub struct Server {
     client: Client,
     rcv: Receiver<MsgToServer>,
     snd: Sender<MsgFromServer>,
-    document_map: DashMap<String, Rope>,
-    parser_map: DashMap<String, Parser>,
-    metadata_map: DashMap<String, Metadata>,
-    cache_dir: String,
+    document_map: DashMap<PathBuf, Rope>,
+    parser_map: DashMap<PathBuf, Parser>,
+    metadata_map: DashMap<PathBuf, Metadata>,
+    cache_dir: PathBuf,
     lsp_token: i32,
     background_tasks: VecDeque<BackgroundTask>,
     background_done: bool,
@@ -119,7 +119,7 @@ impl Server {
             document_map: DashMap::new(),
             parser_map: DashMap::new(),
             metadata_map: DashMap::new(),
-            cache_dir: Metadata::cache_path().to_string_lossy().to_string(),
+            cache_dir: Metadata::cache_path(),
             lsp_token: 0,
             background_tasks: VecDeque::new(),
             background_done: true,
@@ -199,16 +199,20 @@ impl Server {
             self.background_done = false;
             self.on_change(&metadata.project.name, url, text, version);
 
-            if !url.path().contains(&self.cache_dir) {
-                if let Ok(paths) = metadata.paths::<&str>(&[], true) {
-                    let total = paths.len();
-                    let task = BackgroundTask {
-                        metadata,
-                        paths,
-                        total,
-                        progress: false,
-                    };
-                    self.background_tasks.push_back(task);
+            if let Ok(path) = url.to_file_path() {
+                if !path.starts_with(&self.cache_dir) {
+                    if let Ok(paths) = metadata.paths::<&str>(&[], true) {
+                        let total = paths.len();
+                        let task = BackgroundTask {
+                            metadata,
+                            paths,
+                            total,
+                            progress: false,
+                        };
+                        self.background_tasks.push_back(task);
+                    } else {
+                        self.background_done = true;
+                    }
                 } else {
                     self.background_done = true;
                 }
@@ -269,27 +273,27 @@ impl Server {
     }
 
     fn goto_definition(&mut self, url: &Url, line: usize, column: usize) {
-        let path = url.path();
+        if let Ok(path) = url.to_file_path() {
+            if let Some(parser) = self.parser_map.get(&path) {
+                let mut finder = Finder::new();
+                finder.line = line as u32;
+                finder.column = column as u32;
+                finder.veryl(&parser.veryl);
 
-        if let Some(parser) = self.parser_map.get(path) {
-            let mut finder = Finder::new();
-            finder.line = line as u32;
-            finder.column = column as u32;
-            finder.veryl(&parser.veryl);
-
-            if let Some(token) = finder.token {
-                if let Some(namespace) = namespace_table::get(token.id) {
-                    let path = if finder.token_group.is_empty() {
-                        SymbolPath::new(&[token.text])
-                    } else {
-                        SymbolPath::from(finder.token_group.as_slice())
-                    };
-                    if let Ok(symbol) = symbol_table::resolve((&path, &namespace)) {
-                        let location = to_location(&symbol.found.token);
-                        self.snd
-                            .send_blocking(MsgFromServer::GotoDefinition(Some(location)))
-                            .unwrap();
-                        return;
+                if let Some(token) = finder.token {
+                    if let Some(namespace) = namespace_table::get(token.id) {
+                        let path = if finder.token_group.is_empty() {
+                            SymbolPath::new(&[token.text])
+                        } else {
+                            SymbolPath::from(finder.token_group.as_slice())
+                        };
+                        if let Ok(symbol) = symbol_table::resolve((&path, &namespace)) {
+                            let location = to_location(&symbol.found.token);
+                            self.snd
+                                .send_blocking(MsgFromServer::GotoDefinition(Some(location)))
+                                .unwrap();
+                            return;
+                        }
                     }
                 }
             }
@@ -350,30 +354,30 @@ impl Server {
     }
 
     fn hover(&mut self, url: &Url, line: usize, column: usize) {
-        let path = url.path();
-
-        if let Some(parser) = self.parser_map.get(path) {
-            let mut finder = Finder::new();
-            finder.line = line as u32;
-            finder.column = column as u32;
-            finder.veryl(&parser.veryl);
-            if let Some(token) = finder.token {
-                if let Some(namespace) = namespace_table::get(token.id) {
-                    let path = if finder.token_group.is_empty() {
-                        SymbolPath::new(&[token.text])
-                    } else {
-                        SymbolPath::from(finder.token_group.as_slice())
-                    };
-                    if let Ok(symbol) = symbol_table::resolve((&path, &namespace)) {
-                        let text = symbol.found.kind.to_string();
-                        let hover = Hover {
-                            contents: HoverContents::Scalar(MarkedString::String(text)),
-                            range: None,
+        if let Ok(path) = url.to_file_path() {
+            if let Some(parser) = self.parser_map.get(&path) {
+                let mut finder = Finder::new();
+                finder.line = line as u32;
+                finder.column = column as u32;
+                finder.veryl(&parser.veryl);
+                if let Some(token) = finder.token {
+                    if let Some(namespace) = namespace_table::get(token.id) {
+                        let path = if finder.token_group.is_empty() {
+                            SymbolPath::new(&[token.text])
+                        } else {
+                            SymbolPath::from(finder.token_group.as_slice())
                         };
-                        self.snd
-                            .send_blocking(MsgFromServer::Hover(Some(hover)))
-                            .unwrap();
-                        return;
+                        if let Ok(symbol) = symbol_table::resolve((&path, &namespace)) {
+                            let text = symbol.found.kind.to_string();
+                            let hover = Hover {
+                                contents: HoverContents::Scalar(MarkedString::String(text)),
+                                range: None,
+                            };
+                            self.snd
+                                .send_blocking(MsgFromServer::Hover(Some(hover)))
+                                .unwrap();
+                            return;
+                        }
                     }
                 }
             }
@@ -382,25 +386,25 @@ impl Server {
     }
 
     fn references(&mut self, url: &Url, line: usize, column: usize) {
-        let path = url.path();
-
         let mut ret = Vec::new();
-        if let Some(parser) = self.parser_map.get(path) {
-            let mut finder = Finder::new();
-            finder.line = line as u32;
-            finder.column = column as u32;
-            finder.veryl(&parser.veryl);
-            if let Some(token) = finder.token {
-                if let Some(namespace) = namespace_table::get(token.id) {
-                    let path = if finder.token_group.is_empty() {
-                        SymbolPath::new(&[token.text])
-                    } else {
-                        SymbolPath::from(finder.token_group.as_slice())
-                    };
-                    if let Ok(symbol) = symbol_table::resolve((&path, &namespace)) {
-                        for reference in &symbol.found.references {
-                            let location = to_location(reference);
-                            ret.push(location);
+        if let Ok(path) = url.to_file_path() {
+            if let Some(parser) = self.parser_map.get(&path) {
+                let mut finder = Finder::new();
+                finder.line = line as u32;
+                finder.column = column as u32;
+                finder.veryl(&parser.veryl);
+                if let Some(token) = finder.token {
+                    if let Some(namespace) = namespace_table::get(token.id) {
+                        let path = if finder.token_group.is_empty() {
+                            SymbolPath::new(&[token.text])
+                        } else {
+                            SymbolPath::from(finder.token_group.as_slice())
+                        };
+                        if let Ok(symbol) = symbol_table::resolve((&path, &namespace)) {
+                            for reference in &symbol.found.references {
+                                let location = to_location(reference);
+                                ret.push(location);
+                            }
                         }
                     }
                 }
@@ -412,66 +416,66 @@ impl Server {
     }
 
     fn semantic_tokens(&mut self, url: &Url) {
-        let path = url.path();
+        let mut ret = None;
 
-        let ret = if let Some(path) = resource_table::get_path_id(Path::new(path).to_path_buf()) {
-            let mut tokens = Vec::new();
-            for symbol in &symbol_table::get_all() {
-                if symbol.token.source == path {
-                    if let VerylSymbolKind::Port(_) = symbol.kind {
-                        let token_type = semantic_legend::PROPERTY;
-                        tokens.push((symbol.token, token_type));
-                        for reference in &symbol.references {
-                            if reference.source == path {
-                                tokens.push((*reference, token_type));
+        if let Ok(path) = url.to_file_path() {
+            if let Some(path) = resource_table::get_path_id(path) {
+                let mut tokens = Vec::new();
+                for symbol in &symbol_table::get_all() {
+                    if symbol.token.source == path {
+                        if let VerylSymbolKind::Port(_) = symbol.kind {
+                            let token_type = semantic_legend::PROPERTY;
+                            tokens.push((symbol.token, token_type));
+                            for reference in &symbol.references {
+                                if reference.source == path {
+                                    tokens.push((*reference, token_type));
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            tokens.sort_by(|a, b| {
-                a.0.line
-                    .partial_cmp(&b.0.line)
-                    .unwrap()
-                    .then(a.0.column.partial_cmp(&b.0.column).unwrap())
-            });
+                tokens.sort_by(|a, b| {
+                    a.0.line
+                        .partial_cmp(&b.0.line)
+                        .unwrap()
+                        .then(a.0.column.partial_cmp(&b.0.column).unwrap())
+                });
 
-            let mut line = 0;
-            let mut column = 0;
-            let mut data = Vec::new();
-            for (token, token_type) in tokens {
-                let token_line = token.line - 1;
-                let token_column = token.column - 1;
+                let mut line = 0;
+                let mut column = 0;
+                let mut data = Vec::new();
+                for (token, token_type) in tokens {
+                    let token_line = token.line - 1;
+                    let token_column = token.column - 1;
 
-                let delta_line = token_line - line;
-                let delta_start = if delta_line == 0 {
-                    token_column - column
-                } else {
-                    token_column
+                    let delta_line = token_line - line;
+                    let delta_start = if delta_line == 0 {
+                        token_column - column
+                    } else {
+                        token_column
+                    };
+
+                    let semantic_token = SemanticToken {
+                        delta_line,
+                        delta_start,
+                        length: token.length,
+                        token_type,
+                        token_modifiers_bitset: 0,
+                    };
+                    data.push(semantic_token);
+
+                    line = token_line;
+                    column = token_column;
+                }
+
+                let tokens = SemanticTokens {
+                    result_id: None,
+                    data,
                 };
-
-                let semantic_token = SemanticToken {
-                    delta_line,
-                    delta_start,
-                    length: token.length,
-                    token_type,
-                    token_modifiers_bitset: 0,
-                };
-                data.push(semantic_token);
-
-                line = token_line;
-                column = token_column;
+                ret = Some(SemanticTokensResult::Tokens(tokens))
             }
-
-            let tokens = SemanticTokens {
-                result_id: None,
-                data,
-            };
-            Some(SemanticTokensResult::Tokens(tokens))
-        } else {
-            None
-        };
+        }
 
         self.snd
             .send_blocking(MsgFromServer::SemanticTokens(ret))
@@ -479,24 +483,24 @@ impl Server {
     }
 
     fn formatting(&mut self, url: &Url) {
-        let path = url.path();
+        if let Ok(path) = url.to_file_path() {
+            if let Some(metadata) = self.get_metadata(url) {
+                if let Some(rope) = self.document_map.get(&path) {
+                    let line = rope.len_lines() as u32;
+                    if let Some(parser) = self.parser_map.get(&path) {
+                        let mut formatter = Formatter::new(&metadata);
+                        formatter.format(&parser.veryl);
 
-        if let Some(metadata) = self.get_metadata(url) {
-            if let Some(rope) = self.document_map.get(path) {
-                let line = rope.len_lines() as u32;
-                if let Some(parser) = self.parser_map.get(path) {
-                    let mut formatter = Formatter::new(&metadata);
-                    formatter.format(&parser.veryl);
+                        let text_edit = TextEdit {
+                            range: Range::new(Position::new(0, 0), Position::new(line, u32::MAX)),
+                            new_text: formatter.as_str().to_string(),
+                        };
 
-                    let text_edit = TextEdit {
-                        range: Range::new(Position::new(0, 0), Position::new(line, u32::MAX)),
-                        new_text: formatter.as_str().to_string(),
-                    };
-
-                    self.snd
-                        .send_blocking(MsgFromServer::Formatting(Some(vec![text_edit])))
-                        .unwrap();
-                    return;
+                        self.snd
+                            .send_blocking(MsgFromServer::Formatting(Some(vec![text_edit])))
+                            .unwrap();
+                        return;
+                    }
                 }
             }
         }
@@ -569,10 +573,7 @@ impl Server {
     fn background_analyze(&self, path: &PathPair, metadata: &Metadata) {
         let src = path.src.clone();
         if let Ok(text) = std::fs::read_to_string(&src) {
-            if self
-                .document_map
-                .contains_key(&src.to_string_lossy().into_owned())
-            {
+            if self.document_map.contains_key(&src) {
                 return;
             }
             if let Ok(x) = Parser::parse(&text, &src) {
@@ -592,79 +593,84 @@ impl Server {
     }
 
     fn get_metadata(&mut self, url: &Url) -> Option<Metadata> {
-        let path = url.path();
-        if let Some(metadata) = self.metadata_map.get(path) {
-            return Some(metadata.to_owned());
-        } else if let Ok(metadata_path) = Metadata::search_from(path) {
-            if let Ok(metadata) = Metadata::load(metadata_path) {
-                self.metadata_map.insert(path.to_string(), metadata.clone());
-                return Some(metadata);
+        if let Ok(path) = url.to_file_path() {
+            dbg!(&path);
+            if let Some(metadata) = self.metadata_map.get(&path) {
+                return Some(metadata.to_owned());
+            } else if let Ok(metadata_path) = Metadata::search_from(&path) {
+                dbg!(&metadata_path);
+                if let Ok(metadata) = Metadata::load(metadata_path) {
+                    self.metadata_map.insert(path, metadata.clone());
+                    return Some(metadata);
+                }
             }
         }
         None
     }
 
     fn on_change(&mut self, prj: &str, url: &Url, text: &str, version: i32) {
-        let path = url.path();
-        let rope = Rope::from_str(text);
+        if let Ok(path) = url.to_file_path() {
+            let rope = Rope::from_str(text);
 
-        if path.contains(&self.cache_dir) {
-            return;
-        }
+            if path.starts_with(&self.cache_dir) {
+                return;
+            }
 
-        if let Some(metadata) = self.get_metadata(url) {
-            let diag = match Parser::parse(text, &path) {
-                Ok(x) => {
-                    if let Some(path) = resource_table::get_path_id(Path::new(&path).to_path_buf())
-                    {
-                        symbol_table::drop(path);
-                        namespace_table::drop(path);
+            if let Some(metadata) = self.get_metadata(url) {
+                let diag = match Parser::parse(text, &path) {
+                    Ok(x) => {
+                        if let Some(path) =
+                            resource_table::get_path_id(Path::new(&path).to_path_buf())
+                        {
+                            symbol_table::drop(path);
+                            namespace_table::drop(path);
+                        }
+                        let analyzer = Analyzer::new(&metadata);
+                        let mut errors = analyzer.analyze_pass1(prj, text, &path, &x.veryl);
+                        errors.append(&mut analyzer.analyze_pass2(prj, text, &path, &x.veryl));
+                        errors.append(&mut analyzer.analyze_pass3(prj, text, &path, &x.veryl));
+                        let ret: Vec<_> = errors
+                            .drain(0..)
+                            .filter(|x| {
+                                // Filter errors caused by unresolve error until background completion
+                                if self.background_done {
+                                    true
+                                } else {
+                                    !matches!(
+                                        x,
+                                        AnalyzerError::UndefinedIdentifier { .. }
+                                            | AnalyzerError::UnknownMember { .. }
+                                            | AnalyzerError::UnassignVariable { .. }
+                                    )
+                                }
+                            })
+                            .map(|x| {
+                                let x: miette::ErrReport = x.into();
+                                to_diag(x, &rope)
+                            })
+                            .collect();
+                        self.parser_map.insert(path.clone(), x);
+                        ret
                     }
-                    let analyzer = Analyzer::new(&metadata);
-                    let mut errors = analyzer.analyze_pass1(prj, text, path, &x.veryl);
-                    errors.append(&mut analyzer.analyze_pass2(prj, text, path, &x.veryl));
-                    errors.append(&mut analyzer.analyze_pass3(prj, text, path, &x.veryl));
-                    let ret: Vec<_> = errors
-                        .drain(0..)
-                        .filter(|x| {
-                            // Filter errors caused by unresolve error until background completion
-                            if self.background_done {
-                                true
-                            } else {
-                                !matches!(
-                                    x,
-                                    AnalyzerError::UndefinedIdentifier { .. }
-                                        | AnalyzerError::UnknownMember { .. }
-                                        | AnalyzerError::UnassignVariable { .. }
-                                )
-                            }
-                        })
-                        .map(|x| {
-                            let x: miette::ErrReport = x.into();
-                            to_diag(x, &rope)
-                        })
-                        .collect();
-                    self.parser_map.insert(path.to_string(), x);
-                    ret
-                }
-                Err(x) => {
-                    self.parser_map.remove(path);
-                    vec![to_diag(x.into(), &rope)]
-                }
-            };
+                    Err(x) => {
+                        self.parser_map.remove(&path);
+                        vec![to_diag(x.into(), &rope)]
+                    }
+                };
 
-            block_on(
-                self.client
-                    .publish_diagnostics(url.clone(), diag, Some(version)),
-            );
-        } else {
-            block_on(
-                self.client
-                    .log_message(MessageType::INFO, format!("failed to load metadata: {url}")),
-            );
+                block_on(
+                    self.client
+                        .publish_diagnostics(url.clone(), diag, Some(version)),
+                );
+            } else {
+                block_on(
+                    self.client
+                        .log_message(MessageType::INFO, format!("failed to load metadata: {url}")),
+                );
+            }
+
+            self.document_map.insert(path.clone(), rope);
         }
-
-        self.document_map.insert(path.to_string(), rope);
     }
 }
 
