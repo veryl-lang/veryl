@@ -39,7 +39,7 @@ serde           = {version = "1.0", features = ["derive"]}
 serde_json      = "1.0"
 similar         = {version = "2.6.0", features = ["text", "inline"]}
 strnum_bitwidth = "0.1.2"
-tempfile        = "3.11"
+tempfile        = "3.12"
 thiserror       = "1.0"
 tokio           = {version = "1.39.1", features = ["full"]}
 toml            = "0.8.19"
