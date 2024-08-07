@@ -18,12 +18,17 @@ pub struct CheckIdentifier<'a> {
     point: HandlerPoint,
     in_always_comb: bool,
     in_always_ff: bool,
+    in_function: bool,
 }
 
 enum Kind {
     ClockDomain,
     Enum,
     Function,
+    FunctionInout,
+    FunctionInput,
+    FunctionOutput,
+    FunctionRef,
     Instance,
     Interface,
     Modport,
@@ -50,6 +55,7 @@ impl<'a> CheckIdentifier<'a> {
             point: HandlerPoint::Before,
             in_always_comb: false,
             in_always_ff: false,
+            in_function: false,
         }
     }
 
@@ -60,6 +66,10 @@ impl<'a> CheckIdentifier<'a> {
             Kind::ClockDomain => &opt.prefix_clock_domain,
             Kind::Enum => &opt.prefix_enum,
             Kind::Function => &opt.prefix_function,
+            Kind::FunctionInout => &opt.prefix_function_inout,
+            Kind::FunctionInput => &opt.prefix_function_input,
+            Kind::FunctionOutput => &opt.prefix_function_output,
+            Kind::FunctionRef => &opt.prefix_function_ref,
             Kind::Instance => &opt.prefix_instance,
             Kind::Interface => &opt.prefix_interface,
             Kind::Modport => &opt.prefix_modport,
@@ -81,6 +91,10 @@ impl<'a> CheckIdentifier<'a> {
             Kind::ClockDomain => &opt.case_clock_domain,
             Kind::Enum => &opt.case_enum,
             Kind::Function => &opt.case_function,
+            Kind::FunctionInout => &opt.case_function_inout,
+            Kind::FunctionInput => &opt.case_function_input,
+            Kind::FunctionOutput => &opt.case_function_output,
+            Kind::FunctionRef => &opt.case_function_ref,
             Kind::Instance => &opt.case_instance,
             Kind::Interface => &opt.case_interface,
             Kind::Modport => &opt.case_modport,
@@ -102,6 +116,10 @@ impl<'a> CheckIdentifier<'a> {
             Kind::ClockDomain => &opt.re_required_clock_domain,
             Kind::Enum => &opt.re_required_enum,
             Kind::Function => &opt.re_required_function,
+            Kind::FunctionInout => &opt.re_required_function_inout,
+            Kind::FunctionInput => &opt.re_required_function_input,
+            Kind::FunctionOutput => &opt.re_required_function_output,
+            Kind::FunctionRef => &opt.re_required_function_ref,
             Kind::Instance => &opt.re_required_instance,
             Kind::Interface => &opt.re_required_interface,
             Kind::Modport => &opt.re_required_modport,
@@ -123,6 +141,10 @@ impl<'a> CheckIdentifier<'a> {
             Kind::ClockDomain => &opt.re_forbidden_clock_domain,
             Kind::Enum => &opt.re_forbidden_enum,
             Kind::Function => &opt.re_forbidden_function,
+            Kind::FunctionInout => &opt.re_forbidden_function_inout,
+            Kind::FunctionInput => &opt.re_forbidden_function_input,
+            Kind::FunctionOutput => &opt.re_forbidden_function_output,
+            Kind::FunctionRef => &opt.re_forbidden_function_ref,
             Kind::Instance => &opt.re_forbidden_instance,
             Kind::Interface => &opt.re_forbidden_interface,
             Kind::Modport => &opt.re_forbidden_modport,
@@ -314,12 +336,22 @@ impl<'a> VerylGrammarTrait for CheckIdentifier<'a> {
                 }
                 PortDeclarationItemGroup::PortTypeAbstract(_) => SymDirection::Interface,
             };
-            let kind = match direction {
-                SymDirection::Input => Some(Kind::PortInput),
-                SymDirection::Output => Some(Kind::PortOutput),
-                SymDirection::Inout => Some(Kind::PortInout),
-                SymDirection::Modport => Some(Kind::PortModport),
-                _ => None,
+            let kind = if self.in_function {
+                match direction {
+                    SymDirection::Inout => Some(Kind::FunctionInout),
+                    SymDirection::Input => Some(Kind::FunctionInput),
+                    SymDirection::Output => Some(Kind::FunctionOutput),
+                    SymDirection::Ref => Some(Kind::FunctionRef),
+                    _ => None,
+                }
+            } else {
+                match direction {
+                    SymDirection::Inout => Some(Kind::PortInout),
+                    SymDirection::Input => Some(Kind::PortInput),
+                    SymDirection::Modport => Some(Kind::PortModport),
+                    SymDirection::Output => Some(Kind::PortOutput),
+                    _ => None,
+                }
             };
 
             if let Some(kind) = kind {
@@ -346,8 +378,12 @@ impl<'a> VerylGrammarTrait for CheckIdentifier<'a> {
     }
 
     fn function_declaration(&mut self, arg: &FunctionDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            self.check(&arg.identifier.identifier_token.token, Kind::Function);
+        match self.point {
+            HandlerPoint::Before => {
+                self.check(&arg.identifier.identifier_token.token, Kind::Function);
+                self.in_function = true;
+            }
+            HandlerPoint::After => self.in_function = false,
         }
         Ok(())
     }
