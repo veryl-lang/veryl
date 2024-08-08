@@ -35,12 +35,12 @@ fn clock_check() {
 
     let code = r#"
     module ModuleB (
-        clk_a: input clock<2>,
-        clk_b: input clock[2]
+        clk_a: input '_a clock<2>,
+        clk_b: input '_b clock[2]
     ) {
         local POS: u32 = 0;
-        var a: logic;
-        var b: logic;
+        var a: '_a logic;
+        var b: '_b logic;
         always_ff (clk_a[POS]) {
             a = 0;
         }
@@ -55,12 +55,12 @@ fn clock_check() {
 
     let code = r#"
     module ModuleC (
-        clk_a: input clock<2, 2>,
-        clk_b: input clock[2, 2]
+        clk_a: input '_a clock<2, 2>,
+        clk_b: input '_b clock[2, 2]
     ) {
         local POS: u32 = 0;
-        var a: logic;
-        var b: logic;
+        var a: '_a logic;
+        var b: '_b logic;
         always_ff (clk_a[POS][POS]) {
             a = 0;
         }
@@ -89,12 +89,12 @@ fn clock_check() {
 
     let code = r#"
     module ModuleE (
-        clk_a: input clock<2>,
-        clk_b: input clock[2]
+        clk_a: input '_a clock<2>,
+        clk_b: input '_b clock[2]
     ) {
         local POS: u32 = 0;
-        var a: logic;
-        var b: logic;
+        var a: '_a logic;
+        var b: '_b logic;
         always_ff (clk_a) {
             a = 0;
         }
@@ -109,12 +109,12 @@ fn clock_check() {
 
     let code = r#"
     module ModuleF (
-        clk_a: input clock<2>,
-        clk_b: input clock[2]
+        clk_a: input '_a clock<2>,
+        clk_b: input '_b clock[2]
     ) {
         local POS: u32 = 0;
-        var a: logic;
-        var b: logic;
+        var a: '_a logic;
+        var b: '_b logic;
         always_ff (clk_a[POS]) {
             a = 0;
         }
@@ -129,12 +129,12 @@ fn clock_check() {
 
     let code = r#"
     module ModuleG (
-        clk_a: input clock<2, 2>,
-        clk_b: input clock[2, 2]
+        clk_a: input '_a clock<2, 2>,
+        clk_b: input '_b clock[2, 2]
     ) {
         local POS: u32 = 0;
-        var a: logic;
-        var b: logic;
+        var a: '_a logic;
+        var b: '_b logic;
         always_ff (clk_a[POS]) {
             a = 0;
         }
@@ -149,12 +149,12 @@ fn clock_check() {
 
     let code = r#"
     module ModuleH (
-        clk_a: input clock<2, 2>,
-        clk_b: input clock[2, 2]
+        clk_a: input '_a clock<2, 2>,
+        clk_b: input '_b clock[2, 2]
     ) {
         local POS: u32 = 0;
-        var a: logic;
-        var b: logic;
+        var a: '_a logic;
+        var b: '_b logic;
         always_ff (clk_a[POS][POS]) {
             a = 0;
         }
@@ -189,14 +189,14 @@ fn reset_check() {
 
     let code = r#"
     module ModuleB (
-        clk_a: input clock,
-        rst_a: input reset<2>,
-        clk_b: input clock,
-        rst_b: input reset[2]
+        clk_a: input '_a clock,
+        rst_a: input '_a reset<2>,
+        clk_b: input '_b clock,
+        rst_b: input '_b reset[2]
     ) {
         local POS: u32 = 0;
-        var a: logic;
-        var b: logic;
+        var a: '_a logic;
+        var b: '_b logic;
         always_ff (clk_a, rst_a[POS]) {
             if_reset {
                 a = 0;
@@ -215,14 +215,14 @@ fn reset_check() {
 
     let code = r#"
     module ModuleC (
-        clk_a: input clock,
-        rst_a: input reset<2, 2>,
-        clk_b: input clock,
-        rst_b: input reset[2, 2]
+        clk_a: input '_a clock,
+        rst_a: input '_a reset<2, 2>,
+        clk_b: input '_b clock,
+        rst_b: input '_b reset[2, 2]
     ) {
         local POS: u32 = 0;
-        var a: logic;
-        var b: logic;
+        var a: '_a logic;
+        var b: '_b logic;
         always_ff (clk_a, rst_a[POS][POS]) {
             if_reset {
                 a = 0;
@@ -258,14 +258,14 @@ fn reset_check() {
 
     let code = r#"
     module ModuleE (
-        clk_a: input clock,
-        rst_a: input reset<2>,
-        clk_b: input clock,
-        rst_b: input reset[2]
+        clk_a: input '_a clock,
+        rst_a: input '_a reset<2>,
+        clk_b: input '_b clock,
+        rst_b: input '_b reset[2]
     ) {
         local POS: u32 = 0;
-        var a: logic;
-        var b: logic;
+        var a: '_a logic;
+        var b: '_b logic;
         always_ff (clk_a, rst_a) {
             if_reset {
                 a = 0;
@@ -284,14 +284,14 @@ fn reset_check() {
 
     let code = r#"
     module ModuleF (
-        clk_a: input clock,
-        rst_a: input reset<2>,
-        clk_b: input clock,
-        rst_b: input reset[2]
+        clk_a: input '_a clock,
+        rst_a: input '_a reset<2>,
+        clk_b: input '_b clock,
+        rst_b: input '_b reset[2]
     ) {
         local POS: u32 = 0;
-        var a: logic;
-        var b: logic;
+        var a: '_a logic;
+        var b: '_b logic;
         always_ff (clk_a, rst_a[POS]) {
             if_reset {
                 a = 0;
@@ -310,14 +310,14 @@ fn reset_check() {
 
     let code = r#"
     module ModuleG (
-        clk_a: input clock,
-        rst_a: input reset<2, 2>,
-        clk_b: input clock,
-        rst_b: input reset[2, 2]
+        clk_a: input '_a clock,
+        rst_a: input '_a reset<2, 2>,
+        clk_b: input '_b clock,
+        rst_b: input '_b reset[2, 2]
     ) {
         local POS: u32 = 0;
-        var a: logic;
-        var b: logic;
+        var a: '_a logic;
+        var b: '_b logic;
         always_ff (clk_a, rst_a[POS]) {
             if_reset {
                 a = 0;
@@ -336,14 +336,14 @@ fn reset_check() {
 
     let code = r#"
     module ModuleH (
-        clk_a: input clock,
-        rst_a: input reset<2, 2>,
-        clk_b: input clock,
-        rst_b: input reset[2, 2]
+        clk_a: input '_a clock,
+        rst_a: input '_a reset<2, 2>,
+        clk_b: input '_b clock,
+        rst_b: input '_b reset[2, 2]
     ) {
         local POS: u32 = 0;
-        var a: logic;
-        var b: logic;
+        var a: '_a logic;
+        var b: '_b logic;
         always_ff (clk_a, rst_a[POS][POS]) {
             if_reset {
                 a = 0;
@@ -1048,8 +1048,8 @@ fn missing_clock_signal() {
 
     let code = r#"
     module ModuleC (
-        clk_0: input clock,
-        clk_1: input clock
+        clk_0: input '_0 clock,
+        clk_1: input '_1 clock
     ){
         always_ff {}
     }
@@ -1246,6 +1246,23 @@ fn missing_tri() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::MissingTri { .. }));
+}
+
+#[test]
+fn missing_clock_domain() {
+    let code = r#"
+    module ModuleA (
+        clk0: input clock,
+        clk1: input clock,
+    ) {
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MissingClockDomain { .. }
+    ));
 }
 
 #[test]

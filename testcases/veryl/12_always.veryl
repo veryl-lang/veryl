@@ -19,14 +19,14 @@ module Module12_1 (
 }
 
 module Module12_2 (
-    i_clk   : input clock           ,
-    i_clk_p : input clock_posedge   ,
-    i_clk_n : input clock_negedge   ,
-    i_rst   : input reset           ,
-    i_rst_ah: input reset_async_high,
-    i_rst_al: input reset_async_low ,
-    i_rst_sh: input reset_sync_high ,
-    i_rst_sl: input reset_sync_low  ,
+    i_clk   : input '_ clock           ,
+    i_clk_p : input '_ clock_posedge   ,
+    i_clk_n : input '_ clock_negedge   ,
+    i_rst   : input '_ reset           ,
+    i_rst_ah: input '_ reset_async_high,
+    i_rst_al: input '_ reset_async_low ,
+    i_rst_sh: input '_ reset_sync_high ,
+    i_rst_sl: input '_ reset_sync_low  ,
 ) {
     var a : logic;
     var aa: logic;

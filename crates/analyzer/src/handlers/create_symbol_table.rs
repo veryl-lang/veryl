@@ -56,6 +56,7 @@ pub struct CreateSymbolTable<'a> {
     defualt_reset_candidates: Vec<SymbolId>,
     modport_member_ids: Vec<SymbolId>,
     function_ids: HashMap<StrId, SymbolId>,
+    exist_clock_without_domain: bool,
 }
 
 #[derive(Clone)]
@@ -254,6 +255,18 @@ impl<'a> CreateSymbolTable<'a> {
             _ => false,
         }
     }
+
+    fn check_missing_clock_domain(&mut self, token: &Token, r#type: &SymType) {
+        if r#type.kind.is_clock() {
+            if self.exist_clock_without_domain {
+                self.errors.push(AnalyzerError::missing_clock_domain(
+                    self.text,
+                    &token.into(),
+                ));
+            }
+            self.exist_clock_without_domain = true;
+        }
+    }
 }
 
 impl<'a> Handler for CreateSymbolTable<'a> {
@@ -350,6 +363,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             let clock_domain = if let Some(ref x) = arg.let_statement_opt {
                 self.insert_clock_domain(&x.clock_domain)
             } else if affiniation == VariableAffiniation::Module {
+                self.check_missing_clock_domain(&arg.identifier.identifier_token.token, &r#type);
                 SymClockDomain::Implicit
             } else {
                 SymClockDomain::None
@@ -412,6 +426,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             let clock_domain = if let Some(ref x) = arg.let_declaration_opt {
                 self.insert_clock_domain(&x.clock_domain)
             } else if affiniation == VariableAffiniation::Module {
+                self.check_missing_clock_domain(&arg.identifier.identifier_token.token, &r#type);
                 SymClockDomain::Implicit
             } else {
                 SymClockDomain::None
@@ -449,6 +464,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             let clock_domain = if let Some(ref x) = arg.var_declaration_opt {
                 self.insert_clock_domain(&x.clock_domain)
             } else if affiniation == VariableAffiniation::Module {
+                self.check_missing_clock_domain(&arg.identifier.identifier_token.token, &r#type);
                 SymClockDomain::Implicit
             } else {
                 SymClockDomain::None
@@ -815,6 +831,10 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     let clock_domain = if let Some(ref x) = x.port_type_concrete_opt {
                         self.insert_clock_domain(&x.clock_domain)
                     } else if affiniation == VariableAffiniation::Module {
+                        self.check_missing_clock_domain(
+                            &arg.identifier.identifier_token.token,
+                            &r#type,
+                        );
                         SymClockDomain::Implicit
                     } else {
                         SymClockDomain::None
@@ -924,6 +944,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 self.affiniation.push(VariableAffiniation::Module);
                 self.module_namspace_depth = self.namespace.depth();
                 self.function_ids.clear();
+                self.exist_clock_without_domain = false;
             }
             HandlerPoint::After => {
                 self.namespace.pop();
