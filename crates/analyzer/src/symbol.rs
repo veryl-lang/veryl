@@ -486,6 +486,26 @@ pub enum TypeKind {
     UserDefined(Vec<StrId>),
 }
 
+impl TypeKind {
+    pub fn is_clock(&self) -> bool {
+        matches!(
+            self,
+            TypeKind::Clock | TypeKind::ClockPosedge | TypeKind::ClockNegedge
+        )
+    }
+
+    pub fn is_reset(&self) -> bool {
+        matches!(
+            self,
+            TypeKind::Reset
+                | TypeKind::ResetAsyncHigh
+                | TypeKind::ResetAsyncLow
+                | TypeKind::ResetSyncHigh
+                | TypeKind::ResetSyncLow
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeModifier {
     Tri,

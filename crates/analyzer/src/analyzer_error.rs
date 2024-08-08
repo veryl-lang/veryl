@@ -530,6 +530,20 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(missing_clock_domain),
+        help("add clock domain annotation"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#missing_clock_domain")
+    )]
+    #[error("clock domain annotation is required when there are multiple clocks")]
+    MissingClockDomain {
+        #[source_code]
+        input: NamedSource<String>,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(sv_keyword_usage),
         help("Change the identifier to a non-SystemVerilog keyword"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#sv_keyword_usage")
@@ -1197,6 +1211,13 @@ impl AnalyzerError {
 
     pub fn missing_tri(source: &str, token: &TokenRange) -> Self {
         AnalyzerError::MissingTri {
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn missing_clock_domain(source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::MissingClockDomain {
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
         }
