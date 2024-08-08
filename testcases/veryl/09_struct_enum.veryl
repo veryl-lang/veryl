@@ -19,13 +19,15 @@ module Module09 {
         C_1,
     }
 
-    var a: A;
-    var b: B;
-    var c: C;
+    var a: A    ;
+    var b: B    ;
+    var c: C    ;
+    var d: logic;
 
     assign a.a   = 1;
     assign a.aa  = 1;
     assign a.aaa = 1;
     assign b     = B::X;
     assign c     = C::C_0;
+    assign d     = a.a;
 }

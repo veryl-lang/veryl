@@ -115,13 +115,11 @@ impl<'a> VerylGrammarTrait for CheckExpression<'a> {
                         | SymbolKind::ModportVariableMember(_)
                         | SymbolKind::SystemVerilog
                         | SymbolKind::GenericParameter(_)
+                        | SymbolKind::StructMember(_)
+                        | SymbolKind::UnionMember(_)
                         | SymbolKind::Variable(_) => {}
 
-                        SymbolKind::Enum(_)
-                        | SymbolKind::Union(_)
-                        | SymbolKind::Struct(_)
-                        | SymbolKind::StructMember(_)
-                        | SymbolKind::UnionMember(_) => {
+                        SymbolKind::Enum(_) | SymbolKind::Union(_) | SymbolKind::Struct(_) => {
                             if let Some(FunctionKind::System) = self.call_stack_kind.last() {
                             } else {
                                 self.errors.push(error);

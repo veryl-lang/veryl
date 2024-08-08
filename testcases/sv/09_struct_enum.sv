@@ -18,14 +18,16 @@ module veryl_testcase_Module09;
         FOO_C_1
     } C;
 
-    A a;
-    B b;
-    C c;
+    A     a;
+    B     b;
+    C     c;
+    logic d;
 
     always_comb a.a   = 1;
     always_comb a.aa  = 1;
     always_comb a.aaa = 1;
     always_comb b     = B_X;
     always_comb c     = FOO_C_0;
+    always_comb d     = a.a;
 endmodule
 //# sourceMappingURL=../map/testcases/sv/09_struct_enum.sv.map
