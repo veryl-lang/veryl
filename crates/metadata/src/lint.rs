@@ -19,6 +19,14 @@ pub struct LintNaming {
     #[serde(default)]
     pub case_function: Option<Case>,
     #[serde(default)]
+    pub case_function_inout: Option<Case>,
+    #[serde(default)]
+    pub case_function_input: Option<Case>,
+    #[serde(default)]
+    pub case_function_output: Option<Case>,
+    #[serde(default)]
+    pub case_function_ref: Option<Case>,
+    #[serde(default)]
     pub case_instance: Option<Case>,
     #[serde(default)]
     pub case_interface: Option<Case>,
@@ -54,6 +62,14 @@ pub struct LintNaming {
     pub prefix_enum: Option<String>,
     #[serde(default)]
     pub prefix_function: Option<String>,
+    #[serde(default)]
+    pub prefix_function_inout: Option<String>,
+    #[serde(default)]
+    pub prefix_function_input: Option<String>,
+    #[serde(default)]
+    pub prefix_function_output: Option<String>,
+    #[serde(default)]
+    pub prefix_function_ref: Option<String>,
     #[serde(default)]
     pub prefix_instance: Option<String>,
     #[serde(default)]
@@ -91,6 +107,14 @@ pub struct LintNaming {
     #[serde(default, with = "serde_regex")]
     pub re_forbidden_function: Option<Regex>,
     #[serde(default, with = "serde_regex")]
+    pub re_forbidden_function_inout: Option<Regex>,
+    #[serde(default, with = "serde_regex")]
+    pub re_forbidden_function_input: Option<Regex>,
+    #[serde(default, with = "serde_regex")]
+    pub re_forbidden_function_output: Option<Regex>,
+    #[serde(default, with = "serde_regex")]
+    pub re_forbidden_function_ref: Option<Regex>,
+    #[serde(default, with = "serde_regex")]
     pub re_forbidden_instance: Option<Regex>,
     #[serde(default, with = "serde_regex")]
     pub re_forbidden_interface: Option<Regex>,
@@ -126,6 +150,14 @@ pub struct LintNaming {
     pub re_required_enum: Option<Regex>,
     #[serde(default, with = "serde_regex")]
     pub re_required_function: Option<Regex>,
+    #[serde(default, with = "serde_regex")]
+    pub re_required_function_inout: Option<Regex>,
+    #[serde(default, with = "serde_regex")]
+    pub re_required_function_input: Option<Regex>,
+    #[serde(default, with = "serde_regex")]
+    pub re_required_function_output: Option<Regex>,
+    #[serde(default, with = "serde_regex")]
+    pub re_required_function_ref: Option<Regex>,
     #[serde(default, with = "serde_regex")]
     pub re_required_instance: Option<Regex>,
     #[serde(default, with = "serde_regex")]
