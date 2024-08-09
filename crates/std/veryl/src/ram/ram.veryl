@@ -1,0 +1,71 @@
+pub module ram #(
+    param WORD_SIZE    : u32 = 1,
+    param ADDRESS_WIDTH: u32 = if WORD_SIZE >= 2 {
+        $clog2(WORD_SIZE)
+    } else {
+        1
+    },
+    param DATA_WIDTH   : u32       = 8                                         ,
+    param DATA_TYPE    : type      = logic<DATA_WIDTH>                         ,
+    param BUFFER_OUT   : bit       = 0                                         ,
+    param USE_RESET    : bit       = 0                                         ,
+    param INITIAL_VALUE: DATA_TYPE = 0 as DATA_TYPE                            ,
+) (
+    i_clk : input  clock                   ,
+    i_rst : input  reset                   ,
+    i_clr : input  logic                   ,
+    i_mea : input  logic                   ,
+    i_wea : input  logic                   ,
+    i_adra: input  logic    <ADDRESS_WIDTH>,
+    i_da  : input  DATA_TYPE               ,
+    i_meb : input  logic                   ,
+    i_adrb: input  logic    <ADDRESS_WIDTH>,
+    o_qb  : output DATA_TYPE               ,
+) {
+    var ram_data: logic<$bits(DATA_TYPE)> [WORD_SIZE];
+    var q       : logic<$bits(DATA_TYPE)>            ;
+
+    if USE_RESET :g_ram {
+        always_ff {
+            if_reset {
+                ram_data = '{default: INITIAL_VALUE};
+            } else if i_clr {
+                ram_data = '{default: INITIAL_VALUE};
+            } else if i_mea && i_wea {
+                ram_data[i_adra] = i_da;
+            }
+        }
+    } else {
+        always_ff {
+            if i_mea && i_wea {
+                ram_data[i_adra] = i_da;
+            }
+        }
+    }
+
+    always_comb {
+        o_qb = q as DATA_TYPE;
+    }
+
+    if !BUFFER_OUT :g_out {
+        always_comb {
+            q = ram_data[i_adrb];
+        }
+    } else if USE_RESET {
+        always_ff {
+            if_reset {
+                q = INITIAL_VALUE;
+            } else if i_clr {
+                q = INITIAL_VALUE;
+            } else if i_meb {
+                q = ram_data[i_adrb];
+            }
+        }
+    } else {
+        always_ff {
+            if i_meb {
+                q = ram_data[i_adrb];
+            }
+        }
+    }
+}
