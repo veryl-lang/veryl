@@ -398,6 +398,9 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                                 }
                             }
                             SymbolKind::SystemVerilog => dir_unknown = true,
+                            // TODO this should be removed after implementing bounded generic
+                            // parameter
+                            SymbolKind::GenericParameter(_) => dir_unknown = true,
                             _ => (),
                         }
                     }

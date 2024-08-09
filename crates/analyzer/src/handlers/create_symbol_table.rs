@@ -341,7 +341,10 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
     }
 
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
+        // This should be `After` not `Before`.
+        // because namespace_table insertion of identifiers
+        // in the expression_identifier should be done until `arg.into()`.
+        if let HandlerPoint::After = self.point {
             self.connect_targets.push(arg.into());
         }
         Ok(())
