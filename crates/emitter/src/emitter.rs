@@ -307,21 +307,178 @@ impl Emitter {
         self.process_token(x, false, Some(i))
     }
 
+    fn case_inside_statement(&mut self, arg: &CaseStatement) {
+        self.case(&arg.case);
+        self.space(1);
+        self.str("(");
+        self.expression(&arg.expression);
+        self.token_will_push(&arg.l_brace.l_brace_token.replace(") inside"));
+        for (i, x) in arg.case_statement_list.iter().enumerate() {
+            self.newline_list(i);
+            self.case_inside_item(&x.case_item);
+        }
+        self.newline_list_post(arg.case_statement_list.is_empty());
+        self.token(&arg.r_brace.r_brace_token.replace("endcase"));
+    }
+
+    fn case_inside_item(&mut self, arg: &CaseItem) {
+        let start = self.dst_column;
+        match &*arg.case_item_group {
+            CaseItemGroup::CaseCondition(x) => {
+                self.range_item(&x.case_condition.range_item);
+                for x in &x.case_condition.case_condition_list {
+                    self.comma(&x.comma);
+                    self.space(1);
+                    self.range_item(&x.range_item);
+                }
+            }
+            CaseItemGroup::Defaul(x) => self.defaul(&x.defaul),
+        }
+        self.colon(&arg.colon);
+        self.space(1);
+        self.case_item_indent = Some((self.dst_column - start) as usize);
+        self.case_item_statement(&arg.case_item_group0);
+        self.case_item_indent = None;
+    }
+
+    fn case_expaneded_statement(&mut self, arg: &CaseStatement) {
+        self.case(&arg.case);
+        self.space(1);
+        self.str("(");
+        self.str("1'b1");
+        self.token_will_push(&arg.l_brace.l_brace_token.replace(")"));
+        for (i, x) in arg.case_statement_list.iter().enumerate() {
+            self.newline_list(i);
+            self.case_expanded_item(&arg.expression, &x.case_item);
+        }
+        self.newline_list_post(arg.case_statement_list.is_empty());
+        self.token(&arg.r_brace.r_brace_token.replace("endcase"));
+    }
+
+    fn case_expanded_item(&mut self, lhs: &Expression, item: &CaseItem) {
+        let start: u32 = self.dst_column;
+        match &*item.case_item_group {
+            CaseItemGroup::CaseCondition(x) => {
+                self.inside_element_opration(lhs, &x.case_condition.range_item);
+                for x in &x.case_condition.case_condition_list {
+                    self.comma(&x.comma);
+                    self.space(1);
+                    self.inside_element_opration(lhs, &x.range_item);
+                }
+            }
+            CaseItemGroup::Defaul(x) => self.defaul(&x.defaul),
+        }
+        self.colon(&item.colon);
+        self.space(1);
+        self.case_item_indent = Some((self.dst_column - start) as usize);
+        self.case_item_statement(&item.case_item_group0);
+        self.case_item_indent = None;
+    }
+
+    fn case_item_statement(&mut self, arg: &CaseItemGroup0) {
+        match arg {
+            CaseItemGroup0::Statement(x) => self.statement(&x.statement),
+            CaseItemGroup0::LBraceCaseItemGroup0ListRBrace(x) => {
+                self.token_will_push(&x.l_brace.l_brace_token.replace("begin"));
+                let mut base = 0;
+                for (i, x) in x
+                    .case_item_group0_list
+                    .iter()
+                    .filter(|x| is_let_statement(&x.statement))
+                    .enumerate()
+                {
+                    self.newline_list(i);
+                    base += self.statement_variable_declatation_only(&x.statement);
+                }
+                for (i, x) in x.case_item_group0_list.iter().enumerate() {
+                    self.newline_list(base + i);
+                    self.statement(&x.statement);
+                }
+                self.newline_list_post(x.case_item_group0_list.is_empty());
+                self.token(&x.r_brace.r_brace_token.replace("end"));
+            }
+        }
+    }
+
     fn case_expression_condition(&mut self, lhs: &Expression, rhs: &RangeItem) {
-        if rhs.range.range_opt.is_some() {
+        if rhs.range.range_opt.is_some() && !self.build_opt.expand_inside_operation {
             self.str("(");
             self.expression(lhs);
-            self.str(")");
-            self.space(1);
-            self.str("inside {");
+            self.str(") inside {");
             self.range(&rhs.range);
             self.str("}");
         } else {
+            self.inside_element_opration(lhs, rhs);
+        }
+    }
+
+    fn inside_normal_expression(&mut self, arg: &InsideExpression) {
+        self.str("((");
+        self.expression(&arg.expression);
+        self.str(")");
+        self.token(&arg.inside.inside_token.replace(" inside "));
+        self.l_brace(&arg.l_brace);
+        self.range_list(&arg.range_list);
+        self.r_brace(&arg.r_brace);
+        self.str(")");
+    }
+
+    fn inside_expanded_expression(&mut self, arg: &InsideExpression) {
+        self.str("(");
+        self.inside_element_opration(&arg.expression, &arg.range_list.range_item);
+        for x in &arg.range_list.range_list_list {
+            self.str(" || ");
+            self.inside_element_opration(&arg.expression, &x.range_item);
+        }
+        self.str(")");
+    }
+
+    fn outside_normal_expression(&mut self, arg: &OutsideExpression) {
+        self.str("!((");
+        self.expression(&arg.expression);
+        self.str(")");
+        self.token(&arg.outside.outside_token.replace(" inside "));
+        self.l_brace(&arg.l_brace);
+        self.range_list(&arg.range_list);
+        self.r_brace(&arg.r_brace);
+        self.str(")");
+    }
+
+    fn outside_expanded_expression(&mut self, arg: &OutsideExpression) {
+        self.str("!(");
+        self.inside_element_opration(&arg.expression, &arg.range_list.range_item);
+        for x in &arg.range_list.range_list_list {
+            self.str(" || ");
+            self.inside_element_opration(&arg.expression, &x.range_item);
+        }
+        self.str(")");
+    }
+
+    fn inside_element_opration(&mut self, lhs: &Expression, rhs: &RangeItem) {
+        if let Some(ref x) = rhs.range.range_opt {
+            let (op_l, op_r) = match &*x.range_operator {
+                RangeOperator::DotDot(_) => (">=", "<"),
+                RangeOperator::DotDotEqu(_) => (">=", "<="),
+            };
+            self.str("((");
             self.expression(lhs);
-            self.space(1);
-            self.str("==?");
-            self.space(1);
-            self.range(&rhs.range);
+            self.str(") ");
+            self.str(op_l);
+            self.str(" (");
+            self.expression(&rhs.range.expression);
+            self.str(")) && ((");
+            self.expression(lhs);
+            self.str(") ");
+            self.str(op_r);
+            self.str(" (");
+            self.expression(&x.expression);
+            self.str("))");
+        } else {
+            self.str("(");
+            self.expression(lhs);
+            self.str(") ==? (");
+            self.expression(&rhs.range.expression);
+            self.str(")");
         }
     }
 
@@ -1168,30 +1325,20 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'InsideExpression'
     fn inside_expression(&mut self, arg: &InsideExpression) {
-        self.str("((");
-        self.expression(&arg.expression);
-        self.str(")");
-        self.space(1);
-        self.inside(&arg.inside);
-        self.space(1);
-        self.l_brace(&arg.l_brace);
-        self.range_list(&arg.range_list);
-        self.r_brace(&arg.r_brace);
-        self.str(")");
+        if self.build_opt.expand_inside_operation {
+            self.inside_expanded_expression(arg);
+        } else {
+            self.inside_normal_expression(arg);
+        }
     }
 
     /// Semantic action for non-terminal 'OutsideExpression'
     fn outside_expression(&mut self, arg: &OutsideExpression) {
-        self.str("!((");
-        self.expression(&arg.expression);
-        self.str(")");
-        self.space(1);
-        self.token(&arg.outside.outside_token.replace("inside"));
-        self.space(1);
-        self.l_brace(&arg.l_brace);
-        self.range_list(&arg.range_list);
-        self.r_brace(&arg.r_brace);
-        self.str(")");
+        if self.build_opt.expand_inside_operation {
+            self.outside_expanded_expression(arg);
+        } else {
+            self.outside_normal_expression(arg);
+        }
     }
 
     /// Semantic action for non-terminal 'RangeList'
@@ -1635,59 +1782,11 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'CaseStatement'
     fn case_statement(&mut self, arg: &CaseStatement) {
-        self.case(&arg.case);
-        self.space(1);
-        self.str("(");
-        self.expression(&arg.expression);
-        self.token_will_push(&arg.l_brace.l_brace_token.replace(") inside"));
-        for (i, x) in arg.case_statement_list.iter().enumerate() {
-            self.newline_list(i);
-            self.case_item(&x.case_item);
+        if self.build_opt.expand_inside_operation {
+            self.case_expaneded_statement(arg);
+        } else {
+            self.case_inside_statement(arg);
         }
-        self.newline_list_post(arg.case_statement_list.is_empty());
-        self.token(&arg.r_brace.r_brace_token.replace("endcase"));
-    }
-
-    /// Semantic action for non-terminal 'CaseItem'
-    fn case_item(&mut self, arg: &CaseItem) {
-        let start = self.dst_column;
-        match &*arg.case_item_group {
-            CaseItemGroup::CaseCondition(x) => {
-                self.range_item(&x.case_condition.range_item);
-                for x in &x.case_condition.case_condition_list {
-                    self.comma(&x.comma);
-                    self.space(1);
-                    self.range_item(&x.range_item);
-                }
-            }
-            CaseItemGroup::Defaul(x) => self.defaul(&x.defaul),
-        }
-        self.colon(&arg.colon);
-        self.space(1);
-        self.case_item_indent = Some((self.dst_column - start) as usize);
-        match &*arg.case_item_group0 {
-            CaseItemGroup0::Statement(x) => self.statement(&x.statement),
-            CaseItemGroup0::LBraceCaseItemGroup0ListRBrace(x) => {
-                self.token_will_push(&x.l_brace.l_brace_token.replace("begin"));
-                let mut base = 0;
-                for (i, x) in x
-                    .case_item_group0_list
-                    .iter()
-                    .filter(|x| is_let_statement(&x.statement))
-                    .enumerate()
-                {
-                    self.newline_list(i);
-                    base += self.statement_variable_declatation_only(&x.statement);
-                }
-                for (i, x) in x.case_item_group0_list.iter().enumerate() {
-                    self.newline_list(base + i);
-                    self.statement(&x.statement);
-                }
-                self.newline_list_post(x.case_item_group0_list.is_empty());
-                self.token(&x.r_brace.r_brace_token.replace("end"));
-            }
-        }
-        self.case_item_indent = None;
     }
 
     /// Semantic action for non-terminal 'SwitchStatement'

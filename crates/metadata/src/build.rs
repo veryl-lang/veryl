@@ -28,6 +28,8 @@ pub struct Build {
     pub strip_comments: bool,
     #[serde(default)]
     pub sourcemap_target: SourceMapTarget,
+    #[serde(default)]
+    pub expand_inside_operation: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
