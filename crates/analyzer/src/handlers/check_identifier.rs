@@ -87,6 +87,31 @@ impl<'a> CheckIdentifier<'a> {
             Kind::Wire => &opt.prefix_wire,
         };
 
+        let suffix = match kind {
+            Kind::ClockDomain => &opt.suffix_clock_domain,
+            Kind::Enum => &opt.suffix_enum,
+            Kind::Function => &opt.suffix_function,
+            Kind::FunctionInout => &opt.suffix_function_inout,
+            Kind::FunctionInput => &opt.suffix_function_input,
+            Kind::FunctionOutput => &opt.suffix_function_output,
+            Kind::FunctionRef => &opt.suffix_function_ref,
+            Kind::Instance => &opt.suffix_instance,
+            Kind::Interface => &opt.suffix_interface,
+            Kind::Modport => &opt.suffix_modport,
+            Kind::Module => &opt.suffix_module,
+            Kind::Package => &opt.suffix_package,
+            Kind::Parameter => &opt.suffix_parameter,
+            Kind::PortInout => &opt.suffix_port_inout,
+            Kind::PortInput => &opt.suffix_port_input,
+            Kind::PortModport => &opt.suffix_port_modport,
+            Kind::PortOutput => &opt.suffix_port_output,
+            Kind::Reg => &opt.suffix_reg,
+            Kind::Struct => &opt.suffix_struct,
+            Kind::Union => &opt.suffix_union,
+            Kind::Var => &opt.suffix_var,
+            Kind::Wire => &opt.suffix_wire,
+        };
+
         let case = match kind {
             Kind::ClockDomain => &opt.case_clock_domain,
             Kind::Enum => &opt.case_enum,
@@ -195,6 +220,16 @@ impl<'a> CheckIdentifier<'a> {
                 self.errors.push(AnalyzerError::invalid_identifier(
                     &identifier,
                     &format!("prefix: {prefix}"),
+                    self.text,
+                    &token.into(),
+                ));
+            }
+        }
+        if let Some(suffix) = suffix {
+            if !identifier.ends_with(suffix) {
+                self.errors.push(AnalyzerError::invalid_identifier(
+                    &identifier,
+                    &format!("suffix: {suffix}"),
                     self.text,
                     &token.into(),
                 ));
