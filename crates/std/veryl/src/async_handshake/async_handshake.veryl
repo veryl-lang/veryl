@@ -1,0 +1,179 @@
+pub module async_handshake::<S> #(
+    param WIDTH              : u32  = 8           ,
+    param TYPE               : type = logic<WIDTH>,
+    param STAGES             : u32               = 2           ,
+    param INITIALIZE_DATA_OUT: bit               = 1           ,
+    param INITIAL_DATA_OUT   : bit <$bits(TYPE)> = '0          ,
+    param MERGE_RESET        : bit               = '0          ,
+    param RESET_SYNC_STAGES  : u32               = 2           ,
+) (
+    is_clk  : input  's clock,
+    is_rst  : input  's reset,
+    is_valid: input  's logic,
+    os_ready: output 's logic,
+    is_data : input  's TYPE ,
+    id_clk  : input  'd clock,
+    id_rst  : input  'd reset,
+    od_valid: output 'd logic,
+    id_ready: input  'd logic,
+    od_data : output 'd TYPE ,
+) {
+    var srst        : 's reset;
+    var src_state_s : 's logic;
+    var src_state_d : 'd logic;
+    var drst        : 'd reset;
+    var dst_state_s : 's logic;
+    var dst_state_d : 'd logic;
+    var latched_data: 's TYPE ;
+
+    //--------------------------------------------------------------
+    //  Reset
+    //--------------------------------------------------------------
+    inst u_reset_sync: async_fifo_reset_sync::<S> #(
+        MERGE_RESET      : MERGE_RESET      ,
+        RESET_SYNC_STAGES: RESET_SYNC_STAGES,
+    ) (
+        is_clk      ,
+        is_rst      ,
+        os_rst: srst,
+        id_clk      ,
+        id_rst      ,
+        od_rst: drst,
+    );
+
+    //--------------------------------------------------------------
+    //  Source Side
+    //--------------------------------------------------------------
+    :g_src_side {
+        var ready            : 's logic;
+        var state            : 's logic;
+        var dst_state_changed: 's logic;
+
+        assign os_ready = ready;
+        always_ff (is_clk, srst) {
+            if_reset {
+                ready = '1;
+            } else if (!ready) && dst_state_changed {
+                ready = '1;
+            } else if (is_valid) {
+                ready = '0;
+            }
+        }
+
+        always_ff (is_clk) {
+            if is_valid && ready {
+                latched_data = is_data;
+            }
+        }
+
+        assign src_state_s = state;
+        always_ff (is_clk, srst) {
+            if_reset {
+                state = '0;
+            } else if is_valid && ready {
+                state = ~state;
+            }
+        }
+
+        inst u_edge_detector: edge_detector #(
+            WIDTH        : 1 ,
+            INITIAL_VALUE: '0,
+        ) (
+            i_clk    : is_clk           ,
+            i_rst    : srst             ,
+            i_clear  : '0               ,
+            i_data   : dst_state_s      ,
+            o_edge   : dst_state_changed,
+            o_posedge: _                ,
+            o_negedge: _                ,
+        );
+    }
+
+    //--------------------------------------------------------------
+    //  Synchronizers
+    //--------------------------------------------------------------
+    inst u_s_to_d: S #(
+        WIDTH : 1     ,
+        STAGES: STAGES,
+    ) (
+        i_clk: id_clk     ,
+        i_rst: drst       ,
+        i_d  : src_state_s,
+        o_d  : src_state_d,
+    );
+
+    inst u_d_to_s: S #(
+        WIDTH : 1     ,
+        STAGES: STAGES,
+    ) (
+        i_clk: is_clk     ,
+        i_rst: srst       ,
+        i_d  : dst_state_d,
+        o_d  : dst_state_s,
+    );
+
+    //--------------------------------------------------------------
+    //  Destination Side
+    //--------------------------------------------------------------
+    :g_dst_side {
+        var valid            : 'd logic;
+        var data             : 'd TYPE ;
+        var state            : 'd logic;
+        var src_state_changed: 'd logic;
+
+        assign od_valid = valid;
+        always_ff (id_clk, drst) {
+            if_reset {
+                valid = '0;
+            } else if valid && id_ready {
+                valid = '0;
+            } else if (!valid) && src_state_changed {
+                valid = '1;
+            }
+        }
+
+        assign od_data = data;
+
+        // latched_data can caputure by id_clk safely
+        // because it is stable
+        unsafe (cdc) {
+            if INITIALIZE_DATA_OUT :g {
+                always_ff (id_clk, drst) {
+                    if_reset {
+                        data = INITIAL_DATA_OUT as TYPE;
+                    } else if (!valid) && src_state_changed {
+                        data = latched_data;
+                    }
+                }
+            } else {
+                always_ff (id_clk) {
+                    if (!valid) && src_state_changed {
+                        data = latched_data;
+                    }
+                }
+            }
+        }
+
+        assign dst_state_d = state;
+        always_ff (id_clk, drst) {
+            if_reset {
+                state = '0;
+            } else if valid && id_ready {
+                state = ~state;
+            }
+        }
+
+        inst u_edge_detector: edge_detector #(
+            WIDTH        : 1 ,
+            INITIAL_VALUE: '0,
+        ) (
+            i_clk    : id_clk           ,
+            i_rst    : drst             ,
+            i_clear  : '0               ,
+            i_data   : src_state_d      ,
+            o_edge   : src_state_changed,
+            o_posedge: _                ,
+            o_negedge: _                ,
+        );
+    }
+}
