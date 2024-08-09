@@ -226,6 +226,19 @@ impl GenericSymbol {
         if self.arguments.is_empty() {
             self.base()
         } else {
+            // If arguments have unresolved generic parameter, return base path
+            for arg in &self.arguments {
+                if !arg.is_resolvable() {
+                    continue;
+                }
+                let head = &arg.paths[0];
+                if let Ok(symbol) = symbol_table::resolve(&head.base) {
+                    if matches!(symbol.found.kind, SymbolKind::GenericParameter(_)) {
+                        return self.base();
+                    }
+                }
+            }
+
             let mut text = format!("__{}", self.base);
             for a in &self.arguments {
                 text.push('_');
