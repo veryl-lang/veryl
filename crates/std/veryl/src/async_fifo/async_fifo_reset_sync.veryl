@@ -1,0 +1,48 @@
+module async_fifo_reset_sync::<S> #(
+    param MERGE_RESET      : bit = '0,
+    param RESET_SYNC_STAGES: u32 = 2 ,
+) (
+    is_clk: input  's clock,
+    is_rst: input  's reset,
+    os_rst: output 's reset,
+    id_clk: input  'd clock,
+    id_rst: input  'd reset,
+    od_rst: output 'd reset,
+) {
+    if MERGE_RESET :g_reset {
+        var s_rst: 's logic;
+        var d_rst: 'd logic;
+
+        unsafe (cdc) {
+            always_comb {
+                s_rst = is_rst & id_rst;
+                d_rst = is_rst & id_rst;
+            }
+        }
+
+        inst u_srst_sync: S #(
+            WIDTH : 1                ,
+            STAGES: RESET_SYNC_STAGES,
+        ) (
+            i_clk: is_clk,
+            i_rst: s_rst ,
+            i_d  : '1    ,
+            o_d  : os_rst,
+        );
+
+        inst u_drst_sync: S #(
+            WIDTH : 1                ,
+            STAGES: RESET_SYNC_STAGES,
+        ) (
+            i_clk: id_clk,
+            i_rst: d_rst ,
+            i_d  : '1    ,
+            o_d  : od_rst,
+        );
+    } else {
+        always_comb {
+            os_rst = is_rst;
+            od_rst = id_rst;
+        }
+    }
+}

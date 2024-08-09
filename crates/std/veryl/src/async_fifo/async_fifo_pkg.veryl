@@ -1,0 +1,7 @@
+package async_fifo_pkg {
+    function calc_default_depth (
+        stages: input u32,
+    ) -> u32 {
+        return 2 ** ($clog2(2 * stages) + 1);
+    }
+}

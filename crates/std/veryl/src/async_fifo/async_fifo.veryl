@@ -1,0 +1,257 @@
+import async_fifo_pkg::calc_default_depth;
+
+pub module async_fifo::<S> #(
+    param WIDTH             : u32  = 8                         ,
+    param TYPE              : type = logic<WIDTH>              ,
+    param STAGES            : u32  = 2                         ,
+    param DEPTH             : u32  = calc_default_depth(STAGES),
+    param THRESHOLD         : u32  = DEPTH                     ,
+    param USE_OUT_DATA_RESET: bit  = '0                        ,
+    param INITIAL_OUT_DATA  : TYPE = 0 as TYPE                 ,
+    param MERGE_RESET       : bit  = '0                        ,
+    param RESET_SYNC_STAGES : u32  = 2                         ,
+) (
+    is_clk        : input  's clock,
+    is_rst        : input  's reset,
+    os_almost_full: output 's logic,
+    os_full       : output 's logic,
+    is_push       : input  's logic,
+    is_data       : input  's TYPE ,
+    id_clk        : input  'd clock,
+    id_rst        : input  'd reset,
+    od_empty      : output 'd logic,
+    id_pop        : input  'd logic,
+    od_data       : output 'd TYPE ,
+) {
+    local POINTER_WIDTH: u32 = $clog2(DEPTH) + 1;
+
+    var srst           : 's reset               ;
+    var wp_sclk        : 's logic<POINTER_WIDTH>;
+    var wp_sclk_next   : 's logic<POINTER_WIDTH>;
+    var wp_sclk_gray   : 's logic<POINTER_WIDTH>;
+    var wp_sclk_gray_ff: 's logic<POINTER_WIDTH>;
+    var rp_sclk        : 's logic<POINTER_WIDTH>;
+    var rp_sclk_gray   : 's logic<POINTER_WIDTH>;
+    var drst           : 'd reset               ;
+    var wp_dclk        : 'd logic<POINTER_WIDTH>;
+    var wp_dclk_gray   : 'd logic<POINTER_WIDTH>;
+    var rp_dclk        : 'd logic<POINTER_WIDTH>;
+    var rp_dclk_next   : 'd logic<POINTER_WIDTH>;
+    var rp_dclk_gray   : 'd logic<POINTER_WIDTH>;
+    var rp_dclk_gray_ff: 'd logic<POINTER_WIDTH>;
+
+    //--------------------------------------------------------------
+    //  Reset
+    //--------------------------------------------------------------
+    inst u_reset_sync: async_fifo_reset_sync::<S> #(
+        MERGE_RESET        ,
+        RESET_SYNC_STAGES  ,
+    ) (
+        is_clk      ,
+        is_rst      ,
+        os_rst: srst,
+        id_clk      ,
+        id_rst      ,
+        od_rst: drst,
+    );
+
+    //--------------------------------------------------------------
+    //  FIFO Control (Write Side)
+    //--------------------------------------------------------------
+    var word_count : 's logic<POINTER_WIDTH>;
+    var almost_full: 's logic               ;
+    var full       : 's logic               ;
+    var push       : 's logic               ;
+
+    always_comb {
+        os_almost_full = almost_full;
+        os_full        = full;
+    }
+
+    always_comb {
+        push = if !full {
+            is_push
+        } else {
+            '0
+        };
+    }
+
+    always_comb {
+        word_count = wp_sclk_next - rp_sclk;
+    }
+
+    always_ff (is_clk, srst) {
+        if_reset {
+            almost_full = '0;
+            full        = '0;
+        } else {
+            almost_full = (word_count >= THRESHOLD as POINTER_WIDTH);
+            full        = word_count[POINTER_WIDTH - 1];
+        }
+    }
+
+    always_comb {
+        if (push) {
+            wp_sclk_next = wp_sclk + 1 as POINTER_WIDTH;
+        } else {
+            wp_sclk_next = wp_sclk;
+        }
+    }
+
+    always_ff (is_clk, srst) {
+        if_reset {
+            wp_sclk = 0 as POINTER_WIDTH;
+        } else {
+            wp_sclk = wp_sclk_next;
+        }
+    }
+
+    always_ff (is_clk, srst) {
+        if_reset {
+            wp_sclk_gray_ff = 0 as POINTER_WIDTH;
+        } else {
+            wp_sclk_gray_ff = wp_sclk_gray;
+        }
+    }
+
+    inst u_s_bin2gray: bin2gray #(
+        WIDTH: POINTER_WIDTH,
+    ) (
+        i_bin : wp_sclk     ,
+        o_gray: wp_sclk_gray,
+    );
+
+    inst u_s_gray2bin: gray2bin #(
+        WIDTH: POINTER_WIDTH,
+    ) (
+        i_gray: rp_sclk_gray,
+        o_bin : rp_sclk     ,
+    );
+
+    //--------------------------------------------------------------
+    //  FIFO Control (Read Side)
+    //--------------------------------------------------------------
+    var empty     : 'd logic;
+    var empty_next: 'd logic;
+    var pop       : 'd logic;
+
+    always_comb {
+        od_empty = empty;
+    }
+
+    always_comb {
+        if pop {
+            empty_next = wp_dclk == rp_dclk_next;
+        } else {
+            empty_next = wp_dclk == rp_dclk;
+        }
+    }
+
+    always_ff (id_clk, drst) {
+        if_reset {
+            empty = '1;
+        } else {
+            empty = empty_next;
+        }
+    }
+
+    always_comb {
+        pop = if !empty {
+            id_pop
+        } else {
+            '0
+        };
+    }
+
+    always_ff (id_clk, drst) {
+        if_reset {
+            rp_dclk      = 0 as POINTER_WIDTH;
+            rp_dclk_next = 1 as POINTER_WIDTH;
+        } else if pop {
+            rp_dclk      =  rp_dclk_next;
+            rp_dclk_next += 1 as POINTER_WIDTH;
+        }
+    }
+
+    always_ff (id_clk, drst) {
+        if_reset {
+            rp_dclk_gray_ff = 0 as POINTER_WIDTH;
+        } else {
+            rp_dclk_gray_ff = rp_dclk_gray;
+        }
+    }
+
+    inst u_d_bin2gray: bin2gray #(
+        WIDTH: POINTER_WIDTH,
+    ) (
+        i_bin : rp_dclk     ,
+        o_gray: rp_dclk_gray,
+    );
+
+    inst u_d_gray2bin: gray2bin #(
+        WIDTH: POINTER_WIDTH,
+    ) (
+        i_gray: wp_dclk_gray,
+        o_bin : wp_dclk     ,
+    );
+
+    //--------------------------------------------------------------
+    //  Synchronizer
+    //--------------------------------------------------------------
+    inst u_synchronizer_wp: S #(
+        WIDTH : POINTER_WIDTH,
+        STAGES: STAGES       ,
+    ) (
+        i_clk: id_clk         ,
+        i_rst: drst           ,
+        i_d  : wp_sclk_gray_ff,
+        o_d  : wp_dclk_gray   ,
+    );
+
+    inst u_synchronizer_rp: S #(
+        WIDTH : POINTER_WIDTH,
+        STAGES: STAGES       ,
+    ) (
+        i_clk: is_clk      ,
+        i_rst: srst        ,
+        i_d  : rp_dclk_gray,
+        o_d  : rp_sclk_gray,
+    );
+
+    var ram: 's logic<$bits(TYPE)> [DEPTH];
+    var q  : 'd logic<$bits(TYPE)>        ;
+
+    always_ff (is_clk) {
+        if push {
+            ram[wp_sclk[POINTER_WIDTH - 2:0]] = is_data;
+        }
+    }
+
+    // ram access from 'd domain is safe
+    // because read_pointer points stable data
+    unsafe (cdc) {
+        if USE_OUT_DATA_RESET :g_q {
+            always_ff (id_clk, drst) {
+                if_reset {
+                    q = INITIAL_OUT_DATA;
+                } else if empty && (!empty_next) {
+                    q = ram[rp_dclk[POINTER_WIDTH - 2:0]];
+                } else if pop && (!empty_next) {
+                    q = ram[rp_dclk_next[POINTER_WIDTH - 2:0]];
+                }
+            }
+        } else {
+            always_ff (id_clk) {
+                if empty && (!empty_next) {
+                    q = ram[rp_dclk[POINTER_WIDTH - 2:0]];
+                } else if pop && (!empty_next) {
+                    q = ram[rp_dclk_next[POINTER_WIDTH - 2:0]];
+                }
+            }
+        }
+    }
+
+    always_comb {
+        od_data = q as TYPE;
+    }
+}
