@@ -100,6 +100,50 @@ pub struct LintNaming {
     pub prefix_var: Option<String>,
     #[serde(default)]
     pub prefix_wire: Option<String>,
+    #[serde(default)]
+    pub suffix_clock_domain: Option<String>,
+    #[serde(default)]
+    pub suffix_enum: Option<String>,
+    #[serde(default)]
+    pub suffix_function: Option<String>,
+    #[serde(default)]
+    pub suffix_function_inout: Option<String>,
+    #[serde(default)]
+    pub suffix_function_input: Option<String>,
+    #[serde(default)]
+    pub suffix_function_output: Option<String>,
+    #[serde(default)]
+    pub suffix_function_ref: Option<String>,
+    #[serde(default)]
+    pub suffix_instance: Option<String>,
+    #[serde(default)]
+    pub suffix_interface: Option<String>,
+    #[serde(default)]
+    pub suffix_modport: Option<String>,
+    #[serde(default)]
+    pub suffix_module: Option<String>,
+    #[serde(default)]
+    pub suffix_package: Option<String>,
+    #[serde(default)]
+    pub suffix_parameter: Option<String>,
+    #[serde(default)]
+    pub suffix_port_inout: Option<String>,
+    #[serde(default)]
+    pub suffix_port_input: Option<String>,
+    #[serde(default)]
+    pub suffix_port_modport: Option<String>,
+    #[serde(default)]
+    pub suffix_port_output: Option<String>,
+    #[serde(default)]
+    pub suffix_reg: Option<String>,
+    #[serde(default)]
+    pub suffix_struct: Option<String>,
+    #[serde(default)]
+    pub suffix_union: Option<String>,
+    #[serde(default)]
+    pub suffix_var: Option<String>,
+    #[serde(default)]
+    pub suffix_wire: Option<String>,
     #[serde(default, with = "serde_regex")]
     pub re_forbidden_clock_domain: Option<Regex>,
     #[serde(default, with = "serde_regex")]
