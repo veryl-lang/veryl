@@ -1,10 +1,6 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::symbol::Direction as SymDirection;
 use crate::symbol_table::is_sv_keyword;
-use inflector::cases::{
-    camelcase::is_camel_case, pascalcase::is_pascal_case,
-    screamingsnakecase::is_screaming_snake_case, snakecase::is_snake_case,
-};
 use veryl_metadata::{Case, Lint};
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::Token;
@@ -239,8 +235,8 @@ impl<'a> CheckIdentifier<'a> {
             let pass = match case {
                 Case::Snake => is_snake_case(&identifier),
                 Case::ScreamingSnake => is_screaming_snake_case(&identifier),
-                Case::UpperCamel => is_pascal_case(&identifier),
-                Case::LowerCamel => is_camel_case(&identifier),
+                Case::UpperCamel => is_upper_camel_case(&identifier),
+                Case::LowerCamel => is_lower_camel_case(&identifier),
             };
             if !pass {
                 self.errors.push(AnalyzerError::invalid_identifier(
@@ -449,5 +445,76 @@ impl<'a> VerylGrammarTrait for CheckIdentifier<'a> {
             self.check(&arg.identifier.identifier_token.token, Kind::Var)
         }
         Ok(())
+    }
+}
+
+fn is_lower_camel_case(text: &str) -> bool {
+    let head = text.chars().next().unwrap();
+    !text.contains('_') && head.is_ascii_lowercase()
+}
+
+fn is_upper_camel_case(text: &str) -> bool {
+    let head = text.chars().next().unwrap();
+    !text.contains('_') && head.is_ascii_uppercase()
+}
+
+fn is_snake_case(text: &str) -> bool {
+    text.to_ascii_lowercase() == text
+}
+
+fn is_screaming_snake_case(text: &str) -> bool {
+    text.to_ascii_uppercase() == text
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lower_camel_case() {
+        assert_eq!(is_lower_camel_case("abc"), true);
+        assert_eq!(is_lower_camel_case("aBc"), true);
+        assert_eq!(is_lower_camel_case("AbC"), false);
+        assert_eq!(is_lower_camel_case("ABc"), false);
+        assert_eq!(is_lower_camel_case("ABC"), false);
+        assert_eq!(is_lower_camel_case("a_b_c"), false);
+        assert_eq!(is_lower_camel_case("a_B_c"), false);
+        assert_eq!(is_lower_camel_case("A_B_C"), false);
+    }
+
+    #[test]
+    fn upper_camel_case() {
+        assert_eq!(is_upper_camel_case("abc"), false);
+        assert_eq!(is_upper_camel_case("aBc"), false);
+        assert_eq!(is_upper_camel_case("AbC"), true);
+        assert_eq!(is_upper_camel_case("ABc"), true);
+        assert_eq!(is_upper_camel_case("ABC"), true);
+        assert_eq!(is_upper_camel_case("a_b_c"), false);
+        assert_eq!(is_upper_camel_case("a_B_c"), false);
+        assert_eq!(is_upper_camel_case("A_B_C"), false);
+    }
+
+    #[test]
+    fn snake_case() {
+        assert_eq!(is_snake_case("abc"), true);
+        assert_eq!(is_snake_case("aBc"), false);
+        assert_eq!(is_snake_case("AbC"), false);
+        assert_eq!(is_snake_case("ABc"), false);
+        assert_eq!(is_snake_case("ABC"), false);
+        assert_eq!(is_snake_case("a_b_c"), true);
+        assert_eq!(is_snake_case("a_B_c"), false);
+        assert_eq!(is_snake_case("A_B_C"), false);
+    }
+
+    #[test]
+    fn screaming_snake_case() {
+        assert_eq!(is_screaming_snake_case("abc"), false);
+        assert_eq!(is_screaming_snake_case("aBc"), false);
+        assert_eq!(is_screaming_snake_case("AbC"), false);
+        assert_eq!(is_screaming_snake_case("ABc"), false);
+        assert_eq!(is_screaming_snake_case("ABC"), true);
+        assert_eq!(is_screaming_snake_case("a_b_c"), false);
+        assert_eq!(is_screaming_snake_case("a_B_c"), false);
+        assert_eq!(is_screaming_snake_case("A_B_C"), true);
     }
 }
