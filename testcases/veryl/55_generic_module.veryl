@@ -24,3 +24,7 @@ module Module55E::<T> {
 module Module55F::<T = Module55B> {
     inst u: T;
 }
+
+module Module55G::<T> {
+    inst u: T;
+}

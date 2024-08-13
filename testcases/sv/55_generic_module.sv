@@ -39,4 +39,5 @@ endmodule
 module veryl_testcase___Module55F__Module55B;
     veryl_testcase_Module55B u ();
 endmodule
+
 //# sourceMappingURL=../map/testcases/sv/55_generic_module.sv.map

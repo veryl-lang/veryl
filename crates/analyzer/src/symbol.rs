@@ -162,7 +162,7 @@ impl Symbol {
         }
 
         // empty map for non-generic
-        if ret.is_empty() {
+        if ret.is_empty() && !self.kind.is_generic() {
             ret.push(GenericMap::default());
         }
         ret
@@ -305,6 +305,18 @@ impl SymbolKind {
             SymbolKind::GenericParameter(_) => "generic parameter".to_string(),
             SymbolKind::GenericInstance(_) => "generic instance".to_string(),
             SymbolKind::ClockDomain => "clock domain".to_string(),
+        }
+    }
+
+    pub fn is_generic(&self) -> bool {
+        match self {
+            SymbolKind::Module(x) => !x.generic_parameters.is_empty(),
+            SymbolKind::Interface(x) => !x.generic_parameters.is_empty(),
+            SymbolKind::Function(x) => !x.generic_parameters.is_empty(),
+            SymbolKind::Package(x) => !x.generic_parameters.is_empty(),
+            SymbolKind::Struct(x) => !x.generic_parameters.is_empty(),
+            SymbolKind::Union(x) => !x.generic_parameters.is_empty(),
+            _ => false,
         }
     }
 }
