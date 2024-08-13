@@ -220,3 +220,159 @@ endinterface
 
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn expand_case_statement() {
+    let code = r#"module ModuleA {
+    local y: bit = 1;
+
+    var a: logic;
+    let x: logic = 1;
+
+    always_comb {
+        case x {
+            0: a = 1;
+            1: a = 1;
+            2: {
+                   a = 1;
+                   a = 1;
+                   a = 1;
+               }
+            3, 4   : a = 1;
+            5..=7  : a = 1;
+            y - 1  : a = 1;
+            default: a = 1;
+        }
+    }
+}
+"#;
+
+    let expect = r#"module ModuleA;
+    localparam bit y = 1;
+
+    logic a;
+    logic x;
+    always_comb x = 1;
+
+    always_comb begin
+        case (1'b1)
+            (x) ==? (0): a = 1;
+            (x) ==? (1): a = 1;
+            (x) ==? (2): begin
+                             a = 1;
+                             a = 1;
+                             a = 1;
+                         end
+            (x) ==? (3), (x) ==? (4   ): a = 1;
+            ((x) >= (5)) && ((x) <= (7  )): a = 1;
+            (x) ==? (y - 1  ): a = 1;
+            default: a = 1;
+        endcase
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let mut metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+
+    metadata.build.omit_project_prefix = true;
+    metadata.build.expand_inside_operation = true;
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn expand_inside_operator() {
+    let code = r#"module ModuleA {
+    var a: logic;
+    var b: logic;
+
+    assign a = inside 1 + 2 / 3 {0, 0..10, 1..=10};
+    assign b = outside 1 * 2 - 1 {0, 0..10, 1..=10};
+    }
+"#;
+
+    let expect = r#"module ModuleA;
+    logic a;
+    logic b;
+
+    always_comb a = ((1 + 2 / 3) ==? (0) || ((1 + 2 / 3) >= (0)) && ((1 + 2 / 3) < (10)) || ((1 + 2 / 3) >= (1)) && ((1 + 2 / 3) <= (10)));
+    always_comb b = !((1 * 2 - 1) ==? (0) || ((1 * 2 - 1) >= (0)) && ((1 * 2 - 1) < (10)) || ((1 * 2 - 1) >= (1)) && ((1 * 2 - 1) <= (10)));
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let mut metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+
+    metadata.build.omit_project_prefix = true;
+    metadata.build.expand_inside_operation = true;
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn expand_case_expression() {
+    let code = r#"module ModuleA {
+    let a: logic = 1;
+    var b: logic;
+
+    assign b = case a {
+        1      : 0,
+        2      : 1,
+        3, 4   : 2,
+        5..=7  : 3,
+        default: 4,
+    };
+}
+"#;
+
+    let expect = r#"module ModuleA;
+    logic a;
+    always_comb a = 1;
+    logic b;
+
+    always_comb b = (((a) ==? (1)) ? (
+        0
+    ) : ((a) ==? (2)) ? (
+        1
+    ) : ((a) ==? (3)) ? (
+        2
+    ) : ((a) ==? (4)) ? (
+        2
+    ) : (((a) >= (5)) && ((a) <= (7))) ? (
+        3
+    ) : (
+        4
+    ));
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let mut metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+
+    metadata.build.omit_project_prefix = true;
+    metadata.build.expand_inside_operation = true;
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    assert_eq!(ret, expect);
+}
