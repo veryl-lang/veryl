@@ -7,6 +7,7 @@ use crate::lockfile::Lockfile;
 use crate::project::Project;
 use crate::pubfile::{Pubfile, Release};
 use crate::publish::Publish;
+use crate::stdlib;
 use crate::test::Test;
 use crate::{utils, FilelistType, MetadataError};
 use directories::ProjectDirs;
@@ -261,6 +262,9 @@ impl Metadata {
         if !base_dst.exists() {
             fs::create_dir(&base_dst)?;
         }
+
+        stdlib::expand()?;
+        ret.append(&mut stdlib::paths(&base_dst)?);
 
         self.update_lockfile()?;
 

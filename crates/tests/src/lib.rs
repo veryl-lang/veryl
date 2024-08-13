@@ -1,4 +1,7 @@
 #[cfg(test)]
+const DEPENDENCY_TESTS: [&str; 2] = ["25_dependency", "68_std"];
+
+#[cfg(test)]
 mod parser {
     use std::fs;
     use veryl_parser::Parser;
@@ -27,7 +30,7 @@ mod analyzer {
         let metadata_path = Metadata::search_from_current().unwrap();
         let mut metadata = Metadata::load(&metadata_path).unwrap();
 
-        if name == "25_dependency" {
+        if crate::DEPENDENCY_TESTS.contains(&name) {
             let paths = metadata.paths::<&str>(&[], false).unwrap();
             let cache_path = Metadata::cache_path().canonicalize().unwrap();
             for path in paths {
@@ -110,7 +113,7 @@ mod emitter {
         let metadata_path = Metadata::search_from_current().unwrap();
         let mut metadata = Metadata::load(&metadata_path).unwrap();
 
-        if name == "25_dependency" {
+        if crate::DEPENDENCY_TESTS.contains(&name) {
             let paths = metadata.paths::<&str>(&[], false).unwrap();
             let cache_path = Metadata::cache_path().canonicalize().unwrap();
             for path in paths {

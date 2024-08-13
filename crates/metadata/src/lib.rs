@@ -9,6 +9,7 @@ mod metadata_error;
 mod project;
 mod pubfile;
 mod publish;
+mod stdlib;
 mod test;
 #[cfg(test)]
 mod tests;
