@@ -2,9 +2,10 @@ use crate::symbol::{Symbol, SymbolId};
 use crate::symbol_path::SymbolPathNamespace;
 use crate::symbol_table;
 use bimap::BiMap;
-use std::{cell::RefCell, collections::HashMap, collections::HashSet};
-
+use daggy::petgraph::unionfind::UnionFind;
+use daggy::petgraph::visit::{EdgeRef, NodeIndexable};
 use daggy::{petgraph::algo, Dag, Walker};
+use std::{cell::RefCell, collections::HashMap, collections::HashSet};
 use veryl_parser::veryl_token::Token;
 
 #[derive(Clone, Default)]
@@ -140,6 +141,34 @@ impl TypeDag {
         ret
     }
 
+    fn connected_components(&self) -> Vec<Vec<Symbol>> {
+        let graph = self.dag.graph();
+        let mut vertex_sets = UnionFind::new(graph.node_bound());
+        for edge in graph.edge_references() {
+            let (a, b) = (edge.source(), edge.target());
+
+            // Ignore Index0 because it is root node
+            if a.index() != 0 {
+                vertex_sets.union(graph.to_index(a), graph.to_index(b));
+            }
+        }
+        let labels = vertex_sets.into_labeling();
+
+        let mut ret = HashMap::new();
+        for node in graph.node_indices() {
+            let label = labels[graph.to_index(node)];
+            let index = node.index() as u32;
+
+            if self.paths.contains_key(&index) {
+                let sym = self.get_symbol(index);
+                ret.entry(label)
+                    .and_modify(|x: &mut Vec<_>| x.push(sym.clone()))
+                    .or_insert(vec![sym]);
+            }
+        }
+        ret.into_values().collect()
+    }
+
     fn dump(&self) -> String {
         let nodes = algo::toposort(self.dag.graph(), None).unwrap();
         let mut ret = "".to_string();
@@ -190,6 +219,10 @@ pub fn get_symbol(node: u32) -> Symbol {
 
 pub fn toposort() -> Vec<Symbol> {
     TYPE_DAG.with(|f| f.borrow().toposort())
+}
+
+pub fn connected_components() -> Vec<Vec<Symbol>> {
+    TYPE_DAG.with(|f| f.borrow().connected_components())
 }
 
 pub fn dump() -> String {

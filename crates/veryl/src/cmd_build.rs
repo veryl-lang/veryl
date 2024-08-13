@@ -8,11 +8,12 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
+use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::SymbolKind;
 use veryl_analyzer::{type_dag, Analyzer};
 use veryl_emitter::Emitter;
 use veryl_metadata::{FilelistType, Metadata, PathPair, SourceMapTarget, Target};
-use veryl_parser::{veryl_token::TokenSource, Parser};
+use veryl_parser::{resource_table, veryl_token::TokenSource, Parser};
 
 pub struct CmdBuild {
     opt: OptBuild,
@@ -159,7 +160,7 @@ impl CmdBuild {
         let filelist_path = metadata.filelist_path();
         let base_path = metadata.project_path();
 
-        let paths = Self::sort_filelist(paths);
+        let paths = Self::sort_filelist(metadata, paths);
 
         let text = if let Target::Bundle { path } = &metadata.build.target {
             let temp_dir = temp_dir.unwrap();
@@ -207,10 +208,26 @@ impl CmdBuild {
         Ok(())
     }
 
-    fn sort_filelist(paths: &[PathPair]) -> Vec<PathPair> {
+    fn sort_filelist(metadata: &Metadata, paths: &[PathPair]) -> Vec<PathPair> {
         let mut table = HashMap::new();
         for path in paths {
             table.insert(path.src.clone(), path);
+        }
+
+        // Remove files which are not connected from project
+        let connected_components = type_dag::connected_components();
+        let mut prj_namespace = Namespace::new();
+        prj_namespace.push(resource_table::insert_str(&metadata.project.name));
+        for symbols in &connected_components {
+            let used = symbols.iter().any(|x| x.namespace.included(&prj_namespace));
+            if !used {
+                for symbol in symbols {
+                    if let TokenSource::File(x) = symbol.token.source {
+                        let path = PathBuf::from(format!("{}", x));
+                        table.remove(&path);
+                    }
+                }
+            }
         }
 
         let mut ret = vec![];
