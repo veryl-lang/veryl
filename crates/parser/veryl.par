@@ -44,6 +44,7 @@ Operator05Term        : <INITIAL                >"&"                            
 Operator04Term        : <INITIAL                >"\^~|\^|~\^"                                                                          : Token;
 Operator03Term        : <INITIAL                >"\|"                                                                                  : Token;
 UnaryOperatorTerm     : <INITIAL                >"~&|~\||!|~"                                                                          : Token;
+BackQuoteTerm         : <INITIAL, Generic       >"`"                                                                                   : Token;
 ColonColonLAngleTerm  : <INITIAL, Generic       >'::<'                                                                                 : Token;
 ColonColonTerm        : <INITIAL, Generic       >'::'                                                                                  : Token;
 ColonTerm             : <INITIAL, Generic       >':'                                                                                   : Token;
@@ -55,7 +56,6 @@ EquTerm               : <INITIAL, Generic       >'='                            
 HashTerm              : <INITIAL, Generic       >'#'                                                                                   : Token;
 LAngleTerm            : <INITIAL, Generic       >'<'                                                                                   : Token;
 QuoteLBraceTerm       : <INITIAL, Generic       >"'\{"                                                                                 : Token;
-QuoteTerm             : <INITIAL, Generic       >"'"                                                                                   : Token;
 LBraceTerm            : <INITIAL, Generic, Embed>'{'                                                                                   : Token;
 LBracketTerm          : <INITIAL, Generic       >'['                                                                                   : Token;
 LParenTerm            : <INITIAL, Generic       >'('                                                                                   : Token;
@@ -164,6 +164,7 @@ Operator10Token        : Operator10Term        : Token Comments;
 Operator11Token        : Operator11Term        : Token Comments;
 UnaryOperatorToken     : UnaryOperatorTerm     : Token Comments;
 
+BackQuoteToken       : BackQuoteTerm       : Token Comments;
 ColonToken           : ColonTerm           : Token Comments;
 ColonColonLAngleToken: ColonColonLAngleTerm: Token Comments;
 ColonColonToken      : ColonColonTerm      : Token Comments;
@@ -174,7 +175,6 @@ DotToken             : DotTerm             : Token Comments;
 EquToken             : EquTerm             : Token Comments;
 HashToken            : HashTerm            : Token Comments;
 QuoteLBraceToken     : QuoteLBraceTerm     : Token Comments;
-QuoteToken           : QuoteTerm           : Token Comments;
 LAngleToken          : LAngleTerm          : Token Comments;
 LBraceToken          : LBraceTerm          : Token Comments;
 LBracketToken        : LBracketTerm        : Token Comments;
@@ -291,6 +291,7 @@ Operator11        : Operator11Token        : VerylToken;
 UnaryOperator     : UnaryOperatorToken     : VerylToken;
 
 // Symbol
+BackQuote       : BackQuoteToken       : VerylToken;
 Colon           : ColonToken           : VerylToken;
 ColonColonLAngle: ColonColonLAngleToken: VerylToken;
 ColonColon      : ColonColonToken      : VerylToken;
@@ -301,7 +302,6 @@ Dot             : DotToken             : VerylToken;
 Equ             : EquToken             : VerylToken;
 Hash            : HashToken            : VerylToken;
 QuoteLBrace     : QuoteLBraceToken     : VerylToken;
-Quote           : QuoteToken           : VerylToken;
 LAngle          : LAngleToken          : VerylToken;
 LBrace          : LBraceToken          : VerylToken;
 LBracket        : LBracketToken        : VerylToken;
@@ -544,7 +544,7 @@ CastingType: U32
 // ClockDomain
 // ----------------------------------------------------------------------------
 
-ClockDomain: Quote Identifier;
+ClockDomain: BackQuote Identifier;
 
 // ----------------------------------------------------------------------------
 // Statement

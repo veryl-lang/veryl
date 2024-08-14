@@ -135,6 +135,11 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
+    /// Semantic action for non-terminal 'BackQuoteTerm'
+    fn back_quote_term(&mut self, _arg: &BackQuoteTerm) -> Result<()> {
+        Ok(())
+    }
+
     /// Semantic action for non-terminal 'ColonColonLAngleTerm'
     fn colon_colon_l_angle_term(&mut self, _arg: &ColonColonLAngleTerm) -> Result<()> {
         Ok(())
@@ -187,11 +192,6 @@ pub trait VerylGrammarTrait {
 
     /// Semantic action for non-terminal 'QuoteLBraceTerm'
     fn quote_l_brace_term(&mut self, _arg: &QuoteLBraceTerm) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'QuoteTerm'
-    fn quote_term(&mut self, _arg: &QuoteTerm) -> Result<()> {
         Ok(())
     }
 
@@ -685,6 +685,11 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
+    /// Semantic action for non-terminal 'BackQuoteToken'
+    fn back_quote_token(&mut self, _arg: &BackQuoteToken) -> Result<()> {
+        Ok(())
+    }
+
     /// Semantic action for non-terminal 'ColonToken'
     fn colon_token(&mut self, _arg: &ColonToken) -> Result<()> {
         Ok(())
@@ -732,11 +737,6 @@ pub trait VerylGrammarTrait {
 
     /// Semantic action for non-terminal 'QuoteLBraceToken'
     fn quote_l_brace_token(&mut self, _arg: &QuoteLBraceToken) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'QuoteToken'
-    fn quote_token(&mut self, _arg: &QuoteToken) -> Result<()> {
         Ok(())
     }
 
@@ -1240,6 +1240,11 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
+    /// Semantic action for non-terminal 'BackQuote'
+    fn back_quote(&mut self, _arg: &BackQuote) -> Result<()> {
+        Ok(())
+    }
+
     /// Semantic action for non-terminal 'Colon'
     fn colon(&mut self, _arg: &Colon) -> Result<()> {
         Ok(())
@@ -1287,11 +1292,6 @@ pub trait VerylGrammarTrait {
 
     /// Semantic action for non-terminal 'QuoteLBrace'
     fn quote_l_brace(&mut self, _arg: &QuoteLBrace) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'Quote'
-    fn quote(&mut self, _arg: &Quote) -> Result<()> {
         Ok(())
     }
 
@@ -5373,6 +5373,37 @@ pub struct AttributeOpt {
 }
 
 ///
+/// Type derived for non-terminal BackQuote
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct BackQuote {
+    pub back_quote_token: crate::veryl_token::VerylToken,
+}
+
+///
+/// Type derived for non-terminal BackQuoteTerm
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct BackQuoteTerm {
+    pub back_quote_term: crate::veryl_token::Token, /* ` */
+}
+
+///
+/// Type derived for non-terminal BackQuoteToken
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct BackQuoteToken {
+    pub back_quote_term: crate::veryl_token::Token,
+    pub comments: Box<Comments>,
+}
+
+///
 /// Type derived for non-terminal BaseLess
 ///
 #[allow(dead_code)]
@@ -5711,7 +5742,7 @@ pub struct Clock {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ClockDomain {
-    pub quote: Box<Quote>,
+    pub back_quote: Box<BackQuote>,
     pub identifier: Box<Identifier>,
 }
 
@@ -10320,16 +10351,6 @@ pub struct PubToken {
 }
 
 ///
-/// Type derived for non-terminal Quote
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct Quote {
-    pub quote_token: crate::veryl_token::VerylToken,
-}
-
-///
 /// Type derived for non-terminal QuoteLBrace
 ///
 #[allow(dead_code)]
@@ -10357,27 +10378,6 @@ pub struct QuoteLBraceTerm {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct QuoteLBraceToken {
     pub quote_l_brace_term: crate::veryl_token::Token,
-    pub comments: Box<Comments>,
-}
-
-///
-/// Type derived for non-terminal QuoteTerm
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct QuoteTerm {
-    pub quote_term: crate::veryl_token::Token, /* ' */
-}
-
-///
-/// Type derived for non-terminal QuoteToken
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct QuoteToken {
-    pub quote_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
 }
 
@@ -12226,6 +12226,9 @@ pub enum ASTType {
     AttributeListList(Vec<AttributeListList>),
     AttributeListOpt(Option<AttributeListOpt>),
     AttributeOpt(Option<AttributeOpt>),
+    BackQuote(BackQuote),
+    BackQuoteTerm(BackQuoteTerm),
+    BackQuoteToken(BackQuoteToken),
     BaseLess(BaseLess),
     BaseLessTerm(BaseLessTerm),
     BaseLessToken(BaseLessToken),
@@ -12674,12 +12677,9 @@ pub enum ASTType {
     Pub(Pub),
     PubTerm(PubTerm),
     PubToken(PubToken),
-    Quote(Quote),
     QuoteLBrace(QuoteLBrace),
     QuoteLBraceTerm(QuoteLBraceTerm),
     QuoteLBraceToken(QuoteLBraceToken),
-    QuoteTerm(QuoteTerm),
-    QuoteToken(QuoteToken),
     RAngle(RAngle),
     RAngleTerm(RAngleTerm),
     RAngleToken(RAngleToken),
@@ -13371,6 +13371,25 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 23:
     ///
+    /// `BackQuoteTerm: <INITIAL, Generic>"`" : Token;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn back_quote_term(&mut self, back_quote_term: &ParseTreeType<'t>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let back_quote_term = back_quote_term
+            .token()?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let back_quote_term_built = BackQuoteTerm { back_quote_term };
+        // Calling user action here
+        self.user_grammar.back_quote_term(&back_quote_term_built)?;
+        self.push(ASTType::BackQuoteTerm(back_quote_term_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 24:
+    ///
     /// `ColonColonLAngleTerm: <INITIAL, Generic>'::<' : Token;`
     ///
     #[parol_runtime::function_name::named]
@@ -13397,7 +13416,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 24:
+    /// Semantic action for production 25:
     ///
     /// `ColonColonTerm: <INITIAL, Generic>'::' : Token;`
     ///
@@ -13417,7 +13436,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 25:
+    /// Semantic action for production 26:
     ///
     /// `ColonTerm: <INITIAL, Generic>':' : Token;`
     ///
@@ -13436,7 +13455,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 26:
+    /// Semantic action for production 27:
     ///
     /// `CommaTerm: <INITIAL, Generic>',' : Token;`
     ///
@@ -13455,7 +13474,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 27:
+    /// Semantic action for production 28:
     ///
     /// `DotDotEquTerm: <INITIAL, Generic>'..=' : Token;`
     ///
@@ -13475,7 +13494,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 28:
+    /// Semantic action for production 29:
     ///
     /// `DotDotTerm: <INITIAL, Generic>'..' : Token;`
     ///
@@ -13494,7 +13513,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 29:
+    /// Semantic action for production 30:
     ///
     /// `DotTerm: <INITIAL, Generic>'.' : Token;`
     ///
@@ -13513,7 +13532,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 30:
+    /// Semantic action for production 31:
     ///
     /// `EquTerm: <INITIAL, Generic>'=' : Token;`
     ///
@@ -13532,7 +13551,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 31:
+    /// Semantic action for production 32:
     ///
     /// `HashTerm: <INITIAL, Generic>'#' : Token;`
     ///
@@ -13551,7 +13570,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 32:
+    /// Semantic action for production 33:
     ///
     /// `LAngleTerm: <INITIAL, Generic>'<' : Token;`
     ///
@@ -13570,7 +13589,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 33:
+    /// Semantic action for production 34:
     ///
     /// `QuoteLBraceTerm: <INITIAL, Generic>"'\{" : Token;`
     ///
@@ -13587,25 +13606,6 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         self.user_grammar
             .quote_l_brace_term(&quote_l_brace_term_built)?;
         self.push(ASTType::QuoteLBraceTerm(quote_l_brace_term_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 34:
-    ///
-    /// `QuoteTerm: <INITIAL, Generic>"'" : Token;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn quote_term(&mut self, quote_term: &ParseTreeType<'t>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let quote_term = quote_term
-            .token()?
-            .try_into()
-            .map_err(parol_runtime::ParolError::UserError)?;
-        let quote_term_built = QuoteTerm { quote_term };
-        // Calling user action here
-        self.user_grammar.quote_term(&quote_term_built)?;
-        self.push(ASTType::QuoteTerm(quote_term_built), context);
         Ok(())
     }
 
@@ -15692,6 +15692,33 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 135:
     ///
+    /// `BackQuoteToken: BackQuoteTerm : Token Comments;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn back_quote_token(
+        &mut self,
+        _back_quote_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let comments = pop_item!(self, comments, Comments, context);
+        let back_quote_term = pop_item!(self, back_quote_term, BackQuoteTerm, context);
+        let back_quote_token_built = BackQuoteToken {
+            back_quote_term: (&back_quote_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
+        // Calling user action here
+        self.user_grammar
+            .back_quote_token(&back_quote_token_built)?;
+        self.push(ASTType::BackQuoteToken(back_quote_token_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 136:
+    ///
     /// `ColonToken: ColonTerm : Token Comments;`
     ///
     #[parol_runtime::function_name::named]
@@ -15716,7 +15743,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 136:
+    /// Semantic action for production 137:
     ///
     /// `ColonColonLAngleToken: ColonColonLAngleTerm : Token Comments;`
     ///
@@ -15751,7 +15778,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 137:
+    /// Semantic action for production 138:
     ///
     /// `ColonColonToken: ColonColonTerm : Token Comments;`
     ///
@@ -15778,7 +15805,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 138:
+    /// Semantic action for production 139:
     ///
     /// `CommaToken: CommaTerm : Token Comments;`
     ///
@@ -15804,7 +15831,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 139:
+    /// Semantic action for production 140:
     ///
     /// `DotDotToken: DotDotTerm : Token Comments;`
     ///
@@ -15830,7 +15857,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 140:
+    /// Semantic action for production 141:
     ///
     /// `DotDotEquToken: DotDotEquTerm : Token Comments;`
     ///
@@ -15857,7 +15884,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 141:
+    /// Semantic action for production 142:
     ///
     /// `DotToken: DotTerm : Token Comments;`
     ///
@@ -15883,7 +15910,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 142:
+    /// Semantic action for production 143:
     ///
     /// `EquToken: EquTerm : Token Comments;`
     ///
@@ -15909,7 +15936,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 143:
+    /// Semantic action for production 144:
     ///
     /// `HashToken: HashTerm : Token Comments;`
     ///
@@ -15935,7 +15962,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 144:
+    /// Semantic action for production 145:
     ///
     /// `QuoteLBraceToken: QuoteLBraceTerm : Token Comments;`
     ///
@@ -15962,32 +15989,6 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             ASTType::QuoteLBraceToken(quote_l_brace_token_built),
             context,
         );
-        Ok(())
-    }
-
-    /// Semantic action for production 145:
-    ///
-    /// `QuoteToken: QuoteTerm : Token Comments;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn quote_token(
-        &mut self,
-        _quote_term: &ParseTreeType<'t>,
-        _comments: &ParseTreeType<'t>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let comments = pop_item!(self, comments, Comments, context);
-        let quote_term = pop_item!(self, quote_term, QuoteTerm, context);
-        let quote_token_built = QuoteToken {
-            quote_term: (&quote_term)
-                .try_into()
-                .map_err(parol_runtime::ParolError::UserError)?,
-            comments: Box::new(comments),
-        };
-        // Calling user action here
-        self.user_grammar.quote_token(&quote_token_built)?;
-        self.push(ASTType::QuoteToken(quote_token_built), context);
         Ok(())
     }
 
@@ -18523,6 +18524,26 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 246:
     ///
+    /// `BackQuote: BackQuoteToken : VerylToken;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn back_quote(&mut self, _back_quote_token: &ParseTreeType<'t>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let back_quote_token = pop_item!(self, back_quote_token, BackQuoteToken, context);
+        let back_quote_built = BackQuote {
+            back_quote_token: (&back_quote_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
+        // Calling user action here
+        self.user_grammar.back_quote(&back_quote_built)?;
+        self.push(ASTType::BackQuote(back_quote_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 247:
+    ///
     /// `Colon: ColonToken : VerylToken;`
     ///
     #[parol_runtime::function_name::named]
@@ -18541,7 +18562,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 247:
+    /// Semantic action for production 248:
     ///
     /// `ColonColonLAngle: ColonColonLAngleToken : VerylToken;`
     ///
@@ -18573,7 +18594,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 248:
+    /// Semantic action for production 249:
     ///
     /// `ColonColon: ColonColonToken : VerylToken;`
     ///
@@ -18593,7 +18614,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 249:
+    /// Semantic action for production 250:
     ///
     /// `Comma: CommaToken : VerylToken;`
     ///
@@ -18613,7 +18634,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 250:
+    /// Semantic action for production 251:
     ///
     /// `DotDot: DotDotToken : VerylToken;`
     ///
@@ -18633,7 +18654,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 251:
+    /// Semantic action for production 252:
     ///
     /// `DotDotEqu: DotDotEquToken : VerylToken;`
     ///
@@ -18653,7 +18674,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 252:
+    /// Semantic action for production 253:
     ///
     /// `Dot: DotToken : VerylToken;`
     ///
@@ -18673,7 +18694,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 253:
+    /// Semantic action for production 254:
     ///
     /// `Equ: EquToken : VerylToken;`
     ///
@@ -18693,7 +18714,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 254:
+    /// Semantic action for production 255:
     ///
     /// `Hash: HashToken : VerylToken;`
     ///
@@ -18713,7 +18734,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 255:
+    /// Semantic action for production 256:
     ///
     /// `QuoteLBrace: QuoteLBraceToken : VerylToken;`
     ///
@@ -18730,26 +18751,6 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         // Calling user action here
         self.user_grammar.quote_l_brace(&quote_l_brace_built)?;
         self.push(ASTType::QuoteLBrace(quote_l_brace_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 256:
-    ///
-    /// `Quote: QuoteToken : VerylToken;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn quote(&mut self, _quote_token: &ParseTreeType<'t>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let quote_token = pop_item!(self, quote_token, QuoteToken, context);
-        let quote_built = Quote {
-            quote_token: (&quote_token)
-                .try_into()
-                .map_err(parol_runtime::ParolError::UserError)?,
-        };
-        // Calling user action here
-        self.user_grammar.quote(&quote_built)?;
-        self.push(ASTType::Quote(quote_built), context);
         Ok(())
     }
 
@@ -24862,20 +24863,20 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 543:
     ///
-    /// `ClockDomain: Quote Identifier;`
+    /// `ClockDomain: BackQuote Identifier;`
     ///
     #[parol_runtime::function_name::named]
     fn clock_domain(
         &mut self,
-        _quote: &ParseTreeType<'t>,
+        _back_quote: &ParseTreeType<'t>,
         _identifier: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let identifier = pop_item!(self, identifier, Identifier, context);
-        let quote = pop_item!(self, quote, Quote, context);
+        let back_quote = pop_item!(self, back_quote, BackQuote, context);
         let clock_domain_built = ClockDomain {
-            quote: Box::new(quote),
+            back_quote: Box::new(back_quote),
             identifier: Box::new(identifier),
         };
         // Calling user action here
@@ -35114,18 +35115,18 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             20 => self.operator04_term(&children[0]),
             21 => self.operator03_term(&children[0]),
             22 => self.unary_operator_term(&children[0]),
-            23 => self.colon_colon_l_angle_term(&children[0]),
-            24 => self.colon_colon_term(&children[0]),
-            25 => self.colon_term(&children[0]),
-            26 => self.comma_term(&children[0]),
-            27 => self.dot_dot_equ_term(&children[0]),
-            28 => self.dot_dot_term(&children[0]),
-            29 => self.dot_term(&children[0]),
-            30 => self.equ_term(&children[0]),
-            31 => self.hash_term(&children[0]),
-            32 => self.l_angle_term(&children[0]),
-            33 => self.quote_l_brace_term(&children[0]),
-            34 => self.quote_term(&children[0]),
+            23 => self.back_quote_term(&children[0]),
+            24 => self.colon_colon_l_angle_term(&children[0]),
+            25 => self.colon_colon_term(&children[0]),
+            26 => self.colon_term(&children[0]),
+            27 => self.comma_term(&children[0]),
+            28 => self.dot_dot_equ_term(&children[0]),
+            29 => self.dot_dot_term(&children[0]),
+            30 => self.dot_term(&children[0]),
+            31 => self.equ_term(&children[0]),
+            32 => self.hash_term(&children[0]),
+            33 => self.l_angle_term(&children[0]),
+            34 => self.quote_l_brace_term(&children[0]),
             35 => self.l_brace_term(&children[0]),
             36 => self.l_bracket_term(&children[0]),
             37 => self.l_paren_term(&children[0]),
@@ -35226,17 +35227,17 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             132 => self.operator10_token(&children[0], &children[1]),
             133 => self.operator11_token(&children[0], &children[1]),
             134 => self.unary_operator_token(&children[0], &children[1]),
-            135 => self.colon_token(&children[0], &children[1]),
-            136 => self.colon_colon_l_angle_token(&children[0], &children[1]),
-            137 => self.colon_colon_token(&children[0], &children[1]),
-            138 => self.comma_token(&children[0], &children[1]),
-            139 => self.dot_dot_token(&children[0], &children[1]),
-            140 => self.dot_dot_equ_token(&children[0], &children[1]),
-            141 => self.dot_token(&children[0], &children[1]),
-            142 => self.equ_token(&children[0], &children[1]),
-            143 => self.hash_token(&children[0], &children[1]),
-            144 => self.quote_l_brace_token(&children[0], &children[1]),
-            145 => self.quote_token(&children[0], &children[1]),
+            135 => self.back_quote_token(&children[0], &children[1]),
+            136 => self.colon_token(&children[0], &children[1]),
+            137 => self.colon_colon_l_angle_token(&children[0], &children[1]),
+            138 => self.colon_colon_token(&children[0], &children[1]),
+            139 => self.comma_token(&children[0], &children[1]),
+            140 => self.dot_dot_token(&children[0], &children[1]),
+            141 => self.dot_dot_equ_token(&children[0], &children[1]),
+            142 => self.dot_token(&children[0], &children[1]),
+            143 => self.equ_token(&children[0], &children[1]),
+            144 => self.hash_token(&children[0], &children[1]),
+            145 => self.quote_l_brace_token(&children[0], &children[1]),
             146 => self.l_angle_token(&children[0], &children[1]),
             147 => self.l_brace_token(&children[0], &children[1]),
             148 => self.l_bracket_token(&children[0], &children[1]),
@@ -35337,17 +35338,17 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             243 => self.operator10(&children[0]),
             244 => self.operator11(&children[0]),
             245 => self.unary_operator(&children[0]),
-            246 => self.colon(&children[0]),
-            247 => self.colon_colon_l_angle(&children[0]),
-            248 => self.colon_colon(&children[0]),
-            249 => self.comma(&children[0]),
-            250 => self.dot_dot(&children[0]),
-            251 => self.dot_dot_equ(&children[0]),
-            252 => self.dot(&children[0]),
-            253 => self.equ(&children[0]),
-            254 => self.hash(&children[0]),
-            255 => self.quote_l_brace(&children[0]),
-            256 => self.quote(&children[0]),
+            246 => self.back_quote(&children[0]),
+            247 => self.colon(&children[0]),
+            248 => self.colon_colon_l_angle(&children[0]),
+            249 => self.colon_colon(&children[0]),
+            250 => self.comma(&children[0]),
+            251 => self.dot_dot(&children[0]),
+            252 => self.dot_dot_equ(&children[0]),
+            253 => self.dot(&children[0]),
+            254 => self.equ(&children[0]),
+            255 => self.hash(&children[0]),
+            256 => self.quote_l_brace(&children[0]),
             257 => self.l_angle(&children[0]),
             258 => self.l_brace(&children[0]),
             259 => self.l_bracket(&children[0]),
