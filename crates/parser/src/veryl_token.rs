@@ -422,12 +422,7 @@ macro_rules! expression_token_range {
     };
 }
 
-expression_token_range!(
-    Expression11,
-    expression12,
-    expression11_list,
-    scoped_identifier
-);
+expression_token_range!(Expression11, expression12, expression11_list, casting_type);
 expression_token_range!(Expression10, expression11, expression10_list, expression11);
 expression_token_range!(Expression09, expression10, expression09_list, expression10);
 expression_token_range!(Expression08, expression09, expression08_list, expression09);
@@ -547,6 +542,84 @@ impl From<&ArrayType> for TokenRange {
         }
 
         range
+    }
+}
+
+impl From<&CastingType> for TokenRange {
+    fn from(value: &CastingType) -> Self {
+        match value {
+            CastingType::U32(x) => {
+                let beg = x.u32.u32_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+            CastingType::U64(x) => {
+                let beg = x.u64.u64_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+            CastingType::I32(x) => {
+                let beg = x.i32.i32_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+            CastingType::I64(x) => {
+                let beg = x.i64.i64_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+            CastingType::F32(x) => {
+                let beg = x.f32.f32_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+            CastingType::F64(x) => {
+                let beg = x.f64.f64_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+            CastingType::Clock(x) => {
+                let beg = x.clock.clock_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+            CastingType::ClockPosedge(x) => {
+                let beg = x.clock_posedge.clock_posedge_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+            CastingType::ClockNegedge(x) => {
+                let beg = x.clock_negedge.clock_negedge_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+            CastingType::Reset(x) => {
+                let beg = x.reset.reset_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+            CastingType::ResetAsyncHigh(x) => {
+                let beg = x.reset_async_high.reset_async_high_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+            CastingType::ResetAsyncLow(x) => {
+                let beg = x.reset_async_low.reset_async_low_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+            CastingType::ResetSyncHigh(x) => {
+                let beg = x.reset_sync_high.reset_sync_high_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+            CastingType::ResetSyncLow(x) => {
+                let beg = x.reset_sync_low.reset_sync_low_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+            CastingType::ScopedIdentifier(x) => x.scoped_identifier.as_ref().into(),
+        }
     }
 }
 

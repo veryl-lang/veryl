@@ -337,7 +337,7 @@ impl VerylWalker for Formatter {
             self.space(1);
             self.r#as(&x.r#as);
             self.space(1);
-            self.scoped_identifier(&x.scoped_identifier);
+            self.casting_type(&x.casting_type);
         }
     }
 
