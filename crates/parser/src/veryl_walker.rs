@@ -1023,7 +1023,7 @@ pub trait VerylWalker {
         self.expression12(&arg.expression12);
         for x in &arg.expression11_list {
             self.r#as(&x.r#as);
-            self.scoped_identifier(&x.scoped_identifier);
+            self.casting_type(&x.casting_type);
         }
         after!(self, expression11, arg);
     }
@@ -1459,6 +1459,29 @@ pub trait VerylWalker {
             self.array(&x.array);
         }
         after!(self, array_type, arg);
+    }
+
+    /// Semantic action for non-terminal 'CastingType'
+    fn casting_type(&mut self, arg: &CastingType) {
+        before!(self, casting_type, arg);
+        match arg {
+            CastingType::U32(x) => self.u32(&x.u32),
+            CastingType::U64(x) => self.u64(&x.u64),
+            CastingType::I32(x) => self.i32(&x.i32),
+            CastingType::I64(x) => self.i64(&x.i64),
+            CastingType::F32(x) => self.f32(&x.f32),
+            CastingType::F64(x) => self.f64(&x.f64),
+            CastingType::Clock(x) => self.clock(&x.clock),
+            CastingType::ClockPosedge(x) => self.clock_posedge(&x.clock_posedge),
+            CastingType::ClockNegedge(x) => self.clock_negedge(&x.clock_negedge),
+            CastingType::Reset(x) => self.reset(&x.reset),
+            CastingType::ResetAsyncHigh(x) => self.reset_async_high(&x.reset_async_high),
+            CastingType::ResetAsyncLow(x) => self.reset_async_low(&x.reset_async_low),
+            CastingType::ResetSyncHigh(x) => self.reset_sync_high(&x.reset_sync_high),
+            CastingType::ResetSyncLow(x) => self.reset_sync_low(&x.reset_sync_low),
+            CastingType::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
+        }
+        after!(self, casting_type, arg);
     }
 
     /// Semantic action for non-terminal 'ClockDomain'

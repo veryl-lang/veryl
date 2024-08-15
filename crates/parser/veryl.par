@@ -427,7 +427,7 @@ Expression07: Expression08 { Operator08 Expression08 };
 Expression08: Expression09 { Operator09 Expression09 };
 Expression09: Expression10 { ( Operator10 | Star ) Expression10 };
 Expression10: Expression11 { Operator11 Expression11 };
-Expression11: Expression12 { As ScopedIdentifier };
+Expression11: Expression12 { As CastingType };
 Expression12: { ( UnaryOperator | Operator09 | Operator05 | Operator03 | Operator04 ) } Factor;
 
 Factor: Number
@@ -499,7 +499,7 @@ RangeOperator: DotDot
              ;
 
 // ----------------------------------------------------------------------------
-// ScalarType / ArrayType
+// ScalarType / ArrayType / CastingType
 // ----------------------------------------------------------------------------
 
 FixedType: U32 | U64 | I32 | I64 | F32 | F64 | Strin;
@@ -522,6 +522,23 @@ TypeModifier: Tri | Signed;
 ScalarType: { TypeModifier } ( VariableType | FixedType );
 
 ArrayType: ScalarType [ Array ];
+
+CastingType: U32
+           | U64
+           | I32
+           | I64
+           | F32
+           | F64
+           | Clock
+           | ClockPosedge
+           | ClockNegedge
+           | Reset
+           | ResetAsyncHigh
+           | ResetAsyncLow
+           | ResetSyncHigh
+           | ResetSyncLow
+           | ScopedIdentifier
+           ;
 
 // ----------------------------------------------------------------------------
 // ClockDomain
