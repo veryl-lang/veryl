@@ -388,6 +388,20 @@ impl From<&Factor> for TokenRange {
     }
 }
 
+impl From<&Expression11> for TokenRange {
+    fn from(value: &Expression11) -> Self {
+        let beg: TokenRange = value.expression12.as_ref().into();
+        let end = if let Some(ref x) = value.expression11_opt {
+            let end: TokenRange = x.casting_type.as_ref().into();
+            end.end
+        } else {
+            beg.end
+        };
+        let beg = beg.beg;
+        TokenRange { beg, end }
+    }
+}
+
 impl From<&Expression12> for TokenRange {
     fn from(value: &Expression12) -> Self {
         let end: TokenRange = value.factor.as_ref().into();
@@ -422,7 +436,6 @@ macro_rules! expression_token_range {
     };
 }
 
-expression_token_range!(Expression11, expression12, expression11_list, casting_type);
 expression_token_range!(Expression10, expression11, expression10_list, expression11);
 expression_token_range!(Expression09, expression10, expression09_list, expression10);
 expression_token_range!(Expression08, expression09, expression08_list, expression09);

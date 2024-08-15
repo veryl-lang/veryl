@@ -1021,7 +1021,7 @@ pub trait VerylWalker {
     fn expression11(&mut self, arg: &Expression11) {
         before!(self, expression11, arg);
         self.expression12(&arg.expression12);
-        for x in &arg.expression11_list {
+        if let Some(x) = &arg.expression11_opt {
             self.r#as(&x.r#as);
             self.casting_type(&x.casting_type);
         }

@@ -6877,16 +6877,16 @@ pub struct Expression10List {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct Expression11 {
     pub expression12: Box<Expression12>,
-    pub expression11_list: Vec<Expression11List>,
+    pub expression11_opt: Option<Expression11Opt>,
 }
 
 ///
-/// Type derived for non-terminal Expression11List
+/// Type derived for non-terminal Expression11Opt
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct Expression11List {
+pub struct Expression11Opt {
     pub r#as: Box<As>,
     pub casting_type: Box<CastingType>,
 }
@@ -12364,7 +12364,7 @@ pub enum ASTType {
     Expression10(Expression10),
     Expression10List(Vec<Expression10List>),
     Expression11(Expression11),
-    Expression11List(Vec<Expression11List>),
+    Expression11Opt(Option<Expression11Opt>),
     Expression12(Expression12),
     Expression12List(Vec<Expression12List>),
     Expression12ListGroup(Expression12ListGroup),
@@ -21868,22 +21868,21 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 402:
     ///
-    /// `Expression11: Expression12 Expression11List /* Vec */;`
+    /// `Expression11: Expression12 Expression11Opt /* Option */;`
     ///
     #[parol_runtime::function_name::named]
     fn expression11(
         &mut self,
         _expression12: &ParseTreeType<'t>,
-        _expression11_list: &ParseTreeType<'t>,
+        _expression11_opt: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let expression11_list =
-            pop_and_reverse_item!(self, expression11_list, Expression11List, context);
+        let expression11_opt = pop_item!(self, expression11_opt, Expression11Opt, context);
         let expression12 = pop_item!(self, expression12, Expression12, context);
         let expression11_built = Expression11 {
             expression12: Box::new(expression12),
-            expression11_list,
+            expression11_opt,
         };
         // Calling user action here
         self.user_grammar.expression11(&expression11_built)?;
@@ -21893,43 +21892,38 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 403:
     ///
-    /// `Expression11List /* Vec<T>::Push */: As CastingType Expression11List;`
+    /// `Expression11Opt /* Option<T>::Some */: As CastingType;`
     ///
     #[parol_runtime::function_name::named]
-    fn expression11_list_0(
+    fn expression11_opt_0(
         &mut self,
         _as: &ParseTreeType<'t>,
         _casting_type: &ParseTreeType<'t>,
-        _expression11_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let mut expression11_list = pop_item!(self, expression11_list, Expression11List, context);
         let casting_type = pop_item!(self, casting_type, CastingType, context);
         let r#as = pop_item!(self, r#as, As, context);
-        let expression11_list_0_built = Expression11List {
-            casting_type: Box::new(casting_type),
+        let expression11_opt_0_built = Expression11Opt {
             r#as: Box::new(r#as),
+            casting_type: Box::new(casting_type),
         };
-        // Add an element to the vector
-        expression11_list.push(expression11_list_0_built);
-        self.push(ASTType::Expression11List(expression11_list), context);
+        self.push(
+            ASTType::Expression11Opt(Some(expression11_opt_0_built)),
+            context,
+        );
         Ok(())
     }
 
     /// Semantic action for production 404:
     ///
-    /// `Expression11List /* Vec<T>::New */: ;`
+    /// `Expression11Opt /* Option<T>::None */: ;`
     ///
     #[parol_runtime::function_name::named]
-    fn expression11_list_1(&mut self) -> Result<()> {
+    fn expression11_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let expression11_list_1_built = Vec::new();
-        self.push(
-            ASTType::Expression11List(expression11_list_1_built),
-            context,
-        );
+        self.push(ASTType::Expression11Opt(None), context);
         Ok(())
     }
 
@@ -35515,8 +35509,8 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             400 => self.expression10_list_0(&children[0], &children[1], &children[2]),
             401 => self.expression10_list_1(),
             402 => self.expression11(&children[0], &children[1]),
-            403 => self.expression11_list_0(&children[0], &children[1], &children[2]),
-            404 => self.expression11_list_1(),
+            403 => self.expression11_opt_0(&children[0], &children[1]),
+            404 => self.expression11_opt_1(),
             405 => self.expression12(&children[0], &children[1]),
             406 => self.expression12_list_0(&children[0], &children[1]),
             407 => self.expression12_list_group_0(&children[0]),

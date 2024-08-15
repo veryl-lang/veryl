@@ -12,5 +12,5 @@ module Module21 {
         D,
     }
 
-    assign a = b as EnumA as EnumB;
+    assign a = (b as EnumA) as EnumB;
 }
