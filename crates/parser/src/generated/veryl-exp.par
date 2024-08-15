@@ -414,9 +414,9 @@
 /* 399 */ Expression10: Expression11 Expression10List /* Vec */;
 /* 400 */ Expression10List /* Vec<T>::Push */: Operator11 Expression11 Expression10List;
 /* 401 */ Expression10List /* Vec<T>::New */: ;
-/* 402 */ Expression11: Expression12 Expression11List /* Vec */;
-/* 403 */ Expression11List /* Vec<T>::Push */: As CastingType Expression11List;
-/* 404 */ Expression11List /* Vec<T>::New */: ;
+/* 402 */ Expression11: Expression12 Expression11Opt /* Option */;
+/* 403 */ Expression11Opt /* Option<T>::Some */: As CastingType;
+/* 404 */ Expression11Opt /* Option<T>::None */: ;
 /* 405 */ Expression12: Expression12List /* Vec */ Factor;
 /* 406 */ Expression12List /* Vec<T>::Push */: Expression12ListGroup Expression12List;
 /* 407 */ Expression12ListGroup: UnaryOperator;

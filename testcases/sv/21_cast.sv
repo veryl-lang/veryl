@@ -13,6 +13,6 @@ module veryl_testcase_Module21;
         EnumB_D
     } EnumB;
 
-    always_comb a = EnumA'(EnumB'(b));
+    always_comb a = EnumB'((EnumA'(b)));
 endmodule
 //# sourceMappingURL=../map/testcases/sv/21_cast.sv.map

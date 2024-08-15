@@ -1105,7 +1105,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Expression11'
     fn expression11(&mut self, arg: &Expression11) {
-        for x in &arg.expression11_list {
+        if let Some(x) = &arg.expression11_opt {
             match x.casting_type.as_ref() {
                 CastingType::U32(_) => self.str("unsigned'(int"),
                 CastingType::U64(_) => self.str("unsigned'(longint"),
@@ -1119,7 +1119,7 @@ impl VerylWalker for Emitter {
             self.str("'(");
         }
         self.expression12(&arg.expression12);
-        for x in &arg.expression11_list {
+        if let Some(x) = &arg.expression11_opt {
             match x.casting_type.as_ref() {
                 CastingType::U32(_)
                 | CastingType::U64(_)
