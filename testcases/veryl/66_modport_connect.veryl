@@ -1,0 +1,23 @@
+interface Interface66 {
+    var en: logic;
+
+    modport port {
+        en: output,
+    }
+}
+
+module Module66 (
+    a: modport Interface66::port,
+    b: interface,
+) {
+
+    inst u: Module66A (
+        a: a,
+        b: b,
+    );
+}
+
+module Module66A (
+    a: modport Interface66::port,
+    b: interface,
+) {}

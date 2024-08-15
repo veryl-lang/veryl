@@ -15,6 +15,7 @@ pub struct CheckExpression<'a> {
     case_condition_depth: usize,
     evaluator: Evaluator,
     call_stack_kind: Vec<FunctionKind>,
+    in_inst_declaration: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -103,12 +104,17 @@ impl<'a> VerylGrammarTrait for CheckExpression<'a> {
                         | SymbolKind::ClockDomain => {
                             self.errors.push(error);
                         }
-                        SymbolKind::Port(x) => match x.direction {
-                            Direction::Interface | Direction::Modport => {
-                                self.errors.push(error);
+                        SymbolKind::Port(x) => {
+                            // modport and interface direction can be used as factor in inst_declaration
+                            if !self.in_inst_declaration {
+                                match x.direction {
+                                    Direction::Interface | Direction::Modport => {
+                                        self.errors.push(error);
+                                    }
+                                    _ => {}
+                                }
                             }
-                            _ => {}
-                        },
+                        }
                         SymbolKind::Parameter(_)
                         | SymbolKind::EnumMember(_)
                         | SymbolKind::Genvar
@@ -164,6 +170,14 @@ impl<'a> VerylGrammarTrait for CheckExpression<'a> {
                     _ => {}
                 }
             }
+        }
+        Ok(())
+    }
+
+    fn inst_declaration(&mut self, _arg: &InstDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => self.in_inst_declaration = true,
+            HandlerPoint::After => self.in_inst_declaration = false,
         }
         Ok(())
     }
