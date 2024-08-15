@@ -1910,6 +1910,19 @@ fn invalid_case_condition_expression() {
 }
 
 #[test]
+fn invalid_cast() {
+    let code = r#"
+    module ModuleA {
+        let a: clock = 1;
+        let _b: reset = a as reset;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidCast { .. }));
+}
+
+#[test]
 fn clock_domain() {
     let code = r#"
     module ModuleA (

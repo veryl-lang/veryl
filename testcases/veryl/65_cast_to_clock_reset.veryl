@@ -1,0 +1,19 @@
+module Module65 {
+    let a: '_ clock            = 1;
+    let b: '_ reset            = 1;
+    let c: '_ reset_async_high = 1;
+    let d: '_ reset_async_low  = 1;
+    let e: '_ reset_sync_high  = 1;
+    let f: '_ reset_sync_low   = 1;
+
+    let _x0: '_ clock_posedge    = a as clock_posedge;
+    let _x1: '_ clock_negedge    = a as clock_negedge;
+    let _x2: '_ reset_async_high = b as reset_async_high;
+    let _x3: '_ reset_async_low  = b as reset_async_low;
+    let _x4: '_ reset_sync_high  = b as reset_sync_high;
+    let _x5: '_ reset_sync_low   = b as reset_sync_low;
+    let _x6: '_ reset            = c as reset;
+    let _x7: '_ reset            = d as reset;
+    let _x8: '_ reset            = e as reset;
+    let _x9: '_ reset            = f as reset;
+}

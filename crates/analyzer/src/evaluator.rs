@@ -6,6 +6,14 @@ use veryl_parser::veryl_grammar_trait::*;
 pub enum Evaluated {
     Fixed { width: usize, value: isize },
     Variable { width: usize },
+    Clock,
+    ClockPosedge,
+    ClockNegedge,
+    Reset,
+    ResetAsyncHigh,
+    ResetAsyncLow,
+    ResetSyncHigh,
+    ResetSyncLow,
     Unknown,
     UnknownStatic, // A temporary enum value to indicate that a value is knowable statically,
                    // even if, currently, the compiler doesn't know what its value is
@@ -14,6 +22,24 @@ pub enum Evaluated {
 impl Evaluated {
     fn is_known_static(&self) -> bool {
         matches!(self, Evaluated::Fixed { .. } | Evaluated::UnknownStatic)
+    }
+
+    pub fn is_clock(&self) -> bool {
+        matches!(
+            self,
+            Evaluated::Clock | Evaluated::ClockPosedge | Evaluated::ClockNegedge
+        )
+    }
+
+    pub fn is_reset(&self) -> bool {
+        matches!(
+            self,
+            Evaluated::Reset
+                | Evaluated::ResetAsyncHigh
+                | Evaluated::ResetAsyncLow
+                | Evaluated::ResetSyncHigh
+                | Evaluated::ResetSyncLow
+        )
     }
 
     fn binary_op<T: Fn(usize, usize) -> usize, U: Fn(isize, isize) -> Option<isize>>(
@@ -585,10 +611,25 @@ impl Evaluator {
     }
 
     fn expression11(&mut self, arg: &Expression11) -> Evaluated {
-        self.expression12(&arg.expression12)
+        let ret = self.expression12(&arg.expression12);
+        if let Some(x) = &arg.expression11_opt {
+            match x.casting_type.as_ref() {
+                CastingType::Clock(_) => Evaluated::Clock,
+                CastingType::ClockPosedge(_) => Evaluated::ClockPosedge,
+                CastingType::ClockNegedge(_) => Evaluated::ClockNegedge,
+                CastingType::Reset(_) => Evaluated::Reset,
+                CastingType::ResetAsyncHigh(_) => Evaluated::ResetAsyncHigh,
+                CastingType::ResetAsyncLow(_) => Evaluated::ResetAsyncLow,
+                CastingType::ResetSyncHigh(_) => Evaluated::ResetSyncHigh,
+                CastingType::ResetSyncLow(_) => Evaluated::ResetSyncLow,
+                _ => ret,
+            }
+        } else {
+            ret
+        }
     }
 
-    fn expression12(&mut self, arg: &Expression12) -> Evaluated {
+    pub fn expression12(&mut self, arg: &Expression12) -> Evaluated {
         let mut ret = self.factor(&arg.factor);
         for x in arg.expression12_list.iter().rev() {
             let operator = match &*x.expression12_list_group {
@@ -681,8 +722,8 @@ impl Evaluator {
                 Evaluated::Variable { width: rwidth } => Evaluated::Variable {
                     width: ewidth * rwidth,
                 },
-                Evaluated::Unknown => Evaluated::Unknown,
                 Evaluated::UnknownStatic => Evaluated::UnknownStatic,
+                _ => Evaluated::Unknown,
             },
             Evaluated::Variable { width: ewidth } => match rep {
                 Evaluated::Fixed { width: rwidth, .. } | Evaluated::Variable { width: rwidth } => {
@@ -690,11 +731,11 @@ impl Evaluator {
                         width: ewidth * rwidth,
                     }
                 }
-                Evaluated::Unknown => Evaluated::Unknown,
                 Evaluated::UnknownStatic => Evaluated::UnknownStatic,
+                _ => Evaluated::Unknown,
             },
-            Evaluated::Unknown => Evaluated::Unknown,
             Evaluated::UnknownStatic => Evaluated::UnknownStatic,
+            _ => Evaluated::Unknown,
         }
     }
 
@@ -732,8 +773,8 @@ impl Evaluator {
         match self.expression(arg.expression.as_ref()) {
             Evaluated::Fixed { .. } => Evaluated::UnknownStatic,
             Evaluated::Variable { .. } => Evaluated::Unknown,
-            Evaluated::Unknown => Evaluated::Unknown,
             Evaluated::UnknownStatic => unreachable!(),
+            _ => Evaluated::Unknown,
         }
     }
 

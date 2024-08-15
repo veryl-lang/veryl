@@ -3,6 +3,7 @@ use std::fs;
 use std::path::Path;
 use veryl_analyzer::attribute::Attribute as Attr;
 use veryl_analyzer::attribute_table;
+use veryl_analyzer::evaluator::{Evaluated, Evaluator};
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::TypeModifier as SymTypeModifier;
 use veryl_analyzer::symbol::{GenericMap, Symbol, SymbolId, SymbolKind, TypeKind};
@@ -1107,16 +1108,71 @@ impl VerylWalker for Emitter {
     fn expression11(&mut self, arg: &Expression11) {
         if let Some(x) = &arg.expression11_opt {
             match x.casting_type.as_ref() {
-                CastingType::U32(_) => self.str("unsigned'(int"),
-                CastingType::U64(_) => self.str("unsigned'(longint"),
-                CastingType::I32(_) => self.str("signed'(int"),
-                CastingType::I64(_) => self.str("signed'(longint"),
-                CastingType::F32(x) => self.f32(&x.f32),
-                CastingType::F64(x) => self.f64(&x.f64),
-                CastingType::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
-                _ => unimplemented!("clock and reset cast"),
+                CastingType::U32(_) => self.str("unsigned'(int'("),
+                CastingType::U64(_) => self.str("unsigned'(longint'("),
+                CastingType::I32(_) => self.str("signed'(int'("),
+                CastingType::I64(_) => self.str("signed'(longint'("),
+                CastingType::F32(x) => {
+                    self.f32(&x.f32);
+                    self.str("'(");
+                }
+                CastingType::F64(x) => {
+                    self.f64(&x.f64);
+                    self.str("'(");
+                }
+                CastingType::ScopedIdentifier(x) => {
+                    self.scoped_identifier(&x.scoped_identifier);
+                    self.str("'(");
+                }
+                // casting to clock type doesn't change polarity
+                CastingType::Clock(_)
+                | CastingType::ClockPosedge(_)
+                | CastingType::ClockNegedge(_) => (),
+                CastingType::Reset(_)
+                | CastingType::ResetAsyncHigh(_)
+                | CastingType::ResetAsyncLow(_)
+                | CastingType::ResetSyncHigh(_)
+                | CastingType::ResetSyncLow(_) => {
+                    let mut eval = Evaluator::new();
+                    let src = eval.expression12(&arg.expression12);
+                    let dst = x.casting_type.as_ref();
+                    let reset_type = self.build_opt.reset_type;
+
+                    let src_is_high =
+                        matches!((src, reset_type), (Evaluated::Reset, ResetType::AsyncHigh))
+                            | matches!((src, reset_type), (Evaluated::Reset, ResetType::SyncHigh))
+                            | matches!(src, Evaluated::ResetAsyncHigh)
+                            | matches!(src, Evaluated::ResetSyncHigh);
+
+                    let src_is_low =
+                        matches!((src, reset_type), (Evaluated::Reset, ResetType::AsyncLow))
+                            | matches!((src, reset_type), (Evaluated::Reset, ResetType::SyncLow))
+                            | matches!(src, Evaluated::ResetAsyncLow)
+                            | matches!(src, Evaluated::ResetSyncLow);
+
+                    let dst_is_high = matches!(
+                        (dst, reset_type),
+                        (CastingType::Reset(_), ResetType::AsyncHigh)
+                    ) | matches!(
+                        (dst, reset_type),
+                        (CastingType::Reset(_), ResetType::SyncHigh)
+                    ) | matches!(dst, CastingType::ResetAsyncHigh(_))
+                        | matches!(dst, CastingType::ResetSyncHigh(_));
+
+                    let dst_is_low = matches!(
+                        (dst, reset_type),
+                        (CastingType::Reset(_), ResetType::AsyncLow)
+                    ) | matches!(
+                        (dst, reset_type),
+                        (CastingType::Reset(_), ResetType::SyncLow)
+                    ) | matches!(dst, CastingType::ResetAsyncLow(_))
+                        | matches!(dst, CastingType::ResetSyncLow(_));
+
+                    if (src_is_high && dst_is_low) || (src_is_low && dst_is_high) {
+                        self.str("~")
+                    }
+                }
             }
-            self.str("'(");
         }
         self.expression12(&arg.expression12);
         if let Some(x) = &arg.expression11_opt {
@@ -1124,10 +1180,12 @@ impl VerylWalker for Emitter {
                 CastingType::U32(_)
                 | CastingType::U64(_)
                 | CastingType::I32(_)
-                | CastingType::I64(_) => self.str(")"),
+                | CastingType::I64(_) => self.str("))"),
+                CastingType::F32(_) | CastingType::F64(_) | CastingType::ScopedIdentifier(_) => {
+                    self.str(")")
+                }
                 _ => (),
             }
-            self.str(")");
         }
     }
 

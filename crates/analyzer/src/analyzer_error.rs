@@ -337,6 +337,17 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
+    #[diagnostic(severity(Error), code(invalid_cast), help(""), url(""))]
+    #[error("Casting from #{from} to #{to} is incompatible")]
+    InvalidCast {
+        from: String,
+        to: String,
+        #[source_code]
+        input: NamedSource<String>,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
     #[diagnostic(
         severity(Error),
         code(missing_default_argument),
@@ -1073,6 +1084,15 @@ impl AnalyzerError {
 
     pub fn invalid_case_condition_non_elaborative(source: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidCaseConditionNonElaborative {
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn invalid_cast(from: &str, to: &str, source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidCast {
+            from: from.into(),
+            to: to.into(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
         }
