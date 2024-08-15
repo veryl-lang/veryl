@@ -376,3 +376,93 @@ endmodule
 
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn async_reset_cast() {
+    let code = r#"module ModuleA {
+    var a: reset;
+    var b: reset_async_high;
+    var c: reset_async_low;
+
+    let d: reset_async_high = a as reset_async_high;
+    let e: reset_async_low  = a as reset_async_low ;
+    let f: reset            = b as reset           ;
+    let g: reset            = c as reset           ;
+}
+"#;
+
+    let expect = r#"module prj_ModuleA;
+    logic a;
+    logic b;
+    logic c;
+
+    logic d;
+    always_comb d = a;
+    logic e;
+    always_comb e = ~a;
+    logic f;
+    always_comb f = b;
+    logic g;
+    always_comb g = ~c;
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let mut metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+
+    metadata.build.reset_type = ResetType::AsyncHigh;
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn sync_reset_cast() {
+    let code = r#"module ModuleA {
+    var a: reset;
+    var b: reset_sync_high;
+    var c: reset_sync_low;
+
+    let d: reset_sync_high = a as reset_sync_high;
+    let e: reset_sync_low  = a as reset_sync_low ;
+    let f: reset           = b as reset          ;
+    let g: reset           = c as reset          ;
+}
+"#;
+
+    let expect = r#"module prj_ModuleA;
+    logic a;
+    logic b;
+    logic c;
+
+    logic d;
+    always_comb d = ~a;
+    logic e;
+    always_comb e = a;
+    logic f;
+    always_comb f = ~b;
+    logic g;
+    always_comb g = c;
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let mut metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+
+    metadata.build.reset_type = ResetType::SyncLow;
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    assert_eq!(ret, expect);
+}

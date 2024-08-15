@@ -105,7 +105,19 @@ impl Symbol {
             let evaluated = match &self.kind {
                 SymbolKind::Variable(x) => {
                     let mut evaluator = Evaluator::new();
-                    if let Some(width) = evaluator.type_width(x.r#type.clone()) {
+                    if x.r#type.kind.is_clock() | x.r#type.kind.is_reset() {
+                        match x.r#type.kind {
+                            TypeKind::Clock => Evaluated::Clock,
+                            TypeKind::ClockPosedge => Evaluated::ClockPosedge,
+                            TypeKind::ClockNegedge => Evaluated::ClockNegedge,
+                            TypeKind::Reset => Evaluated::Reset,
+                            TypeKind::ResetAsyncHigh => Evaluated::ResetAsyncHigh,
+                            TypeKind::ResetAsyncLow => Evaluated::ResetAsyncLow,
+                            TypeKind::ResetSyncHigh => Evaluated::ResetSyncHigh,
+                            TypeKind::ResetSyncLow => Evaluated::ResetSyncLow,
+                            _ => unreachable!(),
+                        }
+                    } else if let Some(width) = evaluator.type_width(x.r#type.clone()) {
                         Evaluated::Variable { width }
                     } else {
                         Evaluated::Unknown

@@ -256,14 +256,52 @@ impl<'a> VerylGrammarTrait for CheckClockReset<'a> {
             if self.in_if_reset {
                 // Check to see right hand side of reset is const evaluable
                 match self.evaluator.expression(&arg.expression) {
-                    UnknownStatic | Fixed { .. } => {}
-                    Variable { .. } | Unknown => {
+                    UnknownStatic | Fixed { .. } => (),
+                    _ => {
                         self.errors
                             .push(AnalyzerError::invalid_reset_non_elaborative(
                                 self.text,
                                 &arg.expression.as_ref().into(),
                             ));
                     }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn expression11(&mut self, arg: &Expression11) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            if let Some(x) = &arg.expression11_opt {
+                let src = self.evaluator.expression12(&arg.expression12);
+                match x.casting_type.as_ref() {
+                    CastingType::Clock(_)
+                    | CastingType::ClockPosedge(_)
+                    | CastingType::ClockNegedge(_) => {
+                        if !src.is_clock() {
+                            self.errors.push(AnalyzerError::invalid_cast(
+                                "non-clock type",
+                                "clock type",
+                                self.text,
+                                &arg.into(),
+                            ));
+                        }
+                    }
+                    CastingType::Reset(_)
+                    | CastingType::ResetAsyncHigh(_)
+                    | CastingType::ResetAsyncLow(_)
+                    | CastingType::ResetSyncHigh(_)
+                    | CastingType::ResetSyncLow(_) => {
+                        if !src.is_reset() {
+                            self.errors.push(AnalyzerError::invalid_cast(
+                                "non-reset type",
+                                "reset type",
+                                self.text,
+                                &arg.into(),
+                            ));
+                        }
+                    }
+                    _ => (),
                 }
             }
         }
