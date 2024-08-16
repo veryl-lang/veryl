@@ -362,6 +362,46 @@ fn reset_check() {
 }
 
 #[test]
+fn clock_connection_check() {
+    let code = r#"
+    module ModuleA (
+        clk: input logic
+    ) {
+        inst u: ModuleB (
+            clk,
+        );
+    }
+
+    module ModuleB (
+        clk: input clock
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+}
+
+#[test]
+fn reset_connection_check() {
+    let code = r#"
+    module ModuleA (
+        clk: input logic
+    ) {
+        inst u: ModuleB (
+            clk,
+        );
+    }
+
+    module ModuleB (
+        clk: input reset
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+}
+
+#[test]
 fn cyclic_type_dependency() {
     let code = r#"
     module ModuleA {
