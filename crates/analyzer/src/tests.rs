@@ -2160,6 +2160,38 @@ fn sv_keyword_usage() {
 }
 
 #[test]
+fn sv_with_implicit_reset() {
+    let code = r#"
+    module ModuleA {
+        var rst: reset;
+
+        inst u: $sv::Module (
+            rst,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::SvWithImplicitReset { .. }
+    ));
+
+    let code = r#"
+    module ModuleB {
+        var rst: reset_async_low;
+
+        inst u: $sv::Module (
+            rst,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
 fn conflict_with_mangled_enum_member() {
     let code = r#"
     module ModuleA {

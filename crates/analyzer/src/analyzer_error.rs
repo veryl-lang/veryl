@@ -338,7 +338,7 @@ pub enum AnalyzerError {
     },
 
     #[diagnostic(severity(Error), code(invalid_cast), help(""), url(""))]
-    #[error("Casting from #{from} to #{to} is incompatible")]
+    #[error("Casting from {from} to {to} is incompatible")]
     InvalidCast {
         from: String,
         to: String,
@@ -562,6 +562,20 @@ pub enum AnalyzerError {
     #[error("SystemVerilog keyword may not be used as identifier")]
     SvKeywordUsage {
         identifier: String,
+        #[source_code]
+        input: NamedSource<String>,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(sv_with_implicit_reset),
+        help("Use types with explicit synchronisity and polarity like `reset_async_low`"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#sv_with_implicit_reset")
+    )]
+    #[error("Reset type with implicit synchronisity and polarity can't be connected to SystemVerilog module")]
+    SvWithImplicitReset {
         #[source_code]
         input: NamedSource<String>,
         #[label("Error location")]
@@ -1269,6 +1283,13 @@ impl AnalyzerError {
     pub fn sv_keyword_usage(identifier: &str, source: &str, token: &TokenRange) -> Self {
         AnalyzerError::SvKeywordUsage {
             identifier: identifier.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn sv_with_implicit_reset(source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::SvWithImplicitReset {
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
         }

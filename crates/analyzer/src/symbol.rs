@@ -123,6 +123,23 @@ impl Symbol {
                         Evaluated::Unknown
                     }
                 }
+                SymbolKind::Port(x) => {
+                    if let Some(x) = &x.r#type {
+                        match x.kind {
+                            TypeKind::Clock => Evaluated::Clock,
+                            TypeKind::ClockPosedge => Evaluated::ClockPosedge,
+                            TypeKind::ClockNegedge => Evaluated::ClockNegedge,
+                            TypeKind::Reset => Evaluated::Reset,
+                            TypeKind::ResetAsyncHigh => Evaluated::ResetAsyncHigh,
+                            TypeKind::ResetAsyncLow => Evaluated::ResetAsyncLow,
+                            TypeKind::ResetSyncHigh => Evaluated::ResetSyncHigh,
+                            TypeKind::ResetSyncLow => Evaluated::ResetSyncLow,
+                            _ => Evaluated::Unknown,
+                        }
+                    } else {
+                        Evaluated::Unknown
+                    }
+                }
                 SymbolKind::Parameter(x) => {
                     let mut evaluator = Evaluator::new();
                     if let Some(width) = evaluator.type_width(x.r#type.clone()) {
