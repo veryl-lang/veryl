@@ -6,7 +6,7 @@ use crate::assign::{
 use crate::attribute::AllowItem;
 use crate::attribute::Attribute as Attr;
 use crate::attribute_table;
-use crate::symbol::{Direction, SymbolId, SymbolKind};
+use crate::symbol::{Direction, SymbolId, SymbolKind, TypeKind};
 use crate::symbol_table;
 use std::collections::HashMap;
 use veryl_parser::veryl_grammar_trait::*;
@@ -390,6 +390,7 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                     // get port property
                     let mut ports = HashMap::new();
                     let mut port_unknown = false;
+                    let mut sv_instance = false;
                     if let Ok(x) = symbol_table::resolve((&x.type_name, &symbol.found.namespace)) {
                         match x.found.kind {
                             SymbolKind::Module(ref x) => {
@@ -397,7 +398,10 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                                     ports.insert(port.name, port.property());
                                 }
                             }
-                            SymbolKind::SystemVerilog => port_unknown = true,
+                            SymbolKind::SystemVerilog => {
+                                port_unknown = true;
+                                sv_instance = true;
+                            }
                             // TODO this should be removed after implementing bounded generic
                             // parameter
                             SymbolKind::GenericParameter(_) => port_unknown = true,
@@ -467,6 +471,26 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                                             &token.text.to_string(),
                                             "reset type",
                                             "non-reset type",
+                                            self.text,
+                                            &token.into(),
+                                        ));
+                                    }
+
+                                    // Check implicit reset to SV instance
+                                    let is_implicit_reset = match &symbol.found.kind {
+                                        SymbolKind::Port(x) => {
+                                            if let Some(x) = &x.r#type {
+                                                x.kind == TypeKind::Reset
+                                            } else {
+                                                false
+                                            }
+                                        }
+                                        SymbolKind::Variable(x) => x.r#type.kind == TypeKind::Reset,
+                                        _ => false,
+                                    };
+
+                                    if sv_instance && is_implicit_reset {
+                                        self.errors.push(AnalyzerError::sv_with_implicit_reset(
                                             self.text,
                                             &token.into(),
                                         ));
