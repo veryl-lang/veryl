@@ -360,11 +360,11 @@ impl Emitter {
         let start: u32 = self.dst_column;
         match &*item.case_item_group {
             CaseItemGroup::CaseCondition(x) => {
-                self.inside_element_opration(lhs, &x.case_condition.range_item);
+                self.inside_element_operation(lhs, &x.case_condition.range_item);
                 for x in &x.case_condition.case_condition_list {
                     self.comma(&x.comma);
                     self.space(1);
-                    self.inside_element_opration(lhs, &x.range_item);
+                    self.inside_element_operation(lhs, &x.range_item);
                 }
             }
             CaseItemGroup::Defaul(x) => self.defaul(&x.defaul),
@@ -409,7 +409,7 @@ impl Emitter {
             self.range(&rhs.range);
             self.str("}");
         } else {
-            self.inside_element_opration(lhs, rhs);
+            self.inside_element_operation(lhs, rhs);
         }
     }
 
@@ -426,10 +426,10 @@ impl Emitter {
 
     fn inside_expanded_expression(&mut self, arg: &InsideExpression) {
         self.str("(");
-        self.inside_element_opration(&arg.expression, &arg.range_list.range_item);
+        self.inside_element_operation(&arg.expression, &arg.range_list.range_item);
         for x in &arg.range_list.range_list_list {
             self.str(" || ");
-            self.inside_element_opration(&arg.expression, &x.range_item);
+            self.inside_element_operation(&arg.expression, &x.range_item);
         }
         self.str(")");
     }
@@ -447,15 +447,15 @@ impl Emitter {
 
     fn outside_expanded_expression(&mut self, arg: &OutsideExpression) {
         self.str("!(");
-        self.inside_element_opration(&arg.expression, &arg.range_list.range_item);
+        self.inside_element_operation(&arg.expression, &arg.range_list.range_item);
         for x in &arg.range_list.range_list_list {
             self.str(" || ");
-            self.inside_element_opration(&arg.expression, &x.range_item);
+            self.inside_element_operation(&arg.expression, &x.range_item);
         }
         self.str(")");
     }
 
-    fn inside_element_opration(&mut self, lhs: &Expression, rhs: &RangeItem) {
+    fn inside_element_operation(&mut self, lhs: &Expression, rhs: &RangeItem) {
         if let Some(ref x) = rhs.range.range_opt {
             let (op_l, op_r) = match &*x.range_operator {
                 RangeOperator::DotDot(_) => (">=", "<"),
