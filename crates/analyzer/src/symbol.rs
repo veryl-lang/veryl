@@ -331,6 +331,34 @@ impl SymbolKind {
             _ => false,
         }
     }
+
+    pub fn is_clock(&self) -> bool {
+        match self {
+            SymbolKind::Port(x) => {
+                if let Some(x) = &x.r#type {
+                    x.kind.is_clock()
+                } else {
+                    false
+                }
+            }
+            SymbolKind::Variable(x) => x.r#type.kind.is_clock(),
+            _ => false,
+        }
+    }
+
+    pub fn is_reset(&self) -> bool {
+        match self {
+            SymbolKind::Port(x) => {
+                if let Some(x) = &x.r#type {
+                    x.kind.is_reset()
+                } else {
+                    false
+                }
+            }
+            SymbolKind::Variable(x) => x.r#type.kind.is_reset(),
+            _ => false,
+        }
+    }
 }
 
 impl fmt::Display for SymbolKind {

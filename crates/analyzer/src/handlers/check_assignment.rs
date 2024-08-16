@@ -387,20 +387,20 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
         if let HandlerPoint::Before = self.point {
             if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
                 if let SymbolKind::Instance(ref x) = symbol.found.kind {
-                    // get port direction
-                    let mut dirs = HashMap::new();
-                    let mut dir_unknown = false;
+                    // get port property
+                    let mut ports = HashMap::new();
+                    let mut port_unknown = false;
                     if let Ok(x) = symbol_table::resolve((&x.type_name, &symbol.found.namespace)) {
                         match x.found.kind {
                             SymbolKind::Module(ref x) => {
                                 for port in &x.ports {
-                                    dirs.insert(port.name, port.property().direction);
+                                    ports.insert(port.name, port.property());
                                 }
                             }
-                            SymbolKind::SystemVerilog => dir_unknown = true,
+                            SymbolKind::SystemVerilog => port_unknown = true,
                             // TODO this should be removed after implementing bounded generic
                             // parameter
-                            SymbolKind::GenericParameter(_) => dir_unknown = true,
+                            SymbolKind::GenericParameter(_) => port_unknown = true,
                             _ => (),
                         }
                     }
@@ -413,31 +413,63 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                     for (token, targets) in &x.connects {
                         for target in targets {
                             if !target.is_empty() {
-                                let dir_output = if let Some(dir) = dirs.get(&token.text) {
-                                    matches!(
-                                        dir,
-                                        Direction::Ref | Direction::Inout | Direction::Output
-                                    )
-                                } else {
-                                    false
-                                };
+                                if let Ok(symbol) =
+                                    symbol_table::resolve((&target.path(), &symbol.found.namespace))
+                                {
+                                    // Check assignment from output port
+                                    let dir_output = if let Some(port) = ports.get(&token.text) {
+                                        matches!(
+                                            port.direction,
+                                            Direction::Ref | Direction::Inout | Direction::Output
+                                        )
+                                    } else {
+                                        false
+                                    };
 
-                                if dir_output | dir_unknown {
-                                    if let Ok(x) = symbol_table::resolve((
-                                        &target.path(),
-                                        &symbol.found.namespace,
-                                    )) {
+                                    if dir_output | port_unknown {
                                         self.assign_position.push(AssignPositionType::Connect {
                                             token: *token,
-                                            maybe: dir_unknown,
+                                            maybe: port_unknown,
                                         });
                                         let partial = target.is_partial();
                                         symbol_table::add_assign(
-                                            x.full_path,
+                                            symbol.full_path,
                                             &self.assign_position,
                                             partial,
                                         );
                                         self.assign_position.pop();
+                                    }
+
+                                    // Check assignment of clock/reset type
+                                    let (is_clock, is_reset) =
+                                        if let Some(port) = ports.get(&token.text) {
+                                            if let Some(x) = &port.r#type {
+                                                (x.kind.is_clock(), x.kind.is_reset())
+                                            } else {
+                                                (false, false)
+                                            }
+                                        } else {
+                                            (false, false)
+                                        };
+
+                                    if is_clock && !symbol.found.kind.is_clock() {
+                                        self.errors.push(AnalyzerError::mismatch_type(
+                                            &token.text.to_string(),
+                                            "clock type",
+                                            "non-clock type",
+                                            self.text,
+                                            &token.into(),
+                                        ));
+                                    }
+
+                                    if is_reset && !symbol.found.kind.is_reset() {
+                                        self.errors.push(AnalyzerError::mismatch_type(
+                                            &token.text.to_string(),
+                                            "reset type",
+                                            "non-reset type",
+                                            self.text,
+                                            &token.into(),
+                                        ));
                                     }
                                 }
                             }
