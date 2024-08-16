@@ -258,6 +258,7 @@ impl SymbolTable {
                         | SymbolKind::Modport(_)
                         | SymbolKind::ModportFunctionMember(_)
                         | SymbolKind::EnumMember(_)
+                        | SymbolKind::EnumMemberMangled
                         | SymbolKind::Block
                         | SymbolKind::SystemFunction
                         | SymbolKind::Genvar

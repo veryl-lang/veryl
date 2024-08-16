@@ -3653,7 +3653,7 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
         | SymbolKind::Genvar
         | SymbolKind::Namespace
         | SymbolKind::SystemFunction => ret.push_str(&symbol.token.to_string()),
-        SymbolKind::ClockDomain => unreachable!(),
+        SymbolKind::ClockDomain | SymbolKind::EnumMemberMangled => unreachable!(),
     }
     ret
 }

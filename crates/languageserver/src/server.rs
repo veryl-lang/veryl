@@ -325,6 +325,7 @@ impl Server {
                     VerylSymbolKind::UnionMember(_) => SymbolKind::VARIABLE,
                     VerylSymbolKind::Enum(_) => SymbolKind::ENUM,
                     VerylSymbolKind::EnumMember(_) => SymbolKind::ENUM_MEMBER,
+                    VerylSymbolKind::EnumMemberMangled => SymbolKind::ENUM_MEMBER,
                     VerylSymbolKind::Modport(_) => SymbolKind::INTERFACE,
                     VerylSymbolKind::Genvar => SymbolKind::VARIABLE,
                     VerylSymbolKind::TypeDef(_) => SymbolKind::TYPE_PARAMETER,

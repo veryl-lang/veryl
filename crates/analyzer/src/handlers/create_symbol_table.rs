@@ -613,6 +613,19 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             let kind = SymbolKind::EnumMember(property);
             let id = self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
             self.enum_members.push(id);
+
+            // add EnumMemberMangled to detect identifier conflict in generated SV
+            let mut token = arg.identifier.identifier_token.token;
+            let prefix = self.enum_member_prefix.clone().unwrap();
+            token.text = resource_table::insert_str(&format!("{prefix}_{}", token.text));
+            let kind = SymbolKind::EnumMemberMangled;
+
+            // namespace of EnumMemberMangled is outside of enum
+            let namespace = self.namespace.pop();
+            self.insert_symbol(&token, kind, false);
+            if let Some(namespace) = namespace {
+                self.namespace.push(namespace);
+            }
         }
         Ok(())
     }
