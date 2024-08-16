@@ -2158,3 +2158,21 @@ fn sv_keyword_usage() {
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
 }
+
+#[test]
+fn conflict_with_mangled_enum_member() {
+    let code = r#"
+    module ModuleA {
+        enum EnumA: logic {
+            MemberA,
+        }
+        var EnumA_MemberA: logic;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::DuplicatedIdentifier { .. }
+    ));
+}

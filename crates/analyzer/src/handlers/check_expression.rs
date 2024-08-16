@@ -117,6 +117,7 @@ impl<'a> VerylGrammarTrait for CheckExpression<'a> {
                         }
                         SymbolKind::Parameter(_)
                         | SymbolKind::EnumMember(_)
+                        | SymbolKind::EnumMemberMangled
                         | SymbolKind::Genvar
                         | SymbolKind::ModportVariableMember(_)
                         | SymbolKind::SystemVerilog

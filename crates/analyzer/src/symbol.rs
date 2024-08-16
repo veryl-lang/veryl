@@ -276,6 +276,7 @@ pub enum SymbolKind {
     TypeDef(TypeDefProperty),
     Enum(EnumProperty),
     EnumMember(EnumMemberProperty),
+    EnumMemberMangled,
     Modport(ModportProperty),
     Genvar,
     ModportVariableMember(ModportVariableMemberProperty),
@@ -307,6 +308,7 @@ impl SymbolKind {
             SymbolKind::TypeDef(_) => "typedef".to_string(),
             SymbolKind::Enum(_) => "enum".to_string(),
             SymbolKind::EnumMember(_) => "enum member".to_string(),
+            SymbolKind::EnumMemberMangled => "enum member mangled".to_string(),
             SymbolKind::Modport(_) => "modport".to_string(),
             SymbolKind::Genvar => "genvar".to_string(),
             SymbolKind::ModportVariableMember(_) => "modport variable member".to_string(),
@@ -448,6 +450,7 @@ impl fmt::Display for SymbolKind {
                     "enum member".to_string()
                 }
             }
+            SymbolKind::EnumMemberMangled => "enum member mangled".to_string(),
             SymbolKind::Modport(x) => {
                 format!("modport ({} ports)", x.members.len())
             }
