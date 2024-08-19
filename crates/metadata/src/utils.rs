@@ -9,8 +9,11 @@ pub fn gather_files_with_extension<T: AsRef<Path>>(
     symlink: bool,
 ) -> Result<Vec<PathBuf>, MetadataError> {
     let mut inner_prj = Vec::new();
-    for entry in WalkDir::new(base_dir.as_ref()).follow_links(symlink) {
-        let entry = entry?;
+    for entry in WalkDir::new(base_dir.as_ref())
+        .follow_links(symlink)
+        .into_iter()
+        .flatten()
+    {
         if entry.file_type().is_file() {
             if let Some(x) = entry.path().file_name() {
                 if x == "Veryl.toml" {
@@ -25,8 +28,11 @@ pub fn gather_files_with_extension<T: AsRef<Path>>(
     }
 
     let mut ret = Vec::new();
-    for entry in WalkDir::new(base_dir.as_ref()).follow_links(symlink) {
-        let entry = entry?;
+    for entry in WalkDir::new(base_dir.as_ref())
+        .follow_links(symlink)
+        .into_iter()
+        .flatten()
+    {
         if entry.file_type().is_file() {
             if let Some(x) = entry.path().extension() {
                 if x == ext {
