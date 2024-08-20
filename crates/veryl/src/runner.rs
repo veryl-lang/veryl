@@ -1,11 +1,12 @@
 use anstyle::{AnsiColor, Style};
 use log::{debug, log_enabled, Level};
-use miette::Result;
+use miette::{IntoDiagnostic, Result};
 use once_cell::sync::Lazy;
 use regex::Regex;
-use std::path::PathBuf;
-use veryl_metadata::Metadata;
-use veryl_parser::resource_table::StrId;
+use std::fs;
+use std::path::{Path, PathBuf};
+use veryl_metadata::{Metadata, WaveFormTarget};
+use veryl_parser::resource_table::{PathId, StrId};
 use veryl_sourcemap::SourceMap;
 
 mod vcs;
@@ -16,7 +17,7 @@ pub use verilator::*;
 pub use vivado::*;
 
 pub trait Runner {
-    fn run(&mut self, metadata: &Metadata, test: StrId) -> Result<bool>;
+    fn run(&mut self, metadata: &Metadata, test: StrId, path: PathId, wave: bool) -> Result<bool>;
 
     fn name(&self) -> &'static str;
 
@@ -88,4 +89,28 @@ pub fn remap_msg_by_regex(line: &str, re: &Regex) -> String {
     }
 
     ret
+}
+
+pub fn copy_wave(
+    test_name: StrId,
+    test_path: PathId,
+    metadata: &Metadata,
+    work_path: &Path,
+) -> Result<()> {
+    let wave_src_path = work_path.join(format!("{}.vcd", test_name));
+    let wave_dst_path = match &metadata.test.waveform_target {
+        WaveFormTarget::Target => {
+            let target = PathBuf::from(test_path.to_string());
+            target.parent().unwrap().join(format!("{}.vcd", test_name))
+        }
+        WaveFormTarget::Directory { path } => path.join(format!("{}.vcd", test_name)),
+    };
+
+    let wave_dst_dir = wave_dst_path.parent().unwrap();
+    if !wave_dst_dir.exists() {
+        fs::create_dir_all(wave_dst_dir).into_diagnostic()?;
+    }
+
+    fs::copy(wave_src_path, wave_dst_path).into_diagnostic()?;
+    Ok(())
 }

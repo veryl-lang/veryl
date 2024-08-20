@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -11,6 +12,8 @@ pub struct Test {
     pub verilator: VerilatorProperty,
     #[serde(default)]
     pub vivado: VivadoProperty,
+    #[serde(default)]
+    pub waveform_target: WaveFormTarget,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -51,4 +54,14 @@ pub struct VivadoProperty {
     pub elaborate_args: Vec<String>,
     #[serde(default)]
     pub simulate_args: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type")]
+pub enum WaveFormTarget {
+    #[default]
+    #[serde(rename = "target")]
+    Target,
+    #[serde(rename = "directory")]
+    Directory { path: PathBuf },
 }

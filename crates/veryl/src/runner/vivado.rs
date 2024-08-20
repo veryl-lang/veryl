@@ -1,4 +1,4 @@
-use crate::runner::{remap_msg_by_regex, Runner};
+use crate::runner::{copy_wave, remap_msg_by_regex, Runner};
 use futures::prelude::*;
 use log::{error, info};
 use miette::{IntoDiagnostic, Result, WrapErr};
@@ -9,7 +9,7 @@ use tokio::process::{Child, Command};
 use tokio::runtime::Runtime;
 use tokio_util::codec::{FramedRead, LinesCodec};
 use veryl_metadata::Metadata;
-use veryl_parser::resource_table::StrId;
+use veryl_parser::resource_table::{PathId, StrId};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum State {
@@ -95,14 +95,25 @@ impl Vivado {
 }
 
 impl Runner for Vivado {
-    fn run(&mut self, metadata: &Metadata, test: StrId) -> Result<bool> {
+    fn run(&mut self, metadata: &Metadata, test: StrId, path: PathId, wave: bool) -> Result<bool> {
         self.success = true;
 
         let temp_dir = tempfile::tempdir().into_diagnostic()?;
 
         info!("Compiling test ({})", test);
 
-        let define = format!("__veryl_test_{}_{}__", metadata.project.name, test);
+        let mut defines = vec![
+            "-d".to_string(),
+            format!("__veryl_test_{}_{}__", metadata.project.name, test),
+        ];
+
+        if wave {
+            defines.push("-d".to_string());
+            defines.push(format!(
+                "__veryl_wavedump_{}_{}__",
+                metadata.project.name, test
+            ));
+        }
 
         let rt = Runtime::new().unwrap();
 
@@ -111,8 +122,7 @@ impl Runner for Vivado {
                 .arg("--sv")
                 .arg("-f")
                 .arg(metadata.filelist_path())
-                .arg("-d")
-                .arg(&define)
+                .args(&defines)
                 .args(&metadata.test.vivado.compile_args)
                 .current_dir(temp_dir.path())
                 .stdout(Stdio::piped())
@@ -131,9 +141,19 @@ impl Runner for Vivado {
 
         info!("Elaborating test ({})", test);
 
+        let opt = if wave { vec!["-debug", "all"] } else { vec![] };
+
+        let mut top = vec![test.to_string()];
+        if wave {
+            top.push("__veryl_wavedump".to_string());
+        }
+
         rt.block_on(async {
             let elaborate = Command::new("xelab")
-                .arg(test.to_string())
+                .args(top)
+                .args(opt)
+                .arg("-s")
+                .arg("simv")
                 .args(&metadata.test.vivado.elaborate_args)
                 .current_dir(temp_dir.path())
                 .stdout(Stdio::piped())
@@ -154,7 +174,7 @@ impl Runner for Vivado {
 
         rt.block_on(async {
             let simulate = Command::new("xsim")
-                .arg(&format!("work.{}", test))
+                .arg("simv")
                 .arg("--runall")
                 .args(&metadata.test.vivado.simulate_args)
                 .current_dir(temp_dir.path())
@@ -166,6 +186,10 @@ impl Runner for Vivado {
 
             self.parse(simulate).await
         })?;
+
+        if wave {
+            copy_wave(test, path, metadata, temp_dir.path())?;
+        }
 
         if self.success {
             info!("Succeeded test ({})", test);

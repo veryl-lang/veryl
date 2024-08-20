@@ -28,8 +28,8 @@ impl CmdTest {
         let tests: Vec<_> = attribute_table::get_all()
             .into_iter()
             .filter_map(|(_, attr)| {
-                if let Attribute::Test(x) = attr {
-                    Some(x)
+                if let Attribute::Test(x, y) = attr {
+                    Some((x, y))
                 } else {
                     None
                 }
@@ -50,8 +50,8 @@ impl CmdTest {
 
         let mut success = 0;
         let mut failure = 0;
-        for test in &tests {
-            if runner.run(metadata, *test)? {
+        for (test, path) in &tests {
+            if runner.run(metadata, *test, *path, self.opt.wave)? {
                 success += 1;
             } else {
                 failure += 1;

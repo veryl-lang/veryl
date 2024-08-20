@@ -1,4 +1,4 @@
-use crate::runner::{remap_msg_by_regex, Runner};
+use crate::runner::{copy_wave, remap_msg_by_regex, Runner};
 use futures::prelude::*;
 use log::{error, info};
 use miette::{IntoDiagnostic, Result, WrapErr};
@@ -9,7 +9,7 @@ use tokio::process::{Child, Command};
 use tokio::runtime::Runtime;
 use tokio_util::codec::{FramedRead, LinesCodec};
 use veryl_metadata::Metadata;
-use veryl_parser::resource_table::StrId;
+use veryl_parser::resource_table::{PathId, StrId};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum State {
@@ -122,28 +122,41 @@ impl Verilator {
 }
 
 impl Runner for Verilator {
-    fn run(&mut self, metadata: &Metadata, test: StrId) -> Result<bool> {
+    fn run(&mut self, metadata: &Metadata, test: StrId, path: PathId, wave: bool) -> Result<bool> {
         self.success = true;
 
         let temp_dir = tempfile::tempdir().into_diagnostic()?;
 
         info!("Compiling test ({})", test);
 
-        let define = format!("+define+__veryl_test_{}_{}__", metadata.project.name, test);
-        let top = format!("{}", test);
-        let simv = format!("./obj_dir/V{}", test);
+        let mut defines = vec![format!(
+            "+define+__veryl_test_{}_{}__",
+            metadata.project.name, test
+        )];
+
+        if wave {
+            defines.push(format!(
+                "+define+__veryl_wavedump_{}_{}__",
+                metadata.project.name, test
+            ));
+        }
+
+        let mut opt = vec!["--assert", "--binary", "-Wno-MULTITOP"];
+
+        if wave {
+            opt.push("--trace");
+        }
 
         let rt = Runtime::new().unwrap();
 
         rt.block_on(async {
             let compile = Command::new("verilator")
-                .arg("--assert")
-                .arg("--binary")
-                .arg("-top")
-                .arg(&top)
+                .args(&opt)
                 .arg("-f")
                 .arg(metadata.filelist_path())
-                .arg(&define)
+                .arg("-o")
+                .arg("simv")
+                .args(&defines)
                 .args(&metadata.test.verilator.compile_args)
                 .current_dir(temp_dir.path())
                 .stdout(Stdio::piped())
@@ -163,7 +176,7 @@ impl Runner for Verilator {
         info!("Executing test ({})", test);
 
         rt.block_on(async {
-            let simulate = Command::new(simv)
+            let simulate = Command::new("./obj_dir/simv")
                 .args(&metadata.test.verilator.simulate_args)
                 .current_dir(temp_dir.path())
                 .stdout(Stdio::piped())
@@ -174,6 +187,10 @@ impl Runner for Verilator {
 
             self.parse(simulate).await
         })?;
+
+        if wave {
+            copy_wave(test, path, metadata, temp_dir.path())?;
+        }
 
         if self.success {
             info!("Succeeded test ({})", test);

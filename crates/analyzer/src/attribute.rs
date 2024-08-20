@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::fmt;
-use veryl_parser::resource_table::{self, StrId};
+use veryl_parser::resource_table::{self, PathId, StrId};
+use veryl_parser::veryl_token::TokenSource;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Attribute {
@@ -9,7 +10,7 @@ pub enum Attribute {
     Sv(StrId),
     Allow(AllowItem),
     EnumMemberPrefix(StrId),
-    Test(StrId),
+    Test(StrId, PathId),
 }
 
 impl fmt::Display for Attribute {
@@ -20,7 +21,7 @@ impl fmt::Display for Attribute {
             Attribute::Sv(x) => format!("sv(\"{}\")", x),
             Attribute::Allow(x) => format!("allow({})", x),
             Attribute::EnumMemberPrefix(x) => format!("enum_member_prefix({})", x),
-            Attribute::Test(x) => format!("test({})", x),
+            Attribute::Test(x, _) => format!("test({})", x),
         };
         text.fmt(f)
     }
@@ -153,9 +154,15 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
             }
             x if x == pat.test => {
                 let arg = get_arg_ident(&value.attribute_opt);
+                let path =
+                    if let TokenSource::File(x) = value.identifier.identifier_token.token.source {
+                        x
+                    } else {
+                        unreachable!();
+                    };
 
                 if let Some(arg) = arg {
-                    Ok(Attribute::Test(arg))
+                    Ok(Attribute::Test(arg, path))
                 } else {
                     Err(AttributeError::MismatchArgs("single identifier"))
                 }
