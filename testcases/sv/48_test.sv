@@ -2,6 +2,14 @@ module veryl_testcase_Module48;
 endmodule
 
 `ifdef __veryl_test_veryl_testcase_test1__
+    `ifdef __veryl_wavedump_veryl_testcase_test1__
+        module __veryl_wavedump;
+            initial begin
+                $dumpfile("test1.vcd");
+                $dumpvars();
+            end
+        endmodule
+    `endif
 
 module test1;
    initial begin
@@ -16,6 +24,14 @@ endmodule
 `endif
 
 `ifdef __veryl_test_veryl_testcase_test2__
+    `ifdef __veryl_wavedump_veryl_testcase_test2__
+        module __veryl_wavedump;
+            initial begin
+                $dumpfile("test2.vcd");
+                $dumpvars();
+            end
+        endmodule
+    `endif
 
 module test2;
     // parse error
@@ -24,6 +40,14 @@ endmodule
 `endif
 
 `ifdef __veryl_test_veryl_testcase_test3__
+    `ifdef __veryl_wavedump_veryl_testcase_test3__
+        module __veryl_wavedump;
+            initial begin
+                $dumpfile("test3.vcd");
+                $dumpvars();
+            end
+        endmodule
+    `endif
 
 module test3;
     // elaborate error
@@ -33,6 +57,14 @@ endmodule
 `endif
 
 `ifdef __veryl_test_veryl_testcase_test4__
+    `ifdef __veryl_wavedump_veryl_testcase_test4__
+        module __veryl_wavedump;
+            initial begin
+                $dumpfile("test4.vcd");
+                $dumpvars();
+            end
+        endmodule
+    `endif
 module veryl_testcase_test4;
     initial begin
         $display("test4");

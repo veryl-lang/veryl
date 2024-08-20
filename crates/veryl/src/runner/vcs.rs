@@ -1,4 +1,4 @@
-use crate::runner::{remap_msg_by_regex, Runner};
+use crate::runner::{copy_wave, remap_msg_by_regex, Runner};
 use futures::prelude::*;
 use log::{error, info};
 use miette::{IntoDiagnostic, Result, WrapErr};
@@ -9,7 +9,7 @@ use tokio::process::{Child, Command};
 use tokio::runtime::Runtime;
 use tokio_util::codec::{FramedRead, LinesCodec};
 use veryl_metadata::Metadata;
-use veryl_parser::resource_table::StrId;
+use veryl_parser::resource_table::{PathId, StrId};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum State {
@@ -112,14 +112,24 @@ impl Vcs {
 }
 
 impl Runner for Vcs {
-    fn run(&mut self, metadata: &Metadata, test: StrId) -> Result<bool> {
+    fn run(&mut self, metadata: &Metadata, test: StrId, path: PathId, wave: bool) -> Result<bool> {
         self.success = true;
 
         let temp_dir = tempfile::tempdir().into_diagnostic()?;
 
         info!("Compiling test ({})", test);
 
-        let define = format!("+define+__veryl_test_{}_{}__", metadata.project.name, test);
+        let mut defines = vec![format!(
+            "+define+__veryl_test_{}_{}__",
+            metadata.project.name, test
+        )];
+
+        if wave {
+            defines.push(format!(
+                "+define+__veryl_wavedump_{}_{}__",
+                metadata.project.name, test
+            ));
+        }
 
         let rt = Runtime::new().unwrap();
 
@@ -128,7 +138,7 @@ impl Runner for Vcs {
                 .arg("-sverilog")
                 .arg("-f")
                 .arg(metadata.filelist_path())
-                .arg(&define)
+                .args(&defines)
                 .args(&metadata.test.vcs.compile_args)
                 .current_dir(temp_dir.path())
                 .stdout(Stdio::piped())
@@ -159,6 +169,10 @@ impl Runner for Vcs {
 
             self.parse(simulate).await
         })?;
+
+        if wave {
+            copy_wave(test, path, metadata, temp_dir.path())?;
+        }
 
         if self.success {
             info!("Succeeded test ({})", test);

@@ -1977,6 +1977,26 @@ impl VerylWalker for Emitter {
                         );
                         self.token(&arg.hash.hash_token.replace(&text));
                         self.newline();
+                        let mut wavedump = format!(
+                            r##"    `ifdef __veryl_wavedump_{}_{}__
+        module __veryl_wavedump;
+            initial begin
+                $dumpfile("{}.vcd");
+                $dumpvars();
+            end
+        endmodule
+    `endif
+"##,
+                            self.project_name.unwrap(),
+                            test_name,
+                            test_name
+                        );
+
+                        if cfg!(windows) {
+                            wavedump = wavedump.replace("\n", NEWLINE);
+                        }
+
+                        self.str(&wavedump);
                         self.attribute.push(AttributeType::Test);
                     }
                 }

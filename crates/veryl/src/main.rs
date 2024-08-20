@@ -131,6 +131,10 @@ pub struct OptTest {
     /// Simulator
     #[arg(long, value_enum)]
     pub sim: Option<SimType>,
+
+    /// Dump waveform
+    #[arg(long)]
+    pub wave: bool,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
