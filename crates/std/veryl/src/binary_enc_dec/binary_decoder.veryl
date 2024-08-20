@@ -2,7 +2,7 @@
 ///
 /// Converts a bit vector from a binary encoding to
 /// a bit vector with a unary encoding.
-pub module binary_decoder #(
+module binary_decoder #(
     /// Width of the input binary vector
     param BIN_WIDTH: u32 = 8,
     /// Width of the output unary vector
