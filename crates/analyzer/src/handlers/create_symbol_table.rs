@@ -1253,6 +1253,11 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     unreachable!()
                 };
 
+                if top.is_none() && way == "cocotb" {
+                    self.errors
+                        .push(AnalyzerError::invalid_test("`cocotb` test requires top module name at the second argument of `#[test]` attribute", self.text, &token.into()));
+                }
+
                 let property = TestProperty { r#type, path, top };
                 self.insert_symbol(&token, SymbolKind::Test(property), false);
             }
@@ -1285,6 +1290,11 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 } else {
                     unreachable!()
                 };
+
+                if top.is_none() && way == "cocotb" {
+                    self.errors
+                        .push(AnalyzerError::invalid_test("`cocotb` test requires top module name at the second argument of `#[test]` attribute", self.text, &token.into()));
+                }
 
                 let property = TestProperty { r#type, path, top };
                 self.insert_symbol(&token, SymbolKind::Test(property), false);

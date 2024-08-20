@@ -350,6 +350,21 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_test),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_test")
+    )]
+    #[error("test is invalid because {cause}")]
+    InvalidTest {
+        cause: String,
+        #[source_code]
+        input: NamedSource<String>,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(missing_default_argument),
         help("give default argument"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#missing_default_argument")
@@ -1107,6 +1122,14 @@ impl AnalyzerError {
         AnalyzerError::InvalidCast {
             from: from.into(),
             to: to.into(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn invalid_test(cause: &str, source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidTest {
+            cause: cause.into(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
         }
