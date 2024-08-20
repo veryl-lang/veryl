@@ -2,16 +2,16 @@ module async_fifo_reset_sync::<S> #(
     param MERGE_RESET      : bit = '0,
     param RESET_SYNC_STAGES: u32 = 2 ,
 ) (
-    is_clk: input  's clock,
-    is_rst: input  's reset,
-    os_rst: output 's reset,
-    id_clk: input  'd clock,
-    id_rst: input  'd reset,
-    od_rst: output 'd reset,
+    is_clk: input  `s clock,
+    is_rst: input  `s reset,
+    os_rst: output `s reset,
+    id_clk: input  `d clock,
+    id_rst: input  `d reset,
+    od_rst: output `d reset,
 ) {
     if MERGE_RESET :g_reset {
-        var s_rst: 's logic;
-        var d_rst: 'd logic;
+        var s_rst: `s logic;
+        var d_rst: `d logic;
 
         unsafe (cdc) {
             always_comb {

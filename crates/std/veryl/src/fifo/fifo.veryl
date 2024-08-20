@@ -39,17 +39,17 @@ pub module fifo #(
     //--------------------------------------------------------------
     //  controller
     //--------------------------------------------------------------
-    local POINTER_WIDTH: u32 = if RAM_WORDS >= 2 {
+    local RAM_POINTER_WIDTH: u32 = if RAM_WORDS >= 2 {
         $clog2(RAM_WORDS)
     } else {
         1
     };
 
-    var write_pointer: logic<POINTER_WIDTH>;
-    var write_to_ff  : logic               ;
-    var write_to_ram : logic               ;
-    var read_pointer : logic<POINTER_WIDTH>;
-    var read_from_ram: logic               ;
+    var write_pointer: logic<RAM_POINTER_WIDTH>;
+    var write_to_ff  : logic                   ;
+    var write_to_ram : logic                   ;
+    var read_pointer : logic<RAM_POINTER_WIDTH>;
+    var read_from_ram: logic                   ;
 
     inst u_controller: fifo_controller #(
         TYPE               ,
@@ -87,11 +87,11 @@ pub module fifo #(
 
     if RAM_WORDS >= 1 :g_ram {
         inst u_ram: ram #(
-            WORD_SIZE    : RAM_WORDS    ,
-            ADDRESS_WIDTH: POINTER_WIDTH,
-            DATA_TYPE    : TYPE         ,
-            BUFFER_OUT   : 0            ,
-            USE_RESET    : RESET_RAM    ,
+            WORD_SIZE    : RAM_WORDS        ,
+            ADDRESS_WIDTH: RAM_POINTER_WIDTH,
+            DATA_TYPE    : TYPE             ,
+            BUFFER_OUT   : 0                ,
+            USE_RESET    : RESET_RAM        ,
         ) (
             i_clk                ,
             i_rst                ,
