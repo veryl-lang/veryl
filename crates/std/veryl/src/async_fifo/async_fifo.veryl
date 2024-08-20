@@ -118,14 +118,14 @@ pub module async_fifo::<S> #(
         }
     }
 
-    inst u_s_bin2gray: bin2gray #(
+    inst u_s_bin2gray: gray_encoder #(
         WIDTH: POINTER_WIDTH,
     ) (
         i_bin : wp_sclk     ,
         o_gray: wp_sclk_gray,
     );
 
-    inst u_s_gray2bin: gray2bin #(
+    inst u_s_gray2bin: gray_decoder #(
         WIDTH: POINTER_WIDTH,
     ) (
         i_gray: rp_sclk_gray,
@@ -185,14 +185,14 @@ pub module async_fifo::<S> #(
         }
     }
 
-    inst u_d_bin2gray: bin2gray #(
+    inst u_d_bin2gray: gray_encoder #(
         WIDTH: POINTER_WIDTH,
     ) (
         i_bin : rp_dclk     ,
         o_gray: rp_dclk_gray,
     );
 
-    inst u_d_gray2bin: gray2bin #(
+    inst u_d_gray2bin: gray_decoder #(
         WIDTH: POINTER_WIDTH,
     ) (
         i_gray: wp_dclk_gray,

@@ -1,7 +1,7 @@
 /// Converts a Gray encoded bit vector to a binary encoded bit-vector
 /// * Space Complexity: O(WIDTH log WIDTH)
 /// * Time Complexity: O(log WIDTH)
-pub module gray2bin #(
+pub module gray_decoder #(
     /// Input and output bit vector width
     param WIDTH: u32 = 1,
 ) (
@@ -21,7 +21,7 @@ pub module gray2bin #(
         let top_in : logic<TWIDTH> = i_gray[WIDTH - 1:BWIDTH];
         var top_out: logic<TWIDTH>;
 
-        inst u_top: gray2bin #(
+        inst u_top: gray_decoder #(
             WIDTH: TWIDTH,
         ) (
             i_gray: top_in ,
@@ -34,7 +34,7 @@ pub module gray2bin #(
         // Have to xor all of the bottom bits with the xor-reduction of the top bits
         let bot_red: logic<BWIDTH> = bot_out ^ {top_out[0] repeat BWIDTH};
 
-        inst u_bot: gray2bin #(
+        inst u_bot: gray_decoder #(
             WIDTH: BWIDTH,
         ) (
             i_gray: bot_in ,

@@ -1,7 +1,7 @@
 /// Converts a binary encoded bit vector to a Gray encoded bit-vector
 /// * Space Complexity: O(WIDTH)
 /// * Time Complexity: O(1)
-pub module bin2gray #(
+pub module gray_encoder #(
     /// Input and output bit vector width
     param WIDTH: u32 = 32,
 ) (
@@ -29,8 +29,8 @@ module test_gray;
     end
   end
 
-  std_bin2gray #(WIDTH) dut2(.i_bin, .o_gray);
-  std_gray2bin #(WIDTH) dut1(.i_gray(o_gray), .o_bin);
+  std_gray_encoder #(WIDTH) dut2(.i_bin, .o_gray);
+  std_gray_decoder #(WIDTH) dut1(.i_gray(o_gray), .o_bin);
 
   initial begin
     for (longint i = 0; i < (1 << WIDTH); ++i) begin
