@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::fmt;
-use veryl_parser::resource_table::{self, PathId, StrId};
-use veryl_parser::veryl_token::TokenSource;
+use veryl_parser::resource_table::{self, StrId};
+use veryl_parser::veryl_token::Token;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Attribute {
@@ -10,7 +10,7 @@ pub enum Attribute {
     Sv(StrId),
     Allow(AllowItem),
     EnumMemberPrefix(StrId),
-    Test(StrId, PathId),
+    Test(Token, Option<StrId>),
 }
 
 impl fmt::Display for Attribute {
@@ -21,7 +21,7 @@ impl fmt::Display for Attribute {
             Attribute::Sv(x) => format!("sv(\"{}\")", x),
             Attribute::Allow(x) => format!("allow({})", x),
             Attribute::EnumMemberPrefix(x) => format!("enum_member_prefix({})", x),
-            Attribute::Test(x, _) => format!("test({})", x),
+            Attribute::Test(x, _) => format!("test({})", x.text),
         };
         text.fmt(f)
     }
@@ -34,15 +34,18 @@ pub enum AttributeError {
     InvalidAllow(StrId),
 }
 
-fn get_arg_ident(args: &Option<veryl_parser::veryl_grammar_trait::AttributeOpt>) -> Option<StrId> {
+fn get_arg_ident(
+    args: &Option<veryl_parser::veryl_grammar_trait::AttributeOpt>,
+    pos: usize,
+) -> Option<Token> {
     use veryl_parser::veryl_grammar_trait as g;
 
     if let Some(ref x) = args {
         let args: Vec<g::AttributeItem> = x.attribute_list.as_ref().into();
-        if args.len() != 1 {
+        if args.len() <= pos {
             None
-        } else if let g::AttributeItem::Identifier(ref x) = args[0] {
-            Some(x.identifier.identifier_token.token.text)
+        } else if let g::AttributeItem::Identifier(ref x) = args[pos] {
+            Some(x.identifier.identifier_token.token)
         } else {
             None
         }
@@ -51,15 +54,18 @@ fn get_arg_ident(args: &Option<veryl_parser::veryl_grammar_trait::AttributeOpt>)
     }
 }
 
-fn get_arg_string(args: &Option<veryl_parser::veryl_grammar_trait::AttributeOpt>) -> Option<StrId> {
+fn get_arg_string(
+    args: &Option<veryl_parser::veryl_grammar_trait::AttributeOpt>,
+    pos: usize,
+) -> Option<Token> {
     use veryl_parser::veryl_grammar_trait as g;
 
     if let Some(ref x) = args {
         let args: Vec<g::AttributeItem> = x.attribute_list.as_ref().into();
-        if args.len() != 1 {
+        if args.len() <= pos {
             None
-        } else if let g::AttributeItem::StringLiteral(ref x) = args[0] {
-            Some(x.string_literal.string_literal_token.token.text)
+        } else if let g::AttributeItem::StringLiteral(ref x) = args[pos] {
+            Some(x.string_literal.string_literal_token.token)
         } else {
             None
         }
@@ -104,32 +110,32 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
     fn try_from(value: &veryl_parser::veryl_grammar_trait::Attribute) -> Result<Self, Self::Error> {
         PAT.with_borrow(|pat| match value.identifier.identifier_token.token.text {
             x if x == pat.ifdef || x == pat.ifndef => {
-                let arg = get_arg_ident(&value.attribute_opt);
+                let arg = get_arg_ident(&value.attribute_opt, 0);
 
                 if let Some(arg) = arg {
                     if x == pat.ifdef {
-                        Ok(Attribute::Ifdef(arg))
+                        Ok(Attribute::Ifdef(arg.text))
                     } else {
-                        Ok(Attribute::Ifndef(arg))
+                        Ok(Attribute::Ifndef(arg.text))
                     }
                 } else {
                     Err(AttributeError::MismatchArgs("single identifier"))
                 }
             }
             x if x == pat.sv => {
-                let arg = get_arg_string(&value.attribute_opt);
+                let arg = get_arg_string(&value.attribute_opt, 0);
 
                 if let Some(arg) = arg {
-                    Ok(Attribute::Sv(arg))
+                    Ok(Attribute::Sv(arg.text))
                 } else {
                     Err(AttributeError::MismatchArgs("single string"))
                 }
             }
             x if x == pat.allow => {
-                let arg = get_arg_ident(&value.attribute_opt);
+                let arg = get_arg_ident(&value.attribute_opt, 0);
 
                 if let Some(arg) = arg {
-                    match arg {
+                    match arg.text {
                         x if x == pat.missing_port => Ok(Attribute::Allow(AllowItem::MissingPort)),
                         x if x == pat.missing_reset_statement => {
                             Ok(Attribute::Allow(AllowItem::MissingResetStatement))
@@ -137,32 +143,27 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                         x if x == pat.unused_variable => {
                             Ok(Attribute::Allow(AllowItem::UnusedVariable))
                         }
-                        _ => Err(AttributeError::InvalidAllow(arg)),
+                        _ => Err(AttributeError::InvalidAllow(arg.text)),
                     }
                 } else {
                     Err(AttributeError::MismatchArgs("allowable rule"))
                 }
             }
             x if x == pat.enum_member_prefix => {
-                let arg = get_arg_ident(&value.attribute_opt);
+                let arg = get_arg_ident(&value.attribute_opt, 0);
 
                 if let Some(arg) = arg {
-                    Ok(Attribute::EnumMemberPrefix(arg))
+                    Ok(Attribute::EnumMemberPrefix(arg.text))
                 } else {
                     Err(AttributeError::MismatchArgs("single identifier"))
                 }
             }
             x if x == pat.test => {
-                let arg = get_arg_ident(&value.attribute_opt);
-                let path =
-                    if let TokenSource::File(x) = value.identifier.identifier_token.token.source {
-                        x
-                    } else {
-                        unreachable!();
-                    };
+                let arg = get_arg_ident(&value.attribute_opt, 0);
+                let top = get_arg_ident(&value.attribute_opt, 1);
 
                 if let Some(arg) = arg {
-                    Ok(Attribute::Test(arg, path))
+                    Ok(Attribute::Test(arg, top.map(|x| x.text)))
                 } else {
                     Err(AttributeError::MismatchArgs("single identifier"))
                 }

@@ -13,8 +13,8 @@ use crate::symbol::{
     GenericParameterProperty, InstanceProperty, InterfaceProperty, ModportFunctionMemberProperty,
     ModportProperty, ModportVariableMemberProperty, ModuleProperty, PackageProperty, Parameter,
     ParameterProperty, ParameterScope, ParameterValue, Port, PortProperty, StructMemberProperty,
-    StructProperty, Symbol, SymbolId, SymbolKind, TypeDefProperty, TypeKind, UnionMemberProperty,
-    UnionProperty, VariableAffiniation, VariableProperty,
+    StructProperty, Symbol, SymbolId, SymbolKind, TestProperty, TestType, TypeDefProperty,
+    TypeKind, UnionMemberProperty, UnionProperty, VariableAffiniation, VariableProperty,
 };
 use crate::symbol_path::{GenericSymbolPath, SymbolPath};
 use crate::symbol_table;
@@ -1222,6 +1222,72 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     SymbolKind::Package(property),
                     public,
                 );
+            }
+        }
+        Ok(())
+    }
+
+    fn embed_declaration(&mut self, arg: &EmbedDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            let way = arg.identifier.identifier_token.to_string();
+            let mut test_attr = None;
+
+            let attrs = attribute_table::get(&arg.embed.embed_token.token);
+            for attr in attrs {
+                if let Attr::Test(x, y) = attr {
+                    test_attr = Some((x, y));
+                }
+            }
+
+            let content = &arg.embed_content.embed_content_token.token;
+            let r#type = match way.as_str() {
+                "inline" => Some(TestType::Inline),
+                "cocotb" => Some(TestType::CocotbEmbed(content.text)),
+                _ => None,
+            };
+
+            if let (Some((token, top)), Some(r#type)) = (test_attr, r#type) {
+                let path = if let TokenSource::File(x) = content.source {
+                    x
+                } else {
+                    unreachable!()
+                };
+
+                let property = TestProperty { r#type, path, top };
+                self.insert_symbol(&token, SymbolKind::Test(property), false);
+            }
+        }
+        Ok(())
+    }
+
+    fn include_declaration(&mut self, arg: &IncludeDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            let way = arg.identifier.identifier_token.to_string();
+            let mut test_attr = None;
+
+            let attrs = attribute_table::get(&arg.include.include_token.token);
+            for attr in attrs {
+                if let Attr::Test(x, y) = attr {
+                    test_attr = Some((x, y));
+                }
+            }
+
+            let content = &arg.string_literal.string_literal_token.token;
+            let r#type = match way.as_str() {
+                "inline" => Some(TestType::Inline),
+                "cocotb" => Some(TestType::CocotbInclude(content.text)),
+                _ => None,
+            };
+
+            if let (Some((token, top)), Some(r#type)) = (test_attr, r#type) {
+                let path = if let TokenSource::File(x) = content.source {
+                    x
+                } else {
+                    unreachable!()
+                };
+
+                let property = TestProperty { r#type, path, top };
+                self.insert_symbol(&token, SymbolKind::Test(property), false);
             }
         }
         Ok(())

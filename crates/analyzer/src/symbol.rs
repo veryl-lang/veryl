@@ -5,7 +5,7 @@ use crate::symbol_table;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::fmt;
-use veryl_parser::resource_table::StrId;
+use veryl_parser::resource_table::{PathId, StrId};
 use veryl_parser::veryl_grammar_trait as syntax_tree;
 use veryl_parser::veryl_token::{Token, TokenRange};
 use veryl_parser::veryl_walker::VerylWalker;
@@ -304,6 +304,7 @@ pub enum SymbolKind {
     GenericParameter(GenericParameterProperty),
     GenericInstance(GenericInstanceProperty),
     ClockDomain,
+    Test(TestProperty),
 }
 
 impl SymbolKind {
@@ -336,6 +337,7 @@ impl SymbolKind {
             SymbolKind::GenericParameter(_) => "generic parameter".to_string(),
             SymbolKind::GenericInstance(_) => "generic instance".to_string(),
             SymbolKind::ClockDomain => "clock domain".to_string(),
+            SymbolKind::Test(_) => "test".to_string(),
         }
     }
 
@@ -482,6 +484,7 @@ impl fmt::Display for SymbolKind {
             SymbolKind::GenericParameter(_) => "generic parameter".to_string(),
             SymbolKind::GenericInstance(_) => "generic instance".to_string(),
             SymbolKind::ClockDomain => "clock domain".to_string(),
+            SymbolKind::Test(_) => "test".to_string(),
         };
         text.fmt(f)
     }
@@ -1026,4 +1029,18 @@ pub struct GenericParameterProperty {
 pub struct GenericInstanceProperty {
     pub base: SymbolId,
     pub arguments: Vec<GenericSymbolPath>,
+}
+
+#[derive(Debug, Clone)]
+pub enum TestType {
+    Inline,
+    CocotbEmbed(StrId),
+    CocotbInclude(StrId),
+}
+
+#[derive(Debug, Clone)]
+pub struct TestProperty {
+    pub r#type: TestType,
+    pub path: PathId,
+    pub top: Option<StrId>,
 }

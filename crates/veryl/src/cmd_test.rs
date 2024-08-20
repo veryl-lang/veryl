@@ -1,10 +1,10 @@
 use crate::cmd_build::CmdBuild;
-use crate::runner::{Vcs, Verilator, Vivado};
+use crate::runner::{Cocotb, CocotbSource, Vcs, Verilator, Vivado};
 use crate::{OptBuild, OptTest};
 use log::{error, info};
 use miette::Result;
-use veryl_analyzer::attribute::Attribute;
-use veryl_analyzer::attribute_table;
+use veryl_analyzer::symbol::{SymbolKind, TestType};
+use veryl_analyzer::symbol_table;
 use veryl_metadata::{FilelistType, Metadata, SimType};
 
 pub struct CmdTest {
@@ -25,11 +25,11 @@ impl CmdTest {
         });
         build.exec(metadata)?;
 
-        let tests: Vec<_> = attribute_table::get_all()
+        let tests: Vec<_> = symbol_table::get_all()
             .into_iter()
-            .filter_map(|(_, attr)| {
-                if let Attribute::Test(x, y) = attr {
-                    Some((x, y))
+            .filter_map(|symbol| {
+                if let SymbolKind::Test(x) = symbol.kind {
+                    Some((symbol.token.text, x))
                 } else {
                     None
                 }
@@ -42,16 +42,20 @@ impl CmdTest {
             metadata.test.simulator
         };
 
-        let mut runner = match sim_type {
-            SimType::Verilator => Verilator::new().runner(),
-            SimType::Vcs => Vcs::new().runner(),
-            SimType::Vivado => Vivado::new().runner(),
-        };
-
         let mut success = 0;
         let mut failure = 0;
-        for (test, path) in &tests {
-            if runner.run(metadata, *test, *path, self.opt.wave)? {
+        for (test, property) in &tests {
+            let mut runner = match property.r#type {
+                TestType::Inline => match sim_type {
+                    SimType::Verilator => Verilator::new().runner(),
+                    SimType::Vcs => Vcs::new().runner(),
+                    SimType::Vivado => Vivado::new().runner(),
+                },
+                TestType::CocotbEmbed(x) => Cocotb::new(CocotbSource::Embed(x)).runner(),
+                TestType::CocotbInclude(x) => Cocotb::new(CocotbSource::Include(x)).runner(),
+            };
+
+            if runner.run(metadata, *test, property.top, property.path, self.opt.wave)? {
                 success += 1;
             } else {
                 failure += 1;

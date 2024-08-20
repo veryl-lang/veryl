@@ -95,7 +95,14 @@ impl Vivado {
 }
 
 impl Runner for Vivado {
-    fn run(&mut self, metadata: &Metadata, test: StrId, path: PathId, wave: bool) -> Result<bool> {
+    fn run(
+        &mut self,
+        metadata: &Metadata,
+        test: StrId,
+        _top: Option<StrId>,
+        path: PathId,
+        wave: bool,
+    ) -> Result<bool> {
         self.success = true;
 
         let temp_dir = tempfile::tempdir().into_diagnostic()?;

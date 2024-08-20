@@ -101,7 +101,8 @@ impl<'a> VerylGrammarTrait for CheckExpression<'a> {
                         | SymbolKind::Modport(_)
                         | SymbolKind::Namespace
                         | SymbolKind::GenericInstance(_)
-                        | SymbolKind::ClockDomain => {
+                        | SymbolKind::ClockDomain
+                        | SymbolKind::Test(_) => {
                             self.errors.push(error);
                         }
                         SymbolKind::Port(x) => {

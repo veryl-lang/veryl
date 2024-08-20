@@ -262,7 +262,8 @@ impl SymbolTable {
                         | SymbolKind::Block
                         | SymbolKind::SystemFunction
                         | SymbolKind::Genvar
-                        | SymbolKind::ClockDomain => (),
+                        | SymbolKind::ClockDomain
+                        | SymbolKind::Test(_) => (),
                     }
                 } else {
                     return Err(ResolveError::new(

@@ -9,15 +9,24 @@ use veryl_metadata::{Metadata, WaveFormTarget};
 use veryl_parser::resource_table::{PathId, StrId};
 use veryl_sourcemap::SourceMap;
 
+mod cocotb;
 mod vcs;
 mod verilator;
 mod vivado;
+pub use cocotb::*;
 pub use vcs::*;
 pub use verilator::*;
 pub use vivado::*;
 
 pub trait Runner {
-    fn run(&mut self, metadata: &Metadata, test: StrId, path: PathId, wave: bool) -> Result<bool>;
+    fn run(
+        &mut self,
+        metadata: &Metadata,
+        test: StrId,
+        top: Option<StrId>,
+        path: PathId,
+        wave: bool,
+    ) -> Result<bool>;
 
     fn name(&self) -> &'static str;
 
