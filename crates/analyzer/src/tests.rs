@@ -1963,6 +1963,20 @@ fn invalid_cast() {
 }
 
 #[test]
+fn invalid_test() {
+    let code = r#"
+    module ModuleA {}
+
+    #[test(TestA)]
+    embed (cocotb) py {{{
+    }}}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidTest { .. }));
+}
+
+#[test]
 fn clock_domain() {
     let code = r#"
     module ModuleA (
