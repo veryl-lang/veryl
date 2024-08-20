@@ -508,7 +508,7 @@ impl<'a> ResolveContext<'a> {
     }
 }
 
-const DEFINED_NAMESPACES: [&str; 1] = ["$sv"];
+const DEFINED_NAMESPACES: [&str; 2] = ["$sv", "std"];
 
 // Refer IEEE Std 1800-2023 Table B.1 - Reserved keywords
 // This list must be sorted to enable binary search

@@ -1,5 +1,10 @@
+use crate::metadata::Metadata;
 use crate::MetadataError;
+#[cfg(not(target_family = "wasm"))]
+use fs4::fs_std::FileExt;
 use log::debug;
+#[cfg(not(target_family = "wasm"))]
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
@@ -47,4 +52,29 @@ pub fn gather_files_with_extension<T: AsRef<Path>>(
         }
     }
     Ok(ret)
+}
+
+#[cfg(not(target_family = "wasm"))]
+pub fn lock_dir<T: AsRef<Path>>(path: T) -> Result<File, MetadataError> {
+    let base_dir = Metadata::cache_path().join(path);
+    let lock = base_dir.join("lock");
+    let lock = File::create(lock)?;
+    lock.lock_exclusive()?;
+    Ok(lock)
+}
+
+#[cfg(not(target_family = "wasm"))]
+pub fn unlock_dir(lock: File) -> Result<(), MetadataError> {
+    lock.unlock()?;
+    Ok(())
+}
+
+#[cfg(target_family = "wasm")]
+pub fn lock_dir<T: AsRef<Path>>(_path: T) -> Result<(), MetadataError> {
+    Ok(())
+}
+
+#[cfg(target_family = "wasm")]
+pub fn unlock_dir(_lock: ()) -> Result<(), MetadataError> {
+    Ok(())
 }
