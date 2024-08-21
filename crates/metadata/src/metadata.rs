@@ -263,8 +263,10 @@ impl Metadata {
             fs::create_dir(&base_dst)?;
         }
 
-        stdlib::expand()?;
-        ret.append(&mut stdlib::paths(&base_dst)?);
+        if !self.build.exclude_std {
+            stdlib::expand()?;
+            ret.append(&mut stdlib::paths(&base_dst)?);
+        }
 
         self.update_lockfile()?;
 

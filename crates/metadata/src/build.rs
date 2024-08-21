@@ -30,6 +30,8 @@ pub struct Build {
     pub sourcemap_target: SourceMapTarget,
     #[serde(default)]
     pub expand_inside_operation: bool,
+    #[serde(default)]
+    pub exclude_std: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
