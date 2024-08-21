@@ -633,7 +633,7 @@ ModportGroup: { Attribute } ( LBrace ModportList RBrace | ModportItem );
 
 ModportItem: Identifier Colon Direction;
 
-EnumDeclaration: Enum Identifier Colon ScalarType LBrace EnumList RBrace;
+EnumDeclaration: Enum Identifier [ Colon ScalarType ] LBrace EnumList RBrace;
 
 EnumList: EnumGroup { Comma EnumGroup } [ Comma ];
 

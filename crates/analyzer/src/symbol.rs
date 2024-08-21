@@ -458,12 +458,16 @@ impl fmt::Display for SymbolKind {
                 format!("typedef alias ({})", x.r#type)
             }
             SymbolKind::Enum(x) => {
-                format!("enum ({})", x.r#type)
+                if let Some(ref r#type) = x.r#type {
+                    format!("enum ({})", r#type)
+                } else {
+                    "enum ()".to_string()
+                }
             }
             SymbolKind::EnumMember(x) => {
-                if let Some(ref x) = x.value {
+                if let EnumMemberValue::ExplicitValue(ref expression, ref _evaluated) = x.value {
                     let mut stringifier = Stringifier::new();
-                    stringifier.expression(x);
+                    stringifier.expression(expression);
                     format!("enum member = {}", stringifier.as_str())
                 } else {
                     "enum member".to_string()
@@ -995,13 +999,19 @@ pub struct TypeDefProperty {
 
 #[derive(Debug, Clone)]
 pub struct EnumProperty {
-    pub r#type: Type,
+    pub r#type: Option<Type>,
     pub members: Vec<SymbolId>,
 }
 
 #[derive(Debug, Clone)]
+pub enum EnumMemberValue {
+    ImplicitValue(usize),
+    ExplicitValue(syntax_tree::Expression, Option<usize>),
+}
+
+#[derive(Debug, Clone)]
 pub struct EnumMemberProperty {
-    pub value: Option<syntax_tree::Expression>,
+    pub value: EnumMemberValue,
     pub prefix: String,
 }
 

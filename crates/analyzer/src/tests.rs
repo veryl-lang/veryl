@@ -1320,6 +1320,21 @@ fn too_large_enum_variant() {
         errors[0],
         AnalyzerError::TooLargeEnumVariant { .. }
     ));
+
+    let code = r#"
+    module ModuleB {
+        enum EnumB: logic<2> {
+            A = 3,
+            B,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::TooLargeEnumVariant { .. }
+    ));
 }
 
 #[test]

@@ -1966,8 +1966,10 @@ pub trait VerylWalker {
         before!(self, enum_declaration, arg);
         self.r#enum(&arg.r#enum);
         self.identifier(&arg.identifier);
-        self.colon(&arg.colon);
-        self.scalar_type(&arg.scalar_type);
+        if let Some(ref x) = arg.enum_declaration_opt {
+            self.colon(&x.colon);
+            self.scalar_type(&x.scalar_type);
+        }
         self.l_brace(&arg.l_brace);
         self.enum_list(&arg.enum_list);
         self.r_brace(&arg.r_brace);

@@ -5,7 +5,7 @@ use veryl_analyzer::attribute::Attribute as Attr;
 use veryl_analyzer::attribute_table;
 use veryl_analyzer::evaluator::{Evaluated, Evaluator};
 use veryl_analyzer::namespace::Namespace;
-use veryl_analyzer::symbol::TypeModifier as SymTypeModifier;
+use veryl_analyzer::symbol::{EnumMemberValue, TypeModifier as SymTypeModifier};
 use veryl_analyzer::symbol::{GenericMap, Symbol, SymbolId, SymbolKind, TypeKind};
 use veryl_analyzer::symbol_path::{GenericSymbolPath, SymbolPath};
 use veryl_analyzer::symbol_table;
@@ -680,6 +680,35 @@ impl Emitter {
             FunctionItem::VarDeclaration(_) => (),
             FunctionItem::Statement(x) => self.statement(&x.statement),
         };
+    }
+
+    fn default_enum_type(&mut self, arg: &EnumDeclaration) {
+        if let Ok(enum_symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
+            if let SymbolKind::Enum(r#enum) = enum_symbol.found.kind {
+                let mut max_value = r#enum.members.len() - 1;
+
+                for id in r#enum.members {
+                    let member_symbol = symbol_table::get(id).unwrap();
+                    if let SymbolKind::EnumMember(member) = member_symbol.kind {
+                        match member.value {
+                            EnumMemberValue::ExplicitValue(_expression, evaluated) => {
+                                max_value = max_value.max(evaluated.unwrap_or(0));
+                            }
+                            EnumMemberValue::ImplicitValue(value) => {
+                                max_value = max_value.max(value);
+                            }
+                        }
+                    }
+                }
+
+                let width = if max_value == 1 {
+                    1
+                } else {
+                    usize::BITS - max_value.leading_zeros()
+                };
+                self.str(&format!("logic [{}-1:0]", width));
+            }
+        }
     }
 }
 
@@ -2341,7 +2370,11 @@ impl VerylWalker for Emitter {
                 .append(&Some(String::from("typedef ")), &None),
         );
         self.space(1);
-        self.scalar_type(&arg.scalar_type);
+        if let Some(ref x) = arg.enum_declaration_opt {
+            self.scalar_type(&x.scalar_type);
+        } else {
+            self.default_enum_type(arg);
+        }
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();

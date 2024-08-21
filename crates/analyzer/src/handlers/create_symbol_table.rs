@@ -2,6 +2,8 @@ use crate::analyzer_error::AnalyzerError;
 use crate::attribute::AllowItem;
 use crate::attribute::Attribute as Attr;
 use crate::attribute_table;
+use crate::evaluator::Evaluated;
+use crate::evaluator::Evaluator;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol;
@@ -9,7 +11,7 @@ use crate::symbol::ClockDomain as SymClockDomain;
 use crate::symbol::Direction as SymDirection;
 use crate::symbol::Type as SymType;
 use crate::symbol::{
-    ConnectTarget, DocComment, EnumMemberProperty, EnumProperty, FunctionProperty,
+    ConnectTarget, DocComment, EnumMemberProperty, EnumMemberValue, EnumProperty, FunctionProperty,
     GenericParameterProperty, InstanceProperty, InterfaceProperty, ModportFunctionMemberProperty,
     ModportProperty, ModportVariableMemberProperty, ModuleProperty, PackageProperty, Parameter,
     ParameterProperty, ParameterScope, ParameterValue, Port, PortProperty, StructMemberProperty,
@@ -42,6 +44,7 @@ pub struct CreateSymbolTable<'a> {
     attribute_lines: HashSet<u32>,
     struct_or_union: Option<StructOrUnion>,
     enum_member_prefix: Option<String>,
+    enum_member_value: Option<EnumMemberValue>,
     enum_members: Vec<Option<SymbolId>>,
     struct_union_members: Vec<Option<SymbolId>>,
     affiniation: Vec<VariableAffiniation>,
@@ -583,6 +586,9 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 // default prefix
                 self.enum_member_prefix = Some(arg.identifier.identifier_token.to_string());
 
+                // reset enum value
+                self.enum_member_value = None;
+
                 // overridden prefix by attribute
                 let attrs = attribute_table::get(&arg.r#enum.enum_token.token);
                 for attr in attrs {
@@ -595,8 +601,11 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 self.namespace.pop();
                 self.enum_member_prefix = None;
 
-                let r#type = arg.scalar_type.as_ref().into();
                 let members: Vec<_> = self.enum_members.drain(0..).flatten().collect();
+                let r#type = arg
+                    .enum_declaration_opt
+                    .as_ref()
+                    .map(|x| x.scalar_type.as_ref().into());
                 let property = EnumProperty { r#type, members };
                 let kind = SymbolKind::Enum(property);
                 self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
@@ -607,9 +616,34 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
     fn enum_item(&mut self, arg: &EnumItem) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let value = arg.enum_item_opt.as_ref().map(|x| *x.expression.clone());
+            let value = if let Some(ref x) = arg.enum_item_opt {
+                let mut evaluator = Evaluator::new();
+                let evaluated = evaluator.expression(&x.expression);
+                if let Evaluated::Fixed { value, .. } = evaluated {
+                    EnumMemberValue::ExplicitValue(*x.expression.clone(), Some(value as usize))
+                } else {
+                    EnumMemberValue::ExplicitValue(*x.expression.clone(), None)
+                }
+            } else if let Some(ref x) = self.enum_member_value {
+                let previous_value = match x {
+                    EnumMemberValue::ExplicitValue(_expression, evaluated) => {
+                        if let Some(value) = evaluated {
+                            value
+                        } else {
+                            todo!("report error")
+                        }
+                    }
+                    EnumMemberValue::ImplicitValue(value) => value,
+                };
+                EnumMemberValue::ImplicitValue(previous_value + 1)
+            } else {
+                EnumMemberValue::ImplicitValue(0)
+            };
             let prefix = self.enum_member_prefix.clone().unwrap();
-            let property = EnumMemberProperty { value, prefix };
+            let property = EnumMemberProperty {
+                value: value.clone(),
+                prefix,
+            };
             let kind = SymbolKind::EnumMember(property);
             let id = self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
             self.enum_members.push(id);
@@ -626,6 +660,8 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
             if let Some(namespace) = namespace {
                 self.namespace.push(namespace);
             }
+
+            self.enum_member_value = Some(value);
         }
         Ok(())
     }
