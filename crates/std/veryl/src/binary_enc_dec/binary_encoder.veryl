@@ -1,7 +1,7 @@
 /// A binary encoder.
 ///
 /// Transforms a unary encoded value into a binary encoding.
-module binary_encoder #(
+pub module binary_encoder #(
     /// Width of the input unary vector
     param UNARY_WIDTH: u32 = 256,
     /// Width of the output binary vector
