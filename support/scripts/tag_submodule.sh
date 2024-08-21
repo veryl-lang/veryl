@@ -1,6 +1,6 @@
 #!/bin/bash
 
-sub=("doc" "std")
+sub=("doc" "crates/metadata/std")
 root=`git rev-parse --show-toplevel`
 
 pushd ${root}
