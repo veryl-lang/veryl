@@ -1,9 +1,18 @@
+use fs_extra;
 use merkle_hash::{Algorithm, Encodable, MerkleTree};
 use std::env;
 use std::fs;
 use std::path::Path;
 
 fn main() {
+    fs_extra::dir::create("std", true).unwrap();
+    fs_extra::copy_items(
+        &["../../std/src"],
+        "std",
+        &fs_extra::dir::CopyOptions::new(),
+    )
+    .unwrap();
+
     let tree = MerkleTree::builder("./std/src")
         .algorithm(Algorithm::Blake3)
         .hash_names(true)
@@ -24,5 +33,5 @@ fn main() {
         ),
     )
     .unwrap();
-    println!("cargo::rerun-if-changed=./std/src");
+    println!("cargo::rerun-if-changed=../../std/src");
 }

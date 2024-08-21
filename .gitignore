@@ -12,3 +12,4 @@ veryl_testcase.*
 /book/po/messages.pot
 /book/po/*~
 /testcases/map/dependencies/
+/crates/metadata/std/
