@@ -8,8 +8,8 @@ pushd ${root}
 for dir in ${sub[@]}
 do
     pushd ${dir}
-    git tag v$1
-    git push origin v$1
+    git tag -f v$1
+    git push origin -f v$1
     popd
 done
 
