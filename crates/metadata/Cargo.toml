@@ -41,7 +41,6 @@ fs4            = {version = "0.9.1", features = ["sync"]}
 tempfile       = {workspace = true}
 
 [build-dependencies]
-fs_extra       = "1.3"
 merkle_hash    = "3.7"
 
 [features]
