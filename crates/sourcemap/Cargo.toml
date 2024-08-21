@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl-sourcemap"
-version               = "0.11.3"
+version               = "0.12.0"
 edition               = "2021"
 authors.workspace     = true
 repository.workspace  = true
