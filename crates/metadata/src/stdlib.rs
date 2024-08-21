@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 include!(concat!(env!("OUT_DIR"), "/std_hash.rs"));
 
 #[derive(Embed)]
-#[folder = "../../std/src"]
+#[folder = "./std/src"]
 #[include = "*.veryl"]
 struct Asset;
 
