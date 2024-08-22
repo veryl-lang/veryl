@@ -701,7 +701,7 @@ impl Emitter {
                     }
                 }
 
-                let width = if max_value == 1 {
+                let width = if max_value == 0 {
                     1
                 } else {
                     usize::BITS - max_value.leading_zeros()
