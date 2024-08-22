@@ -630,7 +630,13 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                         if let Some(value) = evaluated {
                             value
                         } else {
-                            todo!("report error")
+                            let name = arg.identifier.identifier_token.to_string();
+                            self.errors.push(AnalyzerError::unevaluatable_enum_variant(
+                                &name,
+                                self.text,
+                                &arg.identifier.as_ref().into(),
+                            ));
+                            return Ok(());
                         }
                     }
                     EnumMemberValue::ImplicitValue(value) => value,

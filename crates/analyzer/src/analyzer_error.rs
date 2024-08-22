@@ -616,6 +616,21 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(unevaluatable_enum_variant_value),
+        help(""),
+        url("")
+    )]
+    #[error("The implicit value of enum variant {identifier} cannot be evaluated")]
+    UnevaluatableEnumVariant {
+        identifier: String,
+        #[source_code]
+        input: NamedSource<String>,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(too_large_number),
         help("increase bit width"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#too_large_number")
@@ -1329,6 +1344,14 @@ impl AnalyzerError {
             identifier: identifier.to_string(),
             value,
             width,
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn unevaluatable_enum_variant(identifier: &str, source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::UnevaluatableEnumVariant {
+            identifier: identifier.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
         }
