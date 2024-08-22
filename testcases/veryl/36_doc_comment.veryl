@@ -14,6 +14,14 @@
 /// ]}
 /// ```
 ///
+/// ```mermaid
+/// graph TD;
+///     A-->B;
+///     A-->C;
+///     B-->D;
+///     C-->D;
+/// ```
+///
 pub module Module36 #(
     /// Data width
     param ParamA: u32 = 1,

@@ -34,8 +34,8 @@ handlebars      = "6.0"
 log             = {workspace = true}
 once_cell       = {workspace = true}
 mdbook          = {workspace = true}
-mdbook-wavedrom = "0.10.0"
 miette          = {workspace = true}
+pulldown-cmark  = {workspace = true}
 regex           = {workspace = true}
 serde           = {workspace = true}
 serde_json      = {workspace = true}
