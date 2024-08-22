@@ -8,13 +8,17 @@ module veryl_testcase_Module57;
     always_comb _e.c = 1;
 endmodule
 
+/// Generic package test for doc comment
 package veryl_testcase___Package57A__1;
     localparam int unsigned X = 1;
 endpackage
+
+/// Generic package test for doc comment
 package veryl_testcase___Package57A__2;
     localparam int unsigned X = 2;
 endpackage
 
+/// Generic package test for doc comment
 package veryl_testcase___Package57B__3;
     localparam int unsigned X = 3;
 endpackage

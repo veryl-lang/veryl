@@ -7,6 +7,7 @@ module veryl_testcase_Module55;
     veryl_testcase___Module55F__Module55B u5 ();
 endmodule
 
+/// Generic module test for doc comment
 module veryl_testcase___Module55A__Module55B;
     veryl_testcase_Module55B u ();
 endmodule

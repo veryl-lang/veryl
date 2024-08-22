@@ -5,13 +5,17 @@ module veryl_testcase_Module56;
     veryl_testcase___Interface56B__Package56B u3 ();
 endmodule
 
+/// Generic interface test for doc comment
 interface veryl_testcase___Interface56A__Package56A;
     logic [veryl_testcase_Package56A::X-1:0] _a;
 endinterface
+
+/// Generic interface test for doc comment
 interface veryl_testcase___Interface56A__Package56B;
     logic [veryl_testcase_Package56B::X-1:0] _a;
 endinterface
 
+/// Generic interface test for doc comment
 interface veryl_testcase___Interface56B__Package56A;
     logic [veryl_testcase_Package56A::X-1:0] _b;
 endinterface

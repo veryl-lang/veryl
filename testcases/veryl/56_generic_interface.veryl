@@ -5,11 +5,13 @@ module Module56 {
     inst u3: Interface56B::<>;
 }
 
-interface Interface56A::<T> {
+/// Generic interface test for doc comment
+pub interface Interface56A::<T> {
     var _a: logic<T::X>;
 }
 
-interface Interface56B::<T = Package56B> {
+/// Generic interface test for doc comment
+pub interface Interface56B::<T = Package56B> {
     var _b: logic<T::X>;
 }
 
