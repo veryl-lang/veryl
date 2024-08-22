@@ -14,6 +14,14 @@
 /// ]}
 /// ```
 ///
+/// ```mermaid
+/// graph TD;
+///     A-->B;
+///     A-->C;
+///     B-->D;
+///     C-->D;
+/// ```
+///
 module veryl_testcase_Module36 #(
     /// Data width
     parameter  int unsigned ParamA = 1,

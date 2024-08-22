@@ -1,4 +1,4 @@
-use crate::doc_builder::DocBuilder;
+use crate::doc::DocBuilder;
 use crate::OptDoc;
 use log::info;
 use miette::{IntoDiagnostic, Result, WrapErr};

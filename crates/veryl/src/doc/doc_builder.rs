@@ -1,6 +1,6 @@
+use crate::doc::{Mermaid, Wavedrom};
 use handlebars::Handlebars;
 use mdbook::{Config, MDBook};
-use mdbook_wavedrom::Wavedrom;
 use miette::{IntoDiagnostic, Result};
 use serde::Serialize;
 use std::collections::{BTreeMap, HashSet};
@@ -317,13 +317,19 @@ impl DocBuilder {
             .unwrap();
         cfg.set(
             "output.html.additional-js",
-            vec!["theme/wavedrom.min.js", "theme/wavedrom_skin.js"],
+            vec![
+                "theme/wavedrom.min.js",
+                "theme/wavedrom_skin.js",
+                "theme/mermaid.min.js",
+            ],
         )
         .unwrap();
 
         let wavedrom = Wavedrom;
+        let mermaid = Mermaid;
         let mut md = MDBook::load_with_config(&self.root_dir, cfg).unwrap();
         md.with_preprocessor(wavedrom);
+        md.with_preprocessor(mermaid);
         md.build().unwrap();
         Ok(())
     }
@@ -351,20 +357,25 @@ impl DocBuilder {
         let mut file = File::create(file).into_diagnostic()?;
         write!(file, "{}", custom_css).into_diagnostic()?;
 
-        let favicon = include_bytes!("../resource/favicon.png");
+        let favicon = include_bytes!("../../resource/favicon.png");
         let file = self.theme_dir.join("favicon.png");
         let mut file = File::create(file).into_diagnostic()?;
         file.write(favicon).into_diagnostic()?;
 
-        let wavedrom = include_bytes!("../resource/wavedrom/wavedrom.min.js");
+        let wavedrom = include_bytes!("../../resource/wavedrom/wavedrom.min.js");
         let file = self.theme_dir.join("wavedrom.min.js");
         let mut file = File::create(file).into_diagnostic()?;
         file.write(wavedrom).into_diagnostic()?;
 
-        let wavedrom_skin = include_bytes!("../resource/wavedrom/skins/default.js");
+        let wavedrom_skin = include_bytes!("../../resource/wavedrom/skins/default.js");
         let file = self.theme_dir.join("wavedrom_skin.js");
         let mut file = File::create(file).into_diagnostic()?;
         file.write(wavedrom_skin).into_diagnostic()?;
+
+        let mermaid = include_bytes!("../../resource/mermaid/mermaid.min.js");
+        let file = self.theme_dir.join("mermaid.min.js");
+        let mut file = File::create(file).into_diagnostic()?;
+        file.write(mermaid).into_diagnostic()?;
 
         Ok(())
     }

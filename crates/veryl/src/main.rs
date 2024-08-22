@@ -22,7 +22,7 @@ mod cmd_new;
 mod cmd_publish;
 mod cmd_test;
 mod cmd_update;
-mod doc_builder;
+mod doc;
 mod runner;
 
 // ---------------------------------------------------------------------------------------------------------------------
