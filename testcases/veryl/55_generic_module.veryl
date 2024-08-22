@@ -7,7 +7,8 @@ module Module55 {
     inst u5: Module55F::<>;
 }
 
-module Module55A::<T> {
+/// Generic module test for doc comment
+pub module Module55A::<T> {
     inst u: T;
 }
 

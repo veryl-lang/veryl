@@ -3,7 +3,7 @@ use handlebars::Handlebars;
 use mdbook::{Config, MDBook};
 use miette::{IntoDiagnostic, Result};
 use serde::Serialize;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::PathBuf;
@@ -24,17 +24,17 @@ const SUMMARY_TMPL: &str = r###"
 
 - [Modules](modules.md)
   {{#each modules}}
-  - [{{this}}]({{this}}.md)
+  - [{{this.0}}]({{this.1}}.md)
   {{/each}}
 
 - [Interfaces](interfaces.md)
   {{#each interfaces}}
-  - [{{this}}]({{this}}.md)
+  - [{{this.0}}]({{this.1}}.md)
   {{/each}}
 
 - [Packages](packages.md)
   {{#each packages}}
-  - [{{this}}]({{this}}.md)
+  - [{{this.0}}]({{this.1}}.md)
   {{/each}}
 "###;
 
@@ -42,9 +42,9 @@ const SUMMARY_TMPL: &str = r###"
 struct SummaryData {
     name: String,
     version: String,
-    modules: Vec<String>,
-    interfaces: Vec<String>,
-    packages: Vec<String>,
+    modules: Vec<(String, String)>,
+    interfaces: Vec<(String, String)>,
+    packages: Vec<(String, String)>,
 }
 
 const INDEX_TMPL: &str = r###"
@@ -164,7 +164,11 @@ const MODULE_TMPL: &str = r#"
 {{#each ports}}
 <tr>
     <th class="table_list_item">{{this.name}}</th>
-    <td class="table_list_item"><span class="hljs-keyword">{{this.direction}}</span> <span class="hljs-attribute">{{this.clock_domain}}</span> <span class="hljs-type">{{this.typ}}</span></td>
+    <td class="table_list_item"><span class="hljs-keyword">{{this.direction}}</span></td>
+    {{#if ../clock_domains}}
+    <td class="table_list_item"><span class="hljs-attribute">{{this.clock_domain}}</span></td>
+    {{/if}}
+    <td class="table_list_item"><span class="hljs-type">{{this.typ}}</span></td>
     <td class="table_list_item">{{this.description}}</td>
 </tr>
 {{/each}}
@@ -248,17 +252,24 @@ pub struct DocBuilder {
     root_dir: PathBuf,
     src_dir: PathBuf,
     theme_dir: PathBuf,
-    modules: BTreeMap<String, Symbol>,
-    interfaces: BTreeMap<String, Symbol>,
-    packages: BTreeMap<String, Symbol>,
+    modules: Vec<TopLevelItem>,
+    interfaces: Vec<TopLevelItem>,
+    packages: Vec<TopLevelItem>,
+}
+
+#[derive(Clone)]
+pub struct TopLevelItem {
+    pub file_name: String,
+    pub html_name: String,
+    pub symbol: Symbol,
 }
 
 impl DocBuilder {
     pub fn new(
         metadata: &Metadata,
-        modules: BTreeMap<String, Symbol>,
-        interfaces: BTreeMap<String, Symbol>,
-        packages: BTreeMap<String, Symbol>,
+        modules: Vec<TopLevelItem>,
+        interfaces: Vec<TopLevelItem>,
+        packages: Vec<TopLevelItem>,
     ) -> Result<Self> {
         let temp_dir = tempfile::tempdir().into_diagnostic()?;
         let root_dir = temp_dir.path().to_path_buf();
@@ -288,19 +299,19 @@ impl DocBuilder {
         self.build_component("interfaces.md", self.build_interfaces())?;
         self.build_component("packages.md", self.build_packages())?;
 
-        for (k, v) in &self.modules {
-            let file = format!("{}.md", k);
-            self.build_component(&file, self.build_module(k, v))?;
+        for x in &self.modules {
+            let file = format!("{}.md", x.file_name);
+            self.build_component(&file, self.build_module(&x.html_name, &x.symbol))?;
         }
 
-        for (k, v) in &self.interfaces {
-            let file = format!("{}.md", k);
-            self.build_component(&file, self.build_interface(k, v))?;
+        for x in &self.interfaces {
+            let file = format!("{}.md", x.file_name);
+            self.build_component(&file, self.build_interface(&x.html_name, &x.symbol))?;
         }
 
-        for (k, v) in &self.packages {
-            let file = format!("{}.md", k);
-            self.build_component(&file, self.build_package(k, v))?;
+        for x in &self.packages {
+            let file = format!("{}.md", x.file_name);
+            self.build_component(&file, self.build_package(&x.html_name, &x.symbol))?;
         }
 
         let mut cfg = Config::default();
@@ -388,9 +399,24 @@ impl DocBuilder {
     }
 
     fn build_summary(&self) -> String {
-        let modules: Vec<_> = self.modules.keys().cloned().collect();
-        let interfaces: Vec<_> = self.interfaces.keys().cloned().collect();
-        let packages: Vec<_> = self.packages.keys().cloned().collect();
+        let modules: Vec<_> = self
+            .modules
+            .iter()
+            .cloned()
+            .map(|x| (x.html_name, x.file_name))
+            .collect();
+        let interfaces: Vec<_> = self
+            .interfaces
+            .iter()
+            .cloned()
+            .map(|x| (x.html_name, x.file_name))
+            .collect();
+        let packages: Vec<_> = self
+            .packages
+            .iter()
+            .cloned()
+            .map(|x| (x.html_name, x.file_name))
+            .collect();
         let data = SummaryData {
             name: self.metadata.project.name.clone(),
             version: format!("{}", self.metadata.project.version),
@@ -422,9 +448,9 @@ impl DocBuilder {
         let items: Vec<_> = self
             .modules
             .iter()
-            .map(|(k, v)| ListItem {
-                name: k.clone(),
-                description: v.doc_comment.format(true),
+            .map(|x| ListItem {
+                name: x.html_name.clone(),
+                description: x.symbol.doc_comment.format(true),
             })
             .collect();
 
@@ -442,9 +468,9 @@ impl DocBuilder {
         let items: Vec<_> = self
             .interfaces
             .iter()
-            .map(|(k, v)| ListItem {
-                name: k.clone(),
-                description: v.doc_comment.format(true),
+            .map(|x| ListItem {
+                name: x.html_name.clone(),
+                description: x.symbol.doc_comment.format(true),
             })
             .collect();
 
@@ -462,9 +488,9 @@ impl DocBuilder {
         let items: Vec<_> = self
             .packages
             .iter()
-            .map(|(k, v)| ListItem {
-                name: k.clone(),
-                description: v.doc_comment.format(true),
+            .map(|x| ListItem {
+                name: x.html_name.clone(),
+                description: x.symbol.doc_comment.format(true),
             })
             .collect();
 

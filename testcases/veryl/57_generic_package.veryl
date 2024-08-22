@@ -8,11 +8,13 @@ module Module57 {
     assign _e.c = 1;
 }
 
-package Package57A::<T> {
+/// Generic package test for doc comment
+pub package Package57A::<T> {
     local X: u32 = T;
 }
 
-package Package57B::<T = 4> {
+/// Generic package test for doc comment
+pub package Package57B::<T = 4> {
     local X: u32 = T;
 }
 

@@ -1,11 +1,11 @@
-use crate::doc::DocBuilder;
+use crate::doc::{DocBuilder, TopLevelItem};
 use crate::OptDoc;
 use log::info;
 use miette::{IntoDiagnostic, Result, WrapErr};
 use std::collections::BTreeMap;
 use std::fs;
-use veryl_analyzer::symbol::SymbolKind;
-use veryl_analyzer::Analyzer;
+use veryl_analyzer::symbol::{SymbolId, SymbolKind};
+use veryl_analyzer::{symbol_table, Analyzer};
 use veryl_metadata::Metadata;
 use veryl_parser::resource_table;
 use veryl_parser::Parser;
@@ -51,25 +51,63 @@ impl CmdDoc {
 
         for symbol in veryl_analyzer::symbol_table::get_all() {
             let text = resource_table::get_str_value(symbol.token.text).unwrap();
+            let file_name = text.clone();
+            let symbol = symbol.clone();
             if format!("{}", symbol.namespace) == metadata.project.name && symbol.public {
-                match symbol.kind {
-                    SymbolKind::Module(_) => {
-                        modules.insert(text, symbol.clone());
+                match &symbol.kind {
+                    SymbolKind::Module(x) => {
+                        let html_name = fmt_generic_parameters(&text, &x.generic_parameters);
+                        let item = TopLevelItem {
+                            file_name,
+                            html_name,
+                            symbol,
+                        };
+                        modules.insert(text, item);
                     }
-                    SymbolKind::Interface(_) => {
-                        interfaces.insert(text, symbol.clone());
+                    SymbolKind::Interface(x) => {
+                        let html_name = fmt_generic_parameters(&text, &x.generic_parameters);
+                        let item = TopLevelItem {
+                            file_name,
+                            html_name,
+                            symbol,
+                        };
+                        interfaces.insert(text, item);
                     }
-                    SymbolKind::Package(_) => {
-                        packages.insert(text, symbol.clone());
+                    SymbolKind::Package(x) => {
+                        let html_name = fmt_generic_parameters(&text, &x.generic_parameters);
+                        let item = TopLevelItem {
+                            file_name,
+                            html_name,
+                            symbol,
+                        };
+                        packages.insert(text, item);
                     }
                     _ => (),
                 }
             }
         }
 
+        let modules: Vec<_> = modules.into_values().collect();
+        let interfaces: Vec<_> = interfaces.into_values().collect();
+        let packages: Vec<_> = packages.into_values().collect();
+
         let builder = DocBuilder::new(metadata, modules, interfaces, packages)?;
         builder.build()?;
 
         Ok(true)
+    }
+}
+
+fn fmt_generic_parameters(name: &str, params: &[SymbolId]) -> String {
+    if params.is_empty() {
+        name.to_string()
+    } else {
+        let mut name = name.to_string();
+        name.push_str("::&lt;");
+        for param in params {
+            let symbol = symbol_table::get(*param).unwrap();
+            name.push_str(&format!("{}, ", symbol.token.text));
+        }
+        format!("{}&gt;", name.strip_suffix(", ").unwrap())
     }
 }
