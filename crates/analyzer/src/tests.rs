@@ -1389,6 +1389,36 @@ fn too_much_enum_variant() {
 }
 
 #[test]
+fn unevaluatable_enum_variant() {
+    let code = r#"
+    module ModuleA {
+        enum EnumA: logic<2> {
+            A = 2'b0x,
+            B = 2'b10,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleB {
+        enum EnumA: logic<2> {
+            A = 2'b0x,
+            B,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UnevaluatableEnumVariant { .. }
+    ))
+}
+
+#[test]
 fn undefined_identifier() {
     let code = r#"
     module ModuleA {
