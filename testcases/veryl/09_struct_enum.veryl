@@ -19,23 +19,29 @@ module Module09 {
         Z,
     }
 
+    enum D {
+        X,
+    }
+
     #[enum_member_prefix(FOO)]
-    enum D: logic {
-        D_0,
-        D_1,
+    enum E: logic {
+        E_0,
+        E_1,
     }
 
     var a: A    ;
     var b: B    ;
     var c: C    ;
     var d: D    ;
-    var e: logic;
+    var e: E    ;
+    var f: logic;
 
     assign a.a   = 1;
     assign a.aa  = 1;
     assign a.aaa = 1;
     assign b     = B::X;
     assign c     = C::X;
-    assign d     = D::D_0;
-    assign e     = a.a;
+    assign d     = D::X;
+    assign e     = E::E_0;
+    assign f     = a.a;
 }
