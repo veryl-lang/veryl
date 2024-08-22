@@ -1080,9 +1080,11 @@ impl VerylWalker for Formatter {
         self.r#enum(&arg.r#enum);
         self.space(1);
         self.identifier(&arg.identifier);
-        self.colon(&arg.colon);
-        self.space(1);
-        self.scalar_type(&arg.scalar_type);
+        if let Some(ref x) = arg.enum_declaration_opt {
+            self.colon(&x.colon);
+            self.space(1);
+            self.scalar_type(&x.scalar_type);
+        }
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();

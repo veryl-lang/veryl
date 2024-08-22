@@ -1,7 +1,8 @@
 use crate::analyzer_error::AnalyzerError;
-use crate::evaluator::{Evaluated, Evaluator};
+use crate::evaluator::Evaluator;
+use crate::symbol::{EnumMemberValue, SymbolKind};
+use crate::symbol_table;
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
@@ -9,8 +10,6 @@ pub struct CheckEnum<'a> {
     pub errors: Vec<AnalyzerError>,
     text: &'a str,
     point: HandlerPoint,
-    enum_variants: usize,
-    enum_member_values: Vec<(Evaluated, Token)>,
 }
 
 impl<'a> CheckEnum<'a> {
@@ -19,8 +18,6 @@ impl<'a> CheckEnum<'a> {
             errors: Vec::new(),
             text,
             point: HandlerPoint::Before,
-            enum_variants: 0,
-            enum_member_values: Vec::new(),
         }
     }
 }
@@ -37,54 +34,46 @@ fn calc_width(value: usize) -> usize {
 
 impl<'a> VerylGrammarTrait for CheckEnum<'a> {
     fn enum_declaration(&mut self, arg: &EnumDeclaration) -> Result<(), ParolError> {
-        match self.point {
-            HandlerPoint::Before => {
-                self.enum_variants = 0;
-                self.enum_member_values.clear();
-            }
-            HandlerPoint::After => {
-                let mut evaluator = Evaluator::new();
-                let r#type: crate::symbol::Type = arg.scalar_type.as_ref().into();
-                let width = evaluator.type_width(r#type);
-                if let Some(width) = width {
-                    if calc_width(self.enum_variants - 1) > width {
-                        let name = arg.identifier.identifier_token.to_string();
-                        self.errors.push(AnalyzerError::too_much_enum_variant(
-                            &name,
-                            self.enum_variants,
-                            width,
-                            self.text,
-                            &arg.identifier.as_ref().into(),
-                        ));
-                    }
+        if let HandlerPoint::Before = self.point {
+            let enum_symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
+            if let SymbolKind::Enum(r#enum) = enum_symbol.found.kind {
+                if let Some(r#type) = r#enum.r#type {
+                    if let Some(width) = Evaluator::new().type_width(r#type) {
+                        let variants = r#enum.members.len();
+                        if calc_width(variants - 1) > width {
+                            let name = arg.identifier.identifier_token.to_string();
+                            self.errors.push(AnalyzerError::too_much_enum_variant(
+                                &name,
+                                variants,
+                                width,
+                                self.text,
+                                &arg.identifier.as_ref().into(),
+                            ));
+                        }
 
-                    for (enum_value, token) in &self.enum_member_values {
-                        if let Evaluated::Fixed { value, .. } = enum_value {
-                            if calc_width(*value as usize) > width {
-                                self.errors.push(AnalyzerError::too_large_enum_variant(
-                                    &token.to_string(),
-                                    *value,
-                                    width,
-                                    self.text,
-                                    &token.into(),
-                                ));
+                        for id in r#enum.members {
+                            let member_symbol = symbol_table::get(id).unwrap();
+                            if let SymbolKind::EnumMember(member) = member_symbol.kind {
+                                let member_value = match member.value {
+                                    EnumMemberValue::ExplicitValue(_expression, evaluated) => {
+                                        evaluated.unwrap_or(0)
+                                    }
+                                    EnumMemberValue::ImplicitValue(x) => x,
+                                };
+
+                                if calc_width(member_value) > width {
+                                    self.errors.push(AnalyzerError::too_large_enum_variant(
+                                        &member_symbol.token.to_string(),
+                                        member_value as isize,
+                                        width,
+                                        self.text,
+                                        &member_symbol.token.into(),
+                                    ));
+                                }
                             }
                         }
                     }
                 }
-            }
-        }
-        Ok(())
-    }
-
-    fn enum_item(&mut self, arg: &EnumItem) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            self.enum_variants += 1;
-            if let Some(ref x) = arg.enum_item_opt {
-                let token = arg.identifier.identifier_token.token;
-                let mut evaluator = Evaluator::new();
-                let evaluated = evaluator.expression(&x.expression);
-                self.enum_member_values.push((evaluated, token));
             }
         }
         Ok(())
