@@ -62,7 +62,7 @@ pub module Delay #( // visibility control by `pub` keyword
     i_clk : input clock       ,
     i_rst : input reset       ,
     i_data: input logic<WIDTH>,
-    o_data: input logic<WIDTH>,
+    o_data: output logic<WIDTH>,
 ) {
     // unused variable which is not started with `_` are warned
     var _unused_variable: logic;
