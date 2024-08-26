@@ -1,6 +1,6 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::evaluator::Evaluator;
-use crate::symbol::{EnumMemberValue, SymbolKind};
+use crate::symbol::SymbolKind;
 use crate::symbol_table;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
@@ -54,13 +54,7 @@ impl<'a> VerylGrammarTrait for CheckEnum<'a> {
                         for id in r#enum.members {
                             let member_symbol = symbol_table::get(id).unwrap();
                             if let SymbolKind::EnumMember(member) = member_symbol.kind {
-                                let member_value = match member.value {
-                                    EnumMemberValue::ExplicitValue(_expression, evaluated) => {
-                                        evaluated.unwrap_or(0)
-                                    }
-                                    EnumMemberValue::ImplicitValue(x) => x,
-                                };
-
+                                let member_value = member.value.value().unwrap_or(0);
                                 if calc_width(member_value) > width {
                                     self.errors.push(AnalyzerError::too_large_enum_variant(
                                         &member_symbol.token.to_string(),

@@ -1,11 +1,10 @@
 use crate::aligner::{Aligner, Location};
 use std::fs;
 use std::path::Path;
-use veryl_analyzer::attribute::Attribute as Attr;
-use veryl_analyzer::attribute_table;
+use veryl_analyzer::attribute::EnumEncodingItem;
 use veryl_analyzer::evaluator::{Evaluated, Evaluator};
 use veryl_analyzer::namespace::Namespace;
-use veryl_analyzer::symbol::{EnumMemberValue, TypeModifier as SymTypeModifier};
+use veryl_analyzer::symbol::TypeModifier as SymTypeModifier;
 use veryl_analyzer::symbol::{GenericMap, Symbol, SymbolId, SymbolKind, TypeKind};
 use veryl_analyzer::symbol_path::{GenericSymbolPath, SymbolPath};
 use veryl_analyzer::symbol_table;
@@ -53,7 +52,8 @@ pub struct Emitter {
     default_reset: Option<SymbolId>,
     reset_signal: Option<String>,
     default_block: Option<String>,
-    enum_member_prefix: Option<String>,
+    enum_width: usize,
+    emit_enum_implicit_valiant: bool,
     file_scope_import: Vec<String>,
     attribute: Vec<AttributeType>,
     assignment_lefthand_side: Option<ExpressionIdentifier>,
@@ -87,7 +87,8 @@ impl Default for Emitter {
             default_reset: None,
             reset_signal: None,
             default_block: None,
-            enum_member_prefix: None,
+            enum_width: 0,
+            emit_enum_implicit_valiant: false,
             file_scope_import: Vec::new(),
             attribute: Vec::new(),
             assignment_lefthand_side: None,
@@ -680,35 +681,6 @@ impl Emitter {
             FunctionItem::VarDeclaration(_) => (),
             FunctionItem::Statement(x) => self.statement(&x.statement),
         };
-    }
-
-    fn default_enum_type(&mut self, arg: &EnumDeclaration) {
-        if let Ok(enum_symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
-            if let SymbolKind::Enum(r#enum) = enum_symbol.found.kind {
-                let mut max_value = r#enum.members.len() - 1;
-
-                for id in r#enum.members {
-                    let member_symbol = symbol_table::get(id).unwrap();
-                    if let SymbolKind::EnumMember(member) = member_symbol.kind {
-                        match member.value {
-                            EnumMemberValue::ExplicitValue(_expression, evaluated) => {
-                                max_value = max_value.max(evaluated.unwrap_or(0));
-                            }
-                            EnumMemberValue::ImplicitValue(value) => {
-                                max_value = max_value.max(value);
-                            }
-                        }
-                    }
-                }
-
-                let width = if max_value == 0 {
-                    1
-                } else {
-                    usize::BITS - max_value.leading_zeros()
-                };
-                self.str(&format!("logic [{}-1:0]", width));
-            }
-        }
     }
 }
 
@@ -2358,12 +2330,15 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'EnumDeclaration'
     fn enum_declaration(&mut self, arg: &EnumDeclaration) {
-        self.enum_member_prefix = Some(arg.identifier.identifier_token.to_string());
-        for attr in &attribute_table::get(&arg.r#enum.enum_token.token) {
-            if let Attr::EnumMemberPrefix(x) = attr {
-                self.enum_member_prefix = Some(x.to_string());
-            }
+        let enum_symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
+        if let SymbolKind::Enum(r#enum) = enum_symbol.found.kind {
+            self.enum_width = r#enum.width;
+            self.emit_enum_implicit_valiant = matches!(
+                r#enum.encoding,
+                EnumEncodingItem::OneHot | EnumEncodingItem::Gray
+            );
         }
+
         self.token(
             &arg.r#enum
                 .enum_token
@@ -2373,7 +2348,7 @@ impl VerylWalker for Emitter {
         if let Some(ref x) = arg.enum_declaration_opt {
             self.scalar_type(&x.scalar_type);
         } else {
-            self.default_enum_type(arg);
+            self.str(&format!("logic [{}-1:0]", self.enum_width));
         }
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
@@ -2385,7 +2360,6 @@ impl VerylWalker for Emitter {
         self.identifier(&arg.identifier);
         self.str(";");
         self.token(&arg.r_brace.r_brace_token.replace(""));
-        self.enum_member_prefix = None;
     }
 
     /// Semantic action for non-terminal 'EnumList'
@@ -2419,13 +2393,29 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'EnumItem'
     fn enum_item(&mut self, arg: &EnumItem) {
-        let prefix = format!("{}_", self.enum_member_prefix.clone().unwrap());
-        self.token(&arg.identifier.identifier_token.append(&Some(prefix), &None));
+        let member_symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
+        let (prefix, value) = if let SymbolKind::EnumMember(member) = member_symbol.found.kind {
+            (member.prefix, member.value)
+        } else {
+            unreachable!();
+        };
+
+        self.token(
+            &arg.identifier
+                .identifier_token
+                .append(&Some(format!("{}_", prefix)), &None),
+        );
         if let Some(ref x) = arg.enum_item_opt {
             self.space(1);
             self.equ(&x.equ);
             self.space(1);
             self.expression(&x.expression);
+        } else if self.emit_enum_implicit_valiant {
+            self.str(&format!(
+                " = {}'d{}",
+                self.enum_width,
+                value.value().unwrap_or(0),
+            ));
         }
     }
 
