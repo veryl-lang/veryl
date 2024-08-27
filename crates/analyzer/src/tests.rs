@@ -1415,7 +1415,86 @@ fn unevaluatable_enum_variant() {
     assert!(matches!(
         errors[0],
         AnalyzerError::UnevaluatableEnumVariant { .. }
-    ))
+    ));
+
+    let code = r#"
+    module ModuleC {
+        #[enum_encoding(onehot)]
+        enum EnumA: logic<2> {
+            A = 2'bx1,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UnevaluatableEnumVariant { .. }
+    ));
+
+    let code = r#"
+    module ModuleD {
+        #[enum_encoding(gray)]
+        enum EnumA: logic<2> {
+            A = 2'bx0,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UnevaluatableEnumVariant { .. }
+    ));
+}
+
+#[test]
+fn invalid_enum_variant() {
+    let code = r#"
+    module ModuleA {
+        #[enum_encoding(onehot)]
+        enum EnumA{
+            A = 0,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidEnumVariant { .. }
+    ));
+
+    let code = r#"
+    module ModuleB {
+        #[enum_encoding(onehot)]
+        enum EnumA{
+            A = 3,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidEnumVariant { .. }
+    ));
+
+    let code = r#"
+    module ModuleC {
+        #[enum_encoding(gray)]
+        enum EnumA{
+            A,
+            B = 3,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidEnumVariant { .. }
+    ));
 }
 
 #[test]

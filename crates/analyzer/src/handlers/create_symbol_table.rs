@@ -1,6 +1,6 @@
 use crate::analyzer_error::AnalyzerError;
-use crate::attribute::AllowItem;
 use crate::attribute::Attribute as Attr;
+use crate::attribute::{AllowItem, EnumEncodingItem};
 use crate::attribute_table;
 use crate::evaluator::Evaluated;
 use crate::evaluator::Evaluator;
@@ -43,7 +43,9 @@ pub struct CreateSymbolTable<'a> {
     anonymous_namespace: usize,
     attribute_lines: HashSet<u32>,
     struct_or_union: Option<StructOrUnion>,
+    enum_encoding: EnumEncodingItem,
     enum_member_prefix: Option<String>,
+    enum_member_width: usize,
     enum_member_value: Option<EnumMemberValue>,
     enum_members: Vec<Option<SymbolId>>,
     struct_union_members: Vec<Option<SymbolId>>,
@@ -66,6 +68,10 @@ pub struct CreateSymbolTable<'a> {
 enum StructOrUnion {
     InStruct,
     InUnion,
+}
+
+fn calc_width(value: usize) -> usize {
+    (usize::BITS - value.leading_zeros()) as usize
 }
 
 impl<'a> CreateSymbolTable<'a> {
@@ -268,6 +274,72 @@ impl<'a> CreateSymbolTable<'a> {
                 ));
             }
             self.exist_clock_without_domain = true;
+        }
+    }
+
+    fn evaluate_enum_value(&mut self, arg: &EnumItem) -> EnumMemberValue {
+        if let Some(ref x) = arg.enum_item_opt {
+            let evaluated = Evaluator::new().expression(&x.expression);
+            if let Evaluated::Fixed { value, .. } = evaluated {
+                let valid_variant = match self.enum_encoding {
+                    EnumEncodingItem::OneHot => value.count_ones() == 1,
+                    EnumEncodingItem::Gray => {
+                        if let Some(expected) = self.enum_variant_next_value() {
+                            (value as usize) == expected
+                        } else {
+                            true
+                        }
+                    }
+                    _ => true,
+                };
+                if !valid_variant {
+                    self.errors.push(AnalyzerError::invalid_enum_variant_value(
+                        &arg.identifier.identifier_token.to_string(),
+                        &self.enum_encoding.to_string(),
+                        self.text,
+                        &arg.identifier.as_ref().into(),
+                    ));
+                }
+
+                EnumMemberValue::ExplicitValue(*x.expression.clone(), Some(value as usize))
+            } else if self.enum_encoding == EnumEncodingItem::Sequential {
+                EnumMemberValue::ExplicitValue(*x.expression.clone(), None)
+            } else {
+                self.errors.push(AnalyzerError::unevaluatable_enum_variant(
+                    &arg.identifier.identifier_token.to_string(),
+                    self.text,
+                    &arg.identifier.as_ref().into(),
+                ));
+                EnumMemberValue::UnevaluableValue
+            }
+        } else if let Some(value) = self.enum_variant_next_value() {
+            EnumMemberValue::ImplicitValue(value)
+        } else {
+            self.errors.push(AnalyzerError::unevaluatable_enum_variant(
+                &arg.identifier.identifier_token.to_string(),
+                self.text,
+                &arg.identifier.as_ref().into(),
+            ));
+            EnumMemberValue::UnevaluableValue
+        }
+    }
+
+    fn enum_variant_next_value(&mut self) -> Option<usize> {
+        if let Some(value) = &self.enum_member_value {
+            if let Some(value) = value.value() {
+                match self.enum_encoding {
+                    EnumEncodingItem::Sequential => Some(value + 1),
+                    EnumEncodingItem::OneHot => Some(value << 1),
+                    EnumEncodingItem::Gray => Some(((value + 1) >> 1) ^ (value + 1)),
+                }
+            } else {
+                None
+            }
+        } else {
+            match self.enum_encoding {
+                EnumEncodingItem::OneHot => Some(1),
+                _ => Some(0),
+            }
         }
     }
 }
@@ -586,14 +658,19 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 // default prefix
                 self.enum_member_prefix = Some(arg.identifier.identifier_token.to_string());
 
-                // reset enum value
+                // reset enum encoding/width/value
+                self.enum_encoding = EnumEncodingItem::Sequential;
+                self.enum_member_width = 1;
                 self.enum_member_value = None;
 
-                // overridden prefix by attribute
                 let attrs = attribute_table::get(&arg.r#enum.enum_token.token);
                 for attr in attrs {
                     if let Attr::EnumMemberPrefix(x) = attr {
+                        // overridden prefix by attribute
                         self.enum_member_prefix = Some(x.to_string());
+                    } else if let Attr::EnumEncoding(x) = attr {
+                        // overridden encoding by attribute
+                        self.enum_encoding = x;
                     }
                 }
             }
@@ -606,7 +683,18 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     .enum_declaration_opt
                     .as_ref()
                     .map(|x| x.scalar_type.as_ref().into());
-                let property = EnumProperty { r#type, members };
+                let width = if let Some(x) = r#type.clone() {
+                    Evaluator::new().type_width(x).unwrap_or(0)
+                } else {
+                    calc_width(members.len() - 1).max(self.enum_member_width)
+                };
+
+                let property = EnumProperty {
+                    r#type,
+                    width,
+                    members,
+                    encoding: self.enum_encoding,
+                };
                 let kind = SymbolKind::Enum(property);
                 self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
             }
@@ -616,35 +704,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
     fn enum_item(&mut self, arg: &EnumItem) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let value = if let Some(ref x) = arg.enum_item_opt {
-                let mut evaluator = Evaluator::new();
-                let evaluated = evaluator.expression(&x.expression);
-                if let Evaluated::Fixed { value, .. } = evaluated {
-                    EnumMemberValue::ExplicitValue(*x.expression.clone(), Some(value as usize))
-                } else {
-                    EnumMemberValue::ExplicitValue(*x.expression.clone(), None)
-                }
-            } else if let Some(ref x) = self.enum_member_value {
-                let previous_value = match x {
-                    EnumMemberValue::ExplicitValue(_expression, evaluated) => {
-                        if let Some(value) = evaluated {
-                            value
-                        } else {
-                            let name = arg.identifier.identifier_token.to_string();
-                            self.errors.push(AnalyzerError::unevaluatable_enum_variant(
-                                &name,
-                                self.text,
-                                &arg.identifier.as_ref().into(),
-                            ));
-                            return Ok(());
-                        }
-                    }
-                    EnumMemberValue::ImplicitValue(value) => value,
-                };
-                EnumMemberValue::ImplicitValue(previous_value + 1)
-            } else {
-                EnumMemberValue::ImplicitValue(0)
-            };
+            let value = self.evaluate_enum_value(arg);
             let prefix = self.enum_member_prefix.clone().unwrap();
             let property = EnumMemberProperty {
                 value: value.clone(),
@@ -667,6 +727,9 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 self.namespace.push(namespace);
             }
 
+            self.enum_member_width = self
+                .enum_member_width
+                .max(calc_width(value.value().unwrap_or(0)));
             self.enum_member_value = Some(value);
         }
         Ok(())

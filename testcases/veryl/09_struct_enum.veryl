@@ -23,10 +23,31 @@ module Module09 {
         X,
     }
 
+    #[enum_encoding(sequential)]
+    enum E {
+        X,
+        Y,
+        Z,
+    }
+
+    #[enum_encoding(onehot)]
+    enum F {
+        X,
+        Y,
+        Z,
+    }
+
+    #[enum_encoding(gray)]
+    enum G {
+        X,
+        Y,
+        Z,
+    }
+
     #[enum_member_prefix(FOO)]
-    enum E: logic {
-        E_0,
-        E_1,
+    enum H: logic {
+        H_0,
+        H_1,
     }
 
     var a: A    ;
@@ -34,7 +55,10 @@ module Module09 {
     var c: C    ;
     var d: D    ;
     var e: E    ;
-    var f: logic;
+    var f: F    ;
+    var g: G    ;
+    var h: H    ;
+    var i: logic;
 
     assign a.a   = 1;
     assign a.aa  = 1;
@@ -42,6 +66,9 @@ module Module09 {
     assign b     = B::X;
     assign c     = C::X;
     assign d     = D::X;
-    assign e     = E::E_0;
-    assign f     = a.a;
+    assign e     = E::X;
+    assign f     = F::X;
+    assign g     = G::X;
+    assign h     = H::H_0;
+    assign i     = a.a;
 }

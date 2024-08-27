@@ -23,17 +23,38 @@ module veryl_testcase_Module09;
         D_X
     } D;
 
-    typedef enum logic {
-        FOO_E_0,
-        FOO_E_1
+    typedef enum logic [2-1:0] {
+        E_X,
+        E_Y,
+        E_Z
     } E;
+
+    typedef enum logic [3-1:0] {
+        F_X = 3'd1,
+        F_Y = 3'd2,
+        F_Z = 3'd4
+    } F;
+
+    typedef enum logic [2-1:0] {
+        G_X = 2'd0,
+        G_Y = 2'd1,
+        G_Z = 2'd3
+    } G;
+
+    typedef enum logic {
+        FOO_H_0,
+        FOO_H_1
+    } H;
 
     A     a;
     B     b;
     C     c;
     D     d;
     E     e;
-    logic f;
+    F     f;
+    G     g;
+    H     h;
+    logic i;
 
     always_comb a.a   = 1;
     always_comb a.aa  = 1;
@@ -41,7 +62,10 @@ module veryl_testcase_Module09;
     always_comb b     = B_X;
     always_comb c     = C_X;
     always_comb d     = D_X;
-    always_comb e     = FOO_E_0;
-    always_comb f     = a.a;
+    always_comb e     = E_X;
+    always_comb f     = F_X;
+    always_comb g     = G_X;
+    always_comb h     = FOO_H_0;
+    always_comb i     = a.a;
 endmodule
 //# sourceMappingURL=../map/testcases/sv/09_struct_enum.sv.map

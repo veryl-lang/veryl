@@ -9,6 +9,7 @@ pub enum Attribute {
     Ifndef(StrId),
     Sv(StrId),
     Allow(AllowItem),
+    EnumEncoding(EnumEncodingItem),
     EnumMemberPrefix(StrId),
     Test(Token, Option<StrId>),
 }
@@ -20,6 +21,7 @@ impl fmt::Display for Attribute {
             Attribute::Ifndef(x) => format!("ifndef({})", x),
             Attribute::Sv(x) => format!("sv(\"{}\")", x),
             Attribute::Allow(x) => format!("allow({})", x),
+            Attribute::EnumEncoding(x) => format!("enum_encoding({})", x),
             Attribute::EnumMemberPrefix(x) => format!("enum_member_prefix({})", x),
             Attribute::Test(x, _) => format!("test({})", x.text),
         };
@@ -32,6 +34,7 @@ pub enum AttributeError {
     UnknownAttribute,
     MismatchArgs(&'static str),
     InvalidAllow(StrId),
+    InvalidEnumEncoding(StrId),
 }
 
 fn get_arg_ident(
@@ -82,6 +85,10 @@ struct Pattern {
     pub missing_port: StrId,
     pub missing_reset_statement: StrId,
     pub unused_variable: StrId,
+    pub enum_encoding: StrId,
+    pub sequential: StrId,
+    pub onehot: StrId,
+    pub gray: StrId,
     pub enum_member_prefix: StrId,
     pub test: StrId,
 }
@@ -96,6 +103,10 @@ impl Pattern {
             missing_port: resource_table::insert_str("missing_port"),
             missing_reset_statement: resource_table::insert_str("missing_reset_statement"),
             unused_variable: resource_table::insert_str("unused_variable"),
+            enum_encoding: resource_table::insert_str("enum_encoding"),
+            sequential: resource_table::insert_str("sequential"),
+            onehot: resource_table::insert_str("onehot"),
+            gray: resource_table::insert_str("gray"),
             enum_member_prefix: resource_table::insert_str("enum_member_prefix"),
             test: resource_table::insert_str("test"),
         }
@@ -149,6 +160,24 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                     Err(AttributeError::MismatchArgs("allowable rule"))
                 }
             }
+            x if x == pat.enum_encoding => {
+                let arg = get_arg_ident(&value.attribute_opt, 0);
+
+                if let Some(arg) = arg {
+                    match arg.text {
+                        x if x == pat.sequential => {
+                            Ok(Attribute::EnumEncoding(EnumEncodingItem::Sequential))
+                        }
+                        x if x == pat.onehot => {
+                            Ok(Attribute::EnumEncoding(EnumEncodingItem::OneHot))
+                        }
+                        x if x == pat.gray => Ok(Attribute::EnumEncoding(EnumEncodingItem::Gray)),
+                        _ => Err(AttributeError::InvalidEnumEncoding(arg.text)),
+                    }
+                } else {
+                    Err(AttributeError::MismatchArgs("enum encoding rule"))
+                }
+            }
             x if x == pat.enum_member_prefix => {
                 let arg = get_arg_ident(&value.attribute_opt, 0);
 
@@ -186,6 +215,25 @@ impl fmt::Display for AllowItem {
             AllowItem::MissingPort => "missing_port",
             AllowItem::MissingResetStatement => "missing_reset_statement",
             AllowItem::UnusedVariable => "unused_variable",
+        };
+        text.fmt(f)
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub enum EnumEncodingItem {
+    #[default]
+    Sequential,
+    OneHot,
+    Gray,
+}
+
+impl fmt::Display for EnumEncodingItem {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let text = match self {
+            EnumEncodingItem::Sequential => "sequential",
+            EnumEncodingItem::OneHot => "one_hot",
+            EnumEncodingItem::Gray => "gray",
         };
         text.fmt(f)
     }

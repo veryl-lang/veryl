@@ -597,6 +597,16 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
+    #[diagnostic(severity(Error), code(invalid_enum_encoding), help(""), url(""))]
+    #[error("{identifier} is not valid enum encoding")]
+    InvalidEnumEncoding {
+        identifier: String,
+        #[source_code]
+        input: NamedSource<String>,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
     #[diagnostic(
         severity(Error),
         code(too_large_enum_variant),
@@ -620,9 +630,20 @@ pub enum AnalyzerError {
         help(""),
         url("")
     )]
-    #[error("The implicit value of enum variant {identifier} cannot be evaluated")]
+    #[error("The value of enum variant {identifier} cannot be evaluated")]
     UnevaluatableEnumVariant {
         identifier: String,
+        #[source_code]
+        input: NamedSource<String>,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(severity(Error), code(invalid_enum_variant_value), help(""), url(""))]
+    #[error("The value of enum variant {identifier} is not encoded value by {encoding}")]
+    InvalidEnumVariant {
+        identifier: String,
+        encoding: String,
         #[source_code]
         input: NamedSource<String>,
         #[label("Error location")]
@@ -1333,6 +1354,14 @@ impl AnalyzerError {
         }
     }
 
+    pub fn invalid_enum_encoding(identifier: &str, source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidEnumEncoding {
+            identifier: identifier.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
     pub fn too_large_enum_variant(
         identifier: &str,
         value: isize,
@@ -1352,6 +1381,20 @@ impl AnalyzerError {
     pub fn unevaluatable_enum_variant(identifier: &str, source: &str, token: &TokenRange) -> Self {
         AnalyzerError::UnevaluatableEnumVariant {
             identifier: identifier.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn invalid_enum_variant_value(
+        identifier: &str,
+        encoding: &str,
+        source: &str,
+        token: &TokenRange,
+    ) -> Self {
+        AnalyzerError::InvalidEnumVariant {
+            identifier: identifier.to_string(),
+            encoding: encoding.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
         }

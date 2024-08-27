@@ -1,3 +1,4 @@
+use crate::attribute::EnumEncodingItem;
 use crate::evaluator::{Evaluated, Evaluator};
 use crate::namespace::Namespace;
 use crate::symbol_path::{GenericSymbolPath, SymbolPath};
@@ -1000,13 +1001,26 @@ pub struct TypeDefProperty {
 #[derive(Debug, Clone)]
 pub struct EnumProperty {
     pub r#type: Option<Type>,
+    pub width: usize,
     pub members: Vec<SymbolId>,
+    pub encoding: EnumEncodingItem,
 }
 
 #[derive(Debug, Clone)]
 pub enum EnumMemberValue {
     ImplicitValue(usize),
     ExplicitValue(syntax_tree::Expression, Option<usize>),
+    UnevaluableValue,
+}
+
+impl EnumMemberValue {
+    pub fn value(&self) -> Option<usize> {
+        match self {
+            EnumMemberValue::ImplicitValue(value) => Some(*value),
+            EnumMemberValue::ExplicitValue(_expression, evaluated) => *evaluated,
+            EnumMemberValue::UnevaluableValue => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

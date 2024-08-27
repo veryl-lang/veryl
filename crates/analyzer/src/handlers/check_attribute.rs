@@ -62,6 +62,13 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
                                 &arg.identifier.as_ref().into(),
                             ));
                         }
+                        crate::attribute::AttributeError::InvalidEnumEncoding(x) => {
+                            self.errors.push(AnalyzerError::invalid_enum_encoding(
+                                &x.to_string(),
+                                self.text,
+                                &arg.identifier.as_ref().into(),
+                            ));
+                        }
                     }
                 }
             }
