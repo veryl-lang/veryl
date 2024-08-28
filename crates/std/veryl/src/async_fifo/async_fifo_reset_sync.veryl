@@ -1,4 +1,4 @@
-module async_fifo_reset_sync::<S> #(
+module async_fifo_reset_sync::<S: synchronizer> #(
     param MERGE_RESET      : bit = '0,
     param RESET_SYNC_STAGES: u32 = 2 ,
 ) (

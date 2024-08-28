@@ -4,7 +4,7 @@ import async_fifo_pkg::calc_default_depth;
 ///
 /// Asynchronous FIFO based on gray-code pointer.
 /// Generic parameter `S` is a module name of synchrinozer.
-pub module async_fifo::<S> #(
+pub module async_fifo::<S: synchronizer> #(
     param WIDTH             : u32  = 8                         , /// Data width
     param TYPE              : type = logic<WIDTH>              , /// Data type
     param STAGES            : u32  = 2                         , /// Stages of synchronizer
