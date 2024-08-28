@@ -212,17 +212,17 @@ impl Symbol {
         }
 
         for param in generic_parameters.iter().skip(arguments.len()) {
-            ret.insert(param.0, param.1.as_ref().unwrap().clone());
+            ret.insert(param.0, param.1.default_value.as_ref().unwrap().clone());
         }
 
         ret
     }
 
-    pub fn generic_parameters(&self) -> Vec<(StrId, Option<GenericSymbolPath>)> {
-        fn get_generic_parameter(id: SymbolId) -> (StrId, Option<GenericSymbolPath>) {
+    pub fn generic_parameters(&self) -> Vec<(StrId, GenericParameterProperty)> {
+        fn get_generic_parameter(id: SymbolId) -> (StrId, GenericParameterProperty) {
             let symbol = symbol_table::get(id).unwrap();
             if let SymbolKind::GenericParameter(x) = symbol.kind {
-                (symbol.token.text, x.default_value)
+                (symbol.token.text, x)
             } else {
                 unreachable!()
             }
@@ -281,6 +281,7 @@ pub enum SymbolKind {
     Port(PortProperty),
     Variable(VariableProperty),
     Module(ModuleProperty),
+    ProtoModule(ProtoModuleProperty),
     Interface(InterfaceProperty),
     Function(FunctionProperty),
     Parameter(ParameterProperty),
@@ -314,6 +315,7 @@ impl SymbolKind {
             SymbolKind::Port(_) => "port".to_string(),
             SymbolKind::Variable(_) => "variable".to_string(),
             SymbolKind::Module(_) => "module".to_string(),
+            SymbolKind::ProtoModule(_) => "proto module".to_string(),
             SymbolKind::Interface(_) => "interface".to_string(),
             SymbolKind::Function(_) => "function".to_string(),
             SymbolKind::Parameter(_) => "parameter".to_string(),
@@ -381,6 +383,17 @@ impl SymbolKind {
             _ => false,
         }
     }
+
+    pub fn proto(&self) -> Option<SymbolPath> {
+        match self {
+            SymbolKind::Module(x) => x.proto.clone(),
+            SymbolKind::GenericParameter(x) => match x.bound {
+                GenericBoundKind::Proto(ref x) => Some(x.clone()),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for SymbolKind {
@@ -400,6 +413,13 @@ impl fmt::Display for SymbolKind {
                 format!(
                     "module ({} generic, {} params, {} ports)",
                     x.generic_parameters.len(),
+                    x.parameters.len(),
+                    x.ports.len()
+                )
+            }
+            SymbolKind::ProtoModule(x) => {
+                format!(
+                    "proto module ({} params, {} ports)",
                     x.parameters.len(),
                     x.ports.len()
                 )
@@ -665,20 +685,19 @@ impl From<&syntax_tree::ScalarType> for Type {
             }
         }
         match &*value.scalar_type_group {
-            syntax_tree::ScalarTypeGroup::VariableType(x) => {
-                let x = &x.variable_type;
-                let kind = match &*x.variable_type_group {
-                    syntax_tree::VariableTypeGroup::Clock(_) => TypeKind::Clock,
-                    syntax_tree::VariableTypeGroup::ClockPosedge(_) => TypeKind::ClockPosedge,
-                    syntax_tree::VariableTypeGroup::ClockNegedge(_) => TypeKind::ClockNegedge,
-                    syntax_tree::VariableTypeGroup::Reset(_) => TypeKind::Reset,
-                    syntax_tree::VariableTypeGroup::ResetAsyncHigh(_) => TypeKind::ResetAsyncHigh,
-                    syntax_tree::VariableTypeGroup::ResetAsyncLow(_) => TypeKind::ResetAsyncLow,
-                    syntax_tree::VariableTypeGroup::ResetSyncHigh(_) => TypeKind::ResetSyncHigh,
-                    syntax_tree::VariableTypeGroup::ResetSyncLow(_) => TypeKind::ResetSyncLow,
-                    syntax_tree::VariableTypeGroup::Logic(_) => TypeKind::Logic,
-                    syntax_tree::VariableTypeGroup::Bit(_) => TypeKind::Bit,
-                    syntax_tree::VariableTypeGroup::ScopedIdentifier(x) => {
+            syntax_tree::ScalarTypeGroup::VariableTypeScalarTypeOpt(x) => {
+                let kind = match x.variable_type.as_ref() {
+                    syntax_tree::VariableType::Clock(_) => TypeKind::Clock,
+                    syntax_tree::VariableType::ClockPosedge(_) => TypeKind::ClockPosedge,
+                    syntax_tree::VariableType::ClockNegedge(_) => TypeKind::ClockNegedge,
+                    syntax_tree::VariableType::Reset(_) => TypeKind::Reset,
+                    syntax_tree::VariableType::ResetAsyncHigh(_) => TypeKind::ResetAsyncHigh,
+                    syntax_tree::VariableType::ResetAsyncLow(_) => TypeKind::ResetAsyncLow,
+                    syntax_tree::VariableType::ResetSyncHigh(_) => TypeKind::ResetSyncHigh,
+                    syntax_tree::VariableType::ResetSyncLow(_) => TypeKind::ResetSyncLow,
+                    syntax_tree::VariableType::Logic(_) => TypeKind::Logic,
+                    syntax_tree::VariableType::Bit(_) => TypeKind::Bit,
+                    syntax_tree::VariableType::ScopedIdentifier(x) => {
                         let x = &x.scoped_identifier;
                         let mut name = Vec::new();
                         match &*x.scoped_identifier_group {
@@ -698,7 +717,7 @@ impl From<&syntax_tree::ScalarType> for Type {
                     }
                 };
                 let mut width = Vec::new();
-                if let Some(ref x) = x.variable_type_opt {
+                if let Some(ref x) = x.scalar_type_opt {
                     let x = &x.width;
                     width.push(*x.expression.clone());
                     for x in &x.width_list {
@@ -810,6 +829,7 @@ pub struct PortProperty {
     pub prefix: Option<String>,
     pub suffix: Option<String>,
     pub clock_domain: ClockDomain,
+    pub is_proto: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -881,12 +901,79 @@ impl Parameter {
 #[derive(Debug, Clone)]
 pub struct ModuleProperty {
     pub range: TokenRange,
+    pub proto: Option<SymbolPath>,
     pub generic_parameters: Vec<SymbolId>,
     pub generic_references: Vec<GenericSymbolPath>,
     pub parameters: Vec<Parameter>,
     pub ports: Vec<Port>,
     pub default_clock: Option<SymbolId>,
     pub default_reset: Option<SymbolId>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProtoModuleProperty {
+    pub range: TokenRange,
+    pub parameters: Vec<Parameter>,
+    pub ports: Vec<Port>,
+}
+
+pub enum ProtoIncompatible {
+    MissingParam(StrId),
+    MissingPort(StrId),
+    UnnecessaryParam(StrId),
+    UnnecessaryPort(StrId),
+    IncompatibleParam(StrId),
+    IncompatiblePort(StrId),
+}
+
+impl ProtoModuleProperty {
+    pub fn check_compat(&self, p: &ModuleProperty) -> Vec<ProtoIncompatible> {
+        let mut ret = Vec::new();
+
+        let actual_params: HashMap<_, _> = p
+            .parameters
+            .iter()
+            .map(|x| (x.name, x.property()))
+            .collect();
+        let actual_ports: HashMap<_, _> = p.ports.iter().map(|x| (x.name, x.property())).collect();
+        let mut proto_params: HashMap<_, _> = self
+            .parameters
+            .iter()
+            .map(|x| (x.name, x.property()))
+            .collect();
+        let mut proto_ports: HashMap<_, _> =
+            self.ports.iter().map(|x| (x.name, x.property())).collect();
+
+        for (name, actual_param) in actual_params {
+            if let Some(proto_param) = proto_params.remove(&name) {
+                if proto_param.r#type.to_string() != actual_param.r#type.to_string() {
+                    ret.push(ProtoIncompatible::IncompatibleParam(name));
+                }
+            } else {
+                ret.push(ProtoIncompatible::UnnecessaryParam(name));
+            }
+        }
+        for (name, _) in proto_params {
+            ret.push(ProtoIncompatible::MissingParam(name));
+        }
+
+        for (name, actual_port) in actual_ports {
+            if let Some(proto_port) = proto_ports.remove(&name) {
+                if proto_port.r#type.map(|x| x.to_string())
+                    != actual_port.r#type.map(|x| x.to_string())
+                {
+                    ret.push(ProtoIncompatible::IncompatiblePort(name));
+                }
+            } else {
+                ret.push(ProtoIncompatible::UnnecessaryPort(name));
+            }
+        }
+        for (name, _) in proto_ports {
+            ret.push(ProtoIncompatible::MissingPort(name));
+        }
+
+        ret
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1044,8 +1131,27 @@ pub struct ModportFunctionMemberProperty {
     pub function: SymbolId,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GenericBoundKind {
+    Const,
+    Type,
+    Proto(SymbolPath),
+}
+
+impl fmt::Display for GenericBoundKind {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let text = match self {
+            GenericBoundKind::Const => "const".to_string(),
+            GenericBoundKind::Type => "type".to_string(),
+            GenericBoundKind::Proto(x) => x.to_string(),
+        };
+        text.fmt(f)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct GenericParameterProperty {
+    pub bound: GenericBoundKind,
     pub default_value: Option<GenericSymbolPath>,
 }
 

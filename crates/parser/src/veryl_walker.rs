@@ -398,6 +398,13 @@ pub trait VerylWalker {
         after!(self, clock_negedge, arg);
     }
 
+    /// Semantic action for non-terminal 'Const'
+    fn r#const(&mut self, arg: &Const) {
+        before!(self, r#const, arg);
+        self.veryl_token(&arg.const_token);
+        after!(self, r#const, arg);
+    }
+
     /// Semantic action for non-terminal 'Defaul'
     fn defaul(&mut self, arg: &Defaul) {
         before!(self, defaul, arg);
@@ -634,6 +641,13 @@ pub trait VerylWalker {
         before!(self, param, arg);
         self.veryl_token(&arg.param_token);
         after!(self, param, arg);
+    }
+
+    /// Semantic action for non-terminal 'Proto'
+    fn proto(&mut self, arg: &Proto) {
+        before!(self, proto, arg);
+        self.veryl_token(&arg.proto_token);
+        after!(self, proto, arg);
     }
 
     /// Semantic action for non-terminal 'Pub'
@@ -1409,22 +1423,19 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'VariableType'
     fn variable_type(&mut self, arg: &VariableType) {
         before!(self, variable_type, arg);
-        match &*arg.variable_type_group {
-            VariableTypeGroup::Clock(x) => self.clock(&x.clock),
-            VariableTypeGroup::ClockPosedge(x) => self.clock_posedge(&x.clock_posedge),
-            VariableTypeGroup::ClockNegedge(x) => self.clock_negedge(&x.clock_negedge),
-            VariableTypeGroup::Reset(x) => self.reset(&x.reset),
-            VariableTypeGroup::ResetAsyncHigh(x) => self.reset_async_high(&x.reset_async_high),
-            VariableTypeGroup::ResetAsyncLow(x) => self.reset_async_low(&x.reset_async_low),
-            VariableTypeGroup::ResetSyncHigh(x) => self.reset_sync_high(&x.reset_sync_high),
-            VariableTypeGroup::ResetSyncLow(x) => self.reset_sync_low(&x.reset_sync_low),
-            VariableTypeGroup::Logic(x) => self.logic(&x.logic),
-            VariableTypeGroup::Bit(x) => self.bit(&x.bit),
-            VariableTypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
+        match arg {
+            VariableType::Clock(x) => self.clock(&x.clock),
+            VariableType::ClockPosedge(x) => self.clock_posedge(&x.clock_posedge),
+            VariableType::ClockNegedge(x) => self.clock_negedge(&x.clock_negedge),
+            VariableType::Reset(x) => self.reset(&x.reset),
+            VariableType::ResetAsyncHigh(x) => self.reset_async_high(&x.reset_async_high),
+            VariableType::ResetAsyncLow(x) => self.reset_async_low(&x.reset_async_low),
+            VariableType::ResetSyncHigh(x) => self.reset_sync_high(&x.reset_sync_high),
+            VariableType::ResetSyncLow(x) => self.reset_sync_low(&x.reset_sync_low),
+            VariableType::Logic(x) => self.logic(&x.logic),
+            VariableType::Bit(x) => self.bit(&x.bit),
+            VariableType::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
         };
-        if let Some(ref x) = arg.variable_type_opt {
-            self.width(&x.width);
-        }
         after!(self, variable_type, arg);
     }
 
@@ -1445,7 +1456,12 @@ pub trait VerylWalker {
             self.type_modifier(&x.type_modifier);
         }
         match &*arg.scalar_type_group {
-            ScalarTypeGroup::VariableType(x) => self.variable_type(&x.variable_type),
+            ScalarTypeGroup::VariableTypeScalarTypeOpt(x) => {
+                self.variable_type(&x.variable_type);
+                if let Some(ref x) = x.scalar_type_opt {
+                    self.width(&x.width);
+                }
+            }
             ScalarTypeGroup::FixedType(x) => self.fixed_type(&x.fixed_type),
         }
         after!(self, scalar_type, arg);
@@ -2302,6 +2318,17 @@ pub trait VerylWalker {
         after!(self, with_parameter_item, arg);
     }
 
+    /// Semantic action for non-terminal 'GenericBound'
+    fn generic_bound(&mut self, arg: &GenericBound) {
+        before!(self, generic_bound, arg);
+        match arg {
+            GenericBound::Const(x) => self.r#const(&x.r#const),
+            GenericBound::Type(x) => self.r#type(&x.r#type),
+            GenericBound::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
+        }
+        after!(self, generic_bound, arg);
+    }
+
     /// Semantic action for non-terminal 'WithGenericParameter'
     fn with_generic_parameter(&mut self, arg: &WithGenericParameter) {
         before!(self, with_generic_parameter, arg);
@@ -2329,6 +2356,8 @@ pub trait VerylWalker {
     fn with_generic_parameter_item(&mut self, arg: &WithGenericParameterItem) {
         before!(self, with_generic_parameter_item, arg);
         self.identifier(&arg.identifier);
+        self.colon(&arg.colon);
+        self.generic_bound(&arg.generic_bound);
         if let Some(ref x) = arg.with_generic_parameter_item_opt {
             self.equ(&x.equ);
             self.with_generic_argument_item(&x.with_generic_argument_item);
@@ -2560,9 +2589,13 @@ pub trait VerylWalker {
             self.with_generic_parameter(&x.with_generic_parameter);
         }
         if let Some(ref x) = arg.module_declaration_opt1 {
-            self.with_parameter(&x.with_parameter);
+            self.r#for(&x.r#for);
+            self.scoped_identifier(&x.scoped_identifier);
         }
         if let Some(ref x) = arg.module_declaration_opt2 {
+            self.with_parameter(&x.with_parameter);
+        }
+        if let Some(ref x) = arg.module_declaration_opt3 {
             self.port_declaration(&x.port_declaration);
         }
         self.l_brace(&arg.l_brace);
@@ -2897,6 +2930,24 @@ pub trait VerylWalker {
         after!(self, package_item, arg);
     }
 
+    /// Semantic action for non-terminal 'ProtoModuleDeclaration'
+    fn proto_module_declaration(&mut self, arg: &ProtoModuleDeclaration) {
+        before!(self, proto_module_declaration, arg);
+        if let Some(ref x) = arg.proto_module_declaration_opt {
+            self.r#pub(&x.r#pub);
+        }
+        self.module(&arg.module);
+        self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.proto_module_declaration_opt0 {
+            self.with_parameter(&x.with_parameter);
+        }
+        if let Some(ref x) = arg.proto_module_declaration_opt1 {
+            self.port_declaration(&x.port_declaration);
+        }
+        self.semicolon(&arg.semicolon);
+        after!(self, proto_module_declaration, arg);
+    }
+
     /// Semantic action for non-terminal 'EmbedDeclaration'
     fn embed_declaration(&mut self, arg: &EmbedDeclaration) {
         before!(self, embed_declaration, arg);
@@ -2958,6 +3009,9 @@ pub trait VerylWalker {
             }
             DescriptionItem::PackageDeclaration(x) => {
                 self.package_declaration(&x.package_declaration)
+            }
+            DescriptionItem::ProtoModuleDeclaration(x) => {
+                self.proto_module_declaration(&x.proto_module_declaration)
             }
             DescriptionItem::ImportDeclaration(x) => self.import_declaration(&x.import_declaration),
             DescriptionItem::EmbedDeclaration(x) => self.embed_declaration(&x.embed_declaration),

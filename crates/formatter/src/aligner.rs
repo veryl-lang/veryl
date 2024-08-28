@@ -431,34 +431,6 @@ impl VerylWalker for Aligner {
         self.r_bracket(&arg.r_bracket);
     }
 
-    /// Semantic action for non-terminal 'VariableType'
-    fn variable_type(&mut self, arg: &VariableType) {
-        match &*arg.variable_type_group {
-            VariableTypeGroup::Clock(x) => self.clock(&x.clock),
-            VariableTypeGroup::ClockPosedge(x) => self.clock_posedge(&x.clock_posedge),
-            VariableTypeGroup::ClockNegedge(x) => self.clock_negedge(&x.clock_negedge),
-            VariableTypeGroup::Reset(x) => self.reset(&x.reset),
-            VariableTypeGroup::ResetAsyncHigh(x) => self.reset_async_high(&x.reset_async_high),
-            VariableTypeGroup::ResetAsyncLow(x) => self.reset_async_low(&x.reset_async_low),
-            VariableTypeGroup::ResetSyncHigh(x) => self.reset_sync_high(&x.reset_sync_high),
-            VariableTypeGroup::ResetSyncLow(x) => self.reset_sync_low(&x.reset_sync_low),
-            VariableTypeGroup::Logic(x) => self.logic(&x.logic),
-            VariableTypeGroup::Bit(x) => self.bit(&x.bit),
-            VariableTypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
-        };
-        if !self.in_type_expression {
-            self.aligns[align_kind::TYPE].finish_item();
-            self.aligns[align_kind::WIDTH].start_item();
-        }
-        if let Some(ref x) = arg.variable_type_opt {
-            self.width(&x.width);
-        } else if !self.in_type_expression {
-            let loc = self.aligns[align_kind::TYPE].last_location;
-            let loc = loc.unwrap();
-            self.aligns[align_kind::WIDTH].dummy_location(loc);
-        }
-    }
-
     /// Semantic action for non-terminal 'ScalarType'
     fn scalar_type(&mut self, arg: &ScalarType) {
         if !self.in_type_expression {
@@ -469,7 +441,20 @@ impl VerylWalker for Aligner {
             self.space(1);
         }
         match &*arg.scalar_type_group {
-            ScalarTypeGroup::VariableType(x) => self.variable_type(&x.variable_type),
+            ScalarTypeGroup::VariableTypeScalarTypeOpt(x) => {
+                self.variable_type(&x.variable_type);
+                if !self.in_type_expression {
+                    self.aligns[align_kind::TYPE].finish_item();
+                    self.aligns[align_kind::WIDTH].start_item();
+                }
+                if let Some(ref x) = x.scalar_type_opt {
+                    self.width(&x.width);
+                } else if !self.in_type_expression {
+                    let loc = self.aligns[align_kind::TYPE].last_location;
+                    let loc = loc.unwrap();
+                    self.aligns[align_kind::WIDTH].dummy_location(loc);
+                }
+            }
             ScalarTypeGroup::FixedType(x) => {
                 self.fixed_type(&x.fixed_type);
                 if !self.in_type_expression {

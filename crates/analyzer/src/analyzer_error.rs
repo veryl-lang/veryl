@@ -365,6 +365,23 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(incompat_proto),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#incompat_proto")
+    )]
+    #[error("{identifier} is incompatible with {proto} because {cause}")]
+    IncompatProto {
+        identifier: String,
+        proto: String,
+        cause: String,
+        #[source_code]
+        input: NamedSource<String>,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(missing_default_argument),
         help("give default argument"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#missing_default_argument")
@@ -1190,6 +1207,22 @@ impl AnalyzerError {
     ) -> Self {
         AnalyzerError::InvalidModportFunctionItem {
             identifier: identifier.into(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn incompat_proto(
+        identifier: &str,
+        proto: &str,
+        cause: &str,
+        source: &str,
+        token: &TokenRange,
+    ) -> Self {
+        AnalyzerError::IncompatProto {
+            identifier: identifier.into(),
+            proto: proto.into(),
+            cause: cause.into(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
         }

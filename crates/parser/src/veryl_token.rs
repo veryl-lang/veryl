@@ -466,72 +466,72 @@ impl From<&FixedType> for TokenRange {
 
 impl From<&VariableType> for TokenRange {
     fn from(value: &VariableType) -> Self {
-        let mut range = match &*value.variable_type_group {
-            VariableTypeGroup::Clock(x) => {
+        match value {
+            VariableType::Clock(x) => {
                 let beg = x.clock.clock_token.token;
                 let end = beg;
                 TokenRange { beg, end }
             }
-            VariableTypeGroup::ClockPosedge(x) => {
+            VariableType::ClockPosedge(x) => {
                 let beg = x.clock_posedge.clock_posedge_token.token;
                 let end = beg;
                 TokenRange { beg, end }
             }
-            VariableTypeGroup::ClockNegedge(x) => {
+            VariableType::ClockNegedge(x) => {
                 let beg = x.clock_negedge.clock_negedge_token.token;
                 let end = beg;
                 TokenRange { beg, end }
             }
-            VariableTypeGroup::Reset(x) => {
+            VariableType::Reset(x) => {
                 let beg = x.reset.reset_token.token;
                 let end = beg;
                 TokenRange { beg, end }
             }
-            VariableTypeGroup::ResetAsyncHigh(x) => {
+            VariableType::ResetAsyncHigh(x) => {
                 let beg = x.reset_async_high.reset_async_high_token.token;
                 let end = beg;
                 TokenRange { beg, end }
             }
-            VariableTypeGroup::ResetAsyncLow(x) => {
+            VariableType::ResetAsyncLow(x) => {
                 let beg = x.reset_async_low.reset_async_low_token.token;
                 let end = beg;
                 TokenRange { beg, end }
             }
-            VariableTypeGroup::ResetSyncHigh(x) => {
+            VariableType::ResetSyncHigh(x) => {
                 let beg = x.reset_sync_high.reset_sync_high_token.token;
                 let end = beg;
                 TokenRange { beg, end }
             }
-            VariableTypeGroup::ResetSyncLow(x) => {
+            VariableType::ResetSyncLow(x) => {
                 let beg = x.reset_sync_low.reset_sync_low_token.token;
                 let end = beg;
                 TokenRange { beg, end }
             }
-            VariableTypeGroup::Logic(x) => {
+            VariableType::Logic(x) => {
                 let beg = x.logic.logic_token.token;
                 let end = beg;
                 TokenRange { beg, end }
             }
-            VariableTypeGroup::Bit(x) => {
+            VariableType::Bit(x) => {
                 let beg = x.bit.bit_token.token;
                 let end = beg;
                 TokenRange { beg, end }
             }
-            VariableTypeGroup::ScopedIdentifier(x) => x.scoped_identifier.as_ref().into(),
-        };
-
-        if let Some(ref x) = value.variable_type_opt {
-            range.end = x.width.r_angle.r_angle_token.token;
+            VariableType::ScopedIdentifier(x) => x.scoped_identifier.as_ref().into(),
         }
-
-        range
     }
 }
 
 impl From<&ScalarType> for TokenRange {
     fn from(value: &ScalarType) -> Self {
         let mut range: TokenRange = match &*value.scalar_type_group {
-            ScalarTypeGroup::VariableType(x) => x.variable_type.as_ref().into(),
+            ScalarTypeGroup::VariableTypeScalarTypeOpt(x) => {
+                let mut range: TokenRange = x.variable_type.as_ref().into();
+                if let Some(ref x) = x.scalar_type_opt {
+                    range.end = x.width.r_angle.r_angle_token.token;
+                }
+                range
+            }
             ScalarTypeGroup::FixedType(x) => x.fixed_type.as_ref().into(),
         };
 
@@ -881,6 +881,7 @@ token_with_comments!(Case);
 token_with_comments!(Clock);
 token_with_comments!(ClockPosedge);
 token_with_comments!(ClockNegedge);
+token_with_comments!(Const);
 token_with_comments!(Default);
 token_with_comments!(Else);
 token_with_comments!(Embed);
@@ -915,6 +916,7 @@ token_with_comments!(Output);
 token_with_comments!(Outside);
 token_with_comments!(Package);
 token_with_comments!(Param);
+token_with_comments!(Proto);
 token_with_comments!(Pub);
 token_with_comments!(Ref);
 token_with_comments!(Repeat);

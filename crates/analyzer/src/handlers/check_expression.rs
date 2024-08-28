@@ -93,6 +93,7 @@ impl<'a> VerylGrammarTrait for CheckExpression<'a> {
                             }
                         }
                         SymbolKind::Module(_)
+                        | SymbolKind::ProtoModule(_)
                         | SymbolKind::Interface(_)
                         | SymbolKind::Instance(_)
                         | SymbolKind::Block

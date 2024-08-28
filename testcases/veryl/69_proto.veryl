@@ -1,0 +1,29 @@
+module Module69::<T: Proto69> {
+    inst u: T (
+        a: 0,
+        b: 0,
+        c: _,
+    );
+}
+
+proto module Proto69 #(
+    param A: u32 = 1,
+    param B: u32 = 1,
+    param C: u32 = 1,
+) (
+    a: input  logic,
+    b: input  logic,
+    c: output logic,
+);
+
+module Module69A for Proto69 #(
+    param A: u32 = 1,
+    param B: u32 = 1,
+    param C: u32 = 1,
+) (
+    a: input  logic,
+    b: input  logic,
+    c: output logic,
+) {
+    assign c = a;
+}
