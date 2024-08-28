@@ -385,11 +385,11 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                // Add symbols under $sv namespace
-                if let ScopedIdentifierGroup::DollarIdentifier(x) =
+                // Add symbols under sv namespace
+                if let ScopedIdentifierGroup::IdentifierScopedIdentifierOpt(x) =
                     arg.scoped_identifier_group.as_ref()
                 {
-                    if x.dollar_identifier.dollar_identifier_token.to_string() == "$sv" {
+                    if x.identifier.identifier_token.to_string() == "sv" {
                         let mut namespace = Namespace::new();
                         for (i, token) in scoped_identifier_tokens(arg).iter().enumerate() {
                             if i != 0 {

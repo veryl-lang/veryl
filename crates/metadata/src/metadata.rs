@@ -71,6 +71,8 @@ pub struct Metadata {
 static VALID_PROJECT_NAME: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^[a-zA-Z_][0-9a-zA-Z_]*$").unwrap());
 
+pub static DEFINED_NAMESPACES: [&str; 2] = ["std", "sv"];
+
 impl Metadata {
     pub fn search_from_current() -> Result<PathBuf, MetadataError> {
         Metadata::search_from(env::current_dir()?)
@@ -148,6 +150,13 @@ impl Metadata {
 
     pub fn check(&self) -> Result<(), MetadataError> {
         if !VALID_PROJECT_NAME.is_match(&self.project.name) {
+            return Err(MetadataError::InvalidProjectName(self.project.name.clone()));
+        }
+
+        if DEFINED_NAMESPACES
+            .binary_search(&self.project.name.as_str())
+            .is_ok()
+        {
             return Err(MetadataError::InvalidProjectName(self.project.name.clone()));
         }
 
@@ -278,6 +287,10 @@ impl Metadata {
 
     pub fn create_default_toml(name: &str) -> Result<String, MetadataError> {
         if !VALID_PROJECT_NAME.is_match(name) {
+            return Err(MetadataError::InvalidProjectName(name.to_string()));
+        }
+
+        if DEFINED_NAMESPACES.binary_search(&name).is_ok() {
             return Err(MetadataError::InvalidProjectName(name.to_string()));
         }
 

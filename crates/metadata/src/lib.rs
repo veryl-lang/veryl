@@ -19,7 +19,7 @@ pub use doc::Doc;
 pub use format::Format;
 pub use lint::{Case, Lint};
 pub use lockfile::Lockfile;
-pub use metadata::{BumpKind, Metadata, PathPair};
+pub use metadata::{BumpKind, Metadata, PathPair, DEFINED_NAMESPACES};
 pub use metadata_error::MetadataError;
 pub use project::Project;
 pub use pubfile::{Pubfile, Release};

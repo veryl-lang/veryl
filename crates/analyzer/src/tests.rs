@@ -1612,7 +1612,7 @@ fn unknown_member() {
 fn unknown_msb() {
     let code = r#"
     module ModuleA {
-        var a: $sv::SvType;
+        var a: sv::SvType;
         let b: logic = a[msb];
     }
     "#;
@@ -2214,7 +2214,7 @@ fn clock_domain() {
         i_dat1: input  `b logic,
         o_dat : output `a logic,
     ) {
-        inst u: $sv::Module (
+        inst u: sv::Module (
             i_dat: i_dat1,
             o_dat,
         );
@@ -2343,12 +2343,28 @@ fn sv_keyword_usage() {
 }
 
 #[test]
+fn defined_identifier_usage() {
+    let code = r#"
+    module ModuleA {
+        var std: logic;
+        assign std = 1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::DefinedIdentifierUsage { .. }
+    ));
+}
+
+#[test]
 fn sv_with_implicit_reset() {
     let code = r#"
     module ModuleA {
         var rst: reset;
 
-        inst u: $sv::Module (
+        inst u: sv::Module (
             rst,
         );
     }
@@ -2364,7 +2380,7 @@ fn sv_with_implicit_reset() {
     module ModuleB {
         var rst: reset_async_low;
 
-        inst u: $sv::Module (
+        inst u: sv::Module (
             rst,
         );
     }

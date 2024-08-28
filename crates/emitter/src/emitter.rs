@@ -3564,8 +3564,8 @@ fn namespace_string(namespace: &Namespace, context: &SymbolContext) -> String {
             // top level namespace is always `_`
             let text = format!("{}_", path);
 
-            // "$sv" namespace should be removed
-            if text == "$sv_" {
+            // "sv" namespace should be removed
+            if text == "sv_" {
                 in_sv_namespace = true;
             } else {
                 let emit_prj_prefix = if context.build_opt.omit_project_prefix {

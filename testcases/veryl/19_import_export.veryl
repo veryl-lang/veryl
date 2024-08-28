@@ -1,5 +1,5 @@
-import $sv::PackageA::A;
-import $sv::PackageA::*;
+import sv::PackageA::A;
+import sv::PackageA::*;
 
 module Module19 {
     import PackageA::A;

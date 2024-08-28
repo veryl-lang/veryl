@@ -602,6 +602,23 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(defined_identifier_usage),
+        help("Change the identifier to a non-defined identifier"),
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#defined_identifier"
+        )
+    )]
+    #[error("Defined identifiers may not be used")]
+    DefinedIdentifierUsage {
+        identifier: String,
+        #[source_code]
+        input: NamedSource<String>,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(sv_with_implicit_reset),
         help("Use types with explicit synchronisity and polarity like `reset_async_low`"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#sv_with_implicit_reset")
@@ -1374,6 +1391,14 @@ impl AnalyzerError {
 
     pub fn sv_keyword_usage(identifier: &str, source: &str, token: &TokenRange) -> Self {
         AnalyzerError::SvKeywordUsage {
+            identifier: identifier.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn defined_identifier_usage(identifier: &str, source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::DefinedIdentifierUsage {
             identifier: identifier.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),

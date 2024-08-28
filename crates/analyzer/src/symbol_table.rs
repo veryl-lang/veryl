@@ -6,6 +6,7 @@ use crate::symbol_path::{SymbolPath, SymbolPathNamespace};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
+use veryl_metadata::DEFINED_NAMESPACES;
 use veryl_parser::resource_table::{PathId, StrId, TokenId};
 use veryl_parser::veryl_token::{Token, TokenSource};
 
@@ -509,8 +510,6 @@ impl<'a> ResolveContext<'a> {
     }
 }
 
-const DEFINED_NAMESPACES: [&str; 2] = ["$sv", "std"];
-
 // Refer IEEE Std 1800-2023 Table B.1 - Reserved keywords
 // This list must be sorted to enable binary search
 const SYSTEMVERILOG_KEYWORDS: [&str; 248] = [
@@ -968,6 +967,10 @@ const DEFINED_SYSTEM_FUNCTIONS: [&str; 196] = [
     "$writeo",
 ];
 
+pub fn is_defined_identifier(s: &str) -> bool {
+    DEFINED_NAMESPACES.binary_search(&s).is_ok()
+}
+
 thread_local!(static SYMBOL_TABLE: RefCell<SymbolTable> = RefCell::new(SymbolTable::new()));
 
 pub fn insert(token: &Token, symbol: Symbol) -> Option<SymbolId> {
@@ -1063,7 +1066,7 @@ mod tests {
         var memberA: logic;
         var memberB: PackageA::StructA;
         var memberC: TypeA;
-        var memberD: $sv::SvTypeA;
+        var memberD: sv::SvTypeA;
         var memberE: PackageA::UnionA;
 
         inst instA: InterfaceA;
@@ -1467,10 +1470,10 @@ mod tests {
         check_found(symbol, "prj::ModuleA");
 
         let symbol = resolve(&["memberD", "memberA"], &["ModuleA"]);
-        check_found(symbol, "$sv::SvTypeA");
+        check_found(symbol, "sv::SvTypeA");
 
         let symbol = resolve(&["memberD", "memberA", "memberA", "memberA"], &["ModuleA"]);
-        check_found(symbol, "$sv::SvTypeA");
+        check_found(symbol, "sv::SvTypeA");
     }
 
     #[test]

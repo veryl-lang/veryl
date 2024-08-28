@@ -1,6 +1,6 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::symbol::Direction as SymDirection;
-use crate::symbol_table::is_sv_keyword;
+use crate::symbol_table::{is_defined_identifier, is_sv_keyword};
 use veryl_metadata::{Case, Lint};
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::Token;
@@ -195,6 +195,14 @@ impl<'a> CheckIdentifier<'a> {
 
         if is_sv_keyword(&identifier) {
             self.errors.push(AnalyzerError::sv_keyword_usage(
+                &identifier,
+                self.text,
+                &token.into(),
+            ))
+        }
+
+        if is_defined_identifier(&identifier) {
+            self.errors.push(AnalyzerError::defined_identifier_usage(
                 &identifier,
                 self.text,
                 &token.into(),
