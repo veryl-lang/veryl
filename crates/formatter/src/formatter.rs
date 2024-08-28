@@ -606,7 +606,12 @@ impl VerylWalker for Formatter {
             self.space(1);
         }
         match &*arg.scalar_type_group {
-            ScalarTypeGroup::VariableType(x) => self.variable_type(&x.variable_type),
+            ScalarTypeGroup::VariableTypeScalarTypeOpt(x) => {
+                self.variable_type(&x.variable_type);
+                if let Some(ref x) = x.scalar_type_opt {
+                    self.width(&x.width);
+                }
+            }
             ScalarTypeGroup::FixedType(x) => self.fixed_type(&x.fixed_type),
         };
     }
@@ -1460,6 +1465,9 @@ impl VerylWalker for Formatter {
     /// Semantic action for non-terminal 'WithGenericParameterItem'
     fn with_generic_parameter_item(&mut self, arg: &WithGenericParameterItem) {
         self.identifier(&arg.identifier);
+        self.colon(&arg.colon);
+        self.space(1);
+        self.generic_bound(&arg.generic_bound);
         if let Some(ref x) = arg.with_generic_parameter_item_opt {
             self.space(1);
             self.equ(&x.equ);
@@ -1657,10 +1665,16 @@ impl VerylWalker for Formatter {
         }
         self.space(1);
         if let Some(ref x) = arg.module_declaration_opt1 {
-            self.with_parameter(&x.with_parameter);
+            self.r#for(&x.r#for);
+            self.space(1);
+            self.scoped_identifier(&x.scoped_identifier);
             self.space(1);
         }
         if let Some(ref x) = arg.module_declaration_opt2 {
+            self.with_parameter(&x.with_parameter);
+            self.space(1);
+        }
+        if let Some(ref x) = arg.module_declaration_opt3 {
             self.port_declaration(&x.port_declaration);
             self.space(1);
         }
@@ -1932,6 +1946,28 @@ impl VerylWalker for Formatter {
             }
             PackageGroupGroup::PackageItem(x) => self.package_item(&x.package_item),
         }
+    }
+
+    /// Semantic action for non-terminal 'ProtoModuleDeclaration'
+    fn proto_module_declaration(&mut self, arg: &ProtoModuleDeclaration) {
+        if let Some(ref x) = arg.proto_module_declaration_opt {
+            self.r#pub(&x.r#pub);
+            self.space(1);
+        }
+        self.proto(&arg.proto);
+        self.space(1);
+        self.module(&arg.module);
+        self.space(1);
+        self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.proto_module_declaration_opt0 {
+            self.space(1);
+            self.with_parameter(&x.with_parameter);
+        }
+        if let Some(ref x) = arg.proto_module_declaration_opt1 {
+            self.space(1);
+            self.port_declaration(&x.port_declaration);
+        }
+        self.semicolon(&arg.semicolon);
     }
 
     /// Semantic action for non-terminal 'EmbedDeclaration'

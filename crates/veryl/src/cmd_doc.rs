@@ -46,6 +46,7 @@ impl CmdDoc {
         }
 
         let mut modules = BTreeMap::new();
+        let mut proto_modules = BTreeMap::new();
         let mut interfaces = BTreeMap::new();
         let mut packages = BTreeMap::new();
 
@@ -63,6 +64,15 @@ impl CmdDoc {
                             symbol,
                         };
                         modules.insert(text, item);
+                    }
+                    SymbolKind::ProtoModule(_) => {
+                        let html_name = file_name.clone();
+                        let item = TopLevelItem {
+                            file_name,
+                            html_name,
+                            symbol,
+                        };
+                        proto_modules.insert(text, item);
                     }
                     SymbolKind::Interface(x) => {
                         let html_name = fmt_generic_parameters(&text, &x.generic_parameters);
@@ -88,10 +98,11 @@ impl CmdDoc {
         }
 
         let modules: Vec<_> = modules.into_values().collect();
+        let proto_modules: Vec<_> = proto_modules.into_values().collect();
         let interfaces: Vec<_> = interfaces.into_values().collect();
         let packages: Vec<_> = packages.into_values().collect();
 
-        let builder = DocBuilder::new(metadata, modules, interfaces, packages)?;
+        let builder = DocBuilder::new(metadata, modules, proto_modules, interfaces, packages)?;
         builder.build()?;
 
         Ok(true)

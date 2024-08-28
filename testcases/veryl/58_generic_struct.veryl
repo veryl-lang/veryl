@@ -1,11 +1,11 @@
 module Module58 {
-    struct StructA::<T> {
+    struct StructA::<T: type> {
         A: T,
     }
 
     type C = i32;
 
-    struct StructB::<T = C> {
+    struct StructB::<T: type = C> {
         B: T,
     }
 

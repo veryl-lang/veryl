@@ -12,11 +12,12 @@ use crate::symbol::Direction as SymDirection;
 use crate::symbol::Type as SymType;
 use crate::symbol::{
     ConnectTarget, DocComment, EnumMemberProperty, EnumMemberValue, EnumProperty, FunctionProperty,
-    GenericParameterProperty, InstanceProperty, InterfaceProperty, ModportFunctionMemberProperty,
-    ModportProperty, ModportVariableMemberProperty, ModuleProperty, PackageProperty, Parameter,
-    ParameterProperty, ParameterScope, ParameterValue, Port, PortProperty, StructMemberProperty,
-    StructProperty, Symbol, SymbolId, SymbolKind, TestProperty, TestType, TypeDefProperty,
-    TypeKind, UnionMemberProperty, UnionProperty, VariableAffiniation, VariableProperty,
+    GenericBoundKind, GenericParameterProperty, InstanceProperty, InterfaceProperty,
+    ModportFunctionMemberProperty, ModportProperty, ModportVariableMemberProperty, ModuleProperty,
+    PackageProperty, Parameter, ParameterProperty, ParameterScope, ParameterValue, Port,
+    PortProperty, ProtoModuleProperty, StructMemberProperty, StructProperty, Symbol, SymbolId,
+    SymbolKind, TestProperty, TestType, TypeDefProperty, TypeKind, UnionMemberProperty,
+    UnionProperty, VariableAffiniation, VariableProperty,
 };
 use crate::symbol_path::{GenericSymbolPath, SymbolPath};
 use crate::symbol_table;
@@ -62,6 +63,7 @@ pub struct CreateSymbolTable<'a> {
     modport_member_ids: Vec<SymbolId>,
     function_ids: HashMap<StrId, SymbolId>,
     exist_clock_without_domain: bool,
+    in_proto: bool,
 }
 
 #[derive(Clone)]
@@ -920,8 +922,19 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     None
                 };
 
+            let bound = match arg.generic_bound.as_ref() {
+                GenericBound::Const(_) => GenericBoundKind::Const,
+                GenericBound::Type(_) => GenericBoundKind::Type,
+                GenericBound::ScopedIdentifier(x) => {
+                    GenericBoundKind::Proto(x.scoped_identifier.as_ref().into())
+                }
+            };
+
             if !self.needs_default_generic_argument || default_value.is_some() {
-                let property = GenericParameterProperty { default_value };
+                let property = GenericParameterProperty {
+                    bound,
+                    default_value,
+                };
                 let kind = SymbolKind::GenericParameter(property);
                 if let Some(id) =
                     self.insert_symbol(&arg.identifier.identifier_token.token, kind, false)
@@ -967,6 +980,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                         prefix,
                         suffix,
                         clock_domain,
+                        is_proto: self.in_proto,
                     }
                 }
                 PortDeclarationItemGroup::PortTypeAbstract(x) => {
@@ -985,6 +999,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                         prefix: None,
                         suffix: None,
                         clock_domain,
+                        is_proto: self.in_proto,
                     }
                 }
             };
@@ -1092,9 +1107,14 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 self.defualt_reset_candidates.clear();
 
                 let range = TokenRange::new(&arg.module.module_token, &arg.r_brace.r_brace_token);
+                let proto = arg
+                    .module_declaration_opt1
+                    .as_ref()
+                    .map(|x| x.scoped_identifier.as_ref().into());
 
                 let property = ModuleProperty {
                     range,
+                    proto,
                     generic_parameters,
                     generic_references,
                     parameters,
@@ -1325,6 +1345,43 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 self.insert_symbol(
                     &arg.identifier.identifier_token.token,
                     SymbolKind::Package(property),
+                    public,
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn proto_module_declaration(&mut self, arg: &ProtoModuleDeclaration) -> Result<(), ParolError> {
+        let name = arg.identifier.identifier_token.token.text;
+        match self.point {
+            HandlerPoint::Before => {
+                self.namespace.push(name);
+                self.parameters.push(Vec::new());
+                self.ports.push(Vec::new());
+                self.affiniation.push(VariableAffiniation::Module);
+                self.in_proto = true;
+            }
+            HandlerPoint::After => {
+                self.namespace.pop();
+                self.affiniation.pop();
+                self.in_proto = false;
+
+                let parameters: Vec<_> = self.parameters.pop().unwrap();
+                let ports: Vec<_> = self.ports.pop().unwrap();
+
+                let range =
+                    TokenRange::new(&arg.module.module_token, &arg.semicolon.semicolon_token);
+
+                let property = ProtoModuleProperty {
+                    range,
+                    parameters,
+                    ports,
+                };
+                let public = arg.proto_module_declaration_opt.is_some();
+                self.insert_symbol(
+                    &arg.identifier.identifier_token.token,
+                    SymbolKind::ProtoModule(property),
                     public,
                 );
             }

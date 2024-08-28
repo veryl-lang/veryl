@@ -6,12 +6,12 @@ module Module56 {
 }
 
 /// Generic interface test for doc comment
-pub interface Interface56A::<T> {
+pub interface Interface56A::<T: const> {
     var _a: logic<T::X>;
 }
 
 /// Generic interface test for doc comment
-pub interface Interface56B::<T = Package56B> {
+pub interface Interface56B::<T: const = Package56B> {
     var _b: logic<T::X>;
 }
 

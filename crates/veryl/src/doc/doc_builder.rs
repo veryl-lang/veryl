@@ -11,7 +11,6 @@ use tempfile::TempDir;
 use veryl_analyzer::symbol::{ClockDomain, ParameterScope, Symbol, SymbolKind};
 use veryl_analyzer::symbol_table;
 use veryl_metadata::Metadata;
-use veryl_parser::resource_table;
 use veryl_parser::veryl_token::Token;
 
 const SUMMARY_TMPL: &str = r###"
@@ -24,6 +23,11 @@ const SUMMARY_TMPL: &str = r###"
 
 - [Modules](modules.md)
   {{#each modules}}
+  - [{{this.0}}]({{this.1}}.md)
+  {{/each}}
+
+- [Module Prototypes](proto_modules.md)
+  {{#each proto_modules}}
   - [{{this.0}}]({{this.1}}.md)
   {{/each}}
 
@@ -43,6 +47,7 @@ struct SummaryData {
     name: String,
     version: String,
     modules: Vec<(String, String)>,
+    proto_modules: Vec<(String, String)>,
     interfaces: Vec<(String, String)>,
     packages: Vec<(String, String)>,
 }
@@ -75,6 +80,7 @@ const INDEX_TMPL: &str = r###"
 
 {{{{raw}}}}
 {{#include modules.md}}
+{{#include proto_modules.md}}
 {{#include interfaces.md}}
 {{#include packages.md}}
 {{{{/raw}}}}
@@ -97,7 +103,7 @@ const LIST_TMPL: &str = r###"
 <tbody>
 {{#each items}}
 <tr>
-    <th class="table_list_item"><a href="{{this.name}}.html">{{this.name}}</a></th>
+    <th class="table_list_item"><a href="{{this.file_name}}.html">{{this.html_name}}</a></th>
     <td class="table_list_item">{{this.description}}</td>
 </tr>
 {{/each}}
@@ -114,7 +120,8 @@ struct ListData {
 
 #[derive(Serialize)]
 struct ListItem {
-    name: String,
+    file_name: String,
+    html_name: String,
     description: String,
 }
 
@@ -122,6 +129,22 @@ const MODULE_TMPL: &str = r#"
 ## {{name}}
 
 {{description}}
+
+{{#if generic_parameters}}
+### Generic Parameters
+---
+
+<table class="table_list">
+<tbody>
+{{#each generic_parameters}}
+<tr>
+    <th class="table_list_item">{{this.name}}</th>
+    <td class="table_list_item"><span class="hljs-type">{{this.bound}}</span></td>
+</tr>
+{{/each}}
+</tbody>
+</table>
+{{/if}}
 
 {{#if parameters}}
 ### Parameters
@@ -181,9 +204,16 @@ const MODULE_TMPL: &str = r#"
 struct ModuleData {
     name: String,
     description: String,
+    generic_parameters: Vec<GenericParameterData>,
     parameters: Vec<ParameterData>,
     clock_domains: Vec<String>,
     ports: Vec<PortData>,
+}
+
+#[derive(Serialize)]
+struct GenericParameterData {
+    name: String,
+    bound: String,
 }
 
 #[derive(Serialize)]
@@ -200,6 +230,74 @@ struct PortData {
     clock_domain: Option<String>,
     typ: Option<String>,
     description: Option<String>,
+}
+
+const PROTO_MODULE_TMPL: &str = r#"
+## {{name}}
+
+{{description}}
+
+{{#if parameters}}
+### Parameters
+---
+
+<table class="table_list">
+<tbody>
+{{#each parameters}}
+<tr>
+    <th class="table_list_item">{{this.name}}</th>
+    <td class="table_list_item"><span class="hljs-type">{{this.typ}}</span></td>
+    <td class="table_list_item">{{this.description}}</td>
+</tr>
+{{/each}}
+</tbody>
+</table>
+{{/if}}
+
+{{#if clock_domains}}
+### Clock Domains
+---
+
+<table class="table_list">
+<tbody>
+{{#each clock_domains}}
+<tr>
+    <th class="table_list_item">{{this}}</th>
+</tr>
+{{/each}}
+</tbody>
+</table>
+{{/if}}
+
+{{#if ports}}
+### Ports
+---
+
+<table class="table_list">
+<tbody>
+{{#each ports}}
+<tr>
+    <th class="table_list_item">{{this.name}}</th>
+    <td class="table_list_item"><span class="hljs-keyword">{{this.direction}}</span></td>
+    {{#if ../clock_domains}}
+    <td class="table_list_item"><span class="hljs-attribute">{{this.clock_domain}}</span></td>
+    {{/if}}
+    <td class="table_list_item"><span class="hljs-type">{{this.typ}}</span></td>
+    <td class="table_list_item">{{this.description}}</td>
+</tr>
+{{/each}}
+</tbody>
+</table>
+{{/if}}
+"#;
+
+#[derive(Serialize)]
+struct ProtoModuleData {
+    name: String,
+    description: String,
+    parameters: Vec<ParameterData>,
+    clock_domains: Vec<String>,
+    ports: Vec<PortData>,
 }
 
 const INTERFACE_TMPL: &str = r#"
@@ -253,6 +351,7 @@ pub struct DocBuilder {
     src_dir: PathBuf,
     theme_dir: PathBuf,
     modules: Vec<TopLevelItem>,
+    proto_modules: Vec<TopLevelItem>,
     interfaces: Vec<TopLevelItem>,
     packages: Vec<TopLevelItem>,
 }
@@ -268,6 +367,7 @@ impl DocBuilder {
     pub fn new(
         metadata: &Metadata,
         modules: Vec<TopLevelItem>,
+        proto_modules: Vec<TopLevelItem>,
         interfaces: Vec<TopLevelItem>,
         packages: Vec<TopLevelItem>,
     ) -> Result<Self> {
@@ -285,6 +385,7 @@ impl DocBuilder {
             src_dir,
             theme_dir,
             modules,
+            proto_modules,
             interfaces,
             packages,
         })
@@ -296,12 +397,18 @@ impl DocBuilder {
         self.build_component("SUMMARY.md", self.build_summary())?;
         self.build_component("index.md", self.build_index())?;
         self.build_component("modules.md", self.build_modules())?;
+        self.build_component("proto_modules.md", self.build_proto_modules())?;
         self.build_component("interfaces.md", self.build_interfaces())?;
         self.build_component("packages.md", self.build_packages())?;
 
         for x in &self.modules {
             let file = format!("{}.md", x.file_name);
             self.build_component(&file, self.build_module(&x.html_name, &x.symbol))?;
+        }
+
+        for x in &self.proto_modules {
+            let file = format!("{}.md", x.file_name);
+            self.build_component(&file, self.build_proto_module(&x.html_name, &x.symbol))?;
         }
 
         for x in &self.interfaces {
@@ -405,6 +512,12 @@ impl DocBuilder {
             .cloned()
             .map(|x| (x.html_name, x.file_name))
             .collect();
+        let proto_modules: Vec<_> = self
+            .proto_modules
+            .iter()
+            .cloned()
+            .map(|x| (x.html_name, x.file_name))
+            .collect();
         let interfaces: Vec<_> = self
             .interfaces
             .iter()
@@ -421,6 +534,7 @@ impl DocBuilder {
             name: self.metadata.project.name.clone(),
             version: format!("{}", self.metadata.project.version),
             modules,
+            proto_modules,
             interfaces,
             packages,
         };
@@ -449,7 +563,8 @@ impl DocBuilder {
             .modules
             .iter()
             .map(|x| ListItem {
-                name: x.html_name.clone(),
+                file_name: x.file_name.clone(),
+                html_name: x.html_name.clone(),
                 description: x.symbol.doc_comment.format(true),
             })
             .collect();
@@ -464,12 +579,34 @@ impl DocBuilder {
         handlebars.render_template(LIST_TMPL, &data).unwrap()
     }
 
+    fn build_proto_modules(&self) -> String {
+        let items: Vec<_> = self
+            .proto_modules
+            .iter()
+            .map(|x| ListItem {
+                file_name: x.file_name.clone(),
+                html_name: x.html_name.clone(),
+                description: x.symbol.doc_comment.format(true),
+            })
+            .collect();
+
+        let data = ListData {
+            name: "Module Prototypes".to_string(),
+            items,
+        };
+
+        let mut handlebars = Handlebars::new();
+        handlebars.register_escape_fn(handlebars::no_escape);
+        handlebars.render_template(LIST_TMPL, &data).unwrap()
+    }
+
     fn build_interfaces(&self) -> String {
         let items: Vec<_> = self
             .interfaces
             .iter()
             .map(|x| ListItem {
-                name: x.html_name.clone(),
+                file_name: x.file_name.clone(),
+                html_name: x.html_name.clone(),
                 description: x.symbol.doc_comment.format(true),
             })
             .collect();
@@ -489,7 +626,8 @@ impl DocBuilder {
             .packages
             .iter()
             .map(|x| ListItem {
-                name: x.html_name.clone(),
+                file_name: x.file_name.clone(),
+                html_name: x.html_name.clone(),
                 description: x.symbol.doc_comment.format(true),
             })
             .collect();
@@ -506,12 +644,28 @@ impl DocBuilder {
 
     fn build_module(&self, name: &str, symbol: &Symbol) -> String {
         if let SymbolKind::Module(property) = &symbol.kind {
+            let generic_parameters: Vec<_> = property
+                .generic_parameters
+                .iter()
+                .filter_map(|x| {
+                    let symbol = symbol_table::get(*x).unwrap();
+                    if let SymbolKind::GenericParameter(x) = symbol.kind {
+                        Some(GenericParameterData {
+                            name: symbol.token.text.to_string(),
+                            bound: x.bound.to_string(),
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
             let parameters: Vec<_> = property
                 .parameters
                 .iter()
                 .filter(|x| matches!(x.property().scope, ParameterScope::Global,))
                 .map(|x| ParameterData {
-                    name: resource_table::get_str_value(x.name).unwrap(),
+                    name: x.name.to_string(),
                     typ: format!("{}", x.property().r#type),
                     description: get_comment_from_token(&x.property().token),
                 })
@@ -541,7 +695,7 @@ impl DocBuilder {
                         None
                     };
                     PortData {
-                        name: resource_table::get_str_value(x.name).unwrap(),
+                        name: x.name.to_string(),
                         direction: format!("{}", x.property().direction),
                         clock_domain,
                         typ: x.property().r#type.as_ref().map(|x| format!("{}", x)),
@@ -553,6 +707,7 @@ impl DocBuilder {
             let data = ModuleData {
                 name: name.to_string(),
                 description: symbol.doc_comment.format(false),
+                generic_parameters,
                 parameters,
                 clock_domains,
                 ports,
@@ -566,6 +721,70 @@ impl DocBuilder {
         }
     }
 
+    fn build_proto_module(&self, name: &str, symbol: &Symbol) -> String {
+        if let SymbolKind::ProtoModule(property) = &symbol.kind {
+            let parameters: Vec<_> = property
+                .parameters
+                .iter()
+                .filter(|x| matches!(x.property().scope, ParameterScope::Global,))
+                .map(|x| ParameterData {
+                    name: x.name.to_string(),
+                    typ: format!("{}", x.property().r#type),
+                    description: get_comment_from_token(&x.property().token),
+                })
+                .collect();
+
+            let clock_domains: HashSet<_> = property
+                .ports
+                .iter()
+                .filter_map(|x| {
+                    if let ClockDomain::Explicit(_) = x.property().clock_domain {
+                        Some(x.property().clock_domain.to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            let mut clock_domains: Vec<_> = clock_domains.into_iter().collect();
+            clock_domains.sort();
+
+            let ports: Vec<_> = property
+                .ports
+                .iter()
+                .map(|x| {
+                    let clock_domain = if let ClockDomain::Explicit(_) = x.property().clock_domain {
+                        Some(x.property().clock_domain.to_string())
+                    } else {
+                        None
+                    };
+                    PortData {
+                        name: x.name.to_string(),
+                        direction: format!("{}", x.property().direction),
+                        clock_domain,
+                        typ: x.property().r#type.as_ref().map(|x| format!("{}", x)),
+                        description: get_comment_from_token(&x.property().token),
+                    }
+                })
+                .collect();
+
+            let data = ProtoModuleData {
+                name: name.to_string(),
+                description: symbol.doc_comment.format(false),
+                parameters,
+                clock_domains,
+                ports,
+            };
+
+            let mut handlebars = Handlebars::new();
+            handlebars.register_escape_fn(handlebars::no_escape);
+            handlebars
+                .render_template(PROTO_MODULE_TMPL, &data)
+                .unwrap()
+        } else {
+            String::new()
+        }
+    }
+
     fn build_interface(&self, name: &str, symbol: &Symbol) -> String {
         if let SymbolKind::Interface(property) = &symbol.kind {
             let parameters: Vec<_> = property
@@ -573,7 +792,7 @@ impl DocBuilder {
                 .iter()
                 .filter(|x| matches!(x.property().scope, ParameterScope::Global,))
                 .map(|x| ParameterData {
-                    name: resource_table::get_str_value(x.name).unwrap(),
+                    name: x.name.to_string(),
                     typ: format!("{}", x.property().r#type),
                     description: get_comment_from_token(&x.property().token),
                 })

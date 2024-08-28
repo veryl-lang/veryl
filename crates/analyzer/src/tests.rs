@@ -792,22 +792,22 @@ fn mismatch_function_arity() {
 fn missing_default_generic_argument() {
     let code = r#"
     module ModuleA {
-        function FuncA::<A> () -> logic<A> {}
+        function FuncA::<A: const> () -> logic<A> {}
         let _a: logic = FuncA::<1>();
 
-        function FuncB::<A, B, C> () -> logic<A + B + C> {}
+        function FuncB::<A: const, B: const, C: const> () -> logic<A + B + C> {}
         let _b: logic = FuncB::<1, 2, 3>();
 
-        function FuncC::<A = 1> () -> logic<A> {}
+        function FuncC::<A: const = 1> () -> logic<A> {}
         let _c: logic = FuncC::<>();
 
-        function FuncD::<A = 1, B = 2, C = 3> () -> logic<A + B + C> {}
+        function FuncD::<A: const = 1, B: const = 2, C: const = 3> () -> logic<A + B + C> {}
         let _d: logic = FuncD::<>();
 
-        function FuncE::<A, B = 2, C = 3> () -> logic<A + B + C> {}
+        function FuncE::<A: const, B: const = 2, C: const = 3> () -> logic<A + B + C> {}
         let _e: logic = FuncE::<1>();
 
-        function FuncF::<A, B, C = 3> () -> logic<A + B + C> {}
+        function FuncF::<A: const, B: const, C: const = 3> () -> logic<A + B + C> {}
         let _f: logic = FuncF::<1, 2>();
     }
     "#;
@@ -817,7 +817,7 @@ fn missing_default_generic_argument() {
 
     let code = r#"
         module ModuleB {
-            function FuncA::<A = 1, B, C = 3> () -> logic<A + B + C> {}
+            function FuncA::<A: const = 1, B: const, C: const = 3> () -> logic<A + B + C> {}
             let _a: logic = FuncA::<1, 2, 3> ();
         }
     "#;
@@ -830,7 +830,7 @@ fn missing_default_generic_argument() {
 
     let code = r#"
         module ModuleC {
-            function FuncA::<A = 1, B = 2, C> () -> logic<A + B + C> {}
+            function FuncA::<A: const = 1, B: const = 2, C: const> () -> logic<A + B + C> {}
             let _a: logic = FuncA::<1, 2, 3>();
         }
     "#;
@@ -846,7 +846,7 @@ fn missing_default_generic_argument() {
 fn mismatch_generics_arity() {
     let code = r#"
     module ModuleA {
-        function FuncA::<T> (
+        function FuncA::<T: const> (
             a: input logic<T>,
         ) -> logic<T> {}
 
@@ -862,7 +862,7 @@ fn mismatch_generics_arity() {
 
     let code = r#"
     module ModuleB {
-        function FuncA::<T, U> (
+        function FuncA::<T: const, U: const> (
             a: input logic<T>,
         ) -> logic<T> {}
 
@@ -877,7 +877,7 @@ fn mismatch_generics_arity() {
     ));
 
     let code = r#"
-    package PackageC::<W> {
+    package PackageC::<W: const> {
         struct StructC {
             c: logic<W>,
         }
@@ -893,11 +893,11 @@ fn mismatch_generics_arity() {
 
     let code = r#"
     package PackageD {
-        function FuncD::<W> -> logic<W> {
+        function FuncD::<W: const> -> logic<W> {
             return 0;
         }
     }
-    module SubD::<W> {
+    module SubD::<W: const> {
         let _d: logic<W> = PackageD::FuncD::<W>();
     }
     module TopD {
@@ -993,7 +993,7 @@ fn mismatch_type() {
 
     let code = r#"
     module ModuleG {
-        function FuncG::<T> -> T {
+        function FuncG::<T: type> -> T {
             var g: T;
             g = 0;
             return g;
@@ -1008,7 +1008,7 @@ fn mismatch_type() {
 
     let code = r#"
     module ModuleH {
-        function FuncH::<T> -> T {
+        function FuncH::<T: type> -> T {
             var h: T;
             h = 0;
             return h;
@@ -1021,6 +1021,51 @@ fn mismatch_type() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    interface InterfaceI {}
+
+    module ModuleI (
+        a: modport InterfaceI,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    module ModuleJ {
+        function FuncJ::<T: type> -> T {
+            var g: T;
+            g = 0;
+            return g;
+        }
+
+        local X: u32 = 1;
+        let _g: logic = FuncJ::<X>();
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    proto module ProtoK0;
+    proto module ProtoK1;
+
+    module ModuleK0::<T: ProtoK0> {
+        inst u: T;
+    }
+
+    module ModuleK1 for ProtoK1 {}
+
+    module ModuleK2 {
+        inst u: ModuleK0::<ModuleK1>();
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 }
 
 #[test]

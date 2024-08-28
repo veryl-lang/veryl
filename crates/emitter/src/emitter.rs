@@ -949,7 +949,7 @@ impl VerylWalker for Emitter {
                 for param in params.iter().skip(n_args) {
                     path.paths[i]
                         .arguments
-                        .push(param.1.as_ref().unwrap().clone());
+                        .push(param.1.default_value.as_ref().unwrap().clone());
                 }
             }
         }
@@ -1498,31 +1498,6 @@ impl VerylWalker for Emitter {
         }
     }
 
-    /// Semantic action for non-terminal 'VariableType'
-    fn variable_type(&mut self, arg: &VariableType) {
-        match &*arg.variable_type_group {
-            VariableTypeGroup::Clock(x) => self.clock(&x.clock),
-            VariableTypeGroup::ClockPosedge(x) => self.clock_posedge(&x.clock_posedge),
-            VariableTypeGroup::ClockNegedge(x) => self.clock_negedge(&x.clock_negedge),
-            VariableTypeGroup::Reset(x) => self.reset(&x.reset),
-            VariableTypeGroup::ResetAsyncHigh(x) => self.reset_async_high(&x.reset_async_high),
-            VariableTypeGroup::ResetAsyncLow(x) => self.reset_async_low(&x.reset_async_low),
-            VariableTypeGroup::ResetSyncHigh(x) => self.reset_sync_high(&x.reset_sync_high),
-            VariableTypeGroup::ResetSyncLow(x) => self.reset_sync_low(&x.reset_sync_low),
-            VariableTypeGroup::Logic(x) => self.logic(&x.logic),
-            VariableTypeGroup::Bit(x) => self.bit(&x.bit),
-            VariableTypeGroup::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
-        };
-        if self.signed {
-            self.space(1);
-            self.str("signed");
-        }
-        if let Some(ref x) = arg.variable_type_opt {
-            self.space(1);
-            self.width(&x.width);
-        }
-    }
-
     /// Semantic action for non-terminal 'TypeModifier'
     fn type_modifier(&mut self, arg: &TypeModifier) {
         match arg {
@@ -1540,7 +1515,17 @@ impl VerylWalker for Emitter {
             self.type_modifier(&x.type_modifier);
         }
         match &*arg.scalar_type_group {
-            ScalarTypeGroup::VariableType(x) => self.variable_type(&x.variable_type),
+            ScalarTypeGroup::VariableTypeScalarTypeOpt(x) => {
+                self.variable_type(&x.variable_type);
+                if self.signed {
+                    self.space(1);
+                    self.str("signed");
+                }
+                if let Some(ref x) = x.scalar_type_opt {
+                    self.space(1);
+                    self.width(&x.width);
+                }
+            }
             ScalarTypeGroup::FixedType(x) => self.fixed_type(&x.fixed_type),
         }
         self.signed = false;
@@ -3017,11 +3002,11 @@ impl VerylWalker for Emitter {
             if !file_scope_import.is_empty() {
                 self.newline_pop();
             }
-            if let Some(ref x) = arg.module_declaration_opt1 {
+            if let Some(ref x) = arg.module_declaration_opt2 {
                 self.space(1);
                 self.with_parameter(&x.with_parameter);
             }
-            if let Some(ref x) = arg.module_declaration_opt2 {
+            if let Some(ref x) = arg.module_declaration_opt3 {
                 self.space(1);
                 self.port_declaration(&x.port_declaration);
             }
@@ -3501,6 +3486,8 @@ impl VerylWalker for Emitter {
             DescriptionItem::PackageDeclaration(x) => {
                 self.package_declaration(&x.package_declaration)
             }
+            // proto is not emitted at SystemVerilog
+            DescriptionItem::ProtoModuleDeclaration(_) => (),
             // file scope import is not emitted at SystemVerilog
             DescriptionItem::ImportDeclaration(_) => (),
             DescriptionItem::EmbedDeclaration(x) => self.embed_declaration(&x.embed_declaration),
@@ -3668,7 +3655,7 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
             }
             ret.push_str(&symbol.token.to_string());
         }
-        SymbolKind::GenericParameter(_) => (),
+        SymbolKind::GenericParameter(_) | SymbolKind::ProtoModule(_) => (),
         SymbolKind::Port(x) => {
             if let Some(ref x) = x.prefix {
                 ret.push_str(x);

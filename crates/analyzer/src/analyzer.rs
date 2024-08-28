@@ -1,4 +1,3 @@
-pub mod check_variable_type;
 use crate::analyzer::resource_table::PathId;
 use crate::analyzer_error::AnalyzerError;
 use crate::assign::{AssignPath, AssignPosition, AssignPositionTree, AssignPositionType};
@@ -13,7 +12,6 @@ use crate::symbol::{
 };
 use crate::symbol_table;
 use crate::type_dag;
-use check_variable_type::*;
 use itertools::Itertools;
 use std::path::Path;
 use veryl_metadata::{Build, Lint, Metadata};
@@ -73,12 +71,6 @@ impl<'a> AnalyzerPass3<'a> {
             text,
             symbols,
         }
-    }
-
-    pub fn check_variable_type(&self, input: &Veryl) -> Vec<AnalyzerError> {
-        let mut check_variable_type = CheckVariableType::new(self.text);
-        check_variable_type.veryl(input);
-        check_variable_type.errors
     }
 
     pub fn check_variables(&self) -> Vec<AnalyzerError> {
@@ -245,13 +237,12 @@ impl Analyzer {
         project_name: &str,
         text: &str,
         path: T,
-        input: &Veryl,
+        _input: &Veryl,
     ) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
 
         namespace_table::set_default(&[project_name.into()]);
         let pass3 = AnalyzerPass3::new(path.as_ref(), text);
-        ret.append(&mut pass3.check_variable_type(input));
         ret.append(&mut pass3.check_variables());
         ret.append(&mut pass3.check_assignment());
 
@@ -386,7 +377,7 @@ fn traverse_assignable_symbol(id: SymbolId, path: &AssignPath) -> Vec<AssignPath
 
     if let Some(symbol) = symbol_table::get(id) {
         match &symbol.kind {
-            SymbolKind::Port(x) if is_assignable(&x.direction) => {
+            SymbolKind::Port(x) if is_assignable(&x.direction) && !x.is_proto => {
                 if let Some(ref x) = x.r#type {
                     if let TypeKind::UserDefined(ref x) = x.kind {
                         if let Ok(symbol) = symbol_table::resolve((x, &symbol.namespace)) {

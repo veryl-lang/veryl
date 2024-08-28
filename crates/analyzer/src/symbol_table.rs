@@ -253,6 +253,7 @@ impl SymbolTable {
                         }
                         // don't trace inner item
                         SymbolKind::Function(_)
+                        | SymbolKind::ProtoModule(_)
                         | SymbolKind::Struct(_)
                         | SymbolKind::Union(_)
                         | SymbolKind::Modport(_)

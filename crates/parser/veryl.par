@@ -74,6 +74,7 @@ CaseTerm              : <INITIAL, Generic       >/(?-u:\b)case(?-u:\b)/         
 ClockTerm             : <INITIAL, Generic       >/(?-u:\b)clock(?-u:\b)/                                                               : Token;
 ClockPosedgeTerm      : <INITIAL, Generic       >/(?-u:\b)clock_posedge(?-u:\b)/                                                       : Token;
 ClockNegedgeTerm      : <INITIAL, Generic       >/(?-u:\b)clock_negedge(?-u:\b)/                                                       : Token;
+ConstTerm             : <INITIAL, Generic       >/(?-u:\b)const(?-u:\b)/                                                               : Token;
 DefaultTerm           : <INITIAL, Generic       >/(?-u:\b)default(?-u:\b)/                                                             : Token;
 ElseTerm              : <INITIAL, Generic       >/(?-u:\b)else(?-u:\b)/                                                                : Token;
 EmbedTerm             : <INITIAL, Generic       >/(?-u:\b)embed(?-u:\b)/                                                               : Token;
@@ -108,6 +109,7 @@ OutputTerm            : <INITIAL, Generic       >/(?-u:\b)output(?-u:\b)/       
 OutsideTerm           : <INITIAL, Generic       >/(?-u:\b)outside(?-u:\b)/                                                             : Token;
 PackageTerm           : <INITIAL, Generic       >/(?-u:\b)package(?-u:\b)/                                                             : Token;
 ParamTerm             : <INITIAL, Generic       >/(?-u:\b)param(?-u:\b)/                                                               : Token;
+ProtoTerm             : <INITIAL, Generic       >/(?-u:\b)proto(?-u:\b)/                                                               : Token;
 PubTerm               : <INITIAL, Generic       >/(?-u:\b)pub(?-u:\b)/                                                                 : Token;
 RefTerm               : <INITIAL, Generic       >/(?-u:\b)ref(?-u:\b)/                                                                 : Token;
 RepeatTerm            : <INITIAL, Generic       >/(?-u:\b)repeat(?-u:\b)/                                                              : Token;
@@ -198,6 +200,7 @@ CaseToken          : CaseTerm          : Token Comments;
 ClockToken         : ClockTerm         : Token Comments;
 ClockPosedgeToken  : ClockPosedgeTerm  : Token Comments;
 ClockNegedgeToken  : ClockNegedgeTerm  : Token Comments;
+ConstToken         : ConstTerm         : Token Comments;
 DefaultToken       : DefaultTerm       : Token Comments;
 ElseToken          : ElseTerm          : Token Comments;
 EmbedToken         : EmbedTerm         : Token Comments;
@@ -232,6 +235,7 @@ OutputToken        : OutputTerm        : Token Comments;
 OutsideToken       : OutsideTerm       : Token Comments;
 PackageToken       : PackageTerm       : Token Comments;
 ParamToken         : ParamTerm         : Token Comments;
+ProtoToken         : ProtoTerm         : Token Comments;
 PubToken           : PubTerm           : Token Comments;
 RefToken           : RefTerm           : Token Comments;
 RepeatToken        : RepeatTerm        : Token Comments;
@@ -327,6 +331,7 @@ Case          : CaseToken          : VerylToken;
 Clock         : ClockToken         : VerylToken;
 ClockPosedge  : ClockPosedgeToken  : VerylToken;
 ClockNegedge  : ClockNegedgeToken  : VerylToken;
+Const         : ConstToken         : VerylToken;
 Defaul        : DefaultToken       : VerylToken; // avoid to conflict with Rust's Default trait
 Else          : ElseToken          : VerylToken;
 Embed         : EmbedToken         : VerylToken;
@@ -361,6 +366,7 @@ Output        : OutputToken        : VerylToken;
 Outside       : OutsideToken       : VerylToken;
 Package       : PackageToken       : VerylToken;
 Param         : ParamToken         : VerylToken;
+Proto         : ProtoToken         : VerylToken;
 Pub           : PubToken           : VerylToken;
 Ref           : RefToken           : VerylToken;
 Repeat        : RepeatToken        : VerylToken;
@@ -504,22 +510,21 @@ RangeOperator: DotDot
 
 FixedType: U32 | U64 | I32 | I64 | F32 | F64 | Strin;
 
-VariableType: ( Clock
-              | ClockPosedge
-              | ClockNegedge
-              | Reset
-              | ResetAsyncHigh
-              | ResetAsyncLow
-              | ResetSyncHigh
-              | ResetSyncLow
-              | Logic
-              | Bit
-              | ScopedIdentifier
-              ) [ Width ];
+VariableType: Clock
+            | ClockPosedge
+            | ClockNegedge
+            | Reset
+            | ResetAsyncHigh
+            | ResetAsyncLow
+            | ResetSyncHigh
+            | ResetSyncLow
+            | Logic
+            | Bit
+            | ScopedIdentifier;
 
 TypeModifier: Tri | Signed;
 
-ScalarType: { TypeModifier } ( VariableType | FixedType );
+ScalarType: { TypeModifier } ( VariableType [ Width ] | FixedType );
 
 ArrayType: ScalarType [ Array ];
 
@@ -691,11 +696,15 @@ WithParameterItem: ( Param | Local ) Identifier Colon ( ArrayType Equ Expression
 // WithGenericParameter
 // ----------------------------------------------------------------------------
 
+GenericBound: Const
+            | Type
+            | ScopedIdentifier;
+
 WithGenericParameter: ColonColonLAngle WithGenericParameterList RAngle;
 
 WithGenericParameterList: WithGenericParameterItem { Comma WithGenericParameterItem } [ Comma ];
 
-WithGenericParameterItem: Identifier [ Equ WithGenericArgumentItem ];
+WithGenericParameterItem: Identifier Colon GenericBound [ Equ WithGenericArgumentItem ];
 
 // ----------------------------------------------------------------------------
 // WithGenericArgument
@@ -761,7 +770,7 @@ UnsafeBlock: Unsafe LParen Identifier RParen LBrace { ModuleGroup } RBrace;
 // Module
 // ----------------------------------------------------------------------------
 
-ModuleDeclaration: [ Pub ] Module Identifier [ WithGenericParameter ] [ WithParameter ] [ PortDeclaration ] LBrace { ModuleGroup } RBrace;
+ModuleDeclaration: [ Pub ] Module Identifier [ WithGenericParameter ] [ For ScopedIdentifier ] [ WithParameter ] [ PortDeclaration ] LBrace { ModuleGroup } RBrace;
 
 ModuleIfDeclaration: If Expression ModuleNamedBlock { Else If Expression ModuleOptionalNamedBlock } [ Else ModuleOptionalNamedBlock ];
 
@@ -846,6 +855,12 @@ PackageItem: VarDeclaration
            ;
 
 // ----------------------------------------------------------------------------
+// Proto
+// ----------------------------------------------------------------------------
+
+ProtoModuleDeclaration: [ Pub ] Proto Module Identifier [ WithParameter ] [ PortDeclaration ] Semicolon;
+
+// ----------------------------------------------------------------------------
 // Embed
 // ----------------------------------------------------------------------------
 
@@ -873,6 +888,7 @@ DescriptionGroup: { Attribute } ( LBrace { DescriptionGroup } RBrace | Descripti
 DescriptionItem: ModuleDeclaration
                | InterfaceDeclaration
                | PackageDeclaration
+               | ProtoModuleDeclaration
                | ImportDeclaration
                | EmbedDeclaration
                | IncludeDeclaration

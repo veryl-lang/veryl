@@ -69,7 +69,7 @@ impl<'a> CreateReference<'a> {
                     let params = symbol.found.generic_parameters();
                     let n_args = path.paths[i].arguments.len();
                     let match_artiy = if params.len() > n_args {
-                        params[n_args].1.is_some()
+                        params[n_args].1.default_value.is_some()
                     } else {
                         params.len() == n_args
                     };
@@ -89,7 +89,8 @@ impl<'a> CreateReference<'a> {
 
                     for param in params.iter().skip(n_args) {
                         //  apply default value
-                        path.arguments.push(param.1.as_ref().unwrap().clone());
+                        path.arguments
+                            .push(param.1.default_value.as_ref().unwrap().clone());
                     }
 
                     if let Some((token, new_symbol)) = path.get_generic_instance(&symbol.found) {

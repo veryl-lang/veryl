@@ -313,6 +313,7 @@ impl Server {
                     VerylSymbolKind::Port(_) => SymbolKind::VARIABLE,
                     VerylSymbolKind::Variable(_) => SymbolKind::VARIABLE,
                     VerylSymbolKind::Module(_) => SymbolKind::MODULE,
+                    VerylSymbolKind::ProtoModule(_) => SymbolKind::MODULE,
                     VerylSymbolKind::Interface(_) => SymbolKind::INTERFACE,
                     VerylSymbolKind::Function(_) => SymbolKind::FUNCTION,
                     VerylSymbolKind::Parameter(_) => SymbolKind::CONSTANT,

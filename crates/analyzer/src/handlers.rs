@@ -8,11 +8,12 @@ pub mod check_enum;
 pub mod check_expression;
 pub mod check_function;
 pub mod check_identifier;
-pub mod check_instance;
 pub mod check_modport;
 pub mod check_msb_lsb;
 pub mod check_number;
+pub mod check_proto;
 pub mod check_statement;
+pub mod check_type;
 pub mod check_unsafe;
 pub mod create_reference;
 pub mod create_symbol_table;
@@ -26,11 +27,12 @@ use check_enum::*;
 use check_expression::*;
 use check_function::*;
 use check_identifier::*;
-use check_instance::*;
 use check_modport::*;
 use check_msb_lsb::*;
 use check_number::*;
+use check_proto::*;
 use check_statement::*;
+use check_type::*;
 use check_unsafe::*;
 use create_reference::*;
 use create_symbol_table::*;
@@ -97,7 +99,7 @@ pub struct Pass2Handlers<'a> {
     check_enum: CheckEnum<'a>,
     check_modport: CheckModport<'a>,
     check_function: CheckFunction<'a>,
-    check_instance: CheckInstance<'a>,
+    check_type: CheckType<'a>,
     check_msb_lsb: CheckMsbLsb<'a>,
     check_assignment: CheckAssignment<'a>,
     check_clock_reset: CheckClockReset<'a>,
@@ -105,6 +107,7 @@ pub struct Pass2Handlers<'a> {
     create_type_dag: CreateTypeDag<'a>,
     check_expression: CheckExpression<'a>,
     check_clock_domain: CheckClockDomain<'a>,
+    check_proto: CheckProto<'a>,
 }
 
 impl<'a> Pass2Handlers<'a> {
@@ -113,7 +116,7 @@ impl<'a> Pass2Handlers<'a> {
             check_enum: CheckEnum::new(text),
             check_modport: CheckModport::new(text),
             check_function: CheckFunction::new(text),
-            check_instance: CheckInstance::new(text),
+            check_type: CheckType::new(text),
             check_msb_lsb: CheckMsbLsb::new(text),
             check_assignment: CheckAssignment::new(text),
             check_clock_reset: CheckClockReset::new(text),
@@ -121,6 +124,7 @@ impl<'a> Pass2Handlers<'a> {
             create_type_dag: CreateTypeDag::new(text),
             check_expression: CheckExpression::new(text),
             check_clock_domain: CheckClockDomain::new(text),
+            check_proto: CheckProto::new(text),
         }
     }
 
@@ -129,7 +133,7 @@ impl<'a> Pass2Handlers<'a> {
             &mut self.check_enum as &mut dyn Handler,
             &mut self.check_modport as &mut dyn Handler,
             &mut self.check_function as &mut dyn Handler,
-            &mut self.check_instance as &mut dyn Handler,
+            &mut self.check_type as &mut dyn Handler,
             &mut self.check_msb_lsb as &mut dyn Handler,
             &mut self.check_assignment as &mut dyn Handler,
             &mut self.check_clock_reset as &mut dyn Handler,
@@ -137,6 +141,7 @@ impl<'a> Pass2Handlers<'a> {
             &mut self.create_type_dag as &mut dyn Handler,
             &mut self.check_expression as &mut dyn Handler,
             &mut self.check_clock_domain as &mut dyn Handler,
+            &mut self.check_proto as &mut dyn Handler,
         ]
     }
 
@@ -145,7 +150,7 @@ impl<'a> Pass2Handlers<'a> {
         ret.append(&mut self.check_enum.errors);
         ret.append(&mut self.check_modport.errors);
         ret.append(&mut self.check_function.errors);
-        ret.append(&mut self.check_instance.errors);
+        ret.append(&mut self.check_type.errors);
         ret.append(&mut self.check_msb_lsb.errors);
         ret.append(&mut self.check_assignment.errors);
         ret.append(&mut self.check_clock_reset.errors);
@@ -153,6 +158,7 @@ impl<'a> Pass2Handlers<'a> {
         ret.append(&mut self.create_type_dag.errors);
         ret.append(&mut self.check_expression.errors);
         ret.append(&mut self.check_clock_domain.errors);
+        ret.append(&mut self.check_proto.errors);
         ret
     }
 }

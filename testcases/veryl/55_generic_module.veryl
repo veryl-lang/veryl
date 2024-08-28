@@ -7,25 +7,27 @@ module Module55 {
     inst u5: Module55F::<>;
 }
 
+pub proto module Proto55;
+
 /// Generic module test for doc comment
-pub module Module55A::<T> {
+pub module Module55A::<T: Proto55> {
     inst u: T;
 }
 
-module Module55B {}
+module Module55B for Proto55 {}
 
-module Module55C {}
+module Module55C for Proto55 {}
 
-module Module55D {}
+module Module55D for Proto55 {}
 
-module Module55E::<T> {
+module Module55E::<T: Proto55> {
     inst u: Module55A::<T>;
 }
 
-module Module55F::<T = Module55B> {
+module Module55F::<T: Proto55 = Module55B> {
     inst u: T;
 }
 
-module Module55G::<T> {
+module Module55G::<T: Proto55> {
     inst u: T;
 }
