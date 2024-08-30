@@ -42,7 +42,7 @@ similar         = {version = "2.6.0", features = ["text", "inline"]}
 strnum_bitwidth = "0.1.2"
 tempfile        = "3.12"
 thiserror       = "1.0"
-tokio           = {version = "1.39.1", features = ["full"]}
+tokio           = {version = "1.40.0", features = ["full"]}
 toml            = "0.8.19"
 url             = {version = "2.5", features = ["serde"]}
 
