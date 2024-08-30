@@ -1665,6 +1665,29 @@ fn unused_variable() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UnusedVariable { .. }));
+
+    let code = r#"
+    module ModuleB {
+        always_comb {
+            let a: logic = 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnusedVariable { .. }));
+
+    let code = r#"
+    module ModuleC {
+        always_comb {
+            var a: logic;
+            a = 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnusedVariable { .. }));
 }
 
 #[test]
@@ -1766,6 +1789,36 @@ fn unassign_variable() {
 fn uncovered_branch() {
     let code = r#"
     module ModuleA {
+        var a: logic;
+        var b: logic;
+        let x: logic = 1;
+
+      always_comb {
+        if x {
+            let y: logic = 1;
+            a = y;
+        } else {
+            a = 0;
+        }
+      }
+
+      always_comb {
+        var z: logic;
+        if x {
+            z = 1;
+            b = z;
+        } else {
+            b = 0;
+        }
+      }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleB {
         var a: logic;
         let x: logic = 1;
 

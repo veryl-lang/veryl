@@ -434,6 +434,23 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         Ok(())
     }
 
+    fn statement_block(&mut self, _arg: &StatementBlock) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                let name = format!("@{}", self.anonymous_namespace);
+                let name = resource_table::insert_str(&name);
+                self.namespace.push(name);
+                self.anonymous_namespace += 1;
+                self.affiniation.push(VariableAffiniation::StatementBlock);
+            }
+            HandlerPoint::After => {
+                self.namespace.pop();
+                self.affiniation.pop();
+            }
+        }
+        Ok(())
+    }
+
     fn let_statement(&mut self, arg: &LetStatement) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let mut r#type: SymType = arg.array_type.as_ref().into();
@@ -1045,8 +1062,10 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     .as_ref()
                     .map(|x| (&*x.scalar_type).into());
 
-                let range =
-                    TokenRange::new(&arg.function.function_token, &arg.r_brace.r_brace_token);
+                let range = TokenRange::new(
+                    &arg.function.function_token,
+                    &arg.statement_block.r_brace.r_brace_token,
+                );
 
                 let property = FunctionProperty {
                     range,

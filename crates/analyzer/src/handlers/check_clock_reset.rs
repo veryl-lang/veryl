@@ -97,8 +97,13 @@ impl<'a> VerylGrammarTrait for CheckClockReset<'a> {
                 // Check first if_reset when reset signel exists
                 let if_reset_required = if let Some(ref x) = arg.always_ff_declaration_opt {
                     if x.alwayf_ff_event_list.alwayf_ff_event_list_opt.is_some() {
-                        if let Some(x) = arg.always_ff_declaration_list.first() {
-                            !matches!(&*x.statement, Statement::IfResetStatement(_))
+                        if let Some(x) = arg.statement_block.statement_block_list.first() {
+                            match &*x.statement_block_item {
+                                StatementBlockItem::Statement(x) => {
+                                    !matches!(*x.statement, Statement::IfResetStatement(_))
+                                }
+                                _ => true,
+                            }
                         } else {
                             true
                         }

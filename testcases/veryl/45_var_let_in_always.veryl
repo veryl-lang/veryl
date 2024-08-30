@@ -4,7 +4,8 @@ module Module45 {
     var c: logic<10>;
 
     always_ff (a) {
-        let x: logic<10> = 1;
+        var x: logic<10>;
+        x = 1;
         b = x * 1;
     }
 

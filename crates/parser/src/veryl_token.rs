@@ -224,7 +224,7 @@ impl From<&ExpressionIdentifier> for TokenRange {
 impl From<&AlwaysFfDeclaration> for TokenRange {
     fn from(value: &AlwaysFfDeclaration) -> Self {
         let beg = value.always_ff.always_ff_token.token;
-        let end = value.r_brace.r_brace_token.token;
+        let end = value.statement_block.r_brace.r_brace_token.token;
         TokenRange { beg, end }
     }
 }

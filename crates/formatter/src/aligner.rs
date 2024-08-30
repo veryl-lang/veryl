@@ -547,13 +547,7 @@ impl VerylWalker for Aligner {
         self.colon(&arg.colon);
         match &*arg.case_item_group0 {
             CaseItemGroup0::Statement(x) => self.statement(&x.statement),
-            CaseItemGroup0::LBraceCaseItemGroup0ListRBrace(x) => {
-                self.l_brace(&x.l_brace);
-                for x in &x.case_item_group0_list {
-                    self.statement(&x.statement);
-                }
-                self.r_brace(&x.r_brace);
-            }
+            CaseItemGroup0::StatementBlock(x) => self.statement_block(&x.statement_block),
         }
     }
 
@@ -578,13 +572,7 @@ impl VerylWalker for Aligner {
         self.colon(&arg.colon);
         match &*arg.switch_item_group0 {
             SwitchItemGroup0::Statement(x) => self.statement(&x.statement),
-            SwitchItemGroup0::LBraceSwitchItemGroup0ListRBrace(x) => {
-                self.l_brace(&x.l_brace);
-                for x in &x.switch_item_group0_list {
-                    self.statement(&x.statement);
-                }
-                self.r_brace(&x.r_brace);
-            }
+            SwitchItemGroup0::StatementBlock(x) => self.statement_block(&x.statement_block),
         }
     }
 
@@ -896,10 +884,6 @@ impl VerylWalker for Aligner {
             self.scalar_type(&x.scalar_type);
             self.reset_align();
         }
-        self.l_brace(&arg.l_brace);
-        for x in &arg.function_declaration_list {
-            self.function_item(&x.function_item);
-        }
-        self.r_brace(&arg.r_brace);
+        self.statement_block(&arg.statement_block);
     }
 }

@@ -9,6 +9,7 @@ module veryl_testcase_Module46;
     always_ff @ (posedge a) begin
         logic [10-1:0] x;
         d <= 1;
+
         x = 1;
         b <= x * 1;
     end
@@ -27,9 +28,22 @@ module veryl_testcase_Module46;
     ) ;
         int unsigned d;
         c = a / 1;
+
+        d = 1;
+        b = a + 1 + d;
+        return a + 2;
+    endfunction
+
+    function automatic logic [10-1:0] FuncB(
+        input  logic [10-1:0] a,
+        output logic [10-1:0] b,
+        ref    logic [10-1:0] c
+    ) ;
+        int unsigned d;
+        c = a / 1;
         d = 1;
         b = a + 1 + d;
         return a + 2;
     endfunction
 endmodule
-//# sourceMappingURL=../map/testcases/sv/46_let_anywhere.sv.map
+//# sourceMappingURL=../map/testcases/sv/46_var_let_anywhere.sv.map

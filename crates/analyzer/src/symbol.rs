@@ -818,6 +818,7 @@ pub enum VariableAffiniation {
     Module,
     Intarface,
     Package,
+    StatementBlock,
     Function,
 }
 
