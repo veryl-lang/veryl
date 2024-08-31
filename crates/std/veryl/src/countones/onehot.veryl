@@ -65,9 +65,9 @@ module _onehot #(
 
 }
 
-#[test(test_countones)]
+#[test(test_onehot)]
 embed (inline) sv{{{
-module test_countones;
+module test_onehot;
 
   parameter MIN = 1;
   parameter MAX = 20;
