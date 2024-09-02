@@ -1,5 +1,4 @@
-use crate::metadata::Metadata;
-use crate::MetadataError;
+use directories::ProjectDirs;
 #[cfg(not(target_family = "wasm"))]
 use fs4::fs_std::FileExt;
 use log::debug;
@@ -8,11 +7,26 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
+mod path_error;
+pub use path_error::PathError;
+
+#[derive(Clone, Debug)]
+pub struct PathPair {
+    pub prj: String,
+    pub src: PathBuf,
+    pub dst: PathBuf,
+}
+
+pub fn cache_path() -> PathBuf {
+    let project_dir = ProjectDirs::from("org", "veryl-lang", "veryl").unwrap();
+    project_dir.cache_dir().to_path_buf()
+}
+
 pub fn gather_files_with_extension<T: AsRef<Path>>(
     base_dir: T,
     ext: &str,
     symlink: bool,
-) -> Result<Vec<PathBuf>, MetadataError> {
+) -> Result<Vec<PathBuf>, PathError> {
     let mut inner_prj = Vec::new();
     for entry in WalkDir::new(base_dir.as_ref())
         .follow_links(symlink)
@@ -55,8 +69,8 @@ pub fn gather_files_with_extension<T: AsRef<Path>>(
 }
 
 #[cfg(not(target_family = "wasm"))]
-pub fn lock_dir<T: AsRef<Path>>(path: T) -> Result<File, MetadataError> {
-    let base_dir = Metadata::cache_path().join(path);
+pub fn lock_dir<T: AsRef<Path>>(path: T) -> Result<File, PathError> {
+    let base_dir = cache_path().join(path);
     let lock = base_dir.join("lock");
     let lock = File::create(lock)?;
     lock.lock_exclusive()?;
@@ -64,17 +78,17 @@ pub fn lock_dir<T: AsRef<Path>>(path: T) -> Result<File, MetadataError> {
 }
 
 #[cfg(not(target_family = "wasm"))]
-pub fn unlock_dir(lock: File) -> Result<(), MetadataError> {
+pub fn unlock_dir(lock: File) -> Result<(), PathError> {
     lock.unlock()?;
     Ok(())
 }
 
 #[cfg(target_family = "wasm")]
-pub fn lock_dir<T: AsRef<Path>>(_path: T) -> Result<(), MetadataError> {
+pub fn lock_dir<T: AsRef<Path>>(_path: T) -> Result<(), PathError> {
     Ok(())
 }
 
 #[cfg(target_family = "wasm")]
-pub fn unlock_dir(_lock: ()) -> Result<(), MetadataError> {
+pub fn unlock_dir(_lock: ()) -> Result<(), PathError> {
     Ok(())
 }

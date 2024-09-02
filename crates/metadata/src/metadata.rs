@@ -7,10 +7,8 @@ use crate::lockfile::Lockfile;
 use crate::project::Project;
 use crate::pubfile::{Pubfile, Release};
 use crate::publish::Publish;
-use crate::stdlib;
 use crate::test::Test;
-use crate::{utils, FilelistType, MetadataError};
-use directories::ProjectDirs;
+use crate::{FilelistType, MetadataError};
 use log::{debug, info};
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -23,13 +21,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use url::Url;
-
-#[derive(Clone, Debug)]
-pub struct PathPair {
-    pub prj: String,
-    pub src: PathBuf,
-    pub dst: PathBuf,
-}
+use veryl_path::PathPair;
 
 #[derive(Clone, Copy, Debug)]
 pub enum BumpKind {
@@ -231,7 +223,7 @@ impl Metadata {
         let base = self.project_path();
 
         let src_files = if files.is_empty() {
-            utils::gather_files_with_extension(&base, "veryl", symlink)?
+            veryl_path::gather_files_with_extension(&base, "veryl", symlink)?
         } else {
             let mut ret = Vec::new();
             for file in files {
@@ -264,8 +256,8 @@ impl Metadata {
         }
 
         if !self.build.exclude_std {
-            stdlib::expand()?;
-            ret.append(&mut stdlib::paths(&base_dst)?);
+            veryl_std::expand()?;
+            ret.append(&mut veryl_std::paths(&base_dst)?);
         }
 
         self.update_lockfile()?;
@@ -286,11 +278,6 @@ impl Metadata {
 name = "{name}"
 version = "0.1.0""###
         ))
-    }
-
-    pub fn cache_path() -> PathBuf {
-        let project_dir = ProjectDirs::from("org", "veryl-lang", "veryl").unwrap();
-        project_dir.cache_dir().to_path_buf()
     }
 
     pub fn project_path(&self) -> PathBuf {

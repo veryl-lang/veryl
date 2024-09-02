@@ -4708,6 +4708,7 @@ dependencies = [
  "veryl-formatter",
  "veryl-metadata",
  "veryl-parser",
+ "veryl-path",
  "veryl-sourcemap",
 ]
 
@@ -4764,21 +4765,18 @@ dependencies = [
  "veryl-formatter",
  "veryl-metadata",
  "veryl-parser",
+ "veryl-path",
 ]
 
 [[package]]
 name = "veryl-metadata"
 version = "0.12.0"
 dependencies = [
- "directories",
- "fs4",
  "git-repository",
  "log",
- "merkle_hash",
  "miette",
  "once_cell",
  "regex",
- "rust-embed",
  "semver 1.0.23",
  "serde",
  "serde_regex",
@@ -4789,7 +4787,8 @@ dependencies = [
  "url",
  "uuid",
  "veryl-parser",
- "walkdir",
+ "veryl-path",
+ "veryl-std",
 ]
 
 [[package]]
@@ -4805,6 +4804,17 @@ dependencies = [
  "paste",
  "regex",
  "thiserror",
+]
+
+[[package]]
+name = "veryl-path"
+version = "0.12.0"
+dependencies = [
+ "directories",
+ "fs4",
+ "log",
+ "miette",
+ "thiserror",
  "walkdir",
 ]
 
@@ -4819,6 +4829,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "veryl-std"
+version = "0.12.0"
+dependencies = [
+ "merkle_hash",
+ "miette",
+ "rust-embed",
+ "thiserror",
+ "veryl-path",
+]
+
+[[package]]
 name = "veryl-tests"
 version = "0.1.0"
 dependencies = [
@@ -4829,6 +4850,7 @@ dependencies = [
  "veryl-formatter",
  "veryl-metadata",
  "veryl-parser",
+ "veryl-path",
  "walkdir",
 ]
 

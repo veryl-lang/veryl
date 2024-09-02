@@ -12,10 +12,11 @@ use veryl_analyzer::symbol::SymbolKind as VerylSymbolKind;
 use veryl_analyzer::symbol_path::SymbolPath;
 use veryl_analyzer::{namespace_table, symbol_table, Analyzer, AnalyzerError};
 use veryl_formatter::Formatter;
-use veryl_metadata::{Metadata, PathPair};
+use veryl_metadata::Metadata;
 use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::VerylWalker;
 use veryl_parser::{resource_table, Finder, Parser, ParserError};
+use veryl_path::PathPair;
 
 pub enum MsgToServer {
     DidOpen {
@@ -119,7 +120,7 @@ impl Server {
             document_map: DashMap::new(),
             parser_map: DashMap::new(),
             metadata_map: DashMap::new(),
-            cache_dir: Metadata::cache_path(),
+            cache_dir: veryl_path::cache_path(),
             lsp_token: 0,
             background_tasks: VecDeque::new(),
             background_done: true,

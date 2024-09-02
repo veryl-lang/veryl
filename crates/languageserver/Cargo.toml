@@ -28,3 +28,4 @@ veryl-analyzer    = {version = "0.12.0", path = "../analyzer"}
 veryl-formatter   = {version = "0.12.0", path = "../formatter"}
 veryl-metadata    = {version = "0.12.0", path = "../metadata"}
 veryl-parser      = {version = "0.12.0", path = "../parser"}
+veryl-path        = {version = "0.12.0", path = "../path"}
