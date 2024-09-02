@@ -7,7 +7,9 @@ members = [
     "crates/mdbook",
     "crates/metadata",
     "crates/parser",
+    "crates/path",
     "crates/sourcemap",
+    "crates/std",
     "crates/tests",
     "crates/veryl",
 ]
@@ -45,6 +47,7 @@ thiserror       = "1.0"
 tokio           = {version = "1.40.0", features = ["full"]}
 toml            = "0.8.19"
 url             = {version = "2.5", features = ["serde"]}
+walkdir         = "2.5.0"
 
 [workspace.metadata.release]
 tag = false

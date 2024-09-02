@@ -2,7 +2,6 @@ use crate::git::Git;
 use crate::metadata::{Dependency, Metadata};
 use crate::metadata_error::MetadataError;
 use crate::pubfile::{Pubfile, Release};
-use crate::{utils, PathPair};
 use log::info;
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
@@ -12,6 +11,7 @@ use std::path::Path;
 use std::str::FromStr;
 use url::Url;
 use uuid::Uuid;
+use veryl_path::PathPair;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -160,7 +160,7 @@ impl Lockfile {
                 let metadata = self.get_metadata(&lock.url, &lock.revision)?;
                 let path = metadata.project_path();
 
-                for src in &utils::gather_files_with_extension(&path, "veryl", false)? {
+                for src in &veryl_path::gather_files_with_extension(&path, "veryl", false)? {
                     let rel = src.strip_prefix(&path)?;
                     let mut dst = base_dst.join(&lock.name);
                     dst.push(rel);
@@ -334,7 +334,7 @@ impl Lockfile {
         url: &Url,
         version_req: &VersionReq,
     ) -> Result<Release, MetadataError> {
-        let resolve_dir = Metadata::cache_path().join("resolve");
+        let resolve_dir = veryl_path::cache_path().join("resolve");
 
         if !resolve_dir.exists() {
             fs::create_dir_all(&resolve_dir)?;
@@ -343,11 +343,11 @@ impl Lockfile {
         let uuid = Self::gen_uuid(url, "")?;
 
         let path = resolve_dir.join(uuid.simple().encode_lower(&mut Uuid::encode_buffer()));
-        let lock = utils::lock_dir("resolve")?;
+        let lock = veryl_path::lock_dir("resolve")?;
         let git = Git::clone(url, &path)?;
         git.fetch()?;
         git.checkout(None)?;
-        utils::unlock_dir(lock)?;
+        veryl_path::unlock_dir(lock)?;
 
         let toml = path.join("Veryl.pub");
         let mut pubfile = Pubfile::load(toml)?;
@@ -367,7 +367,7 @@ impl Lockfile {
     }
 
     fn get_metadata(&self, url: &Url, revision: &str) -> Result<Metadata, MetadataError> {
-        let dependencies_dir = Metadata::cache_path().join("dependencies");
+        let dependencies_dir = veryl_path::cache_path().join("dependencies");
 
         if !dependencies_dir.exists() {
             fs::create_dir_all(&dependencies_dir)?;
@@ -379,23 +379,23 @@ impl Lockfile {
         let toml = path.join("Veryl.toml");
 
         if !path.exists() {
-            let lock = utils::lock_dir("dependencies")?;
+            let lock = veryl_path::lock_dir("dependencies")?;
             let git = Git::clone(url, &path)?;
             git.fetch()?;
             git.checkout(Some(revision))?;
-            utils::unlock_dir(lock)?;
+            veryl_path::unlock_dir(lock)?;
         } else {
             let git = Git::open(&path)?;
             let ret = git.is_clean().map_or(false, |x| x);
 
             // If the existing path is not git repository, cleanup and re-try
             if !ret || !toml.exists() {
-                let lock = utils::lock_dir("dependencies")?;
+                let lock = veryl_path::lock_dir("dependencies")?;
                 fs::remove_dir_all(&path)?;
                 let git = Git::clone(url, &path)?;
                 git.fetch()?;
                 git.checkout(Some(revision))?;
-                utils::unlock_dir(lock)?;
+                veryl_path::unlock_dir(lock)?;
             }
         }
 

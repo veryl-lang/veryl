@@ -3,6 +3,7 @@ use semver::Version;
 use std::path::PathBuf;
 use thiserror::Error;
 use url::Url;
+use veryl_path::PathError;
 
 #[derive(Error, Diagnostic, Debug)]
 pub enum MetadataError {
@@ -17,10 +18,6 @@ pub enum MetadataError {
     #[diagnostic(code(MetadataError::Deserialize), help(""))]
     #[error("toml load failed")]
     Deserialize(#[from] toml::de::Error),
-
-    #[diagnostic(code(MetadataError::Walkdir), help(""))]
-    #[error("walkdir error")]
-    Walkdir(#[from] walkdir::Error),
 
     #[diagnostic(code(MetadataError::StripPrefix), help(""))]
     #[error("strip prefix error")]
@@ -67,4 +64,8 @@ pub enum MetadataError {
     #[diagnostic(code(MetadataError::NameConflict), help(""))]
     #[error("project name \"{0}\" is used multiply in dependencies")]
     NameConflict(String),
+
+    #[diagnostic(code(MetadataError::Path), help(""))]
+    #[error("path error")]
+    Path(#[from] PathError),
 }

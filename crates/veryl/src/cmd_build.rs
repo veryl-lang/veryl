@@ -12,8 +12,9 @@ use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::SymbolKind;
 use veryl_analyzer::{type_dag, Analyzer};
 use veryl_emitter::Emitter;
-use veryl_metadata::{FilelistType, Metadata, PathPair, SourceMapTarget, Target};
+use veryl_metadata::{FilelistType, Metadata, SourceMapTarget, Target};
 use veryl_parser::{resource_table, veryl_token::TokenSource, Parser};
+use veryl_path::PathPair;
 
 pub struct CmdBuild {
     opt: OptBuild,

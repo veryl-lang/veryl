@@ -1,0 +1,24 @@
+[package]
+name                  = "veryl-path"
+version               = "0.12.0"
+authors.workspace     = true
+repository.workspace  = true
+keywords.workspace    = true
+categories.workspace  = true
+license.workspace     = true
+readme.workspace      = true
+description.workspace = true
+edition               = "2021"
+
+[dependencies]
+directories = "5.0"
+log         = {workspace = true}
+thiserror   = {workspace = true}
+walkdir     = {workspace = true}
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+miette      = {workspace = true, features = ["fancy-no-syscall"]}
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+miette      = {workspace = true, features = ["fancy"]}
+fs4         = {version = "0.9.1", features = ["sync"]}
