@@ -657,20 +657,25 @@ impl VerylWalker for Formatter {
         self.expression(&arg.expression);
     }
 
+    /// Semantic action for non-terminal 'StatementBlock'
+    fn statement_block(&mut self, arg: &StatementBlock) {
+        self.token_will_push(&arg.l_brace.l_brace_token);
+        for (i, x) in arg.statement_block_list.iter().enumerate() {
+            self.newline_list(i);
+            self.statement_block_item(&x.statement_block_item);
+        }
+        self.newline_list_post(arg.statement_block_list.is_empty());
+        self.r_brace(&arg.r_brace);
+    }
+
     /// Semantic action for non-terminal 'IfStatement'
     fn if_statement(&mut self, arg: &IfStatement) {
         self.r#if(&arg.r#if);
         self.space(1);
         self.expression(&arg.expression);
         self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token);
-        for (i, x) in arg.if_statement_list.iter().enumerate() {
-            self.newline_list(i);
-            self.statement(&x.statement);
-        }
-        self.newline_list_post(arg.if_statement_list.is_empty());
-        self.r_brace(&arg.r_brace);
-        for x in &arg.if_statement_list0 {
+        self.statement_block(&arg.statement_block);
+        for x in &arg.if_statement_list {
             self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
@@ -678,25 +683,13 @@ impl VerylWalker for Formatter {
             self.space(1);
             self.expression(&x.expression);
             self.space(1);
-            self.token_will_push(&x.l_brace.l_brace_token);
-            for (i, x) in x.if_statement_list0_list.iter().enumerate() {
-                self.newline_list(i);
-                self.statement(&x.statement);
-            }
-            self.newline_list_post(x.if_statement_list0_list.is_empty());
-            self.r_brace(&x.r_brace);
+            self.statement_block(&x.statement_block);
         }
         if let Some(ref x) = arg.if_statement_opt {
             self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
-            self.token_will_push(&x.l_brace.l_brace_token);
-            for (i, x) in x.if_statement_opt_list.iter().enumerate() {
-                self.newline_list(i);
-                self.statement(&x.statement);
-            }
-            self.newline_list_post(x.if_statement_opt_list.is_empty());
-            self.r_brace(&x.r_brace);
+            self.statement_block(&x.statement_block);
         }
     }
 
@@ -704,14 +697,8 @@ impl VerylWalker for Formatter {
     fn if_reset_statement(&mut self, arg: &IfResetStatement) {
         self.if_reset(&arg.if_reset);
         self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token);
-        for (i, x) in arg.if_reset_statement_list.iter().enumerate() {
-            self.newline_list(i);
-            self.statement(&x.statement);
-        }
-        self.newline_list_post(arg.if_reset_statement_list.is_empty());
-        self.r_brace(&arg.r_brace);
-        for x in &arg.if_reset_statement_list0 {
+        self.statement_block(&arg.statement_block);
+        for x in &arg.if_reset_statement_list {
             self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
@@ -719,25 +706,13 @@ impl VerylWalker for Formatter {
             self.space(1);
             self.expression(&x.expression);
             self.space(1);
-            self.token_will_push(&x.l_brace.l_brace_token);
-            for (i, x) in x.if_reset_statement_list0_list.iter().enumerate() {
-                self.newline_list(i);
-                self.statement(&x.statement);
-            }
-            self.newline_list_post(x.if_reset_statement_list0_list.is_empty());
-            self.r_brace(&x.r_brace);
+            self.statement_block(&x.statement_block);
         }
         if let Some(ref x) = arg.if_reset_statement_opt {
             self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
-            self.token_will_push(&x.l_brace.l_brace_token);
-            for (i, x) in x.if_reset_statement_opt_list.iter().enumerate() {
-                self.newline_list(i);
-                self.statement(&x.statement);
-            }
-            self.newline_list_post(x.if_reset_statement_opt_list.is_empty());
-            self.r_brace(&x.r_brace);
+            self.statement_block(&x.statement_block);
         }
     }
 
@@ -770,13 +745,7 @@ impl VerylWalker for Formatter {
             self.expression(&x.expression);
             self.space(1);
         }
-        self.token_will_push(&arg.l_brace.l_brace_token);
-        for (i, x) in arg.for_statement_list.iter().enumerate() {
-            self.newline_list(i);
-            self.statement(&x.statement);
-        }
-        self.newline_list_post(arg.for_statement_list.is_empty());
-        self.r_brace(&arg.r_brace);
+        self.statement_block(&arg.statement_block);
     }
 
     /// Semantic action for non-terminal 'CaseStatement'
@@ -806,15 +775,7 @@ impl VerylWalker for Formatter {
         self.case_item_indent.push(self.column() - start);
         match &*arg.case_item_group0 {
             CaseItemGroup0::Statement(x) => self.statement(&x.statement),
-            CaseItemGroup0::LBraceCaseItemGroup0ListRBrace(x) => {
-                self.token_will_push(&x.l_brace.l_brace_token);
-                for (i, x) in x.case_item_group0_list.iter().enumerate() {
-                    self.newline_list(i);
-                    self.statement(&x.statement);
-                }
-                self.newline_list_post(x.case_item_group0_list.is_empty());
-                self.r_brace(&x.r_brace);
-            }
+            CaseItemGroup0::StatementBlock(x) => self.statement_block(&x.statement_block),
         }
         self.case_item_indent.pop();
     }
@@ -854,15 +815,7 @@ impl VerylWalker for Formatter {
         self.case_item_indent.push(self.column() - start);
         match &*arg.switch_item_group0 {
             SwitchItemGroup0::Statement(x) => self.statement(&x.statement),
-            SwitchItemGroup0::LBraceSwitchItemGroup0ListRBrace(x) => {
-                self.token_will_push(&x.l_brace.l_brace_token);
-                for (i, x) in x.switch_item_group0_list.iter().enumerate() {
-                    self.newline_list(i);
-                    self.statement(&x.statement);
-                }
-                self.newline_list_post(x.switch_item_group0_list.is_empty());
-                self.r_brace(&x.r_brace);
-            }
+            SwitchItemGroup0::StatementBlock(x) => self.statement_block(&x.statement_block),
         }
         self.case_item_indent.pop();
     }
@@ -969,13 +922,7 @@ impl VerylWalker for Formatter {
         if let Some(ref x) = arg.always_ff_declaration_opt {
             self.alwayf_ff_event_list(&x.alwayf_ff_event_list);
         }
-        self.token_will_push(&arg.l_brace.l_brace_token);
-        for (i, x) in arg.always_ff_declaration_list.iter().enumerate() {
-            self.newline_list(i);
-            self.statement(&x.statement);
-        }
-        self.newline_list_post(arg.always_ff_declaration_list.is_empty());
-        self.r_brace(&arg.r_brace);
+        self.statement_block(&arg.statement_block);
     }
 
     /// Semantic action for non-terminal 'AlwayfFfEventList'
@@ -1005,13 +952,7 @@ impl VerylWalker for Formatter {
     fn always_comb_declaration(&mut self, arg: &AlwaysCombDeclaration) {
         self.always_comb(&arg.always_comb);
         self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token);
-        for (i, x) in arg.always_comb_declaration_list.iter().enumerate() {
-            self.newline_list(i);
-            self.statement(&x.statement);
-        }
-        self.newline_list_post(arg.always_comb_declaration_list.is_empty());
-        self.r_brace(&arg.r_brace);
+        self.statement_block(&arg.statement_block);
     }
 
     /// Semantic action for non-terminal 'AssignDeclaration'
@@ -1205,26 +1146,14 @@ impl VerylWalker for Formatter {
     fn initial_declaration(&mut self, arg: &InitialDeclaration) {
         self.initial(&arg.initial);
         self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token);
-        for (i, x) in arg.initial_declaration_list.iter().enumerate() {
-            self.newline_list(i);
-            self.statement(&x.statement);
-        }
-        self.newline_list_post(arg.initial_declaration_list.is_empty());
-        self.r_brace(&arg.r_brace);
+        self.statement_block(&arg.statement_block);
     }
 
     /// Semantic action for non-terminal 'FinalDeclaration'
     fn final_declaration(&mut self, arg: &FinalDeclaration) {
         self.r#final(&arg.r#final);
         self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token);
-        for (i, x) in arg.final_declaration_list.iter().enumerate() {
-            self.newline_list(i);
-            self.statement(&x.statement);
-        }
-        self.newline_list_post(arg.final_declaration_list.is_empty());
-        self.r_brace(&arg.r_brace);
+        self.statement_block(&arg.statement_block);
     }
 
     /// Semantic action for non-terminal 'InstDeclaration'
@@ -1596,13 +1525,7 @@ impl VerylWalker for Formatter {
             self.scalar_type(&x.scalar_type);
             self.space(1);
         }
-        self.token_will_push(&arg.l_brace.l_brace_token);
-        for (i, x) in arg.function_declaration_list.iter().enumerate() {
-            self.newline_list(i);
-            self.function_item(&x.function_item);
-        }
-        self.newline_list_post(arg.function_declaration_list.is_empty());
-        self.r_brace(&arg.r_brace);
+        self.statement_block(&arg.statement_block);
     }
 
     /// Semantic action for non-terminal 'ImportDeclaration'

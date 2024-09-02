@@ -7,7 +7,8 @@ module Module46 {
 
     always_ff (a) {
         d = 1;
-        let x: logic<10> = 1;
+        var x: logic<10>;
+        x = 1;
         b = x * 1;
     }
 
@@ -18,6 +19,18 @@ module Module46 {
     }
 
     function FuncA (
+        a: input  logic<10>,
+        b: output logic<10>,
+        c: ref    logic<10>,
+    ) -> logic<10> {
+        c = a / 1;
+        var d: u32;
+        d = 1;
+        b = a + 1 + d;
+        return a + 2;
+    }
+
+    function FuncB (
         a: input  logic<10>,
         b: output logic<10>,
         c: ref    logic<10>,

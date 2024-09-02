@@ -5,7 +5,9 @@ use veryl_analyzer::attribute::EnumEncodingItem;
 use veryl_analyzer::evaluator::{Evaluated, Evaluator};
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::TypeModifier as SymTypeModifier;
-use veryl_analyzer::symbol::{GenericMap, Symbol, SymbolId, SymbolKind, TypeKind};
+use veryl_analyzer::symbol::{
+    GenericMap, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiniation,
+};
 use veryl_analyzer::symbol_path::{GenericSymbolPath, SymbolPath};
 use veryl_analyzer::symbol_table;
 use veryl_analyzer::{msb_table, namespace_table};
@@ -380,25 +382,7 @@ impl Emitter {
     fn case_item_statement(&mut self, arg: &CaseItemGroup0) {
         match arg {
             CaseItemGroup0::Statement(x) => self.statement(&x.statement),
-            CaseItemGroup0::LBraceCaseItemGroup0ListRBrace(x) => {
-                self.token_will_push(&x.l_brace.l_brace_token.replace("begin"));
-                let mut base = 0;
-                for (i, x) in x
-                    .case_item_group0_list
-                    .iter()
-                    .filter(|x| is_let_statement(&x.statement))
-                    .enumerate()
-                {
-                    self.newline_list(i);
-                    base += self.statement_variable_declatation_only(&x.statement);
-                }
-                for (i, x) in x.case_item_group0_list.iter().enumerate() {
-                    self.newline_list(base + i);
-                    self.statement(&x.statement);
-                }
-                self.newline_list_post(x.case_item_group0_list.is_empty());
-                self.token(&x.r_brace.r_brace_token.replace("end"));
-            }
+            CaseItemGroup0::StatementBlock(x) => self.statement_block(&x.statement_block),
         }
     }
 
@@ -526,8 +510,13 @@ impl Emitter {
     }
 
     fn always_ff_if_reset_exists(&mut self, arg: &AlwaysFfDeclaration) -> bool {
-        if let Some(x) = arg.always_ff_declaration_list.first() {
-            matches!(&*x.statement, Statement::IfResetStatement(_))
+        if let Some(x) = arg.statement_block.statement_block_list.first() {
+            match &*x.statement_block_item {
+                StatementBlockItem::Statement(x) => {
+                    matches!(*x.statement, Statement::IfResetStatement(_))
+                }
+                _ => false,
+            }
         } else {
             false
         }
@@ -646,10 +635,46 @@ impl Emitter {
             .contains(&BuiltinType::Type)
     }
 
-    fn statement_variable_declatation_only(&mut self, arg: &Statement) -> usize {
+    fn emit_statement_block(&mut self, arg: &StatementBlock, begin_kw: &str, end_kw: &str) {
+        self.token_will_push(&arg.l_brace.l_brace_token.replace(begin_kw));
+        let mut base = 0;
+        for (i, x) in arg
+            .statement_block_list
+            .iter()
+            .filter(|x| {
+                is_var_declaration(&x.statement_block_item)
+                    || is_let_statement(&x.statement_block_item)
+            })
+            .enumerate()
+        {
+            self.newline_list(i);
+            base += self.statement_variable_declatation_only(&x.statement_block_item);
+        }
+        for (i, x) in arg
+            .statement_block_list
+            .iter()
+            .filter(|x| !is_var_declaration(&x.statement_block_item))
+            .enumerate()
+        {
+            self.newline_list(base + i);
+            match &*x.statement_block_item {
+                StatementBlockItem::LetStatement(x) => self.let_statement(&x.let_statement),
+                StatementBlockItem::Statement(x) => self.statement(&x.statement),
+                _ => unreachable!(),
+            }
+        }
+        self.newline_list_post(arg.statement_block_list.is_empty());
+        self.token(&arg.r_brace.r_brace_token.replace(end_kw));
+    }
+
+    fn statement_variable_declatation_only(&mut self, arg: &StatementBlockItem) -> usize {
         self.clear_adjust_line();
         match arg {
-            Statement::LetStatement(x) => {
+            StatementBlockItem::VarDeclaration(x) => {
+                self.var_declaration(&x.var_declaration);
+                1
+            }
+            StatementBlockItem::LetStatement(x) => {
                 let x = &x.let_statement;
                 self.scalar_type(&x.array_type.scalar_type);
                 self.space(1);
@@ -664,35 +689,14 @@ impl Emitter {
             _ => 0,
         }
     }
-
-    fn function_item_variable_declatation_only(&mut self, arg: &FunctionItem) -> usize {
-        self.clear_adjust_line();
-        match arg {
-            FunctionItem::VarDeclaration(x) => {
-                self.var_declaration(&x.var_declaration);
-                1
-            }
-            FunctionItem::Statement(x) => self.statement_variable_declatation_only(&x.statement),
-        }
-    }
-
-    fn function_item_statement_only(&mut self, arg: &FunctionItem) {
-        match arg {
-            FunctionItem::VarDeclaration(_) => (),
-            FunctionItem::Statement(x) => self.statement(&x.statement),
-        };
-    }
 }
 
-fn is_let_statement(arg: &Statement) -> bool {
-    matches!(arg, Statement::LetStatement(_))
+fn is_var_declaration(arg: &StatementBlockItem) -> bool {
+    matches!(arg, StatementBlockItem::VarDeclaration(_))
 }
 
-fn is_func_let_statement(arg: &FunctionItem) -> bool {
-    match arg {
-        FunctionItem::VarDeclaration(_) => true,
-        FunctionItem::Statement(x) => is_let_statement(&x.statement),
-    }
+fn is_let_statement(arg: &StatementBlockItem) -> bool {
+    matches!(arg, StatementBlockItem::LetStatement(_))
 }
 
 impl VerylWalker for Emitter {
@@ -1531,6 +1535,11 @@ impl VerylWalker for Emitter {
         self.signed = false;
     }
 
+    /// Semantic action for non-terminal 'StatementBlock'
+    fn statement_block(&mut self, arg: &StatementBlock) {
+        self.emit_statement_block(arg, "begin", "end");
+    }
+
     /// Semantic action for non-terminal 'LetStatement'
     fn let_statement(&mut self, arg: &LetStatement) {
         // Variable declaration is moved to statement_variable_declatation_only
@@ -1568,8 +1577,26 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Assignment'
     fn assignment(&mut self, arg: &Assignment) {
+        let is_nba = if !self.in_always_ff {
+            false
+        } else if let Some(lhs) = &self.assignment_lefthand_side {
+            if let Ok(lhs_symbol) = symbol_table::resolve(lhs.scoped_identifier.as_ref()) {
+                match lhs_symbol.found.kind {
+                    SymbolKind::Variable(x) => !matches!(
+                        x.affiniation,
+                        VariableAffiniation::StatementBlock | VariableAffiniation::Function
+                    ),
+                    _ => true,
+                }
+            } else {
+                true
+            }
+        } else {
+            true
+        };
+
         self.space(1);
-        if self.in_always_ff {
+        if is_nba {
             self.str("<");
             match &*arg.assignment_group {
                 AssignmentGroup::Equ(x) => self.equ(&x.equ),
@@ -1616,24 +1643,8 @@ impl VerylWalker for Emitter {
         self.expression(&arg.expression);
         self.str(")");
         self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token.replace("begin"));
-        let mut base = 0;
-        for (i, x) in arg
-            .if_statement_list
-            .iter()
-            .filter(|x| is_let_statement(&x.statement))
-            .enumerate()
-        {
-            self.newline_list(i);
-            base += self.statement_variable_declatation_only(&x.statement);
-        }
-        for (i, x) in arg.if_statement_list.iter().enumerate() {
-            self.newline_list(base + i);
-            self.statement(&x.statement);
-        }
-        self.newline_list_post(arg.if_statement_list.is_empty());
-        self.token(&arg.r_brace.r_brace_token.replace("end"));
-        for x in &arg.if_statement_list0 {
+        self.statement_block(&arg.statement_block);
+        for x in &arg.if_statement_list {
             self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
@@ -1643,45 +1654,13 @@ impl VerylWalker for Emitter {
             self.expression(&x.expression);
             self.str(")");
             self.space(1);
-            self.token_will_push(&x.l_brace.l_brace_token.replace("begin"));
-            let mut base = 0;
-            for (i, x) in x
-                .if_statement_list0_list
-                .iter()
-                .filter(|x| is_let_statement(&x.statement))
-                .enumerate()
-            {
-                self.newline_list(i);
-                base += self.statement_variable_declatation_only(&x.statement);
-            }
-            for (i, x) in x.if_statement_list0_list.iter().enumerate() {
-                self.newline_list(base + i);
-                self.statement(&x.statement);
-            }
-            self.newline_list_post(x.if_statement_list0_list.is_empty());
-            self.token(&x.r_brace.r_brace_token.replace("end"));
+            self.statement_block(&x.statement_block);
         }
         if let Some(ref x) = arg.if_statement_opt {
             self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
-            self.token_will_push(&x.l_brace.l_brace_token.replace("begin"));
-            let mut base = 0;
-            for (i, x) in x
-                .if_statement_opt_list
-                .iter()
-                .filter(|x| is_let_statement(&x.statement))
-                .enumerate()
-            {
-                self.newline_list(i);
-                base += self.statement_variable_declatation_only(&x.statement);
-            }
-            for (i, x) in x.if_statement_opt_list.iter().enumerate() {
-                self.newline_list(base + i);
-                self.statement(&x.statement);
-            }
-            self.newline_list_post(x.if_statement_opt_list.is_empty());
-            self.token(&x.r_brace.r_brace_token.replace("end"));
+            self.statement_block(&x.statement_block);
         }
     }
 
@@ -1694,24 +1673,8 @@ impl VerylWalker for Emitter {
         self.str(&reset_signal);
         self.str(")");
         self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token.replace("begin"));
-        let mut base = 0;
-        for (i, x) in arg
-            .if_reset_statement_list
-            .iter()
-            .filter(|x| is_let_statement(&x.statement))
-            .enumerate()
-        {
-            self.newline_list(i);
-            base += self.statement_variable_declatation_only(&x.statement);
-        }
-        for (i, x) in arg.if_reset_statement_list.iter().enumerate() {
-            self.newline_list(base + i);
-            self.statement(&x.statement);
-        }
-        self.newline_list_post(arg.if_reset_statement_list.is_empty());
-        self.token(&arg.r_brace.r_brace_token.replace("end"));
-        for x in &arg.if_reset_statement_list0 {
+        self.statement_block(&arg.statement_block);
+        for x in &arg.if_reset_statement_list {
             self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
@@ -1721,45 +1684,13 @@ impl VerylWalker for Emitter {
             self.expression(&x.expression);
             self.str(")");
             self.space(1);
-            self.token_will_push(&x.l_brace.l_brace_token.replace("begin"));
-            let mut base = 0;
-            for (i, x) in x
-                .if_reset_statement_list0_list
-                .iter()
-                .filter(|x| is_let_statement(&x.statement))
-                .enumerate()
-            {
-                self.newline_list(i);
-                base += self.statement_variable_declatation_only(&x.statement);
-            }
-            for (i, x) in x.if_reset_statement_list0_list.iter().enumerate() {
-                self.newline_list(base + i);
-                self.statement(&x.statement);
-            }
-            self.newline_list_post(x.if_reset_statement_list0_list.is_empty());
-            self.token(&x.r_brace.r_brace_token.replace("end"));
+            self.statement_block(&x.statement_block);
         }
         if let Some(ref x) = arg.if_reset_statement_opt {
             self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
-            self.token_will_push(&x.l_brace.l_brace_token.replace("begin"));
-            let mut base = 0;
-            for (i, x) in x
-                .if_reset_statement_opt_list
-                .iter()
-                .filter(|x| is_let_statement(&x.statement))
-                .enumerate()
-            {
-                self.newline_list(i);
-                base += self.statement_variable_declatation_only(&x.statement);
-            }
-            for (i, x) in x.if_reset_statement_opt_list.iter().enumerate() {
-                self.newline_list(base + i);
-                self.statement(&x.statement);
-            }
-            self.newline_list_post(x.if_reset_statement_opt_list.is_empty());
-            self.token(&x.r_brace.r_brace_token.replace("end"));
+            self.statement_block(&x.statement_block);
         }
     }
 
@@ -1821,23 +1752,7 @@ impl VerylWalker for Emitter {
         }
         self.str(")");
         self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token.replace("begin"));
-        let mut base = 0;
-        for (i, x) in arg
-            .for_statement_list
-            .iter()
-            .filter(|x| is_let_statement(&x.statement))
-            .enumerate()
-        {
-            self.newline_list(i);
-            base += self.statement_variable_declatation_only(&x.statement);
-        }
-        for (i, x) in arg.for_statement_list.iter().enumerate() {
-            self.newline_list(base + i);
-            self.statement(&x.statement);
-        }
-        self.newline_list_post(arg.for_statement_list.is_empty());
-        self.token(&arg.r_brace.r_brace_token.replace("end"));
+        self.statement_block(&arg.statement_block);
     }
 
     /// Semantic action for non-terminal 'CaseStatement'
@@ -1881,25 +1796,7 @@ impl VerylWalker for Emitter {
         self.case_item_indent = Some((self.dst_column - start) as usize);
         match &*arg.switch_item_group0 {
             SwitchItemGroup0::Statement(x) => self.statement(&x.statement),
-            SwitchItemGroup0::LBraceSwitchItemGroup0ListRBrace(x) => {
-                self.token_will_push(&x.l_brace.l_brace_token.replace("begin"));
-                let mut base = 0;
-                for (i, x) in x
-                    .switch_item_group0_list
-                    .iter()
-                    .filter(|x| is_let_statement(&x.statement))
-                    .enumerate()
-                {
-                    self.newline_list(i);
-                    base += self.statement_variable_declatation_only(&x.statement);
-                }
-                for (i, x) in x.switch_item_group0_list.iter().enumerate() {
-                    self.newline_list(base + i);
-                    self.statement(&x.statement);
-                }
-                self.newline_list_post(x.switch_item_group0_list.is_empty());
-                self.token(&x.r_brace.r_brace_token.replace("end"));
-            }
+            SwitchItemGroup0::StatementBlock(x) => self.statement_block(&x.statement_block),
         }
         self.case_item_indent = None;
     }
@@ -2098,23 +1995,7 @@ impl VerylWalker for Emitter {
             self.always_ff_implicit_event_list(arg);
         }
         self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token.replace("begin"));
-        let mut base = 0;
-        for (i, x) in arg
-            .always_ff_declaration_list
-            .iter()
-            .filter(|x| is_let_statement(&x.statement))
-            .enumerate()
-        {
-            self.newline_list(i);
-            base += self.statement_variable_declatation_only(&x.statement);
-        }
-        for (i, x) in arg.always_ff_declaration_list.iter().enumerate() {
-            self.newline_list(base + i);
-            self.statement(&x.statement);
-        }
-        self.newline_list_post(arg.always_ff_declaration_list.is_empty());
-        self.token(&arg.r_brace.r_brace_token.replace("end"));
+        self.statement_block(&arg.statement_block);
         self.in_always_ff = false;
     }
 
@@ -2211,23 +2092,7 @@ impl VerylWalker for Emitter {
     fn always_comb_declaration(&mut self, arg: &AlwaysCombDeclaration) {
         self.always_comb(&arg.always_comb);
         self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token.replace("begin"));
-        let mut base = 0;
-        for (i, x) in arg
-            .always_comb_declaration_list
-            .iter()
-            .filter(|x| is_let_statement(&x.statement))
-            .enumerate()
-        {
-            self.newline_list(i);
-            base += self.statement_variable_declatation_only(&x.statement);
-        }
-        for (i, x) in arg.always_comb_declaration_list.iter().enumerate() {
-            self.newline_list(base + i);
-            self.statement(&x.statement);
-        }
-        self.newline_list_post(arg.always_comb_declaration_list.is_empty());
-        self.token(&arg.r_brace.r_brace_token.replace("end"));
+        self.statement_block(&arg.statement_block);
     }
 
     /// Semantic action for non-terminal 'AssignDeclaration'
@@ -2490,46 +2355,14 @@ impl VerylWalker for Emitter {
     fn initial_declaration(&mut self, arg: &InitialDeclaration) {
         self.initial(&arg.initial);
         self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token.replace("begin"));
-        let mut base = 0;
-        for (i, x) in arg
-            .initial_declaration_list
-            .iter()
-            .filter(|x| is_let_statement(&x.statement))
-            .enumerate()
-        {
-            self.newline_list(i);
-            base += self.statement_variable_declatation_only(&x.statement);
-        }
-        for (i, x) in arg.initial_declaration_list.iter().enumerate() {
-            self.newline_list(base + i);
-            self.statement(&x.statement);
-        }
-        self.newline_list_post(arg.initial_declaration_list.is_empty());
-        self.token(&arg.r_brace.r_brace_token.replace("end"));
+        self.statement_block(&arg.statement_block);
     }
 
     /// Semantic action for non-terminal 'FinalDeclaration'
     fn final_declaration(&mut self, arg: &FinalDeclaration) {
         self.r#final(&arg.r#final);
         self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token.replace("begin"));
-        let mut base = 0;
-        for (i, x) in arg
-            .final_declaration_list
-            .iter()
-            .filter(|x| is_let_statement(&x.statement))
-            .enumerate()
-        {
-            self.newline_list(i);
-            base += self.statement_variable_declatation_only(&x.statement);
-        }
-        for (i, x) in arg.final_declaration_list.iter().enumerate() {
-            self.newline_list(base + i);
-            self.statement(&x.statement);
-        }
-        self.newline_list_post(arg.final_declaration_list.is_empty());
-        self.token(&arg.r_brace.r_brace_token.replace("end"));
+        self.statement_block(&arg.statement_block);
     }
 
     /// Semantic action for non-terminal 'InstDeclaration'
@@ -2900,23 +2733,7 @@ impl VerylWalker for Emitter {
                 self.token(&x.minus_g_t.minus_g_t_token.replace(""));
             }
             self.str(";");
-            self.token_will_push(&arg.l_brace.l_brace_token.replace(""));
-            let mut base = 0;
-            for (i, x) in arg
-                .function_declaration_list
-                .iter()
-                .filter(|x| is_func_let_statement(&x.function_item))
-                .enumerate()
-            {
-                self.newline_list(i);
-                base += self.function_item_variable_declatation_only(&x.function_item);
-            }
-            for (i, x) in arg.function_declaration_list.iter().enumerate() {
-                self.newline_list(base + i);
-                self.function_item_statement_only(&x.function_item);
-            }
-            self.newline_list_post(arg.function_declaration_list.is_empty());
-            self.token(&arg.r_brace.r_brace_token.replace("endfunction"));
+            self.emit_statement_block(&arg.statement_block, "", "endfunction");
 
             self.generic_map.pop();
         }

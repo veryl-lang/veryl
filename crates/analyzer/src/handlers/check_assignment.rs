@@ -178,7 +178,7 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
         match self.point {
             HandlerPoint::Before => {
                 self.branch_index = 0;
-                let branches = 1 + arg.if_statement_list0.len() + arg.if_statement_opt.iter().len();
+                let branches = 1 + arg.if_statement_list.len() + arg.if_statement_opt.iter().len();
                 let has_default = arg.if_statement_opt.is_some();
                 self.assign_position
                     .push(AssignPositionType::StatementBranch {
@@ -208,9 +208,8 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
         match self.point {
             HandlerPoint::Before => {
                 self.branch_index = 0;
-                let branches = 1
-                    + arg.if_reset_statement_list0.len()
-                    + arg.if_reset_statement_opt.iter().len();
+                let branches =
+                    1 + arg.if_reset_statement_list.len() + arg.if_reset_statement_opt.iter().len();
                 let has_default = arg.if_reset_statement_opt.is_some();
                 let allow_missing_reset_statement = attribute_table::contains(
                     &arg.if_reset.if_reset_token.token,

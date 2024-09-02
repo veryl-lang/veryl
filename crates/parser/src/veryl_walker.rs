@@ -1508,11 +1508,32 @@ pub trait VerylWalker {
         after!(self, clock_domain, arg);
     }
 
+    /// Semantic action for non-terminal 'StatementBlock'
+    fn statement_block(&mut self, arg: &StatementBlock) {
+        before!(self, statement_block, arg);
+        self.l_brace(&arg.l_brace);
+        for x in &arg.statement_block_list {
+            self.statement_block_item(&x.statement_block_item);
+        }
+        self.r_brace(&arg.r_brace);
+        after!(self, statement_block, arg);
+    }
+
+    /// Semantic action for non-terminal 'StatementOrVarDeclaration'
+    fn statement_block_item(&mut self, arg: &StatementBlockItem) {
+        before!(self, statement_block_item, arg);
+        match arg {
+            StatementBlockItem::VarDeclaration(x) => self.var_declaration(&x.var_declaration),
+            StatementBlockItem::LetStatement(x) => self.let_statement(&x.let_statement),
+            StatementBlockItem::Statement(x) => self.statement(&x.statement),
+        }
+        after!(self, statement_block_item, arg);
+    }
+
     /// Semantic action for non-terminal 'Statement'
     fn statement(&mut self, arg: &Statement) {
         before!(self, statement, arg);
         match arg {
-            Statement::LetStatement(x) => self.let_statement(&x.let_statement),
             Statement::IdentifierStatement(x) => self.identifier_statement(&x.identifier_statement),
             Statement::IfStatement(x) => self.if_statement(&x.if_statement),
             Statement::IfResetStatement(x) => self.if_reset_statement(&x.if_reset_statement),
@@ -1575,28 +1596,16 @@ pub trait VerylWalker {
         before!(self, if_statement, arg);
         self.r#if(&arg.r#if);
         self.expression(&arg.expression);
-        self.l_brace(&arg.l_brace);
+        self.statement_block(&arg.statement_block);
         for x in &arg.if_statement_list {
-            self.statement(&x.statement);
-        }
-        self.r_brace(&arg.r_brace);
-        for x in &arg.if_statement_list0 {
             self.r#else(&x.r#else);
             self.r#if(&x.r#if);
             self.expression(&x.expression);
-            self.l_brace(&x.l_brace);
-            for x in &x.if_statement_list0_list {
-                self.statement(&x.statement);
-            }
-            self.r_brace(&x.r_brace);
+            self.statement_block(&x.statement_block);
         }
         if let Some(ref x) = arg.if_statement_opt {
             self.r#else(&x.r#else);
-            self.l_brace(&x.l_brace);
-            for x in &x.if_statement_opt_list {
-                self.statement(&x.statement);
-            }
-            self.r_brace(&x.r_brace);
+            self.statement_block(&x.statement_block);
         }
         after!(self, if_statement, arg);
     }
@@ -1605,28 +1614,16 @@ pub trait VerylWalker {
     fn if_reset_statement(&mut self, arg: &IfResetStatement) {
         before!(self, if_reset_statement, arg);
         self.if_reset(&arg.if_reset);
-        self.l_brace(&arg.l_brace);
+        self.statement_block(&arg.statement_block);
         for x in &arg.if_reset_statement_list {
-            self.statement(&x.statement);
-        }
-        self.r_brace(&arg.r_brace);
-        for x in &arg.if_reset_statement_list0 {
             self.r#else(&x.r#else);
             self.r#if(&x.r#if);
             self.expression(&x.expression);
-            self.l_brace(&x.l_brace);
-            for x in &x.if_reset_statement_list0_list {
-                self.statement(&x.statement);
-            }
-            self.r_brace(&x.r_brace);
+            self.statement_block(&x.statement_block);
         }
         if let Some(ref x) = arg.if_reset_statement_opt {
             self.r#else(&x.r#else);
-            self.l_brace(&x.l_brace);
-            for x in &x.if_reset_statement_opt_list {
-                self.statement(&x.statement);
-            }
-            self.r_brace(&x.r_brace);
+            self.statement_block(&x.statement_block);
         }
         after!(self, if_reset_statement, arg);
     }
@@ -1662,11 +1659,7 @@ pub trait VerylWalker {
             self.assignment_operator(&x.assignment_operator);
             self.expression(&x.expression);
         }
-        self.l_brace(&arg.l_brace);
-        for x in &arg.for_statement_list {
-            self.statement(&x.statement);
-        }
-        self.r_brace(&arg.r_brace);
+        self.statement_block(&arg.statement_block);
         after!(self, for_statement, arg);
     }
 
@@ -1693,13 +1686,7 @@ pub trait VerylWalker {
         self.colon(&arg.colon);
         match &*arg.case_item_group0 {
             CaseItemGroup0::Statement(x) => self.statement(&x.statement),
-            CaseItemGroup0::LBraceCaseItemGroup0ListRBrace(x) => {
-                self.l_brace(&x.l_brace);
-                for x in &x.case_item_group0_list {
-                    self.statement(&x.statement);
-                }
-                self.r_brace(&x.r_brace);
-            }
+            CaseItemGroup0::StatementBlock(x) => self.statement_block(&x.statement_block),
         }
         after!(self, case_item, arg);
     }
@@ -1737,13 +1724,7 @@ pub trait VerylWalker {
         self.colon(&arg.colon);
         match &*arg.switch_item_group0 {
             SwitchItemGroup0::Statement(x) => self.statement(&x.statement),
-            SwitchItemGroup0::LBraceSwitchItemGroup0ListRBrace(x) => {
-                self.l_brace(&x.l_brace);
-                for x in &x.switch_item_group0_list {
-                    self.statement(&x.statement);
-                }
-                self.r_brace(&x.r_brace);
-            }
+            SwitchItemGroup0::StatementBlock(x) => self.statement_block(&x.statement_block),
         }
         after!(self, switch_item, arg);
     }
@@ -1868,11 +1849,7 @@ pub trait VerylWalker {
         if let Some(ref x) = arg.always_ff_declaration_opt {
             self.alwayf_ff_event_list(&x.alwayf_ff_event_list);
         }
-        self.l_brace(&arg.l_brace);
-        for x in &arg.always_ff_declaration_list {
-            self.statement(&x.statement);
-        }
-        self.r_brace(&arg.r_brace);
+        self.statement_block(&arg.statement_block);
         after!(self, always_ff_declaration, arg);
     }
 
@@ -1907,11 +1884,7 @@ pub trait VerylWalker {
     fn always_comb_declaration(&mut self, arg: &AlwaysCombDeclaration) {
         before!(self, always_comb_declaration, arg);
         self.always_comb(&arg.always_comb);
-        self.l_brace(&arg.l_brace);
-        for x in &arg.always_comb_declaration_list {
-            self.statement(&x.statement);
-        }
-        self.r_brace(&arg.r_brace);
+        self.statement_block(&arg.statement_block);
         after!(self, always_comb_declaration, arg);
     }
 
@@ -2107,11 +2080,7 @@ pub trait VerylWalker {
     fn initial_declaration(&mut self, arg: &InitialDeclaration) {
         before!(self, initial_declaration, arg);
         self.initial(&arg.initial);
-        self.l_brace(&arg.l_brace);
-        for x in &arg.initial_declaration_list {
-            self.statement(&x.statement);
-        }
-        self.r_brace(&arg.r_brace);
+        self.statement_block(&arg.statement_block);
         after!(self, initial_declaration, arg);
     }
 
@@ -2119,11 +2088,7 @@ pub trait VerylWalker {
     fn final_declaration(&mut self, arg: &FinalDeclaration) {
         before!(self, final_declaration, arg);
         self.r#final(&arg.r#final);
-        self.l_brace(&arg.l_brace);
-        for x in &arg.final_declaration_list {
-            self.statement(&x.statement);
-        }
-        self.r_brace(&arg.r_brace);
+        self.statement_block(&arg.statement_block);
         after!(self, final_declaration, arg);
     }
 
@@ -2513,22 +2478,8 @@ pub trait VerylWalker {
             self.minus_g_t(&x.minus_g_t);
             self.scalar_type(&x.scalar_type);
         }
-        self.l_brace(&arg.l_brace);
-        for x in &arg.function_declaration_list {
-            self.function_item(&x.function_item);
-        }
-        self.r_brace(&arg.r_brace);
+        self.statement_block(&arg.statement_block);
         after!(self, function_declaration, arg);
-    }
-
-    /// Semantic action for non-terminal 'FunctionItem'
-    fn function_item(&mut self, arg: &FunctionItem) {
-        before!(self, function_item, arg);
-        match arg {
-            FunctionItem::VarDeclaration(x) => self.var_declaration(&x.var_declaration),
-            FunctionItem::Statement(x) => self.statement(&x.statement),
-        };
-        after!(self, function_item, arg);
     }
 
     /// Semantic action for non-terminal 'ImportDeclaration'

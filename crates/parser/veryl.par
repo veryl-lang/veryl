@@ -555,8 +555,11 @@ ClockDomain: BackQuote Identifier;
 // Statement
 // ----------------------------------------------------------------------------
 
-Statement: LetStatement
-         | IdentifierStatement
+StatementBlock: LBrace { StatementBlockItem } RBrace;
+
+StatementBlockItem: VarDeclaration | LetStatement | Statement;
+
+Statement: IdentifierStatement
          | IfStatement
          | IfResetStatement
          | ReturnStatement
@@ -572,25 +575,25 @@ IdentifierStatement: ExpressionIdentifier ( FunctionCall | Assignment ) Semicolo
 
 Assignment: ( Equ | AssignmentOperator ) Expression;
 
-IfStatement: If Expression LBrace { Statement } RBrace { Else If Expression LBrace { Statement } RBrace } [ Else LBrace { Statement } RBrace ];
+IfStatement: If Expression StatementBlock { Else If Expression StatementBlock } [ Else StatementBlock ];
 
-IfResetStatement: IfReset LBrace { Statement } RBrace { Else If Expression LBrace { Statement } RBrace } [ Else LBrace { Statement } RBrace ];
+IfResetStatement: IfReset StatementBlock { Else If Expression StatementBlock } [ Else StatementBlock ];
 
 ReturnStatement: Return Expression Semicolon;
 
 BreakStatement: Break Semicolon;
 
-ForStatement: For Identifier Colon ScalarType In Range [ Step AssignmentOperator Expression ] LBrace { Statement } RBrace;
+ForStatement: For Identifier Colon ScalarType In Range [ Step AssignmentOperator Expression ] StatementBlock;
 
 CaseStatement: Case Expression LBrace { CaseItem } RBrace;
 
-CaseItem: ( CaseCondition | Defaul ) Colon ( Statement | LBrace { Statement } RBrace );
+CaseItem: ( CaseCondition | Defaul ) Colon ( Statement | StatementBlock );
 
 CaseCondition: RangeItem { Comma RangeItem } ;
 
 SwitchStatement: Switch LBrace { SwitchItem } RBrace;
 
-SwitchItem: ( SwitchCondition | Defaul ) Colon ( Statement | LBrace { Statement } RBrace );
+SwitchItem: ( SwitchCondition | Defaul ) Colon ( Statement | StatementBlock );
 
 SwitchCondition: Expression { Comma Expression } ;
 
@@ -618,7 +621,7 @@ LocalDeclaration: Local Identifier Colon ( ArrayType Equ Expression | Type Equ T
 
 TypeDefDeclaration: Type Identifier Equ ArrayType Semicolon;
 
-AlwaysFfDeclaration: AlwaysFf [ AlwayfFfEventList ] LBrace { Statement } RBrace;
+AlwaysFfDeclaration: AlwaysFf [ AlwayfFfEventList ] StatementBlock;
 
 AlwayfFfEventList: LParen AlwaysFfClock [ Comma AlwaysFfReset ] RParen;
 
@@ -626,7 +629,7 @@ AlwaysFfClock: HierarchicalIdentifier;
 
 AlwaysFfReset: HierarchicalIdentifier;
 
-AlwaysCombDeclaration: AlwaysComb LBrace { Statement } RBrace;
+AlwaysCombDeclaration: AlwaysComb StatementBlock;
 
 AssignDeclaration: Assign HierarchicalIdentifier Equ Expression Semicolon;
 
@@ -656,9 +659,9 @@ StructUnionGroup: { Attribute } ( LBrace StructUnionList RBrace | StructUnionIte
 
 StructUnionItem: Identifier Colon ScalarType;
 
-InitialDeclaration: Initial LBrace { Statement } RBrace;
+InitialDeclaration: Initial StatementBlock;
 
-FinalDeclaration: Final LBrace { Statement } RBrace;
+FinalDeclaration: Final StatementBlock;
 
 // ----------------------------------------------------------------------------
 // InstDeclaration
@@ -746,11 +749,7 @@ Direction: Input
 // Function
 // ----------------------------------------------------------------------------
 
-FunctionDeclaration: Function Identifier [ WithGenericParameter ] [ PortDeclaration ] [ MinusGT ScalarType ] LBrace { FunctionItem } RBrace;
-
-FunctionItem: VarDeclaration
-            | Statement
-            ;
+FunctionDeclaration: Function Identifier [ WithGenericParameter ] [ PortDeclaration ] [ MinusGT ScalarType ] StatementBlock;
 
 // ----------------------------------------------------------------------------
 // Import / Export
