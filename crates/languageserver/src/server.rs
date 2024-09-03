@@ -9,6 +9,7 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::Client;
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::SymbolKind as VerylSymbolKind;
+use veryl_analyzer::symbol::{Symbol, TypeKind};
 use veryl_analyzer::symbol_path::SymbolPath;
 use veryl_analyzer::{namespace_table, symbol_table, Analyzer, AnalyzerError};
 use veryl_formatter::Formatter;
@@ -233,6 +234,17 @@ impl Server {
         }
     }
 
+    fn get_line(&self, url: &Url, line: usize) -> Option<String> {
+        if let Ok(path) = url.to_file_path() {
+            if let Some(rope) = self.document_map.get(&path) {
+                if let Some(text) = rope.line(line - 1).as_str() {
+                    return Some(text.to_string());
+                }
+            }
+        }
+        None
+    }
+
     fn completion(
         &mut self,
         url: &Url,
@@ -243,12 +255,18 @@ impl Server {
         let ret = if let Some(context) = context {
             match context.trigger_kind {
                 CompletionTriggerKind::TRIGGER_CHARACTER => {
-                    if self.config.use_operator_completion {
-                        completion_operator(
-                            line,
-                            column,
-                            context.trigger_character.as_ref().unwrap().as_str(),
-                        )
+                    let trigger = context.trigger_character.as_ref().unwrap();
+                    if trigger == "." {
+                        if let Some(text) = self.get_line(url, line) {
+                            let text = text.split_whitespace().last().unwrap();
+                            let text = text.trim_matches(|c| !char::is_alphanumeric(c));
+                            let items = completion_member(url, line, column, text);
+                            Some(CompletionResponse::Array(items))
+                        } else {
+                            None
+                        }
+                    } else if self.config.use_operator_completion {
+                        completion_operator(line, column, trigger)
                     } else {
                         None
                     }
@@ -598,11 +616,9 @@ impl Server {
 
     fn get_metadata(&mut self, url: &Url) -> Option<Metadata> {
         if let Ok(path) = url.to_file_path() {
-            dbg!(&path);
             if let Some(metadata) = self.metadata_map.get(&path) {
                 return Some(metadata.to_owned());
             } else if let Ok(metadata_path) = Metadata::search_from(&path) {
-                dbg!(&metadata_path);
                 if let Ok(metadata) = Metadata::load(metadata_path) {
                     self.metadata_map.insert(path, metadata.clone());
                     return Some(metadata);
@@ -819,6 +835,102 @@ fn completion_operator(line: usize, column: usize, trigger: &str) -> Option<Comp
     }
 }
 
+fn get_member(symbol: &Symbol) -> Vec<CompletionItem> {
+    let mut items = Vec::new();
+    match &symbol.kind {
+        VerylSymbolKind::Modport(x) => {
+            for member in &x.members {
+                let symbol = symbol_table::get(*member).unwrap();
+                let label = symbol.token.text.to_string();
+                let kind = Some(CompletionItemKind::FIELD);
+                let detail = Some(format!("{}", symbol.kind));
+                let documentation = if !symbol.doc_comment.is_empty() {
+                    let content = MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: symbol.doc_comment.format(false),
+                    };
+                    Some(Documentation::MarkupContent(content))
+                } else {
+                    None
+                };
+                let insert_text = Some(label.clone());
+
+                let item = CompletionItem {
+                    label,
+                    kind,
+                    detail,
+                    documentation,
+                    insert_text,
+                    ..Default::default()
+                };
+                items.push(item);
+            }
+        }
+        VerylSymbolKind::Struct(x) => {
+            for member in &x.members {
+                let symbol = symbol_table::get(*member).unwrap();
+                let label = symbol.token.text.to_string();
+                let kind = Some(CompletionItemKind::FIELD);
+                let detail = Some(format!("{}", symbol.kind));
+                let documentation = if !symbol.doc_comment.is_empty() {
+                    let content = MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: symbol.doc_comment.format(false),
+                    };
+                    Some(Documentation::MarkupContent(content))
+                } else {
+                    None
+                };
+                let insert_text = Some(label.clone());
+
+                let item = CompletionItem {
+                    label,
+                    kind,
+                    detail,
+                    documentation,
+                    insert_text,
+                    ..Default::default()
+                };
+                items.push(item);
+            }
+        }
+        _ => (),
+    }
+    items
+}
+
+fn completion_member(url: &Url, line: usize, column: usize, text: &str) -> Vec<CompletionItem> {
+    let current_namespace = current_namespace(url, line, column);
+    let text = resource_table::get_str_id(text.to_string()).unwrap();
+    let mut items = Vec::new();
+
+    if let Some(namespace) = current_namespace {
+        if let Ok(symbol) = symbol_table::resolve((&vec![text], &namespace)) {
+            match symbol.found.kind {
+                VerylSymbolKind::Port(x) => {
+                    if let Some(ref x) = x.r#type {
+                        if let TypeKind::UserDefined(ref x) = x.kind {
+                            if let Ok(symbol) = symbol_table::resolve((x, &namespace)) {
+                                items.append(&mut get_member(&symbol.found));
+                            }
+                        }
+                    }
+                }
+                VerylSymbolKind::Variable(x) => {
+                    if let TypeKind::UserDefined(ref x) = x.r#type.kind {
+                        if let Ok(symbol) = symbol_table::resolve((x, &namespace)) {
+                            items.append(&mut get_member(&symbol.found));
+                        }
+                    }
+                }
+                _ => (),
+            }
+        }
+    }
+
+    items
+}
+
 fn completion_symbol(
     metadata: &Metadata,
     url: &Url,
@@ -828,15 +940,11 @@ fn completion_symbol(
     let current_namespace = current_namespace(url, line, column);
 
     let mut items = Vec::new();
-    let line = (line - 1) as u32;
-    let character = (column - 2) as u32;
-    let start = Position { line, character };
-    let end = Position { line, character };
 
     let prj = resource_table::get_str_id(&metadata.project.name).unwrap();
 
     for symbol in symbol_table::get_all() {
-        let top_level_item = symbol.namespace.paths.len() == 1;
+        let top_level_item = symbol.namespace.paths.len() <= 1;
         let current_item = if let Some(ref x) = current_namespace {
             symbol.namespace.included(x)
         } else {
@@ -844,10 +952,11 @@ fn completion_symbol(
         };
 
         if top_level_item || current_item {
-            let prefix = if symbol.namespace.paths[0] == prj || current_item {
+            let prefix = if symbol.namespace.paths.is_empty()
+                || symbol.namespace.paths[0] == prj
+                || current_item
+            {
                 "".to_string()
-            } else if let VerylSymbolKind::SystemFunction = symbol.kind {
-                "$".to_string()
             } else {
                 format!("{}::", symbol.namespace.paths[0])
             };
@@ -896,17 +1005,12 @@ fn completion_symbol(
                 None
             };
 
-            let text_edit = CompletionTextEdit::Edit(TextEdit {
-                range: Range { start, end },
-                new_text,
-            });
-
             let item = CompletionItem {
                 label,
                 kind,
                 detail,
                 documentation,
-                text_edit: Some(text_edit),
+                insert_text: Some(new_text),
                 ..Default::default()
             };
             items.push(item);

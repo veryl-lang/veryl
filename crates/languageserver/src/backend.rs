@@ -5,7 +5,7 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
-const COMPLETION_TRIGGER: &[&str] = &["<", ">", "=", "!"];
+const COMPLETION_TRIGGER: &[&str] = &["<", ">", "=", "!", "."];
 
 #[derive(Debug)]
 pub struct Backend {
