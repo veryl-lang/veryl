@@ -50,7 +50,7 @@ pub fn paths(base_dst: &Path) -> Result<Vec<PathPair>, PathError> {
         dst.push(rel);
         dst.set_extension("sv");
         ret.push(PathPair {
-            prj: "std".to_string(),
+            prj: "$std".to_string(),
             src: src.to_path_buf(),
             dst,
         });
