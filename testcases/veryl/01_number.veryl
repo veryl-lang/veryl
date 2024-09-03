@@ -1,40 +1,40 @@
 module Module01 {
     // integer
-    local a : u32 = 0123456789;
-    local aa: u32 = 01234_56789;
+    const a : u32 = 0123456789;
+    const aa: u32 = 01234_56789;
 
     // binary
-    local b  : u32 = 32'b01xzXZ;
-    local bb : u32 = 32'b01_xz_XZ;
-    local bbb: u32 = 32'sb01_xz_XZ;
+    const b  : u32 = 32'b01xzXZ;
+    const bb : u32 = 32'b01_xz_XZ;
+    const bbb: u32 = 32'sb01_xz_XZ;
 
     // octal
-    local c  : u32 = 32'o01234567xzXZ;
-    local cc : u32 = 32'o01234_567xzXZ;
-    local ccc: u32 = 32'so01234_567xzXZ;
+    const c  : u32 = 32'o01234567xzXZ;
+    const cc : u32 = 32'o01234_567xzXZ;
+    const ccc: u32 = 32'so01234_567xzXZ;
 
     // decimal
-    local d  : u32 = 32'd0123456789;
-    local dd : u32 = 32'd01234_56789;
-    local ddd: u32 = 32'sd01234_56789;
+    const d  : u32 = 32'd0123456789;
+    const dd : u32 = 32'd01234_56789;
+    const ddd: u32 = 32'sd01234_56789;
 
     // hex
-    local e  : u32 = 128'h0123456789abcdefxzABCDEFXZ;
-    local ee : u32 = 128'h01234_5678_9abc_defxz_ABCD_EFXZ;
-    local eee: u32 = 128'sh01234_5678_9abc_defxz_ABCD_EFXZ;
+    const e  : u32 = 128'h0123456789abcdefxzABCDEFXZ;
+    const ee : u32 = 128'h01234_5678_9abc_defxz_ABCD_EFXZ;
+    const eee: u32 = 128'sh01234_5678_9abc_defxz_ABCD_EFXZ;
 
     // all0, all1, allx, allz
-    local f     : u32 = '0;
-    local ff    : u32 = '1;
-    local fff   : u32 = 'x;
-    local ffff  : u32 = 'X;
-    local fffff : u32 = 'z;
-    local ffffff: u32 = 'Z;
+    const f     : u32 = '0;
+    const ff    : u32 = '1;
+    const fff   : u32 = 'x;
+    const ffff  : u32 = 'X;
+    const fffff : u32 = 'z;
+    const ffffff: u32 = 'Z;
 
     // floating point
-    local g    : u32 = 0123456789.0123456789;
-    local gg   : u32 = 0123456789.0123456789e+0123456789;
-    local ggg  : u32 = 0123456789.0123456789e-0123456789;
-    local gggg : u32 = 0123456789.0123456789E+0123456789;
-    local ggggg: u32 = 0123456789.0123456789E-0123456789;
+    const g    : u32 = 0123456789.0123456789;
+    const gg   : u32 = 0123456789.0123456789e+0123456789;
+    const ggg  : u32 = 0123456789.0123456789e-0123456789;
+    const gggg : u32 = 0123456789.0123456789E+0123456789;
+    const ggggg: u32 = 0123456789.0123456789E-0123456789;
 }

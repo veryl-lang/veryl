@@ -1,5 +1,5 @@
 module Module16 {
-    local y: bit = 1;
+    const y: bit = 1;
 
     var a: logic   ;
     var b: logic   ;

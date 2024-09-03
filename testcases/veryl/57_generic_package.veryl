@@ -1,8 +1,8 @@
 module Module57 {
-    local A: u32 = Package57A::<1>::X;
-    local B: u64 = Package57A::<2>::X;
-    local C: u32 = Package57B::<3>::X;
-    local D: u64 = Package57B::<>::X;
+    const A: u32 = Package57A::<1>::X;
+    const B: u64 = Package57A::<2>::X;
+    const C: u32 = Package57B::<3>::X;
+    const D: u64 = Package57B::<>::X;
 
     var _e  : Package57C::<2>::StructC;
     assign _e.c = 1;
@@ -10,12 +10,12 @@ module Module57 {
 
 /// Generic package test for doc comment
 pub package Package57A::<T: const> {
-    local X: u32 = T;
+    const X: u32 = T;
 }
 
 /// Generic package test for doc comment
 pub package Package57B::<T: const = 4> {
-    local X: u32 = T;
+    const X: u32 = T;
 }
 
 package Package57C::<W: const> {

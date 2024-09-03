@@ -1,5 +1,5 @@
 module Module14 {
-    local X: u32 = 1;
+    const X: u32 = 1;
 
     let a  : logic = 1;
     let aa : logic = 1;

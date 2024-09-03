@@ -6,7 +6,7 @@ pub module binary_decoder #(
     /// Width of the input binary vector
     param BIN_WIDTH: u32 = 8,
     /// Width of the output unary vector
-    local UNARY_WIDTH: u32 = 1 << BIN_WIDTH,
+    const UNARY_WIDTH: u32 = 1 << BIN_WIDTH,
 ) (
     /// Enable Signal.  Dynamic power is minimzed when not enabled.
     i_en: input logic,
@@ -31,7 +31,7 @@ pub module binary_decoder #(
 
 module _bin_decoder #(
     param BIN_WIDTH  : u32 = 8             ,
-    local UNARY_WIDTH: u32 = 1 << BIN_WIDTH,
+    const UNARY_WIDTH: u32 = 1 << BIN_WIDTH,
 ) (
     /// Binary encoded
     i_bin: input logic<BIN_WIDTH>,
@@ -42,8 +42,8 @@ module _bin_decoder #(
     if BIN_WIDTH == 1 :g_base_case {
         assign o_unary = {i_bin, ~i_bin};
     } else :g_recurssive_case {
-        local REC_BIN_WIDTH  : u32                    = BIN_WIDTH - 1;
-        local REC_UNARY_WIDTH: u32                    = 1 << REC_BIN_WIDTH;
+        const REC_BIN_WIDTH  : u32                    = BIN_WIDTH - 1;
+        const REC_UNARY_WIDTH: u32                    = 1 << REC_BIN_WIDTH;
         let r_bin          : logic<REC_BIN_WIDTH>   = i_bin[REC_BIN_WIDTH - 1:0];
         var r_unary        : logic<REC_UNARY_WIDTH>;
 

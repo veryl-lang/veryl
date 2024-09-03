@@ -789,6 +789,11 @@ impl VerylWalker for Emitter {
         self.veryl_token(&arg.clock_negedge_token.replace("logic"));
     }
 
+    /// Semantic action for non-terminal 'Const'
+    fn r#const(&mut self, arg: &Const) {
+        self.veryl_token(&arg.const_token.replace("localparam"));
+    }
+
     /// Semantic action for non-terminal 'Reset'
     fn reset(&mut self, arg: &Reset) {
         self.veryl_token(&arg.reset_token.replace("logic"));
@@ -832,11 +837,6 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'I64'
     fn i64(&mut self, arg: &I64) {
         self.veryl_token(&arg.i64_token.replace("longint signed"));
-    }
-
-    /// Semantic action for non-terminal 'Local'
-    fn local(&mut self, arg: &Local) {
-        self.veryl_token(&arg.local_token.replace("localparam"));
     }
 
     /// Semantic action for non-terminal 'Lsb'
@@ -1932,12 +1932,12 @@ impl VerylWalker for Emitter {
         self.semicolon(&arg.semicolon);
     }
 
-    /// Semantic action for non-terminal 'LocalDeclaration'
-    fn local_declaration(&mut self, arg: &LocalDeclaration) {
-        self.local(&arg.local);
+    /// Semantic action for non-terminal 'ConstDeclaration'
+    fn const_declaration(&mut self, arg: &ConstDeclaration) {
+        self.r#const(&arg.r#const);
         self.space(1);
-        match &*arg.local_declaration_group {
-            LocalDeclarationGroup::ArrayTypeEquExpression(x) => {
+        match &*arg.const_declaration_group {
+            ConstDeclarationGroup::ArrayTypeEquExpression(x) => {
                 if !self.is_implicit_scalar_type(&x.array_type.scalar_type) {
                     self.scalar_type(&x.array_type.scalar_type);
                     self.space(1);
@@ -1952,7 +1952,7 @@ impl VerylWalker for Emitter {
                 self.space(1);
                 self.expression(&x.expression);
             }
-            LocalDeclarationGroup::TypeEquTypeExpression(x) => {
+            ConstDeclarationGroup::TypeEquTypeExpression(x) => {
                 if !self.is_implicit_type() {
                     self.r#type(&x.r#type);
                     self.space(1);
@@ -2576,7 +2576,7 @@ impl VerylWalker for Emitter {
     fn with_parameter_item(&mut self, arg: &WithParameterItem) {
         match &*arg.with_parameter_item_group {
             WithParameterItemGroup::Param(x) => self.param(&x.param),
-            WithParameterItemGroup::Local(x) => self.local(&x.local),
+            WithParameterItemGroup::Const(x) => self.r#const(&x.r#const),
         };
         self.space(1);
         match &*arg.with_parameter_item_group0 {

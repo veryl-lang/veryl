@@ -906,7 +906,6 @@ token_with_comments!(Inst);
 token_with_comments!(Interface);
 token_with_comments!(In);
 token_with_comments!(Let);
-token_with_comments!(Local);
 token_with_comments!(Logic);
 token_with_comments!(Lsb);
 token_with_comments!(Modport);

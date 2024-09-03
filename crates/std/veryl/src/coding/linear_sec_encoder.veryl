@@ -15,7 +15,7 @@ module linear_sec_encoder #(
     var h: logic<P, K>;
     for p in 0..P :gen_vector {
         for k in 0..K :gen_bit {
-            local IDX    : u32 = k + 1;
+            const IDX    : u32 = k + 1;
             assign h[p][k] = IDX[p];
         }
     }
@@ -23,9 +23,9 @@ module linear_sec_encoder #(
     // Move data from input word to its larger k-bit length vector
     var codeword_data_only: logic<K>;
     for k in 1..K + 1 :gen_move_data {
-        local CODEWORD_IDX: u32 = k - 1;
+        const CODEWORD_IDX: u32 = k - 1;
         if !$onehot(k) :gen_move_data_bit {
-            local WORD_IDX                        : u32 = k - $clog2(k) - 1;
+            const WORD_IDX                        : u32 = k - $clog2(k) - 1;
             assign codeword_data_only[CODEWORD_IDX] = i_word[WORD_IDX];
         } else {
             assign codeword_data_only[CODEWORD_IDX] = 1'b0;
@@ -35,7 +35,7 @@ module linear_sec_encoder #(
     // Compute parity bits
     var codeword_parity_only: logic<K>;
     for p in 0..P :gen_parities {
-        local CODEWORD_IDX                      : u32 = (1 << p) - 1;
+        const CODEWORD_IDX                      : u32 = (1 << p) - 1;
         assign codeword_parity_only[CODEWORD_IDX] = ^(h[p] & codeword_data_only);
     }
     for k in 0..K :gen_zeros {

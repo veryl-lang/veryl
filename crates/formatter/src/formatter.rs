@@ -877,22 +877,22 @@ impl VerylWalker for Formatter {
         self.semicolon(&arg.semicolon);
     }
 
-    /// Semantic action for non-terminal 'LocalDeclaration'
-    fn local_declaration(&mut self, arg: &LocalDeclaration) {
-        self.local(&arg.local);
+    /// Semantic action for non-terminal 'ConstDeclaration'
+    fn const_declaration(&mut self, arg: &ConstDeclaration) {
+        self.r#const(&arg.r#const);
         self.space(1);
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
         self.space(1);
-        match &*arg.local_declaration_group {
-            LocalDeclarationGroup::ArrayTypeEquExpression(x) => {
+        match &*arg.const_declaration_group {
+            ConstDeclarationGroup::ArrayTypeEquExpression(x) => {
                 self.array_type(&x.array_type);
                 self.space(1);
                 self.equ(&x.equ);
                 self.space(1);
                 self.expression(&x.expression);
             }
-            LocalDeclarationGroup::TypeEquTypeExpression(x) => {
+            ConstDeclarationGroup::TypeEquTypeExpression(x) => {
                 self.r#type(&x.r#type);
                 self.space(1);
                 self.equ(&x.equ);
@@ -1354,7 +1354,7 @@ impl VerylWalker for Formatter {
     fn with_parameter_item(&mut self, arg: &WithParameterItem) {
         match &*arg.with_parameter_item_group {
             WithParameterItemGroup::Param(x) => self.param(&x.param),
-            WithParameterItemGroup::Local(x) => self.local(&x.local),
+            WithParameterItemGroup::Const(x) => self.r#const(&x.r#const),
         };
         self.space(1);
         self.identifier(&arg.identifier);

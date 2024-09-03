@@ -1,10 +1,10 @@
 module Module34 {
-    local a0: u32 = '0;
-    local a1: u32 = '1;
-    local a2: u32 = 'x;
-    local a3: u32 = 'z;
-    local a4: u32 = 10'0;
-    local a5: u32 = 10'1;
-    local a6: u32 = 10'x;
-    local a7: u32 = 10'z;
+    const a0: u32 = '0;
+    const a1: u32 = '1;
+    const a2: u32 = 'x;
+    const a3: u32 = 'z;
+    const a4: u32 = 10'0;
+    const a5: u32 = 10'1;
+    const a6: u32 = 10'x;
+    const a7: u32 = 10'z;
 }

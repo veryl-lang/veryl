@@ -19,5 +19,5 @@ package Package19 {
 }
 
 package PackageA {
-    local A: u32 = 0;
+    const A: u32 = 0;
 }

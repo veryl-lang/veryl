@@ -444,11 +444,11 @@ impl fmt::Display for SymbolKind {
                     ParameterValue::Expression(x) => stringifier.expression(x),
                     ParameterValue::TypeExpression(x) => stringifier.type_expression(x),
                 }
-                match x.scope {
-                    ParameterScope::Global => {
+                match x.kind {
+                    ParameterKind::Param => {
                         format!("parameter ({}) = {}", x.r#type, stringifier.as_str())
                     }
-                    ParameterScope::Local => {
+                    ParameterKind::Const => {
                         format!("localparam ({}) = {}", x.r#type, stringifier.as_str())
                     }
                 }
@@ -857,16 +857,16 @@ impl Port {
 }
 
 #[derive(Debug, Clone)]
-pub enum ParameterScope {
-    Global,
-    Local,
+pub enum ParameterKind {
+    Param,
+    Const,
 }
 
 #[derive(Debug, Clone)]
 pub struct ParameterProperty {
     pub token: Token,
     pub r#type: Type,
-    pub scope: ParameterScope,
+    pub kind: ParameterKind,
     pub value: ParameterValue,
 }
 

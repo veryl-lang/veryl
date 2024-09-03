@@ -27,7 +27,7 @@ pub module async_fifo::<S: synchronizer> #(
     id_pop        : input  `d logic, /// pop from FIFO
     od_data       : output `d TYPE , /// pop data
 ) {
-    local POINTER_WIDTH: u32 = $clog2(DEPTH) + 1;
+    const POINTER_WIDTH: u32 = $clog2(DEPTH) + 1;
 
     var srst           : `s reset               ;
     var wp_sclk        : `s logic<POINTER_WIDTH>;

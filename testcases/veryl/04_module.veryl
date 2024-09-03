@@ -2,8 +2,8 @@
 module Module04 #(
     // module parameter
     param a  : u32  = 1        ,
-    local aa : u32  = 1        ,
-    local aaa: type = logic<10>,
+    const aa : u32  = 1        ,
+    const aaa: type = logic<10>,
 ) (
     // module port
     b    : input  logic    <10>,
@@ -13,8 +13,8 @@ module Module04 #(
     bbbbb: modport Interface04::d,
 ) {
     // localparam declaration
-    local c : u32 = 1;
-    local cc: u64 = 1;
+    const c : u32 = 1;
+    const cc: u64 = 1;
 
     // variable declaration
     let _d  : logic         = 1;

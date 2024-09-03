@@ -10,7 +10,7 @@ pub module fifo #(
     param CLEAR_DATA       : bit  = 0                       ,
     param PUSH_ON_CLEAR    : bit  = 0                       ,
     param MATCH_COUNT_WIDTH: u32  = 0                       ,
-    local COUNTER          : type = logic<$clog2(DEPTH + 1)>,
+    const COUNTER          : type = logic<$clog2(DEPTH + 1)>,
 ) (
     i_clk        : input  clock  ,
     i_rst        : input  reset  ,
@@ -24,7 +24,7 @@ pub module fifo #(
     i_pop        : input  logic  ,
     o_data       : output TYPE   ,
 ) {
-    local RAM_WORDS: u32 = if DATA_FF_OUT {
+    const RAM_WORDS: u32 = if DATA_FF_OUT {
         DEPTH - 1
     } else {
         DEPTH
@@ -39,7 +39,7 @@ pub module fifo #(
     //--------------------------------------------------------------
     //  controller
     //--------------------------------------------------------------
-    local RAM_POINTER_WIDTH: u32 = if RAM_WORDS >= 2 {
+    const RAM_POINTER_WIDTH: u32 = if RAM_WORDS >= 2 {
         $clog2(RAM_WORDS)
     } else {
         1

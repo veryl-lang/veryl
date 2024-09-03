@@ -31,8 +31,8 @@ module _onehot #(
         assign o_onehot = i_data;
         assign o_zero   = ~i_data;
     } else :gen_rec_case {
-        local WBOT      : u32         = W / 2;
-        local WTOP      : u32         = W - WBOT;
+        const WBOT      : u32         = W / 2;
+        const WTOP      : u32         = W - WBOT;
         let data_bot  : logic<WBOT> = i_data[WBOT - 1:0];
         let data_top  : logic<WTOP> = i_data[W - 1:WBOT];
         var onehot_top: logic      ;

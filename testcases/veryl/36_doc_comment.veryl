@@ -25,7 +25,7 @@
 pub module Module36 #(
     /// Data width
     param ParamA: u32 = 1,
-    local ParamB: u32 = 1,
+    const ParamB: u32 = 1,
 ) (
     i_clk  : input  logic        , /// Clock
     i_rst_n: input  logic        , /// Reset
@@ -41,7 +41,7 @@ pub module Module36 #(
 /// * list item1
 pub interface Interface36 #(
     param ParamA: u32 = 1, /// Data width
-    local ParamB: u32 = 1,
+    const ParamB: u32 = 1,
 ) {}
 
 /// Test package for doc comment

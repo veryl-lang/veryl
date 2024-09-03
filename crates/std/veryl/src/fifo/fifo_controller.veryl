@@ -21,9 +21,9 @@ module fifo_controller #(
     } else {
         1
     },
-    local RAM_POINTER: type = logic<RAM_POINTER_WIDTH>          ,
-    local POINTER    : type = logic<POINTER_WIDTH>              ,
-    local COUNTER    : type = logic<$clog2(DEPTH + 1)>          ,
+    const RAM_POINTER: type = logic<RAM_POINTER_WIDTH>          ,
+    const POINTER    : type = logic<POINTER_WIDTH>              ,
+    const COUNTER    : type = logic<$clog2(DEPTH + 1)>          ,
 ) (
     i_clk          : input  clock      ,
     i_rst          : input  reset      ,
