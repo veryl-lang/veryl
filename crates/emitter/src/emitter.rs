@@ -3381,6 +3381,12 @@ fn namespace_string(namespace: &Namespace, context: &SymbolContext) -> String {
             // top level namespace is always `_`
             let text = format!("{}_", path);
 
+            let text = if text == "$std_" {
+                "std_".to_string()
+            } else {
+                text
+            };
+
             // "$sv" namespace should be removed
             if text == "$sv_" {
                 in_sv_namespace = true;

@@ -1,5 +1,5 @@
 module Module68 {
-    inst u: std::fifo (
+    inst u: $std::fifo (
         i_clk        : _,
         i_rst        : _,
         i_clear      : _,
