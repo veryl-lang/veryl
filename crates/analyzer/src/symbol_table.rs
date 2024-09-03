@@ -1055,8 +1055,8 @@ mod tests {
         portA: input logic<10>,
         portB: modport InterfaceA::modportA,
     ) {
-        local localA: u32 = 1;
-        local localB: PackageA::StructA = 1;
+        const localA: u32 = 1;
+        const localB: PackageA::StructA = 1;
 
         type TypeA = PackageA::StructA;
 
@@ -1073,8 +1073,8 @@ mod tests {
         param paramA: u32 = 1,
         param paramB: PackageA::StructA = 1,
     ) {
-        local localA: u32 = 1;
-        local localB: PackageA::StructA = 1;
+        const localA: u32 = 1;
+        const localB: PackageA::StructA = 1;
 
         type TypeA = PackageA::StructA;
 
@@ -1090,7 +1090,7 @@ mod tests {
     }
 
     package PackageA {
-        local localA: u32 = 1;
+        const localA: u32 = 1;
 
         struct StructA {
             memberA: logic,

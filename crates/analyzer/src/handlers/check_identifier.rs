@@ -307,7 +307,7 @@ impl<'a> VerylGrammarTrait for CheckIdentifier<'a> {
         Ok(())
     }
 
-    fn local_declaration(&mut self, arg: &LocalDeclaration) -> Result<(), ParolError> {
+    fn const_declaration(&mut self, arg: &ConstDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             self.check(&arg.identifier.identifier_token.token, Kind::Parameter);
         }

@@ -1,5 +1,5 @@
 module Module06 {
-    local ParamX: u32 = 1;
+    const ParamX: u32 = 1;
 
     // function without parameter
     function FuncA (

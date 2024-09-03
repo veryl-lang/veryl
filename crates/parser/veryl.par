@@ -99,7 +99,6 @@ InstTerm              : <INITIAL, Generic       >/(?-u:\b)inst(?-u:\b)/         
 InterfaceTerm         : <INITIAL, Generic       >/(?-u:\b)interface(?-u:\b)/                                                           : Token;
 InTerm                : <INITIAL, Generic       >/(?-u:\b)in(?-u:\b)/                                                                  : Token;
 LetTerm               : <INITIAL, Generic       >/(?-u:\b)let(?-u:\b)/                                                                 : Token;
-LocalTerm             : <INITIAL, Generic       >/(?-u:\b)local(?-u:\b)/                                                               : Token;
 LogicTerm             : <INITIAL, Generic       >/(?-u:\b)logic(?-u:\b)/                                                               : Token;
 LsbTerm               : <INITIAL, Generic       >/(?-u:\b)lsb(?-u:\b)/                                                                 : Token;
 ModportTerm           : <INITIAL, Generic       >/(?-u:\b)modport(?-u:\b)/                                                             : Token;
@@ -225,7 +224,6 @@ InstToken          : InstTerm          : Token Comments;
 InterfaceToken     : InterfaceTerm     : Token Comments;
 InToken            : InTerm            : Token Comments;
 LetToken           : LetTerm           : Token Comments;
-LocalToken         : LocalTerm         : Token Comments;
 LogicToken         : LogicTerm         : Token Comments;
 LsbToken           : LsbTerm           : Token Comments;
 ModportToken       : ModportTerm       : Token Comments;
@@ -356,7 +354,6 @@ Inside        : InsideToken        : VerylToken;
 Inst          : InstToken          : VerylToken;
 Interface     : InterfaceToken     : VerylToken;
 Let           : LetToken           : VerylToken;
-Local         : LocalToken         : VerylToken;
 Logic         : LogicToken         : VerylToken;
 Lsb           : LsbToken           : VerylToken;
 Modport       : ModportToken       : VerylToken;
@@ -617,7 +614,7 @@ LetDeclaration: Let Identifier Colon [ ClockDomain ] ArrayType Equ Expression Se
 
 VarDeclaration: Var Identifier Colon [ ClockDomain ] ArrayType Semicolon;
 
-LocalDeclaration: Local Identifier Colon ( ArrayType Equ Expression | Type Equ TypeExpression ) Semicolon;
+ConstDeclaration: Const Identifier Colon ( ArrayType Equ Expression | Type Equ TypeExpression ) Semicolon;
 
 TypeDefDeclaration: Type Identifier Equ ArrayType Semicolon;
 
@@ -693,7 +690,7 @@ WithParameterList: WithParameterGroup { Comma WithParameterGroup } [ Comma ];
 
 WithParameterGroup: { Attribute } ( LBrace WithParameterList RBrace | WithParameterItem );
 
-WithParameterItem: ( Param | Local ) Identifier Colon ( ArrayType Equ Expression | Type Equ TypeExpression );
+WithParameterItem: ( Param | Const ) Identifier Colon ( ArrayType Equ Expression | Type Equ TypeExpression );
 
 // ----------------------------------------------------------------------------
 // WithGenericParameter
@@ -785,7 +782,7 @@ ModuleItem: LetDeclaration
           | VarDeclaration
           | InstDeclaration
           | TypeDefDeclaration
-          | LocalDeclaration
+          | ConstDeclaration
           | AlwaysFfDeclaration
           | AlwaysCombDeclaration
           | AssignDeclaration
@@ -819,7 +816,7 @@ InterfaceGroup: { Attribute } ( LBrace { InterfaceGroup } RBrace | InterfaceItem
 
 InterfaceItem: LetDeclaration
              | VarDeclaration
-             | LocalDeclaration
+             | ConstDeclaration
              | ModportDeclaration
              | InterfaceIfDeclaration
              | InterfaceForDeclaration
@@ -842,7 +839,7 @@ PackageDeclaration: [ Pub ] Package Identifier [ WithGenericParameter ] LBrace {
 PackageGroup: { Attribute } ( LBrace { PackageGroup } RBrace | PackageItem );
 
 PackageItem: VarDeclaration
-           | LocalDeclaration
+           | ConstDeclaration
            | TypeDefDeclaration
            | EnumDeclaration
            | StructUnionDeclaration

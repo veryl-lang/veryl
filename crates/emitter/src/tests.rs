@@ -224,7 +224,7 @@ endinterface
 #[test]
 fn expand_case_statement() {
     let code = r#"module ModuleA {
-    local y: bit = 1;
+    const y: bit = 1;
 
     var a: logic;
     let x: logic = 1;

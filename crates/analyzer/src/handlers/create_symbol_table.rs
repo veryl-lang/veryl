@@ -14,7 +14,7 @@ use crate::symbol::{
     ConnectTarget, DocComment, EnumMemberProperty, EnumMemberValue, EnumProperty, FunctionProperty,
     GenericBoundKind, GenericParameterProperty, InstanceProperty, InterfaceProperty,
     ModportFunctionMemberProperty, ModportProperty, ModportVariableMemberProperty, ModuleProperty,
-    PackageProperty, Parameter, ParameterProperty, ParameterScope, ParameterValue, Port,
+    PackageProperty, Parameter, ParameterKind, ParameterProperty, ParameterValue, Port,
     PortProperty, ProtoModuleProperty, StructMemberProperty, StructProperty, Symbol, SymbolId,
     SymbolKind, TestProperty, TestType, TypeDefProperty, TypeKind, UnionMemberProperty,
     UnionProperty, VariableAffiniation, VariableProperty,
@@ -588,21 +588,21 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         Ok(())
     }
 
-    fn local_declaration(&mut self, arg: &LocalDeclaration) -> Result<(), ParolError> {
+    fn const_declaration(&mut self, arg: &ConstDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let token = arg.identifier.identifier_token.token;
-            let property = match &*arg.local_declaration_group {
-                LocalDeclarationGroup::ArrayTypeEquExpression(x) => {
+            let property = match &*arg.const_declaration_group {
+                ConstDeclarationGroup::ArrayTypeEquExpression(x) => {
                     let r#type: SymType = x.array_type.as_ref().into();
                     let value = ParameterValue::Expression(*x.expression.clone());
                     ParameterProperty {
                         token,
                         r#type,
-                        scope: ParameterScope::Local,
+                        kind: ParameterKind::Const,
                         value,
                     }
                 }
-                LocalDeclarationGroup::TypeEquTypeExpression(x) => {
+                ConstDeclarationGroup::TypeEquTypeExpression(x) => {
                     let r#type: SymType = SymType {
                         modifier: vec![],
                         kind: TypeKind::Type,
@@ -614,7 +614,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     ParameterProperty {
                         token,
                         r#type,
-                        scope: ParameterScope::Local,
+                        kind: ParameterKind::Const,
                         value,
                     }
                 }
@@ -865,9 +865,9 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
     fn with_parameter_item(&mut self, arg: &WithParameterItem) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let token = arg.identifier.identifier_token.token;
-            let scope = match &*arg.with_parameter_item_group {
-                WithParameterItemGroup::Param(_) => ParameterScope::Global,
-                WithParameterItemGroup::Local(_) => ParameterScope::Local,
+            let kind = match &*arg.with_parameter_item_group {
+                WithParameterItemGroup::Param(_) => ParameterKind::Param,
+                WithParameterItemGroup::Const(_) => ParameterKind::Const,
             };
             let property = match &*arg.with_parameter_item_group0 {
                 WithParameterItemGroup0::ArrayTypeEquExpression(x) => {
@@ -876,7 +876,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     ParameterProperty {
                         token,
                         r#type,
-                        scope,
+                        kind,
                         value,
                     }
                 }
@@ -892,7 +892,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     ParameterProperty {
                         token,
                         r#type,
-                        scope,
+                        kind,
                         value,
                     }
                 }

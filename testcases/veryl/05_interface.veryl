@@ -3,11 +3,11 @@ interface Interface05 #(
     // interface parameter
     param a  : u32 = 1,
     param aa : u32 = 1,
-    local aaa: u32 = 1,
+    const aaa: u32 = 1,
 ) {
     // localparam declaration
-    local b : u32 = 1;
-    local bb: u64 = 1;
+    const b : u32 = 1;
+    const bb: u64 = 1;
 
     // variable declaration
     var c  : logic            ;

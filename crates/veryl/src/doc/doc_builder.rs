@@ -8,7 +8,7 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::path::PathBuf;
 use tempfile::TempDir;
-use veryl_analyzer::symbol::{ClockDomain, ParameterScope, Symbol, SymbolKind};
+use veryl_analyzer::symbol::{ClockDomain, ParameterKind, Symbol, SymbolKind};
 use veryl_analyzer::symbol_table;
 use veryl_metadata::Metadata;
 use veryl_parser::veryl_token::Token;
@@ -663,7 +663,7 @@ impl DocBuilder {
             let parameters: Vec<_> = property
                 .parameters
                 .iter()
-                .filter(|x| matches!(x.property().scope, ParameterScope::Global,))
+                .filter(|x| matches!(x.property().kind, ParameterKind::Param,))
                 .map(|x| ParameterData {
                     name: x.name.to_string(),
                     typ: format!("{}", x.property().r#type),
@@ -726,7 +726,7 @@ impl DocBuilder {
             let parameters: Vec<_> = property
                 .parameters
                 .iter()
-                .filter(|x| matches!(x.property().scope, ParameterScope::Global,))
+                .filter(|x| matches!(x.property().kind, ParameterKind::Param,))
                 .map(|x| ParameterData {
                     name: x.name.to_string(),
                     typ: format!("{}", x.property().r#type),
@@ -790,7 +790,7 @@ impl DocBuilder {
             let parameters: Vec<_> = property
                 .parameters
                 .iter()
-                .filter(|x| matches!(x.property().scope, ParameterScope::Global,))
+                .filter(|x| matches!(x.property().kind, ParameterKind::Param,))
                 .map(|x| ParameterData {
                     name: x.name.to_string(),
                     typ: format!("{}", x.property().r#type),

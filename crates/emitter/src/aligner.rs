@@ -228,6 +228,11 @@ impl VerylWalker for Aligner {
         self.veryl_token(&arg.clock_negedge_token.replace("logic"));
     }
 
+    /// Semantic action for non-terminal 'Const'
+    fn r#const(&mut self, arg: &Const) {
+        self.veryl_token(&arg.const_token.replace("localparam"));
+    }
+
     /// Semantic action for non-terminal 'Reset'
     fn reset(&mut self, arg: &Reset) {
         self.veryl_token(&arg.reset_token.replace("logic"));
@@ -271,11 +276,6 @@ impl VerylWalker for Aligner {
     /// Semantic action for non-terminal 'I64'
     fn i64(&mut self, arg: &I64) {
         self.veryl_token(&arg.i64_token.replace("longint signed"));
-    }
-
-    /// Semantic action for non-terminal 'Local'
-    fn local(&mut self, arg: &Local) {
-        self.veryl_token(&arg.local_token.replace("localparam"));
     }
 
     /// Semantic action for non-terminal 'Param'
@@ -703,34 +703,34 @@ impl VerylWalker for Aligner {
         self.semicolon(&arg.semicolon);
     }
 
-    /// Semantic action for non-terminal 'LocalDeclaration'
-    fn local_declaration(&mut self, arg: &LocalDeclaration) {
-        self.local(&arg.local);
+    /// Semantic action for non-terminal 'ConstDeclaration'
+    fn const_declaration(&mut self, arg: &ConstDeclaration) {
+        self.r#const(&arg.r#const);
         self.aligns[align_kind::IDENTIFIER].start_item();
         self.identifier(&arg.identifier);
         self.aligns[align_kind::IDENTIFIER].finish_item();
         self.colon(&arg.colon);
-        match &*arg.local_declaration_group {
-            LocalDeclarationGroup::ArrayTypeEquExpression(x) => {
+        match &*arg.const_declaration_group {
+            ConstDeclarationGroup::ArrayTypeEquExpression(x) => {
                 if !self.is_implicit_scalar_type(&x.array_type.scalar_type) {
                     self.array_type(&x.array_type);
                 } else {
                     self.aligns[align_kind::TYPE].start_item();
                     self.aligns[align_kind::TYPE]
-                        .dummy_location(arg.local.local_token.token.into());
+                        .dummy_location(arg.r#const.const_token.token.into());
                     self.aligns[align_kind::TYPE].finish_item();
                 }
                 self.equ(&x.equ);
                 self.expression(&x.expression);
             }
-            LocalDeclarationGroup::TypeEquTypeExpression(x) => {
+            ConstDeclarationGroup::TypeEquTypeExpression(x) => {
                 self.aligns[align_kind::TYPE].start_item();
                 if !self.is_implicit_type() {
                     self.r#type(&x.r#type);
                     self.space(1);
                 } else {
                     self.aligns[align_kind::TYPE]
-                        .dummy_location(arg.local.local_token.token.into());
+                        .dummy_location(arg.r#const.const_token.token.into());
                 }
                 self.aligns[align_kind::TYPE].finish_item();
                 self.equ(&x.equ);
@@ -870,7 +870,7 @@ impl VerylWalker for Aligner {
         self.aligns[align_kind::PARAMETER].start_item();
         match &*arg.with_parameter_item_group {
             WithParameterItemGroup::Param(x) => self.param(&x.param),
-            WithParameterItemGroup::Local(x) => self.local(&x.local),
+            WithParameterItemGroup::Const(x) => self.r#const(&x.r#const),
         };
         self.aligns[align_kind::PARAMETER].finish_item();
         self.aligns[align_kind::IDENTIFIER].start_item();

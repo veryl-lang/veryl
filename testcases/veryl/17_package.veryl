@@ -1,6 +1,6 @@
 package Package17 {
     // localparam declaration
-    local ParamX: u32 = 1;
+    const ParamX: u32 = 1;
 
     // variable declaration
     var _b: logic;

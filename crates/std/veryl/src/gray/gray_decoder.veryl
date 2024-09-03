@@ -14,8 +14,8 @@ pub module gray_decoder #(
     if WIDTH == 1 :g_base {
         assign o_bin = i_gray;
     } else {
-        local BWIDTH: u32 = WIDTH / 2;
-        local TWIDTH: u32 = WIDTH - BWIDTH;
+        const BWIDTH: u32 = WIDTH / 2;
+        const TWIDTH: u32 = WIDTH - BWIDTH;
 
         // Top Bits
         let top_in : logic<TWIDTH> = i_gray[WIDTH - 1:BWIDTH];

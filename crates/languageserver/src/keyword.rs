@@ -33,7 +33,6 @@ pub const KEYWORDS: &[&str] = &[
     "interface",
     "in",
     "let",
-    "local",
     "logic",
     "lsb",
     "modport",

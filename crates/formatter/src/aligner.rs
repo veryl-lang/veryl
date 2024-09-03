@@ -630,20 +630,20 @@ impl VerylWalker for Aligner {
         self.semicolon(&arg.semicolon);
     }
 
-    /// Semantic action for non-terminal 'LocalDeclaration'
-    fn local_declaration(&mut self, arg: &LocalDeclaration) {
-        self.local(&arg.local);
+    /// Semantic action for non-terminal 'ConstDeclaration'
+    fn const_declaration(&mut self, arg: &ConstDeclaration) {
+        self.r#const(&arg.r#const);
         self.aligns[align_kind::IDENTIFIER].start_item();
         self.identifier(&arg.identifier);
         self.aligns[align_kind::IDENTIFIER].finish_item();
         self.colon(&arg.colon);
-        match &*arg.local_declaration_group {
-            LocalDeclarationGroup::ArrayTypeEquExpression(x) => {
+        match &*arg.const_declaration_group {
+            ConstDeclarationGroup::ArrayTypeEquExpression(x) => {
                 self.array_type(&x.array_type);
                 self.equ(&x.equ);
                 self.expression(&x.expression);
             }
-            LocalDeclarationGroup::TypeEquTypeExpression(x) => {
+            ConstDeclarationGroup::TypeEquTypeExpression(x) => {
                 self.aligns[align_kind::TYPE].start_item();
                 self.r#type(&x.r#type);
                 self.aligns[align_kind::TYPE].finish_item();
@@ -770,7 +770,7 @@ impl VerylWalker for Aligner {
         self.aligns[align_kind::PARAMETER].start_item();
         match &*arg.with_parameter_item_group {
             WithParameterItemGroup::Param(x) => self.param(&x.param),
-            WithParameterItemGroup::Local(x) => self.local(&x.local),
+            WithParameterItemGroup::Const(x) => self.r#const(&x.r#const),
         };
         self.aligns[align_kind::PARAMETER].finish_item();
         self.aligns[align_kind::IDENTIFIER].start_item();

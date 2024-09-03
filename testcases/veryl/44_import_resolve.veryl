@@ -12,9 +12,9 @@ module Module44 {
 }
 
 package Package44A {
-    local z: u32 = 0;
+    const z: u32 = 0;
 }
 
 package Package44B {
-    local y: u32 = 0;
+    const y: u32 = 0;
 }

@@ -5,7 +5,7 @@ pub module binary_encoder #(
     /// Width of the input unary vector
     param UNARY_WIDTH: u32 = 256,
     /// Width of the output binary vector
-    local BIN_WIDTH: u32 = $clog2(UNARY_WIDTH),
+    const BIN_WIDTH: u32 = $clog2(UNARY_WIDTH),
 ) (
     /// Enable Signal.  Dynamic power is minimzed when not enabled.
     i_en: input logic,
@@ -31,7 +31,7 @@ pub module binary_encoder #(
 
 module _binary_encoder #(
     param UNARY_WIDTH: u32 = 256                ,
-    local BIN_WIDTH  : u32 = $clog2(UNARY_WIDTH),
+    const BIN_WIDTH  : u32 = $clog2(UNARY_WIDTH),
 ) (
     i_unary: input  logic<UNARY_WIDTH>,
     o_bin  : output logic<BIN_WIDTH>  ,
@@ -51,9 +51,9 @@ module _binary_encoder #(
             default: 2'bxx,
         };
     } else :g_recursive_case {
-        local REC_UNARY_WIDTH_BOT: u32 = UNARY_WIDTH / 2;
-        local REC_UNARY_WIDTH_TOP: u32 = UNARY_WIDTH - REC_UNARY_WIDTH_BOT;
-        local REC_BIN_WIDTH      : u32 = BIN_WIDTH - 1;
+        const REC_UNARY_WIDTH_BOT: u32 = UNARY_WIDTH / 2;
+        const REC_UNARY_WIDTH_TOP: u32 = UNARY_WIDTH - REC_UNARY_WIDTH_BOT;
+        const REC_BIN_WIDTH      : u32 = BIN_WIDTH - 1;
 
         let r_unary_bot: logic<REC_UNARY_WIDTH_BOT> = i_unary[REC_UNARY_WIDTH_BOT - 1:0];
         let r_unary_top: logic<REC_UNARY_WIDTH_TOP> = i_unary[UNARY_WIDTH - 1:REC_UNARY_WIDTH_BOT];

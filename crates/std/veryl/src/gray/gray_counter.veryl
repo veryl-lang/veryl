@@ -11,7 +11,7 @@ pub module gray_counter #(
     /// Whether counter is wrap around
     param WRAP_AROUND: bit = 1,
     /// Counter type
-    local COUNT: type = logic<WIDTH>,
+    const COUNT: type = logic<WIDTH>,
 ) (
     /// Clock
     i_clk: input clock,

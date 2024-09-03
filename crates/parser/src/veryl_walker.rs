@@ -573,13 +573,6 @@ pub trait VerylWalker {
         after!(self, r#let, arg);
     }
 
-    /// Semantic action for non-terminal 'Local'
-    fn local(&mut self, arg: &Local) {
-        before!(self, local, arg);
-        self.veryl_token(&arg.local_token);
-        after!(self, local, arg);
-    }
-
     /// Semantic action for non-terminal 'Logic'
     fn logic(&mut self, arg: &Logic) {
         before!(self, logic, arg);
@@ -1809,26 +1802,26 @@ pub trait VerylWalker {
         after!(self, var_declaration, arg);
     }
 
-    /// Semantic action for non-terminal 'LocalDeclaration'
-    fn local_declaration(&mut self, arg: &LocalDeclaration) {
-        before!(self, local_declaration, arg);
-        self.local(&arg.local);
+    /// Semantic action for non-terminal 'ConstDeclaration'
+    fn const_declaration(&mut self, arg: &ConstDeclaration) {
+        before!(self, const_declaration, arg);
+        self.r#const(&arg.r#const);
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
-        match &*arg.local_declaration_group {
-            LocalDeclarationGroup::ArrayTypeEquExpression(x) => {
+        match &*arg.const_declaration_group {
+            ConstDeclarationGroup::ArrayTypeEquExpression(x) => {
                 self.array_type(&x.array_type);
                 self.equ(&x.equ);
                 self.expression(&x.expression);
             }
-            LocalDeclarationGroup::TypeEquTypeExpression(x) => {
+            ConstDeclarationGroup::TypeEquTypeExpression(x) => {
                 self.r#type(&x.r#type);
                 self.equ(&x.equ);
                 self.type_expression(&x.type_expression);
             }
         }
         self.semicolon(&arg.semicolon);
-        after!(self, local_declaration, arg);
+        after!(self, const_declaration, arg);
     }
 
     /// Semantic action for non-terminal 'TypeDefDeclaration'
@@ -2264,7 +2257,7 @@ pub trait VerylWalker {
         before!(self, with_parameter_item, arg);
         match &*arg.with_parameter_item_group {
             WithParameterItemGroup::Param(x) => self.param(&x.param),
-            WithParameterItemGroup::Local(x) => self.local(&x.local),
+            WithParameterItemGroup::Const(x) => self.r#const(&x.r#const),
         };
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
@@ -2646,7 +2639,7 @@ pub trait VerylWalker {
             ModuleItem::LetDeclaration(x) => self.let_declaration(&x.let_declaration),
             ModuleItem::VarDeclaration(x) => self.var_declaration(&x.var_declaration),
             ModuleItem::InstDeclaration(x) => self.inst_declaration(&x.inst_declaration),
-            ModuleItem::LocalDeclaration(x) => self.local_declaration(&x.local_declaration),
+            ModuleItem::ConstDeclaration(x) => self.const_declaration(&x.const_declaration),
             ModuleItem::TypeDefDeclaration(x) => self.type_def_declaration(&x.type_def_declaration),
             ModuleItem::AlwaysFfDeclaration(x) => {
                 self.always_ff_declaration(&x.always_ff_declaration)
@@ -2787,7 +2780,7 @@ pub trait VerylWalker {
         match arg {
             InterfaceItem::LetDeclaration(x) => self.let_declaration(&x.let_declaration),
             InterfaceItem::VarDeclaration(x) => self.var_declaration(&x.var_declaration),
-            InterfaceItem::LocalDeclaration(x) => self.local_declaration(&x.local_declaration),
+            InterfaceItem::ConstDeclaration(x) => self.const_declaration(&x.const_declaration),
             InterfaceItem::ModportDeclaration(x) => {
                 self.modport_declaration(&x.modport_declaration)
             }
@@ -2862,7 +2855,7 @@ pub trait VerylWalker {
         before!(self, package_item, arg);
         match arg {
             PackageItem::VarDeclaration(x) => self.var_declaration(&x.var_declaration),
-            PackageItem::LocalDeclaration(x) => self.local_declaration(&x.local_declaration),
+            PackageItem::ConstDeclaration(x) => self.const_declaration(&x.const_declaration),
             PackageItem::TypeDefDeclaration(x) => {
                 self.type_def_declaration(&x.type_def_declaration)
             }

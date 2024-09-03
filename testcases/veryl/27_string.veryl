@@ -1,5 +1,5 @@
 module Module27 {
-    local a: string = "aaa";
+    const a: string = "aaa";
 
     let _b: string = "bbb";
 }

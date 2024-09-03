@@ -1,6 +1,6 @@
 pub module countones #(
     param W    : u32 = 16,
-    local CLOGW: u32 = if (W >: 1) {
+    const CLOGW: u32 = if (W >: 1) {
         $clog2(W) + 1
     } else {
         1
@@ -12,17 +12,17 @@ pub module countones #(
     if (W == 1) :gen_base_case {
         assign o_ones = i_data;
     } else :gen_rec_case {
-        local WBOT    : u32         = W / 2;
-        local WTOP    : u32         = W - WBOT;
+        const WBOT    : u32         = W / 2;
+        const WTOP    : u32         = W - WBOT;
         let data_bot: logic<WBOT> = i_data[WBOT - 1:0];
         let data_top: logic<WTOP> = i_data[W - 1:WBOT];
 
-        local CLOGWBOT: u32 = if (WBOT >: 1) {
+        const CLOGWBOT: u32 = if (WBOT >: 1) {
             $clog2(WBOT) + 1
         } else {
             1
         };
-        local CLOGWTOP: u32 = if (WTOP >: 1) {
+        const CLOGWTOP: u32 = if (WTOP >: 1) {
             $clog2(WTOP) + 1
         } else {
             1

@@ -1,6 +1,6 @@
 module Module28 {
-    local WIDTH0: u32 = 10;
-    local WIDTH1: u32 = 20;
+    const WIDTH0: u32 = 10;
+    const WIDTH1: u32 = 20;
 
     let a: logic<10, 20>              = 1;
     let b: logic<WIDTH0 + 10, WIDTH1> = 1;

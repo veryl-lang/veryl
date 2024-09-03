@@ -16,9 +16,9 @@ pub interface Interface56B::<T: const = Package56B> {
 }
 
 package Package56A {
-    local X: u32 = 1;
+    const X: u32 = 1;
 }
 
 package Package56B {
-    local X: u32 = 2;
+    const X: u32 = 2;
 }

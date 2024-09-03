@@ -7,8 +7,8 @@ use std::collections::HashMap;
 use veryl_parser::{
     resource_table,
     veryl_grammar_trait::{
-        DescriptionItem, EnumDeclaration, ExpressionIdentifier, InterfaceDeclaration,
-        LocalDeclaration, ModportDeclaration, ModuleDeclaration, PackageDeclaration,
+        ConstDeclaration, DescriptionItem, EnumDeclaration, ExpressionIdentifier,
+        InterfaceDeclaration, ModportDeclaration, ModuleDeclaration, PackageDeclaration,
         ScopedIdentifier, StructUnion, StructUnionDeclaration, TypeDefDeclaration, Veryl,
         VerylGrammarTrait,
     },
@@ -149,7 +149,7 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
         Ok(())
     }
 
-    fn local_declaration(&mut self, arg: &LocalDeclaration) -> Result<(), ParolError> {
+    fn const_declaration(&mut self, arg: &ConstDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let path: SymbolPathNamespace = arg.identifier.as_ref().into();
             let name = arg.identifier.identifier_token.to_string();

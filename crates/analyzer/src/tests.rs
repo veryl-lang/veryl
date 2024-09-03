@@ -38,7 +38,7 @@ fn clock_check() {
         clk_a: input `_a clock<2>,
         clk_b: input `_b clock[2]
     ) {
-        local POS: u32 = 0;
+        const POS: u32 = 0;
         var a: `_a logic;
         var b: `_b logic;
         always_ff (clk_a[POS]) {
@@ -58,7 +58,7 @@ fn clock_check() {
         clk_a: input `_a clock<2, 2>,
         clk_b: input `_b clock[2, 2]
     ) {
-        local POS: u32 = 0;
+        const POS: u32 = 0;
         var a: `_a logic;
         var b: `_b logic;
         always_ff (clk_a[POS][POS]) {
@@ -92,7 +92,7 @@ fn clock_check() {
         clk_a: input `_a clock<2>,
         clk_b: input `_b clock[2]
     ) {
-        local POS: u32 = 0;
+        const POS: u32 = 0;
         var a: `_a logic;
         var b: `_b logic;
         always_ff (clk_a) {
@@ -112,7 +112,7 @@ fn clock_check() {
         clk_a: input `_a clock<2>,
         clk_b: input `_b clock[2]
     ) {
-        local POS: u32 = 0;
+        const POS: u32 = 0;
         var a: `_a logic;
         var b: `_b logic;
         always_ff (clk_a[POS]) {
@@ -132,7 +132,7 @@ fn clock_check() {
         clk_a: input `_a clock<2, 2>,
         clk_b: input `_b clock[2, 2]
     ) {
-        local POS: u32 = 0;
+        const POS: u32 = 0;
         var a: `_a logic;
         var b: `_b logic;
         always_ff (clk_a[POS]) {
@@ -152,7 +152,7 @@ fn clock_check() {
         clk_a: input `_a clock<2, 2>,
         clk_b: input `_b clock[2, 2]
     ) {
-        local POS: u32 = 0;
+        const POS: u32 = 0;
         var a: `_a logic;
         var b: `_b logic;
         always_ff (clk_a[POS][POS]) {
@@ -194,7 +194,7 @@ fn reset_check() {
         clk_b: input `_b clock,
         rst_b: input `_b reset[2]
     ) {
-        local POS: u32 = 0;
+        const POS: u32 = 0;
         var a: `_a logic;
         var b: `_b logic;
         always_ff (clk_a, rst_a[POS]) {
@@ -220,7 +220,7 @@ fn reset_check() {
         clk_b: input `_b clock,
         rst_b: input `_b reset[2, 2]
     ) {
-        local POS: u32 = 0;
+        const POS: u32 = 0;
         var a: `_a logic;
         var b: `_b logic;
         always_ff (clk_a, rst_a[POS][POS]) {
@@ -263,7 +263,7 @@ fn reset_check() {
         clk_b: input `_b clock,
         rst_b: input `_b reset[2]
     ) {
-        local POS: u32 = 0;
+        const POS: u32 = 0;
         var a: `_a logic;
         var b: `_b logic;
         always_ff (clk_a, rst_a) {
@@ -289,7 +289,7 @@ fn reset_check() {
         clk_b: input `_b clock,
         rst_b: input `_b reset[2]
     ) {
-        local POS: u32 = 0;
+        const POS: u32 = 0;
         var a: `_a logic;
         var b: `_b logic;
         always_ff (clk_a, rst_a[POS]) {
@@ -315,7 +315,7 @@ fn reset_check() {
         clk_b: input `_b clock,
         rst_b: input `_b reset[2, 2]
     ) {
-        local POS: u32 = 0;
+        const POS: u32 = 0;
         var a: `_a logic;
         var b: `_b logic;
         always_ff (clk_a, rst_a[POS]) {
@@ -341,7 +341,7 @@ fn reset_check() {
         clk_b: input `_b clock,
         rst_b: input `_b reset[2, 2]
     ) {
-        local POS: u32 = 0;
+        const POS: u32 = 0;
         var a: `_a logic;
         var b: `_b logic;
         always_ff (clk_a, rst_a[POS][POS]) {
@@ -449,8 +449,8 @@ fn cyclic_type_dependency() {
 fn duplicated_identifier() {
     let code = r#"
     module ModuleA {
-        local a: u32 = 1;
-        local a: u32 = 1;
+        const a: u32 = 1;
+        const a: u32 = 1;
     }
     "#;
 
@@ -915,7 +915,7 @@ fn mismatch_attribute_args() {
     let code = r#"
     module ModuleA {
         #[sv]
-        local a: u32 = 1;
+        const a: u32 = 1;
     }
     "#;
 
@@ -930,7 +930,7 @@ fn mismatch_attribute_args() {
 fn mismatch_type() {
     let code = r#"
     module ModuleA {
-        local a: u32 = 1;
+        const a: u32 = 1;
         inst u: a;
     }
     "#;
@@ -1041,7 +1041,7 @@ fn mismatch_type() {
             return g;
         }
 
-        local X: u32 = 1;
+        const X: u32 = 1;
         let _g: logic = FuncJ::<X>();
     }
     "#;
@@ -1386,7 +1386,7 @@ fn too_large_enum_variant() {
 fn too_large_number() {
     let code = r#"
     module ModuleA {
-        local a: u32 = 2'd100;
+        const a: u32 = 2'd100;
     }
     "#;
 
@@ -1562,7 +1562,7 @@ fn unknown_attribute() {
     let code = r#"
     module ModuleA {
         #[dummy_name]
-        local a: u32 = 1;
+        const a: u32 = 1;
     }
     "#;
 
@@ -1971,7 +1971,7 @@ fn test_factors() {
         let state: State = State::Run1;
         var u    : U    ;
         var s    : S    ;
-        local J    : i32   = 32;
+        const J    : i32   = 32;
 
         for i in 0..1 :g_display {
             always_ff {
@@ -2057,7 +2057,7 @@ fn invalid_case_condition_expression() {
         o_b  : output logic,
         o_c  : output logic,
     ) {
-        local ONE: bit <3> = 3'd1;
+        const ONE: bit <3> = 3'd1;
 
         always_comb {
           case i_sel {
