@@ -1,0 +1,73 @@
+/// Enocdes a vector for single-error correction using a linear Hamming code.
+module linear_sec_encoder #(
+    /// Number of parity bits
+    param P: u32 = 4,
+    /// Length of codeword
+    param K: u32 = (1 << P) - 1,
+    /// Length of data
+    param N: u32 = K - P,
+) (
+    i_word    : input  logic<N>,
+    o_codeword: output logic<K>,
+) {
+
+    // Generate H Matrix
+    var h: logic<P, K>;
+    for p in 0..P :gen_vector {
+        for k in 0..K :gen_bit {
+            local IDX    : u32 = k + 1;
+            assign h[p][k] = IDX[p];
+        }
+    }
+
+    // Move data from input word to its larger k-bit length vector
+    var codeword_data_only: logic<K>;
+    for k in 1..K + 1 :gen_move_data {
+        local CODEWORD_IDX: u32 = k - 1;
+        if !$onehot(k) :gen_move_data_bit {
+            local WORD_IDX                        : u32 = k - $clog2(k) - 1;
+            assign codeword_data_only[CODEWORD_IDX] = i_word[WORD_IDX];
+        } else {
+            assign codeword_data_only[CODEWORD_IDX] = 1'b0;
+        }
+    }
+
+    // Compute parity bits
+    var codeword_parity_only: logic<K>;
+    for p in 0..P :gen_parities {
+        local CODEWORD_IDX                      : u32 = (1 << p) - 1;
+        assign codeword_parity_only[CODEWORD_IDX] = ^(h[p] & codeword_data_only);
+    }
+    for k in 0..K :gen_zeros {
+        if !$onehot(k + 1) :gen_zero_bit {
+            assign codeword_parity_only[k] = 1'b0;
+        }
+    }
+
+    assign o_codeword = codeword_data_only | codeword_parity_only;
+}
+
+#[test(test_3_1_hamming_encode)]
+embed (inline) sv{{{
+module test_3_1_hamming_code;
+  bit i_word;
+  logic [2:0] o_codeword;
+
+  std_linear_sec_encoder#(.P(2)) dut(.*);
+
+  initial begin
+    $display("enc.h[0]: %b\n", dut.h[0]);
+    $display("enc.h[1]: %b\n", dut.h[1]);
+    $monitor("word: %b\n", i_word, "cwrd: %3b\n", o_codeword,
+    "cwrd_dataonly: %b\n", dut.codeword_data_only,
+    "cwrd_parionly: %b\n\n", dut.codeword_parity_only,
+    );
+    i_word = 1'b0;
+    #1 assert(o_codeword == 3'b000);
+    i_word = 1'b1;
+    #1 assert(o_codeword == 3'b111);
+    $finish;
+  end
+
+endmodule
+}}}

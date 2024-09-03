@@ -4,9 +4,6 @@
 [submodule "doc"]
 	path = doc
 	url = https://github.com/veryl-lang/doc
-[submodule "std"]
-	path = crates/metadata/std
-	url = https://github.com/veryl-lang/std
 [submodule "support/sourcemap-resolver"]
 	path = support/sourcemap-resolver
 	url = https://github.com/veryl-lang/sourcemap-resolver

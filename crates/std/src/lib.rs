@@ -6,7 +6,7 @@ use veryl_path::{PathError, PathPair};
 include!(concat!(env!("OUT_DIR"), "/std_hash.rs"));
 
 #[derive(Embed)]
-#[folder = "../metadata/std/src"]
+#[folder = "./veryl/src"]
 #[include = "*.veryl"]
 struct Asset;
 

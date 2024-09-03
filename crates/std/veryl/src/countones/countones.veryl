@@ -1,0 +1,85 @@
+pub module countones #(
+    param W    : u32 = 16,
+    local CLOGW: u32 = if (W >: 1) {
+        $clog2(W) + 1
+    } else {
+        1
+    },
+) (
+    i_data: input  logic<W>    ,
+    o_ones: output logic<CLOGW>,
+) {
+    if (W == 1) :gen_base_case {
+        assign o_ones = i_data;
+    } else :gen_rec_case {
+        local WBOT    : u32         = W / 2;
+        local WTOP    : u32         = W - WBOT;
+        let data_bot: logic<WBOT> = i_data[WBOT - 1:0];
+        let data_top: logic<WTOP> = i_data[W - 1:WBOT];
+
+        local CLOGWBOT: u32 = if (WBOT >: 1) {
+            $clog2(WBOT) + 1
+        } else {
+            1
+        };
+        local CLOGWTOP: u32 = if (WTOP >: 1) {
+            $clog2(WTOP) + 1
+        } else {
+            1
+        };
+        var ones_bot: logic<CLOGWBOT>;
+        var ones_top: logic<CLOGWTOP>;
+
+        inst u_bot: countones #(
+            W: WBOT,
+        ) (
+            i_data: data_bot,
+            o_ones: ones_bot,
+        );
+        inst u_top: countones #(
+            W: WTOP,
+        ) (
+            i_data: data_top,
+            o_ones: ones_top,
+        );
+        assign o_ones = {1'b0 repeat (W - WTOP), ones_top} + {1'b0 repeat (W - WBOT), ones_bot};
+        // initial {
+        //     $monitor("i_data: %b, data_top: %b, data_bot: %b\n", i_data, data_top, data_bot, "o_ones: %d, ones_top: %d, ones_bot: %d\n", o_ones, ones_top, ones_bot);
+        // }
+    }
+}
+
+#[test(test_countones)]
+embed (inline) sv{{{
+module test_countones;
+
+  parameter MIN = 1;
+  parameter MAX = 20;
+  logic [MAX:MIN] done;
+
+  // initial begin $display("Hello, World!\n"); $finish; end
+  for (genvar i = MIN; i <= MAX; ++i) begin : gen_duts
+    bit [i-1:0] i_data;
+    logic [((i > 1) ? $clog2(i) : 0):0] o_ones;
+    std_countones #(i) u_dut(.*);
+
+    initial begin
+      done[i] = 1'b0;
+      for (int j = 0; j < (1 << i); ++j) begin
+        i_data = j;
+        #1;
+        assert(o_ones == $countones(i_data)) else begin
+          $display("Expected %d, but got %d ones in %b of length %d", $countones(i_data), o_ones, i_data, i);
+        end
+      end
+      $display("Done verifying countones#(%2d)", i);
+    end
+  end
+
+  always_comb begin
+    if (done == '1)
+      $finish;
+  end
+  
+endmodule
+}}}

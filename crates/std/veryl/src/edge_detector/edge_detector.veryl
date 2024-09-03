@@ -1,0 +1,38 @@
+/// Edge detector
+pub module edge_detector #(
+    /// Data width
+    param WIDTH: u32 = 1,
+    /// Initial value of internal FF
+    param INITIAL_VALUE: bit<WIDTH> = '0,
+) (
+    /// Clock
+    i_clk: input clock,
+    /// Reset
+    i_rst: input reset,
+    /// Clear
+    i_clear: input logic,
+    /// Data
+    i_data: input logic<WIDTH>,
+    /// Both edges
+    o_edge: output logic<WIDTH>,
+    /// Positive edge
+    o_posedge: output logic<WIDTH>,
+    /// Negative edge
+    o_negedge: output logic<WIDTH>,
+) {
+    var data: logic<WIDTH>;
+
+    assign o_edge    = (i_data) ^ (data) & (~i_clear);
+    assign o_posedge = (i_data) & (~data) & (~i_clear);
+    assign o_negedge = (~i_data) & (data) & (~i_clear);
+
+    always_ff {
+        if_reset {
+            data = INITIAL_VALUE;
+        } else if i_clear {
+            data = INITIAL_VALUE;
+        } else {
+            data = i_data;
+        }
+    }
+}

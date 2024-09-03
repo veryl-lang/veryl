@@ -1,0 +1,110 @@
+/// Decodes a Hamming encoded single-error-correcting bitvector into its closest word
+module linear_sec_decoder #(
+    /// Number of parity bits
+    param P: u32 = 4,
+    /// Length of codeword
+    param K: u32 = (1 << P) - 1,
+    /// Length of data
+    param N: u32 = K - P,
+) (
+    i_codeword: input  logic<K>,
+    o_word    : output logic<N>,
+    /// Set iff the input codeword had a detected and corrected single-bit error in it
+    o_corrected: output logic,
+
+) {
+    // 1-indexed codeword
+    let codeword          : logic<K + 1> = {i_codeword, 1'b0};
+    var codeword_corrected: logic<K + 1>;
+
+    var errors: logic<P>;
+
+    // Generate word from corrected codeword
+    for idx in 1..(K + 2) :g_create_word {
+        if !$onehot(idx) :g_data_bit {
+            local CEIL            : u32 = $clog2(idx);
+            local WORD_IDX        : u32 = idx - 1 - CEIL;
+            assign o_word[WORD_IDX] = codeword_corrected[idx];
+        }
+    }
+
+    // Check parities
+    // for k in 1..K + 1 :g_check_parities {
+    //     local ERROR_IDX: u32 = k - 1;
+    //     if $onehot(k) :g_error_check_parities {
+    //         var masked_bits    : logic<K + 1>;
+    //         assign masked_bits[0]  = 1'b0;
+    //         local ONE_IDX_SET_BIT: u32 = $clog2(k);
+    //         for idx in 1..K + 1 :g_check_bits {
+    //             if idx[ONE_IDX_SET_BIT] :g_take_parity {
+    //                 assign masked_bits[idx] = codeword[idx];
+    //             } else {
+    //                 assign masked_bits[idx] = 1'b0;
+    //             }
+    //         }
+    //         assign errors[ERROR_IDX] = ^masked_bits;
+    //     } else {
+    //         assign errors[ERROR_IDX] = 1'b0;
+    //     }
+    // }
+    for pbit in 1..P + 1 :g_check_parities {
+        local ONE_IDX_SET_BIT: u32          = pbit - 1;
+        var masked_bits    : logic<K + 1>;
+        assign masked_bits[0]  = 1'b0;
+        for idx in 1..K + 1 :g_check_bits {
+            if idx[ONE_IDX_SET_BIT] :g_take_parity {
+                assign masked_bits[idx] = codeword[idx];
+            } else {
+                assign masked_bits[idx] = 1'b0;
+            }
+        }
+        assign errors[ONE_IDX_SET_BIT] = ^masked_bits;
+    }
+    // for idx in 1..(K + 1) :g_check_parities {
+    //     if $onehot(idx) :g_is_onehot {
+    //         local ONE_IDX_SET_BIT: u32      = $clog2(idx);
+    //         var masked_bits    : logic<K>;
+    //         for idx2 in 1..(P + 1) :gen_mask {
+    //             if idx2[ONE_IDX_SET_BIT] :g_take_parity {
+    //                 assign masked_bits[idx2 - 1] = codeword[idx2];
+    //             } else {
+    //                 assign masked_bits[idx2 - 1] = 1'b0;
+    //             }
+    //         }
+    //         assign errors[ONE_IDX_SET_BIT] = ~^masked_bits;
+    //     }
+    // }
+
+    // Correct as needed
+    assign o_corrected = |errors;
+    always_comb {
+        codeword_corrected         =  codeword;
+        codeword_corrected[errors] ^= 1;
+    }
+}
+
+#[test(test_3_1_hamming_decode)]
+embed (inline) sv{{{
+module test_3_1_hamming_code;
+  bit o_word;
+  logic o_corrected;
+  logic [2:0] i_codeword;
+
+  std_linear_sec_decoder#(.P(2)) dut(.*);
+
+  initial begin
+    $monitor("word: %b\n", o_word, "cwrd: %3b\n", i_codeword,
+        "corrected: %b\n", o_corrected,
+        "errors: %b\n\n", dut.errors
+    );
+    i_codeword = 3'b111;
+    #1 assert(o_word == 1'b1);
+    i_codeword = 3'b000;
+    #1 assert(o_word == 1'b0);
+    i_codeword = 3'b010;
+    #1 assert(o_word == 1'b0 && o_corrected);
+    $finish;
+  end
+
+endmodule
+}}}

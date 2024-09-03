@@ -7,9 +7,17 @@
 Veryl is a modern hardware description language.
 
 This project is under the exploration phase of language design.
-If you have any idea, please open [Issue](https://github.com/veryl-lang/veryl/issues).
+We call for the following suggestion or contribution:
 
-* [Document](https://doc.veryl-lang.org/book/)
+* Language design
+* Tool implementation
+* Standard library implementation
+
+If you have any idea, please open [Issue](https://github.com/veryl-lang/veryl/issues) or [Pull request](https://github.com/veryl-lang/veryl/pulls).
+
+## External resources
+
+* [Language Reference](https://doc.veryl-lang.org/book/)
     * [日本語](https://doc.veryl-lang.org/book/ja/)
 * [PlayGround](https://doc.veryl-lang.org/playground/)
 

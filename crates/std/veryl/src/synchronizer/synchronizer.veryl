@@ -1,0 +1,9 @@
+pub proto module synchronizer #(
+    param WIDTH : u32 = 8,
+    param STAGES: u32 = 2,
+) (
+    i_clk: input  clock,
+    i_rst: input  reset,
+    i_d  : input  logic,
+    o_d  : output logic,
+);

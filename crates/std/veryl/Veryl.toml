@@ -1,0 +1,44 @@
+[project]
+name        = "std"
+version     = "0.0.1"
+authors     = ["dalance@gmail.com"]
+description = "Veryl Standard Library"
+license     = "MIT OR Apache-2.0"
+repository  = "https://github.com/veryl-lang/std"
+
+[build]
+target      = {type = "directory", path = "target/src"}
+exclude_std = true
+
+[lint.naming]
+case_enum          = "snake"
+case_function      = "snake"
+case_instance      = "snake"
+case_interface     = "snake"
+case_modport       = "snake"
+case_module        = "snake"
+case_package       = "snake"
+case_parameter     = "screaming_snake"
+case_port_inout    = "snake"
+case_port_input    = "snake"
+case_port_modport  = "snake"
+case_port_output   = "snake"
+case_reg           = "snake"
+case_struct        = "snake"
+case_union         = "snake"
+case_var           = "snake"
+case_wire          = "snake"
+prefix_port_input  = "i"
+prefix_port_output = "o"
+
+[doc]
+path = "target/doc"
+
+[test]
+waveform_target = {type = "directory", path = "target/wave"}
+
+[test.vcs]
+compile_args = ["-full64"]
+
+[test.verilator]
+compile_args = ["-Wno-MULTIDRIVEN", "-Wno-WIDTHTRUNC", "-Wno-WIDTHEXPAND"]
