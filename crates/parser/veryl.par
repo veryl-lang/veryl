@@ -772,6 +772,8 @@ ModuleIfDeclaration: If Expression ModuleNamedBlock { Else If Expression ModuleO
 
 ModuleForDeclaration: For Identifier In Range [ Step AssignmentOperator Expression ] ModuleNamedBlock;
 
+ModuleBlockDeclaration: ModuleNamedBlock;
+
 ModuleNamedBlock: Colon Identifier LBrace { ModuleGroup } RBrace;
 
 ModuleOptionalNamedBlock: [ Colon Identifier ] LBrace { ModuleGroup } RBrace;
@@ -789,9 +791,9 @@ ModuleItem: LetDeclaration
           | FunctionDeclaration
           | ModuleIfDeclaration
           | ModuleForDeclaration
+          | ModuleBlockDeclaration
           | EnumDeclaration
           | StructUnionDeclaration
-          | ModuleNamedBlock
           | ImportDeclaration
           | InitialDeclaration
           | FinalDeclaration
@@ -808,6 +810,8 @@ InterfaceIfDeclaration: If Expression InterfaceNamedBlock { Else If Expression I
 
 InterfaceForDeclaration: For Identifier In Range [ Step AssignmentOperator Expression ] InterfaceNamedBlock;
 
+InterfaceBlockDeclaration: InterfaceNamedBlock;
+
 InterfaceNamedBlock: Colon Identifier LBrace { InterfaceGroup } RBrace;
 
 InterfaceOptionalNamedBlock: [ Colon Identifier ] LBrace { InterfaceGroup } RBrace;
@@ -820,10 +824,10 @@ InterfaceItem: LetDeclaration
              | ModportDeclaration
              | InterfaceIfDeclaration
              | InterfaceForDeclaration
+             | InterfaceBlockDeclaration
              | TypeDefDeclaration
              | EnumDeclaration
              | StructUnionDeclaration
-             | InterfaceNamedBlock
              | FunctionDeclaration
              | ImportDeclaration
              | InitialDeclaration

@@ -29,13 +29,13 @@ description = "A modern hardware description language"
 
 [workspace.dependencies]
 anyhow          = "1.0"
-clap            = {version = "4.5.16", features = ["derive"]}
+clap            = {version = "4.5.17", features = ["derive"]}
 futures         = "0.3.30"
 log             = "0.4.22"
 mdbook          = "0.4.40"
 miette          = {version = "7.2"}
 once_cell       = "1.19"
-pulldown-cmark  = "0.12.0"
+pulldown-cmark  = "0.12.1"
 regex           = "1.10.6"
 semver          = {version = "1.0", features = ["serde"]}
 serde           = {version = "1.0", features = ["derive"]}
