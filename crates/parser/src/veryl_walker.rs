@@ -2585,6 +2585,13 @@ pub trait VerylWalker {
         after!(self, module_for_declaration, arg);
     }
 
+    /// Semantic action for non-terminal 'ModuleBlockDeclaration'
+    fn module_block_declaration(&mut self, arg: &ModuleBlockDeclaration) {
+        before!(self, module_block_declaration, arg);
+        self.module_named_block(&arg.module_named_block);
+        after!(self, module_block_declaration, arg);
+    }
+
     /// Semantic action for non-terminal 'ModuleNamedBlock'
     fn module_named_block(&mut self, arg: &ModuleNamedBlock) {
         before!(self, module_named_block, arg);
@@ -2657,11 +2664,13 @@ pub trait VerylWalker {
             ModuleItem::ModuleForDeclaration(x) => {
                 self.module_for_declaration(&x.module_for_declaration)
             }
+            ModuleItem::ModuleBlockDeclaration(x) => {
+                self.module_block_declaration(&x.module_block_declaration)
+            }
             ModuleItem::EnumDeclaration(x) => self.enum_declaration(&x.enum_declaration),
             ModuleItem::StructUnionDeclaration(x) => {
                 self.struct_union_declaration(&x.struct_union_declaration)
             }
-            ModuleItem::ModuleNamedBlock(x) => self.module_named_block(&x.module_named_block),
             ModuleItem::ImportDeclaration(x) => self.import_declaration(&x.import_declaration),
             ModuleItem::InitialDeclaration(x) => self.initial_declaration(&x.initial_declaration),
             ModuleItem::FinalDeclaration(x) => self.final_declaration(&x.final_declaration),
@@ -2727,6 +2736,13 @@ pub trait VerylWalker {
         after!(self, interface_for_declaration, arg);
     }
 
+    /// Semantic action for non-terminal 'InterfaceBlockDeclaration'
+    fn interface_block_declaration(&mut self, arg: &InterfaceBlockDeclaration) {
+        before!(self, interface_block_declaration, arg);
+        self.interface_named_block(&arg.interface_named_block);
+        after!(self, interface_block_declaration, arg);
+    }
+
     /// Semantic action for non-terminal 'InterfaceNamedBlock'
     fn interface_named_block(&mut self, arg: &InterfaceNamedBlock) {
         before!(self, interface_named_block, arg);
@@ -2790,15 +2806,15 @@ pub trait VerylWalker {
             InterfaceItem::InterfaceForDeclaration(x) => {
                 self.interface_for_declaration(&x.interface_for_declaration)
             }
+            InterfaceItem::InterfaceBlockDeclaration(x) => {
+                self.interface_block_declaration(&x.interface_block_declaration);
+            }
             InterfaceItem::TypeDefDeclaration(x) => {
                 self.type_def_declaration(&x.type_def_declaration)
             }
             InterfaceItem::EnumDeclaration(x) => self.enum_declaration(&x.enum_declaration),
             InterfaceItem::StructUnionDeclaration(x) => {
                 self.struct_union_declaration(&x.struct_union_declaration)
-            }
-            InterfaceItem::InterfaceNamedBlock(x) => {
-                self.interface_named_block(&x.interface_named_block)
             }
             InterfaceItem::FunctionDeclaration(x) => {
                 self.function_declaration(&x.function_declaration)

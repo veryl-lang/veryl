@@ -8,4 +8,10 @@ module Module15 {
     :label1 {
         let _a: logic = 1;
     }
+
+    for i in 0..10 :label2 {
+        :label {
+            let _a: logic = 1;
+        }
+    }
 }
