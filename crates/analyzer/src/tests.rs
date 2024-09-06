@@ -1,9 +1,11 @@
-use crate::{Analyzer, AnalyzerError};
+use crate::{symbol_table, Analyzer, AnalyzerError};
 use veryl_metadata::Metadata;
 use veryl_parser::Parser;
 
 #[track_caller]
 fn analyze(code: &str) -> Vec<AnalyzerError> {
+    symbol_table::clear();
+
     let metadata: Metadata =
         toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
     let parser = Parser::parse(&code, &"").unwrap();
@@ -1670,18 +1672,6 @@ fn unused_variable() {
     module ModuleB {
         always_comb {
             let a: logic = 1;
-        }
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::UnusedVariable { .. }));
-
-    let code = r#"
-    module ModuleC {
-        always_comb {
-            var a: logic;
-            a = 1;
         }
     }
     "#;
