@@ -2884,8 +2884,6 @@ pub trait VerylWalker {
             }
             PackageItem::ImportDeclaration(x) => self.import_declaration(&x.import_declaration),
             PackageItem::ExportDeclaration(x) => self.export_declaration(&x.export_declaration),
-            PackageItem::InitialDeclaration(x) => self.initial_declaration(&x.initial_declaration),
-            PackageItem::FinalDeclaration(x) => self.final_declaration(&x.final_declaration),
         }
         after!(self, package_item, arg);
     }
