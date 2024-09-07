@@ -16,6 +16,7 @@ pub struct CheckType<'a> {
     pub errors: Vec<AnalyzerError>,
     text: &'a str,
     point: HandlerPoint,
+    in_module: bool,
     in_variable_type: bool,
     in_modport: bool,
 }
@@ -189,6 +190,14 @@ impl<'a> VerylGrammarTrait for CheckType<'a> {
         Ok(())
     }
 
+    fn module_declaration(&mut self, _arg: &ModuleDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => self.in_module = true,
+            HandlerPoint::After => self.in_module = false,
+        };
+        Ok(())
+    }
+
     fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let mut connected_params = Vec::new();
@@ -220,7 +229,7 @@ impl<'a> VerylGrammarTrait for CheckType<'a> {
                 let mut ports = vec![];
                 let mut check_port_connection = false;
                 match symbol.found.kind {
-                    SymbolKind::Module(ref x) => {
+                    SymbolKind::Module(ref x) if self.in_module => {
                         params.append(&mut x.parameters.clone());
                         ports.append(&mut x.ports.clone());
                         check_port_connection = true;
@@ -248,9 +257,14 @@ impl<'a> VerylGrammarTrait for CheckType<'a> {
                         }
                     }
                     _ => {
+                        let expected = if self.in_module {
+                            "module or interface"
+                        } else {
+                            "interface"
+                        };
                         self.errors.push(AnalyzerError::mismatch_type(
                             name,
-                            "module or interface",
+                            expected,
                             &symbol.found.kind.to_kind_name(),
                             self.text,
                             &arg.identifier.as_ref().into(),

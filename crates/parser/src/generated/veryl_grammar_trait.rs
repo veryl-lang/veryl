@@ -2330,31 +2330,6 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'ModuleIfDeclaration'
-    fn module_if_declaration(&mut self, _arg: &ModuleIfDeclaration) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'ModuleForDeclaration'
-    fn module_for_declaration(&mut self, _arg: &ModuleForDeclaration) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'ModuleBlockDeclaration'
-    fn module_block_declaration(&mut self, _arg: &ModuleBlockDeclaration) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'ModuleNamedBlock'
-    fn module_named_block(&mut self, _arg: &ModuleNamedBlock) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'ModuleOptionalNamedBlock'
-    fn module_optional_named_block(&mut self, _arg: &ModuleOptionalNamedBlock) -> Result<()> {
-        Ok(())
-    }
-
     /// Semantic action for non-terminal 'ModuleGroup'
     fn module_group(&mut self, _arg: &ModuleGroup) -> Result<()> {
         Ok(())
@@ -2370,31 +2345,6 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'InterfaceIfDeclaration'
-    fn interface_if_declaration(&mut self, _arg: &InterfaceIfDeclaration) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'InterfaceForDeclaration'
-    fn interface_for_declaration(&mut self, _arg: &InterfaceForDeclaration) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'InterfaceBlockDeclaration'
-    fn interface_block_declaration(&mut self, _arg: &InterfaceBlockDeclaration) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'InterfaceNamedBlock'
-    fn interface_named_block(&mut self, _arg: &InterfaceNamedBlock) -> Result<()> {
-        Ok(())
-    }
-
-    /// Semantic action for non-terminal 'InterfaceOptionalNamedBlock'
-    fn interface_optional_named_block(&mut self, _arg: &InterfaceOptionalNamedBlock) -> Result<()> {
-        Ok(())
-    }
-
     /// Semantic action for non-terminal 'InterfaceGroup'
     fn interface_group(&mut self, _arg: &InterfaceGroup) -> Result<()> {
         Ok(())
@@ -2402,6 +2352,41 @@ pub trait VerylGrammarTrait {
 
     /// Semantic action for non-terminal 'InterfaceItem'
     fn interface_item(&mut self, _arg: &InterfaceItem) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'GenerateIfDeclaration'
+    fn generate_if_declaration(&mut self, _arg: &GenerateIfDeclaration) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'GenerateForDeclaration'
+    fn generate_for_declaration(&mut self, _arg: &GenerateForDeclaration) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'GenerateBlockDeclaration'
+    fn generate_block_declaration(&mut self, _arg: &GenerateBlockDeclaration) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'GenerateNamedBlock'
+    fn generate_named_block(&mut self, _arg: &GenerateNamedBlock) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'GenerateOptionalNamedBlock'
+    fn generate_optional_named_block(&mut self, _arg: &GenerateOptionalNamedBlock) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'GenerateGroup'
+    fn generate_group(&mut self, _arg: &GenerateGroup) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'GenerateItem'
+    fn generate_item(&mut self, _arg: &GenerateItem) -> Result<()> {
         Ok(())
     }
 
@@ -4182,7 +4167,7 @@ pub struct ExportDeclarationGroupScopedIdentifierExportDeclarationOpt {
 }
 
 ///
-/// Type derived for production 839
+/// Type derived for production 822
 ///
 /// `ModuleGroupGroup: LBrace ModuleGroupGroupList /* Vec */ RBrace;`
 ///
@@ -4196,7 +4181,7 @@ pub struct ModuleGroupGroupLBraceModuleGroupGroupListRBrace {
 }
 
 ///
-/// Type derived for production 842
+/// Type derived for production 825
 ///
 /// `ModuleGroupGroup: ModuleItem;`
 ///
@@ -4208,223 +4193,7 @@ pub struct ModuleGroupGroupModuleItem {
 }
 
 ///
-/// Type derived for production 845
-///
-/// `ModuleItem: LetDeclaration;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleItemLetDeclaration {
-    pub let_declaration: Box<LetDeclaration>,
-}
-
-///
-/// Type derived for production 846
-///
-/// `ModuleItem: VarDeclaration;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleItemVarDeclaration {
-    pub var_declaration: Box<VarDeclaration>,
-}
-
-///
-/// Type derived for production 847
-///
-/// `ModuleItem: InstDeclaration;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleItemInstDeclaration {
-    pub inst_declaration: Box<InstDeclaration>,
-}
-
-///
-/// Type derived for production 848
-///
-/// `ModuleItem: TypeDefDeclaration;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleItemTypeDefDeclaration {
-    pub type_def_declaration: Box<TypeDefDeclaration>,
-}
-
-///
-/// Type derived for production 849
-///
-/// `ModuleItem: ConstDeclaration;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleItemConstDeclaration {
-    pub const_declaration: Box<ConstDeclaration>,
-}
-
-///
-/// Type derived for production 850
-///
-/// `ModuleItem: AlwaysFfDeclaration;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleItemAlwaysFfDeclaration {
-    pub always_ff_declaration: Box<AlwaysFfDeclaration>,
-}
-
-///
-/// Type derived for production 851
-///
-/// `ModuleItem: AlwaysCombDeclaration;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleItemAlwaysCombDeclaration {
-    pub always_comb_declaration: Box<AlwaysCombDeclaration>,
-}
-
-///
-/// Type derived for production 852
-///
-/// `ModuleItem: AssignDeclaration;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleItemAssignDeclaration {
-    pub assign_declaration: Box<AssignDeclaration>,
-}
-
-///
-/// Type derived for production 853
-///
-/// `ModuleItem: FunctionDeclaration;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleItemFunctionDeclaration {
-    pub function_declaration: Box<FunctionDeclaration>,
-}
-
-///
-/// Type derived for production 854
-///
-/// `ModuleItem: ModuleIfDeclaration;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleItemModuleIfDeclaration {
-    pub module_if_declaration: Box<ModuleIfDeclaration>,
-}
-
-///
-/// Type derived for production 855
-///
-/// `ModuleItem: ModuleForDeclaration;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleItemModuleForDeclaration {
-    pub module_for_declaration: Box<ModuleForDeclaration>,
-}
-
-///
-/// Type derived for production 856
-///
-/// `ModuleItem: ModuleBlockDeclaration;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleItemModuleBlockDeclaration {
-    pub module_block_declaration: Box<ModuleBlockDeclaration>,
-}
-
-///
-/// Type derived for production 857
-///
-/// `ModuleItem: EnumDeclaration;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleItemEnumDeclaration {
-    pub enum_declaration: Box<EnumDeclaration>,
-}
-
-///
-/// Type derived for production 858
-///
-/// `ModuleItem: StructUnionDeclaration;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleItemStructUnionDeclaration {
-    pub struct_union_declaration: Box<StructUnionDeclaration>,
-}
-
-///
-/// Type derived for production 859
-///
-/// `ModuleItem: ImportDeclaration;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleItemImportDeclaration {
-    pub import_declaration: Box<ImportDeclaration>,
-}
-
-///
-/// Type derived for production 860
-///
-/// `ModuleItem: InitialDeclaration;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleItemInitialDeclaration {
-    pub initial_declaration: Box<InitialDeclaration>,
-}
-
-///
-/// Type derived for production 861
-///
-/// `ModuleItem: FinalDeclaration;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleItemFinalDeclaration {
-    pub final_declaration: Box<FinalDeclaration>,
-}
-
-///
-/// Type derived for production 862
-///
-/// `ModuleItem: UnsafeBlock;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleItemUnsafeBlock {
-    pub unsafe_block: Box<UnsafeBlock>,
-}
-
-///
-/// Type derived for production 890
+/// Type derived for production 839
 ///
 /// `InterfaceGroupGroup: LBrace InterfaceGroupGroupList /* Vec */ RBrace;`
 ///
@@ -4438,7 +4207,7 @@ pub struct InterfaceGroupGroupLBraceInterfaceGroupGroupListRBrace {
 }
 
 ///
-/// Type derived for production 893
+/// Type derived for production 842
 ///
 /// `InterfaceGroupGroup: InterfaceItem;`
 ///
@@ -4450,43 +4219,19 @@ pub struct InterfaceGroupGroupInterfaceItem {
 }
 
 ///
-/// Type derived for production 896
+/// Type derived for production 845
 ///
-/// `InterfaceItem: LetDeclaration;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct InterfaceItemLetDeclaration {
-    pub let_declaration: Box<LetDeclaration>,
-}
-
-///
-/// Type derived for production 897
-///
-/// `InterfaceItem: VarDeclaration;`
+/// `InterfaceItem: GenerateItem;`
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct InterfaceItemVarDeclaration {
-    pub var_declaration: Box<VarDeclaration>,
+pub struct InterfaceItemGenerateItem {
+    pub generate_item: Box<GenerateItem>,
 }
 
 ///
-/// Type derived for production 898
-///
-/// `InterfaceItem: ConstDeclaration;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct InterfaceItemConstDeclaration {
-    pub const_declaration: Box<ConstDeclaration>,
-}
-
-///
-/// Type derived for production 899
+/// Type derived for production 846
 ///
 /// `InterfaceItem: ModportDeclaration;`
 ///
@@ -4498,127 +4243,249 @@ pub struct InterfaceItemModportDeclaration {
 }
 
 ///
-/// Type derived for production 900
+/// Type derived for production 865
 ///
-/// `InterfaceItem: InterfaceIfDeclaration;`
+/// `GenerateGroupGroup: LBrace GenerateGroupGroupList /* Vec */ RBrace;`
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct InterfaceItemInterfaceIfDeclaration {
-    pub interface_if_declaration: Box<InterfaceIfDeclaration>,
+pub struct GenerateGroupGroupLBraceGenerateGroupGroupListRBrace {
+    pub l_brace: Box<LBrace>,
+    pub generate_group_group_list: Vec<GenerateGroupGroupList>,
+    pub r_brace: Box<RBrace>,
 }
 
 ///
-/// Type derived for production 901
+/// Type derived for production 868
 ///
-/// `InterfaceItem: InterfaceForDeclaration;`
+/// `GenerateGroupGroup: GenerateItem;`
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct InterfaceItemInterfaceForDeclaration {
-    pub interface_for_declaration: Box<InterfaceForDeclaration>,
+pub struct GenerateGroupGroupGenerateItem {
+    pub generate_item: Box<GenerateItem>,
 }
 
 ///
-/// Type derived for production 902
+/// Type derived for production 871
 ///
-/// `InterfaceItem: InterfaceBlockDeclaration;`
+/// `GenerateItem: LetDeclaration;`
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct InterfaceItemInterfaceBlockDeclaration {
-    pub interface_block_declaration: Box<InterfaceBlockDeclaration>,
+pub struct GenerateItemLetDeclaration {
+    pub let_declaration: Box<LetDeclaration>,
 }
 
 ///
-/// Type derived for production 903
+/// Type derived for production 872
 ///
-/// `InterfaceItem: TypeDefDeclaration;`
+/// `GenerateItem: VarDeclaration;`
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct InterfaceItemTypeDefDeclaration {
-    pub type_def_declaration: Box<TypeDefDeclaration>,
+pub struct GenerateItemVarDeclaration {
+    pub var_declaration: Box<VarDeclaration>,
 }
 
 ///
-/// Type derived for production 904
+/// Type derived for production 873
 ///
-/// `InterfaceItem: EnumDeclaration;`
+/// `GenerateItem: InstDeclaration;`
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct InterfaceItemEnumDeclaration {
-    pub enum_declaration: Box<EnumDeclaration>,
+pub struct GenerateItemInstDeclaration {
+    pub inst_declaration: Box<InstDeclaration>,
 }
 
 ///
-/// Type derived for production 905
+/// Type derived for production 874
 ///
-/// `InterfaceItem: StructUnionDeclaration;`
+/// `GenerateItem: ConstDeclaration;`
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct InterfaceItemStructUnionDeclaration {
-    pub struct_union_declaration: Box<StructUnionDeclaration>,
+pub struct GenerateItemConstDeclaration {
+    pub const_declaration: Box<ConstDeclaration>,
 }
 
 ///
-/// Type derived for production 906
+/// Type derived for production 875
 ///
-/// `InterfaceItem: FunctionDeclaration;`
+/// `GenerateItem: AlwaysFfDeclaration;`
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct InterfaceItemFunctionDeclaration {
+pub struct GenerateItemAlwaysFfDeclaration {
+    pub always_ff_declaration: Box<AlwaysFfDeclaration>,
+}
+
+///
+/// Type derived for production 876
+///
+/// `GenerateItem: AlwaysCombDeclaration;`
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct GenerateItemAlwaysCombDeclaration {
+    pub always_comb_declaration: Box<AlwaysCombDeclaration>,
+}
+
+///
+/// Type derived for production 877
+///
+/// `GenerateItem: AssignDeclaration;`
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct GenerateItemAssignDeclaration {
+    pub assign_declaration: Box<AssignDeclaration>,
+}
+
+///
+/// Type derived for production 878
+///
+/// `GenerateItem: FunctionDeclaration;`
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct GenerateItemFunctionDeclaration {
     pub function_declaration: Box<FunctionDeclaration>,
 }
 
 ///
-/// Type derived for production 907
+/// Type derived for production 879
 ///
-/// `InterfaceItem: ImportDeclaration;`
+/// `GenerateItem: GenerateIfDeclaration;`
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct InterfaceItemImportDeclaration {
+pub struct GenerateItemGenerateIfDeclaration {
+    pub generate_if_declaration: Box<GenerateIfDeclaration>,
+}
+
+///
+/// Type derived for production 880
+///
+/// `GenerateItem: GenerateForDeclaration;`
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct GenerateItemGenerateForDeclaration {
+    pub generate_for_declaration: Box<GenerateForDeclaration>,
+}
+
+///
+/// Type derived for production 881
+///
+/// `GenerateItem: GenerateBlockDeclaration;`
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct GenerateItemGenerateBlockDeclaration {
+    pub generate_block_declaration: Box<GenerateBlockDeclaration>,
+}
+
+///
+/// Type derived for production 882
+///
+/// `GenerateItem: TypeDefDeclaration;`
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct GenerateItemTypeDefDeclaration {
+    pub type_def_declaration: Box<TypeDefDeclaration>,
+}
+
+///
+/// Type derived for production 883
+///
+/// `GenerateItem: EnumDeclaration;`
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct GenerateItemEnumDeclaration {
+    pub enum_declaration: Box<EnumDeclaration>,
+}
+
+///
+/// Type derived for production 884
+///
+/// `GenerateItem: StructUnionDeclaration;`
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct GenerateItemStructUnionDeclaration {
+    pub struct_union_declaration: Box<StructUnionDeclaration>,
+}
+
+///
+/// Type derived for production 885
+///
+/// `GenerateItem: ImportDeclaration;`
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct GenerateItemImportDeclaration {
     pub import_declaration: Box<ImportDeclaration>,
 }
 
 ///
-/// Type derived for production 908
+/// Type derived for production 886
 ///
-/// `InterfaceItem: InitialDeclaration;`
+/// `GenerateItem: InitialDeclaration;`
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct InterfaceItemInitialDeclaration {
+pub struct GenerateItemInitialDeclaration {
     pub initial_declaration: Box<InitialDeclaration>,
 }
 
 ///
-/// Type derived for production 909
+/// Type derived for production 887
 ///
-/// `InterfaceItem: FinalDeclaration;`
+/// `GenerateItem: FinalDeclaration;`
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct InterfaceItemFinalDeclaration {
+pub struct GenerateItemFinalDeclaration {
     pub final_declaration: Box<FinalDeclaration>,
 }
 
 ///
-/// Type derived for production 918
+/// Type derived for production 888
+///
+/// `GenerateItem: UnsafeBlock;`
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct GenerateItemUnsafeBlock {
+    pub unsafe_block: Box<UnsafeBlock>,
+}
+
+///
+/// Type derived for production 897
 ///
 /// `PackageGroupGroup: LBrace PackageGroupGroupList /* Vec */ RBrace;`
 ///
@@ -4632,7 +4499,7 @@ pub struct PackageGroupGroupLBracePackageGroupGroupListRBrace {
 }
 
 ///
-/// Type derived for production 921
+/// Type derived for production 900
 ///
 /// `PackageGroupGroup: PackageItem;`
 ///
@@ -4644,7 +4511,7 @@ pub struct PackageGroupGroupPackageItem {
 }
 
 ///
-/// Type derived for production 924
+/// Type derived for production 903
 ///
 /// `PackageItem: VarDeclaration;`
 ///
@@ -4656,7 +4523,7 @@ pub struct PackageItemVarDeclaration {
 }
 
 ///
-/// Type derived for production 925
+/// Type derived for production 904
 ///
 /// `PackageItem: ConstDeclaration;`
 ///
@@ -4668,7 +4535,7 @@ pub struct PackageItemConstDeclaration {
 }
 
 ///
-/// Type derived for production 926
+/// Type derived for production 905
 ///
 /// `PackageItem: TypeDefDeclaration;`
 ///
@@ -4680,7 +4547,7 @@ pub struct PackageItemTypeDefDeclaration {
 }
 
 ///
-/// Type derived for production 927
+/// Type derived for production 906
 ///
 /// `PackageItem: EnumDeclaration;`
 ///
@@ -4692,7 +4559,7 @@ pub struct PackageItemEnumDeclaration {
 }
 
 ///
-/// Type derived for production 928
+/// Type derived for production 907
 ///
 /// `PackageItem: StructUnionDeclaration;`
 ///
@@ -4704,7 +4571,7 @@ pub struct PackageItemStructUnionDeclaration {
 }
 
 ///
-/// Type derived for production 929
+/// Type derived for production 908
 ///
 /// `PackageItem: FunctionDeclaration;`
 ///
@@ -4716,7 +4583,7 @@ pub struct PackageItemFunctionDeclaration {
 }
 
 ///
-/// Type derived for production 930
+/// Type derived for production 909
 ///
 /// `PackageItem: ImportDeclaration;`
 ///
@@ -4728,7 +4595,7 @@ pub struct PackageItemImportDeclaration {
 }
 
 ///
-/// Type derived for production 931
+/// Type derived for production 910
 ///
 /// `PackageItem: ExportDeclaration;`
 ///
@@ -4740,7 +4607,7 @@ pub struct PackageItemExportDeclaration {
 }
 
 ///
-/// Type derived for production 944
+/// Type derived for production 923
 ///
 /// `EmbedItem: LBraceTerm EmbedItemList /* Vec */ RBraceTerm;`
 ///
@@ -4754,7 +4621,7 @@ pub struct EmbedItemLBraceTermEmbedItemListRBraceTerm {
 }
 
 ///
-/// Type derived for production 947
+/// Type derived for production 926
 ///
 /// `EmbedItem: AnyTerm;`
 ///
@@ -4766,7 +4633,7 @@ pub struct EmbedItemAnyTerm {
 }
 
 ///
-/// Type derived for production 950
+/// Type derived for production 929
 ///
 /// `DescriptionGroupGroup: LBrace DescriptionGroupGroupList /* Vec */ RBrace;`
 ///
@@ -4780,7 +4647,7 @@ pub struct DescriptionGroupGroupLBraceDescriptionGroupGroupListRBrace {
 }
 
 ///
-/// Type derived for production 953
+/// Type derived for production 932
 ///
 /// `DescriptionGroupGroup: DescriptionItem;`
 ///
@@ -4792,7 +4659,7 @@ pub struct DescriptionGroupGroupDescriptionItem {
 }
 
 ///
-/// Type derived for production 956
+/// Type derived for production 935
 ///
 /// `DescriptionItem: ModuleDeclaration;`
 ///
@@ -4804,7 +4671,7 @@ pub struct DescriptionItemModuleDeclaration {
 }
 
 ///
-/// Type derived for production 957
+/// Type derived for production 936
 ///
 /// `DescriptionItem: InterfaceDeclaration;`
 ///
@@ -4816,7 +4683,7 @@ pub struct DescriptionItemInterfaceDeclaration {
 }
 
 ///
-/// Type derived for production 958
+/// Type derived for production 937
 ///
 /// `DescriptionItem: PackageDeclaration;`
 ///
@@ -4828,7 +4695,7 @@ pub struct DescriptionItemPackageDeclaration {
 }
 
 ///
-/// Type derived for production 959
+/// Type derived for production 938
 ///
 /// `DescriptionItem: ProtoModuleDeclaration;`
 ///
@@ -4840,7 +4707,7 @@ pub struct DescriptionItemProtoModuleDeclaration {
 }
 
 ///
-/// Type derived for production 960
+/// Type derived for production 939
 ///
 /// `DescriptionItem: ImportDeclaration;`
 ///
@@ -4852,7 +4719,7 @@ pub struct DescriptionItemImportDeclaration {
 }
 
 ///
-/// Type derived for production 961
+/// Type derived for production 940
 ///
 /// `DescriptionItem: EmbedDeclaration;`
 ///
@@ -4864,7 +4731,7 @@ pub struct DescriptionItemEmbedDeclaration {
 }
 
 ///
-/// Type derived for production 962
+/// Type derived for production 941
 ///
 /// `DescriptionItem: IncludeDeclaration;`
 ///
@@ -7454,6 +7321,206 @@ pub struct FunctionToken {
 }
 
 ///
+/// Type derived for non-terminal GenerateBlockDeclaration
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct GenerateBlockDeclaration {
+    pub generate_named_block: Box<GenerateNamedBlock>,
+}
+
+///
+/// Type derived for non-terminal GenerateForDeclaration
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct GenerateForDeclaration {
+    pub r#for: Box<For>,
+    pub identifier: Box<Identifier>,
+    pub r#in: Box<In>,
+    pub range: Box<Range>,
+    pub generate_for_declaration_opt: Option<GenerateForDeclarationOpt>,
+    pub generate_named_block: Box<GenerateNamedBlock>,
+}
+
+///
+/// Type derived for non-terminal GenerateForDeclarationOpt
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct GenerateForDeclarationOpt {
+    pub step: Box<Step>,
+    pub assignment_operator: Box<AssignmentOperator>,
+    pub expression: Box<Expression>,
+}
+
+///
+/// Type derived for non-terminal GenerateGroup
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct GenerateGroup {
+    pub generate_group_list: Vec<GenerateGroupList>,
+    pub generate_group_group: Box<GenerateGroupGroup>,
+}
+
+///
+/// Type derived for non-terminal GenerateGroupGroup
+///
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub enum GenerateGroupGroup {
+    LBraceGenerateGroupGroupListRBrace(GenerateGroupGroupLBraceGenerateGroupGroupListRBrace),
+    GenerateItem(GenerateGroupGroupGenerateItem),
+}
+
+///
+/// Type derived for non-terminal GenerateGroupGroupList
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct GenerateGroupGroupList {
+    pub generate_group: Box<GenerateGroup>,
+}
+
+///
+/// Type derived for non-terminal GenerateGroupList
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct GenerateGroupList {
+    pub attribute: Box<Attribute>,
+}
+
+///
+/// Type derived for non-terminal GenerateIfDeclaration
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct GenerateIfDeclaration {
+    pub r#if: Box<If>,
+    pub expression: Box<Expression>,
+    pub generate_named_block: Box<GenerateNamedBlock>,
+    pub generate_if_declaration_list: Vec<GenerateIfDeclarationList>,
+    pub generate_if_declaration_opt: Option<GenerateIfDeclarationOpt>,
+}
+
+///
+/// Type derived for non-terminal GenerateIfDeclarationList
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct GenerateIfDeclarationList {
+    pub r#else: Box<Else>,
+    pub r#if: Box<If>,
+    pub expression: Box<Expression>,
+    pub generate_optional_named_block: Box<GenerateOptionalNamedBlock>,
+}
+
+///
+/// Type derived for non-terminal GenerateIfDeclarationOpt
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct GenerateIfDeclarationOpt {
+    pub r#else: Box<Else>,
+    pub generate_optional_named_block: Box<GenerateOptionalNamedBlock>,
+}
+
+///
+/// Type derived for non-terminal GenerateItem
+///
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub enum GenerateItem {
+    LetDeclaration(GenerateItemLetDeclaration),
+    VarDeclaration(GenerateItemVarDeclaration),
+    InstDeclaration(GenerateItemInstDeclaration),
+    ConstDeclaration(GenerateItemConstDeclaration),
+    AlwaysFfDeclaration(GenerateItemAlwaysFfDeclaration),
+    AlwaysCombDeclaration(GenerateItemAlwaysCombDeclaration),
+    AssignDeclaration(GenerateItemAssignDeclaration),
+    FunctionDeclaration(GenerateItemFunctionDeclaration),
+    GenerateIfDeclaration(GenerateItemGenerateIfDeclaration),
+    GenerateForDeclaration(GenerateItemGenerateForDeclaration),
+    GenerateBlockDeclaration(GenerateItemGenerateBlockDeclaration),
+    TypeDefDeclaration(GenerateItemTypeDefDeclaration),
+    EnumDeclaration(GenerateItemEnumDeclaration),
+    StructUnionDeclaration(GenerateItemStructUnionDeclaration),
+    ImportDeclaration(GenerateItemImportDeclaration),
+    InitialDeclaration(GenerateItemInitialDeclaration),
+    FinalDeclaration(GenerateItemFinalDeclaration),
+    UnsafeBlock(GenerateItemUnsafeBlock),
+}
+
+///
+/// Type derived for non-terminal GenerateNamedBlock
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct GenerateNamedBlock {
+    pub colon: Box<Colon>,
+    pub identifier: Box<Identifier>,
+    pub l_brace: Box<LBrace>,
+    pub generate_named_block_list: Vec<GenerateNamedBlockList>,
+    pub r_brace: Box<RBrace>,
+}
+
+///
+/// Type derived for non-terminal GenerateNamedBlockList
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct GenerateNamedBlockList {
+    pub generate_group: Box<GenerateGroup>,
+}
+
+///
+/// Type derived for non-terminal GenerateOptionalNamedBlock
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct GenerateOptionalNamedBlock {
+    pub generate_optional_named_block_opt: Option<GenerateOptionalNamedBlockOpt>,
+    pub l_brace: Box<LBrace>,
+    pub generate_optional_named_block_list: Vec<GenerateOptionalNamedBlockList>,
+    pub r_brace: Box<RBrace>,
+}
+
+///
+/// Type derived for non-terminal GenerateOptionalNamedBlockList
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct GenerateOptionalNamedBlockList {
+    pub generate_group: Box<GenerateGroup>,
+}
+
+///
+/// Type derived for non-terminal GenerateOptionalNamedBlockOpt
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct GenerateOptionalNamedBlockOpt {
+    pub colon: Box<Colon>,
+    pub identifier: Box<Identifier>,
+}
+
+///
 /// Type derived for non-terminal GenericBound
 ///
 #[allow(dead_code)]
@@ -8414,16 +8481,6 @@ pub struct Interface {
 }
 
 ///
-/// Type derived for non-terminal InterfaceBlockDeclaration
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct InterfaceBlockDeclaration {
-    pub interface_named_block: Box<InterfaceNamedBlock>,
-}
-
-///
 /// Type derived for non-terminal InterfaceDeclaration
 ///
 #[allow(dead_code)]
@@ -8481,33 +8538,6 @@ pub struct InterfaceDeclarationOpt1 {
 }
 
 ///
-/// Type derived for non-terminal InterfaceForDeclaration
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct InterfaceForDeclaration {
-    pub r#for: Box<For>,
-    pub identifier: Box<Identifier>,
-    pub r#in: Box<In>,
-    pub range: Box<Range>,
-    pub interface_for_declaration_opt: Option<InterfaceForDeclarationOpt>,
-    pub interface_named_block: Box<InterfaceNamedBlock>,
-}
-
-///
-/// Type derived for non-terminal InterfaceForDeclarationOpt
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct InterfaceForDeclarationOpt {
-    pub step: Box<Step>,
-    pub assignment_operator: Box<AssignmentOperator>,
-    pub expression: Box<Expression>,
-}
-
-///
 /// Type derived for non-terminal InterfaceGroup
 ///
 #[allow(dead_code)]
@@ -8549,121 +8579,13 @@ pub struct InterfaceGroupList {
 }
 
 ///
-/// Type derived for non-terminal InterfaceIfDeclaration
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct InterfaceIfDeclaration {
-    pub r#if: Box<If>,
-    pub expression: Box<Expression>,
-    pub interface_named_block: Box<InterfaceNamedBlock>,
-    pub interface_if_declaration_list: Vec<InterfaceIfDeclarationList>,
-    pub interface_if_declaration_opt: Option<InterfaceIfDeclarationOpt>,
-}
-
-///
-/// Type derived for non-terminal InterfaceIfDeclarationList
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct InterfaceIfDeclarationList {
-    pub r#else: Box<Else>,
-    pub r#if: Box<If>,
-    pub expression: Box<Expression>,
-    pub interface_optional_named_block: Box<InterfaceOptionalNamedBlock>,
-}
-
-///
-/// Type derived for non-terminal InterfaceIfDeclarationOpt
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct InterfaceIfDeclarationOpt {
-    pub r#else: Box<Else>,
-    pub interface_optional_named_block: Box<InterfaceOptionalNamedBlock>,
-}
-
-///
 /// Type derived for non-terminal InterfaceItem
 ///
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum InterfaceItem {
-    LetDeclaration(InterfaceItemLetDeclaration),
-    VarDeclaration(InterfaceItemVarDeclaration),
-    ConstDeclaration(InterfaceItemConstDeclaration),
+    GenerateItem(InterfaceItemGenerateItem),
     ModportDeclaration(InterfaceItemModportDeclaration),
-    InterfaceIfDeclaration(InterfaceItemInterfaceIfDeclaration),
-    InterfaceForDeclaration(InterfaceItemInterfaceForDeclaration),
-    InterfaceBlockDeclaration(InterfaceItemInterfaceBlockDeclaration),
-    TypeDefDeclaration(InterfaceItemTypeDefDeclaration),
-    EnumDeclaration(InterfaceItemEnumDeclaration),
-    StructUnionDeclaration(InterfaceItemStructUnionDeclaration),
-    FunctionDeclaration(InterfaceItemFunctionDeclaration),
-    ImportDeclaration(InterfaceItemImportDeclaration),
-    InitialDeclaration(InterfaceItemInitialDeclaration),
-    FinalDeclaration(InterfaceItemFinalDeclaration),
-}
-
-///
-/// Type derived for non-terminal InterfaceNamedBlock
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct InterfaceNamedBlock {
-    pub colon: Box<Colon>,
-    pub identifier: Box<Identifier>,
-    pub l_brace: Box<LBrace>,
-    pub interface_named_block_list: Vec<InterfaceNamedBlockList>,
-    pub r_brace: Box<RBrace>,
-}
-
-///
-/// Type derived for non-terminal InterfaceNamedBlockList
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct InterfaceNamedBlockList {
-    pub interface_group: Box<InterfaceGroup>,
-}
-
-///
-/// Type derived for non-terminal InterfaceOptionalNamedBlock
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct InterfaceOptionalNamedBlock {
-    pub interface_optional_named_block_opt: Option<InterfaceOptionalNamedBlockOpt>,
-    pub l_brace: Box<LBrace>,
-    pub interface_optional_named_block_list: Vec<InterfaceOptionalNamedBlockList>,
-    pub r_brace: Box<RBrace>,
-}
-
-///
-/// Type derived for non-terminal InterfaceOptionalNamedBlockList
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct InterfaceOptionalNamedBlockList {
-    pub interface_group: Box<InterfaceGroup>,
-}
-
-///
-/// Type derived for non-terminal InterfaceOptionalNamedBlockOpt
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct InterfaceOptionalNamedBlockOpt {
-    pub colon: Box<Colon>,
-    pub identifier: Box<Identifier>,
 }
 
 ///
@@ -9152,16 +9074,6 @@ pub struct Module {
 }
 
 ///
-/// Type derived for non-terminal ModuleBlockDeclaration
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleBlockDeclaration {
-    pub module_named_block: Box<ModuleNamedBlock>,
-}
-
-///
 /// Type derived for non-terminal ModuleDeclaration
 ///
 #[allow(dead_code)]
@@ -9242,33 +9154,6 @@ pub struct ModuleDeclarationOpt3 {
 }
 
 ///
-/// Type derived for non-terminal ModuleForDeclaration
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleForDeclaration {
-    pub r#for: Box<For>,
-    pub identifier: Box<Identifier>,
-    pub r#in: Box<In>,
-    pub range: Box<Range>,
-    pub module_for_declaration_opt: Option<ModuleForDeclarationOpt>,
-    pub module_named_block: Box<ModuleNamedBlock>,
-}
-
-///
-/// Type derived for non-terminal ModuleForDeclarationOpt
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleForDeclarationOpt {
-    pub step: Box<Step>,
-    pub assignment_operator: Box<AssignmentOperator>,
-    pub expression: Box<Expression>,
-}
-
-///
 /// Type derived for non-terminal ModuleGroup
 ///
 #[allow(dead_code)]
@@ -9310,125 +9195,13 @@ pub struct ModuleGroupList {
 }
 
 ///
-/// Type derived for non-terminal ModuleIfDeclaration
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleIfDeclaration {
-    pub r#if: Box<If>,
-    pub expression: Box<Expression>,
-    pub module_named_block: Box<ModuleNamedBlock>,
-    pub module_if_declaration_list: Vec<ModuleIfDeclarationList>,
-    pub module_if_declaration_opt: Option<ModuleIfDeclarationOpt>,
-}
-
-///
-/// Type derived for non-terminal ModuleIfDeclarationList
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleIfDeclarationList {
-    pub r#else: Box<Else>,
-    pub r#if: Box<If>,
-    pub expression: Box<Expression>,
-    pub module_optional_named_block: Box<ModuleOptionalNamedBlock>,
-}
-
-///
-/// Type derived for non-terminal ModuleIfDeclarationOpt
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleIfDeclarationOpt {
-    pub r#else: Box<Else>,
-    pub module_optional_named_block: Box<ModuleOptionalNamedBlock>,
-}
-
-///
 /// Type derived for non-terminal ModuleItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub enum ModuleItem {
-    LetDeclaration(ModuleItemLetDeclaration),
-    VarDeclaration(ModuleItemVarDeclaration),
-    InstDeclaration(ModuleItemInstDeclaration),
-    TypeDefDeclaration(ModuleItemTypeDefDeclaration),
-    ConstDeclaration(ModuleItemConstDeclaration),
-    AlwaysFfDeclaration(ModuleItemAlwaysFfDeclaration),
-    AlwaysCombDeclaration(ModuleItemAlwaysCombDeclaration),
-    AssignDeclaration(ModuleItemAssignDeclaration),
-    FunctionDeclaration(ModuleItemFunctionDeclaration),
-    ModuleIfDeclaration(ModuleItemModuleIfDeclaration),
-    ModuleForDeclaration(ModuleItemModuleForDeclaration),
-    ModuleBlockDeclaration(ModuleItemModuleBlockDeclaration),
-    EnumDeclaration(ModuleItemEnumDeclaration),
-    StructUnionDeclaration(ModuleItemStructUnionDeclaration),
-    ImportDeclaration(ModuleItemImportDeclaration),
-    InitialDeclaration(ModuleItemInitialDeclaration),
-    FinalDeclaration(ModuleItemFinalDeclaration),
-    UnsafeBlock(ModuleItemUnsafeBlock),
-}
-
-///
-/// Type derived for non-terminal ModuleNamedBlock
-///
-#[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleNamedBlock {
-    pub colon: Box<Colon>,
-    pub identifier: Box<Identifier>,
-    pub l_brace: Box<LBrace>,
-    pub module_named_block_list: Vec<ModuleNamedBlockList>,
-    pub r_brace: Box<RBrace>,
-}
-
-///
-/// Type derived for non-terminal ModuleNamedBlockList
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleNamedBlockList {
-    pub module_group: Box<ModuleGroup>,
-}
-
-///
-/// Type derived for non-terminal ModuleOptionalNamedBlock
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleOptionalNamedBlock {
-    pub module_optional_named_block_opt: Option<ModuleOptionalNamedBlockOpt>,
-    pub l_brace: Box<LBrace>,
-    pub module_optional_named_block_list: Vec<ModuleOptionalNamedBlockList>,
-    pub r_brace: Box<RBrace>,
-}
-
-///
-/// Type derived for non-terminal ModuleOptionalNamedBlockList
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleOptionalNamedBlockList {
-    pub module_group: Box<ModuleGroup>,
-}
-
-///
-/// Type derived for non-terminal ModuleOptionalNamedBlockOpt
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct ModuleOptionalNamedBlockOpt {
-    pub colon: Box<Colon>,
-    pub identifier: Box<Identifier>,
+pub struct ModuleItem {
+    pub generate_item: Box<GenerateItem>,
 }
 
 ///
@@ -11808,7 +11581,7 @@ pub struct UnsafeBlock {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct UnsafeBlockList {
-    pub module_group: Box<ModuleGroup>,
+    pub generate_group: Box<GenerateGroup>,
 }
 
 ///
@@ -12449,6 +12222,22 @@ pub enum ASTType {
     FunctionDeclarationOpt1(Option<FunctionDeclarationOpt1>),
     FunctionTerm(FunctionTerm),
     FunctionToken(FunctionToken),
+    GenerateBlockDeclaration(GenerateBlockDeclaration),
+    GenerateForDeclaration(GenerateForDeclaration),
+    GenerateForDeclarationOpt(Option<GenerateForDeclarationOpt>),
+    GenerateGroup(GenerateGroup),
+    GenerateGroupGroup(GenerateGroupGroup),
+    GenerateGroupGroupList(Vec<GenerateGroupGroupList>),
+    GenerateGroupList(Vec<GenerateGroupList>),
+    GenerateIfDeclaration(GenerateIfDeclaration),
+    GenerateIfDeclarationList(Vec<GenerateIfDeclarationList>),
+    GenerateIfDeclarationOpt(Option<GenerateIfDeclarationOpt>),
+    GenerateItem(GenerateItem),
+    GenerateNamedBlock(GenerateNamedBlock),
+    GenerateNamedBlockList(Vec<GenerateNamedBlockList>),
+    GenerateOptionalNamedBlock(GenerateOptionalNamedBlock),
+    GenerateOptionalNamedBlockList(Vec<GenerateOptionalNamedBlockList>),
+    GenerateOptionalNamedBlockOpt(Option<GenerateOptionalNamedBlockOpt>),
     GenericBound(GenericBound),
     Hash(Hash),
     HashTerm(HashTerm),
@@ -12536,27 +12325,16 @@ pub enum ASTType {
     InstToken(InstToken),
     IntegralNumber(IntegralNumber),
     Interface(Interface),
-    InterfaceBlockDeclaration(InterfaceBlockDeclaration),
     InterfaceDeclaration(InterfaceDeclaration),
     InterfaceDeclarationList(Vec<InterfaceDeclarationList>),
     InterfaceDeclarationOpt(Option<InterfaceDeclarationOpt>),
     InterfaceDeclarationOpt0(Option<InterfaceDeclarationOpt0>),
     InterfaceDeclarationOpt1(Option<InterfaceDeclarationOpt1>),
-    InterfaceForDeclaration(InterfaceForDeclaration),
-    InterfaceForDeclarationOpt(Option<InterfaceForDeclarationOpt>),
     InterfaceGroup(InterfaceGroup),
     InterfaceGroupGroup(InterfaceGroupGroup),
     InterfaceGroupGroupList(Vec<InterfaceGroupGroupList>),
     InterfaceGroupList(Vec<InterfaceGroupList>),
-    InterfaceIfDeclaration(InterfaceIfDeclaration),
-    InterfaceIfDeclarationList(Vec<InterfaceIfDeclarationList>),
-    InterfaceIfDeclarationOpt(Option<InterfaceIfDeclarationOpt>),
     InterfaceItem(InterfaceItem),
-    InterfaceNamedBlock(InterfaceNamedBlock),
-    InterfaceNamedBlockList(Vec<InterfaceNamedBlockList>),
-    InterfaceOptionalNamedBlock(InterfaceOptionalNamedBlock),
-    InterfaceOptionalNamedBlockList(Vec<InterfaceOptionalNamedBlockList>),
-    InterfaceOptionalNamedBlockOpt(Option<InterfaceOptionalNamedBlockOpt>),
     InterfaceTerm(InterfaceTerm),
     InterfaceToken(InterfaceToken),
     LAngle(LAngle),
@@ -12602,7 +12380,6 @@ pub enum ASTType {
     ModportTerm(ModportTerm),
     ModportToken(ModportToken),
     Module(Module),
-    ModuleBlockDeclaration(ModuleBlockDeclaration),
     ModuleDeclaration(ModuleDeclaration),
     ModuleDeclarationList(Vec<ModuleDeclarationList>),
     ModuleDeclarationOpt(Option<ModuleDeclarationOpt>),
@@ -12610,21 +12387,11 @@ pub enum ASTType {
     ModuleDeclarationOpt1(Option<ModuleDeclarationOpt1>),
     ModuleDeclarationOpt2(Option<ModuleDeclarationOpt2>),
     ModuleDeclarationOpt3(Option<ModuleDeclarationOpt3>),
-    ModuleForDeclaration(ModuleForDeclaration),
-    ModuleForDeclarationOpt(Option<ModuleForDeclarationOpt>),
     ModuleGroup(ModuleGroup),
     ModuleGroupGroup(ModuleGroupGroup),
     ModuleGroupGroupList(Vec<ModuleGroupGroupList>),
     ModuleGroupList(Vec<ModuleGroupList>),
-    ModuleIfDeclaration(ModuleIfDeclaration),
-    ModuleIfDeclarationList(Vec<ModuleIfDeclarationList>),
-    ModuleIfDeclarationOpt(Option<ModuleIfDeclarationOpt>),
     ModuleItem(ModuleItem),
-    ModuleNamedBlock(ModuleNamedBlock),
-    ModuleNamedBlockList(Vec<ModuleNamedBlockList>),
-    ModuleOptionalNamedBlock(ModuleOptionalNamedBlock),
-    ModuleOptionalNamedBlockList(Vec<ModuleOptionalNamedBlockList>),
-    ModuleOptionalNamedBlockOpt(Option<ModuleOptionalNamedBlockOpt>),
     ModuleTerm(ModuleTerm),
     ModuleToken(ModuleToken),
     Msb(Msb),
@@ -31054,20 +30821,20 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 806:
     ///
-    /// `UnsafeBlockList /* Vec<T>::Push */: ModuleGroup UnsafeBlockList;`
+    /// `UnsafeBlockList /* Vec<T>::Push */: GenerateGroup UnsafeBlockList;`
     ///
     #[parol_runtime::function_name::named]
     fn unsafe_block_list_0(
         &mut self,
-        _module_group: &ParseTreeType<'t>,
+        _generate_group: &ParseTreeType<'t>,
         _unsafe_block_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let mut unsafe_block_list = pop_item!(self, unsafe_block_list, UnsafeBlockList, context);
-        let module_group = pop_item!(self, module_group, ModuleGroup, context);
+        let generate_group = pop_item!(self, generate_group, GenerateGroup, context);
         let unsafe_block_list_0_built = UnsafeBlockList {
-            module_group: Box::new(module_group),
+            generate_group: Box::new(generate_group),
         };
         // Add an element to the vector
         unsafe_block_list.push(unsafe_block_list_0_built);
@@ -31380,469 +31147,6 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 821:
     ///
-    /// `ModuleIfDeclaration: If Expression ModuleNamedBlock ModuleIfDeclarationList /* Vec */ ModuleIfDeclarationOpt /* Option */;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_if_declaration(
-        &mut self,
-        _if: &ParseTreeType<'t>,
-        _expression: &ParseTreeType<'t>,
-        _module_named_block: &ParseTreeType<'t>,
-        _module_if_declaration_list: &ParseTreeType<'t>,
-        _module_if_declaration_opt: &ParseTreeType<'t>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let module_if_declaration_opt = pop_item!(
-            self,
-            module_if_declaration_opt,
-            ModuleIfDeclarationOpt,
-            context
-        );
-        let module_if_declaration_list = pop_and_reverse_item!(
-            self,
-            module_if_declaration_list,
-            ModuleIfDeclarationList,
-            context
-        );
-        let module_named_block = pop_item!(self, module_named_block, ModuleNamedBlock, context);
-        let expression = pop_item!(self, expression, Expression, context);
-        let r#if = pop_item!(self, r#if, If, context);
-        let module_if_declaration_built = ModuleIfDeclaration {
-            r#if: Box::new(r#if),
-            expression: Box::new(expression),
-            module_named_block: Box::new(module_named_block),
-            module_if_declaration_list,
-            module_if_declaration_opt,
-        };
-        // Calling user action here
-        self.user_grammar
-            .module_if_declaration(&module_if_declaration_built)?;
-        self.push(
-            ASTType::ModuleIfDeclaration(module_if_declaration_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 822:
-    ///
-    /// `ModuleIfDeclarationList /* Vec<T>::Push */: Else If Expression ModuleOptionalNamedBlock ModuleIfDeclarationList;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_if_declaration_list_0(
-        &mut self,
-        _else: &ParseTreeType<'t>,
-        _if: &ParseTreeType<'t>,
-        _expression: &ParseTreeType<'t>,
-        _module_optional_named_block: &ParseTreeType<'t>,
-        _module_if_declaration_list: &ParseTreeType<'t>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let mut module_if_declaration_list = pop_item!(
-            self,
-            module_if_declaration_list,
-            ModuleIfDeclarationList,
-            context
-        );
-        let module_optional_named_block = pop_item!(
-            self,
-            module_optional_named_block,
-            ModuleOptionalNamedBlock,
-            context
-        );
-        let expression = pop_item!(self, expression, Expression, context);
-        let r#if = pop_item!(self, r#if, If, context);
-        let r#else = pop_item!(self, r#else, Else, context);
-        let module_if_declaration_list_0_built = ModuleIfDeclarationList {
-            module_optional_named_block: Box::new(module_optional_named_block),
-            expression: Box::new(expression),
-            r#if: Box::new(r#if),
-            r#else: Box::new(r#else),
-        };
-        // Add an element to the vector
-        module_if_declaration_list.push(module_if_declaration_list_0_built);
-        self.push(
-            ASTType::ModuleIfDeclarationList(module_if_declaration_list),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 823:
-    ///
-    /// `ModuleIfDeclarationList /* Vec<T>::New */: ;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_if_declaration_list_1(&mut self) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let module_if_declaration_list_1_built = Vec::new();
-        self.push(
-            ASTType::ModuleIfDeclarationList(module_if_declaration_list_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 824:
-    ///
-    /// `ModuleIfDeclarationOpt /* Option<T>::Some */: Else ModuleOptionalNamedBlock;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_if_declaration_opt_0(
-        &mut self,
-        _else: &ParseTreeType<'t>,
-        _module_optional_named_block: &ParseTreeType<'t>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let module_optional_named_block = pop_item!(
-            self,
-            module_optional_named_block,
-            ModuleOptionalNamedBlock,
-            context
-        );
-        let r#else = pop_item!(self, r#else, Else, context);
-        let module_if_declaration_opt_0_built = ModuleIfDeclarationOpt {
-            r#else: Box::new(r#else),
-            module_optional_named_block: Box::new(module_optional_named_block),
-        };
-        self.push(
-            ASTType::ModuleIfDeclarationOpt(Some(module_if_declaration_opt_0_built)),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 825:
-    ///
-    /// `ModuleIfDeclarationOpt /* Option<T>::None */: ;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_if_declaration_opt_1(&mut self) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::ModuleIfDeclarationOpt(None), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 826:
-    ///
-    /// `ModuleForDeclaration: For Identifier In Range ModuleForDeclarationOpt /* Option */ ModuleNamedBlock;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_for_declaration(
-        &mut self,
-        _for: &ParseTreeType<'t>,
-        _identifier: &ParseTreeType<'t>,
-        _in: &ParseTreeType<'t>,
-        _range: &ParseTreeType<'t>,
-        _module_for_declaration_opt: &ParseTreeType<'t>,
-        _module_named_block: &ParseTreeType<'t>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let module_named_block = pop_item!(self, module_named_block, ModuleNamedBlock, context);
-        let module_for_declaration_opt = pop_item!(
-            self,
-            module_for_declaration_opt,
-            ModuleForDeclarationOpt,
-            context
-        );
-        let range = pop_item!(self, range, Range, context);
-        let r#in = pop_item!(self, r#in, In, context);
-        let identifier = pop_item!(self, identifier, Identifier, context);
-        let r#for = pop_item!(self, r#for, For, context);
-        let module_for_declaration_built = ModuleForDeclaration {
-            r#for: Box::new(r#for),
-            identifier: Box::new(identifier),
-            r#in: Box::new(r#in),
-            range: Box::new(range),
-            module_for_declaration_opt,
-            module_named_block: Box::new(module_named_block),
-        };
-        // Calling user action here
-        self.user_grammar
-            .module_for_declaration(&module_for_declaration_built)?;
-        self.push(
-            ASTType::ModuleForDeclaration(module_for_declaration_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 827:
-    ///
-    /// `ModuleForDeclarationOpt /* Option<T>::Some */: Step AssignmentOperator Expression;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_for_declaration_opt_0(
-        &mut self,
-        _step: &ParseTreeType<'t>,
-        _assignment_operator: &ParseTreeType<'t>,
-        _expression: &ParseTreeType<'t>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let expression = pop_item!(self, expression, Expression, context);
-        let assignment_operator = pop_item!(self, assignment_operator, AssignmentOperator, context);
-        let step = pop_item!(self, step, Step, context);
-        let module_for_declaration_opt_0_built = ModuleForDeclarationOpt {
-            step: Box::new(step),
-            assignment_operator: Box::new(assignment_operator),
-            expression: Box::new(expression),
-        };
-        self.push(
-            ASTType::ModuleForDeclarationOpt(Some(module_for_declaration_opt_0_built)),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 828:
-    ///
-    /// `ModuleForDeclarationOpt /* Option<T>::None */: ;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_for_declaration_opt_1(&mut self) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::ModuleForDeclarationOpt(None), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 829:
-    ///
-    /// `ModuleBlockDeclaration: ModuleNamedBlock;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_block_declaration(&mut self, _module_named_block: &ParseTreeType<'t>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let module_named_block = pop_item!(self, module_named_block, ModuleNamedBlock, context);
-        let module_block_declaration_built = ModuleBlockDeclaration {
-            module_named_block: Box::new(module_named_block),
-        };
-        // Calling user action here
-        self.user_grammar
-            .module_block_declaration(&module_block_declaration_built)?;
-        self.push(
-            ASTType::ModuleBlockDeclaration(module_block_declaration_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 830:
-    ///
-    /// `ModuleNamedBlock: Colon Identifier LBrace ModuleNamedBlockList /* Vec */ RBrace;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_named_block(
-        &mut self,
-        _colon: &ParseTreeType<'t>,
-        _identifier: &ParseTreeType<'t>,
-        _l_brace: &ParseTreeType<'t>,
-        _module_named_block_list: &ParseTreeType<'t>,
-        _r_brace: &ParseTreeType<'t>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let r_brace = pop_item!(self, r_brace, RBrace, context);
-        let module_named_block_list =
-            pop_and_reverse_item!(self, module_named_block_list, ModuleNamedBlockList, context);
-        let l_brace = pop_item!(self, l_brace, LBrace, context);
-        let identifier = pop_item!(self, identifier, Identifier, context);
-        let colon = pop_item!(self, colon, Colon, context);
-        let module_named_block_built = ModuleNamedBlock {
-            colon: Box::new(colon),
-            identifier: Box::new(identifier),
-            l_brace: Box::new(l_brace),
-            module_named_block_list,
-            r_brace: Box::new(r_brace),
-        };
-        // Calling user action here
-        self.user_grammar
-            .module_named_block(&module_named_block_built)?;
-        self.push(ASTType::ModuleNamedBlock(module_named_block_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 831:
-    ///
-    /// `ModuleNamedBlockList /* Vec<T>::Push */: ModuleGroup ModuleNamedBlockList;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_named_block_list_0(
-        &mut self,
-        _module_group: &ParseTreeType<'t>,
-        _module_named_block_list: &ParseTreeType<'t>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let mut module_named_block_list =
-            pop_item!(self, module_named_block_list, ModuleNamedBlockList, context);
-        let module_group = pop_item!(self, module_group, ModuleGroup, context);
-        let module_named_block_list_0_built = ModuleNamedBlockList {
-            module_group: Box::new(module_group),
-        };
-        // Add an element to the vector
-        module_named_block_list.push(module_named_block_list_0_built);
-        self.push(
-            ASTType::ModuleNamedBlockList(module_named_block_list),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 832:
-    ///
-    /// `ModuleNamedBlockList /* Vec<T>::New */: ;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_named_block_list_1(&mut self) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let module_named_block_list_1_built = Vec::new();
-        self.push(
-            ASTType::ModuleNamedBlockList(module_named_block_list_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 833:
-    ///
-    /// `ModuleOptionalNamedBlock: ModuleOptionalNamedBlockOpt /* Option */ LBrace ModuleOptionalNamedBlockList /* Vec */ RBrace;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_optional_named_block(
-        &mut self,
-        _module_optional_named_block_opt: &ParseTreeType<'t>,
-        _l_brace: &ParseTreeType<'t>,
-        _module_optional_named_block_list: &ParseTreeType<'t>,
-        _r_brace: &ParseTreeType<'t>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let r_brace = pop_item!(self, r_brace, RBrace, context);
-        let module_optional_named_block_list = pop_and_reverse_item!(
-            self,
-            module_optional_named_block_list,
-            ModuleOptionalNamedBlockList,
-            context
-        );
-        let l_brace = pop_item!(self, l_brace, LBrace, context);
-        let module_optional_named_block_opt = pop_item!(
-            self,
-            module_optional_named_block_opt,
-            ModuleOptionalNamedBlockOpt,
-            context
-        );
-        let module_optional_named_block_built = ModuleOptionalNamedBlock {
-            module_optional_named_block_opt,
-            l_brace: Box::new(l_brace),
-            module_optional_named_block_list,
-            r_brace: Box::new(r_brace),
-        };
-        // Calling user action here
-        self.user_grammar
-            .module_optional_named_block(&module_optional_named_block_built)?;
-        self.push(
-            ASTType::ModuleOptionalNamedBlock(module_optional_named_block_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 834:
-    ///
-    /// `ModuleOptionalNamedBlockList /* Vec<T>::Push */: ModuleGroup ModuleOptionalNamedBlockList;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_optional_named_block_list_0(
-        &mut self,
-        _module_group: &ParseTreeType<'t>,
-        _module_optional_named_block_list: &ParseTreeType<'t>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let mut module_optional_named_block_list = pop_item!(
-            self,
-            module_optional_named_block_list,
-            ModuleOptionalNamedBlockList,
-            context
-        );
-        let module_group = pop_item!(self, module_group, ModuleGroup, context);
-        let module_optional_named_block_list_0_built = ModuleOptionalNamedBlockList {
-            module_group: Box::new(module_group),
-        };
-        // Add an element to the vector
-        module_optional_named_block_list.push(module_optional_named_block_list_0_built);
-        self.push(
-            ASTType::ModuleOptionalNamedBlockList(module_optional_named_block_list),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 835:
-    ///
-    /// `ModuleOptionalNamedBlockList /* Vec<T>::New */: ;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_optional_named_block_list_1(&mut self) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let module_optional_named_block_list_1_built = Vec::new();
-        self.push(
-            ASTType::ModuleOptionalNamedBlockList(module_optional_named_block_list_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 836:
-    ///
-    /// `ModuleOptionalNamedBlockOpt /* Option<T>::Some */: Colon Identifier;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_optional_named_block_opt_0(
-        &mut self,
-        _colon: &ParseTreeType<'t>,
-        _identifier: &ParseTreeType<'t>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let identifier = pop_item!(self, identifier, Identifier, context);
-        let colon = pop_item!(self, colon, Colon, context);
-        let module_optional_named_block_opt_0_built = ModuleOptionalNamedBlockOpt {
-            colon: Box::new(colon),
-            identifier: Box::new(identifier),
-        };
-        self.push(
-            ASTType::ModuleOptionalNamedBlockOpt(Some(module_optional_named_block_opt_0_built)),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 837:
-    ///
-    /// `ModuleOptionalNamedBlockOpt /* Option<T>::None */: ;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_optional_named_block_opt_1(&mut self) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::ModuleOptionalNamedBlockOpt(None), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 838:
-    ///
     /// `ModuleGroup: ModuleGroupList /* Vec */ ModuleGroupGroup;`
     ///
     #[parol_runtime::function_name::named]
@@ -31866,7 +31170,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 839:
+    /// Semantic action for production 822:
     ///
     /// `ModuleGroupGroup: LBrace ModuleGroupGroupList /* Vec */ RBrace;`
     ///
@@ -31897,7 +31201,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 840:
+    /// Semantic action for production 823:
     ///
     /// `ModuleGroupGroupList /* Vec<T>::Push */: ModuleGroup ModuleGroupGroupList;`
     ///
@@ -31924,7 +31228,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 841:
+    /// Semantic action for production 824:
     ///
     /// `ModuleGroupGroupList /* Vec<T>::New */: ;`
     ///
@@ -31940,7 +31244,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 842:
+    /// Semantic action for production 825:
     ///
     /// `ModuleGroupGroup: ModuleItem;`
     ///
@@ -31960,7 +31264,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 843:
+    /// Semantic action for production 826:
     ///
     /// `ModuleGroupList /* Vec<T>::Push */: Attribute ModuleGroupList;`
     ///
@@ -31983,7 +31287,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 844:
+    /// Semantic action for production 827:
     ///
     /// `ModuleGroupList /* Vec<T>::New */: ;`
     ///
@@ -31996,369 +31300,25 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 845:
+    /// Semantic action for production 828:
     ///
-    /// `ModuleItem: LetDeclaration;`
+    /// `ModuleItem: GenerateItem;`
     ///
     #[parol_runtime::function_name::named]
-    fn module_item_0(&mut self, _let_declaration: &ParseTreeType<'t>) -> Result<()> {
+    fn module_item(&mut self, _generate_item: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let let_declaration = pop_item!(self, let_declaration, LetDeclaration, context);
-        let module_item_0_built = ModuleItemLetDeclaration {
-            let_declaration: Box::new(let_declaration),
+        let generate_item = pop_item!(self, generate_item, GenerateItem, context);
+        let module_item_built = ModuleItem {
+            generate_item: Box::new(generate_item),
         };
-        let module_item_0_built = ModuleItem::LetDeclaration(module_item_0_built);
         // Calling user action here
-        self.user_grammar.module_item(&module_item_0_built)?;
-        self.push(ASTType::ModuleItem(module_item_0_built), context);
+        self.user_grammar.module_item(&module_item_built)?;
+        self.push(ASTType::ModuleItem(module_item_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 846:
-    ///
-    /// `ModuleItem: VarDeclaration;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_item_1(&mut self, _var_declaration: &ParseTreeType<'t>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let var_declaration = pop_item!(self, var_declaration, VarDeclaration, context);
-        let module_item_1_built = ModuleItemVarDeclaration {
-            var_declaration: Box::new(var_declaration),
-        };
-        let module_item_1_built = ModuleItem::VarDeclaration(module_item_1_built);
-        // Calling user action here
-        self.user_grammar.module_item(&module_item_1_built)?;
-        self.push(ASTType::ModuleItem(module_item_1_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 847:
-    ///
-    /// `ModuleItem: InstDeclaration;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_item_2(&mut self, _inst_declaration: &ParseTreeType<'t>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let inst_declaration = pop_item!(self, inst_declaration, InstDeclaration, context);
-        let module_item_2_built = ModuleItemInstDeclaration {
-            inst_declaration: Box::new(inst_declaration),
-        };
-        let module_item_2_built = ModuleItem::InstDeclaration(module_item_2_built);
-        // Calling user action here
-        self.user_grammar.module_item(&module_item_2_built)?;
-        self.push(ASTType::ModuleItem(module_item_2_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 848:
-    ///
-    /// `ModuleItem: TypeDefDeclaration;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_item_3(&mut self, _type_def_declaration: &ParseTreeType<'t>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let type_def_declaration =
-            pop_item!(self, type_def_declaration, TypeDefDeclaration, context);
-        let module_item_3_built = ModuleItemTypeDefDeclaration {
-            type_def_declaration: Box::new(type_def_declaration),
-        };
-        let module_item_3_built = ModuleItem::TypeDefDeclaration(module_item_3_built);
-        // Calling user action here
-        self.user_grammar.module_item(&module_item_3_built)?;
-        self.push(ASTType::ModuleItem(module_item_3_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 849:
-    ///
-    /// `ModuleItem: ConstDeclaration;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_item_4(&mut self, _const_declaration: &ParseTreeType<'t>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let const_declaration = pop_item!(self, const_declaration, ConstDeclaration, context);
-        let module_item_4_built = ModuleItemConstDeclaration {
-            const_declaration: Box::new(const_declaration),
-        };
-        let module_item_4_built = ModuleItem::ConstDeclaration(module_item_4_built);
-        // Calling user action here
-        self.user_grammar.module_item(&module_item_4_built)?;
-        self.push(ASTType::ModuleItem(module_item_4_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 850:
-    ///
-    /// `ModuleItem: AlwaysFfDeclaration;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_item_5(&mut self, _always_ff_declaration: &ParseTreeType<'t>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let always_ff_declaration =
-            pop_item!(self, always_ff_declaration, AlwaysFfDeclaration, context);
-        let module_item_5_built = ModuleItemAlwaysFfDeclaration {
-            always_ff_declaration: Box::new(always_ff_declaration),
-        };
-        let module_item_5_built = ModuleItem::AlwaysFfDeclaration(module_item_5_built);
-        // Calling user action here
-        self.user_grammar.module_item(&module_item_5_built)?;
-        self.push(ASTType::ModuleItem(module_item_5_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 851:
-    ///
-    /// `ModuleItem: AlwaysCombDeclaration;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_item_6(&mut self, _always_comb_declaration: &ParseTreeType<'t>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let always_comb_declaration = pop_item!(
-            self,
-            always_comb_declaration,
-            AlwaysCombDeclaration,
-            context
-        );
-        let module_item_6_built = ModuleItemAlwaysCombDeclaration {
-            always_comb_declaration: Box::new(always_comb_declaration),
-        };
-        let module_item_6_built = ModuleItem::AlwaysCombDeclaration(module_item_6_built);
-        // Calling user action here
-        self.user_grammar.module_item(&module_item_6_built)?;
-        self.push(ASTType::ModuleItem(module_item_6_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 852:
-    ///
-    /// `ModuleItem: AssignDeclaration;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_item_7(&mut self, _assign_declaration: &ParseTreeType<'t>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let assign_declaration = pop_item!(self, assign_declaration, AssignDeclaration, context);
-        let module_item_7_built = ModuleItemAssignDeclaration {
-            assign_declaration: Box::new(assign_declaration),
-        };
-        let module_item_7_built = ModuleItem::AssignDeclaration(module_item_7_built);
-        // Calling user action here
-        self.user_grammar.module_item(&module_item_7_built)?;
-        self.push(ASTType::ModuleItem(module_item_7_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 853:
-    ///
-    /// `ModuleItem: FunctionDeclaration;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_item_8(&mut self, _function_declaration: &ParseTreeType<'t>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let function_declaration =
-            pop_item!(self, function_declaration, FunctionDeclaration, context);
-        let module_item_8_built = ModuleItemFunctionDeclaration {
-            function_declaration: Box::new(function_declaration),
-        };
-        let module_item_8_built = ModuleItem::FunctionDeclaration(module_item_8_built);
-        // Calling user action here
-        self.user_grammar.module_item(&module_item_8_built)?;
-        self.push(ASTType::ModuleItem(module_item_8_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 854:
-    ///
-    /// `ModuleItem: ModuleIfDeclaration;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_item_9(&mut self, _module_if_declaration: &ParseTreeType<'t>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let module_if_declaration =
-            pop_item!(self, module_if_declaration, ModuleIfDeclaration, context);
-        let module_item_9_built = ModuleItemModuleIfDeclaration {
-            module_if_declaration: Box::new(module_if_declaration),
-        };
-        let module_item_9_built = ModuleItem::ModuleIfDeclaration(module_item_9_built);
-        // Calling user action here
-        self.user_grammar.module_item(&module_item_9_built)?;
-        self.push(ASTType::ModuleItem(module_item_9_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 855:
-    ///
-    /// `ModuleItem: ModuleForDeclaration;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_item_10(&mut self, _module_for_declaration: &ParseTreeType<'t>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let module_for_declaration =
-            pop_item!(self, module_for_declaration, ModuleForDeclaration, context);
-        let module_item_10_built = ModuleItemModuleForDeclaration {
-            module_for_declaration: Box::new(module_for_declaration),
-        };
-        let module_item_10_built = ModuleItem::ModuleForDeclaration(module_item_10_built);
-        // Calling user action here
-        self.user_grammar.module_item(&module_item_10_built)?;
-        self.push(ASTType::ModuleItem(module_item_10_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 856:
-    ///
-    /// `ModuleItem: ModuleBlockDeclaration;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_item_11(&mut self, _module_block_declaration: &ParseTreeType<'t>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let module_block_declaration = pop_item!(
-            self,
-            module_block_declaration,
-            ModuleBlockDeclaration,
-            context
-        );
-        let module_item_11_built = ModuleItemModuleBlockDeclaration {
-            module_block_declaration: Box::new(module_block_declaration),
-        };
-        let module_item_11_built = ModuleItem::ModuleBlockDeclaration(module_item_11_built);
-        // Calling user action here
-        self.user_grammar.module_item(&module_item_11_built)?;
-        self.push(ASTType::ModuleItem(module_item_11_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 857:
-    ///
-    /// `ModuleItem: EnumDeclaration;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_item_12(&mut self, _enum_declaration: &ParseTreeType<'t>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let enum_declaration = pop_item!(self, enum_declaration, EnumDeclaration, context);
-        let module_item_12_built = ModuleItemEnumDeclaration {
-            enum_declaration: Box::new(enum_declaration),
-        };
-        let module_item_12_built = ModuleItem::EnumDeclaration(module_item_12_built);
-        // Calling user action here
-        self.user_grammar.module_item(&module_item_12_built)?;
-        self.push(ASTType::ModuleItem(module_item_12_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 858:
-    ///
-    /// `ModuleItem: StructUnionDeclaration;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_item_13(&mut self, _struct_union_declaration: &ParseTreeType<'t>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let struct_union_declaration = pop_item!(
-            self,
-            struct_union_declaration,
-            StructUnionDeclaration,
-            context
-        );
-        let module_item_13_built = ModuleItemStructUnionDeclaration {
-            struct_union_declaration: Box::new(struct_union_declaration),
-        };
-        let module_item_13_built = ModuleItem::StructUnionDeclaration(module_item_13_built);
-        // Calling user action here
-        self.user_grammar.module_item(&module_item_13_built)?;
-        self.push(ASTType::ModuleItem(module_item_13_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 859:
-    ///
-    /// `ModuleItem: ImportDeclaration;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_item_14(&mut self, _import_declaration: &ParseTreeType<'t>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let import_declaration = pop_item!(self, import_declaration, ImportDeclaration, context);
-        let module_item_14_built = ModuleItemImportDeclaration {
-            import_declaration: Box::new(import_declaration),
-        };
-        let module_item_14_built = ModuleItem::ImportDeclaration(module_item_14_built);
-        // Calling user action here
-        self.user_grammar.module_item(&module_item_14_built)?;
-        self.push(ASTType::ModuleItem(module_item_14_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 860:
-    ///
-    /// `ModuleItem: InitialDeclaration;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_item_15(&mut self, _initial_declaration: &ParseTreeType<'t>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let initial_declaration = pop_item!(self, initial_declaration, InitialDeclaration, context);
-        let module_item_15_built = ModuleItemInitialDeclaration {
-            initial_declaration: Box::new(initial_declaration),
-        };
-        let module_item_15_built = ModuleItem::InitialDeclaration(module_item_15_built);
-        // Calling user action here
-        self.user_grammar.module_item(&module_item_15_built)?;
-        self.push(ASTType::ModuleItem(module_item_15_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 861:
-    ///
-    /// `ModuleItem: FinalDeclaration;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_item_16(&mut self, _final_declaration: &ParseTreeType<'t>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let final_declaration = pop_item!(self, final_declaration, FinalDeclaration, context);
-        let module_item_16_built = ModuleItemFinalDeclaration {
-            final_declaration: Box::new(final_declaration),
-        };
-        let module_item_16_built = ModuleItem::FinalDeclaration(module_item_16_built);
-        // Calling user action here
-        self.user_grammar.module_item(&module_item_16_built)?;
-        self.push(ASTType::ModuleItem(module_item_16_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 862:
-    ///
-    /// `ModuleItem: UnsafeBlock;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn module_item_17(&mut self, _unsafe_block: &ParseTreeType<'t>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let unsafe_block = pop_item!(self, unsafe_block, UnsafeBlock, context);
-        let module_item_17_built = ModuleItemUnsafeBlock {
-            unsafe_block: Box::new(unsafe_block),
-        };
-        let module_item_17_built = ModuleItem::UnsafeBlock(module_item_17_built);
-        // Calling user action here
-        self.user_grammar.module_item(&module_item_17_built)?;
-        self.push(ASTType::ModuleItem(module_item_17_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 863:
+    /// Semantic action for production 829:
     ///
     /// `InterfaceDeclaration: InterfaceDeclarationOpt /* Option */ Interface Identifier InterfaceDeclarationOpt0 /* Option */ InterfaceDeclarationOpt1 /* Option */ LBrace InterfaceDeclarationList /* Vec */ RBrace;`
     ///
@@ -32424,7 +31384,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 864:
+    /// Semantic action for production 830:
     ///
     /// `InterfaceDeclarationList /* Vec<T>::Push */: InterfaceGroup InterfaceDeclarationList;`
     ///
@@ -32455,7 +31415,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 865:
+    /// Semantic action for production 831:
     ///
     /// `InterfaceDeclarationList /* Vec<T>::New */: ;`
     ///
@@ -32471,7 +31431,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 866:
+    /// Semantic action for production 832:
     ///
     /// `InterfaceDeclarationOpt1 /* Option<T>::Some */: WithParameter;`
     ///
@@ -32490,7 +31450,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 867:
+    /// Semantic action for production 833:
     ///
     /// `InterfaceDeclarationOpt1 /* Option<T>::None */: ;`
     ///
@@ -32502,7 +31462,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 868:
+    /// Semantic action for production 834:
     ///
     /// `InterfaceDeclarationOpt0 /* Option<T>::Some */: WithGenericParameter;`
     ///
@@ -32525,7 +31485,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 869:
+    /// Semantic action for production 835:
     ///
     /// `InterfaceDeclarationOpt0 /* Option<T>::None */: ;`
     ///
@@ -32537,7 +31497,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 870:
+    /// Semantic action for production 836:
     ///
     /// `InterfaceDeclarationOpt /* Option<T>::Some */: Pub;`
     ///
@@ -32556,7 +31516,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 871:
+    /// Semantic action for production 837:
     ///
     /// `InterfaceDeclarationOpt /* Option<T>::None */: ;`
     ///
@@ -32568,489 +31528,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 872:
-    ///
-    /// `InterfaceIfDeclaration: If Expression InterfaceNamedBlock InterfaceIfDeclarationList /* Vec */ InterfaceIfDeclarationOpt /* Option */;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn interface_if_declaration(
-        &mut self,
-        _if: &ParseTreeType<'t>,
-        _expression: &ParseTreeType<'t>,
-        _interface_named_block: &ParseTreeType<'t>,
-        _interface_if_declaration_list: &ParseTreeType<'t>,
-        _interface_if_declaration_opt: &ParseTreeType<'t>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let interface_if_declaration_opt = pop_item!(
-            self,
-            interface_if_declaration_opt,
-            InterfaceIfDeclarationOpt,
-            context
-        );
-        let interface_if_declaration_list = pop_and_reverse_item!(
-            self,
-            interface_if_declaration_list,
-            InterfaceIfDeclarationList,
-            context
-        );
-        let interface_named_block =
-            pop_item!(self, interface_named_block, InterfaceNamedBlock, context);
-        let expression = pop_item!(self, expression, Expression, context);
-        let r#if = pop_item!(self, r#if, If, context);
-        let interface_if_declaration_built = InterfaceIfDeclaration {
-            r#if: Box::new(r#if),
-            expression: Box::new(expression),
-            interface_named_block: Box::new(interface_named_block),
-            interface_if_declaration_list,
-            interface_if_declaration_opt,
-        };
-        // Calling user action here
-        self.user_grammar
-            .interface_if_declaration(&interface_if_declaration_built)?;
-        self.push(
-            ASTType::InterfaceIfDeclaration(interface_if_declaration_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 873:
-    ///
-    /// `InterfaceIfDeclarationList /* Vec<T>::Push */: Else If Expression InterfaceOptionalNamedBlock InterfaceIfDeclarationList;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn interface_if_declaration_list_0(
-        &mut self,
-        _else: &ParseTreeType<'t>,
-        _if: &ParseTreeType<'t>,
-        _expression: &ParseTreeType<'t>,
-        _interface_optional_named_block: &ParseTreeType<'t>,
-        _interface_if_declaration_list: &ParseTreeType<'t>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let mut interface_if_declaration_list = pop_item!(
-            self,
-            interface_if_declaration_list,
-            InterfaceIfDeclarationList,
-            context
-        );
-        let interface_optional_named_block = pop_item!(
-            self,
-            interface_optional_named_block,
-            InterfaceOptionalNamedBlock,
-            context
-        );
-        let expression = pop_item!(self, expression, Expression, context);
-        let r#if = pop_item!(self, r#if, If, context);
-        let r#else = pop_item!(self, r#else, Else, context);
-        let interface_if_declaration_list_0_built = InterfaceIfDeclarationList {
-            interface_optional_named_block: Box::new(interface_optional_named_block),
-            expression: Box::new(expression),
-            r#if: Box::new(r#if),
-            r#else: Box::new(r#else),
-        };
-        // Add an element to the vector
-        interface_if_declaration_list.push(interface_if_declaration_list_0_built);
-        self.push(
-            ASTType::InterfaceIfDeclarationList(interface_if_declaration_list),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 874:
-    ///
-    /// `InterfaceIfDeclarationList /* Vec<T>::New */: ;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn interface_if_declaration_list_1(&mut self) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let interface_if_declaration_list_1_built = Vec::new();
-        self.push(
-            ASTType::InterfaceIfDeclarationList(interface_if_declaration_list_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 875:
-    ///
-    /// `InterfaceIfDeclarationOpt /* Option<T>::Some */: Else InterfaceOptionalNamedBlock;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn interface_if_declaration_opt_0(
-        &mut self,
-        _else: &ParseTreeType<'t>,
-        _interface_optional_named_block: &ParseTreeType<'t>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let interface_optional_named_block = pop_item!(
-            self,
-            interface_optional_named_block,
-            InterfaceOptionalNamedBlock,
-            context
-        );
-        let r#else = pop_item!(self, r#else, Else, context);
-        let interface_if_declaration_opt_0_built = InterfaceIfDeclarationOpt {
-            r#else: Box::new(r#else),
-            interface_optional_named_block: Box::new(interface_optional_named_block),
-        };
-        self.push(
-            ASTType::InterfaceIfDeclarationOpt(Some(interface_if_declaration_opt_0_built)),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 876:
-    ///
-    /// `InterfaceIfDeclarationOpt /* Option<T>::None */: ;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn interface_if_declaration_opt_1(&mut self) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::InterfaceIfDeclarationOpt(None), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 877:
-    ///
-    /// `InterfaceForDeclaration: For Identifier In Range InterfaceForDeclarationOpt /* Option */ InterfaceNamedBlock;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn interface_for_declaration(
-        &mut self,
-        _for: &ParseTreeType<'t>,
-        _identifier: &ParseTreeType<'t>,
-        _in: &ParseTreeType<'t>,
-        _range: &ParseTreeType<'t>,
-        _interface_for_declaration_opt: &ParseTreeType<'t>,
-        _interface_named_block: &ParseTreeType<'t>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let interface_named_block =
-            pop_item!(self, interface_named_block, InterfaceNamedBlock, context);
-        let interface_for_declaration_opt = pop_item!(
-            self,
-            interface_for_declaration_opt,
-            InterfaceForDeclarationOpt,
-            context
-        );
-        let range = pop_item!(self, range, Range, context);
-        let r#in = pop_item!(self, r#in, In, context);
-        let identifier = pop_item!(self, identifier, Identifier, context);
-        let r#for = pop_item!(self, r#for, For, context);
-        let interface_for_declaration_built = InterfaceForDeclaration {
-            r#for: Box::new(r#for),
-            identifier: Box::new(identifier),
-            r#in: Box::new(r#in),
-            range: Box::new(range),
-            interface_for_declaration_opt,
-            interface_named_block: Box::new(interface_named_block),
-        };
-        // Calling user action here
-        self.user_grammar
-            .interface_for_declaration(&interface_for_declaration_built)?;
-        self.push(
-            ASTType::InterfaceForDeclaration(interface_for_declaration_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 878:
-    ///
-    /// `InterfaceForDeclarationOpt /* Option<T>::Some */: Step AssignmentOperator Expression;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn interface_for_declaration_opt_0(
-        &mut self,
-        _step: &ParseTreeType<'t>,
-        _assignment_operator: &ParseTreeType<'t>,
-        _expression: &ParseTreeType<'t>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let expression = pop_item!(self, expression, Expression, context);
-        let assignment_operator = pop_item!(self, assignment_operator, AssignmentOperator, context);
-        let step = pop_item!(self, step, Step, context);
-        let interface_for_declaration_opt_0_built = InterfaceForDeclarationOpt {
-            step: Box::new(step),
-            assignment_operator: Box::new(assignment_operator),
-            expression: Box::new(expression),
-        };
-        self.push(
-            ASTType::InterfaceForDeclarationOpt(Some(interface_for_declaration_opt_0_built)),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 879:
-    ///
-    /// `InterfaceForDeclarationOpt /* Option<T>::None */: ;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn interface_for_declaration_opt_1(&mut self) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::InterfaceForDeclarationOpt(None), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 880:
-    ///
-    /// `InterfaceBlockDeclaration: InterfaceNamedBlock;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn interface_block_declaration(
-        &mut self,
-        _interface_named_block: &ParseTreeType<'t>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let interface_named_block =
-            pop_item!(self, interface_named_block, InterfaceNamedBlock, context);
-        let interface_block_declaration_built = InterfaceBlockDeclaration {
-            interface_named_block: Box::new(interface_named_block),
-        };
-        // Calling user action here
-        self.user_grammar
-            .interface_block_declaration(&interface_block_declaration_built)?;
-        self.push(
-            ASTType::InterfaceBlockDeclaration(interface_block_declaration_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 881:
-    ///
-    /// `InterfaceNamedBlock: Colon Identifier LBrace InterfaceNamedBlockList /* Vec */ RBrace;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn interface_named_block(
-        &mut self,
-        _colon: &ParseTreeType<'t>,
-        _identifier: &ParseTreeType<'t>,
-        _l_brace: &ParseTreeType<'t>,
-        _interface_named_block_list: &ParseTreeType<'t>,
-        _r_brace: &ParseTreeType<'t>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let r_brace = pop_item!(self, r_brace, RBrace, context);
-        let interface_named_block_list = pop_and_reverse_item!(
-            self,
-            interface_named_block_list,
-            InterfaceNamedBlockList,
-            context
-        );
-        let l_brace = pop_item!(self, l_brace, LBrace, context);
-        let identifier = pop_item!(self, identifier, Identifier, context);
-        let colon = pop_item!(self, colon, Colon, context);
-        let interface_named_block_built = InterfaceNamedBlock {
-            colon: Box::new(colon),
-            identifier: Box::new(identifier),
-            l_brace: Box::new(l_brace),
-            interface_named_block_list,
-            r_brace: Box::new(r_brace),
-        };
-        // Calling user action here
-        self.user_grammar
-            .interface_named_block(&interface_named_block_built)?;
-        self.push(
-            ASTType::InterfaceNamedBlock(interface_named_block_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 882:
-    ///
-    /// `InterfaceNamedBlockList /* Vec<T>::Push */: InterfaceGroup InterfaceNamedBlockList;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn interface_named_block_list_0(
-        &mut self,
-        _interface_group: &ParseTreeType<'t>,
-        _interface_named_block_list: &ParseTreeType<'t>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let mut interface_named_block_list = pop_item!(
-            self,
-            interface_named_block_list,
-            InterfaceNamedBlockList,
-            context
-        );
-        let interface_group = pop_item!(self, interface_group, InterfaceGroup, context);
-        let interface_named_block_list_0_built = InterfaceNamedBlockList {
-            interface_group: Box::new(interface_group),
-        };
-        // Add an element to the vector
-        interface_named_block_list.push(interface_named_block_list_0_built);
-        self.push(
-            ASTType::InterfaceNamedBlockList(interface_named_block_list),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 883:
-    ///
-    /// `InterfaceNamedBlockList /* Vec<T>::New */: ;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn interface_named_block_list_1(&mut self) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let interface_named_block_list_1_built = Vec::new();
-        self.push(
-            ASTType::InterfaceNamedBlockList(interface_named_block_list_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 884:
-    ///
-    /// `InterfaceOptionalNamedBlock: InterfaceOptionalNamedBlockOpt /* Option */ LBrace InterfaceOptionalNamedBlockList /* Vec */ RBrace;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn interface_optional_named_block(
-        &mut self,
-        _interface_optional_named_block_opt: &ParseTreeType<'t>,
-        _l_brace: &ParseTreeType<'t>,
-        _interface_optional_named_block_list: &ParseTreeType<'t>,
-        _r_brace: &ParseTreeType<'t>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let r_brace = pop_item!(self, r_brace, RBrace, context);
-        let interface_optional_named_block_list = pop_and_reverse_item!(
-            self,
-            interface_optional_named_block_list,
-            InterfaceOptionalNamedBlockList,
-            context
-        );
-        let l_brace = pop_item!(self, l_brace, LBrace, context);
-        let interface_optional_named_block_opt = pop_item!(
-            self,
-            interface_optional_named_block_opt,
-            InterfaceOptionalNamedBlockOpt,
-            context
-        );
-        let interface_optional_named_block_built = InterfaceOptionalNamedBlock {
-            interface_optional_named_block_opt,
-            l_brace: Box::new(l_brace),
-            interface_optional_named_block_list,
-            r_brace: Box::new(r_brace),
-        };
-        // Calling user action here
-        self.user_grammar
-            .interface_optional_named_block(&interface_optional_named_block_built)?;
-        self.push(
-            ASTType::InterfaceOptionalNamedBlock(interface_optional_named_block_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 885:
-    ///
-    /// `InterfaceOptionalNamedBlockList /* Vec<T>::Push */: InterfaceGroup InterfaceOptionalNamedBlockList;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn interface_optional_named_block_list_0(
-        &mut self,
-        _interface_group: &ParseTreeType<'t>,
-        _interface_optional_named_block_list: &ParseTreeType<'t>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let mut interface_optional_named_block_list = pop_item!(
-            self,
-            interface_optional_named_block_list,
-            InterfaceOptionalNamedBlockList,
-            context
-        );
-        let interface_group = pop_item!(self, interface_group, InterfaceGroup, context);
-        let interface_optional_named_block_list_0_built = InterfaceOptionalNamedBlockList {
-            interface_group: Box::new(interface_group),
-        };
-        // Add an element to the vector
-        interface_optional_named_block_list.push(interface_optional_named_block_list_0_built);
-        self.push(
-            ASTType::InterfaceOptionalNamedBlockList(interface_optional_named_block_list),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 886:
-    ///
-    /// `InterfaceOptionalNamedBlockList /* Vec<T>::New */: ;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn interface_optional_named_block_list_1(&mut self) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let interface_optional_named_block_list_1_built = Vec::new();
-        self.push(
-            ASTType::InterfaceOptionalNamedBlockList(interface_optional_named_block_list_1_built),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 887:
-    ///
-    /// `InterfaceOptionalNamedBlockOpt /* Option<T>::Some */: Colon Identifier;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn interface_optional_named_block_opt_0(
-        &mut self,
-        _colon: &ParseTreeType<'t>,
-        _identifier: &ParseTreeType<'t>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let identifier = pop_item!(self, identifier, Identifier, context);
-        let colon = pop_item!(self, colon, Colon, context);
-        let interface_optional_named_block_opt_0_built = InterfaceOptionalNamedBlockOpt {
-            colon: Box::new(colon),
-            identifier: Box::new(identifier),
-        };
-        self.push(
-            ASTType::InterfaceOptionalNamedBlockOpt(Some(
-                interface_optional_named_block_opt_0_built,
-            )),
-            context,
-        );
-        Ok(())
-    }
-
-    /// Semantic action for production 888:
-    ///
-    /// `InterfaceOptionalNamedBlockOpt /* Option<T>::None */: ;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn interface_optional_named_block_opt_1(&mut self) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::InterfaceOptionalNamedBlockOpt(None), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 889:
+    /// Semantic action for production 838:
     ///
     /// `InterfaceGroup: InterfaceGroupList /* Vec */ InterfaceGroupGroup;`
     ///
@@ -33076,7 +31554,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 890:
+    /// Semantic action for production 839:
     ///
     /// `InterfaceGroupGroup: LBrace InterfaceGroupGroupList /* Vec */ RBrace;`
     ///
@@ -33112,7 +31590,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 891:
+    /// Semantic action for production 840:
     ///
     /// `InterfaceGroupGroupList /* Vec<T>::Push */: InterfaceGroup InterfaceGroupGroupList;`
     ///
@@ -33143,7 +31621,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 892:
+    /// Semantic action for production 841:
     ///
     /// `InterfaceGroupGroupList /* Vec<T>::New */: ;`
     ///
@@ -33159,7 +31637,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 893:
+    /// Semantic action for production 842:
     ///
     /// `InterfaceGroupGroup: InterfaceItem;`
     ///
@@ -33180,7 +31658,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 894:
+    /// Semantic action for production 843:
     ///
     /// `InterfaceGroupList /* Vec<T>::Push */: Attribute InterfaceGroupList;`
     ///
@@ -33204,7 +31682,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 895:
+    /// Semantic action for production 844:
     ///
     /// `InterfaceGroupList /* Vec<T>::New */: ;`
     ///
@@ -33220,200 +31698,969 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 896:
+    /// Semantic action for production 845:
     ///
-    /// `InterfaceItem: LetDeclaration;`
+    /// `InterfaceItem: GenerateItem;`
     ///
     #[parol_runtime::function_name::named]
-    fn interface_item_0(&mut self, _let_declaration: &ParseTreeType<'t>) -> Result<()> {
+    fn interface_item_0(&mut self, _generate_item: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let let_declaration = pop_item!(self, let_declaration, LetDeclaration, context);
-        let interface_item_0_built = InterfaceItemLetDeclaration {
-            let_declaration: Box::new(let_declaration),
+        let generate_item = pop_item!(self, generate_item, GenerateItem, context);
+        let interface_item_0_built = InterfaceItemGenerateItem {
+            generate_item: Box::new(generate_item),
         };
-        let interface_item_0_built = InterfaceItem::LetDeclaration(interface_item_0_built);
+        let interface_item_0_built = InterfaceItem::GenerateItem(interface_item_0_built);
         // Calling user action here
         self.user_grammar.interface_item(&interface_item_0_built)?;
         self.push(ASTType::InterfaceItem(interface_item_0_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 897:
+    /// Semantic action for production 846:
     ///
-    /// `InterfaceItem: VarDeclaration;`
+    /// `InterfaceItem: ModportDeclaration;`
     ///
     #[parol_runtime::function_name::named]
-    fn interface_item_1(&mut self, _var_declaration: &ParseTreeType<'t>) -> Result<()> {
+    fn interface_item_1(&mut self, _modport_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let var_declaration = pop_item!(self, var_declaration, VarDeclaration, context);
-        let interface_item_1_built = InterfaceItemVarDeclaration {
-            var_declaration: Box::new(var_declaration),
+        let modport_declaration = pop_item!(self, modport_declaration, ModportDeclaration, context);
+        let interface_item_1_built = InterfaceItemModportDeclaration {
+            modport_declaration: Box::new(modport_declaration),
         };
-        let interface_item_1_built = InterfaceItem::VarDeclaration(interface_item_1_built);
+        let interface_item_1_built = InterfaceItem::ModportDeclaration(interface_item_1_built);
         // Calling user action here
         self.user_grammar.interface_item(&interface_item_1_built)?;
         self.push(ASTType::InterfaceItem(interface_item_1_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 898:
+    /// Semantic action for production 847:
     ///
-    /// `InterfaceItem: ConstDeclaration;`
+    /// `GenerateIfDeclaration: If Expression GenerateNamedBlock GenerateIfDeclarationList /* Vec */ GenerateIfDeclarationOpt /* Option */;`
     ///
     #[parol_runtime::function_name::named]
-    fn interface_item_2(&mut self, _const_declaration: &ParseTreeType<'t>) -> Result<()> {
+    fn generate_if_declaration(
+        &mut self,
+        _if: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
+        _generate_named_block: &ParseTreeType<'t>,
+        _generate_if_declaration_list: &ParseTreeType<'t>,
+        _generate_if_declaration_opt: &ParseTreeType<'t>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let generate_if_declaration_opt = pop_item!(
+            self,
+            generate_if_declaration_opt,
+            GenerateIfDeclarationOpt,
+            context
+        );
+        let generate_if_declaration_list = pop_and_reverse_item!(
+            self,
+            generate_if_declaration_list,
+            GenerateIfDeclarationList,
+            context
+        );
+        let generate_named_block =
+            pop_item!(self, generate_named_block, GenerateNamedBlock, context);
+        let expression = pop_item!(self, expression, Expression, context);
+        let r#if = pop_item!(self, r#if, If, context);
+        let generate_if_declaration_built = GenerateIfDeclaration {
+            r#if: Box::new(r#if),
+            expression: Box::new(expression),
+            generate_named_block: Box::new(generate_named_block),
+            generate_if_declaration_list,
+            generate_if_declaration_opt,
+        };
+        // Calling user action here
+        self.user_grammar
+            .generate_if_declaration(&generate_if_declaration_built)?;
+        self.push(
+            ASTType::GenerateIfDeclaration(generate_if_declaration_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 848:
+    ///
+    /// `GenerateIfDeclarationList /* Vec<T>::Push */: Else If Expression GenerateOptionalNamedBlock GenerateIfDeclarationList;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_if_declaration_list_0(
+        &mut self,
+        _else: &ParseTreeType<'t>,
+        _if: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
+        _generate_optional_named_block: &ParseTreeType<'t>,
+        _generate_if_declaration_list: &ParseTreeType<'t>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let mut generate_if_declaration_list = pop_item!(
+            self,
+            generate_if_declaration_list,
+            GenerateIfDeclarationList,
+            context
+        );
+        let generate_optional_named_block = pop_item!(
+            self,
+            generate_optional_named_block,
+            GenerateOptionalNamedBlock,
+            context
+        );
+        let expression = pop_item!(self, expression, Expression, context);
+        let r#if = pop_item!(self, r#if, If, context);
+        let r#else = pop_item!(self, r#else, Else, context);
+        let generate_if_declaration_list_0_built = GenerateIfDeclarationList {
+            generate_optional_named_block: Box::new(generate_optional_named_block),
+            expression: Box::new(expression),
+            r#if: Box::new(r#if),
+            r#else: Box::new(r#else),
+        };
+        // Add an element to the vector
+        generate_if_declaration_list.push(generate_if_declaration_list_0_built);
+        self.push(
+            ASTType::GenerateIfDeclarationList(generate_if_declaration_list),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 849:
+    ///
+    /// `GenerateIfDeclarationList /* Vec<T>::New */: ;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_if_declaration_list_1(&mut self) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let generate_if_declaration_list_1_built = Vec::new();
+        self.push(
+            ASTType::GenerateIfDeclarationList(generate_if_declaration_list_1_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 850:
+    ///
+    /// `GenerateIfDeclarationOpt /* Option<T>::Some */: Else GenerateOptionalNamedBlock;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_if_declaration_opt_0(
+        &mut self,
+        _else: &ParseTreeType<'t>,
+        _generate_optional_named_block: &ParseTreeType<'t>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let generate_optional_named_block = pop_item!(
+            self,
+            generate_optional_named_block,
+            GenerateOptionalNamedBlock,
+            context
+        );
+        let r#else = pop_item!(self, r#else, Else, context);
+        let generate_if_declaration_opt_0_built = GenerateIfDeclarationOpt {
+            r#else: Box::new(r#else),
+            generate_optional_named_block: Box::new(generate_optional_named_block),
+        };
+        self.push(
+            ASTType::GenerateIfDeclarationOpt(Some(generate_if_declaration_opt_0_built)),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 851:
+    ///
+    /// `GenerateIfDeclarationOpt /* Option<T>::None */: ;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_if_declaration_opt_1(&mut self) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        self.push(ASTType::GenerateIfDeclarationOpt(None), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 852:
+    ///
+    /// `GenerateForDeclaration: For Identifier In Range GenerateForDeclarationOpt /* Option */ GenerateNamedBlock;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_for_declaration(
+        &mut self,
+        _for: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+        _in: &ParseTreeType<'t>,
+        _range: &ParseTreeType<'t>,
+        _generate_for_declaration_opt: &ParseTreeType<'t>,
+        _generate_named_block: &ParseTreeType<'t>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let generate_named_block =
+            pop_item!(self, generate_named_block, GenerateNamedBlock, context);
+        let generate_for_declaration_opt = pop_item!(
+            self,
+            generate_for_declaration_opt,
+            GenerateForDeclarationOpt,
+            context
+        );
+        let range = pop_item!(self, range, Range, context);
+        let r#in = pop_item!(self, r#in, In, context);
+        let identifier = pop_item!(self, identifier, Identifier, context);
+        let r#for = pop_item!(self, r#for, For, context);
+        let generate_for_declaration_built = GenerateForDeclaration {
+            r#for: Box::new(r#for),
+            identifier: Box::new(identifier),
+            r#in: Box::new(r#in),
+            range: Box::new(range),
+            generate_for_declaration_opt,
+            generate_named_block: Box::new(generate_named_block),
+        };
+        // Calling user action here
+        self.user_grammar
+            .generate_for_declaration(&generate_for_declaration_built)?;
+        self.push(
+            ASTType::GenerateForDeclaration(generate_for_declaration_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 853:
+    ///
+    /// `GenerateForDeclarationOpt /* Option<T>::Some */: Step AssignmentOperator Expression;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_for_declaration_opt_0(
+        &mut self,
+        _step: &ParseTreeType<'t>,
+        _assignment_operator: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let expression = pop_item!(self, expression, Expression, context);
+        let assignment_operator = pop_item!(self, assignment_operator, AssignmentOperator, context);
+        let step = pop_item!(self, step, Step, context);
+        let generate_for_declaration_opt_0_built = GenerateForDeclarationOpt {
+            step: Box::new(step),
+            assignment_operator: Box::new(assignment_operator),
+            expression: Box::new(expression),
+        };
+        self.push(
+            ASTType::GenerateForDeclarationOpt(Some(generate_for_declaration_opt_0_built)),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 854:
+    ///
+    /// `GenerateForDeclarationOpt /* Option<T>::None */: ;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_for_declaration_opt_1(&mut self) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        self.push(ASTType::GenerateForDeclarationOpt(None), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 855:
+    ///
+    /// `GenerateBlockDeclaration: GenerateNamedBlock;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_block_declaration(
+        &mut self,
+        _generate_named_block: &ParseTreeType<'t>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let generate_named_block =
+            pop_item!(self, generate_named_block, GenerateNamedBlock, context);
+        let generate_block_declaration_built = GenerateBlockDeclaration {
+            generate_named_block: Box::new(generate_named_block),
+        };
+        // Calling user action here
+        self.user_grammar
+            .generate_block_declaration(&generate_block_declaration_built)?;
+        self.push(
+            ASTType::GenerateBlockDeclaration(generate_block_declaration_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 856:
+    ///
+    /// `GenerateNamedBlock: Colon Identifier LBrace GenerateNamedBlockList /* Vec */ RBrace;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_named_block(
+        &mut self,
+        _colon: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _generate_named_block_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let r_brace = pop_item!(self, r_brace, RBrace, context);
+        let generate_named_block_list = pop_and_reverse_item!(
+            self,
+            generate_named_block_list,
+            GenerateNamedBlockList,
+            context
+        );
+        let l_brace = pop_item!(self, l_brace, LBrace, context);
+        let identifier = pop_item!(self, identifier, Identifier, context);
+        let colon = pop_item!(self, colon, Colon, context);
+        let generate_named_block_built = GenerateNamedBlock {
+            colon: Box::new(colon),
+            identifier: Box::new(identifier),
+            l_brace: Box::new(l_brace),
+            generate_named_block_list,
+            r_brace: Box::new(r_brace),
+        };
+        // Calling user action here
+        self.user_grammar
+            .generate_named_block(&generate_named_block_built)?;
+        self.push(
+            ASTType::GenerateNamedBlock(generate_named_block_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 857:
+    ///
+    /// `GenerateNamedBlockList /* Vec<T>::Push */: GenerateGroup GenerateNamedBlockList;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_named_block_list_0(
+        &mut self,
+        _generate_group: &ParseTreeType<'t>,
+        _generate_named_block_list: &ParseTreeType<'t>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let mut generate_named_block_list = pop_item!(
+            self,
+            generate_named_block_list,
+            GenerateNamedBlockList,
+            context
+        );
+        let generate_group = pop_item!(self, generate_group, GenerateGroup, context);
+        let generate_named_block_list_0_built = GenerateNamedBlockList {
+            generate_group: Box::new(generate_group),
+        };
+        // Add an element to the vector
+        generate_named_block_list.push(generate_named_block_list_0_built);
+        self.push(
+            ASTType::GenerateNamedBlockList(generate_named_block_list),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 858:
+    ///
+    /// `GenerateNamedBlockList /* Vec<T>::New */: ;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_named_block_list_1(&mut self) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let generate_named_block_list_1_built = Vec::new();
+        self.push(
+            ASTType::GenerateNamedBlockList(generate_named_block_list_1_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 859:
+    ///
+    /// `GenerateOptionalNamedBlock: GenerateOptionalNamedBlockOpt /* Option */ LBrace GenerateOptionalNamedBlockList /* Vec */ RBrace;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_optional_named_block(
+        &mut self,
+        _generate_optional_named_block_opt: &ParseTreeType<'t>,
+        _l_brace: &ParseTreeType<'t>,
+        _generate_optional_named_block_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let r_brace = pop_item!(self, r_brace, RBrace, context);
+        let generate_optional_named_block_list = pop_and_reverse_item!(
+            self,
+            generate_optional_named_block_list,
+            GenerateOptionalNamedBlockList,
+            context
+        );
+        let l_brace = pop_item!(self, l_brace, LBrace, context);
+        let generate_optional_named_block_opt = pop_item!(
+            self,
+            generate_optional_named_block_opt,
+            GenerateOptionalNamedBlockOpt,
+            context
+        );
+        let generate_optional_named_block_built = GenerateOptionalNamedBlock {
+            generate_optional_named_block_opt,
+            l_brace: Box::new(l_brace),
+            generate_optional_named_block_list,
+            r_brace: Box::new(r_brace),
+        };
+        // Calling user action here
+        self.user_grammar
+            .generate_optional_named_block(&generate_optional_named_block_built)?;
+        self.push(
+            ASTType::GenerateOptionalNamedBlock(generate_optional_named_block_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 860:
+    ///
+    /// `GenerateOptionalNamedBlockList /* Vec<T>::Push */: GenerateGroup GenerateOptionalNamedBlockList;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_optional_named_block_list_0(
+        &mut self,
+        _generate_group: &ParseTreeType<'t>,
+        _generate_optional_named_block_list: &ParseTreeType<'t>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let mut generate_optional_named_block_list = pop_item!(
+            self,
+            generate_optional_named_block_list,
+            GenerateOptionalNamedBlockList,
+            context
+        );
+        let generate_group = pop_item!(self, generate_group, GenerateGroup, context);
+        let generate_optional_named_block_list_0_built = GenerateOptionalNamedBlockList {
+            generate_group: Box::new(generate_group),
+        };
+        // Add an element to the vector
+        generate_optional_named_block_list.push(generate_optional_named_block_list_0_built);
+        self.push(
+            ASTType::GenerateOptionalNamedBlockList(generate_optional_named_block_list),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 861:
+    ///
+    /// `GenerateOptionalNamedBlockList /* Vec<T>::New */: ;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_optional_named_block_list_1(&mut self) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let generate_optional_named_block_list_1_built = Vec::new();
+        self.push(
+            ASTType::GenerateOptionalNamedBlockList(generate_optional_named_block_list_1_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 862:
+    ///
+    /// `GenerateOptionalNamedBlockOpt /* Option<T>::Some */: Colon Identifier;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_optional_named_block_opt_0(
+        &mut self,
+        _colon: &ParseTreeType<'t>,
+        _identifier: &ParseTreeType<'t>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let identifier = pop_item!(self, identifier, Identifier, context);
+        let colon = pop_item!(self, colon, Colon, context);
+        let generate_optional_named_block_opt_0_built = GenerateOptionalNamedBlockOpt {
+            colon: Box::new(colon),
+            identifier: Box::new(identifier),
+        };
+        self.push(
+            ASTType::GenerateOptionalNamedBlockOpt(Some(generate_optional_named_block_opt_0_built)),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 863:
+    ///
+    /// `GenerateOptionalNamedBlockOpt /* Option<T>::None */: ;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_optional_named_block_opt_1(&mut self) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        self.push(ASTType::GenerateOptionalNamedBlockOpt(None), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 864:
+    ///
+    /// `GenerateGroup: GenerateGroupList /* Vec */ GenerateGroupGroup;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_group(
+        &mut self,
+        _generate_group_list: &ParseTreeType<'t>,
+        _generate_group_group: &ParseTreeType<'t>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let generate_group_group =
+            pop_item!(self, generate_group_group, GenerateGroupGroup, context);
+        let generate_group_list =
+            pop_and_reverse_item!(self, generate_group_list, GenerateGroupList, context);
+        let generate_group_built = GenerateGroup {
+            generate_group_list,
+            generate_group_group: Box::new(generate_group_group),
+        };
+        // Calling user action here
+        self.user_grammar.generate_group(&generate_group_built)?;
+        self.push(ASTType::GenerateGroup(generate_group_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 865:
+    ///
+    /// `GenerateGroupGroup: LBrace GenerateGroupGroupList /* Vec */ RBrace;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_group_group_0(
+        &mut self,
+        _l_brace: &ParseTreeType<'t>,
+        _generate_group_group_list: &ParseTreeType<'t>,
+        _r_brace: &ParseTreeType<'t>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let r_brace = pop_item!(self, r_brace, RBrace, context);
+        let generate_group_group_list = pop_and_reverse_item!(
+            self,
+            generate_group_group_list,
+            GenerateGroupGroupList,
+            context
+        );
+        let l_brace = pop_item!(self, l_brace, LBrace, context);
+        let generate_group_group_0_built = GenerateGroupGroupLBraceGenerateGroupGroupListRBrace {
+            l_brace: Box::new(l_brace),
+            generate_group_group_list,
+            r_brace: Box::new(r_brace),
+        };
+        let generate_group_group_0_built =
+            GenerateGroupGroup::LBraceGenerateGroupGroupListRBrace(generate_group_group_0_built);
+        self.push(
+            ASTType::GenerateGroupGroup(generate_group_group_0_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 866:
+    ///
+    /// `GenerateGroupGroupList /* Vec<T>::Push */: GenerateGroup GenerateGroupGroupList;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_group_group_list_0(
+        &mut self,
+        _generate_group: &ParseTreeType<'t>,
+        _generate_group_group_list: &ParseTreeType<'t>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let mut generate_group_group_list = pop_item!(
+            self,
+            generate_group_group_list,
+            GenerateGroupGroupList,
+            context
+        );
+        let generate_group = pop_item!(self, generate_group, GenerateGroup, context);
+        let generate_group_group_list_0_built = GenerateGroupGroupList {
+            generate_group: Box::new(generate_group),
+        };
+        // Add an element to the vector
+        generate_group_group_list.push(generate_group_group_list_0_built);
+        self.push(
+            ASTType::GenerateGroupGroupList(generate_group_group_list),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 867:
+    ///
+    /// `GenerateGroupGroupList /* Vec<T>::New */: ;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_group_group_list_1(&mut self) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let generate_group_group_list_1_built = Vec::new();
+        self.push(
+            ASTType::GenerateGroupGroupList(generate_group_group_list_1_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 868:
+    ///
+    /// `GenerateGroupGroup: GenerateItem;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_group_group_1(&mut self, _generate_item: &ParseTreeType<'t>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let generate_item = pop_item!(self, generate_item, GenerateItem, context);
+        let generate_group_group_1_built = GenerateGroupGroupGenerateItem {
+            generate_item: Box::new(generate_item),
+        };
+        let generate_group_group_1_built =
+            GenerateGroupGroup::GenerateItem(generate_group_group_1_built);
+        self.push(
+            ASTType::GenerateGroupGroup(generate_group_group_1_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 869:
+    ///
+    /// `GenerateGroupList /* Vec<T>::Push */: Attribute GenerateGroupList;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_group_list_0(
+        &mut self,
+        _attribute: &ParseTreeType<'t>,
+        _generate_group_list: &ParseTreeType<'t>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let mut generate_group_list =
+            pop_item!(self, generate_group_list, GenerateGroupList, context);
+        let attribute = pop_item!(self, attribute, Attribute, context);
+        let generate_group_list_0_built = GenerateGroupList {
+            attribute: Box::new(attribute),
+        };
+        // Add an element to the vector
+        generate_group_list.push(generate_group_list_0_built);
+        self.push(ASTType::GenerateGroupList(generate_group_list), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 870:
+    ///
+    /// `GenerateGroupList /* Vec<T>::New */: ;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_group_list_1(&mut self) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let generate_group_list_1_built = Vec::new();
+        self.push(
+            ASTType::GenerateGroupList(generate_group_list_1_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 871:
+    ///
+    /// `GenerateItem: LetDeclaration;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_item_0(&mut self, _let_declaration: &ParseTreeType<'t>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let let_declaration = pop_item!(self, let_declaration, LetDeclaration, context);
+        let generate_item_0_built = GenerateItemLetDeclaration {
+            let_declaration: Box::new(let_declaration),
+        };
+        let generate_item_0_built = GenerateItem::LetDeclaration(generate_item_0_built);
+        // Calling user action here
+        self.user_grammar.generate_item(&generate_item_0_built)?;
+        self.push(ASTType::GenerateItem(generate_item_0_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 872:
+    ///
+    /// `GenerateItem: VarDeclaration;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_item_1(&mut self, _var_declaration: &ParseTreeType<'t>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let var_declaration = pop_item!(self, var_declaration, VarDeclaration, context);
+        let generate_item_1_built = GenerateItemVarDeclaration {
+            var_declaration: Box::new(var_declaration),
+        };
+        let generate_item_1_built = GenerateItem::VarDeclaration(generate_item_1_built);
+        // Calling user action here
+        self.user_grammar.generate_item(&generate_item_1_built)?;
+        self.push(ASTType::GenerateItem(generate_item_1_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 873:
+    ///
+    /// `GenerateItem: InstDeclaration;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_item_2(&mut self, _inst_declaration: &ParseTreeType<'t>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let inst_declaration = pop_item!(self, inst_declaration, InstDeclaration, context);
+        let generate_item_2_built = GenerateItemInstDeclaration {
+            inst_declaration: Box::new(inst_declaration),
+        };
+        let generate_item_2_built = GenerateItem::InstDeclaration(generate_item_2_built);
+        // Calling user action here
+        self.user_grammar.generate_item(&generate_item_2_built)?;
+        self.push(ASTType::GenerateItem(generate_item_2_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 874:
+    ///
+    /// `GenerateItem: ConstDeclaration;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_item_3(&mut self, _const_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let const_declaration = pop_item!(self, const_declaration, ConstDeclaration, context);
-        let interface_item_2_built = InterfaceItemConstDeclaration {
+        let generate_item_3_built = GenerateItemConstDeclaration {
             const_declaration: Box::new(const_declaration),
         };
-        let interface_item_2_built = InterfaceItem::ConstDeclaration(interface_item_2_built);
+        let generate_item_3_built = GenerateItem::ConstDeclaration(generate_item_3_built);
         // Calling user action here
-        self.user_grammar.interface_item(&interface_item_2_built)?;
-        self.push(ASTType::InterfaceItem(interface_item_2_built), context);
+        self.user_grammar.generate_item(&generate_item_3_built)?;
+        self.push(ASTType::GenerateItem(generate_item_3_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 899:
+    /// Semantic action for production 875:
     ///
-    /// `InterfaceItem: ModportDeclaration;`
+    /// `GenerateItem: AlwaysFfDeclaration;`
     ///
     #[parol_runtime::function_name::named]
-    fn interface_item_3(&mut self, _modport_declaration: &ParseTreeType<'t>) -> Result<()> {
+    fn generate_item_4(&mut self, _always_ff_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let modport_declaration = pop_item!(self, modport_declaration, ModportDeclaration, context);
-        let interface_item_3_built = InterfaceItemModportDeclaration {
-            modport_declaration: Box::new(modport_declaration),
+        let always_ff_declaration =
+            pop_item!(self, always_ff_declaration, AlwaysFfDeclaration, context);
+        let generate_item_4_built = GenerateItemAlwaysFfDeclaration {
+            always_ff_declaration: Box::new(always_ff_declaration),
         };
-        let interface_item_3_built = InterfaceItem::ModportDeclaration(interface_item_3_built);
+        let generate_item_4_built = GenerateItem::AlwaysFfDeclaration(generate_item_4_built);
         // Calling user action here
-        self.user_grammar.interface_item(&interface_item_3_built)?;
-        self.push(ASTType::InterfaceItem(interface_item_3_built), context);
+        self.user_grammar.generate_item(&generate_item_4_built)?;
+        self.push(ASTType::GenerateItem(generate_item_4_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 900:
+    /// Semantic action for production 876:
     ///
-    /// `InterfaceItem: InterfaceIfDeclaration;`
+    /// `GenerateItem: AlwaysCombDeclaration;`
     ///
     #[parol_runtime::function_name::named]
-    fn interface_item_4(&mut self, _interface_if_declaration: &ParseTreeType<'t>) -> Result<()> {
+    fn generate_item_5(&mut self, _always_comb_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let interface_if_declaration = pop_item!(
+        let always_comb_declaration = pop_item!(
             self,
-            interface_if_declaration,
-            InterfaceIfDeclaration,
+            always_comb_declaration,
+            AlwaysCombDeclaration,
             context
         );
-        let interface_item_4_built = InterfaceItemInterfaceIfDeclaration {
-            interface_if_declaration: Box::new(interface_if_declaration),
+        let generate_item_5_built = GenerateItemAlwaysCombDeclaration {
+            always_comb_declaration: Box::new(always_comb_declaration),
         };
-        let interface_item_4_built = InterfaceItem::InterfaceIfDeclaration(interface_item_4_built);
+        let generate_item_5_built = GenerateItem::AlwaysCombDeclaration(generate_item_5_built);
         // Calling user action here
-        self.user_grammar.interface_item(&interface_item_4_built)?;
-        self.push(ASTType::InterfaceItem(interface_item_4_built), context);
+        self.user_grammar.generate_item(&generate_item_5_built)?;
+        self.push(ASTType::GenerateItem(generate_item_5_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 901:
+    /// Semantic action for production 877:
     ///
-    /// `InterfaceItem: InterfaceForDeclaration;`
+    /// `GenerateItem: AssignDeclaration;`
     ///
     #[parol_runtime::function_name::named]
-    fn interface_item_5(&mut self, _interface_for_declaration: &ParseTreeType<'t>) -> Result<()> {
+    fn generate_item_6(&mut self, _assign_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let interface_for_declaration = pop_item!(
-            self,
-            interface_for_declaration,
-            InterfaceForDeclaration,
-            context
-        );
-        let interface_item_5_built = InterfaceItemInterfaceForDeclaration {
-            interface_for_declaration: Box::new(interface_for_declaration),
+        let assign_declaration = pop_item!(self, assign_declaration, AssignDeclaration, context);
+        let generate_item_6_built = GenerateItemAssignDeclaration {
+            assign_declaration: Box::new(assign_declaration),
         };
-        let interface_item_5_built = InterfaceItem::InterfaceForDeclaration(interface_item_5_built);
+        let generate_item_6_built = GenerateItem::AssignDeclaration(generate_item_6_built);
         // Calling user action here
-        self.user_grammar.interface_item(&interface_item_5_built)?;
-        self.push(ASTType::InterfaceItem(interface_item_5_built), context);
+        self.user_grammar.generate_item(&generate_item_6_built)?;
+        self.push(ASTType::GenerateItem(generate_item_6_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 902:
+    /// Semantic action for production 878:
     ///
-    /// `InterfaceItem: InterfaceBlockDeclaration;`
+    /// `GenerateItem: FunctionDeclaration;`
     ///
     #[parol_runtime::function_name::named]
-    fn interface_item_6(&mut self, _interface_block_declaration: &ParseTreeType<'t>) -> Result<()> {
+    fn generate_item_7(&mut self, _function_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let interface_block_declaration = pop_item!(
-            self,
-            interface_block_declaration,
-            InterfaceBlockDeclaration,
-            context
-        );
-        let interface_item_6_built = InterfaceItemInterfaceBlockDeclaration {
-            interface_block_declaration: Box::new(interface_block_declaration),
+        let function_declaration =
+            pop_item!(self, function_declaration, FunctionDeclaration, context);
+        let generate_item_7_built = GenerateItemFunctionDeclaration {
+            function_declaration: Box::new(function_declaration),
         };
-        let interface_item_6_built =
-            InterfaceItem::InterfaceBlockDeclaration(interface_item_6_built);
+        let generate_item_7_built = GenerateItem::FunctionDeclaration(generate_item_7_built);
         // Calling user action here
-        self.user_grammar.interface_item(&interface_item_6_built)?;
-        self.push(ASTType::InterfaceItem(interface_item_6_built), context);
+        self.user_grammar.generate_item(&generate_item_7_built)?;
+        self.push(ASTType::GenerateItem(generate_item_7_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 903:
+    /// Semantic action for production 879:
     ///
-    /// `InterfaceItem: TypeDefDeclaration;`
+    /// `GenerateItem: GenerateIfDeclaration;`
     ///
     #[parol_runtime::function_name::named]
-    fn interface_item_7(&mut self, _type_def_declaration: &ParseTreeType<'t>) -> Result<()> {
+    fn generate_item_8(&mut self, _generate_if_declaration: &ParseTreeType<'t>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let generate_if_declaration = pop_item!(
+            self,
+            generate_if_declaration,
+            GenerateIfDeclaration,
+            context
+        );
+        let generate_item_8_built = GenerateItemGenerateIfDeclaration {
+            generate_if_declaration: Box::new(generate_if_declaration),
+        };
+        let generate_item_8_built = GenerateItem::GenerateIfDeclaration(generate_item_8_built);
+        // Calling user action here
+        self.user_grammar.generate_item(&generate_item_8_built)?;
+        self.push(ASTType::GenerateItem(generate_item_8_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 880:
+    ///
+    /// `GenerateItem: GenerateForDeclaration;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_item_9(&mut self, _generate_for_declaration: &ParseTreeType<'t>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let generate_for_declaration = pop_item!(
+            self,
+            generate_for_declaration,
+            GenerateForDeclaration,
+            context
+        );
+        let generate_item_9_built = GenerateItemGenerateForDeclaration {
+            generate_for_declaration: Box::new(generate_for_declaration),
+        };
+        let generate_item_9_built = GenerateItem::GenerateForDeclaration(generate_item_9_built);
+        // Calling user action here
+        self.user_grammar.generate_item(&generate_item_9_built)?;
+        self.push(ASTType::GenerateItem(generate_item_9_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 881:
+    ///
+    /// `GenerateItem: GenerateBlockDeclaration;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_item_10(&mut self, _generate_block_declaration: &ParseTreeType<'t>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let generate_block_declaration = pop_item!(
+            self,
+            generate_block_declaration,
+            GenerateBlockDeclaration,
+            context
+        );
+        let generate_item_10_built = GenerateItemGenerateBlockDeclaration {
+            generate_block_declaration: Box::new(generate_block_declaration),
+        };
+        let generate_item_10_built = GenerateItem::GenerateBlockDeclaration(generate_item_10_built);
+        // Calling user action here
+        self.user_grammar.generate_item(&generate_item_10_built)?;
+        self.push(ASTType::GenerateItem(generate_item_10_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 882:
+    ///
+    /// `GenerateItem: TypeDefDeclaration;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_item_11(&mut self, _type_def_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let type_def_declaration =
             pop_item!(self, type_def_declaration, TypeDefDeclaration, context);
-        let interface_item_7_built = InterfaceItemTypeDefDeclaration {
+        let generate_item_11_built = GenerateItemTypeDefDeclaration {
             type_def_declaration: Box::new(type_def_declaration),
         };
-        let interface_item_7_built = InterfaceItem::TypeDefDeclaration(interface_item_7_built);
+        let generate_item_11_built = GenerateItem::TypeDefDeclaration(generate_item_11_built);
         // Calling user action here
-        self.user_grammar.interface_item(&interface_item_7_built)?;
-        self.push(ASTType::InterfaceItem(interface_item_7_built), context);
+        self.user_grammar.generate_item(&generate_item_11_built)?;
+        self.push(ASTType::GenerateItem(generate_item_11_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 904:
+    /// Semantic action for production 883:
     ///
-    /// `InterfaceItem: EnumDeclaration;`
+    /// `GenerateItem: EnumDeclaration;`
     ///
     #[parol_runtime::function_name::named]
-    fn interface_item_8(&mut self, _enum_declaration: &ParseTreeType<'t>) -> Result<()> {
+    fn generate_item_12(&mut self, _enum_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let enum_declaration = pop_item!(self, enum_declaration, EnumDeclaration, context);
-        let interface_item_8_built = InterfaceItemEnumDeclaration {
+        let generate_item_12_built = GenerateItemEnumDeclaration {
             enum_declaration: Box::new(enum_declaration),
         };
-        let interface_item_8_built = InterfaceItem::EnumDeclaration(interface_item_8_built);
+        let generate_item_12_built = GenerateItem::EnumDeclaration(generate_item_12_built);
         // Calling user action here
-        self.user_grammar.interface_item(&interface_item_8_built)?;
-        self.push(ASTType::InterfaceItem(interface_item_8_built), context);
+        self.user_grammar.generate_item(&generate_item_12_built)?;
+        self.push(ASTType::GenerateItem(generate_item_12_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 905:
+    /// Semantic action for production 884:
     ///
-    /// `InterfaceItem: StructUnionDeclaration;`
+    /// `GenerateItem: StructUnionDeclaration;`
     ///
     #[parol_runtime::function_name::named]
-    fn interface_item_9(&mut self, _struct_union_declaration: &ParseTreeType<'t>) -> Result<()> {
+    fn generate_item_13(&mut self, _struct_union_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let struct_union_declaration = pop_item!(
@@ -33422,94 +32669,93 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             StructUnionDeclaration,
             context
         );
-        let interface_item_9_built = InterfaceItemStructUnionDeclaration {
+        let generate_item_13_built = GenerateItemStructUnionDeclaration {
             struct_union_declaration: Box::new(struct_union_declaration),
         };
-        let interface_item_9_built = InterfaceItem::StructUnionDeclaration(interface_item_9_built);
+        let generate_item_13_built = GenerateItem::StructUnionDeclaration(generate_item_13_built);
         // Calling user action here
-        self.user_grammar.interface_item(&interface_item_9_built)?;
-        self.push(ASTType::InterfaceItem(interface_item_9_built), context);
+        self.user_grammar.generate_item(&generate_item_13_built)?;
+        self.push(ASTType::GenerateItem(generate_item_13_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 906:
+    /// Semantic action for production 885:
     ///
-    /// `InterfaceItem: FunctionDeclaration;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn interface_item_10(&mut self, _function_declaration: &ParseTreeType<'t>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let function_declaration =
-            pop_item!(self, function_declaration, FunctionDeclaration, context);
-        let interface_item_10_built = InterfaceItemFunctionDeclaration {
-            function_declaration: Box::new(function_declaration),
-        };
-        let interface_item_10_built = InterfaceItem::FunctionDeclaration(interface_item_10_built);
-        // Calling user action here
-        self.user_grammar.interface_item(&interface_item_10_built)?;
-        self.push(ASTType::InterfaceItem(interface_item_10_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 907:
-    ///
-    /// `InterfaceItem: ImportDeclaration;`
+    /// `GenerateItem: ImportDeclaration;`
     ///
     #[parol_runtime::function_name::named]
-    fn interface_item_11(&mut self, _import_declaration: &ParseTreeType<'t>) -> Result<()> {
+    fn generate_item_14(&mut self, _import_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let import_declaration = pop_item!(self, import_declaration, ImportDeclaration, context);
-        let interface_item_11_built = InterfaceItemImportDeclaration {
+        let generate_item_14_built = GenerateItemImportDeclaration {
             import_declaration: Box::new(import_declaration),
         };
-        let interface_item_11_built = InterfaceItem::ImportDeclaration(interface_item_11_built);
+        let generate_item_14_built = GenerateItem::ImportDeclaration(generate_item_14_built);
         // Calling user action here
-        self.user_grammar.interface_item(&interface_item_11_built)?;
-        self.push(ASTType::InterfaceItem(interface_item_11_built), context);
+        self.user_grammar.generate_item(&generate_item_14_built)?;
+        self.push(ASTType::GenerateItem(generate_item_14_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 908:
+    /// Semantic action for production 886:
     ///
-    /// `InterfaceItem: InitialDeclaration;`
+    /// `GenerateItem: InitialDeclaration;`
     ///
     #[parol_runtime::function_name::named]
-    fn interface_item_12(&mut self, _initial_declaration: &ParseTreeType<'t>) -> Result<()> {
+    fn generate_item_15(&mut self, _initial_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let initial_declaration = pop_item!(self, initial_declaration, InitialDeclaration, context);
-        let interface_item_12_built = InterfaceItemInitialDeclaration {
+        let generate_item_15_built = GenerateItemInitialDeclaration {
             initial_declaration: Box::new(initial_declaration),
         };
-        let interface_item_12_built = InterfaceItem::InitialDeclaration(interface_item_12_built);
+        let generate_item_15_built = GenerateItem::InitialDeclaration(generate_item_15_built);
         // Calling user action here
-        self.user_grammar.interface_item(&interface_item_12_built)?;
-        self.push(ASTType::InterfaceItem(interface_item_12_built), context);
+        self.user_grammar.generate_item(&generate_item_15_built)?;
+        self.push(ASTType::GenerateItem(generate_item_15_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 909:
+    /// Semantic action for production 887:
     ///
-    /// `InterfaceItem: FinalDeclaration;`
+    /// `GenerateItem: FinalDeclaration;`
     ///
     #[parol_runtime::function_name::named]
-    fn interface_item_13(&mut self, _final_declaration: &ParseTreeType<'t>) -> Result<()> {
+    fn generate_item_16(&mut self, _final_declaration: &ParseTreeType<'t>) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let final_declaration = pop_item!(self, final_declaration, FinalDeclaration, context);
-        let interface_item_13_built = InterfaceItemFinalDeclaration {
+        let generate_item_16_built = GenerateItemFinalDeclaration {
             final_declaration: Box::new(final_declaration),
         };
-        let interface_item_13_built = InterfaceItem::FinalDeclaration(interface_item_13_built);
+        let generate_item_16_built = GenerateItem::FinalDeclaration(generate_item_16_built);
         // Calling user action here
-        self.user_grammar.interface_item(&interface_item_13_built)?;
-        self.push(ASTType::InterfaceItem(interface_item_13_built), context);
+        self.user_grammar.generate_item(&generate_item_16_built)?;
+        self.push(ASTType::GenerateItem(generate_item_16_built), context);
         Ok(())
     }
 
-    /// Semantic action for production 910:
+    /// Semantic action for production 888:
+    ///
+    /// `GenerateItem: UnsafeBlock;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn generate_item_17(&mut self, _unsafe_block: &ParseTreeType<'t>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let unsafe_block = pop_item!(self, unsafe_block, UnsafeBlock, context);
+        let generate_item_17_built = GenerateItemUnsafeBlock {
+            unsafe_block: Box::new(unsafe_block),
+        };
+        let generate_item_17_built = GenerateItem::UnsafeBlock(generate_item_17_built);
+        // Calling user action here
+        self.user_grammar.generate_item(&generate_item_17_built)?;
+        self.push(ASTType::GenerateItem(generate_item_17_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 889:
     ///
     /// `PackageDeclaration: PackageDeclarationOpt /* Option */ Package Identifier PackageDeclarationOpt0 /* Option */ LBrace PackageDeclarationList /* Vec */ RBrace;`
     ///
@@ -33567,7 +32813,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 911:
+    /// Semantic action for production 890:
     ///
     /// `PackageDeclarationList /* Vec<T>::Push */: PackageGroup PackageDeclarationList;`
     ///
@@ -33598,7 +32844,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 912:
+    /// Semantic action for production 891:
     ///
     /// `PackageDeclarationList /* Vec<T>::New */: ;`
     ///
@@ -33614,7 +32860,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 913:
+    /// Semantic action for production 892:
     ///
     /// `PackageDeclarationOpt0 /* Option<T>::Some */: WithGenericParameter;`
     ///
@@ -33637,7 +32883,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 914:
+    /// Semantic action for production 893:
     ///
     /// `PackageDeclarationOpt0 /* Option<T>::None */: ;`
     ///
@@ -33649,7 +32895,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 915:
+    /// Semantic action for production 894:
     ///
     /// `PackageDeclarationOpt /* Option<T>::Some */: Pub;`
     ///
@@ -33668,7 +32914,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 916:
+    /// Semantic action for production 895:
     ///
     /// `PackageDeclarationOpt /* Option<T>::None */: ;`
     ///
@@ -33680,7 +32926,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 917:
+    /// Semantic action for production 896:
     ///
     /// `PackageGroup: PackageGroupList /* Vec */ PackageGroupGroup;`
     ///
@@ -33705,7 +32951,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 918:
+    /// Semantic action for production 897:
     ///
     /// `PackageGroupGroup: LBrace PackageGroupGroupList /* Vec */ RBrace;`
     ///
@@ -33740,7 +32986,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 919:
+    /// Semantic action for production 898:
     ///
     /// `PackageGroupGroupList /* Vec<T>::Push */: PackageGroup PackageGroupGroupList;`
     ///
@@ -33771,7 +33017,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 920:
+    /// Semantic action for production 899:
     ///
     /// `PackageGroupGroupList /* Vec<T>::New */: ;`
     ///
@@ -33787,7 +33033,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 921:
+    /// Semantic action for production 900:
     ///
     /// `PackageGroupGroup: PackageItem;`
     ///
@@ -33808,7 +33054,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 922:
+    /// Semantic action for production 901:
     ///
     /// `PackageGroupList /* Vec<T>::Push */: Attribute PackageGroupList;`
     ///
@@ -33831,7 +33077,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 923:
+    /// Semantic action for production 902:
     ///
     /// `PackageGroupList /* Vec<T>::New */: ;`
     ///
@@ -33847,7 +33093,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 924:
+    /// Semantic action for production 903:
     ///
     /// `PackageItem: VarDeclaration;`
     ///
@@ -33866,7 +33112,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 925:
+    /// Semantic action for production 904:
     ///
     /// `PackageItem: ConstDeclaration;`
     ///
@@ -33885,7 +33131,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 926:
+    /// Semantic action for production 905:
     ///
     /// `PackageItem: TypeDefDeclaration;`
     ///
@@ -33905,7 +33151,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 927:
+    /// Semantic action for production 906:
     ///
     /// `PackageItem: EnumDeclaration;`
     ///
@@ -33924,7 +33170,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 928:
+    /// Semantic action for production 907:
     ///
     /// `PackageItem: StructUnionDeclaration;`
     ///
@@ -33948,7 +33194,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 929:
+    /// Semantic action for production 908:
     ///
     /// `PackageItem: FunctionDeclaration;`
     ///
@@ -33968,7 +33214,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 930:
+    /// Semantic action for production 909:
     ///
     /// `PackageItem: ImportDeclaration;`
     ///
@@ -33987,7 +33233,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 931:
+    /// Semantic action for production 910:
     ///
     /// `PackageItem: ExportDeclaration;`
     ///
@@ -34006,7 +33252,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 932:
+    /// Semantic action for production 911:
     ///
     /// `ProtoModuleDeclaration: ProtoModuleDeclarationOpt /* Option */ Proto Module Identifier ProtoModuleDeclarationOpt0 /* Option */ ProtoModuleDeclarationOpt1 /* Option */ Semicolon;`
     ///
@@ -34064,7 +33310,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 933:
+    /// Semantic action for production 912:
     ///
     /// `ProtoModuleDeclarationOpt1 /* Option<T>::Some */: PortDeclaration;`
     ///
@@ -34086,7 +33332,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 934:
+    /// Semantic action for production 913:
     ///
     /// `ProtoModuleDeclarationOpt1 /* Option<T>::None */: ;`
     ///
@@ -34098,7 +33344,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 935:
+    /// Semantic action for production 914:
     ///
     /// `ProtoModuleDeclarationOpt0 /* Option<T>::Some */: WithParameter;`
     ///
@@ -34120,7 +33366,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 936:
+    /// Semantic action for production 915:
     ///
     /// `ProtoModuleDeclarationOpt0 /* Option<T>::None */: ;`
     ///
@@ -34132,7 +33378,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 937:
+    /// Semantic action for production 916:
     ///
     /// `ProtoModuleDeclarationOpt /* Option<T>::Some */: Pub;`
     ///
@@ -34151,7 +33397,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 938:
+    /// Semantic action for production 917:
     ///
     /// `ProtoModuleDeclarationOpt /* Option<T>::None */: ;`
     ///
@@ -34163,7 +33409,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 939:
+    /// Semantic action for production 918:
     ///
     /// `EmbedDeclaration: Embed LParen Identifier RParen Identifier EmbedContent;`
     ///
@@ -34200,7 +33446,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 940:
+    /// Semantic action for production 919:
     ///
     /// `EmbedContent: EmbedContentToken : VerylToken;`
     ///
@@ -34220,7 +33466,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 941:
+    /// Semantic action for production 920:
     ///
     /// `EmbedContentToken: LBraceTerm %push(Embed) LBraceTerm LBraceTerm EmbedContentTokenList /* Vec */ RBraceTerm RBraceTerm RBraceTerm %pop() Comments;`
     ///
@@ -34271,7 +33517,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 942:
+    /// Semantic action for production 921:
     ///
     /// `EmbedContentTokenList /* Vec<T>::Push */: EmbedItem EmbedContentTokenList;`
     ///
@@ -34302,7 +33548,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 943:
+    /// Semantic action for production 922:
     ///
     /// `EmbedContentTokenList /* Vec<T>::New */: ;`
     ///
@@ -34318,7 +33564,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 944:
+    /// Semantic action for production 923:
     ///
     /// `EmbedItem: LBraceTerm EmbedItemList /* Vec */ RBraceTerm;`
     ///
@@ -34346,7 +33592,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 945:
+    /// Semantic action for production 924:
     ///
     /// `EmbedItemList /* Vec<T>::Push */: EmbedItem EmbedItemList;`
     ///
@@ -34369,7 +33615,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 946:
+    /// Semantic action for production 925:
     ///
     /// `EmbedItemList /* Vec<T>::New */: ;`
     ///
@@ -34382,7 +33628,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 947:
+    /// Semantic action for production 926:
     ///
     /// `EmbedItem: AnyTerm;`
     ///
@@ -34401,7 +33647,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 948:
+    /// Semantic action for production 927:
     ///
     /// `IncludeDeclaration: Include LParen Identifier Comma StringLiteral RParen Semicolon;`
     ///
@@ -34444,7 +33690,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 949:
+    /// Semantic action for production 928:
     ///
     /// `DescriptionGroup: DescriptionGroupList /* Vec */ DescriptionGroupGroup;`
     ///
@@ -34475,7 +33721,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 950:
+    /// Semantic action for production 929:
     ///
     /// `DescriptionGroupGroup: LBrace DescriptionGroupGroupList /* Vec */ RBrace;`
     ///
@@ -34513,7 +33759,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 951:
+    /// Semantic action for production 930:
     ///
     /// `DescriptionGroupGroupList /* Vec<T>::Push */: DescriptionGroup DescriptionGroupGroupList;`
     ///
@@ -34544,7 +33790,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 952:
+    /// Semantic action for production 931:
     ///
     /// `DescriptionGroupGroupList /* Vec<T>::New */: ;`
     ///
@@ -34560,7 +33806,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 953:
+    /// Semantic action for production 932:
     ///
     /// `DescriptionGroupGroup: DescriptionItem;`
     ///
@@ -34581,7 +33827,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 954:
+    /// Semantic action for production 933:
     ///
     /// `DescriptionGroupList /* Vec<T>::Push */: Attribute DescriptionGroupList;`
     ///
@@ -34608,7 +33854,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 955:
+    /// Semantic action for production 934:
     ///
     /// `DescriptionGroupList /* Vec<T>::New */: ;`
     ///
@@ -34624,7 +33870,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 956:
+    /// Semantic action for production 935:
     ///
     /// `DescriptionItem: ModuleDeclaration;`
     ///
@@ -34644,7 +33890,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 957:
+    /// Semantic action for production 936:
     ///
     /// `DescriptionItem: InterfaceDeclaration;`
     ///
@@ -34666,7 +33912,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 958:
+    /// Semantic action for production 937:
     ///
     /// `DescriptionItem: PackageDeclaration;`
     ///
@@ -34687,7 +33933,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 959:
+    /// Semantic action for production 938:
     ///
     /// `DescriptionItem: ProtoModuleDeclaration;`
     ///
@@ -34713,7 +33959,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 960:
+    /// Semantic action for production 939:
     ///
     /// `DescriptionItem: ImportDeclaration;`
     ///
@@ -34733,7 +33979,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 961:
+    /// Semantic action for production 940:
     ///
     /// `DescriptionItem: EmbedDeclaration;`
     ///
@@ -34753,7 +33999,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 962:
+    /// Semantic action for production 941:
     ///
     /// `DescriptionItem: IncludeDeclaration;`
     ///
@@ -34774,7 +34020,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 963:
+    /// Semantic action for production 942:
     ///
     /// `Veryl: Start VerylList /* Vec */;`
     ///
@@ -34794,7 +34040,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 964:
+    /// Semantic action for production 943:
     ///
     /// `VerylList /* Vec<T>::Push */: DescriptionGroup VerylList;`
     ///
@@ -34817,7 +34063,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 965:
+    /// Semantic action for production 944:
     ///
     /// `VerylList /* Vec<T>::New */: ;`
     ///
@@ -35893,79 +35139,15 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             818 => self.module_declaration_opt0_1(),
             819 => self.module_declaration_opt_0(&children[0]),
             820 => self.module_declaration_opt_1(),
-            821 => self.module_if_declaration(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-            ),
-            822 => self.module_if_declaration_list_0(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-            ),
-            823 => self.module_if_declaration_list_1(),
-            824 => self.module_if_declaration_opt_0(&children[0], &children[1]),
-            825 => self.module_if_declaration_opt_1(),
-            826 => self.module_for_declaration(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-                &children[5],
-            ),
-            827 => self.module_for_declaration_opt_0(&children[0], &children[1], &children[2]),
-            828 => self.module_for_declaration_opt_1(),
-            829 => self.module_block_declaration(&children[0]),
-            830 => self.module_named_block(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-            ),
-            831 => self.module_named_block_list_0(&children[0], &children[1]),
-            832 => self.module_named_block_list_1(),
-            833 => self.module_optional_named_block(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-            ),
-            834 => self.module_optional_named_block_list_0(&children[0], &children[1]),
-            835 => self.module_optional_named_block_list_1(),
-            836 => self.module_optional_named_block_opt_0(&children[0], &children[1]),
-            837 => self.module_optional_named_block_opt_1(),
-            838 => self.module_group(&children[0], &children[1]),
-            839 => self.module_group_group_0(&children[0], &children[1], &children[2]),
-            840 => self.module_group_group_list_0(&children[0], &children[1]),
-            841 => self.module_group_group_list_1(),
-            842 => self.module_group_group_1(&children[0]),
-            843 => self.module_group_list_0(&children[0], &children[1]),
-            844 => self.module_group_list_1(),
-            845 => self.module_item_0(&children[0]),
-            846 => self.module_item_1(&children[0]),
-            847 => self.module_item_2(&children[0]),
-            848 => self.module_item_3(&children[0]),
-            849 => self.module_item_4(&children[0]),
-            850 => self.module_item_5(&children[0]),
-            851 => self.module_item_6(&children[0]),
-            852 => self.module_item_7(&children[0]),
-            853 => self.module_item_8(&children[0]),
-            854 => self.module_item_9(&children[0]),
-            855 => self.module_item_10(&children[0]),
-            856 => self.module_item_11(&children[0]),
-            857 => self.module_item_12(&children[0]),
-            858 => self.module_item_13(&children[0]),
-            859 => self.module_item_14(&children[0]),
-            860 => self.module_item_15(&children[0]),
-            861 => self.module_item_16(&children[0]),
-            862 => self.module_item_17(&children[0]),
-            863 => self.interface_declaration(
+            821 => self.module_group(&children[0], &children[1]),
+            822 => self.module_group_group_0(&children[0], &children[1], &children[2]),
+            823 => self.module_group_group_list_0(&children[0], &children[1]),
+            824 => self.module_group_group_list_1(),
+            825 => self.module_group_group_1(&children[0]),
+            826 => self.module_group_list_0(&children[0], &children[1]),
+            827 => self.module_group_list_1(),
+            828 => self.module_item(&children[0]),
+            829 => self.interface_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -35975,113 +35157,96 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[6],
                 &children[7],
             ),
-            864 => self.interface_declaration_list_0(&children[0], &children[1]),
-            865 => self.interface_declaration_list_1(),
-            866 => self.interface_declaration_opt1_0(&children[0]),
-            867 => self.interface_declaration_opt1_1(),
-            868 => self.interface_declaration_opt0_0(&children[0]),
-            869 => self.interface_declaration_opt0_1(),
-            870 => self.interface_declaration_opt_0(&children[0]),
-            871 => self.interface_declaration_opt_1(),
-            872 => self.interface_if_declaration(
+            830 => self.interface_declaration_list_0(&children[0], &children[1]),
+            831 => self.interface_declaration_list_1(),
+            832 => self.interface_declaration_opt1_0(&children[0]),
+            833 => self.interface_declaration_opt1_1(),
+            834 => self.interface_declaration_opt0_0(&children[0]),
+            835 => self.interface_declaration_opt0_1(),
+            836 => self.interface_declaration_opt_0(&children[0]),
+            837 => self.interface_declaration_opt_1(),
+            838 => self.interface_group(&children[0], &children[1]),
+            839 => self.interface_group_group_0(&children[0], &children[1], &children[2]),
+            840 => self.interface_group_group_list_0(&children[0], &children[1]),
+            841 => self.interface_group_group_list_1(),
+            842 => self.interface_group_group_1(&children[0]),
+            843 => self.interface_group_list_0(&children[0], &children[1]),
+            844 => self.interface_group_list_1(),
+            845 => self.interface_item_0(&children[0]),
+            846 => self.interface_item_1(&children[0]),
+            847 => self.generate_if_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
             ),
-            873 => self.interface_if_declaration_list_0(
+            848 => self.generate_if_declaration_list_0(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
             ),
-            874 => self.interface_if_declaration_list_1(),
-            875 => self.interface_if_declaration_opt_0(&children[0], &children[1]),
-            876 => self.interface_if_declaration_opt_1(),
-            877 => self.interface_for_declaration(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-                &children[5],
-            ),
-            878 => self.interface_for_declaration_opt_0(&children[0], &children[1], &children[2]),
-            879 => self.interface_for_declaration_opt_1(),
-            880 => self.interface_block_declaration(&children[0]),
-            881 => self.interface_named_block(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-            ),
-            882 => self.interface_named_block_list_0(&children[0], &children[1]),
-            883 => self.interface_named_block_list_1(),
-            884 => self.interface_optional_named_block(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-            ),
-            885 => self.interface_optional_named_block_list_0(&children[0], &children[1]),
-            886 => self.interface_optional_named_block_list_1(),
-            887 => self.interface_optional_named_block_opt_0(&children[0], &children[1]),
-            888 => self.interface_optional_named_block_opt_1(),
-            889 => self.interface_group(&children[0], &children[1]),
-            890 => self.interface_group_group_0(&children[0], &children[1], &children[2]),
-            891 => self.interface_group_group_list_0(&children[0], &children[1]),
-            892 => self.interface_group_group_list_1(),
-            893 => self.interface_group_group_1(&children[0]),
-            894 => self.interface_group_list_0(&children[0], &children[1]),
-            895 => self.interface_group_list_1(),
-            896 => self.interface_item_0(&children[0]),
-            897 => self.interface_item_1(&children[0]),
-            898 => self.interface_item_2(&children[0]),
-            899 => self.interface_item_3(&children[0]),
-            900 => self.interface_item_4(&children[0]),
-            901 => self.interface_item_5(&children[0]),
-            902 => self.interface_item_6(&children[0]),
-            903 => self.interface_item_7(&children[0]),
-            904 => self.interface_item_8(&children[0]),
-            905 => self.interface_item_9(&children[0]),
-            906 => self.interface_item_10(&children[0]),
-            907 => self.interface_item_11(&children[0]),
-            908 => self.interface_item_12(&children[0]),
-            909 => self.interface_item_13(&children[0]),
-            910 => self.package_declaration(
+            849 => self.generate_if_declaration_list_1(),
+            850 => self.generate_if_declaration_opt_0(&children[0], &children[1]),
+            851 => self.generate_if_declaration_opt_1(),
+            852 => self.generate_for_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
                 &children[5],
-                &children[6],
             ),
-            911 => self.package_declaration_list_0(&children[0], &children[1]),
-            912 => self.package_declaration_list_1(),
-            913 => self.package_declaration_opt0_0(&children[0]),
-            914 => self.package_declaration_opt0_1(),
-            915 => self.package_declaration_opt_0(&children[0]),
-            916 => self.package_declaration_opt_1(),
-            917 => self.package_group(&children[0], &children[1]),
-            918 => self.package_group_group_0(&children[0], &children[1], &children[2]),
-            919 => self.package_group_group_list_0(&children[0], &children[1]),
-            920 => self.package_group_group_list_1(),
-            921 => self.package_group_group_1(&children[0]),
-            922 => self.package_group_list_0(&children[0], &children[1]),
-            923 => self.package_group_list_1(),
-            924 => self.package_item_0(&children[0]),
-            925 => self.package_item_1(&children[0]),
-            926 => self.package_item_2(&children[0]),
-            927 => self.package_item_3(&children[0]),
-            928 => self.package_item_4(&children[0]),
-            929 => self.package_item_5(&children[0]),
-            930 => self.package_item_6(&children[0]),
-            931 => self.package_item_7(&children[0]),
-            932 => self.proto_module_declaration(
+            853 => self.generate_for_declaration_opt_0(&children[0], &children[1], &children[2]),
+            854 => self.generate_for_declaration_opt_1(),
+            855 => self.generate_block_declaration(&children[0]),
+            856 => self.generate_named_block(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                &children[4],
+            ),
+            857 => self.generate_named_block_list_0(&children[0], &children[1]),
+            858 => self.generate_named_block_list_1(),
+            859 => self.generate_optional_named_block(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+            ),
+            860 => self.generate_optional_named_block_list_0(&children[0], &children[1]),
+            861 => self.generate_optional_named_block_list_1(),
+            862 => self.generate_optional_named_block_opt_0(&children[0], &children[1]),
+            863 => self.generate_optional_named_block_opt_1(),
+            864 => self.generate_group(&children[0], &children[1]),
+            865 => self.generate_group_group_0(&children[0], &children[1], &children[2]),
+            866 => self.generate_group_group_list_0(&children[0], &children[1]),
+            867 => self.generate_group_group_list_1(),
+            868 => self.generate_group_group_1(&children[0]),
+            869 => self.generate_group_list_0(&children[0], &children[1]),
+            870 => self.generate_group_list_1(),
+            871 => self.generate_item_0(&children[0]),
+            872 => self.generate_item_1(&children[0]),
+            873 => self.generate_item_2(&children[0]),
+            874 => self.generate_item_3(&children[0]),
+            875 => self.generate_item_4(&children[0]),
+            876 => self.generate_item_5(&children[0]),
+            877 => self.generate_item_6(&children[0]),
+            878 => self.generate_item_7(&children[0]),
+            879 => self.generate_item_8(&children[0]),
+            880 => self.generate_item_9(&children[0]),
+            881 => self.generate_item_10(&children[0]),
+            882 => self.generate_item_11(&children[0]),
+            883 => self.generate_item_12(&children[0]),
+            884 => self.generate_item_13(&children[0]),
+            885 => self.generate_item_14(&children[0]),
+            886 => self.generate_item_15(&children[0]),
+            887 => self.generate_item_16(&children[0]),
+            888 => self.generate_item_17(&children[0]),
+            889 => self.package_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -36090,13 +35255,43 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[5],
                 &children[6],
             ),
-            933 => self.proto_module_declaration_opt1_0(&children[0]),
-            934 => self.proto_module_declaration_opt1_1(),
-            935 => self.proto_module_declaration_opt0_0(&children[0]),
-            936 => self.proto_module_declaration_opt0_1(),
-            937 => self.proto_module_declaration_opt_0(&children[0]),
-            938 => self.proto_module_declaration_opt_1(),
-            939 => self.embed_declaration(
+            890 => self.package_declaration_list_0(&children[0], &children[1]),
+            891 => self.package_declaration_list_1(),
+            892 => self.package_declaration_opt0_0(&children[0]),
+            893 => self.package_declaration_opt0_1(),
+            894 => self.package_declaration_opt_0(&children[0]),
+            895 => self.package_declaration_opt_1(),
+            896 => self.package_group(&children[0], &children[1]),
+            897 => self.package_group_group_0(&children[0], &children[1], &children[2]),
+            898 => self.package_group_group_list_0(&children[0], &children[1]),
+            899 => self.package_group_group_list_1(),
+            900 => self.package_group_group_1(&children[0]),
+            901 => self.package_group_list_0(&children[0], &children[1]),
+            902 => self.package_group_list_1(),
+            903 => self.package_item_0(&children[0]),
+            904 => self.package_item_1(&children[0]),
+            905 => self.package_item_2(&children[0]),
+            906 => self.package_item_3(&children[0]),
+            907 => self.package_item_4(&children[0]),
+            908 => self.package_item_5(&children[0]),
+            909 => self.package_item_6(&children[0]),
+            910 => self.package_item_7(&children[0]),
+            911 => self.proto_module_declaration(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                &children[4],
+                &children[5],
+                &children[6],
+            ),
+            912 => self.proto_module_declaration_opt1_0(&children[0]),
+            913 => self.proto_module_declaration_opt1_1(),
+            914 => self.proto_module_declaration_opt0_0(&children[0]),
+            915 => self.proto_module_declaration_opt0_1(),
+            916 => self.proto_module_declaration_opt_0(&children[0]),
+            917 => self.proto_module_declaration_opt_1(),
+            918 => self.embed_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -36104,8 +35299,8 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 &children[5],
             ),
-            940 => self.embed_content(&children[0]),
-            941 => self.embed_content_token(
+            919 => self.embed_content(&children[0]),
+            920 => self.embed_content_token(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -36115,13 +35310,13 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[6],
                 &children[7],
             ),
-            942 => self.embed_content_token_list_0(&children[0], &children[1]),
-            943 => self.embed_content_token_list_1(),
-            944 => self.embed_item_0(&children[0], &children[1], &children[2]),
-            945 => self.embed_item_list_0(&children[0], &children[1]),
-            946 => self.embed_item_list_1(),
-            947 => self.embed_item_1(&children[0]),
-            948 => self.include_declaration(
+            921 => self.embed_content_token_list_0(&children[0], &children[1]),
+            922 => self.embed_content_token_list_1(),
+            923 => self.embed_item_0(&children[0], &children[1], &children[2]),
+            924 => self.embed_item_list_0(&children[0], &children[1]),
+            925 => self.embed_item_list_1(),
+            926 => self.embed_item_1(&children[0]),
+            927 => self.include_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -36130,23 +35325,23 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[5],
                 &children[6],
             ),
-            949 => self.description_group(&children[0], &children[1]),
-            950 => self.description_group_group_0(&children[0], &children[1], &children[2]),
-            951 => self.description_group_group_list_0(&children[0], &children[1]),
-            952 => self.description_group_group_list_1(),
-            953 => self.description_group_group_1(&children[0]),
-            954 => self.description_group_list_0(&children[0], &children[1]),
-            955 => self.description_group_list_1(),
-            956 => self.description_item_0(&children[0]),
-            957 => self.description_item_1(&children[0]),
-            958 => self.description_item_2(&children[0]),
-            959 => self.description_item_3(&children[0]),
-            960 => self.description_item_4(&children[0]),
-            961 => self.description_item_5(&children[0]),
-            962 => self.description_item_6(&children[0]),
-            963 => self.veryl(&children[0], &children[1]),
-            964 => self.veryl_list_0(&children[0], &children[1]),
-            965 => self.veryl_list_1(),
+            928 => self.description_group(&children[0], &children[1]),
+            929 => self.description_group_group_0(&children[0], &children[1], &children[2]),
+            930 => self.description_group_group_list_0(&children[0], &children[1]),
+            931 => self.description_group_group_list_1(),
+            932 => self.description_group_group_1(&children[0]),
+            933 => self.description_group_list_0(&children[0], &children[1]),
+            934 => self.description_group_list_1(),
+            935 => self.description_item_0(&children[0]),
+            936 => self.description_item_1(&children[0]),
+            937 => self.description_item_2(&children[0]),
+            938 => self.description_item_3(&children[0]),
+            939 => self.description_item_4(&children[0]),
+            940 => self.description_item_5(&children[0]),
+            941 => self.description_item_6(&children[0]),
+            942 => self.veryl(&children[0], &children[1]),
+            943 => self.veryl_list_0(&children[0], &children[1]),
+            944 => self.veryl_list_1(),
             _ => Err(ParserError::InternalError(format!(
                 "Unhandled production number: {}",
                 prod_num

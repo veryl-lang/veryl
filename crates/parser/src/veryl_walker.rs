@@ -2515,7 +2515,7 @@ pub trait VerylWalker {
         self.r_paren(&arg.r_paren);
         self.l_brace(&arg.l_brace);
         for x in &arg.unsafe_block_list {
-            self.module_group(&x.module_group);
+            self.generate_group(&x.generate_group);
         }
         self.r_brace(&arg.r_brace);
         after!(self, unsafe_block, arg);
@@ -2550,76 +2550,6 @@ pub trait VerylWalker {
         after!(self, module_declaration, arg);
     }
 
-    /// Semantic action for non-terminal 'ModuleIfDeclaration'
-    fn module_if_declaration(&mut self, arg: &ModuleIfDeclaration) {
-        before!(self, module_if_declaration, arg);
-        self.r#if(&arg.r#if);
-        self.expression(&arg.expression);
-        self.module_named_block(&arg.module_named_block);
-        for x in &arg.module_if_declaration_list {
-            self.r#else(&x.r#else);
-            self.r#if(&x.r#if);
-            self.expression(&x.expression);
-            self.module_optional_named_block(&x.module_optional_named_block);
-        }
-        if let Some(ref x) = arg.module_if_declaration_opt {
-            self.r#else(&x.r#else);
-            self.module_optional_named_block(&x.module_optional_named_block);
-        }
-        after!(self, module_if_declaration, arg);
-    }
-
-    /// Semantic action for non-terminal 'ModuleForDeclaration'
-    fn module_for_declaration(&mut self, arg: &ModuleForDeclaration) {
-        before!(self, module_for_declaration, arg);
-        self.r#for(&arg.r#for);
-        self.identifier(&arg.identifier);
-        self.r#in(&arg.r#in);
-        self.range(&arg.range);
-        if let Some(ref x) = arg.module_for_declaration_opt {
-            self.step(&x.step);
-            self.assignment_operator(&x.assignment_operator);
-            self.expression(&x.expression);
-        }
-        self.module_named_block(&arg.module_named_block);
-        after!(self, module_for_declaration, arg);
-    }
-
-    /// Semantic action for non-terminal 'ModuleBlockDeclaration'
-    fn module_block_declaration(&mut self, arg: &ModuleBlockDeclaration) {
-        before!(self, module_block_declaration, arg);
-        self.module_named_block(&arg.module_named_block);
-        after!(self, module_block_declaration, arg);
-    }
-
-    /// Semantic action for non-terminal 'ModuleNamedBlock'
-    fn module_named_block(&mut self, arg: &ModuleNamedBlock) {
-        before!(self, module_named_block, arg);
-        self.colon(&arg.colon);
-        self.identifier(&arg.identifier);
-        self.l_brace(&arg.l_brace);
-        for x in &arg.module_named_block_list {
-            self.module_group(&x.module_group);
-        }
-        self.r_brace(&arg.r_brace);
-        after!(self, module_named_block, arg);
-    }
-
-    /// Semantic action for non-terminal 'ModuleOptionalNamedBlock'
-    fn module_optional_named_block(&mut self, arg: &ModuleOptionalNamedBlock) {
-        before!(self, module_optional_named_block, arg);
-        if let Some(ref x) = arg.module_optional_named_block_opt {
-            self.colon(&x.colon);
-            self.identifier(&x.identifier);
-        }
-        self.l_brace(&arg.l_brace);
-        for x in &arg.module_optional_named_block_list {
-            self.module_group(&x.module_group);
-        }
-        self.r_brace(&arg.r_brace);
-        after!(self, module_optional_named_block, arg);
-    }
-
     /// Semantic action for non-terminal 'ModuleGroup'
     fn module_group(&mut self, arg: &ModuleGroup) {
         before!(self, module_group, arg);
@@ -2634,7 +2564,9 @@ pub trait VerylWalker {
                 }
                 self.r_brace(&x.r_brace);
             }
-            ModuleGroupGroup::ModuleItem(x) => self.module_item(&x.module_item),
+            ModuleGroupGroup::ModuleItem(x) => {
+                self.module_item(&x.module_item);
+            }
         }
         after!(self, module_group, arg);
     }
@@ -2642,40 +2574,7 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'ModuleItem'
     fn module_item(&mut self, arg: &ModuleItem) {
         before!(self, module_item, arg);
-        match arg {
-            ModuleItem::LetDeclaration(x) => self.let_declaration(&x.let_declaration),
-            ModuleItem::VarDeclaration(x) => self.var_declaration(&x.var_declaration),
-            ModuleItem::InstDeclaration(x) => self.inst_declaration(&x.inst_declaration),
-            ModuleItem::ConstDeclaration(x) => self.const_declaration(&x.const_declaration),
-            ModuleItem::TypeDefDeclaration(x) => self.type_def_declaration(&x.type_def_declaration),
-            ModuleItem::AlwaysFfDeclaration(x) => {
-                self.always_ff_declaration(&x.always_ff_declaration)
-            }
-            ModuleItem::AlwaysCombDeclaration(x) => {
-                self.always_comb_declaration(&x.always_comb_declaration)
-            }
-            ModuleItem::AssignDeclaration(x) => self.assign_declaration(&x.assign_declaration),
-            ModuleItem::FunctionDeclaration(x) => {
-                self.function_declaration(&x.function_declaration)
-            }
-            ModuleItem::ModuleIfDeclaration(x) => {
-                self.module_if_declaration(&x.module_if_declaration)
-            }
-            ModuleItem::ModuleForDeclaration(x) => {
-                self.module_for_declaration(&x.module_for_declaration)
-            }
-            ModuleItem::ModuleBlockDeclaration(x) => {
-                self.module_block_declaration(&x.module_block_declaration)
-            }
-            ModuleItem::EnumDeclaration(x) => self.enum_declaration(&x.enum_declaration),
-            ModuleItem::StructUnionDeclaration(x) => {
-                self.struct_union_declaration(&x.struct_union_declaration)
-            }
-            ModuleItem::ImportDeclaration(x) => self.import_declaration(&x.import_declaration),
-            ModuleItem::InitialDeclaration(x) => self.initial_declaration(&x.initial_declaration),
-            ModuleItem::FinalDeclaration(x) => self.final_declaration(&x.final_declaration),
-            ModuleItem::UnsafeBlock(x) => self.unsafe_block(&x.unsafe_block),
-        };
+        self.generate_item(&arg.generate_item);
         after!(self, module_item, arg);
     }
 
@@ -2701,76 +2600,6 @@ pub trait VerylWalker {
         after!(self, interface_declaration, arg);
     }
 
-    /// Semantic action for non-terminal 'InterfaceIfDeclaration'
-    fn interface_if_declaration(&mut self, arg: &InterfaceIfDeclaration) {
-        before!(self, interface_if_declaration, arg);
-        self.r#if(&arg.r#if);
-        self.expression(&arg.expression);
-        self.interface_named_block(&arg.interface_named_block);
-        for x in &arg.interface_if_declaration_list {
-            self.r#else(&x.r#else);
-            self.r#if(&x.r#if);
-            self.expression(&x.expression);
-            self.interface_optional_named_block(&x.interface_optional_named_block);
-        }
-        if let Some(ref x) = arg.interface_if_declaration_opt {
-            self.r#else(&x.r#else);
-            self.interface_optional_named_block(&x.interface_optional_named_block);
-        }
-        after!(self, interface_if_declaration, arg);
-    }
-
-    /// Semantic action for non-terminal 'InterfaceForDeclaration'
-    fn interface_for_declaration(&mut self, arg: &InterfaceForDeclaration) {
-        before!(self, interface_for_declaration, arg);
-        self.r#for(&arg.r#for);
-        self.identifier(&arg.identifier);
-        self.r#in(&arg.r#in);
-        self.range(&arg.range);
-        if let Some(ref x) = arg.interface_for_declaration_opt {
-            self.step(&x.step);
-            self.assignment_operator(&x.assignment_operator);
-            self.expression(&x.expression);
-        }
-        self.interface_named_block(&arg.interface_named_block);
-        after!(self, interface_for_declaration, arg);
-    }
-
-    /// Semantic action for non-terminal 'InterfaceBlockDeclaration'
-    fn interface_block_declaration(&mut self, arg: &InterfaceBlockDeclaration) {
-        before!(self, interface_block_declaration, arg);
-        self.interface_named_block(&arg.interface_named_block);
-        after!(self, interface_block_declaration, arg);
-    }
-
-    /// Semantic action for non-terminal 'InterfaceNamedBlock'
-    fn interface_named_block(&mut self, arg: &InterfaceNamedBlock) {
-        before!(self, interface_named_block, arg);
-        self.colon(&arg.colon);
-        self.identifier(&arg.identifier);
-        self.l_brace(&arg.l_brace);
-        for x in &arg.interface_named_block_list {
-            self.interface_group(&x.interface_group);
-        }
-        self.r_brace(&arg.r_brace);
-        after!(self, interface_named_block, arg);
-    }
-
-    /// Semantic action for non-terminal 'InterfaceOptionalNamedBlock'
-    fn interface_optional_named_block(&mut self, arg: &InterfaceOptionalNamedBlock) {
-        before!(self, interface_optional_named_block, arg);
-        if let Some(ref x) = arg.interface_optional_named_block_opt {
-            self.colon(&x.colon);
-            self.identifier(&x.identifier);
-        }
-        self.l_brace(&arg.l_brace);
-        for x in &arg.interface_optional_named_block_list {
-            self.interface_group(&x.interface_group);
-        }
-        self.r_brace(&arg.r_brace);
-        after!(self, interface_optional_named_block, arg);
-    }
-
     /// Semantic action for non-terminal 'InterfaceGroup'
     fn interface_group(&mut self, arg: &InterfaceGroup) {
         before!(self, interface_group, arg);
@@ -2785,7 +2614,9 @@ pub trait VerylWalker {
                 }
                 self.r_brace(&x.r_brace);
             }
-            InterfaceGroupGroup::InterfaceItem(x) => self.interface_item(&x.interface_item),
+            InterfaceGroupGroup::InterfaceItem(x) => {
+                self.interface_item(&x.interface_item);
+            }
         }
         after!(self, interface_group, arg);
     }
@@ -2794,38 +2625,143 @@ pub trait VerylWalker {
     fn interface_item(&mut self, arg: &InterfaceItem) {
         before!(self, interface_item, arg);
         match arg {
-            InterfaceItem::LetDeclaration(x) => self.let_declaration(&x.let_declaration),
-            InterfaceItem::VarDeclaration(x) => self.var_declaration(&x.var_declaration),
-            InterfaceItem::ConstDeclaration(x) => self.const_declaration(&x.const_declaration),
+            InterfaceItem::GenerateItem(x) => self.generate_item(&x.generate_item),
             InterfaceItem::ModportDeclaration(x) => {
                 self.modport_declaration(&x.modport_declaration)
             }
-            InterfaceItem::InterfaceIfDeclaration(x) => {
-                self.interface_if_declaration(&x.interface_if_declaration)
+        }
+        after!(self, interface_item, arg);
+    }
+
+    /// Semantic action for non-terminal 'GenerateIfDeclaration'
+    fn generate_if_declaration(&mut self, arg: &GenerateIfDeclaration) {
+        before!(self, generate_if_declaration, arg);
+        self.r#if(&arg.r#if);
+        self.expression(&arg.expression);
+        self.generate_named_block(&arg.generate_named_block);
+        for x in &arg.generate_if_declaration_list {
+            self.r#else(&x.r#else);
+            self.r#if(&x.r#if);
+            self.expression(&x.expression);
+            self.generate_optional_named_block(&x.generate_optional_named_block);
+        }
+        if let Some(ref x) = arg.generate_if_declaration_opt {
+            self.r#else(&x.r#else);
+            self.generate_optional_named_block(&x.generate_optional_named_block);
+        }
+        after!(self, generate_if_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'GenerateForDeclaration'
+    fn generate_for_declaration(&mut self, arg: &GenerateForDeclaration) {
+        before!(self, generate_for_declaration, arg);
+        self.r#for(&arg.r#for);
+        self.identifier(&arg.identifier);
+        self.r#in(&arg.r#in);
+        self.range(&arg.range);
+        if let Some(ref x) = arg.generate_for_declaration_opt {
+            self.step(&x.step);
+            self.assignment_operator(&x.assignment_operator);
+            self.expression(&x.expression);
+        }
+        self.generate_named_block(&arg.generate_named_block);
+        after!(self, generate_for_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'GenerateBlockDeclaration'
+    fn generate_block_declaration(&mut self, arg: &GenerateBlockDeclaration) {
+        before!(self, generate_block_declaration, arg);
+        self.generate_named_block(&arg.generate_named_block);
+        after!(self, generate_block_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'GenerateNamedBlock'
+    fn generate_named_block(&mut self, arg: &GenerateNamedBlock) {
+        before!(self, generate_named_block, arg);
+        self.colon(&arg.colon);
+        self.identifier(&arg.identifier);
+        self.l_brace(&arg.l_brace);
+        for x in &arg.generate_named_block_list {
+            self.generate_group(&x.generate_group);
+        }
+        self.r_brace(&arg.r_brace);
+        after!(self, generate_named_block, arg);
+    }
+
+    /// Semantic action for non-terminal 'GenerateOptionalNamedBlock'
+    fn generate_optional_named_block(&mut self, arg: &GenerateOptionalNamedBlock) {
+        before!(self, generate_optional_named_block, arg);
+        if let Some(ref x) = arg.generate_optional_named_block_opt {
+            self.colon(&x.colon);
+            self.identifier(&x.identifier);
+        }
+        self.l_brace(&arg.l_brace);
+        for x in &arg.generate_optional_named_block_list {
+            self.generate_group(&x.generate_group);
+        }
+        self.r_brace(&arg.r_brace);
+        after!(self, generate_optional_named_block, arg);
+    }
+
+    /// Semantic action for non-terminal 'GenerateGroup'
+    fn generate_group(&mut self, arg: &GenerateGroup) {
+        before!(self, generate_group, arg);
+        for x in &arg.generate_group_list {
+            self.attribute(&x.attribute);
+        }
+        match &*arg.generate_group_group {
+            GenerateGroupGroup::LBraceGenerateGroupGroupListRBrace(x) => {
+                self.l_brace(&x.l_brace);
+                for x in &x.generate_group_group_list {
+                    self.generate_group(&x.generate_group);
+                }
+                self.r_brace(&x.r_brace);
             }
-            InterfaceItem::InterfaceForDeclaration(x) => {
-                self.interface_for_declaration(&x.interface_for_declaration)
+            GenerateGroupGroup::GenerateItem(x) => self.generate_item(&x.generate_item),
+        }
+        after!(self, generate_group, arg);
+    }
+
+    /// Semantic action for non-terminal 'GenerateItem'
+    fn generate_item(&mut self, arg: &GenerateItem) {
+        before!(self, generate_item, arg);
+        match arg {
+            GenerateItem::LetDeclaration(x) => self.let_declaration(&x.let_declaration),
+            GenerateItem::VarDeclaration(x) => self.var_declaration(&x.var_declaration),
+            GenerateItem::InstDeclaration(x) => self.inst_declaration(&x.inst_declaration),
+            GenerateItem::ConstDeclaration(x) => self.const_declaration(&x.const_declaration),
+            GenerateItem::AlwaysFfDeclaration(x) => {
+                self.always_ff_declaration(&x.always_ff_declaration)
             }
-            InterfaceItem::InterfaceBlockDeclaration(x) => {
-                self.interface_block_declaration(&x.interface_block_declaration);
+            GenerateItem::AlwaysCombDeclaration(x) => {
+                self.always_comb_declaration(&x.always_comb_declaration)
             }
-            InterfaceItem::TypeDefDeclaration(x) => {
-                self.type_def_declaration(&x.type_def_declaration)
-            }
-            InterfaceItem::EnumDeclaration(x) => self.enum_declaration(&x.enum_declaration),
-            InterfaceItem::StructUnionDeclaration(x) => {
-                self.struct_union_declaration(&x.struct_union_declaration)
-            }
-            InterfaceItem::FunctionDeclaration(x) => {
+            GenerateItem::AssignDeclaration(x) => self.assign_declaration(&x.assign_declaration),
+            GenerateItem::FunctionDeclaration(x) => {
                 self.function_declaration(&x.function_declaration)
             }
-            InterfaceItem::ImportDeclaration(x) => self.import_declaration(&x.import_declaration),
-            InterfaceItem::InitialDeclaration(x) => {
-                self.initial_declaration(&x.initial_declaration)
+            GenerateItem::GenerateIfDeclaration(x) => {
+                self.generate_if_declaration(&x.generate_if_declaration)
             }
-            InterfaceItem::FinalDeclaration(x) => self.final_declaration(&x.final_declaration),
+            GenerateItem::GenerateForDeclaration(x) => {
+                self.generate_for_declaration(&x.generate_for_declaration)
+            }
+            GenerateItem::GenerateBlockDeclaration(x) => {
+                self.generate_block_declaration(&x.generate_block_declaration)
+            }
+            GenerateItem::TypeDefDeclaration(x) => {
+                self.type_def_declaration(&x.type_def_declaration)
+            }
+            GenerateItem::EnumDeclaration(x) => self.enum_declaration(&x.enum_declaration),
+            GenerateItem::StructUnionDeclaration(x) => {
+                self.struct_union_declaration(&x.struct_union_declaration)
+            }
+            GenerateItem::ImportDeclaration(x) => self.import_declaration(&x.import_declaration),
+            GenerateItem::InitialDeclaration(x) => self.initial_declaration(&x.initial_declaration),
+            GenerateItem::FinalDeclaration(x) => self.final_declaration(&x.final_declaration),
+            GenerateItem::UnsafeBlock(x) => self.unsafe_block(&x.unsafe_block),
         };
-        after!(self, interface_item, arg);
+        after!(self, generate_item, arg);
     }
 
     /// Semantic action for non-terminal 'PackageDeclaration'

@@ -1568,7 +1568,7 @@ impl VerylWalker for Formatter {
         self.token_will_push(&arg.l_brace.l_brace_token);
         for (i, x) in arg.unsafe_block_list.iter().enumerate() {
             self.newline_list(i);
-            self.module_group(&x.module_group);
+            self.generate_group(&x.generate_group);
         }
         self.newline_list_post(arg.unsafe_block_list.is_empty());
         self.r_brace(&arg.r_brace);
@@ -1607,82 +1607,6 @@ impl VerylWalker for Formatter {
             self.module_group(&x.module_group);
         }
         self.newline_list_post(arg.module_declaration_list.is_empty());
-        self.r_brace(&arg.r_brace);
-    }
-
-    /// Semantic action for non-terminal 'ModuleIfDeclaration'
-    fn module_if_declaration(&mut self, arg: &ModuleIfDeclaration) {
-        self.r#if(&arg.r#if);
-        self.space(1);
-        self.expression(&arg.expression);
-        self.space(1);
-        self.module_named_block(&arg.module_named_block);
-        for x in &arg.module_if_declaration_list {
-            self.space(1);
-            self.r#else(&x.r#else);
-            self.space(1);
-            self.r#if(&x.r#if);
-            self.space(1);
-            self.expression(&x.expression);
-            self.space(1);
-            self.module_optional_named_block(&x.module_optional_named_block);
-        }
-        if let Some(ref x) = arg.module_if_declaration_opt {
-            self.space(1);
-            self.r#else(&x.r#else);
-            self.space(1);
-            self.module_optional_named_block(&x.module_optional_named_block);
-        }
-    }
-
-    /// Semantic action for non-terminal 'ModuleForDeclaration'
-    fn module_for_declaration(&mut self, arg: &ModuleForDeclaration) {
-        self.r#for(&arg.r#for);
-        self.space(1);
-        self.identifier(&arg.identifier);
-        self.space(1);
-        self.r#in(&arg.r#in);
-        self.space(1);
-        self.range(&arg.range);
-        self.space(1);
-        if let Some(ref x) = arg.module_for_declaration_opt {
-            self.step(&x.step);
-            self.space(1);
-            self.assignment_operator(&x.assignment_operator);
-            self.space(1);
-            self.expression(&x.expression);
-            self.space(1);
-        }
-        self.module_named_block(&arg.module_named_block);
-    }
-
-    /// Semantic action for non-terminal 'ModuleNamedBlock'
-    fn module_named_block(&mut self, arg: &ModuleNamedBlock) {
-        self.colon(&arg.colon);
-        self.identifier(&arg.identifier);
-        self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token);
-        for (i, x) in arg.module_named_block_list.iter().enumerate() {
-            self.newline_list(i);
-            self.module_group(&x.module_group);
-        }
-        self.newline_list_post(arg.module_named_block_list.is_empty());
-        self.r_brace(&arg.r_brace);
-    }
-
-    /// Semantic action for non-terminal 'ModuleOptionalNamedBlock'
-    fn module_optional_named_block(&mut self, arg: &ModuleOptionalNamedBlock) {
-        if let Some(ref x) = arg.module_optional_named_block_opt {
-            self.colon(&x.colon);
-            self.identifier(&x.identifier);
-            self.space(1);
-        }
-        self.token_will_push(&arg.l_brace.l_brace_token);
-        for (i, x) in arg.module_optional_named_block_list.iter().enumerate() {
-            self.newline_list(i);
-            self.module_group(&x.module_group);
-        }
-        self.newline_list_post(arg.module_optional_named_block_list.is_empty());
         self.r_brace(&arg.r_brace);
     }
 
@@ -1732,83 +1656,6 @@ impl VerylWalker for Formatter {
         self.r_brace(&arg.r_brace);
     }
 
-    /// Semantic action for non-terminal 'InterfaceIfDeclaration'
-    fn interface_if_declaration(&mut self, arg: &InterfaceIfDeclaration) {
-        self.r#if(&arg.r#if);
-        self.space(1);
-        self.expression(&arg.expression);
-        self.space(1);
-        self.interface_named_block(&arg.interface_named_block);
-        for x in &arg.interface_if_declaration_list {
-            self.space(1);
-            self.r#else(&x.r#else);
-            self.space(1);
-            self.r#if(&x.r#if);
-            self.space(1);
-            self.expression(&x.expression);
-            self.space(1);
-            self.interface_optional_named_block(&x.interface_optional_named_block);
-        }
-        if let Some(ref x) = arg.interface_if_declaration_opt {
-            self.space(1);
-            self.r#else(&x.r#else);
-            self.space(1);
-            self.interface_optional_named_block(&x.interface_optional_named_block);
-        }
-    }
-
-    /// Semantic action for non-terminal 'InterfaceForDeclaration'
-    fn interface_for_declaration(&mut self, arg: &InterfaceForDeclaration) {
-        self.r#for(&arg.r#for);
-        self.space(1);
-        self.identifier(&arg.identifier);
-        self.space(1);
-        self.r#in(&arg.r#in);
-        self.space(1);
-        self.range(&arg.range);
-        self.space(1);
-        if let Some(ref x) = arg.interface_for_declaration_opt {
-            self.step(&x.step);
-            self.space(1);
-            self.assignment_operator(&x.assignment_operator);
-            self.space(1);
-            self.expression(&x.expression);
-            self.space(1);
-        }
-        self.interface_named_block(&arg.interface_named_block);
-    }
-
-    /// Semantic action for non-terminal 'InterfaceNamedBlock'
-    fn interface_named_block(&mut self, arg: &InterfaceNamedBlock) {
-        self.colon(&arg.colon);
-        self.identifier(&arg.identifier);
-        self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token);
-        self.newline_push();
-        for (i, x) in arg.interface_named_block_list.iter().enumerate() {
-            self.newline_list(i);
-            self.interface_group(&x.interface_group);
-        }
-        self.newline_list_post(arg.interface_named_block_list.is_empty());
-        self.r_brace(&arg.r_brace);
-    }
-
-    /// Semantic action for non-terminal 'InterfaceOptionalNamedBlock'
-    fn interface_optional_named_block(&mut self, arg: &InterfaceOptionalNamedBlock) {
-        if let Some(ref x) = arg.interface_optional_named_block_opt {
-            self.colon(&x.colon);
-            self.identifier(&x.identifier);
-            self.space(1);
-        }
-        self.token_will_push(&arg.l_brace.l_brace_token);
-        for (i, x) in arg.interface_optional_named_block_list.iter().enumerate() {
-            self.newline_list(i);
-            self.interface_group(&x.interface_group);
-        }
-        self.newline_list_post(arg.interface_optional_named_block_list.is_empty());
-        self.r_brace(&arg.r_brace);
-    }
-
     /// Semantic action for non-terminal 'InterfaceGroup'
     fn interface_group(&mut self, arg: &InterfaceGroup) {
         for x in &arg.interface_group_list {
@@ -1826,6 +1673,102 @@ impl VerylWalker for Formatter {
                 self.r_brace(&x.r_brace);
             }
             InterfaceGroupGroup::InterfaceItem(x) => self.interface_item(&x.interface_item),
+        }
+    }
+
+    /// Semantic action for non-terminal 'GenerateIfDeclaration'
+    fn generate_if_declaration(&mut self, arg: &GenerateIfDeclaration) {
+        self.r#if(&arg.r#if);
+        self.space(1);
+        self.expression(&arg.expression);
+        self.space(1);
+        self.generate_named_block(&arg.generate_named_block);
+        for x in &arg.generate_if_declaration_list {
+            self.space(1);
+            self.r#else(&x.r#else);
+            self.space(1);
+            self.r#if(&x.r#if);
+            self.space(1);
+            self.expression(&x.expression);
+            self.space(1);
+            self.generate_optional_named_block(&x.generate_optional_named_block);
+        }
+        if let Some(ref x) = arg.generate_if_declaration_opt {
+            self.space(1);
+            self.r#else(&x.r#else);
+            self.space(1);
+            self.generate_optional_named_block(&x.generate_optional_named_block);
+        }
+    }
+
+    /// Semantic action for non-terminal 'GenerateForDeclaration'
+    fn generate_for_declaration(&mut self, arg: &GenerateForDeclaration) {
+        self.r#for(&arg.r#for);
+        self.space(1);
+        self.identifier(&arg.identifier);
+        self.space(1);
+        self.r#in(&arg.r#in);
+        self.space(1);
+        self.range(&arg.range);
+        self.space(1);
+        if let Some(ref x) = arg.generate_for_declaration_opt {
+            self.step(&x.step);
+            self.space(1);
+            self.assignment_operator(&x.assignment_operator);
+            self.space(1);
+            self.expression(&x.expression);
+            self.space(1);
+        }
+        self.generate_named_block(&arg.generate_named_block);
+    }
+
+    /// Semantic action for non-terminal 'GenerateNamedBlock'
+    fn generate_named_block(&mut self, arg: &GenerateNamedBlock) {
+        self.colon(&arg.colon);
+        self.identifier(&arg.identifier);
+        self.space(1);
+        self.token_will_push(&arg.l_brace.l_brace_token);
+        for (i, x) in arg.generate_named_block_list.iter().enumerate() {
+            self.newline_list(i);
+            self.generate_group(&x.generate_group);
+        }
+        self.newline_list_post(arg.generate_named_block_list.is_empty());
+        self.r_brace(&arg.r_brace);
+    }
+
+    /// Semantic action for non-terminal 'GenerateOptionalNamedBlock'
+    fn generate_optional_named_block(&mut self, arg: &GenerateOptionalNamedBlock) {
+        if let Some(ref x) = arg.generate_optional_named_block_opt {
+            self.colon(&x.colon);
+            self.identifier(&x.identifier);
+            self.space(1);
+        }
+        self.token_will_push(&arg.l_brace.l_brace_token);
+        for (i, x) in arg.generate_optional_named_block_list.iter().enumerate() {
+            self.newline_list(i);
+            self.generate_group(&x.generate_group);
+        }
+        self.newline_list_post(arg.generate_optional_named_block_list.is_empty());
+        self.r_brace(&arg.r_brace);
+    }
+
+    /// Semantic action for non-terminal 'GenerateGroup'
+    fn generate_group(&mut self, arg: &GenerateGroup) {
+        for x in &arg.generate_group_list {
+            self.attribute(&x.attribute);
+            self.newline();
+        }
+        match &*arg.generate_group_group {
+            GenerateGroupGroup::LBraceGenerateGroupGroupListRBrace(x) => {
+                self.token_will_push(&x.l_brace.l_brace_token);
+                for (i, x) in x.generate_group_group_list.iter().enumerate() {
+                    self.newline_list(i);
+                    self.generate_group(&x.generate_group);
+                }
+                self.newline_list_post(x.generate_group_group_list.is_empty());
+                self.r_brace(&x.r_brace);
+            }
+            GenerateGroupGroup::GenerateItem(x) => self.generate_item(&x.generate_item),
         }
     }
 

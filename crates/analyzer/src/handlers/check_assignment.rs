@@ -521,13 +521,13 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
         Ok(())
     }
 
-    fn module_if_declaration(&mut self, arg: &ModuleIfDeclaration) -> Result<(), ParolError> {
+    fn generate_if_declaration(&mut self, arg: &GenerateIfDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
                 self.branch_index = 0;
                 let branches = 1
-                    + arg.module_if_declaration_list.len()
-                    + arg.module_if_declaration_opt.iter().len();
+                    + arg.generate_if_declaration_list.len()
+                    + arg.generate_if_declaration_opt.iter().len();
                 self.assign_position
                     .push(AssignPositionType::DeclarationBranch {
                         token: arg.r#if.if_token.token,
@@ -547,7 +547,7 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
         Ok(())
     }
 
-    fn module_for_declaration(&mut self, arg: &ModuleForDeclaration) -> Result<(), ParolError> {
+    fn generate_for_declaration(&mut self, arg: &GenerateForDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if let Ok(x) = symbol_table::resolve(arg.identifier.as_ref()) {
                 self.assign_position.push(AssignPositionType::Statement {

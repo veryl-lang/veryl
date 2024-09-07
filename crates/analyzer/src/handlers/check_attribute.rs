@@ -193,6 +193,19 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
         Ok(())
     }
 
+    fn generate_group(&mut self, arg: &GenerateGroup) -> Result<(), ParolError> {
+        if let HandlerPoint::After = self.point {
+            let mut last_token = LastToken::default();
+            last_token.generate_group(arg);
+            let last_token = last_token.token().unwrap();
+
+            for _ in &arg.generate_group_list {
+                attribute_table::end(last_token);
+            }
+        }
+        Ok(())
+    }
+
     fn package_group(&mut self, arg: &PackageGroup) -> Result<(), ParolError> {
         if let HandlerPoint::After = self.point {
             let mut last_token = LastToken::default();

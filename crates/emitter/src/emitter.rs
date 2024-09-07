@@ -633,7 +633,7 @@ impl Emitter {
             .contains(&BuiltinType::Type)
     }
 
-    fn emit_module_named_block(&mut self, arg: &ModuleNamedBlock, prefix: &str) {
+    fn emit_generate_named_block(&mut self, arg: &GenerateNamedBlock, prefix: &str) {
         self.default_block = Some(arg.identifier.identifier_token.to_string());
         self.token_will_push(
             &arg.l_brace
@@ -643,29 +643,11 @@ impl Emitter {
         self.space(1);
         self.colon(&arg.colon);
         self.identifier(&arg.identifier);
-        for (i, x) in arg.module_named_block_list.iter().enumerate() {
+        for (i, x) in arg.generate_named_block_list.iter().enumerate() {
             self.newline_list(i);
-            self.module_group(&x.module_group);
+            self.generate_group(&x.generate_group);
         }
-        self.newline_list_post(arg.module_named_block_list.is_empty());
-        self.token(&arg.r_brace.r_brace_token.replace("end"));
-    }
-
-    fn emit_interface_named_block(&mut self, arg: &InterfaceNamedBlock, prefix: &str) {
-        self.default_block = Some(arg.identifier.identifier_token.to_string());
-        self.token_will_push(
-            &arg.l_brace
-                .l_brace_token
-                .replace(&format!("{}begin", prefix)),
-        );
-        self.space(1);
-        self.colon(&arg.colon);
-        self.identifier(&arg.identifier);
-        for (i, x) in arg.interface_named_block_list.iter().enumerate() {
-            self.newline_list(i);
-            self.interface_group(&x.interface_group);
-        }
-        self.newline_list_post(arg.interface_named_block_list.is_empty());
+        self.newline_list_post(arg.generate_named_block_list.is_empty());
         self.token(&arg.r_brace.r_brace_token.replace("end"));
     }
 
@@ -2810,7 +2792,7 @@ impl VerylWalker for Emitter {
             if i != 0 {
                 self.newline();
             }
-            self.module_group(&x.module_group);
+            self.generate_group(&x.generate_group);
         }
     }
 
@@ -2874,114 +2856,6 @@ impl VerylWalker for Emitter {
 
         self.default_clock = None;
         self.default_reset = None;
-    }
-
-    /// Semantic action for non-terminal 'ModuleIfDeclaration'
-    fn module_if_declaration(&mut self, arg: &ModuleIfDeclaration) {
-        self.r#if(&arg.r#if);
-        self.space(1);
-        self.str("(");
-        self.expression(&arg.expression);
-        self.str(")");
-        self.space(1);
-        self.module_named_block(&arg.module_named_block);
-        for x in &arg.module_if_declaration_list {
-            self.space(1);
-            self.r#else(&x.r#else);
-            self.space(1);
-            self.r#if(&x.r#if);
-            self.space(1);
-            self.str("(");
-            self.expression(&x.expression);
-            self.str(")");
-            self.space(1);
-            self.module_optional_named_block(&x.module_optional_named_block);
-        }
-        if let Some(ref x) = arg.module_if_declaration_opt {
-            self.space(1);
-            self.r#else(&x.r#else);
-            self.space(1);
-            self.module_optional_named_block(&x.module_optional_named_block);
-        }
-    }
-
-    /// Semantic action for non-terminal 'ModuleForDeclaration'
-    fn module_for_declaration(&mut self, arg: &ModuleForDeclaration) {
-        self.r#for(&arg.r#for);
-        self.space(1);
-        self.str("(");
-        self.str("genvar");
-        self.space(1);
-        self.identifier(&arg.identifier);
-        self.space(1);
-        self.str("=");
-        self.space(1);
-        self.expression(&arg.range.expression);
-        self.str(";");
-        self.space(1);
-        self.identifier(&arg.identifier);
-        self.space(1);
-        if let Some(ref x) = arg.range.range_opt {
-            match &*x.range_operator {
-                RangeOperator::DotDot(_) => self.str("<"),
-                RangeOperator::DotDotEqu(_) => self.str("<="),
-            }
-        } else {
-            self.str("<=");
-        }
-        self.space(1);
-        if let Some(ref x) = arg.range.range_opt {
-            self.expression(&x.expression);
-        } else {
-            self.expression(&arg.range.expression);
-        }
-        self.str(";");
-        self.space(1);
-        if let Some(ref x) = arg.module_for_declaration_opt {
-            self.identifier(&arg.identifier);
-            self.space(1);
-            self.assignment_operator(&x.assignment_operator);
-            self.space(1);
-            self.expression(&x.expression);
-        } else {
-            self.identifier(&arg.identifier);
-            self.str("++");
-        }
-        self.str(")");
-        self.space(1);
-        self.module_named_block(&arg.module_named_block);
-    }
-
-    /// Semantic action for non-terminal 'ModuleBlockDeclaration'
-    fn module_block_declaration(&mut self, arg: &ModuleBlockDeclaration) {
-        self.emit_module_named_block(&arg.module_named_block, "if (1) ");
-    }
-
-    /// Semantic action for non-terminal 'ModuleNamedBlock'
-    fn module_named_block(&mut self, arg: &ModuleNamedBlock) {
-        self.emit_module_named_block(arg, "");
-    }
-
-    /// Semantic action for non-terminal 'ModuleOptionalNamedBlock'
-    fn module_optional_named_block(&mut self, arg: &ModuleOptionalNamedBlock) {
-        self.str("begin");
-        if let Some(ref x) = arg.module_optional_named_block_opt {
-            self.space(1);
-            self.colon(&x.colon);
-            self.identifier(&x.identifier);
-        } else {
-            self.space(1);
-            self.str(":");
-            let name = self.default_block.clone().unwrap();
-            self.str(&name);
-        }
-        self.token_will_push(&arg.l_brace.l_brace_token.replace(""));
-        for (i, x) in arg.module_optional_named_block_list.iter().enumerate() {
-            self.newline_list(i);
-            self.module_group(&x.module_group);
-        }
-        self.newline_list_post(arg.module_optional_named_block_list.is_empty());
-        self.token(&arg.r_brace.r_brace_token.replace("end"));
     }
 
     /// Semantic action for non-terminal 'ModuleGroup'
@@ -3056,16 +2930,37 @@ impl VerylWalker for Emitter {
         }
     }
 
-    /// Semantic action for non-terminal 'InterfaceIfDeclaration'
-    fn interface_if_declaration(&mut self, arg: &InterfaceIfDeclaration) {
+    /// Semantic action for non-terminal 'InterfaceGroup'
+    fn interface_group(&mut self, arg: &InterfaceGroup) {
+        for x in &arg.interface_group_list {
+            self.attribute(&x.attribute);
+        }
+        match &*arg.interface_group_group {
+            InterfaceGroupGroup::LBraceInterfaceGroupGroupListRBrace(x) => {
+                for (i, x) in x.interface_group_group_list.iter().enumerate() {
+                    if i != 0 {
+                        self.newline();
+                    }
+                    self.interface_group(&x.interface_group);
+                }
+            }
+            InterfaceGroupGroup::InterfaceItem(x) => self.interface_item(&x.interface_item),
+        }
+        for _ in &arg.interface_group_list {
+            self.attribute_end();
+        }
+    }
+
+    /// Semantic action for non-terminal 'GenerateIfDeclaration'
+    fn generate_if_declaration(&mut self, arg: &GenerateIfDeclaration) {
         self.r#if(&arg.r#if);
         self.space(1);
         self.str("(");
         self.expression(&arg.expression);
         self.str(")");
         self.space(1);
-        self.interface_named_block(&arg.interface_named_block);
-        for x in &arg.interface_if_declaration_list {
+        self.generate_named_block(&arg.generate_named_block);
+        for x in &arg.generate_if_declaration_list {
             self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
@@ -3075,18 +2970,18 @@ impl VerylWalker for Emitter {
             self.expression(&x.expression);
             self.str(")");
             self.space(1);
-            self.interface_optional_named_block(&x.interface_optional_named_block);
+            self.generate_optional_named_block(&x.generate_optional_named_block);
         }
-        if let Some(ref x) = arg.interface_if_declaration_opt {
+        if let Some(ref x) = arg.generate_if_declaration_opt {
             self.space(1);
             self.r#else(&x.r#else);
             self.space(1);
-            self.interface_optional_named_block(&x.interface_optional_named_block);
+            self.generate_optional_named_block(&x.generate_optional_named_block);
         }
     }
 
-    /// Semantic action for non-terminal 'InterfaceForDeclaration'
-    fn interface_for_declaration(&mut self, arg: &InterfaceForDeclaration) {
+    /// Semantic action for non-terminal 'GenerateForDeclaration'
+    fn generate_for_declaration(&mut self, arg: &GenerateForDeclaration) {
         self.r#for(&arg.r#for);
         self.space(1);
         self.str("(");
@@ -3117,7 +3012,7 @@ impl VerylWalker for Emitter {
         }
         self.str(";");
         self.space(1);
-        if let Some(ref x) = arg.interface_for_declaration_opt {
+        if let Some(ref x) = arg.generate_for_declaration_opt {
             self.identifier(&arg.identifier);
             self.space(1);
             self.assignment_operator(&x.assignment_operator);
@@ -3129,23 +3024,23 @@ impl VerylWalker for Emitter {
         }
         self.str(")");
         self.space(1);
-        self.interface_named_block(&arg.interface_named_block);
+        self.generate_named_block(&arg.generate_named_block);
     }
 
-    /// Semantic action for non-terminal 'InterfaceBlockDeclaration'
-    fn interface_block_declaration(&mut self, arg: &InterfaceBlockDeclaration) {
-        self.emit_interface_named_block(&arg.interface_named_block, "if (1) ");
+    /// Semantic action for non-terminal 'GenerateBlockDeclaration'
+    fn generate_block_declaration(&mut self, arg: &GenerateBlockDeclaration) {
+        self.emit_generate_named_block(&arg.generate_named_block, "if (1) ");
     }
 
-    /// Semantic action for non-terminal 'InterfaceNamedBlock'
-    fn interface_named_block(&mut self, arg: &InterfaceNamedBlock) {
-        self.emit_interface_named_block(arg, "");
+    /// Semantic action for non-terminal 'GenerateNamedBlock'
+    fn generate_named_block(&mut self, arg: &GenerateNamedBlock) {
+        self.emit_generate_named_block(arg, "");
     }
 
-    /// Semantic action for non-terminal 'InterfaceOptionalNamedBlock'
-    fn interface_optional_named_block(&mut self, arg: &InterfaceOptionalNamedBlock) {
+    /// Semantic action for non-terminal 'GenerateOptionalNamedBlock'
+    fn generate_optional_named_block(&mut self, arg: &GenerateOptionalNamedBlock) {
         self.str("begin");
-        if let Some(ref x) = arg.interface_optional_named_block_opt {
+        if let Some(ref x) = arg.generate_optional_named_block_opt {
             self.space(1);
             self.colon(&x.colon);
             self.identifier(&x.identifier);
@@ -3156,31 +3051,31 @@ impl VerylWalker for Emitter {
             self.str(&name);
         }
         self.token_will_push(&arg.l_brace.l_brace_token.replace(""));
-        for (i, x) in arg.interface_optional_named_block_list.iter().enumerate() {
+        for (i, x) in arg.generate_optional_named_block_list.iter().enumerate() {
             self.newline_list(i);
-            self.interface_group(&x.interface_group);
+            self.generate_group(&x.generate_group);
         }
-        self.newline_list_post(arg.interface_optional_named_block_list.is_empty());
+        self.newline_list_post(arg.generate_optional_named_block_list.is_empty());
         self.token(&arg.r_brace.r_brace_token.replace("end"));
     }
 
-    /// Semantic action for non-terminal 'InterfaceGroup'
-    fn interface_group(&mut self, arg: &InterfaceGroup) {
-        for x in &arg.interface_group_list {
+    /// Semantic action for non-terminal 'GenerateGroup'
+    fn generate_group(&mut self, arg: &GenerateGroup) {
+        for x in &arg.generate_group_list {
             self.attribute(&x.attribute);
         }
-        match &*arg.interface_group_group {
-            InterfaceGroupGroup::LBraceInterfaceGroupGroupListRBrace(x) => {
-                for (i, x) in x.interface_group_group_list.iter().enumerate() {
+        match &*arg.generate_group_group {
+            GenerateGroupGroup::LBraceGenerateGroupGroupListRBrace(x) => {
+                for (i, x) in x.generate_group_group_list.iter().enumerate() {
                     if i != 0 {
                         self.newline();
                     }
-                    self.interface_group(&x.interface_group);
+                    self.generate_group(&x.generate_group);
                 }
             }
-            InterfaceGroupGroup::InterfaceItem(x) => self.interface_item(&x.interface_item),
+            GenerateGroupGroup::GenerateItem(x) => self.generate_item(&x.generate_item),
         }
-        for _ in &arg.interface_group_list {
+        for _ in &arg.generate_group_list {
             self.attribute_end();
         }
     }

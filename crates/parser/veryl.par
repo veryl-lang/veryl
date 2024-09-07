@@ -760,79 +760,55 @@ ExportDeclaration: Export ( Star | ScopedIdentifier [ ColonColon Star ] ) Semico
 // Unsafe
 // ----------------------------------------------------------------------------
 
-UnsafeBlock: Unsafe LParen Identifier RParen LBrace { ModuleGroup } RBrace;
+UnsafeBlock: Unsafe LParen Identifier RParen LBrace { GenerateGroup } RBrace;
 
 // ----------------------------------------------------------------------------
-// Module
+// Module/Interface
 // ----------------------------------------------------------------------------
 
 ModuleDeclaration: [ Pub ] Module Identifier [ WithGenericParameter ] [ For ScopedIdentifier ] [ WithParameter ] [ PortDeclaration ] LBrace { ModuleGroup } RBrace;
 
-ModuleIfDeclaration: If Expression ModuleNamedBlock { Else If Expression ModuleOptionalNamedBlock } [ Else ModuleOptionalNamedBlock ];
-
-ModuleForDeclaration: For Identifier In Range [ Step AssignmentOperator Expression ] ModuleNamedBlock;
-
-ModuleBlockDeclaration: ModuleNamedBlock;
-
-ModuleNamedBlock: Colon Identifier LBrace { ModuleGroup } RBrace;
-
-ModuleOptionalNamedBlock: [ Colon Identifier ] LBrace { ModuleGroup } RBrace;
-
 ModuleGroup: { Attribute } ( LBrace { ModuleGroup } RBrace | ModuleItem );
 
-ModuleItem: LetDeclaration
-          | VarDeclaration
-          | InstDeclaration
-          | TypeDefDeclaration
-          | ConstDeclaration
-          | AlwaysFfDeclaration
-          | AlwaysCombDeclaration
-          | AssignDeclaration
-          | FunctionDeclaration
-          | ModuleIfDeclaration
-          | ModuleForDeclaration
-          | ModuleBlockDeclaration
-          | EnumDeclaration
-          | StructUnionDeclaration
-          | ImportDeclaration
-          | InitialDeclaration
-          | FinalDeclaration
-          | UnsafeBlock
-          ;
-
-// ----------------------------------------------------------------------------
-// Interface
-// ----------------------------------------------------------------------------
+ModuleItem: GenerateItem;
 
 InterfaceDeclaration: [ Pub ] Interface Identifier [ WithGenericParameter ] [ WithParameter ] LBrace { InterfaceGroup } RBrace;
 
-InterfaceIfDeclaration: If Expression InterfaceNamedBlock { Else If Expression InterfaceOptionalNamedBlock } [ Else InterfaceOptionalNamedBlock ];
-
-InterfaceForDeclaration: For Identifier In Range [ Step AssignmentOperator Expression ] InterfaceNamedBlock;
-
-InterfaceBlockDeclaration: InterfaceNamedBlock;
-
-InterfaceNamedBlock: Colon Identifier LBrace { InterfaceGroup } RBrace;
-
-InterfaceOptionalNamedBlock: [ Colon Identifier ] LBrace { InterfaceGroup } RBrace;
-
 InterfaceGroup: { Attribute } ( LBrace { InterfaceGroup } RBrace | InterfaceItem );
 
-InterfaceItem: LetDeclaration
-             | VarDeclaration
-             | ConstDeclaration
-             | ModportDeclaration
-             | InterfaceIfDeclaration
-             | InterfaceForDeclaration
-             | InterfaceBlockDeclaration
-             | TypeDefDeclaration
-             | EnumDeclaration
-             | StructUnionDeclaration
-             | FunctionDeclaration
-             | ImportDeclaration
-             | InitialDeclaration
-             | FinalDeclaration
-             ;
+InterfaceItem: GenerateItem | ModportDeclaration;
+
+GenerateIfDeclaration: If Expression GenerateNamedBlock { Else If Expression GenerateOptionalNamedBlock } [ Else GenerateOptionalNamedBlock ];
+
+GenerateForDeclaration: For Identifier In Range [ Step AssignmentOperator Expression ] GenerateNamedBlock;
+
+GenerateBlockDeclaration: GenerateNamedBlock;
+
+GenerateNamedBlock: Colon Identifier LBrace { GenerateGroup } RBrace;
+
+GenerateOptionalNamedBlock: [ Colon Identifier ] LBrace { GenerateGroup } RBrace;
+
+GenerateGroup: { Attribute } ( LBrace { GenerateGroup } RBrace | GenerateItem );
+
+GenerateItem: LetDeclaration
+            | VarDeclaration
+            | InstDeclaration
+            | ConstDeclaration
+            | AlwaysFfDeclaration
+            | AlwaysCombDeclaration
+            | AssignDeclaration
+            | FunctionDeclaration
+            | GenerateIfDeclaration
+            | GenerateForDeclaration
+            | GenerateBlockDeclaration
+            | TypeDefDeclaration
+            | EnumDeclaration
+            | StructUnionDeclaration
+            | ImportDeclaration
+            | InitialDeclaration
+            | FinalDeclaration
+            | UnsafeBlock
+            ;
 
 // ----------------------------------------------------------------------------
 // Package
