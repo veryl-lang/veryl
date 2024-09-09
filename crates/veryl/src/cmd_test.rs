@@ -28,8 +28,12 @@ impl CmdTest {
         let tests: Vec<_> = symbol_table::get_all()
             .into_iter()
             .filter_map(|symbol| {
-                if let SymbolKind::Test(x) = symbol.kind {
-                    Some((symbol.token.text, x))
+                if symbol.namespace.to_string() == metadata.project.name {
+                    if let SymbolKind::Test(x) = symbol.kind {
+                        Some((symbol.token.text, x))
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
