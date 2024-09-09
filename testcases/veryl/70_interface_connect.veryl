@@ -1,0 +1,23 @@
+interface Interface70 {
+    var en: logic;
+
+    modport port {
+        en: output,
+    }
+}
+
+module Module70 (
+    b: interface,
+) {
+    inst a: Interface70;
+
+    inst u: Module70A (
+        a: a,
+        b: b,
+    );
+}
+
+module Module70A (
+    a: modport Interface70::port,
+    b: interface,
+) {}

@@ -92,6 +92,8 @@ impl<'a> VerylGrammarTrait for CheckExpression<'a> {
                                 self.call_stack_kind.push(FunctionKind::System);
                             }
                         }
+                        // instance can be used as factor in inst_declaration
+                        SymbolKind::Instance(_) if self.in_inst_declaration => (),
                         SymbolKind::Module(_)
                         | SymbolKind::ProtoModule(_)
                         | SymbolKind::Interface(_)
