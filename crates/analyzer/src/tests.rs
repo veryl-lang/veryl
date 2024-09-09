@@ -1068,6 +1068,26 @@ fn mismatch_type() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    interface InterfaceL0 {}
+    interface InterfaceL1 {
+      inst u: InterfaceL0();
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleM0 {}
+    interface InterfaceM1 {
+      inst u: ModuleM0();
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 }
 
 #[test]

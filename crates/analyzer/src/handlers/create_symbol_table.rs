@@ -1152,14 +1152,14 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         Ok(())
     }
 
-    fn module_for_declaration(&mut self, arg: &ModuleForDeclaration) -> Result<(), ParolError> {
+    fn generate_for_declaration(&mut self, arg: &GenerateForDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             self.for_identifier = Some(arg.identifier.identifier_token.token);
         }
         Ok(())
     }
 
-    fn module_named_block(&mut self, arg: &ModuleNamedBlock) -> Result<(), ParolError> {
+    fn generate_named_block(&mut self, arg: &GenerateNamedBlock) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
                 self.insert_symbol(
@@ -1185,13 +1185,13 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         Ok(())
     }
 
-    fn module_optional_named_block(
+    fn generate_optional_named_block(
         &mut self,
-        arg: &ModuleOptionalNamedBlock,
+        arg: &GenerateOptionalNamedBlock,
     ) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                let name = if let Some(ref x) = arg.module_optional_named_block_opt {
+                let name = if let Some(ref x) = arg.generate_optional_named_block_opt {
                     self.insert_symbol(
                         &x.identifier.identifier_token.token,
                         SymbolKind::Block,
@@ -1264,74 +1264,6 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                         }
                     }
                 }
-            }
-        }
-        Ok(())
-    }
-
-    fn interface_for_declaration(
-        &mut self,
-        arg: &InterfaceForDeclaration,
-    ) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            self.for_identifier = Some(arg.identifier.identifier_token.token);
-        }
-        Ok(())
-    }
-
-    fn interface_named_block(&mut self, arg: &InterfaceNamedBlock) -> Result<(), ParolError> {
-        match self.point {
-            HandlerPoint::Before => {
-                self.insert_symbol(
-                    &arg.identifier.identifier_token.token,
-                    SymbolKind::Block,
-                    false,
-                );
-
-                let name = arg.identifier.identifier_token.token.text;
-                self.default_block = Some(name);
-                self.namespace.push(name);
-
-                if self.for_identifier.is_some() {
-                    let identifier = self.for_identifier.unwrap();
-                    self.insert_symbol(&identifier, SymbolKind::Genvar, false);
-                    self.for_identifier = None;
-                }
-            }
-            HandlerPoint::After => {
-                self.namespace.pop();
-            }
-        }
-        Ok(())
-    }
-
-    fn interface_optional_named_block(
-        &mut self,
-        arg: &InterfaceOptionalNamedBlock,
-    ) -> Result<(), ParolError> {
-        match self.point {
-            HandlerPoint::Before => {
-                let name = if let Some(ref x) = arg.interface_optional_named_block_opt {
-                    self.insert_symbol(
-                        &x.identifier.identifier_token.token,
-                        SymbolKind::Block,
-                        false,
-                    );
-                    x.identifier.identifier_token.token.text
-                } else {
-                    let name = format!(
-                        "{}@{}",
-                        self.default_block.unwrap(),
-                        self.anonymous_namespace
-                    );
-                    self.anonymous_namespace += 1;
-                    resource_table::insert_str(&name)
-                };
-
-                self.namespace.push(name)
-            }
-            HandlerPoint::After => {
-                self.namespace.pop();
             }
         }
         Ok(())
