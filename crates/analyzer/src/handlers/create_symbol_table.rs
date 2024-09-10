@@ -19,8 +19,9 @@ use crate::symbol::{
     SymbolKind, TestProperty, TestType, TypeDefProperty, TypeKind, UnionMemberProperty,
     UnionProperty, VariableAffiniation, VariableProperty,
 };
-use crate::symbol_path::{GenericSymbolPath, SymbolPath};
+use crate::symbol_path::{GenericSymbolPath, SymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
+use crate::symbol_table::Import as SymImport;
 use std::collections::{HashMap, HashSet};
 use veryl_metadata::ClockType;
 use veryl_metadata::{Build, ResetType};
@@ -64,6 +65,8 @@ pub struct CreateSymbolTable<'a> {
     function_ids: HashMap<StrId, SymbolId>,
     exist_clock_without_domain: bool,
     in_proto: bool,
+    file_scope_import_item: Vec<SymbolPathNamespace>,
+    file_scope_import_wildcard: Vec<SymbolPathNamespace>,
 }
 
 #[derive(Clone)]
@@ -342,6 +345,26 @@ impl<'a> CreateSymbolTable<'a> {
                 EnumEncodingItem::OneHot => Some(1),
                 _ => Some(0),
             }
+        }
+    }
+
+    fn apply_file_scope_import(&self) {
+        for x in &self.file_scope_import_item {
+            let import = SymImport {
+                path: x.clone(),
+                namespace: self.namespace.clone(),
+                wildcard: false,
+            };
+            symbol_table::add_import(import);
+        }
+
+        for x in &self.file_scope_import_wildcard {
+            let import = SymImport {
+                path: x.clone(),
+                namespace: self.namespace.clone(),
+                wildcard: true,
+            };
+            symbol_table::add_import(import);
         }
     }
 }
@@ -1088,6 +1111,32 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
         Ok(())
     }
 
+    fn import_declaration(&mut self, arg: &ImportDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            let path: SymbolPath = arg.scoped_identifier.as_ref().into();
+            let path: SymbolPathNamespace = (&path, &self.namespace).into();
+            let namespace = path.1.clone();
+            let wildcard = arg.import_declaration_opt.is_some();
+
+            let import = SymImport {
+                path: path.clone(),
+                namespace,
+                wildcard,
+            };
+
+            if self.affiniation.is_empty() {
+                if wildcard {
+                    self.file_scope_import_wildcard.push(path);
+                } else {
+                    self.file_scope_import_item.push(path);
+                }
+            } else {
+                symbol_table::add_import(import);
+            }
+        }
+        Ok(())
+    }
+
     fn module_declaration(&mut self, arg: &ModuleDeclaration) -> Result<(), ParolError> {
         let name = arg.identifier.identifier_token.token.text;
         match self.point {
@@ -1100,6 +1149,8 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 self.module_namspace_depth = self.namespace.depth();
                 self.function_ids.clear();
                 self.exist_clock_without_domain = false;
+
+                self.apply_file_scope_import();
             }
             HandlerPoint::After => {
                 self.namespace.pop();
@@ -1227,6 +1278,8 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 self.affiniation.push(VariableAffiniation::Intarface);
                 self.function_ids.clear();
                 self.modport_member_ids.clear();
+
+                self.apply_file_scope_import();
             }
             HandlerPoint::After => {
                 self.namespace.pop();
@@ -1277,6 +1330,8 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 self.generic_parameters.push(Vec::new());
                 self.affiniation.push(VariableAffiniation::Package);
                 self.function_ids.clear();
+
+                self.apply_file_scope_import();
             }
             HandlerPoint::After => {
                 self.namespace.pop();

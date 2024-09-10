@@ -33,6 +33,8 @@ impl CmdDump {
             contexts.push((path, input, parser, analyzer));
         }
 
+        Analyzer::analyze_post_pass1();
+
         for (path, input, parser, analyzer) in &contexts {
             analyzer.analyze_pass2(&path.prj, input, &path.src, &parser.veryl);
         }

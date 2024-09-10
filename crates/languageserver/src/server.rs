@@ -177,6 +177,7 @@ impl Server {
                         );
                     }
                     if task.paths.is_empty() {
+                        Analyzer::analyze_post_pass1();
                         self.progress_done("background analyze done");
                         if self.background_tasks.is_empty() {
                             self.background_done = true;
@@ -647,6 +648,7 @@ impl Server {
                         }
                         let analyzer = Analyzer::new(&metadata);
                         let mut errors = analyzer.analyze_pass1(prj, text, &path, &x.veryl);
+                        Analyzer::analyze_post_pass1();
                         errors.append(&mut analyzer.analyze_pass2(prj, text, &path, &x.veryl));
                         errors.append(&mut analyzer.analyze_pass3(prj, text, &path, &x.veryl));
                         let ret: Vec<_> = errors

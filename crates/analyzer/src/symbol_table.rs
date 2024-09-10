@@ -36,12 +36,20 @@ impl ResolveError {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct Import {
+    pub path: SymbolPathNamespace,
+    pub namespace: Namespace,
+    pub wildcard: bool,
+}
+
 #[derive(Clone, Default, Debug)]
 pub struct SymbolTable {
     name_table: HashMap<StrId, Vec<SymbolId>>,
     symbol_table: HashMap<SymbolId, Symbol>,
     project_local_table: HashMap<StrId, HashMap<StrId, StrId>>,
     assign_list: Vec<Assign>,
+    import_list: Vec<Import>,
 }
 
 impl SymbolTable {
@@ -380,7 +388,7 @@ impl SymbolTable {
         }
     }
 
-    pub fn add_imported_item(&mut self, target: TokenId, namespace: &Namespace) {
+    fn add_imported_item(&mut self, target: TokenId, namespace: &Namespace) {
         for (_, symbol) in self.symbol_table.iter_mut() {
             if symbol.token.id == target {
                 symbol.imported.push(namespace.to_owned());
@@ -388,10 +396,37 @@ impl SymbolTable {
         }
     }
 
-    pub fn add_imported_package(&mut self, target: &Namespace, namespace: &Namespace) {
+    fn add_imported_package(&mut self, target: &Namespace, namespace: &Namespace) {
         for (_, symbol) in self.symbol_table.iter_mut() {
             if symbol.namespace.matched(target) {
                 symbol.imported.push(namespace.to_owned());
+            }
+        }
+    }
+
+    pub fn add_import(&mut self, import: Import) {
+        self.import_list.push(import);
+    }
+
+    pub fn apply_import(&mut self) {
+        let import_list: Vec<_> = self.import_list.drain(0..).collect();
+        for import in import_list {
+            if let Ok(symbol) = self.resolve(&import.path.0, &import.path.1) {
+                let symbol = symbol.found;
+                match symbol.kind {
+                    SymbolKind::Package(_) if import.wildcard => {
+                        let mut target = symbol.namespace.clone();
+                        target.push(symbol.token.text);
+
+                        self.add_imported_package(&target, &import.namespace);
+                    }
+                    SymbolKind::SystemVerilog => (),
+                    // Error will be reported at create_reference
+                    _ if import.wildcard => (),
+                    _ => {
+                        self.add_imported_item(symbol.token.id, &import.namespace);
+                    }
+                }
             }
         }
     }
@@ -1011,12 +1046,12 @@ pub fn add_generic_instance(target: SymbolId, instance: SymbolId) {
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_generic_instance(target, instance))
 }
 
-pub fn add_imported_item(target: TokenId, namespace: &Namespace) {
-    SYMBOL_TABLE.with(|f| f.borrow_mut().add_imported_item(target, namespace))
+pub fn add_import(import: Import) {
+    SYMBOL_TABLE.with(|f| f.borrow_mut().add_import(import))
 }
 
-pub fn add_imported_package(target: &Namespace, namespace: &Namespace) {
-    SYMBOL_TABLE.with(|f| f.borrow_mut().add_imported_package(target, namespace))
+pub fn apply_import() {
+    SYMBOL_TABLE.with(|f| f.borrow_mut().apply_import())
 }
 
 pub fn add_project_local(prj: StrId, from: StrId, to: StrId) {
