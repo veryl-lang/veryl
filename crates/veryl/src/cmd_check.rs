@@ -71,6 +71,8 @@ impl CmdCheck {
             contexts.push((path, input, parser, analyzer));
         }
 
+        Analyzer::analyze_post_pass1();
+
         for (path, input, parser, analyzer) in &contexts {
             let mut errors = analyzer.analyze_pass2(&path.prj, input, &path.src, &parser.veryl);
             check_error = check_error.append(&mut errors).check_err()?;

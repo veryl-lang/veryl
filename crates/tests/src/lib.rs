@@ -53,6 +53,8 @@ mod analyzer {
         dbg!(&errors);
         assert!(errors.is_empty());
 
+        Analyzer::analyze_post_pass1();
+
         let errors = analyzer.analyze_pass2(&prj, &input, &file, &ret.veryl);
         dbg!(&errors);
         assert!(errors.is_empty());
@@ -135,6 +137,7 @@ mod emitter {
         let prj = &metadata.project.name;
         let analyzer = Analyzer::new(&metadata);
         let _ = analyzer.analyze_pass1(&prj, &input, &src_path, &ret.veryl);
+        Analyzer::analyze_post_pass1();
         let _ = analyzer.analyze_pass2(&prj, &input, &src_path, &ret.veryl);
         let mut emitter = Emitter::new(&metadata, &src_path, &dst_path, &map_path);
         emitter.emit(&prj, &ret.veryl);

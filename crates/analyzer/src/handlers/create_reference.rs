@@ -4,7 +4,6 @@ use crate::namespace_table;
 use crate::symbol::{GenericMap, SymbolKind};
 use crate::symbol_path::{GenericSymbolPath, SymbolPath};
 use crate::symbol_table::{self, ResolveError, ResolveErrorCause};
-use veryl_parser::resource_table::TokenId;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::TokenRange;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
@@ -15,16 +14,12 @@ pub struct CreateReference<'a> {
     pub errors: Vec<AnalyzerError>,
     text: &'a str,
     point: HandlerPoint,
-    top_level: bool,
-    file_scope_imported_items: Vec<TokenId>,
-    file_scope_imported_packages: Vec<Namespace>,
 }
 
 impl<'a> CreateReference<'a> {
     pub fn new(text: &'a str) -> Self {
         Self {
             text,
-            top_level: true,
             ..Default::default()
         }
     }
@@ -223,85 +218,14 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
         Ok(())
     }
 
-    fn module_declaration(&mut self, arg: &ModuleDeclaration) -> Result<(), ParolError> {
-        match self.point {
-            HandlerPoint::Before => {
-                self.top_level = false;
-                let mut namespace = Namespace::default();
-                namespace.push(arg.identifier.identifier_token.token.text);
-                for x in &self.file_scope_imported_items {
-                    symbol_table::add_imported_item(*x, &namespace);
-                }
-                for x in &self.file_scope_imported_packages {
-                    symbol_table::add_imported_package(x, &namespace);
-                }
-            }
-            HandlerPoint::After => {
-                self.top_level = true;
-            }
-        }
-        Ok(())
-    }
-
-    fn interface_declaration(&mut self, arg: &InterfaceDeclaration) -> Result<(), ParolError> {
-        match self.point {
-            HandlerPoint::Before => {
-                self.top_level = false;
-                let mut namespace = Namespace::default();
-                namespace.push(arg.identifier.identifier_token.token.text);
-                for x in &self.file_scope_imported_items {
-                    symbol_table::add_imported_item(*x, &namespace);
-                }
-                for x in &self.file_scope_imported_packages {
-                    symbol_table::add_imported_package(x, &namespace);
-                }
-            }
-            HandlerPoint::After => {
-                self.top_level = true;
-            }
-        }
-        Ok(())
-    }
-
-    fn package_declaration(&mut self, arg: &PackageDeclaration) -> Result<(), ParolError> {
-        match self.point {
-            HandlerPoint::Before => {
-                self.top_level = false;
-                let mut namespace = Namespace::default();
-                namespace.push(arg.identifier.identifier_token.token.text);
-                for x in &self.file_scope_imported_items {
-                    symbol_table::add_imported_item(*x, &namespace);
-                }
-                for x in &self.file_scope_imported_packages {
-                    symbol_table::add_imported_package(x, &namespace);
-                }
-            }
-            HandlerPoint::After => {
-                self.top_level = true;
-            }
-        }
-        Ok(())
-    }
-
     fn import_declaration(&mut self, arg: &ImportDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let is_wildcard = arg.import_declaration_opt.is_some();
-            let id = arg.scoped_identifier.identifier().token.id;
-            let namespace = namespace_table::get(id).unwrap();
             match symbol_table::resolve(arg.scoped_identifier.as_ref()) {
                 Ok(symbol) => {
                     let symbol = symbol.found;
                     match symbol.kind {
-                        SymbolKind::Package(_) if is_wildcard => {
-                            let mut target = symbol.namespace.clone();
-                            target.push(symbol.token.text);
-
-                            if self.top_level {
-                                self.file_scope_imported_packages.push(target);
-                            } else {
-                                symbol_table::add_imported_package(&target, &namespace);
-                            }
-                        }
+                        SymbolKind::Package(_) if is_wildcard => (),
                         SymbolKind::SystemVerilog => (),
                         _ if is_wildcard => {
                             self.errors.push(AnalyzerError::invalid_import(
@@ -309,13 +233,7 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
                                 &arg.scoped_identifier.as_ref().into(),
                             ));
                         }
-                        _ => {
-                            if self.top_level {
-                                self.file_scope_imported_items.push(symbol.token.id);
-                            } else {
-                                symbol_table::add_imported_item(symbol.token.id, &namespace);
-                            }
-                        }
+                        _ => (),
                     }
                 }
                 Err(err) => {

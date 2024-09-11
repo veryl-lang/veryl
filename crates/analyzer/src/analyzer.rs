@@ -215,6 +215,10 @@ impl Analyzer {
         ret
     }
 
+    pub fn analyze_post_pass1() {
+        symbol_table::apply_import();
+    }
+
     pub fn analyze_pass2<T: AsRef<Path>>(
         &self,
         project_name: &str,

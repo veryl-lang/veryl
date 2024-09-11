@@ -34,6 +34,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             let prj = &metadata.project.name;
             let analyzer = Analyzer::new(black_box(&metadata));
             analyzer.analyze_pass1(prj, black_box(&text), &"", &parser.veryl);
+            Analyzer::analyze_post_pass1();
             analyzer.analyze_pass2(prj, black_box(&text), &"", &parser.veryl);
             //analyzer.analyze_pass3(prj, black_box(&text), &"", &parser.veryl);
         })
