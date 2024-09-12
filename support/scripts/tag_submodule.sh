@@ -3,7 +3,7 @@
 if [ "$DRY_RUN" = "true" ]; then
     echo "tagging skipped"
 else
-    sub=("doc" "crates/metadata/std")
+    sub=("doc")
     root=`git rev-parse --show-toplevel`
 
     pushd ${root}
