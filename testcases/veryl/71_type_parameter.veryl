@@ -1,0 +1,18 @@
+module Module71 #(
+    param param_type: type = logic,
+) {
+    type type_type = logic<32>;
+
+    struct struct_type {
+        a: logic,
+    }
+
+    inst m: Module71A #(T1: param_type, T2: type_type, T3: struct_type, /*T4: logic,*/);
+}
+
+module Module71A #(
+    param T1: type = logic,
+    param T2: type = logic,
+    param T3: type = logic,
+    param T4: type = logic,
+) {}

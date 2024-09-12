@@ -16,6 +16,7 @@ pub struct CheckExpression<'a> {
     evaluator: Evaluator,
     call_stack_kind: Vec<FunctionKind>,
     in_inst_declaration: bool,
+    in_inst_parameter: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -94,6 +95,12 @@ impl<'a> VerylGrammarTrait for CheckExpression<'a> {
                         }
                         // instance can be used as factor in inst_declaration
                         SymbolKind::Instance(_) if self.in_inst_declaration => (),
+                        // type can be used as factor in inst_parameter
+                        SymbolKind::TypeDef(_)
+                        | SymbolKind::Struct(_)
+                        | SymbolKind::Enum(_)
+                        | SymbolKind::Union(_)
+                            if self.in_inst_parameter => {}
                         SymbolKind::Module(_)
                         | SymbolKind::ProtoModule(_)
                         | SymbolKind::Interface(_)
@@ -183,6 +190,14 @@ impl<'a> VerylGrammarTrait for CheckExpression<'a> {
         match self.point {
             HandlerPoint::Before => self.in_inst_declaration = true,
             HandlerPoint::After => self.in_inst_declaration = false,
+        }
+        Ok(())
+    }
+
+    fn inst_parameter(&mut self, _arg: &InstParameter) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => self.in_inst_parameter = true,
+            HandlerPoint::After => self.in_inst_parameter = false,
         }
         Ok(())
     }
