@@ -4686,6 +4686,7 @@ version = "0.13.0"
 dependencies = [
  "anstyle",
  "clap",
+ "clap_complete",
  "console",
  "fern",
  "futures",

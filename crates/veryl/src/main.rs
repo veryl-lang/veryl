@@ -1,4 +1,5 @@
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
+use clap_complete::aot::Shell;
 use console::Style;
 use fern::Dispatch;
 use log::debug;
@@ -41,8 +42,22 @@ struct Opt {
     #[arg(long, global = true)]
     pub verbose: bool,
 
+    /// Generate tab-completion
+    #[arg(long, global = true, hide = true)]
+    pub completion: Option<CompletionShell>,
+
     #[command(subcommand)]
     command: Commands,
+}
+
+#[derive(Clone, ValueEnum)]
+#[clap(rename_all = "lower")]
+pub enum CompletionShell {
+    Bash,
+    Elvish,
+    Fish,
+    PowerShell,
+    Zsh,
 }
 
 #[derive(Subcommand)]
@@ -234,6 +249,18 @@ pub struct OptDump {
 
 fn main() -> Result<ExitCode> {
     let opt = Opt::parse();
+
+    if let Some(shell) = opt.completion {
+        let shell = match shell {
+            CompletionShell::Bash => Shell::Bash,
+            CompletionShell::Elvish => Shell::Elvish,
+            CompletionShell::Fish => Shell::Fish,
+            CompletionShell::PowerShell => Shell::PowerShell,
+            CompletionShell::Zsh => Shell::Zsh,
+        };
+        clap_complete::generate(shell, &mut Opt::command(), "veryl", &mut std::io::stdout());
+        return Ok(ExitCode::SUCCESS);
+    }
 
     let level = if opt.verbose {
         LevelFilter::Debug
