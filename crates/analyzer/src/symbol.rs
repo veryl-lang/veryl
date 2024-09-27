@@ -155,6 +155,7 @@ impl Symbol {
                     // TODO: Actually Evaluate its Width
                     Evaluated::UnknownStatic
                 }
+                SymbolKind::Genvar => Evaluated::UnknownStatic,
                 _ => Evaluated::Unknown,
             };
             self.evaluated.replace(Some(evaluated));

@@ -83,6 +83,16 @@ module Module12_2 (
         }
     }
 
+    // if_reset with loop
+    var d: logic<10>;
+    for i in 0..10 :g {
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                d = i;
+            }
+        }
+    }
+
     // always_comb declaration
     always_comb {
         a    = 10;

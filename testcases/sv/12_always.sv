@@ -85,6 +85,16 @@ module veryl_testcase_Module12_2 (
         end
     end
 
+    // if_reset with loop
+    logic [10-1:0] d;
+    for (genvar i = 0; i < 10; i++) begin :g
+        always_ff @ (posedge i_clk, negedge i_rst_n) begin
+            if (!i_rst_n) begin
+                d <= i;
+            end
+        end
+    end
+
     // always_comb declaration
     always_comb begin
         a    = 10;
