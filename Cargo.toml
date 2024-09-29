@@ -58,10 +58,5 @@ opt-level = 3
 [profile.release.build-override]
 opt-level = 3
 
-[profile.release]
-# Workaround for long time compilation
-# https://github.com/rust-lang/rust/issues/129776
-codegen-units = 1
-
 [profile.bench]
 debug = true
