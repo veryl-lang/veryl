@@ -172,6 +172,9 @@ impl VerylWalker for Aligner {
     }
 
     /// Semantic action for non-terminal 'Expression'
+    // Add `#[inline(never)]` to `expression*` as a workaround for long time compilation
+    // https://github.com/rust-lang/rust/issues/106211
+    #[inline(never)]
     fn expression(&mut self, arg: &Expression) {
         self.expression01(&arg.expression01);
         for x in &arg.expression_list {
@@ -183,6 +186,7 @@ impl VerylWalker for Aligner {
     }
 
     /// Semantic action for non-terminal 'Expression01'
+    #[inline(never)]
     fn expression01(&mut self, arg: &Expression01) {
         self.expression02(&arg.expression02);
         for x in &arg.expression01_list {
@@ -194,6 +198,7 @@ impl VerylWalker for Aligner {
     }
 
     /// Semantic action for non-terminal 'Expression02'
+    #[inline(never)]
     fn expression02(&mut self, arg: &Expression02) {
         self.expression03(&arg.expression03);
         for x in &arg.expression02_list {
@@ -205,6 +210,7 @@ impl VerylWalker for Aligner {
     }
 
     /// Semantic action for non-terminal 'Expression03'
+    #[inline(never)]
     fn expression03(&mut self, arg: &Expression03) {
         self.expression04(&arg.expression04);
         for x in &arg.expression03_list {
@@ -216,6 +222,7 @@ impl VerylWalker for Aligner {
     }
 
     /// Semantic action for non-terminal 'Expression04'
+    #[inline(never)]
     fn expression04(&mut self, arg: &Expression04) {
         self.expression05(&arg.expression05);
         for x in &arg.expression04_list {
@@ -227,6 +234,7 @@ impl VerylWalker for Aligner {
     }
 
     /// Semantic action for non-terminal 'Expression05'
+    #[inline(never)]
     fn expression05(&mut self, arg: &Expression05) {
         self.expression06(&arg.expression06);
         for x in &arg.expression05_list {
@@ -238,6 +246,7 @@ impl VerylWalker for Aligner {
     }
 
     /// Semantic action for non-terminal 'Expression06'
+    #[inline(never)]
     fn expression06(&mut self, arg: &Expression06) {
         self.expression07(&arg.expression07);
         for x in &arg.expression06_list {
@@ -249,6 +258,7 @@ impl VerylWalker for Aligner {
     }
 
     /// Semantic action for non-terminal 'Expression07'
+    #[inline(never)]
     fn expression07(&mut self, arg: &Expression07) {
         self.expression08(&arg.expression08);
         for x in &arg.expression07_list {
@@ -260,6 +270,7 @@ impl VerylWalker for Aligner {
     }
 
     /// Semantic action for non-terminal 'Expression08'
+    #[inline(never)]
     fn expression08(&mut self, arg: &Expression08) {
         self.expression09(&arg.expression09);
         for x in &arg.expression08_list {
@@ -271,6 +282,7 @@ impl VerylWalker for Aligner {
     }
 
     /// Semantic action for non-terminal 'Expression09'
+    #[inline(never)]
     fn expression09(&mut self, arg: &Expression09) {
         self.expression10(&arg.expression10);
         for x in &arg.expression09_list {
@@ -285,6 +297,7 @@ impl VerylWalker for Aligner {
     }
 
     /// Semantic action for non-terminal 'Expression10'
+    #[inline(never)]
     fn expression10(&mut self, arg: &Expression10) {
         self.expression11(&arg.expression11);
         for x in &arg.expression10_list {
@@ -296,6 +309,7 @@ impl VerylWalker for Aligner {
     }
 
     /// Semantic action for non-terminal 'Expression11'
+    #[inline(never)]
     fn expression11(&mut self, arg: &Expression11) {
         self.expression12(&arg.expression12);
         if let Some(x) = &arg.expression11_opt {
