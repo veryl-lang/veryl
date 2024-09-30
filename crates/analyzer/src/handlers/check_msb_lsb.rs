@@ -72,8 +72,15 @@ impl<'a> VerylGrammarTrait for CheckMsbLsb<'a> {
                     symbol_table::resolve(self.identifier_path.last().unwrap().clone())
                 {
                     let namespace = &x.found.namespace;
-                    if let SymbolKind::Variable(x) = x.found.kind {
-                        let types = trace_type(&x.r#type, namespace);
+
+                    let r#type = match x.found.kind {
+                        SymbolKind::Variable(x) => Some(x.r#type),
+                        SymbolKind::Port(x) => x.r#type,
+                        _ => None,
+                    };
+
+                    if let Some(x) = r#type {
+                        let types = trace_type(&x, namespace);
                         let mut select_dimension = *self.select_dimension.last().unwrap();
 
                         let mut expression = None;
