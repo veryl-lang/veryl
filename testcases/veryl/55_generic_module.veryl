@@ -5,6 +5,7 @@ module Module55 {
     inst u3: Module55E::<Module55D>;
     inst u4: Module55F::<Module55C>;
     inst u5: Module55F::<>;
+    inst u6: Module55H::<10>;
 }
 
 pub proto module Proto55;
@@ -30,4 +31,12 @@ module Module55F::<T: Proto55 = Module55B> {
 
 module Module55G::<T: Proto55> {
     inst u: T;
+}
+
+module Module55H::<W: const> {
+    struct StructH::<W: const> {
+        value: logic<W>,
+    }
+
+    let _a: StructH::<W> = 0;
 }
