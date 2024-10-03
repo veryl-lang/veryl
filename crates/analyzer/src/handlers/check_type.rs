@@ -17,7 +17,8 @@ pub struct CheckType<'a> {
     text: &'a str,
     point: HandlerPoint,
     in_module: bool,
-    in_variable_type: bool,
+    in_variable_type: Vec<()>,
+    in_generic_argument: Vec<()>,
     in_modport: bool,
 }
 
@@ -56,8 +57,24 @@ fn is_variable_type(symbol: &Symbol) -> bool {
 impl<'a> VerylGrammarTrait for CheckType<'a> {
     fn variable_type(&mut self, _arg: &VariableType) -> Result<(), ParolError> {
         match self.point {
-            HandlerPoint::Before => self.in_variable_type = true,
-            HandlerPoint::After => self.in_variable_type = false,
+            HandlerPoint::Before => {
+                self.in_variable_type.push(());
+            }
+            HandlerPoint::After => {
+                self.in_variable_type.pop();
+            }
+        }
+        Ok(())
+    }
+
+    fn with_generic_argument(&mut self, _arg: &WithGenericArgument) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.in_generic_argument.push(());
+            }
+            HandlerPoint::After => {
+                self.in_generic_argument.pop();
+            }
         }
         Ok(())
     }
@@ -82,7 +99,7 @@ impl<'a> VerylGrammarTrait for CheckType<'a> {
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             // Check variable type
-            if self.in_variable_type {
+            if !self.in_variable_type.is_empty() && self.in_generic_argument.is_empty() {
                 if let Ok(symbol) = symbol_table::resolve(arg) {
                     if self.in_modport {
                         if !matches!(symbol.found.kind, SymbolKind::Modport(_)) {
