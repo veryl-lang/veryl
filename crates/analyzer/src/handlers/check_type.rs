@@ -245,14 +245,34 @@ impl<'a> VerylGrammarTrait for CheckType<'a> {
                 let mut params = vec![];
                 let mut ports = vec![];
                 let mut check_port_connection = false;
-                match symbol.found.kind {
+
+                let type_expected = match symbol.found.kind {
                     SymbolKind::Module(ref x) if self.in_module => {
                         params.append(&mut x.parameters.clone());
                         ports.append(&mut x.ports.clone());
                         check_port_connection = true;
+                        None
                     }
-                    SymbolKind::Interface(_) => (),
-                    SymbolKind::SystemVerilog => (),
+                    SymbolKind::Interface(_) | SymbolKind::SystemVerilog => None,
+                    SymbolKind::GenericInstance(ref x) => {
+                        let base = symbol_table::get(x.base).unwrap();
+                        match base.kind {
+                            SymbolKind::Module(ref x) if self.in_module => {
+                                params.append(&mut x.parameters.clone());
+                                ports.append(&mut x.ports.clone());
+                                check_port_connection = true;
+                                None
+                            }
+                            SymbolKind::Interface(_) | SymbolKind::SystemVerilog => None,
+                            _ => {
+                                if self.in_module {
+                                    Some("module or interface")
+                                } else {
+                                    Some("interface")
+                                }
+                            }
+                        }
+                    }
                     SymbolKind::GenericParameter(ref x) => {
                         if let GenericBoundKind::Proto(ref x) = x.bound {
                             if let Ok(symbol) = symbol_table::resolve((x, &symbol.found.namespace))
@@ -261,32 +281,34 @@ impl<'a> VerylGrammarTrait for CheckType<'a> {
                                     params.append(&mut x.parameters.clone());
                                     ports.append(&mut x.ports.clone());
                                     check_port_connection = true;
+                                    None
                                 } else {
-                                    self.errors.push(AnalyzerError::mismatch_type(
-                                        name,
-                                        "module or interface",
-                                        &symbol.found.kind.to_kind_name(),
-                                        self.text,
-                                        &arg.identifier.as_ref().into(),
-                                    ));
+                                    Some("module or interface")
                                 }
+                            } else {
+                                None
                             }
+                        } else {
+                            None
                         }
                     }
                     _ => {
-                        let expected = if self.in_module {
-                            "module or interface"
+                        if self.in_module {
+                            Some("module or interface")
                         } else {
-                            "interface"
-                        };
-                        self.errors.push(AnalyzerError::mismatch_type(
-                            name,
-                            expected,
-                            &symbol.found.kind.to_kind_name(),
-                            self.text,
-                            &arg.identifier.as_ref().into(),
-                        ));
+                            Some("interface")
+                        }
                     }
+                };
+
+                if let Some(expected) = type_expected {
+                    self.errors.push(AnalyzerError::mismatch_type(
+                        name,
+                        expected,
+                        &symbol.found.kind.to_kind_name(),
+                        self.text,
+                        &arg.identifier.as_ref().into(),
+                    ));
                 }
 
                 if check_port_connection {

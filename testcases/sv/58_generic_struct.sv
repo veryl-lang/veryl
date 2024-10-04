@@ -22,6 +22,7 @@ module veryl_testcase_Module58;
     __StructA__Package58_C _b;
     __StructA__C           _c;
     __StructB__Package58_C _d;
+    __StructB__Package58_C _f;
     __StructB__C _e;
 endmodule
 

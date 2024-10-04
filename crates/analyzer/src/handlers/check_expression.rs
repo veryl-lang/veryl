@@ -110,7 +110,6 @@ impl<'a> VerylGrammarTrait for CheckExpression<'a> {
                         | SymbolKind::TypeDef(_)
                         | SymbolKind::Modport(_)
                         | SymbolKind::Namespace
-                        | SymbolKind::GenericInstance(_)
                         | SymbolKind::ClockDomain
                         | SymbolKind::Test(_) => {
                             self.errors.push(error);
@@ -135,6 +134,7 @@ impl<'a> VerylGrammarTrait for CheckExpression<'a> {
                         | SymbolKind::GenericParameter(_)
                         | SymbolKind::StructMember(_)
                         | SymbolKind::UnionMember(_)
+                        | SymbolKind::GenericInstance(_)
                         | SymbolKind::Variable(_) => {}
 
                         SymbolKind::Enum(_) | SymbolKind::Union(_) | SymbolKind::Struct(_) => {
@@ -150,21 +150,33 @@ impl<'a> VerylGrammarTrait for CheckExpression<'a> {
                     // Must be a function call
                     let expid = x.expression_identifier.as_ref();
                     if let Ok(rr) = symbol_table::resolve(expid) {
-                        match rr.found.kind {
+                        let is_function = match &rr.found.kind {
                             SymbolKind::Function(_)
                             | SymbolKind::SystemVerilog
                             | SymbolKind::ModportFunctionMember(..)
-                            | SymbolKind::SystemFunction => {}
-                            _ => {
-                                let identifier = rr.found.token.to_string();
-                                let token: TokenRange = x.expression_identifier.as_ref().into();
-                                self.errors.push(AnalyzerError::call_non_function(
-                                    &identifier,
-                                    &rr.found.kind.to_kind_name(),
-                                    self.text,
-                                    &token,
-                                ));
+                            | SymbolKind::SystemFunction => true,
+                            SymbolKind::GenericInstance(x) => {
+                                let base = symbol_table::get(x.base).unwrap();
+                                matches!(
+                                    base.kind,
+                                    SymbolKind::Function(_)
+                                        | SymbolKind::SystemVerilog
+                                        | SymbolKind::ModportFunctionMember(..)
+                                        | SymbolKind::SystemFunction
+                                )
                             }
+                            _ => false,
+                        };
+
+                        if !is_function {
+                            let identifier = rr.found.token.to_string();
+                            let token: TokenRange = x.expression_identifier.as_ref().into();
+                            self.errors.push(AnalyzerError::call_non_function(
+                                &identifier,
+                                &rr.found.kind.to_kind_name(),
+                                self.text,
+                                &token,
+                            ));
                         }
                     }
                 }

@@ -6,6 +6,7 @@ module Module55 {
     inst u4: Module55F::<Module55C>;
     inst u5: Module55F::<>;
     inst u6: Module55H::<10>;
+    inst u7: Module55H::<10>;
 }
 
 pub proto module Proto55;

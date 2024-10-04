@@ -2,6 +2,7 @@ module veryl_testcase_Module57;
     localparam int unsigned     A = veryl_testcase___Package57A__1::X;
     localparam longint unsigned B = veryl_testcase___Package57A__2::X;
     localparam int unsigned     C = veryl_testcase___Package57B__3::X;
+    localparam int unsigned     E = veryl_testcase___Package57B__3::X;
     localparam longint unsigned D = veryl_testcase___Package57B__4::X;
 
     veryl_testcase___Package57C__2::StructC _e  ;

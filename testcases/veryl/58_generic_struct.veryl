@@ -13,6 +13,7 @@ module Module58 {
     var _b: StructA::<Package58::C>;
     var _c: StructA::<C>           ;
     var _d: StructB::<Package58::C>;
+    var _f: StructB::<Package58::C>;
     var _e: StructB::<>            ;
 }
 

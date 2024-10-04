@@ -12,8 +12,12 @@ module veryl_testcase_Module54;
 
     logic [10-1:0] _a;
     always_comb _a = __FuncA__10(1);
-    logic [20-1:0] _b;
-    always_comb _b = __FuncA__20(1);
+    logic [10-1:0] _b;
+    always_comb _b = __FuncA__10(1);
+    logic [20-1:0] _c;
+    always_comb _c = __FuncA__20(1);
+    logic [20-1:0] _d;
+    always_comb _d = __FuncA__20(1);
 
     function automatic logic [10 + 2-1:0] __FuncB__10__2(
         input logic [10 + 2-1:0] a
@@ -26,9 +30,13 @@ module veryl_testcase_Module54;
         return a + 1;
     endfunction
 
-    logic [12-1:0] _c;
-    always_comb _c = __FuncB__10__2(1);
-    logic [14-1:0] _d;
-    always_comb _d = __FuncB__10__4(1);
+    logic [12-1:0] _e;
+    always_comb _e = __FuncB__10__2(1);
+    logic [12-1:0] _f;
+    always_comb _f = __FuncB__10__2(1);
+    logic [14-1:0] _g;
+    always_comb _g = __FuncB__10__4(1);
+    logic [14-1:0] _h;
+    always_comb _h = __FuncB__10__4(1);
 endmodule
 //# sourceMappingURL=../map/testcases/sv/54_generic_function.sv.map
