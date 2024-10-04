@@ -26,7 +26,7 @@ If you have any idea, please open [Issue](https://github.com/veryl-lang/veryl/is
 * [Overview](#overview)
 * [Example](#example)
 * [FAQ](#faq)
-* [Installation & Usage](#installation_usage)
+* [Installation & Usage](#installation--usage)
 * [License](#license)
 * [Contribution](#contribution)
 
