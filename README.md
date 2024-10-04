@@ -23,10 +23,10 @@ If you have any idea, please open [Issue](https://github.com/veryl-lang/veryl/is
 
 ## Documentation quick links
 
-* [Concepts](#concepts)
+* [Overview](#overview)
 * [Example](#example)
-* [Installation](#installation)
-* [Usage](#usage)
+* [FAQ](#faq)
+* [Installation & Usage](#installation_usage)
 * [License](#license)
 * [Contribution](#contribution)
 
@@ -67,9 +67,9 @@ With these features, Veryl provides powerful support for designers to efficientl
 pub module Delay #( // visibility control by `pub` keyword
     param WIDTH: u32 = 1, // trailing comma is allowed
 ) (
-    i_clk : input clock       ,
-    i_rst : input reset       ,
-    i_data: input logic<WIDTH>,
+    i_clk : input  clock       ,
+    i_rst : input  reset       ,
+    i_data: input  logic<WIDTH>,
     o_data: output logic<WIDTH>,
 ) {
     // unused variable which is not started with `_` are warned
@@ -119,33 +119,42 @@ endmodule
 </tr>
 </table>
 
-## Installation
+## FAQ
 
-See [Document](https://doc.veryl-lang.org/book/03_getting_started/01_installation.html).
+### Why not SystemVerilog?
 
-## Usage
+SystemVerilog is very complicated language, and it causes difficulty of implementing EDA tools for it. 
+As a consequence, major EDA tools only support SystemVerilog subset which is different each other,
+and users must explore usable languege features which are covered by adopted tools.
+Additionally, the difficulty prevents productivity improvement by developing support tools.
+This is a reason that a new language having simplified and sophisticated syntax, not SystemVerilog, is required.
 
-```
-// Create a new project
-veryl new [project name]
+### Why not existing Alt-HDLs (e.g. Chisel)?
 
-// Create a new project in an existing directory
-veryl init [path]
+Many existing alt-HDLs are inner DSL of a programming language.
+This approach has some advantages like rapid development and resusable tooling ecosystem,
+but the syntax can't be fit for hardware description completely.
+Additionally, enormous Verilog code is generated from short and sophisticated code in these languages.
+This prevents general ASIC workflows like timing improvement, pre/post-mask ECO because these workflows require FF-level modification in Verilog.
+Interopration between these language and SystemVerilog is challenging because these can't connect to SystemVerilog's type like `interface` and `struct` directly.
+By these reason, the existing Alt-HDLs can't be used as alternative of SystemVerilog, especially if there are many existing SystemVerilog codebase.
+Veryl resolves these problems by HDL-specialized syntax and human-readable SystemVerilog code generation.
 
-// Format the current project
-veryl fmt
+### Why some language features (e.g. auto pipelining) are not adopted?
 
-// Analyze the current project
-veryl check
+Veryl focuses equivalency with SystemVerilog at the point of view of the language semantics.
+This eases to predict the changes of generated SystemVerilog code from modification of Veryl code,
+and Veryl can be applied to ASIC workflows like timing improvement and pre/post-mask ECO.
+Therefore, some features generating FFs are not adopted because these prevent the predictability.
 
-// Build target codes corresponding to the current project
-veryl build
+### Why some syntax features (e.g. off-side rule, semicolon less) are not adopted?
 
-// Build the document corresponding to the current project
-veryl doc
-```
+Veryl focuses syntax simplicity because it reduces tool implementation effort.
+Therefore syntax features which introduce large complexity in exchange for slight abbreviation are not adopted.
 
-For detailed information, see [Document](https://doc.veryl-lang.org/book/).
+## Installation & Usage
+
+See [Getting Started](https://doc.veryl-lang.org/book/03_getting_started.html).
 
 ## License
 
