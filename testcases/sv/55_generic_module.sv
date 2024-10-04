@@ -6,6 +6,7 @@ module veryl_testcase_Module55;
     veryl_testcase___Module55F__Module55C u4 ();
     veryl_testcase___Module55F__Module55B u5 ();
     veryl_testcase___Module55H__10 u6 ();
+    veryl_testcase___Module55H__10 u7 ();
 endmodule
 
 

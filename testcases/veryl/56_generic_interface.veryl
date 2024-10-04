@@ -2,6 +2,7 @@ module Module56 {
     inst u0: Interface56A::<Package56A>;
     inst u1: Interface56A::<Package56B>;
     inst u2: Interface56B::<Package56A>;
+    inst u4: Interface56B::<Package56A>;
     inst u3: Interface56B::<>;
 }
 

@@ -2,6 +2,7 @@ module veryl_testcase_Module56;
     veryl_testcase___Interface56A__Package56A u0 ();
     veryl_testcase___Interface56A__Package56B u1 ();
     veryl_testcase___Interface56B__Package56A u2 ();
+    veryl_testcase___Interface56B__Package56A u4 ();
     veryl_testcase___Interface56B__Package56B u3 ();
 endmodule
 

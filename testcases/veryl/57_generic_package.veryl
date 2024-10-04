@@ -2,6 +2,7 @@ module Module57 {
     const A: u32 = Package57A::<1>::X;
     const B: u64 = Package57A::<2>::X;
     const C: u32 = Package57B::<3>::X;
+    const E: u32 = Package57B::<3>::X;
     const D: u64 = Package57B::<>::X;
 
     var _e  : Package57C::<2>::StructC;
