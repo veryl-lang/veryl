@@ -154,18 +154,17 @@ impl Emitter {
     }
 
     fn unindent(&mut self) {
-        if self
-            .string
-            .ends_with(&" ".repeat(self.indent * self.format_opt.indent_width))
-        {
-            self.truncate(self.string.len() - self.indent * self.format_opt.indent_width);
+        let indent_width =
+            self.indent * self.format_opt.indent_width + self.case_item_indent.unwrap_or(0);
+        if self.string.ends_with(&" ".repeat(indent_width)) {
+            self.truncate(self.string.len() - indent_width);
         }
     }
 
     fn indent(&mut self) {
-        self.str(&" ".repeat(
-            self.indent * self.format_opt.indent_width + self.case_item_indent.unwrap_or(0),
-        ));
+        let indent_width =
+            self.indent * self.format_opt.indent_width + self.case_item_indent.unwrap_or(0);
+        self.str(&" ".repeat(indent_width));
     }
 
     fn newline_push(&mut self) {
@@ -338,9 +337,14 @@ impl Emitter {
         }
         self.colon(&arg.colon);
         self.space(1);
-        self.case_item_indent = Some((self.dst_column - start) as usize);
-        self.case_item_statement(&arg.case_item_group0);
-        self.case_item_indent = None;
+        match arg.case_item_group0.as_ref() {
+            CaseItemGroup0::Statement(x) => self.statement(&x.statement),
+            CaseItemGroup0::StatementBlock(x) => {
+                self.case_item_indent = Some((self.dst_column - start) as usize);
+                self.statement_block(&x.statement_block);
+                self.case_item_indent = None;
+            }
+        }
     }
 
     fn case_expaneded_statement(&mut self, arg: &CaseStatement) {
@@ -372,15 +376,13 @@ impl Emitter {
         }
         self.colon(&item.colon);
         self.space(1);
-        self.case_item_indent = Some((self.dst_column - start) as usize);
-        self.case_item_statement(&item.case_item_group0);
-        self.case_item_indent = None;
-    }
-
-    fn case_item_statement(&mut self, arg: &CaseItemGroup0) {
-        match arg {
+        match item.case_item_group0.as_ref() {
             CaseItemGroup0::Statement(x) => self.statement(&x.statement),
-            CaseItemGroup0::StatementBlock(x) => self.statement_block(&x.statement_block),
+            CaseItemGroup0::StatementBlock(x) => {
+                self.case_item_indent = Some((self.dst_column - start) as usize);
+                self.statement_block(&x.statement_block);
+                self.case_item_indent = None;
+            }
         }
     }
 
