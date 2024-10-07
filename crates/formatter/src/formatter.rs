@@ -66,19 +66,17 @@ impl Formatter {
     }
 
     fn unindent(&mut self) {
-        if self
-            .string
-            .ends_with(&" ".repeat(self.indent * self.format_opt.indent_width))
-        {
-            self.string
-                .truncate(self.string.len() - self.indent * self.format_opt.indent_width);
+        let indent_width =
+            self.indent * self.format_opt.indent_width + self.case_item_indent.last().unwrap_or(&0);
+        if self.string.ends_with(&" ".repeat(indent_width)) {
+            self.string.truncate(self.string.len() - indent_width);
         }
     }
 
     fn indent(&mut self) {
-        self.str(&" ".repeat(
-            self.indent * self.format_opt.indent_width + self.case_item_indent.last().unwrap_or(&0),
-        ));
+        let indent_width =
+            self.indent * self.format_opt.indent_width + self.case_item_indent.last().unwrap_or(&0);
+        self.str(&" ".repeat(indent_width));
     }
 
     fn newline_push(&mut self) {
@@ -787,12 +785,14 @@ impl VerylWalker for Formatter {
         }
         self.colon(&arg.colon);
         self.space(1);
-        self.case_item_indent.push(self.column() - start);
         match &*arg.case_item_group0 {
             CaseItemGroup0::Statement(x) => self.statement(&x.statement),
-            CaseItemGroup0::StatementBlock(x) => self.statement_block(&x.statement_block),
+            CaseItemGroup0::StatementBlock(x) => {
+                self.case_item_indent.push(self.column() - start);
+                self.statement_block(&x.statement_block);
+                self.case_item_indent.pop();
+            }
         }
-        self.case_item_indent.pop();
     }
 
     /// Semantic action for non-terminal 'CaseCondition'
@@ -827,12 +827,14 @@ impl VerylWalker for Formatter {
         }
         self.colon(&arg.colon);
         self.space(1);
-        self.case_item_indent.push(self.column() - start);
         match &*arg.switch_item_group0 {
             SwitchItemGroup0::Statement(x) => self.statement(&x.statement),
-            SwitchItemGroup0::StatementBlock(x) => self.statement_block(&x.statement_block),
+            SwitchItemGroup0::StatementBlock(x) => {
+                self.case_item_indent.push(self.column() - start);
+                self.statement_block(&x.statement_block);
+                self.case_item_indent.pop();
+            }
         }
-        self.case_item_indent.pop();
     }
 
     /// Semantic action for non-terminal 'SwitchCondition'

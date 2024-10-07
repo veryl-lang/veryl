@@ -10,10 +10,10 @@ module veryl_testcase_Module16;
 
     always_comb begin
         case (x) inside
-            0: a = 1;
-            1: a = 1;
-            2: begin
-                   a = 1;
+            0: a = 1; // comment
+            1: a = 1; // comment
+            2: begin // comment
+                   a = 1; // comment
                    a = 1;
                    a = 1;
                end
