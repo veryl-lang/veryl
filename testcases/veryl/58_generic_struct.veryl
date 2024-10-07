@@ -9,12 +9,18 @@ module Module58 {
         B: T,
     }
 
+    struct StructC::<T: type, U: type> {
+        B: T,
+        C: U,
+    }
+
     var _a: StructA::<Package58::B>;
     var _b: StructA::<Package58::C>;
     var _c: StructA::<C>           ;
     var _d: StructB::<Package58::C>;
     var _f: StructB::<Package58::C>;
     var _e: StructB::<>            ;
+    var _g: StructC::<C, C>        ;
 }
 
 package Package58 {

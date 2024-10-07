@@ -811,6 +811,19 @@ impl VerylWalker for Aligner {
         }
     }
 
+    /// Semantic action for non-terminal 'WithGenericArgumentList'
+    fn with_generic_argument_list(&mut self, arg: &WithGenericArgumentList) {
+        self.with_generic_argument_item(&arg.with_generic_argument_item);
+        for x in &arg.with_generic_argument_list_list {
+            self.comma(&x.comma);
+            self.space(1);
+            self.with_generic_argument_item(&x.with_generic_argument_item);
+        }
+        if let Some(ref x) = arg.with_generic_argument_list_opt {
+            self.comma(&x.comma);
+        }
+    }
+
     /// Semantic action for non-terminal 'PortDeclarationItem'
     fn port_declaration_item(&mut self, arg: &PortDeclarationItem) {
         self.aligns[align_kind::IDENTIFIER].start_item();
