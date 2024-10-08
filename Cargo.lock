@@ -3037,9 +3037,9 @@ checksum = "54ec451836679aaa55158b454b441e21446a111ea34aa1917eba29245bafe4b8"
 
 [[package]]
 name = "parol_runtime"
-version = "1.0.0"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cda5f5f0606aaf8460dd4cf5c2ae98b321960562c61b02a6a66944c11a70ed7"
+checksum = "af0dd8b5794dd60893c1a31c42e1b905107033ab54f941200ceed2954777ae54"
 dependencies = [
  "anyhow",
  "codespan-reporting",
