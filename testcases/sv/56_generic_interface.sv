@@ -4,6 +4,11 @@ module veryl_testcase_Module56;
     veryl_testcase___Interface56B__Package56A u2 ();
     veryl_testcase___Interface56B__Package56A u4 ();
     veryl_testcase___Interface56B__Package56B u3 ();
+
+    logic _a;
+    always_comb _a = u0._a;
+    logic _b;
+    always_comb _b = u2._b;
 endmodule
 
 /// Generic interface test for doc comment

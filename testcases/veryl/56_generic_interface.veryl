@@ -4,6 +4,9 @@ module Module56 {
     inst u2: Interface56B::<Package56A>;
     inst u4: Interface56B::<Package56A>;
     inst u3: Interface56B::<>;
+
+    let _a: logic = u0._a;
+    let _b: logic = u2._b;
 }
 
 /// Generic interface test for doc comment
