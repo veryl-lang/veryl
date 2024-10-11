@@ -241,11 +241,19 @@ impl SymbolTable {
                             context.inner = true;
                         }
                         SymbolKind::Instance(ref x) => {
-                            context.namespace = Namespace::default();
-                            for x in &x.type_name {
-                                context.namespace.push(*x);
+                            let path = SymbolPath::new(&x.type_name);
+                            let symbol = self.resolve(&path, &context.namespace)?;
+                            if let SymbolKind::GenericInstance(x) = &symbol.found.kind {
+                                let symbol = self.symbol_table.get(&x.base).unwrap();
+                                context.namespace = symbol.inner_namespace();
+                                context.inner = true;
+                            } else {
+                                context.namespace = Namespace::default();
+                                for x in &x.type_name {
+                                    context.namespace.push(*x);
+                                }
+                                context.inner = true;
                             }
-                            context.inner = true;
                         }
                         SymbolKind::GenericInstance(ref x) => {
                             let symbol = self.symbol_table.get(&x.base).unwrap();

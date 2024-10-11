@@ -45,7 +45,6 @@ use self::{check_assignment::CheckAssignment, create_type_dag::CreateTypeDag};
 
 pub struct Pass1Handlers<'a> {
     check_attribute: CheckAttribute<'a>,
-    check_direction: CheckDirection<'a>,
     check_embed_include: CheckEmbedInclude<'a>,
     check_identifier: CheckIdentifier<'a>,
     check_number: CheckNumber<'a>,
@@ -58,7 +57,6 @@ impl<'a> Pass1Handlers<'a> {
     pub fn new(text: &'a str, build_opt: &'a Build, lint_opt: &'a Lint) -> Self {
         Self {
             check_attribute: CheckAttribute::new(text),
-            check_direction: CheckDirection::new(text),
             check_embed_include: CheckEmbedInclude::new(text),
             check_identifier: CheckIdentifier::new(text, lint_opt),
             check_number: CheckNumber::new(text),
@@ -71,7 +69,6 @@ impl<'a> Pass1Handlers<'a> {
     pub fn get_handlers(&mut self) -> Vec<&mut dyn Handler> {
         vec![
             &mut self.check_attribute as &mut dyn Handler,
-            &mut self.check_direction as &mut dyn Handler,
             &mut self.check_embed_include as &mut dyn Handler,
             &mut self.check_identifier as &mut dyn Handler,
             &mut self.check_number as &mut dyn Handler,
@@ -84,7 +81,6 @@ impl<'a> Pass1Handlers<'a> {
     pub fn get_errors(&mut self) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
         ret.append(&mut self.check_attribute.errors);
-        ret.append(&mut self.check_direction.errors);
         ret.append(&mut self.check_embed_include.errors);
         ret.append(&mut self.check_identifier.errors);
         ret.append(&mut self.check_number.errors);
@@ -97,6 +93,7 @@ impl<'a> Pass1Handlers<'a> {
 
 pub struct Pass2Handlers<'a> {
     check_enum: CheckEnum<'a>,
+    check_direction: CheckDirection<'a>,
     check_modport: CheckModport<'a>,
     check_function: CheckFunction<'a>,
     check_type: CheckType<'a>,
@@ -114,6 +111,7 @@ impl<'a> Pass2Handlers<'a> {
     pub fn new(text: &'a str, _build_opt: &'a Build, _lint_opt: &'a Lint) -> Self {
         Self {
             check_enum: CheckEnum::new(text),
+            check_direction: CheckDirection::new(text),
             check_modport: CheckModport::new(text),
             check_function: CheckFunction::new(text),
             check_type: CheckType::new(text),
@@ -131,6 +129,7 @@ impl<'a> Pass2Handlers<'a> {
     pub fn get_handlers(&mut self) -> Vec<&mut dyn Handler> {
         vec![
             &mut self.check_enum as &mut dyn Handler,
+            &mut self.check_direction as &mut dyn Handler,
             &mut self.check_modport as &mut dyn Handler,
             &mut self.check_function as &mut dyn Handler,
             &mut self.check_type as &mut dyn Handler,
@@ -148,6 +147,7 @@ impl<'a> Pass2Handlers<'a> {
     pub fn get_errors(&mut self) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
         ret.append(&mut self.check_enum.errors);
+        ret.append(&mut self.check_direction.errors);
         ret.append(&mut self.check_modport.errors);
         ret.append(&mut self.check_function.errors);
         ret.append(&mut self.check_type.errors);
