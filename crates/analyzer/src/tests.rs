@@ -595,22 +595,6 @@ fn invalid_direction() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidDirection { .. }));
-
-    let code = r#"
-    interface InterfaceG {
-        var value: logic;
-        modport mp {
-            value: input,
-        }
-    }
-
-    module ModuleG (
-        port_a: input InterfaceG
-    ){}
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidDirection { .. }));
 }
 
 #[test]

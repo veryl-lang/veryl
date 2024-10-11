@@ -1,6 +1,4 @@
 use crate::analyzer_error::AnalyzerError;
-use crate::symbol::SymbolKind;
-use crate::symbol_table;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
@@ -13,7 +11,6 @@ pub struct CheckDirection<'a> {
     in_function: bool,
     in_module: bool,
     in_modport: bool,
-    is_interface_port: bool,
 }
 
 impl<'a> CheckDirection<'a> {
@@ -31,17 +28,6 @@ impl<'a> Handler for CheckDirection<'a> {
     }
 }
 
-fn is_interface_type(arg: &ArrayType) -> bool {
-    if let ScalarTypeGroup::VariableTypeScalarTypeOpt(x) = &*arg.scalar_type.scalar_type_group {
-        if let VariableType::ScopedIdentifier(x) = x.variable_type.as_ref() {
-            let symbol = symbol_table::resolve(x.scoped_identifier.as_ref()).unwrap();
-            return matches!(symbol.found.kind, SymbolKind::Interface(_));
-        }
-    }
-
-    false
-}
-
 impl<'a> VerylGrammarTrait for CheckDirection<'a> {
     fn port_declaration_item(&mut self, arg: &PortDeclarationItem) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
@@ -49,10 +35,8 @@ impl<'a> VerylGrammarTrait for CheckDirection<'a> {
                 arg.port_declaration_item_group.as_ref()
             {
                 let x = x.port_type_concrete.as_ref();
-                let r#type = &x.array_type;
-
-                self.is_interface_port = is_interface_type(r#type);
                 if let Direction::Inout(_) = x.direction.as_ref() {
+                    let r#type = &x.array_type;
                     let is_tri = r#type
                         .scalar_type
                         .scalar_type_list
@@ -74,35 +58,8 @@ impl<'a> VerylGrammarTrait for CheckDirection<'a> {
     fn direction(&mut self, arg: &Direction) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             match arg {
-                Direction::Input(x) => {
-                    if self.is_interface_port {
-                        self.errors.push(AnalyzerError::invalid_direction(
-                            "input",
-                            self.text,
-                            &x.input.input_token.token.into(),
-                        ));
-                    }
-                }
-                Direction::Output(x) => {
-                    if self.is_interface_port {
-                        self.errors.push(AnalyzerError::invalid_direction(
-                            "output",
-                            self.text,
-                            &x.output.output_token.token.into(),
-                        ));
-                    }
-                }
-                Direction::Inout(x) => {
-                    if self.is_interface_port {
-                        self.errors.push(AnalyzerError::invalid_direction(
-                            "inout",
-                            self.text,
-                            &x.inout.inout_token.token.into(),
-                        ));
-                    }
-                }
                 Direction::Ref(x) => {
-                    if !self.in_function || self.is_interface_port {
+                    if !self.in_function {
                         self.errors.push(AnalyzerError::invalid_direction(
                             "ref",
                             self.text,
@@ -120,7 +77,7 @@ impl<'a> VerylGrammarTrait for CheckDirection<'a> {
                     }
                 }
                 Direction::Import(x) => {
-                    if !self.in_modport || self.is_interface_port {
+                    if !self.in_modport {
                         self.errors.push(AnalyzerError::invalid_direction(
                             "import",
                             self.text,
@@ -128,6 +85,7 @@ impl<'a> VerylGrammarTrait for CheckDirection<'a> {
                         ));
                     }
                 }
+                _ => (),
             }
         }
         Ok(())
