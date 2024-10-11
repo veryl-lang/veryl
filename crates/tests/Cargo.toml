@@ -6,12 +6,12 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-veryl-analyzer  = {version = "0.13.0", path = "../analyzer"}
-veryl-emitter   = {version = "0.13.0", path = "../emitter"}
-veryl-formatter = {version = "0.13.0", path = "../formatter"}
-veryl-metadata  = {version = "0.13.0", path = "../metadata"}
-veryl-parser    = {version = "0.13.0", path = "../parser"}
-veryl-path      = {version = "0.13.0", path = "../path"}
+veryl-analyzer  = {version = "0.13.1", path = "../analyzer"}
+veryl-emitter   = {version = "0.13.1", path = "../emitter"}
+veryl-formatter = {version = "0.13.1", path = "../formatter"}
+veryl-metadata  = {version = "0.13.1", path = "../metadata"}
+veryl-parser    = {version = "0.13.1", path = "../parser"}
+veryl-path      = {version = "0.13.1", path = "../path"}
 
 [dev-dependencies]
 criterion = "0.5.1"
