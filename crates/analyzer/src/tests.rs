@@ -595,22 +595,6 @@ fn invalid_direction() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidDirection { .. }));
-
-    let code = r#"
-    interface InterfaceG {
-        var value: logic;
-        modport mp {
-            value: input,
-        }
-    }
-
-    module ModuleG (
-        port_a: input InterfaceG
-    ){}
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidDirection { .. }));
 }
 
 #[test]
@@ -1101,6 +1085,84 @@ fn mismatch_type() {
     interface InterfaceM1 {
       inst u: ModuleM0();
     }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    interface InterfaceN1 {
+        var a: logic;
+        modport mp {
+            a: input,
+        }
+    }
+    module ModuleN1 (
+        port_n1: input InterfaceN1::mp,
+    ){}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    interface InterfaceN2::<W: const> {
+        var a: logic<W>;
+        modport mp {
+            a: input,
+        }
+    }
+    module ModuleN2 (
+        port_n2: input InterfaceN2::<2>::mp,
+    ){}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    interface InterfaceN3 {
+        var a: logic;
+    }
+    module ModuleN3 (
+        port_n3: input InterfaceN3,
+    ){}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    interface InterfaceN4::<W: const> {
+        var a: logic<W>;
+    }
+    module ModuleN4 (
+        port_n4: input InterfaceN4::<2>,
+    ){}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    interface InterfaceO1 {
+        var a: logic;
+    }
+    module ModuleO1 (
+        port_o1: modport InterfaceO1,
+    ){}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    interface InterfaceO2::<W: const> {
+        var a: logic<W>;
+    }
+    module ModuleO2 (
+        port_o2: modport InterfaceO2::<2>,
+    ){}
     "#;
 
     let errors = analyze(code);
