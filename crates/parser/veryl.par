@@ -413,7 +413,7 @@ RealNumber: FixedPoint
 
 HierarchicalIdentifier: Identifier { Select } { Dot Identifier { Select } };
 ScopedIdentifier      : ( DollarIdentifier | Identifier [ WithGenericArgument ] ) { ColonColon Identifier [ WithGenericArgument ] };
-ExpressionIdentifier  : ScopedIdentifier { Select } { Dot Identifier { Select } };
+ExpressionIdentifier  : ScopedIdentifier [ Width ] { Select } { Dot Identifier { Select } };
 
 // ----------------------------------------------------------------------------
 // Expression
@@ -445,6 +445,8 @@ Factor: Number
       | ( Msb | Lsb )
       | InsideExpression
       | OutsideExpression
+      | TypeExpression
+      | FactorType
       ;
 
 FunctionCall: LParen [ ArgumentList ] RParen;
@@ -467,9 +469,7 @@ CaseExpression: Case Expression LBrace CaseCondition Colon Expression Comma { Ca
 
 SwitchExpression: Switch LBrace SwitchCondition Colon Expression Comma { SwitchCondition Colon Expression Comma } Defaul Colon Expression [ Comma ] RBrace;
 
-TypeExpression: ScalarType
-              | Type LParen Expression RParen
-              ;
+TypeExpression: Type LParen Expression RParen;
 
 InsideExpression: Inside Expression LBrace RangeList RBrace;
 
@@ -516,12 +516,15 @@ VariableType: Clock
             | ResetSyncHigh
             | ResetSyncLow
             | Logic
-            | Bit
-            | ScopedIdentifier;
+            | Bit;
+
+UserDefinedType: ScopedIdentifier;
 
 TypeModifier: Tri | Signed;
 
-ScalarType: { TypeModifier } ( VariableType [ Width ] | FixedType );
+FactorType: ( VariableType [ Width ] | FixedType );
+
+ScalarType: { TypeModifier } ( UserDefinedType [ Width ] | FactorType );
 
 ArrayType: ScalarType [ Array ];
 
@@ -539,7 +542,7 @@ CastingType: U32
            | ResetAsyncLow
            | ResetSyncHigh
            | ResetSyncLow
-           | ScopedIdentifier
+           | UserDefinedType
            ;
 
 // ----------------------------------------------------------------------------
@@ -614,7 +617,7 @@ LetDeclaration: Let Identifier Colon [ ClockDomain ] ArrayType Equ Expression Se
 
 VarDeclaration: Var Identifier Colon [ ClockDomain ] ArrayType Semicolon;
 
-ConstDeclaration: Const Identifier Colon ( ArrayType Equ Expression | Type Equ TypeExpression ) Semicolon;
+ConstDeclaration: Const Identifier Colon ( ArrayType | Type ) Equ Expression Semicolon;
 
 TypeDefDeclaration: Type Identifier Equ ArrayType Semicolon;
 
@@ -690,7 +693,7 @@ WithParameterList: WithParameterGroup { Comma WithParameterGroup } [ Comma ];
 
 WithParameterGroup: { Attribute } ( LBrace WithParameterList RBrace | WithParameterItem );
 
-WithParameterItem: ( Param | Const ) Identifier Colon ( ArrayType Equ Expression | Type Equ TypeExpression );
+WithParameterItem: ( Param | Const ) Identifier Colon ( ArrayType | Type ) Equ Expression;
 
 // ----------------------------------------------------------------------------
 // WithGenericParameter

@@ -13,6 +13,10 @@ module veryl_testcase_Module21;
         EnumB_D
     } EnumB;
 
-    always_comb a = EnumB'((EnumA'(b)));
+    localparam type EnumC = EnumB;
+
+    localparam int unsigned EnumD = 1;
+
+    always_comb a = EnumD'((EnumC'((EnumB'((EnumA'(b)))))));
 endmodule
 //# sourceMappingURL=../map/testcases/sv/21_cast.sv.map

@@ -698,6 +698,8 @@ impl Evaluator {
             Factor::FactorGroup(_) => Evaluated::Unknown,
             Factor::InsideExpression(_) => Evaluated::Unknown,
             Factor::OutsideExpression(_) => Evaluated::Unknown,
+            Factor::TypeExpression(_) => Evaluated::Unknown,
+            Factor::FactorType(_) => Evaluated::Unknown,
         }
     }
 

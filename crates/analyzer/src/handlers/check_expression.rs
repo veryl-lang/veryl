@@ -14,15 +14,7 @@ pub struct CheckExpression<'a> {
     point: HandlerPoint,
     case_condition_depth: usize,
     evaluator: Evaluator,
-    call_stack_kind: Vec<FunctionKind>,
     in_inst_declaration: bool,
-    in_inst_parameter: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum FunctionKind {
-    System,
-    NonSystem,
 }
 
 impl<'a> CheckExpression<'a> {
@@ -82,32 +74,21 @@ impl<'a> VerylGrammarTrait for CheckExpression<'a> {
                         SymbolKind::Function(_) | SymbolKind::ModportFunctionMember(_) => {
                             if x.factor_opt.is_none() {
                                 self.errors.push(error);
-                            } else {
-                                self.call_stack_kind.push(FunctionKind::NonSystem);
                             }
                         }
                         SymbolKind::SystemFunction => {
                             if x.factor_opt.is_none() {
                                 self.errors.push(error);
-                            } else {
-                                self.call_stack_kind.push(FunctionKind::System);
                             }
                         }
                         // instance can be used as factor in inst_declaration
                         SymbolKind::Instance(_) if self.in_inst_declaration => (),
-                        // type can be used as factor in inst_parameter
-                        SymbolKind::TypeDef(_)
-                        | SymbolKind::Struct(_)
-                        | SymbolKind::Enum(_)
-                        | SymbolKind::Union(_)
-                            if self.in_inst_parameter => {}
                         SymbolKind::Module(_)
                         | SymbolKind::ProtoModule(_)
                         | SymbolKind::Interface(_)
                         | SymbolKind::Instance(_)
                         | SymbolKind::Block
                         | SymbolKind::Package(_)
-                        | SymbolKind::TypeDef(_)
                         | SymbolKind::Modport(_)
                         | SymbolKind::Namespace
                         | SymbolKind::ClockDomain
@@ -125,7 +106,11 @@ impl<'a> VerylGrammarTrait for CheckExpression<'a> {
                                 }
                             }
                         }
-                        SymbolKind::Parameter(_)
+                        SymbolKind::TypeDef(_)
+                        | SymbolKind::Struct(_)
+                        | SymbolKind::Enum(_)
+                        | SymbolKind::Union(_)
+                        | SymbolKind::Parameter(_)
                         | SymbolKind::EnumMember(_)
                         | SymbolKind::EnumMemberMangled
                         | SymbolKind::Genvar
@@ -136,13 +121,6 @@ impl<'a> VerylGrammarTrait for CheckExpression<'a> {
                         | SymbolKind::UnionMember(_)
                         | SymbolKind::GenericInstance(_)
                         | SymbolKind::Variable(_) => {}
-
-                        SymbolKind::Enum(_) | SymbolKind::Union(_) | SymbolKind::Struct(_) => {
-                            if let Some(FunctionKind::System) = self.call_stack_kind.last() {
-                            } else {
-                                self.errors.push(error);
-                            }
-                        }
                     }
                 }
 
@@ -181,19 +159,6 @@ impl<'a> VerylGrammarTrait for CheckExpression<'a> {
                     }
                 }
             }
-        } else if let Factor::ExpressionIdentifierFactorOpt(x) = arg {
-            let expid = x.expression_identifier.as_ref();
-            if let Ok(rr) = symbol_table::resolve(expid) {
-                match rr.found.kind {
-                    SymbolKind::Function(_) | SymbolKind::ModportFunctionMember(_) => {
-                        self.call_stack_kind.pop();
-                    }
-                    SymbolKind::SystemFunction => {
-                        self.call_stack_kind.pop();
-                    }
-                    _ => {}
-                }
-            }
         }
         Ok(())
     }
@@ -202,14 +167,6 @@ impl<'a> VerylGrammarTrait for CheckExpression<'a> {
         match self.point {
             HandlerPoint::Before => self.in_inst_declaration = true,
             HandlerPoint::After => self.in_inst_declaration = false,
-        }
-        Ok(())
-    }
-
-    fn inst_parameter(&mut self, _arg: &InstParameter) -> Result<(), ParolError> {
-        match self.point {
-            HandlerPoint::Before => self.in_inst_parameter = true,
-            HandlerPoint::After => self.in_inst_parameter = false,
         }
         Ok(())
     }

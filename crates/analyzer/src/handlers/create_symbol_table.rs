@@ -14,10 +14,10 @@ use crate::symbol::{
     ConnectTarget, DocComment, EnumMemberProperty, EnumMemberValue, EnumProperty, FunctionProperty,
     GenericBoundKind, GenericParameterProperty, InstanceProperty, InterfaceProperty,
     ModportFunctionMemberProperty, ModportProperty, ModportVariableMemberProperty, ModuleProperty,
-    PackageProperty, Parameter, ParameterKind, ParameterProperty, ParameterValue, Port,
-    PortProperty, ProtoModuleProperty, StructMemberProperty, StructProperty, Symbol, SymbolId,
-    SymbolKind, TestProperty, TestType, TypeDefProperty, TypeKind, UnionMemberProperty,
-    UnionProperty, VariableAffiniation, VariableProperty,
+    PackageProperty, Parameter, ParameterKind, ParameterProperty, Port, PortProperty,
+    ProtoModuleProperty, StructMemberProperty, StructProperty, Symbol, SymbolId, SymbolKind,
+    TestProperty, TestType, TypeDefProperty, TypeKind, UnionMemberProperty, UnionProperty,
+    VariableAffiniation, VariableProperty,
 };
 use crate::symbol_path::{GenericSymbolPath, SymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
@@ -614,10 +614,10 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
     fn const_declaration(&mut self, arg: &ConstDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let token = arg.identifier.identifier_token.token;
+            let value = *arg.expression.clone();
             let property = match &*arg.const_declaration_group {
-                ConstDeclarationGroup::ArrayTypeEquExpression(x) => {
+                ConstDeclarationGroup::ArrayType(x) => {
                     let r#type: SymType = x.array_type.as_ref().into();
-                    let value = ParameterValue::Expression(*x.expression.clone());
                     ParameterProperty {
                         token,
                         r#type,
@@ -625,7 +625,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                         value,
                     }
                 }
-                ConstDeclarationGroup::TypeEquTypeExpression(x) => {
+                ConstDeclarationGroup::Type(_) => {
                     let r#type: SymType = SymType {
                         modifier: vec![],
                         kind: TypeKind::Type,
@@ -633,7 +633,6 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                         array: vec![],
                         is_const: false,
                     };
-                    let value = ParameterValue::TypeExpression(*x.type_expression.clone());
                     ParameterProperty {
                         token,
                         r#type,
@@ -892,10 +891,10 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 WithParameterItemGroup::Param(_) => ParameterKind::Param,
                 WithParameterItemGroup::Const(_) => ParameterKind::Const,
             };
+            let value = *arg.expression.clone();
             let property = match &*arg.with_parameter_item_group0 {
-                WithParameterItemGroup0::ArrayTypeEquExpression(x) => {
+                WithParameterItemGroup0::ArrayType(x) => {
                     let r#type: SymType = x.array_type.as_ref().into();
-                    let value = ParameterValue::Expression(*x.expression.clone());
                     ParameterProperty {
                         token,
                         r#type,
@@ -903,7 +902,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                         value,
                     }
                 }
-                WithParameterItemGroup0::TypeEquTypeExpression(x) => {
+                WithParameterItemGroup0::Type(_) => {
                     let r#type: SymType = SymType {
                         modifier: vec![],
                         kind: TypeKind::Type,
@@ -911,7 +910,6 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                         array: vec![],
                         is_const: false,
                     };
-                    let value = ParameterValue::TypeExpression(*x.type_expression.clone());
                     ParameterProperty {
                         token,
                         r#type,

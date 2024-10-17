@@ -12,5 +12,9 @@ module Module21 {
         D,
     }
 
-    assign a = (b as EnumA) as EnumB;
+    const EnumC: type = EnumB;
+
+    const EnumD: u32 = 1;
+
+    assign a = (((b as EnumA) as EnumB) as EnumC) as EnumD;
 }

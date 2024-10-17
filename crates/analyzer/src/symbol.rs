@@ -146,10 +146,7 @@ impl Symbol {
                     if let Some(width) = evaluator.type_width(x.r#type.clone()) {
                         evaluator.context_width.push(width);
                     }
-                    match &x.value {
-                        ParameterValue::Expression(x) => evaluator.expression(x),
-                        ParameterValue::TypeExpression(_) => Evaluated::Unknown,
-                    }
+                    evaluator.expression(&x.value)
                 }
                 SymbolKind::EnumMember(_) => {
                     // TODO: Actually Evaluate its Width
@@ -441,10 +438,7 @@ impl fmt::Display for SymbolKind {
             }
             SymbolKind::Parameter(x) => {
                 let mut stringifier = Stringifier::new();
-                match &x.value {
-                    ParameterValue::Expression(x) => stringifier.expression(x),
-                    ParameterValue::TypeExpression(x) => stringifier.type_expression(x),
-                }
+                stringifier.expression(&x.value);
                 match x.kind {
                     ParameterKind::Param => {
                         format!("parameter ({}) = {}", x.r#type, stringifier.as_str())
@@ -676,17 +670,132 @@ impl fmt::Display for Type {
     }
 }
 
-impl From<&syntax_tree::ScalarType> for Type {
-    fn from(value: &syntax_tree::ScalarType) -> Self {
-        let mut modifier = Vec::new();
-        for x in &value.scalar_type_list {
-            match &*x.type_modifier {
-                syntax_tree::TypeModifier::Tri(_) => modifier.push(TypeModifier::Tri),
-                syntax_tree::TypeModifier::Signed(_) => modifier.push(TypeModifier::Signed),
+impl TryFrom<&syntax_tree::Expression> for Type {
+    type Error = ();
+
+    fn try_from(value: &syntax_tree::Expression) -> Result<Self, Self::Error> {
+        let value = if value.expression_list.is_empty() {
+            value.expression01.as_ref()
+        } else {
+            return Err(());
+        };
+        let value = if value.expression01_list.is_empty() {
+            value.expression02.as_ref()
+        } else {
+            return Err(());
+        };
+        let value = if value.expression02_list.is_empty() {
+            value.expression03.as_ref()
+        } else {
+            return Err(());
+        };
+        let value = if value.expression03_list.is_empty() {
+            value.expression04.as_ref()
+        } else {
+            return Err(());
+        };
+        let value = if value.expression04_list.is_empty() {
+            value.expression05.as_ref()
+        } else {
+            return Err(());
+        };
+        let value = if value.expression05_list.is_empty() {
+            value.expression06.as_ref()
+        } else {
+            return Err(());
+        };
+        let value = if value.expression06_list.is_empty() {
+            value.expression07.as_ref()
+        } else {
+            return Err(());
+        };
+        let value = if value.expression07_list.is_empty() {
+            value.expression08.as_ref()
+        } else {
+            return Err(());
+        };
+        let value = if value.expression08_list.is_empty() {
+            value.expression09.as_ref()
+        } else {
+            return Err(());
+        };
+        let value = if value.expression09_list.is_empty() {
+            value.expression10.as_ref()
+        } else {
+            return Err(());
+        };
+        let value = if value.expression10_list.is_empty() {
+            value.expression11.as_ref()
+        } else {
+            return Err(());
+        };
+        let value = if value.expression11_opt.is_none() {
+            value.expression12.as_ref()
+        } else {
+            return Err(());
+        };
+        let value = if value.expression12_list.is_empty() {
+            value.factor.as_ref()
+        } else {
+            return Err(());
+        };
+
+        match value {
+            syntax_tree::Factor::FactorType(x) => {
+                let factor_type: Type = x.factor_type.as_ref().into();
+                Ok(factor_type)
             }
+            syntax_tree::Factor::ExpressionIdentifierFactorOpt(x) => {
+                if x.factor_opt.is_some() {
+                    Err(())
+                } else {
+                    let x = x.expression_identifier.as_ref();
+                    if !x.expression_identifier_list.is_empty() {
+                        return Err(());
+                    }
+                    if !x.expression_identifier_list0.is_empty() {
+                        return Err(());
+                    }
+
+                    let mut name = Vec::new();
+                    match x.scoped_identifier.scoped_identifier_group.as_ref() {
+                        syntax_tree::ScopedIdentifierGroup::IdentifierScopedIdentifierOpt(x) => {
+                            name.push(x.identifier.identifier_token.token.text);
+                        }
+                        syntax_tree::ScopedIdentifierGroup::DollarIdentifier(x) => {
+                            name.push(x.dollar_identifier.dollar_identifier_token.token.text);
+                        }
+                    }
+                    for x in &x.scoped_identifier.scoped_identifier_list {
+                        name.push(x.identifier.identifier_token.token.text);
+                    }
+                    let kind = TypeKind::UserDefined(name);
+                    let mut width = Vec::new();
+                    if let Some(ref x) = x.expression_identifier_opt {
+                        let x = &x.width;
+                        width.push(*x.expression.clone());
+                        for x in &x.width_list {
+                            width.push(*x.expression.clone());
+                        }
+                    }
+                    Ok(Type {
+                        kind,
+                        modifier: vec![],
+                        width,
+                        array: vec![],
+                        is_const: false,
+                    })
+                }
+            }
+            _ => Err(()),
         }
-        match &*value.scalar_type_group {
-            syntax_tree::ScalarTypeGroup::VariableTypeScalarTypeOpt(x) => {
+    }
+}
+
+impl From<&syntax_tree::FactorType> for Type {
+    fn from(value: &syntax_tree::FactorType) -> Self {
+        match value.factor_type_group.as_ref() {
+            syntax_tree::FactorTypeGroup::VariableTypeFactorTypeOpt(x) => {
                 let kind = match x.variable_type.as_ref() {
                     syntax_tree::VariableType::Clock(_) => TypeKind::Clock,
                     syntax_tree::VariableType::ClockPosedge(_) => TypeKind::ClockPosedge,
@@ -698,25 +807,70 @@ impl From<&syntax_tree::ScalarType> for Type {
                     syntax_tree::VariableType::ResetSyncLow(_) => TypeKind::ResetSyncLow,
                     syntax_tree::VariableType::Logic(_) => TypeKind::Logic,
                     syntax_tree::VariableType::Bit(_) => TypeKind::Bit,
-                    syntax_tree::VariableType::ScopedIdentifier(x) => {
-                        let x = &x.scoped_identifier;
-                        let mut name = Vec::new();
-                        match &*x.scoped_identifier_group {
-                            syntax_tree::ScopedIdentifierGroup::IdentifierScopedIdentifierOpt(
-                                x,
-                            ) => {
-                                name.push(x.identifier.identifier_token.token.text);
-                            }
-                            syntax_tree::ScopedIdentifierGroup::DollarIdentifier(x) => {
-                                name.push(x.dollar_identifier.dollar_identifier_token.token.text);
-                            }
-                        }
-                        for x in &x.scoped_identifier_list {
-                            name.push(x.identifier.identifier_token.token.text);
-                        }
-                        TypeKind::UserDefined(name)
-                    }
                 };
+                let mut width = Vec::new();
+                if let Some(ref x) = x.factor_type_opt {
+                    let x = &x.width;
+                    width.push(*x.expression.clone());
+                    for x in &x.width_list {
+                        width.push(*x.expression.clone());
+                    }
+                }
+                Type {
+                    kind,
+                    modifier: vec![],
+                    width,
+                    array: vec![],
+                    is_const: false,
+                }
+            }
+            syntax_tree::FactorTypeGroup::FixedType(x) => {
+                let kind = match x.fixed_type.as_ref() {
+                    syntax_tree::FixedType::U32(_) => TypeKind::U32,
+                    syntax_tree::FixedType::U64(_) => TypeKind::U64,
+                    syntax_tree::FixedType::I32(_) => TypeKind::I32,
+                    syntax_tree::FixedType::I64(_) => TypeKind::I64,
+                    syntax_tree::FixedType::F32(_) => TypeKind::F32,
+                    syntax_tree::FixedType::F64(_) => TypeKind::F64,
+                    syntax_tree::FixedType::Strin(_) => TypeKind::String,
+                };
+                Type {
+                    kind,
+                    modifier: vec![],
+                    width: vec![],
+                    array: vec![],
+                    is_const: false,
+                }
+            }
+        }
+    }
+}
+
+impl From<&syntax_tree::ScalarType> for Type {
+    fn from(value: &syntax_tree::ScalarType) -> Self {
+        let mut modifier = Vec::new();
+        for x in &value.scalar_type_list {
+            match &*x.type_modifier {
+                syntax_tree::TypeModifier::Tri(_) => modifier.push(TypeModifier::Tri),
+                syntax_tree::TypeModifier::Signed(_) => modifier.push(TypeModifier::Signed),
+            }
+        }
+        match &*value.scalar_type_group {
+            syntax_tree::ScalarTypeGroup::UserDefinedTypeScalarTypeOpt(x) => {
+                let ident = x.user_defined_type.scoped_identifier.as_ref();
+                let mut name = Vec::new();
+                match ident.scoped_identifier_group.as_ref() {
+                    syntax_tree::ScopedIdentifierGroup::IdentifierScopedIdentifierOpt(x) => {
+                        name.push(x.identifier.identifier_token.token.text);
+                    }
+                    syntax_tree::ScopedIdentifierGroup::DollarIdentifier(x) => {
+                        name.push(x.dollar_identifier.dollar_identifier_token.token.text);
+                    }
+                }
+                for x in &ident.scoped_identifier_list {
+                    name.push(x.identifier.identifier_token.token.text);
+                }
+                let kind = TypeKind::UserDefined(name);
                 let mut width = Vec::new();
                 if let Some(ref x) = x.scalar_type_opt {
                     let x = &x.width;
@@ -733,21 +887,12 @@ impl From<&syntax_tree::ScalarType> for Type {
                     is_const: false,
                 }
             }
-            syntax_tree::ScalarTypeGroup::FixedType(x) => {
-                let x = &x.fixed_type;
-                let kind = match **x {
-                    syntax_tree::FixedType::U32(_) => TypeKind::U32,
-                    syntax_tree::FixedType::U64(_) => TypeKind::U64,
-                    syntax_tree::FixedType::I32(_) => TypeKind::I32,
-                    syntax_tree::FixedType::I64(_) => TypeKind::I64,
-                    syntax_tree::FixedType::F32(_) => TypeKind::F32,
-                    syntax_tree::FixedType::F64(_) => TypeKind::F64,
-                    syntax_tree::FixedType::Strin(_) => TypeKind::String,
-                };
+            syntax_tree::ScalarTypeGroup::FactorType(x) => {
+                let factor_type: Type = x.factor_type.as_ref().into();
                 Type {
-                    kind,
+                    kind: factor_type.kind,
                     modifier,
-                    width: vec![],
+                    width: factor_type.width,
                     array: vec![],
                     is_const: false,
                 }
@@ -868,13 +1013,7 @@ pub struct ParameterProperty {
     pub token: Token,
     pub r#type: Type,
     pub kind: ParameterKind,
-    pub value: ParameterValue,
-}
-
-#[derive(Debug, Clone)]
-pub enum ParameterValue {
-    Expression(syntax_tree::Expression),
-    TypeExpression(syntax_tree::TypeExpression),
+    pub value: syntax_tree::Expression,
 }
 
 #[derive(Debug, Clone)]

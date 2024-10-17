@@ -208,6 +208,9 @@ impl From<&ScopedIdentifier> for TokenRange {
 impl From<&ExpressionIdentifier> for TokenRange {
     fn from(value: &ExpressionIdentifier) -> Self {
         let mut range: TokenRange = value.scoped_identifier.as_ref().into();
+        if let Some(ref x) = value.expression_identifier_opt {
+            range.end = x.width.r_angle.r_angle_token.token;
+        }
         for x in &value.expression_identifier_list {
             range.end = x.select.r_bracket.r_bracket_token.token;
         }
@@ -359,6 +362,7 @@ impl_token_range!(
     r_brace,
     r_brace_token
 );
+impl_token_range!(TypeExpression, r#type, type_token, r_paren, r_paren_token);
 
 impl From<&FactorGroup> for TokenRange {
     fn from(value: &FactorGroup) -> Self {
@@ -384,6 +388,8 @@ impl From<&Factor> for TokenRange {
             Factor::FactorGroup(x) => x.factor_group.as_ref().into(),
             Factor::InsideExpression(x) => x.inside_expression.as_ref().into(),
             Factor::OutsideExpression(x) => x.outside_expression.as_ref().into(),
+            Factor::TypeExpression(x) => x.type_expression.as_ref().into(),
+            Factor::FactorType(x) => x.factor_type.as_ref().into(),
         }
     }
 }
@@ -517,7 +523,21 @@ impl From<&VariableType> for TokenRange {
                 let end = beg;
                 TokenRange { beg, end }
             }
-            VariableType::ScopedIdentifier(x) => x.scoped_identifier.as_ref().into(),
+        }
+    }
+}
+
+impl From<&FactorType> for TokenRange {
+    fn from(value: &FactorType) -> Self {
+        match value.factor_type_group.as_ref() {
+            FactorTypeGroup::VariableTypeFactorTypeOpt(x) => {
+                let mut range: TokenRange = x.variable_type.as_ref().into();
+                if let Some(ref x) = x.factor_type_opt {
+                    range.end = x.width.r_angle.r_angle_token.token;
+                }
+                range
+            }
+            FactorTypeGroup::FixedType(x) => x.fixed_type.as_ref().into(),
         }
     }
 }
@@ -525,14 +545,14 @@ impl From<&VariableType> for TokenRange {
 impl From<&ScalarType> for TokenRange {
     fn from(value: &ScalarType) -> Self {
         let mut range: TokenRange = match &*value.scalar_type_group {
-            ScalarTypeGroup::VariableTypeScalarTypeOpt(x) => {
-                let mut range: TokenRange = x.variable_type.as_ref().into();
+            ScalarTypeGroup::UserDefinedTypeScalarTypeOpt(x) => {
+                let mut range: TokenRange = x.user_defined_type.scoped_identifier.as_ref().into();
                 if let Some(ref x) = x.scalar_type_opt {
                     range.end = x.width.r_angle.r_angle_token.token;
                 }
                 range
             }
-            ScalarTypeGroup::FixedType(x) => x.fixed_type.as_ref().into(),
+            ScalarTypeGroup::FactorType(x) => x.factor_type.as_ref().into(),
         };
 
         if let Some(x) = value.scalar_type_list.first() {
@@ -631,7 +651,9 @@ impl From<&CastingType> for TokenRange {
                 let end = beg;
                 TokenRange { beg, end }
             }
-            CastingType::ScopedIdentifier(x) => x.scoped_identifier.as_ref().into(),
+            CastingType::UserDefinedType(x) => {
+                x.user_defined_type.scoped_identifier.as_ref().into()
+            }
         }
     }
 }

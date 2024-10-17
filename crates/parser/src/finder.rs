@@ -119,6 +119,9 @@ impl VerylWalker for Finder {
                 self.with_generic_argument(&x.with_generic_argument);
             }
         }
+        if let Some(ref x) = arg.expression_identifier_opt {
+            self.width(&x.width);
+        }
         for x in &arg.expression_identifier_list {
             self.select(&x.select);
         }

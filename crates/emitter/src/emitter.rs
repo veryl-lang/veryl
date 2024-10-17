@@ -1157,8 +1157,8 @@ impl VerylWalker for Emitter {
                     self.f64(&x.f64);
                     self.str("'(");
                 }
-                CastingType::ScopedIdentifier(x) => {
-                    self.scoped_identifier(&x.scoped_identifier);
+                CastingType::UserDefinedType(x) => {
+                    self.user_defined_type(&x.user_defined_type);
                     self.str("'(");
                 }
                 // casting to clock type doesn't change polarity
@@ -1218,7 +1218,7 @@ impl VerylWalker for Emitter {
                 | CastingType::U64(_)
                 | CastingType::I32(_)
                 | CastingType::I64(_) => self.str("))"),
-                CastingType::F32(_) | CastingType::F64(_) | CastingType::ScopedIdentifier(_) => {
+                CastingType::F32(_) | CastingType::F64(_) | CastingType::UserDefinedType(_) => {
                     self.str(")")
                 }
                 _ => (),
@@ -1545,14 +1545,32 @@ impl VerylWalker for Emitter {
         }
     }
 
+    /// Semantic action for non-terminal 'FactorType'
+    fn factor_type(&mut self, arg: &FactorType) {
+        match arg.factor_type_group.as_ref() {
+            FactorTypeGroup::VariableTypeFactorTypeOpt(x) => {
+                self.variable_type(&x.variable_type);
+                if self.signed {
+                    self.space(1);
+                    self.str("signed");
+                }
+                if let Some(ref x) = x.factor_type_opt {
+                    self.space(1);
+                    self.width(&x.width);
+                }
+            }
+            FactorTypeGroup::FixedType(x) => self.fixed_type(&x.fixed_type),
+        }
+    }
+
     /// Semantic action for non-terminal 'ScalarType'
     fn scalar_type(&mut self, arg: &ScalarType) {
         for x in &arg.scalar_type_list {
             self.type_modifier(&x.type_modifier);
         }
         match &*arg.scalar_type_group {
-            ScalarTypeGroup::VariableTypeScalarTypeOpt(x) => {
-                self.variable_type(&x.variable_type);
+            ScalarTypeGroup::UserDefinedTypeScalarTypeOpt(x) => {
+                self.user_defined_type(&x.user_defined_type);
                 if self.signed {
                     self.space(1);
                     self.str("signed");
@@ -1562,7 +1580,7 @@ impl VerylWalker for Emitter {
                     self.width(&x.width);
                 }
             }
-            ScalarTypeGroup::FixedType(x) => self.fixed_type(&x.fixed_type),
+            ScalarTypeGroup::FactorType(x) => self.factor_type(&x.factor_type),
         }
         self.signed = false;
     }
@@ -1969,7 +1987,7 @@ impl VerylWalker for Emitter {
         self.r#const(&arg.r#const);
         self.space(1);
         match &*arg.const_declaration_group {
-            ConstDeclarationGroup::ArrayTypeEquExpression(x) => {
+            ConstDeclarationGroup::ArrayType(x) => {
                 if !self.is_implicit_scalar_type(&x.array_type.scalar_type) {
                     self.scalar_type(&x.array_type.scalar_type);
                     self.space(1);
@@ -1979,23 +1997,19 @@ impl VerylWalker for Emitter {
                     self.space(1);
                     self.array(&x.array);
                 }
-                self.space(1);
-                self.equ(&x.equ);
-                self.space(1);
-                self.expression(&x.expression);
             }
-            ConstDeclarationGroup::TypeEquTypeExpression(x) => {
+            ConstDeclarationGroup::Type(x) => {
                 if !self.is_implicit_type() {
                     self.r#type(&x.r#type);
                     self.space(1);
                 }
                 self.identifier(&arg.identifier);
-                self.space(1);
-                self.equ(&x.equ);
-                self.space(1);
-                self.type_expression(&x.type_expression);
             }
         }
+        self.space(1);
+        self.equ(&arg.equ);
+        self.space(1);
+        self.expression(&arg.expression);
         self.semicolon(&arg.semicolon);
     }
 
@@ -2612,7 +2626,7 @@ impl VerylWalker for Emitter {
         };
         self.space(1);
         match &*arg.with_parameter_item_group0 {
-            WithParameterItemGroup0::ArrayTypeEquExpression(x) => {
+            WithParameterItemGroup0::ArrayType(x) => {
                 if !self.is_implicit_scalar_type(&x.array_type.scalar_type) {
                     self.scalar_type(&x.array_type.scalar_type);
                     self.space(1);
@@ -2622,23 +2636,19 @@ impl VerylWalker for Emitter {
                     self.space(1);
                     self.array(&x.array);
                 }
-                self.space(1);
-                self.equ(&x.equ);
-                self.space(1);
-                self.expression(&x.expression);
             }
-            WithParameterItemGroup0::TypeEquTypeExpression(x) => {
+            WithParameterItemGroup0::Type(x) => {
                 if !self.is_implicit_type() {
                     self.r#type(&x.r#type);
                     self.space(1);
                 }
                 self.identifier(&arg.identifier);
-                self.space(1);
-                self.equ(&x.equ);
-                self.space(1);
-                self.type_expression(&x.type_expression);
             }
         }
+        self.space(1);
+        self.equ(&arg.equ);
+        self.space(1);
+        self.expression(&arg.expression);
     }
 
     /// Semantic action for non-terminal 'PortDeclaration'
