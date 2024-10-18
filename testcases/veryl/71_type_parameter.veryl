@@ -7,7 +7,7 @@ module Module71 #(
         a: logic,
     }
 
-    inst m: Module71A #(T1: param_type, T2: type_type, T3: struct_type, /*T4: logic,*/);
+    inst m: Module71A #(T1: param_type, T2: type_type, T3: struct_type, T4: logic<10>,);
 }
 
 module Module71A #(

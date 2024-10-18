@@ -7,8 +7,7 @@ use crate::msb_table;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::{
-    Direction, DocComment, ParameterValue, Symbol, SymbolId, SymbolKind, TypeKind,
-    VariableAffiniation,
+    Direction, DocComment, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiniation,
 };
 use crate::symbol_table;
 use crate::type_dag;
@@ -319,8 +318,8 @@ fn traverse_type_symbol(id: SymbolId, path: &AssignPath) -> Vec<AssignPath> {
                 }
             }
             SymbolKind::Parameter(x) if x.r#type.kind == TypeKind::Type => {
-                if let ParameterValue::TypeExpression(TypeExpression::ScalarType(ref x)) = x.value {
-                    let r#type: crate::symbol::Type = (&*x.scalar_type).into();
+                let r#type: Result<crate::symbol::Type, ()> = (&x.value).try_into();
+                if let Ok(r#type) = r#type {
                     if let TypeKind::UserDefined(ref x) = r#type.kind {
                         if let Ok(symbol) = symbol_table::resolve((x, &symbol.namespace)) {
                             return traverse_type_symbol(symbol.found.id, path);
@@ -328,6 +327,8 @@ fn traverse_type_symbol(id: SymbolId, path: &AssignPath) -> Vec<AssignPath> {
                     } else {
                         return vec![path.clone()];
                     }
+                } else {
+                    return vec![path.clone()];
                 }
             }
             SymbolKind::Struct(x) => {

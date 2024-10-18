@@ -528,15 +528,10 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'TypeExpression'
     fn type_expression(&mut self, arg: &TypeExpression) {
-        match arg {
-            TypeExpression::ScalarType(x) => self.scalar_type(&x.scalar_type),
-            TypeExpression::TypeLParenExpressionRParen(x) => {
-                self.r#type(&x.r#type);
-                self.l_paren(&x.l_paren);
-                self.expression(&x.expression);
-                self.r_paren(&x.r_paren);
-            }
-        }
+        self.r#type(&arg.r#type);
+        self.l_paren(&arg.l_paren);
+        self.expression(&arg.expression);
+        self.r_paren(&arg.r_paren);
     }
 
     /// Semantic action for non-terminal 'InsideExpression'
@@ -619,13 +614,13 @@ impl VerylWalker for Formatter {
             self.space(1);
         }
         match &*arg.scalar_type_group {
-            ScalarTypeGroup::VariableTypeScalarTypeOpt(x) => {
-                self.variable_type(&x.variable_type);
+            ScalarTypeGroup::UserDefinedTypeScalarTypeOpt(x) => {
+                self.user_defined_type(&x.user_defined_type);
                 if let Some(ref x) = x.scalar_type_opt {
                     self.width(&x.width);
                 }
             }
-            ScalarTypeGroup::FixedType(x) => self.fixed_type(&x.fixed_type),
+            ScalarTypeGroup::FactorType(x) => self.factor_type(&x.factor_type),
         };
     }
 
@@ -902,21 +897,17 @@ impl VerylWalker for Formatter {
         self.colon(&arg.colon);
         self.space(1);
         match &*arg.const_declaration_group {
-            ConstDeclarationGroup::ArrayTypeEquExpression(x) => {
+            ConstDeclarationGroup::ArrayType(x) => {
                 self.array_type(&x.array_type);
-                self.space(1);
-                self.equ(&x.equ);
-                self.space(1);
-                self.expression(&x.expression);
             }
-            ConstDeclarationGroup::TypeEquTypeExpression(x) => {
+            ConstDeclarationGroup::Type(x) => {
                 self.r#type(&x.r#type);
-                self.space(1);
-                self.equ(&x.equ);
-                self.space(1);
-                self.type_expression(&x.type_expression);
             }
         }
+        self.space(1);
+        self.equ(&arg.equ);
+        self.space(1);
+        self.expression(&arg.expression);
         self.semicolon(&arg.semicolon);
     }
 
@@ -1378,21 +1369,17 @@ impl VerylWalker for Formatter {
         self.colon(&arg.colon);
         self.space(1);
         match &*arg.with_parameter_item_group0 {
-            WithParameterItemGroup0::ArrayTypeEquExpression(x) => {
+            WithParameterItemGroup0::ArrayType(x) => {
                 self.array_type(&x.array_type);
-                self.space(1);
-                self.equ(&x.equ);
-                self.space(1);
-                self.expression(&x.expression);
             }
-            WithParameterItemGroup0::TypeEquTypeExpression(x) => {
+            WithParameterItemGroup0::Type(x) => {
                 self.r#type(&x.r#type);
-                self.space(1);
-                self.equ(&x.equ);
-                self.space(1);
-                self.type_expression(&x.type_expression);
             }
         }
+        self.space(1);
+        self.equ(&arg.equ);
+        self.space(1);
+        self.expression(&arg.expression);
     }
 
     /// Semantic action for non-terminal 'WithGenericParameterList'

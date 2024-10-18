@@ -17,7 +17,8 @@ pub struct CheckType<'a> {
     text: &'a str,
     point: HandlerPoint,
     in_module: bool,
-    in_variable_type: Vec<()>,
+    in_user_defined_type: Vec<()>,
+    in_casting_type: Vec<()>,
     in_generic_argument: Vec<()>,
     in_modport: bool,
 }
@@ -54,14 +55,37 @@ fn is_variable_type(symbol: &Symbol) -> bool {
     }
 }
 
+fn is_casting_type(symbol: &Symbol) -> bool {
+    match &symbol.kind {
+        // U32/U64 can be used as casting type
+        SymbolKind::Parameter(x) => matches!(
+            x.r#type.kind,
+            TypeKind::Type | TypeKind::U32 | TypeKind::U64
+        ),
+        _ => is_variable_type(symbol),
+    }
+}
+
 impl<'a> VerylGrammarTrait for CheckType<'a> {
-    fn variable_type(&mut self, _arg: &VariableType) -> Result<(), ParolError> {
+    fn user_defined_type(&mut self, _arg: &UserDefinedType) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                self.in_variable_type.push(());
+                self.in_user_defined_type.push(());
             }
             HandlerPoint::After => {
-                self.in_variable_type.pop();
+                self.in_user_defined_type.pop();
+            }
+        }
+        Ok(())
+    }
+
+    fn casting_type(&mut self, _arg: &CastingType) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.in_casting_type.push(());
+            }
+            HandlerPoint::After => {
+                self.in_casting_type.pop();
             }
         }
         Ok(())
@@ -99,7 +123,7 @@ impl<'a> VerylGrammarTrait for CheckType<'a> {
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             // Check variable type
-            if !self.in_variable_type.is_empty() && self.in_generic_argument.is_empty() {
+            if !self.in_user_defined_type.is_empty() && self.in_generic_argument.is_empty() {
                 if let Ok(symbol) = symbol_table::resolve(arg) {
                     if self.in_modport {
                         if !matches!(symbol.found.kind, SymbolKind::Modport(_)) {
@@ -111,14 +135,22 @@ impl<'a> VerylGrammarTrait for CheckType<'a> {
                                 &arg.identifier().token.into(),
                             ));
                         }
-                    } else if !is_variable_type(&symbol.found) {
-                        self.errors.push(AnalyzerError::mismatch_type(
-                            &symbol.found.token.to_string(),
-                            "enum or union or struct",
-                            &symbol.found.kind.to_kind_name(),
-                            self.text,
-                            &arg.identifier().token.into(),
-                        ));
+                    } else {
+                        let type_error = if !self.in_casting_type.is_empty() {
+                            !is_casting_type(&symbol.found)
+                        } else {
+                            !is_variable_type(&symbol.found)
+                        };
+                        if type_error {
+                            dbg!(&symbol.found);
+                            self.errors.push(AnalyzerError::mismatch_type(
+                                &symbol.found.token.to_string(),
+                                "enum or union or struct",
+                                &symbol.found.kind.to_kind_name(),
+                                self.text,
+                                &arg.identifier().token.into(),
+                            ));
+                        }
                     }
                 }
             }

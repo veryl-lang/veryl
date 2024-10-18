@@ -7,7 +7,7 @@ module veryl_testcase_Module71 #(
         logic a;
     } struct_type;
 
-    veryl_testcase_Module71A #(.T1 (param_type), .T2 (type_type), .T3 (struct_type) /*T4: logic,*/) m ();
+    veryl_testcase_Module71A #(.T1 (param_type), .T2 (type_type), .T3 (struct_type), .T4 (logic [10-1:0])) m ();
 endmodule
 
 module veryl_testcase_Module71A #(
