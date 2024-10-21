@@ -29,7 +29,7 @@ anstyle         = "1.0"
 clap            = {workspace = true}
 clap_complete   = "4.5"
 console         = "0.15.8"
-fern            = "0.6.2"
+fern            = "0.7.0"
 futures         = {workspace = true}
 handlebars      = "6.1"
 log             = {workspace = true}
