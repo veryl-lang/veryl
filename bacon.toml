@@ -9,6 +9,10 @@ default_job = "check"
 on_change_strategy = "kill_then_restart"
 ignored_lines = ["warning: veryl-std.*", "warning: veryl-parser.*"]
 
+[jobs.build]
+command = ["cargo", "build", "--color", "always"]
+need_stdout = false
+
 [jobs.check]
 command = ["cargo", "check", "--color", "always"]
 need_stdout = false
@@ -101,4 +105,4 @@ allow_warnings = true
 # should go in your personal global prefs.toml file instead.
 [keybindings]
 # alt-m = "job:my-job"
-c = "job:clippy-all" # comment this to have 'c' run clippy on only the default target
+c = "job:clippy" # comment this to have 'c' run clippy on only the default target
