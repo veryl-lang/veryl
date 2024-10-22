@@ -1,6 +1,8 @@
 use crate::{
     analyzer_error::AnalyzerError,
+    symbol::SymbolKind,
     symbol_path::{GenericSymbolPath, SymbolPathNamespace},
+    symbol_table,
     type_dag::{self, Context, DagError},
 };
 use std::collections::HashMap;
@@ -182,8 +184,8 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if !self.ctx.is_empty() && self.ctx.last() != Some(&Context::ExpressionIdentifier) {
-                let path: GenericSymbolPath = arg.into();
-                if path.is_generic_reference() {
+                let generic_path: GenericSymbolPath = arg.into();
+                if generic_path.is_generic_reference() {
                     return Ok(());
                 }
 
@@ -194,6 +196,46 @@ impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
                 if let (Some(parent), Some(child)) = (self.parent.last(), child) {
                     if !self.is_owned(*parent, child) {
                         self.insert_edge(*parent, child, *self.ctx.last().unwrap());
+                    }
+                }
+
+                // If symbol is GenricInstance, base symbol should be added to DAG too
+                let namespace = path.1.clone();
+                if let Ok(sym) = symbol_table::resolve(&path) {
+                    if let SymbolKind::GenericInstance(x) = sym.found.kind {
+                        if let Some(base) = symbol_table::get(x.base) {
+                            let path: SymbolPathNamespace = (&base.token).into();
+                            let name = base.token.to_string();
+                            let token = base.token;
+                            let base = self.insert_node(&path, &name, &token);
+                            if let (Some(parent), Some(base)) = (self.parent.last(), base) {
+                                if !self.is_owned(*parent, base) {
+                                    self.insert_edge(*parent, base, *self.ctx.last().unwrap());
+                                }
+                            }
+
+                            // Add edge from GenericInstance to GenericArgument
+                            for path in &generic_path.paths {
+                                for arg in &path.arguments {
+                                    if arg.is_resolvable() {
+                                        let path = arg.mangled_path();
+                                        let path = SymbolPathNamespace(path, namespace.clone());
+                                        if let Ok(sym) = symbol_table::resolve(&path) {
+                                            let name = sym.found.token.to_string();
+                                            let token = sym.found.token;
+                                            let arg = self.insert_node(&path, &name, &token);
+                                            if let (Some(arg), Some(base)) = (arg, base) {
+                                                self.insert_edge(
+                                                    base,
+                                                    arg,
+                                                    Context::GenericInstance,
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

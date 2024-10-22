@@ -142,7 +142,6 @@ impl<'a> VerylGrammarTrait for CheckType<'a> {
                             !is_variable_type(&symbol.found)
                         };
                         if type_error {
-                            dbg!(&symbol.found);
                             self.errors.push(AnalyzerError::mismatch_type(
                                 &symbol.found.token.to_string(),
                                 "enum or union or struct",
