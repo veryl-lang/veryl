@@ -88,7 +88,17 @@ module Module12_2 (
     for i in 0..10 :g {
         always_ff (i_clk, i_rst) {
             if_reset {
-                d = i;
+                d[i] = i;
+            }
+        }
+    }
+
+    // if_reset with loop
+    var e: logic<10>;
+    always_ff (i_clk, i_rst) {
+        if_reset {
+            for i: u32 in 0..10 {
+                e[i] = i;
             }
         }
     }

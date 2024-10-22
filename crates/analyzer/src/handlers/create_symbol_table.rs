@@ -494,6 +494,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 prefix,
                 suffix,
                 clock_domain,
+                loop_variable: false,
             };
             let kind = SymbolKind::Variable(property);
 
@@ -526,6 +527,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     prefix: None,
                     suffix: None,
                     clock_domain: SymClockDomain::None,
+                    loop_variable: true,
                 };
                 let kind = SymbolKind::Variable(property);
                 self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
@@ -557,6 +559,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 prefix,
                 suffix,
                 clock_domain,
+                loop_variable: false,
             };
             let kind = SymbolKind::Variable(property);
 
@@ -595,6 +598,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                 prefix,
                 suffix,
                 clock_domain,
+                loop_variable: false,
             };
             let kind = SymbolKind::Variable(property);
 

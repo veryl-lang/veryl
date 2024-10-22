@@ -119,7 +119,11 @@ impl Symbol {
                             _ => unreachable!(),
                         }
                     } else if let Some(width) = evaluator.type_width(x.r#type.clone()) {
-                        Evaluated::Variable { width }
+                        if x.loop_variable {
+                            Evaluated::UnknownStatic
+                        } else {
+                            Evaluated::Variable { width }
+                        }
                     } else {
                         Evaluated::Unknown
                     }
@@ -957,6 +961,7 @@ pub struct VariableProperty {
     pub prefix: Option<String>,
     pub suffix: Option<String>,
     pub clock_domain: ClockDomain,
+    pub loop_variable: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
