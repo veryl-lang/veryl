@@ -90,7 +90,17 @@ module veryl_testcase_Module12_2 (
     for (genvar i = 0; i < 10; i++) begin :g
         always_ff @ (posedge i_clk, negedge i_rst_n) begin
             if (!i_rst_n) begin
-                d <= i;
+                d[i] <= i;
+            end
+        end
+    end
+
+    // if_reset with loop
+    logic [10-1:0] e;
+    always_ff @ (posedge i_clk, negedge i_rst_n) begin
+        if (!i_rst_n) begin
+            for (int unsigned i = 0; i < 10; i++) begin
+                e[i] <= i;
             end
         end
     end
