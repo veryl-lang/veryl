@@ -1,4 +1,4 @@
-interface Interface70 {
+interface Interface70A {
     var en: logic;
 
     modport port {
@@ -6,18 +6,29 @@ interface Interface70 {
     }
 }
 
+interface Interface70B::<WIDTH: const> {
+    var value: logic<WIDTH>;
+
+    modport port {
+        value: output,
+    }
+}
+
 module Module70 (
-    b: interface,
+    c: interface,
 ) {
-    inst a: Interface70;
+    inst a: Interface70A;
+    inst b: Interface70B::<8>;
 
     inst u: Module70A (
         a: a,
         b: b,
+        c: c,
     );
 }
 
 module Module70A (
-    a: modport Interface70::port,
-    b: interface,
+    a: modport Interface70A::port     ,
+    b: modport Interface70B::<8>::port,
+    c: interface,
 ) {}

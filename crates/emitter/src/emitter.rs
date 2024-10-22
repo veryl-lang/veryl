@@ -3329,7 +3329,13 @@ fn namespace_string(namespace: &Namespace, context: &SymbolContext) -> String {
             if let Ok(ref symbol) = symbol_table::resolve((&symbol_path, &resolve_namespace)) {
                 let separator = match symbol.found.kind {
                     SymbolKind::Package(_) => "::",
-                    SymbolKind::GenericInstance(_) => "::",
+                    SymbolKind::GenericInstance(ref x) => {
+                        let symbol = symbol_table::get(x.base).unwrap();
+                        match symbol.kind {
+                            SymbolKind::Interface(_) => ".",
+                            _ => "::",
+                        }
+                    }
                     SymbolKind::Interface(_) => ".",
                     _ if in_sv_namespace => "::",
                     _ => "_",
