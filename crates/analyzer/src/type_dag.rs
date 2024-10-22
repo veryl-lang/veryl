@@ -39,6 +39,7 @@ pub enum Context {
     Package,
     Modport,
     ExpressionIdentifier,
+    GenericInstance,
 }
 
 #[derive(Debug, Clone)]
@@ -172,16 +173,44 @@ impl TypeDag {
     fn dump(&self) -> String {
         let nodes = algo::toposort(self.dag.graph(), None).unwrap();
         let mut ret = "".to_string();
-        for node in nodes {
-            if let Some(path) = self.paths.get(&(node.index() as u32)) {
-                ret.push_str(&format!("{}\n", path.name));
+
+        let mut max_width = 0;
+        for node in &nodes {
+            let idx = node.index() as u32;
+            if let Some(path) = self.paths.get(&idx) {
+                max_width = max_width.max(path.name.len());
+                for parent in self.dag.parents(*node).iter(&self.dag) {
+                    let node = parent.1.index() as u32;
+                    if let Some(path) = self.paths.get(&node) {
+                        max_width = max_width.max(path.name.len() + 4);
+                    }
+                }
+            }
+        }
+
+        for node in &nodes {
+            let idx = node.index() as u32;
+            if let Some(path) = self.paths.get(&idx) {
+                let symbol = self.symbols.get(&idx).unwrap();
+                ret.push_str(&format!(
+                    "{}{} : {}\n",
+                    path.name,
+                    " ".repeat(max_width - path.name.len()),
+                    symbol.kind
+                ));
                 let mut set = HashSet::new();
-                for parent in self.dag.parents(node).iter(&self.dag) {
+                for parent in self.dag.parents(*node).iter(&self.dag) {
                     let node = parent.1.index() as u32;
                     if !set.contains(&node) {
                         set.insert(node);
                         if let Some(path) = self.paths.get(&node) {
-                            ret.push_str(&format!(" |- {}\n", path.name));
+                            let symbol = self.symbols.get(&node).unwrap();
+                            ret.push_str(&format!(
+                                " |- {}{} : {}\n",
+                                path.name,
+                                " ".repeat(max_width - path.name.len() - 4),
+                                symbol.kind
+                            ));
                         }
                     }
                 }
