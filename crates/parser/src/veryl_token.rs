@@ -11,6 +11,7 @@ pub enum TokenSource {
     File(PathId),
     Builtin,
     External,
+    Generated,
 }
 
 impl fmt::Display for TokenSource {
@@ -19,6 +20,7 @@ impl fmt::Display for TokenSource {
             TokenSource::File(x) => x.to_string(),
             TokenSource::Builtin => "builtin".to_string(),
             TokenSource::External => "external".to_string(),
+            TokenSource::Generated => "generated".to_string(),
         };
         text.fmt(f)
     }
@@ -64,6 +66,19 @@ impl Token {
             length,
             pos,
             source,
+        }
+    }
+
+    pub fn generate(text: StrId) -> Self {
+        let id = resource_table::new_token_id();
+        Token {
+            id,
+            text,
+            line: 0,
+            column: 0,
+            length: 0,
+            pos: 0,
+            source: TokenSource::Generated,
         }
     }
 }

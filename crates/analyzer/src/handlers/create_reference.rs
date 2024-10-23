@@ -88,12 +88,14 @@ impl<'a> CreateReference<'a> {
                             .push(param.1.default_value.as_ref().unwrap().clone());
                     }
 
-                    if let Some((token, new_symbol)) = path.get_generic_instance(&symbol.found) {
+                    if let Some((token, new_symbol, arguments)) =
+                        path.get_generic_instance(&symbol.found)
+                    {
                         if let Some(ref x) = symbol_table::insert(&token, new_symbol) {
                             symbol_table::add_generic_instance(symbol.found.id, *x);
                         }
 
-                        let table = symbol.found.generic_table(&path.arguments);
+                        let table = symbol.found.generic_table(&arguments);
                         let map = vec![GenericMap {
                             name: "".to_string(),
                             map: table,

@@ -6,7 +6,7 @@ use std::cmp::Ordering;
 use std::fmt;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::veryl_grammar_trait as syntax_tree;
-use veryl_parser::veryl_token::{Token, TokenRange};
+use veryl_parser::veryl_token::{Token, TokenRange, TokenSource};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SymbolPath(pub Vec<StrId>);
@@ -250,13 +250,21 @@ impl GenericSymbol {
         }
     }
 
-    pub fn get_generic_instance(&self, base: &Symbol) -> Option<(Token, Symbol)> {
+    pub fn get_generic_instance(
+        &self,
+        base: &Symbol,
+    ) -> Option<(Token, Symbol, Vec<GenericSymbolPath>)> {
         if self.arguments.is_empty() {
             None
         } else {
+            let mut arguments = self.arguments.clone();
+            for arg in &mut arguments {
+                arg.resolve_imported(&base.namespace);
+            }
+
             let property = GenericInstanceProperty {
                 base: base.id,
-                arguments: self.arguments.clone(),
+                arguments: arguments.clone(),
             };
             let kind = SymbolKind::GenericInstance(property);
             let token = &self.base;
@@ -269,7 +277,9 @@ impl GenericSymbol {
                 token.source,
             );
             let symbol = Symbol::new(&token, kind, &base.namespace, false, DocComment::default());
-            Some((token, symbol))
+
+            // return arguments which is modified by `resolve_imported`
+            Some((token, symbol, arguments))
         }
     }
 }
@@ -374,6 +384,44 @@ impl GenericSymbolPath {
                         break;
                     }
                 }
+            }
+        }
+    }
+
+    /// Resolve and expand path if the path is imported at declaration
+    pub fn resolve_imported(&mut self, namespace: &Namespace) {
+        if !self.is_resolvable() {
+            return;
+        }
+        if symbol_table::resolve((&self.generic_path(), namespace)).is_err() {
+            let self_namespace = namespace_table::get(self.range.beg.id).unwrap();
+            let TokenSource::File(self_file_path) = self.range.beg.source else {
+                return;
+            };
+            if let Ok(symbol) = symbol_table::resolve((&self.generic_path(), &self_namespace)) {
+                let mut prefix = Vec::new();
+                let default_path = namespace_table::get_default();
+                for (i, path) in symbol.found.namespace.paths.iter().enumerate() {
+                    // if path is included by default_path, it is not appended
+                    if default_path.paths.get(i) == Some(path) {
+                        continue;
+                    }
+
+                    let token = Token::generate(*path);
+                    namespace_table::insert(token.id, self_file_path, &self_namespace);
+                    prefix.push(GenericSymbol {
+                        base: token,
+                        arguments: vec![],
+                    });
+                }
+                for (i, p) in prefix.into_iter().enumerate() {
+                    self.paths.insert(i, p);
+                }
+            }
+        }
+        for path in &mut self.paths {
+            for arg in &mut path.arguments {
+                arg.resolve_imported(namespace);
             }
         }
     }
