@@ -368,6 +368,7 @@ impl GenericSymbolPath {
                 self.paths.clone_from(&x.paths);
                 self.paths.append(&mut paths);
                 self.kind = x.kind;
+                self.range = x.range;
                 break;
             }
         }
@@ -381,6 +382,7 @@ impl GenericSymbolPath {
                         arg.paths.clone_from(&x.paths);
                         arg.paths.append(&mut paths);
                         arg.kind = x.kind;
+                        arg.range = x.range;
                         break;
                     }
                 }
@@ -399,23 +401,22 @@ impl GenericSymbolPath {
                 return;
             };
             if let Ok(symbol) = symbol_table::resolve((&self.generic_path(), &self_namespace)) {
-                let mut prefix = Vec::new();
-                let default_path = namespace_table::get_default();
-                for (i, path) in symbol.found.namespace.paths.iter().enumerate() {
-                    // if path is included by default_path, it is not appended
-                    if default_path.paths.get(i) == Some(path) {
-                        continue;
-                    }
+                let mut parent = symbol.found.namespace.clone();
+                parent.strip_prefix(&namespace_table::get_default());
 
-                    let token = Token::generate(*path);
-                    namespace_table::insert(token.id, self_file_path, &self_namespace);
-                    prefix.push(GenericSymbol {
-                        base: token,
-                        arguments: vec![],
-                    });
-                }
-                for (i, p) in prefix.into_iter().enumerate() {
-                    self.paths.insert(i, p);
+                // If symbol belongs Package, it can be expanded
+                if let Ok(parent_symbol) = symbol_table::resolve((&parent.paths, &self_namespace)) {
+                    if matches!(parent_symbol.found.kind, SymbolKind::Package(_)) {
+                        for (i, path) in parent.paths.iter().enumerate() {
+                            let token = Token::generate(*path);
+                            namespace_table::insert(token.id, self_file_path, &self_namespace);
+                            let generic_symbol = GenericSymbol {
+                                base: token,
+                                arguments: vec![],
+                            };
+                            self.paths.insert(i, generic_symbol);
+                        }
+                    }
                 }
             }
         }

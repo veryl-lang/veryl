@@ -2535,3 +2535,23 @@ fn conflict_with_mangled_enum_member() {
         AnalyzerError::DuplicatedIdentifier { .. }
     ));
 }
+
+#[test]
+fn unresolvable_generic_argument() {
+    let code = r#"
+    module ModuleA {
+        const X: u32 = 1;
+        const Y: u32 = PackageA::<X>::W;
+    }
+
+    package PackageA::<T: const> {
+        const W: u32 = T;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UnresolvableGenericArgument { .. }
+    ));
+}
