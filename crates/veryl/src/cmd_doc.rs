@@ -47,6 +47,10 @@ impl CmdDoc {
             analyzer.analyze_pass3(&path.prj, input, &path.src, &parser.veryl);
         }
 
+        for (path, input, parser, analyzer) in &contexts {
+            analyzer.analyze_pass4(&path.prj, input, &path.src, &parser.veryl);
+        }
+
         let mut modules = BTreeMap::new();
         let mut proto_modules = BTreeMap::new();
         let mut interfaces = BTreeMap::new();

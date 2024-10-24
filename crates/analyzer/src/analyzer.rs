@@ -56,16 +56,34 @@ impl<'a> VerylWalker for AnalyzerPass2<'a> {
 }
 
 pub struct AnalyzerPass3<'a> {
+    handlers: Pass3Handlers<'a>,
+}
+
+impl<'a> AnalyzerPass3<'a> {
+    pub fn new(text: &'a str, build_opt: &'a Build, lint_opt: &'a Lint) -> Self {
+        AnalyzerPass3 {
+            handlers: Pass3Handlers::new(text, build_opt, lint_opt),
+        }
+    }
+}
+
+impl<'a> VerylWalker for AnalyzerPass3<'a> {
+    fn get_handlers(&mut self) -> Option<Vec<&mut dyn Handler>> {
+        Some(self.handlers.get_handlers())
+    }
+}
+
+pub struct AnalyzerPass4<'a> {
     path: PathId,
     text: &'a str,
     symbols: Vec<Symbol>,
 }
 
-impl<'a> AnalyzerPass3<'a> {
+impl<'a> AnalyzerPass4<'a> {
     pub fn new(path: &'a Path, text: &'a str) -> Self {
         let symbols = symbol_table::get_all();
         let path = resource_table::get_path_id(path.to_path_buf()).unwrap();
-        AnalyzerPass3 {
+        AnalyzerPass4 {
             path,
             text,
             symbols,
@@ -239,15 +257,32 @@ impl Analyzer {
         &self,
         project_name: &str,
         text: &str,
+        _path: T,
+        input: &Veryl,
+    ) -> Vec<AnalyzerError> {
+        let mut ret = Vec::new();
+
+        namespace_table::set_default(&[project_name.into()]);
+        let mut pass3 = AnalyzerPass3::new(text, &self.build_opt, &self.lint_opt);
+        pass3.veryl(input);
+        ret.append(&mut pass3.handlers.get_errors());
+
+        ret
+    }
+
+    pub fn analyze_pass4<T: AsRef<Path>>(
+        &self,
+        project_name: &str,
+        text: &str,
         path: T,
         _input: &Veryl,
     ) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
 
         namespace_table::set_default(&[project_name.into()]);
-        let pass3 = AnalyzerPass3::new(path.as_ref(), text);
-        ret.append(&mut pass3.check_variables());
-        ret.append(&mut pass3.check_assignment());
+        let pass4 = AnalyzerPass4::new(path.as_ref(), text);
+        ret.append(&mut pass4.check_variables());
+        ret.append(&mut pass4.check_assignment());
 
         ret
     }
