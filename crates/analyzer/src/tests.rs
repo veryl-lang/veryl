@@ -1872,6 +1872,100 @@ fn unassign_variable() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
+
+    let code = r#"
+    module ModuleA {
+        var a: logic;
+        var b: logic;
+        always_comb {
+            b = a;
+            a = 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
+
+    let code = r#"
+    module ModuleA {
+        var a: logic;
+        always_comb {
+            a = a;
+            a = 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
+
+    let code = r#"
+    module ModuleA {
+        var a: logic;
+        var b: logic;
+        always_comb {
+            if 1 {
+                let c: logic = 1;
+                a = c;
+            } else {
+                a = 0;
+            }
+            if 1 {
+                var c: logic;
+                b = c;
+            } else {
+                b = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
+
+    let code = r#"
+    module ModuleA {
+        var a: logic;
+        always_comb {
+            let b: logic = 1;
+            a = b;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        var a: logic;
+        always_comb {
+            for i: u32 in 0..1 {
+                a = i;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<2>;
+        always_comb {
+            a[0] = 0;
+        }
+
+        always_comb {
+            a[1] = a[0];
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

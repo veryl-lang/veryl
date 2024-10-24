@@ -1,41 +1,69 @@
 use crate::analyzer_error::AnalyzerError;
-use crate::assign::{
-    AssignDeclarationType, AssignPosition, AssignPositionType, AssignStatementBranchItemType,
-    AssignStatementBranchType,
-};
 use crate::attribute::AllowItem;
 use crate::attribute::Attribute as Attr;
 use crate::attribute_table;
 use crate::symbol::{Direction, SymbolId, SymbolKind, TypeKind};
 use crate::symbol_table;
+use crate::var_ref::{
+    AssignDeclarationType, AssignPosition, AssignPositionType, AssignStatementBranchItemType,
+    AssignStatementBranchType, ExpressionTargetType, VarRef, VarRefAffiliation, VarRefPath,
+    VarRefType,
+};
 use std::collections::HashMap;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
-pub struct CheckAssignment<'a> {
+pub struct CheckVarRef<'a> {
     pub errors: Vec<AnalyzerError>,
     text: &'a str,
     point: HandlerPoint,
+    affiliation: Vec<VarRefAffiliation>,
     assign_position: AssignPosition,
+    in_expression: Vec<()>,
     in_if_expression: Vec<()>,
     branch_index: usize,
 }
 
-impl<'a> CheckAssignment<'a> {
+impl<'a> CheckVarRef<'a> {
     pub fn new(text: &'a str) -> Self {
         Self {
             errors: Vec::new(),
             text,
             point: HandlerPoint::Before,
+            affiliation: Vec::new(),
             assign_position: AssignPosition::default(),
+            in_expression: Vec::new(),
             in_if_expression: Vec::new(),
             branch_index: 0,
         }
     }
+
+    fn add_assign(&mut self, path: &VarRefPath) {
+        let r#type = VarRefType::AssignTarget {
+            position: self.assign_position.clone(),
+        };
+        let assign = VarRef {
+            r#type,
+            affiliation: *self.affiliation.last().unwrap(),
+            path: path.clone(),
+        };
+        symbol_table::add_var_ref(&assign);
+        self.assign_position.pop();
+    }
+
+    fn add_expression(&mut self, path: &VarRefPath, r#type: ExpressionTargetType) {
+        let r#type = VarRefType::ExpressionTarget { r#type };
+        let expression = VarRef {
+            r#type,
+            affiliation: *self.affiliation.last().unwrap(),
+            path: path.clone(),
+        };
+        symbol_table::add_var_ref(&expression);
+    }
 }
 
-impl<'a> Handler for CheckAssignment<'a> {
+impl<'a> Handler for CheckVarRef<'a> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
@@ -67,11 +95,11 @@ fn can_assign(full_path: &[SymbolId]) -> bool {
     false
 }
 
-impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
+impl<'a> VerylGrammarTrait for CheckVarRef<'a> {
     fn r#else(&mut self, arg: &Else) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if self.in_if_expression.is_empty() {
-                let new_position = if let AssignPositionType::StatementBranchItem { .. } =
+                let position = if let AssignPositionType::StatementBranchItem { .. } =
                     self.assign_position.0.last().unwrap()
                 {
                     AssignPositionType::StatementBranchItem {
@@ -85,7 +113,7 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                         index: self.branch_index,
                     }
                 };
-                *self.assign_position.0.last_mut().unwrap() = new_position;
+                *self.assign_position.0.last_mut().unwrap() = position;
                 self.branch_index += 1;
             }
         }
@@ -104,22 +132,72 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
         Ok(())
     }
 
-    fn let_statement(&mut self, arg: &LetStatement) -> Result<(), ParolError> {
+    fn assignment(&mut self, _arg: &Assignment) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.in_expression.push(());
+            }
+            HandlerPoint::After => {
+                self.in_expression.pop();
+            }
+        }
+        Ok(())
+    }
+
+    fn function_call(&mut self, _arg: &FunctionCall) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.in_expression.push(());
+            }
+            HandlerPoint::After => {
+                self.in_expression.pop();
+            }
+        }
+        Ok(())
+    }
+
+    fn expression_identifier(&mut self, arg: &ExpressionIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            if let Ok(x) = symbol_table::resolve(arg.identifier.as_ref()) {
+            if !self.in_expression.is_empty() {
+                if let Ok(path) = VarRefPath::try_from(arg) {
+                    let full_path = path.full_path();
+                    let symbol = symbol_table::get(*full_path.last().unwrap()).unwrap();
+                    let r#type = match symbol.kind {
+                        SymbolKind::Variable(_) => ExpressionTargetType::Variable,
+                        SymbolKind::Parameter(_) => ExpressionTargetType::Parameter,
+                        SymbolKind::Port(x) => match x.direction {
+                            Direction::Input => ExpressionTargetType::InputPort,
+                            Direction::Output => ExpressionTargetType::OutputPort,
+                            Direction::Inout => ExpressionTargetType::InoutPort,
+                            Direction::Ref => ExpressionTargetType::RefPort,
+                            _ => unreachable!(),
+                        },
+                        _ => {
+                            return Ok(());
+                        }
+                    };
+                    self.add_expression(&path, r#type);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn let_statement(&mut self, arg: &LetStatement) -> Result<(), ParolError> {
+        if let HandlerPoint::After = self.point {
+            if let Ok(path) = VarRefPath::try_from(arg.identifier.as_ref()) {
                 self.assign_position.push(AssignPositionType::Statement {
                     token: arg.equ.equ_token.token,
                     resettable: false,
                 });
-                symbol_table::add_assign(x.full_path, &self.assign_position, false);
-                self.assign_position.pop();
+                self.add_assign(&path);
             }
         }
         Ok(())
     }
 
     fn identifier_statement(&mut self, arg: &IdentifierStatement) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
+        if let HandlerPoint::After = self.point {
             if let IdentifierStatementGroup::Assignment(x) = &*arg.identifier_statement_group {
                 let token = match x.assignment.assignment_group.as_ref() {
                     AssignmentGroup::Equ(x) => x.equ.equ_token.token,
@@ -127,43 +205,34 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
                         x.assignment_operator.assignment_operator_token.token
                     }
                 };
-                if let Ok(x) = symbol_table::resolve(arg.expression_identifier.as_ref()) {
-                    let full_path = x.full_path;
-                    if can_assign(&full_path) {
-                        let mut partial = !arg
-                            .expression_identifier
-                            .expression_identifier_list
-                            .is_empty();
-                        partial |= arg
-                            .expression_identifier
-                            .expression_identifier_list0
-                            .iter()
-                            .any(|x| !x.expression_identifier_list0_list.is_empty());
+                if let Ok(path) = VarRefPath::try_from(arg.expression_identifier.as_ref()) {
+                    let full_path = path.full_path();
+                    let symbol = symbol_table::get(*full_path.last().unwrap()).unwrap();
 
+                    if can_assign(&full_path) {
                         self.assign_position.push(AssignPositionType::Statement {
                             token,
                             resettable: true,
                         });
-                        symbol_table::add_assign(full_path, &self.assign_position, partial);
-                        self.assign_position.pop();
+                        self.add_assign(&path);
                     } else {
                         let token = arg.expression_identifier.identifier().token;
                         self.errors.push(AnalyzerError::invalid_assignment(
                             &token.to_string(),
                             self.text,
-                            &x.found.kind.to_kind_name(),
+                            &symbol.kind.to_kind_name(),
                             &arg.expression_identifier.as_ref().into(),
                         ));
                     }
 
                     // Check to confirm not assigning to constant
-                    if let SymbolKind::Variable(v) = x.found.kind.clone() {
+                    if let SymbolKind::Variable(v) = symbol.kind.clone() {
                         if v.r#type.is_const {
                             let token = arg.expression_identifier.identifier().token;
                             self.errors.push(AnalyzerError::invalid_assignment_to_const(
                                 &token.to_string(),
                                 self.text,
-                                &x.found.kind.to_kind_name(),
+                                &symbol.kind.to_kind_name(),
                                 &arg.expression_identifier.as_ref().into(),
                             ));
                         }
@@ -241,13 +310,12 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
 
     fn for_statement(&mut self, arg: &ForStatement) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            if let Ok(x) = symbol_table::resolve(arg.identifier.as_ref()) {
+            if let Ok(path) = VarRefPath::try_from(arg.identifier.as_ref()) {
                 self.assign_position.push(AssignPositionType::Statement {
                     token: arg.r#for.for_token.token,
                     resettable: false,
                 });
-                symbol_table::add_assign(x.full_path, &self.assign_position, false);
-                self.assign_position.pop();
+                self.add_assign(&path);
             }
         }
         Ok(())
@@ -299,14 +367,13 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
     }
 
     fn let_declaration(&mut self, arg: &LetDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if let Ok(x) = symbol_table::resolve(arg.identifier.as_ref()) {
+        if let HandlerPoint::After = self.point {
+            if let Ok(path) = VarRefPath::try_from(arg.identifier.as_ref()) {
                 self.assign_position.push(AssignPositionType::Declaration {
                     token: arg.r#let.let_token.token,
                     r#type: AssignDeclarationType::Let,
                 });
-                symbol_table::add_assign(x.full_path, &self.assign_position, false);
-                self.assign_position.pop();
+                self.add_assign(&path);
             }
         }
         Ok(())
@@ -315,12 +382,16 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
     fn always_ff_declaration(&mut self, arg: &AlwaysFfDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
+                self.affiliation.push(VarRefAffiliation::AlwaysFF {
+                    token: arg.always_ff.always_ff_token.token,
+                });
                 self.assign_position.push(AssignPositionType::Declaration {
                     token: arg.always_ff.always_ff_token.token,
-                    r#type: AssignDeclarationType::AlwaysFf,
+                    r#type: AssignDeclarationType::AlwaysFF,
                 });
             }
             HandlerPoint::After => {
+                self.affiliation.pop();
                 self.assign_position.pop();
             }
         }
@@ -330,6 +401,9 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
     fn always_comb_declaration(&mut self, arg: &AlwaysCombDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
+                self.affiliation.push(VarRefAffiliation::AlwaysComb {
+                    token: arg.always_comb.always_comb_token.token,
+                });
                 self.assign_position.push(AssignPositionType::Declaration {
                     token: arg.always_comb.always_comb_token.token,
                     r#type: AssignDeclarationType::AlwaysComb,
@@ -343,37 +417,26 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
     }
 
     fn assign_declaration(&mut self, arg: &AssignDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if let Ok(x) = symbol_table::resolve(arg.hierarchical_identifier.as_ref()) {
-                let full_path = x.full_path;
+        if let HandlerPoint::After = self.point {
+            if let Ok(path) = VarRefPath::try_from(arg.hierarchical_identifier.as_ref()) {
+                let full_path = path.full_path();
                 if can_assign(&full_path) {
-                    // selected partially
-                    let partial = !arg
-                        .hierarchical_identifier
-                        .hierarchical_identifier_list
-                        .is_empty()
-                        | arg
-                            .hierarchical_identifier
-                            .hierarchical_identifier_list0
-                            .iter()
-                            .any(|x| !x.hierarchical_identifier_list0_list.is_empty());
-
                     self.assign_position.push(AssignPositionType::Declaration {
                         token: arg.assign.assign_token.token,
                         r#type: AssignDeclarationType::Assign,
                     });
-                    symbol_table::add_assign(full_path, &self.assign_position, partial);
-                    self.assign_position.pop();
+                    self.add_assign(&path);
                 } else {
                     let token = &arg
                         .hierarchical_identifier
                         .identifier
                         .identifier_token
                         .token;
+                    let symbol = symbol_table::get(*full_path.last().unwrap()).unwrap();
                     self.errors.push(AnalyzerError::invalid_assignment(
                         &token.to_string(),
                         self.text,
-                        &x.found.kind.to_kind_name(),
+                        &symbol.kind.to_kind_name(),
                         &arg.hierarchical_identifier.as_ref().into(),
                     ));
                 }
@@ -386,10 +449,10 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
         if let HandlerPoint::Before = self.point {
             if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
                 if let SymbolKind::Instance(ref x) = symbol.found.kind {
-                    // get port property
                     let mut ports = HashMap::new();
                     let mut port_unknown = false;
                     let mut sv_instance = false;
+
                     if let Ok(x) = symbol_table::resolve((&x.type_name, &symbol.found.namespace)) {
                         match x.found.kind {
                             SymbolKind::Module(ref x) => {
@@ -415,91 +478,84 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
 
                     for (token, targets) in &x.connects {
                         for target in targets {
-                            if !target.is_empty() {
-                                if let Ok(symbol) =
-                                    symbol_table::resolve((&target.path(), &symbol.found.namespace))
-                                {
-                                    // Check assignment from output port
-                                    let dir_output = if let Some(port) = ports.get(&token.text) {
-                                        matches!(
-                                            port.direction,
-                                            Direction::Ref | Direction::Inout | Direction::Output
-                                        )
-                                    } else {
-                                        false
-                                    };
+                            if let Ok(path) =
+                                VarRefPath::try_from((target, &symbol.found.namespace))
+                            {
+                                let full_path = path.full_path();
+                                let symbol = symbol_table::get(*full_path.last().unwrap()).unwrap();
 
-                                    if dir_output | port_unknown {
-                                        self.assign_position.push(AssignPositionType::Connect {
-                                            token: *token,
-                                            maybe: port_unknown,
-                                        });
-                                        let partial = target.is_partial();
-                                        symbol_table::add_assign(
-                                            symbol.full_path,
-                                            &self.assign_position,
-                                            partial,
-                                        );
-                                        self.assign_position.pop();
-                                    }
+                                // Check assignment from output port
+                                let dir_output = if let Some(port) = ports.get(&token.text) {
+                                    matches!(
+                                        port.direction,
+                                        Direction::Ref | Direction::Inout | Direction::Output
+                                    )
+                                } else {
+                                    false
+                                };
 
-                                    // Check assignment of clock/reset type
-                                    let (is_clock, is_reset) =
-                                        if let Some(port) = ports.get(&token.text) {
-                                            if let Some(x) = &port.r#type {
-                                                (x.kind.is_clock(), x.kind.is_reset())
-                                            } else {
-                                                (false, false)
-                                            }
+                                if dir_output | port_unknown {
+                                    self.assign_position.push(AssignPositionType::Connect {
+                                        token: *token,
+                                        maybe: port_unknown,
+                                    });
+                                    self.add_assign(&path);
+                                }
+
+                                // Check assignment of clock/reset type
+                                let (is_clock, is_reset) =
+                                    if let Some(port) = ports.get(&token.text) {
+                                        if let Some(x) = &port.r#type {
+                                            (x.kind.is_clock(), x.kind.is_reset())
                                         } else {
                                             (false, false)
-                                        };
-
-                                    if is_clock && !symbol.found.kind.is_clock() {
-                                        self.errors.push(AnalyzerError::mismatch_type(
-                                            &token.text.to_string(),
-                                            "clock type",
-                                            "non-clock type",
-                                            self.text,
-                                            &token.into(),
-                                        ));
-                                    }
-
-                                    if is_reset && !symbol.found.kind.is_reset() {
-                                        self.errors.push(AnalyzerError::mismatch_type(
-                                            &token.text.to_string(),
-                                            "reset type",
-                                            "non-reset type",
-                                            self.text,
-                                            &token.into(),
-                                        ));
-                                    }
-
-                                    // Check implicit reset to SV instance
-                                    let is_implicit_reset = match &symbol.found.kind {
-                                        SymbolKind::Port(x) => {
-                                            if let Some(x) = &x.r#type {
-                                                x.kind == TypeKind::Reset
-                                            } else {
-                                                false
-                                            }
                                         }
-                                        SymbolKind::Variable(x) => x.r#type.kind == TypeKind::Reset,
-                                        _ => false,
+                                    } else {
+                                        (false, false)
                                     };
 
-                                    if sv_instance && is_implicit_reset {
-                                        self.errors.push(AnalyzerError::sv_with_implicit_reset(
-                                            self.text,
-                                            &token.into(),
-                                        ));
+                                if is_clock && !symbol.kind.is_clock() {
+                                    self.errors.push(AnalyzerError::mismatch_type(
+                                        &token.text.to_string(),
+                                        "clock type",
+                                        "non-clock type",
+                                        self.text,
+                                        &token.into(),
+                                    ));
+                                }
+
+                                if is_reset && !symbol.kind.is_reset() {
+                                    self.errors.push(AnalyzerError::mismatch_type(
+                                        &token.text.to_string(),
+                                        "reset type",
+                                        "non-reset type",
+                                        self.text,
+                                        &token.into(),
+                                    ));
+                                }
+
+                                // Check implicit reset to SV instance
+                                let is_implicit_reset = match &symbol.kind {
+                                    SymbolKind::Port(x) => {
+                                        if let Some(x) = &x.r#type {
+                                            x.kind == TypeKind::Reset
+                                        } else {
+                                            false
+                                        }
                                     }
+                                    SymbolKind::Variable(x) => x.r#type.kind == TypeKind::Reset,
+                                    _ => false,
+                                };
+
+                                if sv_instance && is_implicit_reset {
+                                    self.errors.push(AnalyzerError::sv_with_implicit_reset(
+                                        self.text,
+                                        &token.into(),
+                                    ));
                                 }
                             }
                         }
                     }
-
-                    self.assign_position.pop();
                 }
             }
         }
@@ -509,12 +565,16 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
     fn function_declaration(&mut self, arg: &FunctionDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
+                self.affiliation.push(VarRefAffiliation::Function {
+                    token: arg.function.function_token.token,
+                });
                 self.assign_position.push(AssignPositionType::Declaration {
                     token: arg.function.function_token.token,
                     r#type: AssignDeclarationType::Function,
                 });
             }
             HandlerPoint::After => {
+                self.affiliation.pop();
                 self.assign_position.pop();
             }
         }
@@ -549,13 +609,40 @@ impl<'a> VerylGrammarTrait for CheckAssignment<'a> {
 
     fn generate_for_declaration(&mut self, arg: &GenerateForDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            if let Ok(x) = symbol_table::resolve(arg.identifier.as_ref()) {
+            if let Ok(path) = VarRefPath::try_from(arg.identifier.as_ref()) {
                 self.assign_position.push(AssignPositionType::Statement {
                     token: arg.r#for.for_token.token,
                     resettable: false,
                 });
-                symbol_table::add_assign(x.full_path, &self.assign_position, false);
-                self.assign_position.pop();
+                self.add_assign(&path);
+            }
+        }
+        Ok(())
+    }
+
+    fn module_declaration(&mut self, arg: &ModuleDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.affiliation.push(VarRefAffiliation::Module {
+                    token: arg.module.module_token.token,
+                });
+            }
+            HandlerPoint::After => {
+                self.affiliation.pop();
+            }
+        }
+        Ok(())
+    }
+
+    fn interface_declaration(&mut self, arg: &InterfaceDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.affiliation.push(VarRefAffiliation::Interface {
+                    token: arg.interface.interface_token.token,
+                });
+            }
+            HandlerPoint::After => {
+                self.affiliation.pop();
             }
         }
         Ok(())

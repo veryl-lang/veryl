@@ -1,4 +1,3 @@
-pub mod check_assignment;
 pub mod check_attribute;
 pub mod check_clock_domain;
 pub mod check_clock_reset;
@@ -15,6 +14,7 @@ pub mod check_proto;
 pub mod check_statement;
 pub mod check_type;
 pub mod check_unsafe;
+pub mod check_var_ref;
 pub mod create_reference;
 pub mod create_symbol_table;
 pub mod create_type_dag;
@@ -34,6 +34,7 @@ use check_proto::*;
 use check_statement::*;
 use check_type::*;
 use check_unsafe::*;
+use check_var_ref::*;
 use create_reference::*;
 use create_symbol_table::*;
 
@@ -41,7 +42,7 @@ use crate::analyzer_error::AnalyzerError;
 use veryl_metadata::{Build, Lint};
 use veryl_parser::veryl_walker::Handler;
 
-use self::{check_assignment::CheckAssignment, create_type_dag::CreateTypeDag};
+use self::create_type_dag::CreateTypeDag;
 
 pub struct Pass1Handlers<'a> {
     check_attribute: CheckAttribute<'a>,
@@ -100,7 +101,7 @@ pub struct Pass2Handlers<'a> {
     check_modport: CheckModport<'a>,
     check_function: CheckFunction<'a>,
     check_msb_lsb: CheckMsbLsb<'a>,
-    check_assignment: CheckAssignment<'a>,
+    check_var_ref: CheckVarRef<'a>,
     check_clock_reset: CheckClockReset<'a>,
     create_reference: CreateReference<'a>,
     create_type_dag: CreateTypeDag<'a>,
@@ -117,7 +118,7 @@ impl<'a> Pass2Handlers<'a> {
             check_modport: CheckModport::new(text),
             check_function: CheckFunction::new(text),
             check_msb_lsb: CheckMsbLsb::new(text),
-            check_assignment: CheckAssignment::new(text),
+            check_var_ref: CheckVarRef::new(text),
             check_clock_reset: CheckClockReset::new(text),
             create_reference: CreateReference::new(text),
             create_type_dag: CreateTypeDag::new(text),
@@ -134,7 +135,7 @@ impl<'a> Pass2Handlers<'a> {
             &mut self.check_modport as &mut dyn Handler,
             &mut self.check_function as &mut dyn Handler,
             &mut self.check_msb_lsb as &mut dyn Handler,
-            &mut self.check_assignment as &mut dyn Handler,
+            &mut self.check_var_ref as &mut dyn Handler,
             &mut self.check_clock_reset as &mut dyn Handler,
             &mut self.create_reference as &mut dyn Handler,
             &mut self.create_type_dag as &mut dyn Handler,
@@ -151,7 +152,7 @@ impl<'a> Pass2Handlers<'a> {
         ret.append(&mut self.check_modport.errors);
         ret.append(&mut self.check_function.errors);
         ret.append(&mut self.check_msb_lsb.errors);
-        ret.append(&mut self.check_assignment.errors);
+        ret.append(&mut self.check_var_ref.errors);
         ret.append(&mut self.check_clock_reset.errors);
         ret.append(&mut self.create_reference.errors);
         ret.append(&mut self.create_type_dag.errors);

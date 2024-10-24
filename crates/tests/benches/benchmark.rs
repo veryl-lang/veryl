@@ -36,7 +36,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             analyzer.analyze_pass1(prj, black_box(&text), &"", &parser.veryl);
             Analyzer::analyze_post_pass1();
             analyzer.analyze_pass2(prj, black_box(&text), &"", &parser.veryl);
-            //analyzer.analyze_pass3(prj, black_box(&text), &"", &parser.veryl);
+            analyzer.analyze_pass3(prj, black_box(&text), &"", &parser.veryl);
         })
     });
     group.bench_function("format", |b| {

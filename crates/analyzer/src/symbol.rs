@@ -957,7 +957,7 @@ impl fmt::Display for ClockDomain {
 #[derive(Debug, Clone)]
 pub struct VariableProperty {
     pub r#type: Type,
-    pub affiniation: VariableAffiniation,
+    pub affiliation: VariableAffiliation,
     pub prefix: Option<String>,
     pub suffix: Option<String>,
     pub clock_domain: ClockDomain,
@@ -965,7 +965,7 @@ pub struct VariableProperty {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VariableAffiniation {
+pub enum VariableAffiliation {
     Module,
     Intarface,
     Package,
