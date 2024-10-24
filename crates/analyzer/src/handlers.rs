@@ -14,6 +14,7 @@ pub mod check_number;
 pub mod check_proto;
 pub mod check_statement;
 pub mod check_type;
+pub mod check_unassigned;
 pub mod check_unsafe;
 pub mod create_reference;
 pub mod create_symbol_table;
@@ -33,6 +34,7 @@ use check_number::*;
 use check_proto::*;
 use check_statement::*;
 use check_type::*;
+use check_unassigned::*;
 use check_unsafe::*;
 use create_reference::*;
 use create_symbol_table::*;
@@ -159,6 +161,28 @@ impl<'a> Pass2Handlers<'a> {
         ret.append(&mut self.check_clock_domain.errors);
         ret.append(&mut self.check_proto.errors);
         ret.append(&mut self.check_type.errors);
+        ret
+    }
+}
+
+pub struct Pass3Handlers<'a> {
+    check_unassigned: CheckUnassigned<'a>,
+}
+
+impl<'a> Pass3Handlers<'a> {
+    pub fn new(text: &'a str, _build_opt: &'a Build, _lint_opt: &'a Lint) -> Self {
+        Self {
+            check_unassigned: CheckUnassigned::new(text),
+        }
+    }
+
+    pub fn get_handlers(&mut self) -> Vec<&mut dyn Handler> {
+        vec![&mut self.check_unassigned as &mut dyn Handler]
+    }
+
+    pub fn get_errors(&mut self) -> Vec<AnalyzerError> {
+        let mut ret = Vec::new();
+        ret.append(&mut self.check_unassigned.errors);
         ret
     }
 }

@@ -171,6 +171,9 @@ impl Preprocessor for Veryl {
                                         errors.append(
                                             &mut analyzer.analyze_pass3(prj, &x, "", &ret.veryl),
                                         );
+                                        errors.append(
+                                            &mut analyzer.analyze_pass4(prj, &x, "", &ret.veryl),
+                                        );
 
                                         if !errors.is_empty() {
                                             eprintln!("veryl analyze failed : {path}:{line}:{col}");

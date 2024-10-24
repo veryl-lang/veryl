@@ -83,6 +83,11 @@ impl CmdCheck {
             check_error = check_error.append(&mut errors).check_err()?;
         }
 
+        for (path, input, parser, analyzer) in &contexts {
+            let mut errors = analyzer.analyze_pass4(&path.prj, input, &path.src, &parser.veryl);
+            check_error = check_error.append(&mut errors).check_err()?;
+        }
+
         let _ = check_error.check_all()?;
         Ok(true)
     }

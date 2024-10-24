@@ -43,6 +43,10 @@ impl CmdDump {
             analyzer.analyze_pass3(&path.prj, input, &path.src, &parser.veryl);
         }
 
+        for (path, input, parser, analyzer) in &contexts {
+            analyzer.analyze_pass4(&path.prj, input, &path.src, &parser.veryl);
+        }
+
         if self.opt.symbol_table {
             println!("{}", veryl_analyzer::symbol_table::dump());
         }

@@ -16,6 +16,7 @@ fn analyze(code: &str) -> Vec<AnalyzerError> {
     Analyzer::analyze_post_pass1();
     errors.append(&mut analyzer.analyze_pass2(&"prj", &code, &"", &parser.veryl));
     errors.append(&mut analyzer.analyze_pass3(&"prj", &code, &"", &parser.veryl));
+    errors.append(&mut analyzer.analyze_pass4(&"prj", &code, &"", &parser.veryl));
     dbg!(&errors);
     errors
 }
@@ -1872,6 +1873,60 @@ fn unassign_variable() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
+
+    let code = r#"
+    module ModuleA {
+        var a: logic;
+        var b: logic;
+        always_comb {
+            b = a;
+            a = 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
+
+    let code = r#"
+    module ModuleA {
+        var a: logic;
+        always_comb {
+            a = a;
+            a = 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
+
+    let code = r#"
+    module ModuleA {
+        var a: logic;
+        always_comb {
+            let b: logic = 1;
+            a = b;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        var a: logic;
+        always_comb {
+            for i: u32 in 0..1 {
+                a = i;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

@@ -62,6 +62,10 @@ mod analyzer {
         let errors = analyzer.analyze_pass3(&prj, &input, &file, &ret.veryl);
         dbg!(&errors);
         assert!(errors.is_empty());
+
+        let errors = analyzer.analyze_pass4(&prj, &input, &file, &ret.veryl);
+        dbg!(&errors);
+        assert!(errors.is_empty());
     }
 
     include!(concat!(env!("OUT_DIR"), "/test.rs"));

@@ -58,6 +58,11 @@ impl CmdBuild {
             check_error = check_error.append(&mut errors).check_err()?;
         }
 
+        for (path, input, parser, analyzer) in &contexts {
+            let mut errors = analyzer.analyze_pass4(&path.prj, input, &path.src, &parser.veryl);
+            check_error = check_error.append(&mut errors).check_err()?;
+        }
+
         let temp_dir = if let Target::Bundle { .. } = &metadata.build.target {
             Some(TempDir::new().into_diagnostic()?)
         } else {
