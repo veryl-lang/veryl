@@ -58,6 +58,16 @@ impl Namespace {
         }
         Self { paths }
     }
+
+    pub fn strip_prefix(&mut self, x: &Namespace) {
+        let mut paths = vec![];
+        for (i, p) in self.paths.iter().enumerate() {
+            if x.paths.get(i) != Some(p) {
+                paths.push(*p);
+            }
+        }
+        self.paths = paths;
+    }
 }
 
 impl Default for Namespace {

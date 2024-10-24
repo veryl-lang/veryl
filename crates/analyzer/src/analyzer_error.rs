@@ -718,6 +718,23 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(unresolvable_generic_argument),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unresolvable_generic_argument")
+    )]
+    #[error("{identifier} can't be resolved from the definition of generics")]
+    UnresolvableGenericArgument {
+        identifier: String,
+        #[source_code]
+        input: NamedSource<String>,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        #[label("Definition")]
+        definition_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(unknown_attribute),
         help(""),
         url(
@@ -1462,6 +1479,20 @@ impl AnalyzerError {
             identifier: identifier.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
+        }
+    }
+
+    pub fn unresolvable_generic_argument(
+        identifier: &str,
+        source: &str,
+        token: &TokenRange,
+        definition_token: &TokenRange,
+    ) -> Self {
+        AnalyzerError::UnresolvableGenericArgument {
+            identifier: identifier.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+            definition_location: definition_token.into(),
         }
     }
 
