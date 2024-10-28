@@ -31,7 +31,7 @@ clap_complete   = "4.5"
 console         = "0.15.8"
 fern            = "0.7.0"
 futures         = {workspace = true}
-handlebars      = "6.1"
+handlebars      = "6.2"
 log             = {workspace = true}
 once_cell       = {workspace = true}
 mdbook          = {workspace = true}
