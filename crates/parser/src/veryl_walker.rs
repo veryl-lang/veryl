@@ -1533,10 +1533,31 @@ pub trait VerylWalker {
         before!(self, statement_block, arg);
         self.l_brace(&arg.l_brace);
         for x in &arg.statement_block_list {
-            self.statement_block_item(&x.statement_block_item);
+            self.statement_block_group(&x.statement_block_group);
         }
         self.r_brace(&arg.r_brace);
         after!(self, statement_block, arg);
+    }
+
+    /// Semantic action for non-terminal 'StatementBlockGroup'
+    fn statement_block_group(&mut self, arg: &StatementBlockGroup) {
+        before!(self, statement_block_group, arg);
+        for x in &arg.statement_block_group_list {
+            self.attribute(&x.attribute);
+        }
+        match arg.statement_block_group_group.as_ref() {
+            StatementBlockGroupGroup::LBraceStatementBlockGroupGroupListRBrace(x) => {
+                self.l_brace(&x.l_brace);
+                for x in &x.statement_block_group_group_list {
+                    self.statement_block_group(&x.statement_block_group);
+                }
+                self.r_brace(&x.r_brace);
+            }
+            StatementBlockGroupGroup::StatementBlockItem(x) => {
+                self.statement_block_item(&x.statement_block_item);
+            }
+        }
+        after!(self, statement_block_group, arg);
     }
 
     /// Semantic action for non-terminal 'StatementOrVarDeclaration'

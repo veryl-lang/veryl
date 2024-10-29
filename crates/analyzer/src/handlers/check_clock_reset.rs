@@ -98,11 +98,11 @@ impl<'a> VerylGrammarTrait for CheckClockReset<'a> {
                 let if_reset_required = if let Some(ref x) = arg.always_ff_declaration_opt {
                     if x.alwayf_ff_event_list.alwayf_ff_event_list_opt.is_some() {
                         if let Some(x) = arg.statement_block.statement_block_list.first() {
-                            match &*x.statement_block_item {
-                                StatementBlockItem::Statement(x) => {
-                                    !matches!(*x.statement, Statement::IfResetStatement(_))
-                                }
-                                _ => true,
+                            let x: Vec<_> = x.statement_block_group.as_ref().into();
+                            if let Some(StatementBlockItem::Statement(x)) = x.first() {
+                                !matches!(*x.statement, Statement::IfResetStatement(_))
+                            } else {
+                                true
                             }
                         } else {
                             true

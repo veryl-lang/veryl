@@ -555,7 +555,9 @@ ClockDomain: BackQuote Identifier;
 // Statement
 // ----------------------------------------------------------------------------
 
-StatementBlock: LBrace { StatementBlockItem } RBrace;
+StatementBlock: LBrace { StatementBlockGroup } RBrace;
+
+StatementBlockGroup: { Attribute } ( LBrace { StatementBlockGroup } RBrace | StatementBlockItem );
 
 StatementBlockItem: VarDeclaration | LetStatement | Statement;
 

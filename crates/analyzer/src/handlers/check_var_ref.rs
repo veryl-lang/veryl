@@ -1,6 +1,6 @@
 use crate::analyzer_error::AnalyzerError;
-use crate::attribute::AllowItem;
 use crate::attribute::Attribute as Attr;
+use crate::attribute::{AllowItem, CondTypeItem};
 use crate::attribute_table;
 use crate::symbol::{Direction, SymbolId, SymbolKind, TypeKind};
 use crate::symbol_table;
@@ -11,6 +11,7 @@ use crate::var_ref::{
 };
 use std::collections::HashMap;
 use veryl_parser::veryl_grammar_trait::*;
+use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
@@ -92,6 +93,19 @@ fn can_assign(full_path: &[SymbolId]) -> bool {
         }
     }
 
+    false
+}
+
+fn has_cond_type(token: &Token) -> bool {
+    let mut attrs = attribute_table::get(token);
+    attrs.reverse();
+    for attr in attrs {
+        match attr {
+            Attr::CondType(CondTypeItem::None) => return false,
+            Attr::CondType(_) => return true,
+            _ => (),
+        }
+    }
     false
 }
 
@@ -248,7 +262,9 @@ impl<'a> VerylGrammarTrait for CheckVarRef<'a> {
             HandlerPoint::Before => {
                 self.branch_index = 0;
                 let branches = 1 + arg.if_statement_list.len() + arg.if_statement_opt.iter().len();
-                let has_default = arg.if_statement_opt.is_some();
+                let has_explicit_default = arg.if_statement_opt.is_some();
+                let has_cond_type = has_cond_type(&arg.r#if.if_token.token);
+                let has_default = has_explicit_default | has_cond_type;
                 self.assign_position
                     .push(AssignPositionType::StatementBranch {
                         token: arg.r#if.if_token.token,
@@ -279,7 +295,9 @@ impl<'a> VerylGrammarTrait for CheckVarRef<'a> {
                 self.branch_index = 0;
                 let branches =
                     1 + arg.if_reset_statement_list.len() + arg.if_reset_statement_opt.iter().len();
-                let has_default = arg.if_reset_statement_opt.is_some();
+                let has_explicit_default = arg.if_reset_statement_opt.is_some();
+                let has_cond_type = has_cond_type(&arg.if_reset.if_reset_token.token);
+                let has_default = has_explicit_default | has_cond_type;
                 let allow_missing_reset_statement = attribute_table::contains(
                     &arg.if_reset.if_reset_token.token,
                     Attr::Allow(AllowItem::MissingResetStatement),
@@ -326,12 +344,14 @@ impl<'a> VerylGrammarTrait for CheckVarRef<'a> {
             HandlerPoint::Before => {
                 self.branch_index = 0;
                 let branches = arg.case_statement_list.len();
-                let has_default = arg.case_statement_list.iter().any(|x| {
+                let has_explicit_default = arg.case_statement_list.iter().any(|x| {
                     matches!(
                         x.case_item.case_item_group.as_ref(),
                         CaseItemGroup::Defaul(_)
                     )
                 });
+                let has_cond_type = has_cond_type(&arg.case.case_token.token);
+                let has_default = has_explicit_default | has_cond_type;
                 self.assign_position
                     .push(AssignPositionType::StatementBranch {
                         token: arg.case.case_token.token,
