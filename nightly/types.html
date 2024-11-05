@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>countones</title>
+        <title>types</title>
 
 
         <!-- Custom HTML head -->
@@ -88,7 +88,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="index.html">std</a></li><li class="chapter-item expanded "><div>0.0.1</div></li><li class="chapter-item expanded affix "><li class="spacer"></li><li class="chapter-item expanded "><a href="modules.html">Modules</a><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="async_fifo.html">async_fifo::&lt;S&gt;</a></li><li class="chapter-item "><a href="async_handshake.html">async_handshake::&lt;S&gt;</a></li><li class="chapter-item "><a href="binary_decoder.html">binary_decoder</a></li><li class="chapter-item "><a href="binary_encoder.html">binary_encoder</a></li><li class="chapter-item "><a href="counter.html">counter</a></li><li class="chapter-item expanded "><a href="countones.html" class="active">countones</a></li><li class="chapter-item "><a href="delay.html">delay</a></li><li class="chapter-item "><a href="edge_detector.html">edge_detector</a></li><li class="chapter-item "><a href="fifo.html">fifo</a></li><li class="chapter-item "><a href="gray_counter.html">gray_counter</a></li><li class="chapter-item "><a href="gray_decoder.html">gray_decoder</a></li><li class="chapter-item "><a href="gray_encoder.html">gray_encoder</a></li><li class="chapter-item "><a href="lfsr_galois.html">lfsr_galois</a></li><li class="chapter-item "><a href="onehot.html">onehot</a></li><li class="chapter-item "><a href="ram.html">ram</a></li></ol></li><li class="chapter-item expanded "><a href="proto_modules.html">Module Prototypes</a><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="synchronizer.html">synchronizer</a></li></ol></li><li class="chapter-item expanded "><a href="interfaces.html">Interfaces</a></li><li class="chapter-item expanded "><a href="packages.html">Packages</a><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="types.html">types</a></li></ol></li></ol>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="index.html">std</a></li><li class="chapter-item expanded "><div>0.0.1</div></li><li class="chapter-item expanded affix "><li class="spacer"></li><li class="chapter-item expanded "><a href="modules.html">Modules</a><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="async_fifo.html">async_fifo::&lt;S&gt;</a></li><li class="chapter-item "><a href="async_handshake.html">async_handshake::&lt;S&gt;</a></li><li class="chapter-item "><a href="binary_decoder.html">binary_decoder</a></li><li class="chapter-item "><a href="binary_encoder.html">binary_encoder</a></li><li class="chapter-item "><a href="counter.html">counter</a></li><li class="chapter-item "><a href="countones.html">countones</a></li><li class="chapter-item "><a href="delay.html">delay</a></li><li class="chapter-item "><a href="edge_detector.html">edge_detector</a></li><li class="chapter-item "><a href="fifo.html">fifo</a></li><li class="chapter-item "><a href="gray_counter.html">gray_counter</a></li><li class="chapter-item "><a href="gray_decoder.html">gray_decoder</a></li><li class="chapter-item "><a href="gray_encoder.html">gray_encoder</a></li><li class="chapter-item "><a href="lfsr_galois.html">lfsr_galois</a></li><li class="chapter-item "><a href="onehot.html">onehot</a></li><li class="chapter-item "><a href="ram.html">ram</a></li></ol></li><li class="chapter-item expanded "><a href="proto_modules.html">Module Prototypes</a><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="synchronizer.html">synchronizer</a></li></ol></li><li class="chapter-item expanded "><a href="interfaces.html">Interfaces</a></li><li class="chapter-item expanded "><a href="packages.html">Packages</a><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item expanded "><a href="types.html" class="active">types</a></li></ol></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -173,48 +173,17 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h2 id="countones"><a class="header" href="#countones">countones</a></h2>
-<h3 id="parameters"><a class="header" href="#parameters">Parameters</a></h3>
-<hr />
-<table class="table_list">
-<tbody>
-<tr>
-    <th class="table_list_item">W</th>
-    <td class="table_list_item"><span class="hljs-type">u32</span></td>
-    <td class="table_list_item"></td>
-</tr>
-</tbody>
-</table>
-<h3 id="ports"><a class="header" href="#ports">Ports</a></h3>
-<hr />
-<table class="table_list">
-<tbody>
-<tr>
-    <th class="table_list_item">i_data</th>
-    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<W></span></td>
-    <td class="table_list_item"></td>
-</tr>
-<tr>
-    <th class="table_list_item">o_ones</th>
-    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<CLOGW></span></td>
-    <td class="table_list_item"></td>
-</tr>
-</tbody>
-</table>
+                        <h2 id="types"><a class="header" href="#types">types</a></h2>
+<p>A package for pre-defined types</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="counter.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="packages.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="delay.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
-                                <i class="fa fa-angle-right"></i>
-                            </a>
 
                         <div style="clear: both"></div>
                     </nav>
@@ -222,13 +191,10 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="counter.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="packages.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="delay.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
-                        <i class="fa fa-angle-right"></i>
-                    </a>
             </nav>
 
         </div>
