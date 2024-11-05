@@ -1,0 +1,131 @@
+/// A package for pre-defined types
+pub package types {
+    type ul8  = logic<8> ; /// 8 bits unsigned logic vector
+    type ul16 = logic<16>; /// 16 bits unsigned logic vector
+    type ul32 = logic<32>; /// 32 bits unsigned logic vector
+    type ul64 = logic<64>; /// 64 bits unsigned logic vector
+
+    type il8  = signed logic<8> ; /// 8 bits signed logic vector
+    type il16 = signed logic<16>; /// 16 bits signed logic vector
+    type il32 = signed logic<32>; /// 32 bits signed logic vector
+    type il64 = signed logic<64>; /// 64 bits signed logic vector
+
+    type ub8  = bit<8> ; /// 8 bits unsigned bit vector
+    type ub16 = bit<16>; /// 16 bits unsigned bit vector
+    type ub32 = bit<32>; /// 32 bits unsigned bit vector
+    type ub64 = bit<64>; /// 64 bits unsigned bit vector
+
+    type ib8  = signed bit<8> ; /// 8 bits signed bit vector
+    type ib16 = signed bit<16>; /// 16 bits signed bit vector
+    type ib32 = signed bit<32>; /// 32 bits signed bit vector
+    type ib64 = signed bit<64>; /// 64 bits signed bit vector
+}
+
+#[test(test_std_types_pkg)]
+embed (inline) sv{{{
+module test_std_types_pkg;
+    std_types::ul8  a;
+    std_types::ul16 b;
+    std_types::ul32 c;
+    std_types::ul64 d;
+
+    std_types::il8  e;
+    std_types::il16 f;
+    std_types::il32 g;
+    std_types::il64 h;
+
+    std_types::ub8  i;
+    std_types::ub16 j;
+    std_types::ub32 k;
+    std_types::ub64 l;
+
+    std_types::ib8  m;
+    std_types::ib16 n;
+    std_types::ib32 o;
+    std_types::ib64 p;
+
+    `define test_unsigned_logic(VARIABLE, WIDTH) \
+    begin \
+        assert($bits(VARIABLE) == WIDTH) \
+        else $error("error detected"); \
+        VARIABLE = '0; \
+        VARIABLE[WIDTH-1] = '1; \
+        assert(VARIABLE > 0) \
+        else $error("error detected"); \
+        `ifndef VERILATOR \
+            VARIABLE = 'x; \
+            assert(VARIABLE === 'x) \
+            else $error("error detected"); \
+        `endif \
+    end
+
+    `define test_signed_logic(VARIABLE, WIDTH) \
+    begin \
+        assert($bits(VARIABLE) == WIDTH) \
+        else $error("error detected"); \
+        VARIABLE = '0; \
+        VARIABLE[WIDTH-1] = '1; \
+        assert(VARIABLE < 0) \
+        else $error("error detected"); \
+        `ifndef VERILATOR \
+            VARIABLE = 'x; \
+            assert(VARIABLE === 'x) \
+            else $error("error detected"); \
+        `endif \
+    end
+
+    `define test_unsigned_bit(VARIABLE, WIDTH) \
+    begin \
+        assert($bits(VARIABLE) == WIDTH) \
+        else $error("error detected"); \
+        VARIABLE = '0; \
+        VARIABLE[WIDTH-1] = '1; \
+        assert(VARIABLE > 0) \
+        else $error("error detected"); \
+        `ifndef VERILATOR \
+            VARIABLE = 'x; \
+            assert(VARIABLE === '0) \
+            else $error("error detected"); \
+        `endif \
+    end
+
+    `define test_signed_bit(VARIABLE, WIDTH) \
+    begin \
+        assert($bits(VARIABLE) == WIDTH) \
+        else $error("error detected"); \
+        VARIABLE = '0; \
+        VARIABLE[WIDTH-1] = '1; \
+        assert(VARIABLE < 0) \
+        else $error("error detected"); \
+        `ifndef VERILATOR \
+            VARIABLE = 'x; \
+            assert(VARIABLE === '0) \
+            else $error("error detected"); \
+        `endif \
+    end
+
+    initial begin
+        `test_unsigned_logic(a, 8)
+        `test_unsigned_logic(b, 16)
+        `test_unsigned_logic(c, 32)
+        `test_unsigned_logic(d, 64)
+
+        `test_signed_logic(e, 8)
+        `test_signed_logic(f, 16)
+        `test_signed_logic(g, 32)
+        `test_signed_logic(h, 64)
+
+        `test_unsigned_bit(i, 8)
+        `test_unsigned_bit(j, 16)
+        `test_unsigned_bit(k, 32)
+        `test_unsigned_bit(l, 64)
+
+        `test_signed_bit(m, 8)
+        `test_signed_bit(n, 16)
+        `test_signed_bit(o, 32)
+        `test_signed_bit(p, 64)
+
+        $finish;
+    end
+endmodule
+}}}
