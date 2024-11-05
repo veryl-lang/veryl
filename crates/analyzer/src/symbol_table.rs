@@ -1,8 +1,8 @@
-use crate::assign::{Assign, AssignPath, AssignPosition};
 use crate::evaluator::Evaluated;
 use crate::namespace::Namespace;
 use crate::symbol::{DocComment, Symbol, SymbolId, SymbolKind, TypeKind};
 use crate::symbol_path::{SymbolPath, SymbolPathNamespace};
+use crate::var_ref::{Assign, VarRef, VarRefAffiliation};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
@@ -48,7 +48,7 @@ pub struct SymbolTable {
     name_table: HashMap<StrId, Vec<SymbolId>>,
     symbol_table: HashMap<SymbolId, Symbol>,
     project_local_table: HashMap<StrId, HashMap<StrId, StrId>>,
-    assign_list: Vec<Assign>,
+    var_ref_list: HashMap<VarRefAffiliation, Vec<VarRef>>,
     import_list: Vec<Import>,
 }
 
@@ -330,16 +330,18 @@ impl SymbolTable {
     }
 
     pub fn dump_assign_list(&self) -> String {
+        let assign_list = self.get_assign_list();
+
         let mut ret = "AssignList [\n".to_string();
 
         let mut path_width = 0;
         let mut pos_width = 0;
-        for assign in &self.assign_list {
+        for assign in &assign_list {
             path_width = path_width.max(assign.path.to_string().len());
             pos_width = pos_width.max(assign.position.to_string().len());
         }
 
-        for assign in &self.assign_list {
+        for assign in &assign_list {
             let last_token = assign.position.0.last().unwrap().token();
 
             ret.push_str(&format!(
@@ -452,22 +454,23 @@ impl SymbolTable {
         self.project_local_table.get(&prj).cloned()
     }
 
-    pub fn add_assign(
-        &mut self,
-        full_path: Vec<SymbolId>,
-        position: &AssignPosition,
-        partial: bool,
-    ) {
-        let assign = Assign {
-            path: AssignPath(full_path),
-            position: position.clone(),
-            partial,
-        };
-        self.assign_list.push(assign);
+    pub fn add_var_ref(&mut self, var_ref: &VarRef) {
+        self.var_ref_list
+            .entry(var_ref.affiliation)
+            .and_modify(|x| x.push(var_ref.clone()))
+            .or_insert(vec![var_ref.clone()]);
+    }
+
+    pub fn get_var_ref_list(&self) -> HashMap<VarRefAffiliation, Vec<VarRef>> {
+        self.var_ref_list.clone()
     }
 
     pub fn get_assign_list(&self) -> Vec<Assign> {
-        self.assign_list.clone()
+        self.var_ref_list
+            .values()
+            .flat_map(|l| l.iter().filter(|r| r.is_assign()))
+            .map(Assign::new)
+            .collect()
     }
 
     pub fn clear(&mut self) {
@@ -1070,8 +1073,12 @@ pub fn get_project_local(prj: StrId) -> Option<HashMap<StrId, StrId>> {
     SYMBOL_TABLE.with(|f| f.borrow().get_project_local(prj))
 }
 
-pub fn add_assign(full_path: Vec<SymbolId>, position: &AssignPosition, partial: bool) {
-    SYMBOL_TABLE.with(|f| f.borrow_mut().add_assign(full_path, position, partial))
+pub fn add_var_ref(var_ref: &VarRef) {
+    SYMBOL_TABLE.with(|f| f.borrow_mut().add_var_ref(var_ref))
+}
+
+pub fn get_var_ref_list() -> HashMap<VarRefAffiliation, Vec<VarRef>> {
+    SYMBOL_TABLE.with(|f| f.borrow_mut().get_var_ref_list())
 }
 
 pub fn get_assign_list() -> Vec<Assign> {

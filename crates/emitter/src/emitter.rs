@@ -6,7 +6,7 @@ use veryl_analyzer::evaluator::{Evaluated, Evaluator};
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::TypeModifier as SymTypeModifier;
 use veryl_analyzer::symbol::{
-    GenericMap, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiniation,
+    GenericMap, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiliation,
 };
 use veryl_analyzer::symbol_path::{GenericSymbolPath, SymbolPath};
 use veryl_analyzer::symbol_table;
@@ -1633,8 +1633,8 @@ impl VerylWalker for Emitter {
             if let Ok(lhs_symbol) = symbol_table::resolve(lhs.scoped_identifier.as_ref()) {
                 match lhs_symbol.found.kind {
                     SymbolKind::Variable(x) => !matches!(
-                        x.affiniation,
-                        VariableAffiniation::StatementBlock | VariableAffiniation::Function
+                        x.affiliation,
+                        VariableAffiliation::StatementBlock | VariableAffiliation::Function
                     ),
                     _ => true,
                 }

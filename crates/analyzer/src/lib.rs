@@ -1,6 +1,5 @@
 pub mod analyzer;
 pub mod analyzer_error;
-pub mod assign;
 pub mod attribute;
 pub mod attribute_table;
 pub mod evaluator;
@@ -15,6 +14,7 @@ pub mod symbol_table;
 pub mod type_dag;
 pub mod r#unsafe;
 pub mod unsafe_table;
+pub mod var_ref;
 pub use analyzer::Analyzer;
 pub use analyzer_error::AnalyzerError;
 #[cfg(test)]

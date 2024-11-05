@@ -1,16 +1,19 @@
 use crate::analyzer::resource_table::PathId;
 use crate::analyzer_error::AnalyzerError;
-use crate::assign::{AssignPath, AssignPosition, AssignPositionTree, AssignPositionType};
 use crate::attribute_table;
 use crate::handlers::*;
 use crate::msb_table;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::{
-    Direction, DocComment, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiniation,
+    Direction, DocComment, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiliation,
 };
 use crate::symbol_table;
 use crate::type_dag;
+use crate::var_ref::{
+    AssignPosition, AssignPositionTree, AssignPositionType, ExpressionTargetType,
+    VarRefAffiliation, VarRefPath, VarRefType,
+};
 use itertools::Itertools;
 use std::path::Path;
 use veryl_metadata::{Build, Lint, Metadata};
@@ -54,7 +57,6 @@ impl<'a> VerylWalker for AnalyzerPass2<'a> {
         Some(self.handlers.get_handlers())
     }
 }
-
 pub struct AnalyzerPass3<'a> {
     path: PathId,
     text: &'a str,
@@ -105,7 +107,7 @@ impl<'a> AnalyzerPass3<'a> {
             if symbol.token.source == self.path {
                 assignable_list.append(&mut traverse_assignable_symbol(
                     symbol.id,
-                    &AssignPath::new(symbol.id),
+                    &VarRefPath::new((&symbol.id).into()),
                 ));
             }
         }
@@ -120,10 +122,10 @@ impl<'a> AnalyzerPass3<'a> {
 
         for (path, positions) in &assignable_list {
             if positions.is_empty() {
-                let symbol = symbol_table::get(*path.0.first().unwrap()).unwrap();
+                let full_path = path.full_path();
+                let symbol = symbol_table::get(*full_path.first().unwrap()).unwrap();
                 if must_be_assigned(&symbol.kind) {
-                    let path: Vec<_> = path
-                        .0
+                    let path: Vec<_> = full_path
                         .iter()
                         .map(|x| symbol_table::get(*x).unwrap().token.to_string())
                         .collect();
@@ -135,7 +137,8 @@ impl<'a> AnalyzerPass3<'a> {
                 }
             }
 
-            let symbol = symbol_table::get(*path.0.first().unwrap()).unwrap();
+            let full_path = path.full_path();
+            let symbol = symbol_table::get(*full_path.first().unwrap()).unwrap();
 
             if positions.len() > 1 {
                 for comb in positions.iter().combinations(2) {
@@ -145,9 +148,49 @@ impl<'a> AnalyzerPass3<'a> {
                 }
             }
 
-            ret.append(&mut check_assign_position_tree(
-                &symbol, self.text, positions,
-            ));
+            let non_state_variable = match &symbol.kind {
+                SymbolKind::Port(_) => true,
+                SymbolKind::Variable(x) => x.affiliation != VariableAffiliation::StatementBlock,
+                _ => {
+                    unreachable!()
+                }
+            };
+            if non_state_variable {
+                ret.append(&mut check_assign_position_tree(
+                    &symbol, self.text, positions,
+                ));
+            }
+        }
+
+        ret
+    }
+
+    pub fn check_unassigned(&self) -> Vec<AnalyzerError> {
+        let mut ret = Vec::new();
+
+        for (key, list) in symbol_table::get_var_ref_list() {
+            if matches!(key, VarRefAffiliation::AlwaysComb { .. }) {
+                let list: Vec<_> = list.iter().enumerate().collect();
+                let assign_list: Vec<_> = list.iter().filter(|(_i, x)| x.is_assign()).collect();
+                for (i, var_ref) in &list {
+                    if let VarRefType::ExpressionTarget { r#type } = var_ref.r#type {
+                        if matches!(
+                            r#type,
+                            ExpressionTargetType::Variable | ExpressionTargetType::OutputPort
+                        ) && assign_list.iter().any(|(index, assign)| {
+                            index > i && assign.path.may_fully_included(&var_ref.path)
+                        }) {
+                            let full_path = var_ref.path.full_path();
+                            let symbol = symbol_table::get(*full_path.first().unwrap()).unwrap();
+                            ret.push(AnalyzerError::unassign_variable(
+                                &var_ref.path.to_string(),
+                                self.text,
+                                &symbol.token.into(),
+                            ));
+                        }
+                    }
+                }
+            }
         }
 
         ret
@@ -248,6 +291,7 @@ impl Analyzer {
         let pass3 = AnalyzerPass3::new(path.as_ref(), text);
         ret.append(&mut pass3.check_variables());
         ret.append(&mut pass3.check_assignment());
+        ret.append(&mut pass3.check_unassigned());
 
         ret
     }
@@ -278,7 +322,7 @@ fn must_be_assigned(kind: &SymbolKind) -> bool {
     }
 }
 
-fn traverse_type_symbol(id: SymbolId, path: &AssignPath) -> Vec<AssignPath> {
+fn traverse_type_symbol(id: SymbolId, path: &VarRefPath) -> Vec<VarRefPath> {
     if let Some(symbol) = symbol_table::get(id) {
         match &symbol.kind {
             SymbolKind::Variable(x) => {
@@ -335,7 +379,7 @@ fn traverse_type_symbol(id: SymbolId, path: &AssignPath) -> Vec<AssignPath> {
                 let mut ret = Vec::new();
                 for member in &x.members {
                     let mut path = path.clone();
-                    path.push(*member);
+                    path.push(member.into());
                     ret.append(&mut traverse_type_symbol(*member, &path));
                 }
                 return ret;
@@ -354,7 +398,7 @@ fn traverse_type_symbol(id: SymbolId, path: &AssignPath) -> Vec<AssignPath> {
                 let mut ret = Vec::new();
                 for member in &x.members {
                     let mut path = path.clone();
-                    path.push(*member);
+                    path.push(member.into());
                     ret.append(&mut traverse_type_symbol(*member, &path));
                 }
                 return ret;
@@ -374,9 +418,9 @@ fn traverse_type_symbol(id: SymbolId, path: &AssignPath) -> Vec<AssignPath> {
     vec![]
 }
 
-fn traverse_assignable_symbol(id: SymbolId, path: &AssignPath) -> Vec<AssignPath> {
+fn traverse_assignable_symbol(id: SymbolId, path: &VarRefPath) -> Vec<VarRefPath> {
     // check cyclic dependency
-    if path.0.iter().filter(|x| **x == id).count() > 1 {
+    if path.full_path().iter().filter(|x| **x == id).count() > 1 {
         return vec![];
     }
 
@@ -394,8 +438,9 @@ fn traverse_assignable_symbol(id: SymbolId, path: &AssignPath) -> Vec<AssignPath
                 }
             }
             SymbolKind::Variable(x)
-                if x.affiniation == VariableAffiniation::Module
-                    || x.affiniation == VariableAffiniation::Function =>
+                if x.affiliation == VariableAffiliation::Module
+                    || x.affiliation == VariableAffiliation::Function
+                    || x.affiliation == VariableAffiliation::StatementBlock =>
             {
                 if let TypeKind::UserDefined(ref x) = x.r#type.kind {
                     if let Ok(symbol) = symbol_table::resolve((x, &symbol.namespace)) {
