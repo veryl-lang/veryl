@@ -32,7 +32,7 @@ anyhow          = "1.0"
 clap            = {version = "4.5.20", features = ["derive"]}
 futures         = "0.3.31"
 log             = "0.4.22"
-mdbook          = "0.4.41"
+mdbook          = "0.4.42"
 miette          = {version = "7.2"}
 once_cell       = "1.20"
 pulldown-cmark  = "0.12.2"
