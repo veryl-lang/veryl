@@ -1966,6 +1966,45 @@ fn unassign_variable() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        var a:  logic;
+        var b:  logic;
+
+        always_comb {
+            a = b;
+        }
+
+        assign b = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA (
+        o_d:    output logic
+    ) {
+        assign  o_d = '0;
+    }
+    module ModuleB {
+        var a: logic;
+        var b: logic;
+
+        always_comb {
+            a = b;
+        }
+
+        inst u_sub: ModuleA (
+            o_d: b
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
