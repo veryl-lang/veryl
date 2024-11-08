@@ -410,6 +410,7 @@ impl<'a> VerylGrammarTrait for CheckVarRef<'a> {
                 });
             }
             HandlerPoint::After => {
+                self.affiliation.pop();
                 self.assign_position.pop();
             }
         }
