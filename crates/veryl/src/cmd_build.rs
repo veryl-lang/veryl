@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::SymbolKind;
-use veryl_analyzer::{type_dag, Analyzer};
+use veryl_analyzer::{symbol_table, type_dag, Analyzer};
 use veryl_emitter::Emitter;
 use veryl_metadata::{FilelistType, Metadata, SourceMapTarget, Target};
 use veryl_parser::{resource_table, veryl_token::TokenSource, Parser};
@@ -25,7 +25,7 @@ impl CmdBuild {
         Self { opt }
     }
 
-    pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
+    pub fn exec(&self, metadata: &mut Metadata, include_tests: bool) -> Result<bool> {
         let paths = metadata.paths(&self.opt.files, true)?;
 
         let mut check_error = CheckError::default();
@@ -124,7 +124,7 @@ impl CmdBuild {
             }
         }
 
-        self.gen_filelist(metadata, &paths, temp_dir)?;
+        self.gen_filelist(metadata, &paths, temp_dir, include_tests)?;
 
         let _ = check_error.check_all()?;
         Ok(true)
@@ -148,11 +148,12 @@ impl CmdBuild {
         metadata: &Metadata,
         paths: &[PathSet],
         temp_dir: Option<TempDir>,
+        include_tests: bool,
     ) -> Result<()> {
         let filelist_path = metadata.filelist_path();
         let base_path = metadata.project_path();
 
-        let paths = Self::sort_filelist(metadata, paths);
+        let paths = Self::sort_filelist(metadata, paths, include_tests);
 
         let text = if let Target::Bundle { path } = &metadata.build.target {
             let temp_dir = temp_dir.unwrap();
@@ -200,24 +201,42 @@ impl CmdBuild {
         Ok(())
     }
 
-    pub fn sort_filelist(metadata: &Metadata, paths: &[PathSet]) -> Vec<PathSet> {
+    pub fn sort_filelist(
+        metadata: &Metadata,
+        paths: &[PathSet],
+        include_tests: bool,
+    ) -> Vec<PathSet> {
         let mut table = HashMap::new();
         for path in paths {
             table.insert(path.src.clone(), path);
         }
 
-        // Remove files which are not connected from project
-        let connected_components = type_dag::connected_components();
+        // Collect files connected from project
         let mut prj_namespace = Namespace::new();
         prj_namespace.push(resource_table::insert_str(&metadata.project.name));
-        for symbols in &connected_components {
-            let used = symbols.iter().any(|x| x.namespace.included(&prj_namespace));
-            if !used {
-                for symbol in symbols {
-                    if let TokenSource::File(x) = symbol.token.source {
-                        let path = PathBuf::from(format!("{}", x));
-                        table.remove(&path);
-                    }
+
+        let mut candidate_symbols: Vec<_> = type_dag::connected_components()
+            .into_iter()
+            .filter(|symbols| {
+                symbols
+                    .iter()
+                    .any(|symbol| symbol.namespace.included(&prj_namespace))
+            })
+            .flatten()
+            .collect();
+        if include_tests {
+            candidate_symbols.extend(symbol_table::get_all().into_iter().filter(|symbol| {
+                matches!(symbol.kind, SymbolKind::Test(_))
+                    && symbol.namespace.included(&prj_namespace)
+            }));
+        }
+
+        let mut used_paths = HashMap::new();
+        for symbol in &candidate_symbols {
+            if let TokenSource::File(x) = symbol.token.source {
+                let path = PathBuf::from(format!("{}", x));
+                if let Some(x) = table.remove(&path) {
+                    used_paths.insert(path, x);
                 }
             }
         }
@@ -231,14 +250,14 @@ impl CmdBuild {
             ) {
                 if let TokenSource::File(x) = symbol.token.source {
                     let path = PathBuf::from(format!("{}", x));
-                    if let Some(x) = table.remove(&path) {
+                    if let Some(x) = used_paths.remove(&path) {
                         ret.push(x.clone());
                     }
                 }
             }
         }
 
-        for path in table.into_values() {
+        for path in used_paths.into_values() {
             ret.push(path.clone());
         }
 
