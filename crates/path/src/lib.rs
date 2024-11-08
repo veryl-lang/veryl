@@ -11,10 +11,11 @@ mod path_error;
 pub use path_error::PathError;
 
 #[derive(Clone, Debug)]
-pub struct PathPair {
+pub struct PathSet {
     pub prj: String,
     pub src: PathBuf,
     pub dst: PathBuf,
+    pub map: PathBuf,
 }
 
 pub fn cache_path() -> PathBuf {

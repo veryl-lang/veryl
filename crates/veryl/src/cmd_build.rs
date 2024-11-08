@@ -14,7 +14,7 @@ use veryl_analyzer::{type_dag, Analyzer};
 use veryl_emitter::Emitter;
 use veryl_metadata::{FilelistType, Metadata, SourceMapTarget, Target};
 use veryl_parser::{resource_table, veryl_token::TokenSource, Parser};
-use veryl_path::PathPair;
+use veryl_path::PathSet;
 
 pub struct CmdBuild {
     opt: OptBuild,
@@ -65,31 +65,20 @@ impl CmdBuild {
         };
 
         for (path, input, parser, _) in &contexts {
-            let dst = if let Some(ref temp_dir) = temp_dir {
-                temp_dir.path().join(
+            let (dst, map) = if let Some(ref temp_dir) = temp_dir {
+                let dst_temp = temp_dir.path().join(
                     path.dst
                         .strip_prefix(metadata.project_path())
                         .into_diagnostic()?,
-                )
-            } else {
-                path.dst.clone()
-            };
-
-            let map = match &metadata.build.sourcemap_target {
-                SourceMapTarget::Directory { path: map_dir } => {
-                    let dst = path
-                        .dst
+                );
+                let map_temp = temp_dir.path().join(
+                    path.map
                         .strip_prefix(metadata.project_path())
-                        .into_diagnostic()?;
-                    let mut map = dst.to_path_buf();
-                    map.set_extension("sv.map");
-                    metadata.project_path().join(map_dir).join(map)
-                }
-                _ => {
-                    let mut map = dst.clone();
-                    map.set_extension("sv.map");
-                    map
-                }
+                        .into_diagnostic()?,
+                );
+                (dst_temp, map_temp)
+            } else {
+                (path.dst.clone(), path.map.clone())
             };
 
             let mut emitter = Emitter::new(metadata, &path.src, &dst, &map);
@@ -157,7 +146,7 @@ impl CmdBuild {
     fn gen_filelist(
         &self,
         metadata: &Metadata,
-        paths: &[PathPair],
+        paths: &[PathSet],
         temp_dir: Option<TempDir>,
     ) -> Result<()> {
         let filelist_path = metadata.filelist_path();
@@ -211,7 +200,7 @@ impl CmdBuild {
         Ok(())
     }
 
-    fn sort_filelist(metadata: &Metadata, paths: &[PathPair]) -> Vec<PathPair> {
+    fn sort_filelist(metadata: &Metadata, paths: &[PathSet]) -> Vec<PathSet> {
         let mut table = HashMap::new();
         for path in paths {
             table.insert(path.src.clone(), path);

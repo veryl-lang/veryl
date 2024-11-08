@@ -17,7 +17,7 @@ use veryl_metadata::Metadata;
 use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::VerylWalker;
 use veryl_parser::{resource_table, Finder, Parser, ParserError};
-use veryl_path::PathPair;
+use veryl_path::PathSet;
 
 pub enum MsgToServer {
     DidOpen {
@@ -75,7 +75,7 @@ pub enum MsgFromServer {
 
 pub struct BackgroundTask {
     metadata: Metadata,
-    paths: Vec<PathPair>,
+    paths: Vec<PathSet>,
     total: usize,
     progress: bool,
 }
@@ -593,7 +593,7 @@ impl Server {
         );
     }
 
-    fn background_analyze(&self, path: &PathPair, metadata: &Metadata) {
+    fn background_analyze(&self, path: &PathSet, metadata: &Metadata) {
         let src = path.src.clone();
         if let Ok(text) = std::fs::read_to_string(&src) {
             if self.document_map.contains_key(&src) {
