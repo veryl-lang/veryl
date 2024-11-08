@@ -20,6 +20,10 @@ impl CmdClean {
                 info!("Removing file ({})", path.dst.to_string_lossy());
                 fs::remove_file(&path.dst).into_diagnostic()?;
             }
+            if path.map.exists() {
+                info!("Removing file ({})", path.map.to_string_lossy());
+                fs::remove_file(&path.map).into_diagnostic()?;
+            }
         }
 
         let project_dependencies_path = metadata.project_dependencies_path();
@@ -35,6 +39,12 @@ impl CmdClean {
         if filelist_path.exists() {
             info!("Removing file ({})", filelist_path.to_string_lossy());
             fs::remove_file(&filelist_path).into_diagnostic()?;
+        }
+
+        let doc_path = metadata.doc_path();
+        if doc_path.exists() {
+            info!("Removing dir  ({})", doc_path.to_string_lossy());
+            fs::remove_dir_all(&doc_path).into_diagnostic()?;
         }
 
         Ok(true)

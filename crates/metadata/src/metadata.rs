@@ -8,7 +8,7 @@ use crate::project::Project;
 use crate::pubfile::{Pubfile, Release};
 use crate::publish::Publish;
 use crate::test::Test;
-use crate::{FilelistType, MetadataError};
+use crate::{FilelistType, MetadataError, SourceMapTarget};
 use log::{debug, info};
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -21,7 +21,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use url::Url;
-use veryl_path::PathPair;
+use veryl_path::PathSet;
 
 #[derive(Clone, Copy, Debug)]
 pub enum BumpKind {
@@ -219,7 +219,7 @@ impl Metadata {
         &mut self,
         files: &[T],
         symlink: bool,
-    ) -> Result<Vec<PathPair>, MetadataError> {
+    ) -> Result<Vec<PathSet>, MetadataError> {
         let base = self.project_path();
 
         let src_files = if files.is_empty() {
@@ -243,10 +243,21 @@ impl Metadata {
                     PathBuf::from("target").join(src.with_extension("sv").file_name().unwrap()),
                 ),
             };
-            ret.push(PathPair {
+            let map = match &self.build.sourcemap_target {
+                SourceMapTarget::Directory { ref path } => {
+                    base.join(path.join(src.with_extension("sv.map").file_name().unwrap()))
+                }
+                _ => {
+                    let mut map = dst.clone();
+                    map.set_extension("sv.map");
+                    map
+                }
+            };
+            ret.push(PathSet {
                 prj: self.project.name.clone(),
                 src: src.to_path_buf(),
                 dst,
+                map,
             });
         }
 
@@ -296,6 +307,10 @@ version = "0.1.0""###
         };
 
         self.metadata_path.with_file_name(filelist_name)
+    }
+
+    pub fn doc_path(&self) -> PathBuf {
+        self.metadata_path.parent().unwrap().join(&self.doc.path)
     }
 }
 

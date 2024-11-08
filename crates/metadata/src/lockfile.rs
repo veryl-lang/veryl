@@ -11,7 +11,7 @@ use std::path::Path;
 use std::str::FromStr;
 use url::Url;
 use uuid::Uuid;
-use veryl_path::PathPair;
+use veryl_path::PathSet;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -152,7 +152,7 @@ impl Lockfile {
         Ok(modified)
     }
 
-    pub fn paths(&self, base_dst: &Path) -> Result<Vec<PathPair>, MetadataError> {
+    pub fn paths(&self, base_dst: &Path) -> Result<Vec<PathSet>, MetadataError> {
         let mut ret = Vec::new();
 
         for locks in self.lock_table.values() {
@@ -165,10 +165,13 @@ impl Lockfile {
                     let mut dst = base_dst.join(&lock.name);
                     dst.push(rel);
                     dst.set_extension("sv");
-                    ret.push(PathPair {
+                    let mut map = dst.clone();
+                    map.set_extension("sv.map");
+                    ret.push(PathSet {
                         prj: lock.name.clone(),
                         src: src.to_path_buf(),
                         dst,
+                        map,
                     });
                 }
             }

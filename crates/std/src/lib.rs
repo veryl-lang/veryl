@@ -1,7 +1,7 @@
 use rust_embed::Embed;
 use std::fs;
 use std::path::{Path, PathBuf};
-use veryl_path::{PathError, PathPair};
+use veryl_path::{PathError, PathSet};
 
 include!(concat!(env!("OUT_DIR"), "/std_hash.rs"));
 
@@ -40,7 +40,7 @@ pub fn expand() -> Result<(), PathError> {
     Ok(())
 }
 
-pub fn paths(base_dst: &Path) -> Result<Vec<PathPair>, PathError> {
+pub fn paths(base_dst: &Path) -> Result<Vec<PathSet>, PathError> {
     let mut ret = Vec::new();
     let std_dir = std_dir().canonicalize().unwrap();
 
@@ -49,10 +49,13 @@ pub fn paths(base_dst: &Path) -> Result<Vec<PathPair>, PathError> {
         let mut dst = base_dst.join("std");
         dst.push(rel);
         dst.set_extension("sv");
-        ret.push(PathPair {
+        let mut map = dst.to_path_buf();
+        map.set_extension("sv.map");
+        ret.push(PathSet {
             prj: "$std".to_string(),
             src: src.to_path_buf(),
             dst,
+            map,
         });
     }
 
