@@ -12,6 +12,10 @@ veryl_testcase.*
 /book/po/messages.pot
 /book/po/*~
 /testcases/map/dependencies/
+/testcases/filelist/dependencies/
+/testcases/filelist/src/*.sv
+/testcases/filelist/*.f
+/testcases/filelist/Veryl.lock
 /crates/metadata/std/
 /crates/std/veryl/*.f
 /crates/std/veryl/target/

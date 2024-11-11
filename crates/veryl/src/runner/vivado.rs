@@ -94,6 +94,12 @@ impl Vivado {
     }
 }
 
+impl Default for Vivado {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Runner for Vivado {
     fn run(
         &mut self,

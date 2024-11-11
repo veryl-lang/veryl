@@ -252,3 +252,90 @@ mod path {
         );
     }
 }
+
+#[cfg(test)]
+mod filelist {
+    use std::fs;
+    use std::path::PathBuf;
+    use veryl_analyzer::Analyzer;
+    use veryl_metadata::Metadata;
+    use veryl_parser::Parser;
+
+    fn check_list(paths: &[String], expected: &[&str]) {
+        let paths: Vec<_> = paths.iter().map(|x| x.as_str()).collect();
+        for x in &paths {
+            assert!(expected.contains(&x));
+        }
+        for x in expected {
+            assert!(paths.contains(x));
+        }
+    }
+
+    fn check_order(paths: &[String], path0: &str, path1: &str) {
+        let path0 = paths
+            .iter()
+            .enumerate()
+            .find_map(|(i, x)| if x == path0 { Some(i) } else { None });
+        let path1 = paths
+            .iter()
+            .enumerate()
+            .find_map(|(i, x)| if x == path1 { Some(i) } else { None });
+        assert!(path0 < path1);
+    }
+
+    #[test]
+    fn test() {
+        let path = std::env::current_dir().unwrap();
+        let path = path.join("../../testcases/filelist");
+        let metadata_path = Metadata::search_from(path).unwrap();
+        let mut metadata = Metadata::load(&metadata_path).unwrap();
+        let paths = metadata.paths::<PathBuf>(&[], false).unwrap();
+
+        let mut contexts = Vec::new();
+
+        for path in &paths {
+            let input = fs::read_to_string(&path.src).unwrap();
+            let parser = Parser::parse(&input, &path.src).unwrap();
+
+            let analyzer = Analyzer::new(&metadata);
+            let _ = analyzer.analyze_pass1(&path.prj, &input, &path.src, &parser.veryl);
+            contexts.push((path, input, parser, analyzer));
+        }
+
+        Analyzer::analyze_post_pass1();
+
+        for (path, input, parser, analyzer) in &contexts {
+            let _ = analyzer.analyze_pass2(&path.prj, input, &path.src, &parser.veryl);
+        }
+
+        for (path, input, parser, analyzer) in &contexts {
+            let _ = analyzer.analyze_pass3(&path.prj, input, &path.src, &parser.veryl);
+        }
+
+        let paths = veryl::cmd_build::CmdBuild::sort_filelist(&metadata, &paths);
+        let paths: Vec<_> = paths
+            .into_iter()
+            .map(|x| x.src.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+
+        dbg!(&paths);
+
+        let all = &[
+            "package_a.veryl",
+            "package_b.veryl",
+            "module_a.veryl",
+            "module_b.veryl",
+            "module_c.veryl",
+            "fifo_controller.veryl",
+            "fifo.veryl",
+            "ram.veryl",
+            // This should be removed by #1064
+            "test_linear_sec.veryl",
+        ];
+        check_list(&paths, all);
+
+        check_order(&paths, "package_a.veryl", "module_a.veryl");
+        check_order(&paths, "package_b.veryl", "module_b.veryl");
+        check_order(&paths, "ram.veryl", "module_c.veryl");
+    }
+}

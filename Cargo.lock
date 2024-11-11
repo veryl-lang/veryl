@@ -5050,6 +5050,7 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "pprof",
+ "veryl",
  "veryl-analyzer",
  "veryl-emitter",
  "veryl-formatter",

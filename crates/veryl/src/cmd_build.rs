@@ -200,7 +200,7 @@ impl CmdBuild {
         Ok(())
     }
 
-    fn sort_filelist(metadata: &Metadata, paths: &[PathSet]) -> Vec<PathSet> {
+    pub fn sort_filelist(metadata: &Metadata, paths: &[PathSet]) -> Vec<PathSet> {
         let mut table = HashMap::new();
         for path in paths {
             table.insert(path.src.clone(), path);
