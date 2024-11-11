@@ -1,0 +1,3 @@
+module ModuleA {
+    let _a: PackageA::StructA = 0;
+}

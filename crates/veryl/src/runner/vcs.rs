@@ -111,6 +111,12 @@ impl Vcs {
     }
 }
 
+impl Default for Vcs {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Runner for Vcs {
     fn run(
         &mut self,

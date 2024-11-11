@@ -1,0 +1,15 @@
+module ModuleC {
+    inst u: $std::ram (
+        i_clk : _,
+        i_rst : _,
+        i_clr : _,
+        i_mea : _,
+        i_wea : _,
+        i_adra: _,
+        i_da  : _,
+        i_meb : _,
+        i_adrb: _,
+        o_qb  : _,
+    );
+
+}

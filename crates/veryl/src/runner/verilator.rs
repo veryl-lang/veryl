@@ -121,6 +121,12 @@ impl Verilator {
     }
 }
 
+impl Default for Verilator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Runner for Verilator {
     fn run(
         &mut self,
