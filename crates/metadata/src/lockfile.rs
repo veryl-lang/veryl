@@ -7,7 +7,7 @@ use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use url::Url;
 use uuid::Uuid;
@@ -180,6 +180,24 @@ impl Lockfile {
         Ok(ret)
     }
 
+    pub fn clear_cache(&self) -> Result<(), MetadataError> {
+        for locks in self.lock_table.values() {
+            for lock in locks {
+                let resolve_path = Self::resolve_path(&lock.url)?;
+                let dependency_path = Self::dependency_path(&lock.url, &lock.revision)?;
+                if resolve_path.exists() {
+                    dbg!(&resolve_path);
+                    fs::remove_dir_all(&resolve_path)?;
+                }
+                if dependency_path.exists() {
+                    dbg!(&dependency_path);
+                    fs::remove_dir_all(&dependency_path)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn sort_table(&mut self) {
         for locks in self.lock_table.values_mut() {
             locks.sort_by(|a, b| b.version.cmp(&a.version));
@@ -332,6 +350,12 @@ impl Lockfile {
         Ok(None)
     }
 
+    fn resolve_path(url: &Url) -> Result<PathBuf, MetadataError> {
+        let resolve_dir = veryl_path::cache_path().join("resolve");
+        let uuid = Self::gen_uuid(url, "")?;
+        Ok(resolve_dir.join(uuid.simple().encode_lower(&mut Uuid::encode_buffer())))
+    }
+
     fn resolve_version_from_latest(
         &mut self,
         url: &Url,
@@ -343,9 +367,7 @@ impl Lockfile {
             fs::create_dir_all(&resolve_dir)?;
         }
 
-        let uuid = Self::gen_uuid(url, "")?;
-
-        let path = resolve_dir.join(uuid.simple().encode_lower(&mut Uuid::encode_buffer()));
+        let path = Self::resolve_path(url)?;
         let lock = veryl_path::lock_dir("resolve")?;
         let git = Git::clone(url, &path)?;
         git.fetch()?;
@@ -369,6 +391,12 @@ impl Lockfile {
         })
     }
 
+    fn dependency_path(url: &Url, revision: &str) -> Result<PathBuf, MetadataError> {
+        let dependencies_dir = veryl_path::cache_path().join("dependencies");
+        let uuid = Self::gen_uuid(url, revision)?;
+        Ok(dependencies_dir.join(uuid.simple().encode_lower(&mut Uuid::encode_buffer())))
+    }
+
     fn get_metadata(&self, url: &Url, revision: &str) -> Result<Metadata, MetadataError> {
         let dependencies_dir = veryl_path::cache_path().join("dependencies");
 
@@ -376,9 +404,7 @@ impl Lockfile {
             fs::create_dir_all(&dependencies_dir)?;
         }
 
-        let uuid = Self::gen_uuid(url, revision)?;
-
-        let path = dependencies_dir.join(uuid.simple().encode_lower(&mut Uuid::encode_buffer()));
+        let path = Self::dependency_path(url, revision)?;
         let toml = path.join("Veryl.toml");
 
         if !path.exists() {
