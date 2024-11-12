@@ -263,4 +263,6 @@ fn lockfile() {
     assert_eq!(sub2_0.unwrap().version, Version::parse("0.1.1").unwrap());
     assert_eq!(sub3_2.unwrap().version, Version::parse("0.2.0").unwrap());
     assert_eq!(sub3_3.unwrap().version, Version::parse("1.0.0").unwrap());
+
+    let _ = lockfile.clear_cache();
 }
