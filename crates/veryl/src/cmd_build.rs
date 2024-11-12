@@ -217,11 +217,7 @@ impl CmdBuild {
 
         let mut candidate_symbols: Vec<_> = type_dag::connected_components()
             .into_iter()
-            .filter(|symbols| {
-                symbols
-                    .iter()
-                    .any(|symbol| symbol.namespace.included(&prj_namespace))
-            })
+            .filter(|symbols| symbols[0].namespace.included(&prj_namespace))
             .flatten()
             .collect();
         if include_tests {

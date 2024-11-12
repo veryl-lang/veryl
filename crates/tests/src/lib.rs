@@ -326,8 +326,6 @@ mod filelist {
             "module_a.veryl",
             "module_b.veryl",
             "module_c.veryl",
-            "fifo_controller.veryl",
-            "fifo.veryl",
             "ram.veryl",
         ];
         check_list(&paths, all);
