@@ -312,7 +312,7 @@ mod filelist {
             let _ = analyzer.analyze_pass3(&path.prj, input, &path.src, &parser.veryl);
         }
 
-        let paths = veryl::cmd_build::CmdBuild::sort_filelist(&metadata, &paths);
+        let paths = veryl::cmd_build::CmdBuild::sort_filelist(&metadata, &paths, false);
         let paths: Vec<_> = paths
             .into_iter()
             .map(|x| x.src.file_name().unwrap().to_string_lossy().into_owned())
@@ -329,8 +329,6 @@ mod filelist {
             "fifo_controller.veryl",
             "fifo.veryl",
             "ram.veryl",
-            // This should be removed by #1064
-            "test_linear_sec.veryl",
         ];
         check_list(&paths, all);
 

@@ -86,7 +86,7 @@ fn main() -> Result<ExitCode> {
         Commands::Init(x) => cmd_init::CmdInit::new(x).exec()?,
         Commands::Fmt(x) => cmd_fmt::CmdFmt::new(x).exec(&mut metadata)?,
         Commands::Check(x) => cmd_check::CmdCheck::new(x).exec(&mut metadata)?,
-        Commands::Build(x) => cmd_build::CmdBuild::new(x).exec(&mut metadata)?,
+        Commands::Build(x) => cmd_build::CmdBuild::new(x).exec(&mut metadata, false)?,
         Commands::Clean(x) => cmd_clean::CmdClean::new(x).exec(&mut metadata)?,
         Commands::Update(x) => cmd_update::CmdUpdate::new(x).exec(&mut metadata)?,
         Commands::Publish(x) => cmd_publish::CmdPublish::new(x).exec(&mut metadata)?,

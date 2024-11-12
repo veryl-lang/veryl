@@ -23,7 +23,7 @@ impl CmdTest {
         let build = CmdBuild::new(OptBuild {
             files: self.opt.files.clone(),
         });
-        build.exec(metadata)?;
+        build.exec(metadata, true)?;
 
         let tests: Vec<_> = symbol_table::get_all()
             .into_iter()
