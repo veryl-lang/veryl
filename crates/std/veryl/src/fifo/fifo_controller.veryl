@@ -15,15 +15,15 @@ module fifo_controller #(
     } else {
         1
     },
-    param MATCH_COUNT_WIDTH: u32 = 0                                         ,
+    param MATCH_COUNT_WIDTH: u32 = 0                                             ,
     param POINTER_WIDTH    : u32 = if DEPTH >= 2 {
         $clog2(DEPTH)
     } else {
         1
     },
-    const RAM_POINTER: type = logic<RAM_POINTER_WIDTH>          ,
-    const POINTER    : type = logic<POINTER_WIDTH>              ,
-    const COUNTER    : type = logic<$clog2(DEPTH + 1)>          ,
+    const RAM_POINTER: type = logic<RAM_POINTER_WIDTH>              ,
+    const POINTER    : type = logic<POINTER_WIDTH>                  ,
+    const COUNTER    : type = logic<$clog2(DEPTH + 1)>              ,
 ) (
     i_clk          : input  clock      ,
     i_rst          : input  reset      ,

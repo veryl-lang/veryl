@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/aligner",
     "crates/analyzer",
     "crates/emitter",
     "crates/formatter",

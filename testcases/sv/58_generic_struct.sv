@@ -6,7 +6,7 @@ module veryl_testcase_Module58;
         veryl_testcase_Package58::C A;
     } __StructA__Package58_C;
     typedef struct packed {
-        C A;
+        C                           A;
     } __StructA__C;
 
     typedef int signed C;
@@ -15,7 +15,7 @@ module veryl_testcase_Module58;
         veryl_testcase_Package58::C B;
     } __StructB__Package58_C;
     typedef struct packed {
-        C B;
+        C                           B;
     } __StructB__C;
 
     typedef struct packed {
@@ -28,7 +28,7 @@ module veryl_testcase_Module58;
     __StructA__C           _c;
     __StructB__Package58_C _d;
     __StructB__Package58_C _f;
-    __StructB__C _e;
+    __StructB__C           _e;
     __StructC__C__C        _g;
 endmodule
 

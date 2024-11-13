@@ -15,6 +15,7 @@ edition               = "2021"
 [dependencies]
 serde           = {workspace = true}
 strnum_bitwidth = {workspace = true}
+veryl-aligner   = {version = "0.13.2", path = "../aligner"}
 veryl-analyzer  = {version = "0.13.2", path = "../analyzer"}
 veryl-metadata  = {version = "0.13.2", path = "../metadata"}
 veryl-parser    = {version = "0.13.2", path = "../parser"}

@@ -1,4 +1,4 @@
-use crate::aligner::{Aligner, Location};
+use veryl_aligner::{align_kind, Aligner, Location};
 use veryl_metadata::{Format, Metadata};
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
@@ -10,7 +10,14 @@ const NEWLINE: &str = "\r\n";
 #[cfg(not(target_os = "windows"))]
 const NEWLINE: &str = "\n";
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Mode {
+    Emit,
+    Align,
+}
+
 pub struct Formatter {
+    mode: Mode,
     format_opt: Format,
     string: String,
     indent: usize,
@@ -21,11 +28,14 @@ pub struct Formatter {
     single_line: bool,
     adjust_line: bool,
     case_item_indent: Vec<usize>,
+    in_scalar_type: bool,
+    in_expression: Vec<()>,
 }
 
 impl Default for Formatter {
     fn default() -> Self {
         Self {
+            mode: Mode::Emit,
             format_opt: Format::default(),
             string: String::new(),
             indent: 0,
@@ -36,6 +46,8 @@ impl Default for Formatter {
             single_line: false,
             adjust_line: false,
             case_item_indent: Vec::new(),
+            in_scalar_type: false,
+            in_expression: Vec::new(),
         }
     }
 }
@@ -49,7 +61,11 @@ impl Formatter {
     }
 
     pub fn format(&mut self, input: &Veryl) {
-        self.aligner.align(input);
+        self.mode = Mode::Align;
+        self.veryl(input);
+        self.aligner.finish_group();
+        self.aligner.gather_additions();
+        self.mode = Mode::Emit;
         self.veryl(input);
     }
 
@@ -62,10 +78,21 @@ impl Formatter {
     }
 
     fn str(&mut self, x: &str) {
-        self.string.push_str(x);
+        match self.mode {
+            Mode::Emit => {
+                self.string.push_str(x);
+            }
+            Mode::Align => {
+                self.aligner.space(x.len());
+            }
+        }
     }
 
     fn unindent(&mut self) {
+        if self.mode == Mode::Align {
+            return;
+        }
+
         let indent_width =
             self.indent * self.format_opt.indent_width + self.case_item_indent.last().unwrap_or(&0);
         if self.string.ends_with(&" ".repeat(indent_width)) {
@@ -74,12 +101,20 @@ impl Formatter {
     }
 
     fn indent(&mut self) {
+        if self.mode == Mode::Align {
+            return;
+        }
+
         let indent_width =
             self.indent * self.format_opt.indent_width + self.case_item_indent.last().unwrap_or(&0);
         self.str(&" ".repeat(indent_width));
     }
 
     fn newline_push(&mut self) {
+        if self.mode == Mode::Align {
+            return;
+        }
+
         self.unindent();
         if !self.consumed_next_newline {
             self.str(NEWLINE);
@@ -92,6 +127,10 @@ impl Formatter {
     }
 
     fn newline_pop(&mut self) {
+        if self.mode == Mode::Align {
+            return;
+        }
+
         self.unindent();
         if !self.consumed_next_newline {
             self.str(NEWLINE);
@@ -104,6 +143,10 @@ impl Formatter {
     }
 
     fn newline(&mut self) {
+        if self.mode == Mode::Align {
+            return;
+        }
+
         self.unindent();
         if !self.consumed_next_newline {
             self.str(NEWLINE);
@@ -154,38 +197,45 @@ impl Formatter {
     }
 
     fn process_token(&mut self, x: &VerylToken, will_push: bool) {
-        self.push_token(&x.token);
+        match self.mode {
+            Mode::Emit => {
+                self.push_token(&x.token);
 
-        let loc: Location = x.token.into();
-        if let Some(width) = self.aligner.additions.get(&loc) {
-            self.space(*width as usize);
-        }
+                let loc: Location = x.token.into();
+                if let Some(width) = self.aligner.additions.get(&loc) {
+                    self.space(*width as usize);
+                }
 
-        // temporary indent to adjust indent of comments with the next push
-        if will_push {
-            self.indent += 1;
-        }
-        // detect line comment newline which will consume the next newline
-        self.consumed_next_newline = false;
-        for x in &x.comments {
-            // insert space between comments in the same line
-            if x.line == self.line && !self.in_start_token {
-                self.space(1);
+                // temporary indent to adjust indent of comments with the next push
+                if will_push {
+                    self.indent += 1;
+                }
+                // detect line comment newline which will consume the next newline
+                self.consumed_next_newline = false;
+                for x in &x.comments {
+                    // insert space between comments in the same line
+                    if x.line == self.line && !self.in_start_token {
+                        self.space(1);
+                    }
+                    for _ in 0..x.line - self.line {
+                        self.unindent();
+                        self.str(NEWLINE);
+                        self.indent();
+                    }
+                    self.push_token(x);
+                }
+                if will_push {
+                    self.indent -= 1;
+                }
+                if self.consumed_next_newline {
+                    self.unindent();
+                    self.str(NEWLINE);
+                    self.indent();
+                }
             }
-            for _ in 0..x.line - self.line {
-                self.unindent();
-                self.str(NEWLINE);
-                self.indent();
+            Mode::Align => {
+                self.aligner.token(x);
             }
-            self.push_token(x);
-        }
-        if will_push {
-            self.indent -= 1;
-        }
-        if self.consumed_next_newline {
-            self.unindent();
-            self.str(NEWLINE);
-            self.indent();
         }
     }
 
@@ -195,6 +245,51 @@ impl Formatter {
 
     fn token_will_push(&mut self, x: &VerylToken) {
         self.process_token(x, true)
+    }
+
+    fn align_start(&mut self, kind: usize) {
+        if self.mode == Mode::Align {
+            self.aligner.aligns[kind].start_item();
+        }
+    }
+
+    fn align_finish(&mut self, kind: usize) {
+        if self.mode == Mode::Align {
+            self.aligner.aligns[kind].finish_item();
+        }
+    }
+
+    fn align_last_location(&mut self, kind: usize) -> Option<Location> {
+        self.aligner.aligns[kind].last_location
+    }
+
+    fn align_dummy_location(&mut self, kind: usize, loc: Option<Location>) {
+        if self.mode == Mode::Align {
+            self.aligner.aligns[kind].dummy_location(loc.unwrap());
+        }
+    }
+
+    fn align_dummy_token(&mut self, kind: usize, token: &VerylToken) {
+        if self.mode == Mode::Align {
+            self.aligner.aligns[kind].dummy_token(token);
+        }
+    }
+
+    fn align_reset(&mut self) {
+        if self.mode == Mode::Align {
+            self.aligner.finish_group();
+        }
+    }
+
+    fn align_insert(&mut self, token: &VerylToken, width: usize) {
+        if self.mode == Mode::Align {
+            let loc: Location = token.token.into();
+            self.aligner
+                .additions
+                .entry(loc)
+                .and_modify(|val| *val += width as u32)
+                .or_insert(width as u32);
+        }
     }
 }
 
@@ -209,6 +304,7 @@ impl VerylWalker for Formatter {
     // https://github.com/rust-lang/rust/issues/106211
     #[inline(never)]
     fn expression(&mut self, arg: &Expression) {
+        self.in_expression.push(());
         self.expression01(&arg.expression01);
         for x in &arg.expression_list {
             self.space(1);
@@ -216,6 +312,7 @@ impl VerylWalker for Formatter {
             self.space(1);
             self.expression01(&x.expression01);
         }
+        self.in_expression.pop();
     }
 
     /// Semantic action for non-terminal 'Expression01'
@@ -468,21 +565,27 @@ impl VerylWalker for Formatter {
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
+        self.align_start(align_kind::EXPRESSION);
         self.case_condition(&arg.case_condition);
+        self.align_finish(align_kind::EXPRESSION);
         self.colon(&arg.colon);
         self.space(1);
         self.expression(&arg.expression0);
         self.comma(&arg.comma);
         self.newline();
         for x in &arg.case_expression_list {
+            self.align_start(align_kind::EXPRESSION);
             self.case_condition(&x.case_condition);
+            self.align_finish(align_kind::EXPRESSION);
             self.colon(&x.colon);
             self.space(1);
             self.expression(&x.expression);
             self.comma(&x.comma);
             self.newline();
         }
+        self.align_start(align_kind::EXPRESSION);
         self.defaul(&arg.defaul);
+        self.align_finish(align_kind::EXPRESSION);
         self.colon(&arg.colon0);
         self.space(1);
         self.expression(&arg.expression1);
@@ -501,22 +604,28 @@ impl VerylWalker for Formatter {
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
+        self.align_start(align_kind::EXPRESSION);
         self.switch_condition(&arg.switch_condition);
+        self.align_finish(align_kind::EXPRESSION);
         self.colon(&arg.colon);
         self.space(1);
         self.expression(&arg.expression);
         self.comma(&arg.comma);
         self.newline();
         for x in &arg.switch_expression_list {
+            self.align_start(align_kind::EXPRESSION);
             self.switch_condition(&x.switch_condition);
+            self.align_finish(align_kind::EXPRESSION);
             self.colon(&x.colon);
             self.space(1);
             self.expression(&x.expression);
             self.comma(&x.comma);
             self.newline();
         }
+        self.align_start(align_kind::EXPRESSION);
         self.defaul(&arg.defaul);
-        self.colon(&arg.colon);
+        self.align_finish(align_kind::EXPRESSION);
+        self.colon(&arg.colon0);
         self.space(1);
         self.expression(&arg.expression0);
         if let Some(ref x) = arg.switch_expression_opt {
@@ -607,8 +716,45 @@ impl VerylWalker for Formatter {
         self.r_bracket(&arg.r_bracket);
     }
 
+    /// Semantic action for non-terminal 'FactorType'
+    fn factor_type(&mut self, arg: &FactorType) {
+        match arg.factor_type_group.as_ref() {
+            FactorTypeGroup::VariableTypeFactorTypeOpt(x) => {
+                self.variable_type(&x.variable_type);
+                if self.in_scalar_type {
+                    self.align_finish(align_kind::TYPE);
+                    self.align_start(align_kind::WIDTH);
+                }
+                if let Some(ref x) = x.factor_type_opt {
+                    self.width(&x.width);
+                } else if self.in_scalar_type {
+                    let loc = self.align_last_location(align_kind::TYPE);
+                    self.align_dummy_location(align_kind::WIDTH, loc);
+                }
+            }
+            FactorTypeGroup::FixedType(x) => {
+                self.fixed_type(&x.fixed_type);
+                if self.in_scalar_type {
+                    self.align_finish(align_kind::TYPE);
+                    self.align_start(align_kind::WIDTH);
+                    let loc = self.align_last_location(align_kind::TYPE);
+                    self.align_dummy_location(align_kind::WIDTH, loc);
+                }
+            }
+        }
+    }
+
     /// Semantic action for non-terminal 'ScalarType'
     fn scalar_type(&mut self, arg: &ScalarType) {
+        self.in_scalar_type = true;
+
+        // disable align in Expression
+        if self.mode == Mode::Align && !self.in_expression.is_empty() {
+            self.in_scalar_type = false;
+            return;
+        }
+
+        self.align_start(align_kind::TYPE);
         for x in &arg.scalar_type_list {
             self.type_modifier(&x.type_modifier);
             self.space(1);
@@ -616,33 +762,53 @@ impl VerylWalker for Formatter {
         match &*arg.scalar_type_group {
             ScalarTypeGroup::UserDefinedTypeScalarTypeOpt(x) => {
                 self.user_defined_type(&x.user_defined_type);
+                self.align_finish(align_kind::TYPE);
+                self.align_start(align_kind::WIDTH);
                 if let Some(ref x) = x.scalar_type_opt {
                     self.width(&x.width);
+                } else {
+                    let loc = self.align_last_location(align_kind::TYPE);
+                    self.align_dummy_location(align_kind::WIDTH, loc);
                 }
             }
             ScalarTypeGroup::FactorType(x) => self.factor_type(&x.factor_type),
-        };
+        }
+        self.align_finish(align_kind::WIDTH);
+        self.in_scalar_type = false;
     }
 
     /// Semantic action for non-terminal 'ArrayType'
     fn array_type(&mut self, arg: &ArrayType) {
         self.scalar_type(&arg.scalar_type);
+        self.align_start(align_kind::ARRAY);
         if let Some(ref x) = arg.array_type_opt {
             self.space(1);
             self.array(&x.array);
+        } else {
+            let loc = self.align_last_location(align_kind::WIDTH);
+            self.align_dummy_location(align_kind::ARRAY, loc);
         }
+        self.align_finish(align_kind::ARRAY);
     }
 
     /// Semantic action for non-terminal 'LetStatement'
     fn let_statement(&mut self, arg: &LetStatement) {
         self.r#let(&arg.r#let);
         self.space(1);
+        self.align_start(align_kind::IDENTIFIER);
         self.identifier(&arg.identifier);
+        self.align_finish(align_kind::IDENTIFIER);
         self.colon(&arg.colon);
         self.space(1);
         if let Some(ref x) = arg.let_statement_opt {
+            self.align_start(align_kind::CLOCK_DOMAIN);
             self.clock_domain(&x.clock_domain);
             self.space(1);
+            self.align_finish(align_kind::CLOCK_DOMAIN);
+        } else {
+            self.align_start(align_kind::CLOCK_DOMAIN);
+            self.align_dummy_token(align_kind::CLOCK_DOMAIN, &arg.colon.colon_token);
+            self.align_finish(align_kind::CLOCK_DOMAIN);
         }
         self.array_type(&arg.array_type);
         self.space(1);
@@ -652,15 +818,33 @@ impl VerylWalker for Formatter {
         self.semicolon(&arg.semicolon);
     }
 
+    /// Semantic action for non-terminal 'IdentifierStatement'
+    fn identifier_statement(&mut self, arg: &IdentifierStatement) {
+        self.align_start(align_kind::IDENTIFIER);
+        self.expression_identifier(&arg.expression_identifier);
+        self.align_finish(align_kind::IDENTIFIER);
+        match &*arg.identifier_statement_group {
+            IdentifierStatementGroup::FunctionCall(x) => {
+                self.function_call(&x.function_call);
+            }
+            IdentifierStatementGroup::Assignment(x) => {
+                self.assignment(&x.assignment);
+            }
+        }
+        self.semicolon(&arg.semicolon);
+    }
+
     /// Semantic action for non-terminal 'Assignment'
     fn assignment(&mut self, arg: &Assignment) {
         self.space(1);
+        self.align_start(align_kind::ASSIGNMENT);
         match &*arg.assignment_group {
             AssignmentGroup::Equ(x) => self.equ(&x.equ),
             AssignmentGroup::AssignmentOperator(x) => {
                 self.assignment_operator(&x.assignment_operator)
             }
         }
+        self.align_finish(align_kind::ASSIGNMENT);
         self.space(1);
         self.expression(&arg.expression);
     }
@@ -796,10 +980,12 @@ impl VerylWalker for Formatter {
     /// Semantic action for non-terminal 'CaseItem'
     fn case_item(&mut self, arg: &CaseItem) {
         let start = self.column();
+        self.align_start(align_kind::EXPRESSION);
         match &*arg.case_item_group {
             CaseItemGroup::CaseCondition(x) => self.case_condition(&x.case_condition),
             CaseItemGroup::Defaul(x) => self.defaul(&x.defaul),
         }
+        self.align_finish(align_kind::EXPRESSION);
         self.colon(&arg.colon);
         self.space(1);
         match &*arg.case_item_group0 {
@@ -838,10 +1024,12 @@ impl VerylWalker for Formatter {
     /// Semantic action for non-terminal 'SwitchItem'
     fn switch_item(&mut self, arg: &SwitchItem) {
         let start = self.column();
+        self.align_start(align_kind::EXPRESSION);
         match &*arg.switch_item_group {
             SwitchItemGroup::SwitchCondition(x) => self.switch_condition(&x.switch_condition),
             SwitchItemGroup::Defaul(x) => self.defaul(&x.defaul),
         }
+        self.align_finish(align_kind::EXPRESSION);
         self.colon(&arg.colon);
         self.space(1);
         match &*arg.switch_item_group0 {
@@ -881,12 +1069,20 @@ impl VerylWalker for Formatter {
     fn let_declaration(&mut self, arg: &LetDeclaration) {
         self.r#let(&arg.r#let);
         self.space(1);
+        self.align_start(align_kind::IDENTIFIER);
         self.identifier(&arg.identifier);
+        self.align_finish(align_kind::IDENTIFIER);
         self.colon(&arg.colon);
         self.space(1);
         if let Some(ref x) = arg.let_declaration_opt {
+            self.align_start(align_kind::CLOCK_DOMAIN);
             self.clock_domain(&x.clock_domain);
             self.space(1);
+            self.align_finish(align_kind::CLOCK_DOMAIN);
+        } else {
+            self.align_start(align_kind::CLOCK_DOMAIN);
+            self.align_dummy_token(align_kind::CLOCK_DOMAIN, &arg.colon.colon_token);
+            self.align_finish(align_kind::CLOCK_DOMAIN);
         }
         self.array_type(&arg.array_type);
         self.space(1);
@@ -900,12 +1096,20 @@ impl VerylWalker for Formatter {
     fn var_declaration(&mut self, arg: &VarDeclaration) {
         self.var(&arg.var);
         self.space(1);
+        self.align_start(align_kind::IDENTIFIER);
         self.identifier(&arg.identifier);
+        self.align_finish(align_kind::IDENTIFIER);
         self.colon(&arg.colon);
         self.space(1);
         if let Some(ref x) = arg.var_declaration_opt {
+            self.align_start(align_kind::CLOCK_DOMAIN);
             self.clock_domain(&x.clock_domain);
             self.space(1);
+            self.align_finish(align_kind::CLOCK_DOMAIN);
+        } else {
+            self.align_start(align_kind::CLOCK_DOMAIN);
+            self.align_dummy_token(align_kind::CLOCK_DOMAIN, &arg.colon.colon_token);
+            self.align_finish(align_kind::CLOCK_DOMAIN);
         }
         self.array_type(&arg.array_type);
         self.semicolon(&arg.semicolon);
@@ -915,7 +1119,9 @@ impl VerylWalker for Formatter {
     fn const_declaration(&mut self, arg: &ConstDeclaration) {
         self.r#const(&arg.r#const);
         self.space(1);
+        self.align_start(align_kind::IDENTIFIER);
         self.identifier(&arg.identifier);
+        self.align_finish(align_kind::IDENTIFIER);
         self.colon(&arg.colon);
         self.space(1);
         match &*arg.const_declaration_group {
@@ -923,7 +1129,9 @@ impl VerylWalker for Formatter {
                 self.array_type(&x.array_type);
             }
             ConstDeclarationGroup::Type(x) => {
+                self.align_start(align_kind::TYPE);
                 self.r#type(&x.r#type);
+                self.align_finish(align_kind::TYPE);
             }
         }
         self.space(1);
@@ -937,7 +1145,9 @@ impl VerylWalker for Formatter {
     fn type_def_declaration(&mut self, arg: &TypeDefDeclaration) {
         self.r#type(&arg.r#type);
         self.space(1);
+        self.align_start(align_kind::IDENTIFIER);
         self.identifier(&arg.identifier);
+        self.align_finish(align_kind::IDENTIFIER);
         self.space(1);
         self.equ(&arg.equ);
         self.space(1);
@@ -989,7 +1199,9 @@ impl VerylWalker for Formatter {
     fn assign_declaration(&mut self, arg: &AssignDeclaration) {
         self.assign(&arg.assign);
         self.space(1);
+        self.align_start(align_kind::IDENTIFIER);
         self.hierarchical_identifier(&arg.hierarchical_identifier);
+        self.align_finish(align_kind::IDENTIFIER);
         self.space(1);
         self.equ(&arg.equ);
         self.space(1);
@@ -1045,7 +1257,9 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'ModportItem'
     fn modport_item(&mut self, arg: &ModportItem) {
+        self.align_start(align_kind::IDENTIFIER);
         self.identifier(&arg.identifier);
+        self.align_finish(align_kind::IDENTIFIER);
         self.colon(&arg.colon);
         self.space(1);
         self.direction(&arg.direction);
@@ -1166,7 +1380,9 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'StructUnionItem'
     fn struct_union_item(&mut self, arg: &StructUnionItem) {
+        self.align_start(align_kind::IDENTIFIER);
         self.identifier(&arg.identifier);
+        self.align_finish(align_kind::IDENTIFIER);
         self.colon(&arg.colon);
         self.space(1);
         self.scalar_type(&arg.scalar_type);
@@ -1188,15 +1404,23 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'InstDeclaration'
     fn inst_declaration(&mut self, arg: &InstDeclaration) {
-        if arg.inst_declaration_opt1.is_none() {
-            self.single_line = true;
-        }
+        self.single_line = arg.inst_declaration_opt1.is_none();
         self.inst(&arg.inst);
         self.space(1);
+        if self.single_line {
+            self.align_start(align_kind::IDENTIFIER);
+        }
         self.identifier(&arg.identifier);
+        if self.single_line {
+            self.align_finish(align_kind::IDENTIFIER);
+        }
         self.colon(&arg.colon);
         self.space(1);
         self.scoped_identifier(&arg.scoped_identifier);
+        // skip align at single line
+        if self.mode == Mode::Align && self.single_line {
+            return;
+        }
         if let Some(ref x) = arg.inst_declaration_opt {
             self.space(1);
             self.array(&x.array);
@@ -1278,11 +1502,20 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'InstParameterItem'
     fn inst_parameter_item(&mut self, arg: &InstParameterItem) {
+        self.align_start(align_kind::IDENTIFIER);
         self.identifier(&arg.identifier);
+        self.align_finish(align_kind::IDENTIFIER);
         if let Some(ref x) = arg.inst_parameter_item_opt {
             self.colon(&x.colon);
             self.space(1);
+            self.align_start(align_kind::EXPRESSION);
             self.expression(&x.expression);
+            self.align_finish(align_kind::EXPRESSION);
+        } else {
+            self.align_insert(&arg.identifier.identifier_token, ": ".len());
+            self.align_start(align_kind::EXPRESSION);
+            self.align_dummy_token(align_kind::EXPRESSION, &arg.identifier.identifier_token);
+            self.align_finish(align_kind::EXPRESSION);
         }
     }
 
@@ -1321,11 +1554,20 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'InstPortItem'
     fn inst_port_item(&mut self, arg: &InstPortItem) {
+        self.align_start(align_kind::IDENTIFIER);
         self.identifier(&arg.identifier);
+        self.align_finish(align_kind::IDENTIFIER);
         if let Some(ref x) = arg.inst_port_item_opt {
             self.colon(&x.colon);
             self.space(1);
+            self.align_start(align_kind::EXPRESSION);
             self.expression(&x.expression);
+            self.align_finish(align_kind::EXPRESSION);
+        } else {
+            self.align_insert(&arg.identifier.identifier_token, ": ".len());
+            self.align_start(align_kind::EXPRESSION);
+            self.align_dummy_token(align_kind::EXPRESSION, &arg.identifier.identifier_token);
+            self.align_finish(align_kind::EXPRESSION);
         }
     }
 
@@ -1382,12 +1624,16 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'WithParameterItem'
     fn with_parameter_item(&mut self, arg: &WithParameterItem) {
+        self.align_start(align_kind::PARAMETER);
         match &*arg.with_parameter_item_group {
             WithParameterItemGroup::Param(x) => self.param(&x.param),
             WithParameterItemGroup::Const(x) => self.r#const(&x.r#const),
         };
+        self.align_finish(align_kind::PARAMETER);
         self.space(1);
+        self.align_start(align_kind::IDENTIFIER);
         self.identifier(&arg.identifier);
+        self.align_finish(align_kind::IDENTIFIER);
         self.colon(&arg.colon);
         self.space(1);
         match &*arg.with_parameter_item_group0 {
@@ -1395,13 +1641,17 @@ impl VerylWalker for Formatter {
                 self.array_type(&x.array_type);
             }
             WithParameterItemGroup0::Type(x) => {
+                self.align_start(align_kind::TYPE);
                 self.r#type(&x.r#type);
+                self.align_finish(align_kind::TYPE);
             }
         }
         self.space(1);
         self.equ(&arg.equ);
         self.space(1);
+        self.align_start(align_kind::EXPRESSION);
         self.expression(&arg.expression);
+        self.align_finish(align_kind::EXPRESSION);
     }
 
     /// Semantic action for non-terminal 'WithGenericParameterList'
@@ -1495,41 +1745,69 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'PortDeclarationItem'
     fn port_declaration_item(&mut self, arg: &PortDeclarationItem) {
+        self.align_start(align_kind::IDENTIFIER);
         self.identifier(&arg.identifier);
+        self.align_finish(align_kind::IDENTIFIER);
         self.colon(&arg.colon);
         self.space(1);
         match &*arg.port_declaration_item_group {
             PortDeclarationItemGroup::PortTypeConcrete(x) => {
-                self.port_type_concrete(&x.port_type_concrete);
+                let x = x.port_type_concrete.as_ref();
+                self.direction(&x.direction);
+                self.space(1);
+                if let Some(ref x) = x.port_type_concrete_opt {
+                    self.align_start(align_kind::CLOCK_DOMAIN);
+                    self.clock_domain(&x.clock_domain);
+                    self.space(1);
+                    self.align_finish(align_kind::CLOCK_DOMAIN);
+                } else {
+                    self.align_start(align_kind::CLOCK_DOMAIN);
+                    let token = match x.direction.as_ref() {
+                        Direction::Input(x) => &x.input.input_token,
+                        Direction::Output(x) => &x.output.output_token,
+                        Direction::Inout(x) => &x.inout.inout_token,
+                        Direction::Ref(x) => &x.r#ref.ref_token,
+                        Direction::Modport(x) => &x.modport.modport_token,
+                        Direction::Import(x) => &x.import.import_token,
+                    };
+                    self.align_dummy_token(align_kind::CLOCK_DOMAIN, token);
+                    self.align_finish(align_kind::CLOCK_DOMAIN);
+                }
+                self.array_type(&x.array_type);
             }
             PortDeclarationItemGroup::PortTypeAbstract(x) => {
-                self.port_type_abstract(&x.port_type_abstract);
+                let x = x.port_type_abstract.as_ref();
+                if let Some(ref x) = x.port_type_abstract_opt {
+                    self.align_start(align_kind::CLOCK_DOMAIN);
+                    self.clock_domain(&x.clock_domain);
+                    self.space(1);
+                    self.align_finish(align_kind::CLOCK_DOMAIN);
+                } else {
+                    self.align_start(align_kind::CLOCK_DOMAIN);
+                    self.align_dummy_token(align_kind::CLOCK_DOMAIN, &arg.colon.colon_token);
+                    self.align_finish(align_kind::CLOCK_DOMAIN);
+                }
+                self.interface(&x.interface);
+                if let Some(ref x) = x.port_type_abstract_opt0 {
+                    self.space(1);
+                    self.array(&x.array);
+                }
             }
         }
     }
 
-    /// Semantic action for non-terminal 'PortTypeConcrete'
-    fn port_type_concrete(&mut self, arg: &PortTypeConcrete) {
-        self.direction(&arg.direction);
-        self.space(1);
-        if let Some(ref x) = arg.port_type_concrete_opt {
-            self.clock_domain(&x.clock_domain);
-            self.space(1);
-        }
-        self.array_type(&arg.array_type);
-    }
-
-    /// Semantic action for non-terminal 'PortTypeAbstract'
-    fn port_type_abstract(&mut self, arg: &PortTypeAbstract) {
-        if let Some(ref x) = arg.port_type_abstract_opt {
-            self.clock_domain(&x.clock_domain);
-            self.space(1);
-        }
-        self.interface(&arg.interface);
-        if let Some(ref x) = arg.port_type_abstract_opt0 {
-            self.space(1);
-            self.array(&x.array);
-        }
+    /// Semantic action for non-terminal 'Direction'
+    fn direction(&mut self, arg: &Direction) {
+        self.align_start(align_kind::DIRECTION);
+        match arg {
+            Direction::Input(x) => self.input(&x.input),
+            Direction::Output(x) => self.output(&x.output),
+            Direction::Inout(x) => self.inout(&x.inout),
+            Direction::Ref(x) => self.r#ref(&x.r#ref),
+            Direction::Modport(x) => self.modport(&x.modport),
+            Direction::Import(x) => self.import(&x.import),
+        };
+        self.align_finish(align_kind::DIRECTION);
     }
 
     /// Semantic action for non-terminal 'FunctionDeclaration'
@@ -1550,6 +1828,7 @@ impl VerylWalker for Formatter {
             self.space(1);
             self.scalar_type(&x.scalar_type);
             self.space(1);
+            self.align_reset();
         }
         self.statement_block(&arg.statement_block);
     }
