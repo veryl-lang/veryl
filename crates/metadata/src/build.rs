@@ -32,6 +32,8 @@ pub struct Build {
     pub expand_inside_operation: bool,
     #[serde(default)]
     pub exclude_std: bool,
+    #[serde(default)]
+    pub emit_cond_type: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

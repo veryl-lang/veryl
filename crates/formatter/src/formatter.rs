@@ -670,10 +670,32 @@ impl VerylWalker for Formatter {
         self.token_will_push(&arg.l_brace.l_brace_token);
         for (i, x) in arg.statement_block_list.iter().enumerate() {
             self.newline_list(i);
-            self.statement_block_item(&x.statement_block_item);
+            self.statement_block_group(&x.statement_block_group);
         }
         self.newline_list_post(arg.statement_block_list.is_empty());
         self.r_brace(&arg.r_brace);
+    }
+
+    /// Semantic action for non-terminal 'StatementBlockGroup'
+    fn statement_block_group(&mut self, arg: &StatementBlockGroup) {
+        for x in &arg.statement_block_group_list {
+            self.attribute(&x.attribute);
+            self.newline();
+        }
+        match arg.statement_block_group_group.as_ref() {
+            StatementBlockGroupGroup::LBraceStatementBlockGroupGroupListRBrace(x) => {
+                self.token_will_push(&x.l_brace.l_brace_token);
+                for (i, x) in x.statement_block_group_group_list.iter().enumerate() {
+                    self.newline_list(i);
+                    self.statement_block_group(&x.statement_block_group);
+                }
+                self.newline_list_post(x.statement_block_group_group_list.is_empty());
+                self.r_brace(&x.r_brace);
+            }
+            StatementBlockGroupGroup::StatementBlockItem(x) => {
+                self.statement_block_item(&x.statement_block_item);
+            }
+        }
     }
 
     /// Semantic action for non-terminal 'IfStatement'

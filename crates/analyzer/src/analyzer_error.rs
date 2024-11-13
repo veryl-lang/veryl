@@ -614,9 +614,31 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
-    #[diagnostic(severity(Error), code(invalid_enum_encoding), help(""), url(""))]
+    #[diagnostic(
+        severity(Error),
+        code(invalid_enum_encoding),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_enum_encoding")
+    )]
     #[error("{identifier} is not valid enum encoding")]
     InvalidEnumEncoding {
+        identifier: String,
+        #[source_code]
+        input: NamedSource<String>,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(invalid_cond_type),
+        help(""),
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_cond_type"
+        )
+    )]
+    #[error("{identifier} is not valid condition type")]
+    InvalidCondType {
         identifier: String,
         #[source_code]
         input: NamedSource<String>,
@@ -1406,6 +1428,14 @@ impl AnalyzerError {
 
     pub fn invalid_enum_encoding(identifier: &str, source: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidEnumEncoding {
+            identifier: identifier.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn invalid_cond_type(identifier: &str, source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidCondType {
             identifier: identifier.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),

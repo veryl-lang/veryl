@@ -12,6 +12,7 @@ pub enum Attribute {
     EnumEncoding(EnumEncodingItem),
     EnumMemberPrefix(StrId),
     Test(Token, Option<StrId>),
+    CondType(CondTypeItem),
 }
 
 impl fmt::Display for Attribute {
@@ -24,6 +25,7 @@ impl fmt::Display for Attribute {
             Attribute::EnumEncoding(x) => format!("enum_encoding({})", x),
             Attribute::EnumMemberPrefix(x) => format!("enum_member_prefix({})", x),
             Attribute::Test(x, _) => format!("test({})", x.text),
+            Attribute::CondType(x) => format!("cond_type({})", x),
         };
         text.fmt(f)
     }
@@ -35,6 +37,7 @@ pub enum AttributeError {
     MismatchArgs(&'static str),
     InvalidAllow(StrId),
     InvalidEnumEncoding(StrId),
+    InvalidCondType(StrId),
 }
 
 fn get_arg_ident(
@@ -91,6 +94,11 @@ struct Pattern {
     pub gray: StrId,
     pub enum_member_prefix: StrId,
     pub test: StrId,
+    pub cond_type: StrId,
+    pub unique: StrId,
+    pub unique0: StrId,
+    pub priority: StrId,
+    pub none: StrId,
 }
 
 impl Pattern {
@@ -109,6 +117,11 @@ impl Pattern {
             gray: resource_table::insert_str("gray"),
             enum_member_prefix: resource_table::insert_str("enum_member_prefix"),
             test: resource_table::insert_str("test"),
+            cond_type: resource_table::insert_str("cond_type"),
+            unique: resource_table::insert_str("unique"),
+            unique0: resource_table::insert_str("unique0"),
+            priority: resource_table::insert_str("priority"),
+            none: resource_table::insert_str("none"),
         }
     }
 }
@@ -197,6 +210,21 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                     Err(AttributeError::MismatchArgs("single identifier"))
                 }
             }
+            x if x == pat.cond_type => {
+                let arg = get_arg_ident(&value.attribute_opt, 0);
+
+                if let Some(arg) = arg {
+                    match arg.text {
+                        x if x == pat.unique => Ok(Attribute::CondType(CondTypeItem::Unique)),
+                        x if x == pat.unique0 => Ok(Attribute::CondType(CondTypeItem::Unique0)),
+                        x if x == pat.priority => Ok(Attribute::CondType(CondTypeItem::Priority)),
+                        x if x == pat.none => Ok(Attribute::CondType(CondTypeItem::None)),
+                        _ => Err(AttributeError::InvalidCondType(arg.text)),
+                    }
+                } else {
+                    Err(AttributeError::MismatchArgs("condition type"))
+                }
+            }
             _ => Err(AttributeError::UnknownAttribute),
         })
     }
@@ -234,6 +262,26 @@ impl fmt::Display for EnumEncodingItem {
             EnumEncodingItem::Sequential => "sequential",
             EnumEncodingItem::OneHot => "one_hot",
             EnumEncodingItem::Gray => "gray",
+        };
+        text.fmt(f)
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum CondTypeItem {
+    Unique,
+    Unique0,
+    Priority,
+    None,
+}
+
+impl fmt::Display for CondTypeItem {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let text = match self {
+            CondTypeItem::Unique => "unique",
+            CondTypeItem::Unique0 => "unique0",
+            CondTypeItem::Priority => "priority",
+            CondTypeItem::None => "none",
         };
         text.fmt(f)
     }

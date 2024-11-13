@@ -1,4 +1,5 @@
 use crate::analyzer_error::AnalyzerError;
+use crate::attribute::AttributeError;
 use crate::attribute_table;
 use veryl_parser::last_token::LastToken;
 use veryl_parser::veryl_grammar_trait::*;
@@ -40,14 +41,14 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
                 Err(err) => {
                     attribute_table::begin(arg.hash.hash_token.token, None);
                     match err {
-                        crate::attribute::AttributeError::UnknownAttribute => {
+                        AttributeError::UnknownAttribute => {
                             self.errors.push(AnalyzerError::unknown_attribute(
                                 &arg.identifier.identifier_token.to_string(),
                                 self.text,
                                 &arg.identifier.as_ref().into(),
                             ));
                         }
-                        crate::attribute::AttributeError::MismatchArgs(x) => {
+                        AttributeError::MismatchArgs(x) => {
                             self.errors.push(AnalyzerError::mismatch_attribute_args(
                                 &arg.identifier.identifier_token.to_string(),
                                 x,
@@ -55,15 +56,22 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
                                 &arg.identifier.as_ref().into(),
                             ));
                         }
-                        crate::attribute::AttributeError::InvalidAllow(x) => {
+                        AttributeError::InvalidAllow(x) => {
                             self.errors.push(AnalyzerError::invalid_allow(
                                 &x.to_string(),
                                 self.text,
                                 &arg.identifier.as_ref().into(),
                             ));
                         }
-                        crate::attribute::AttributeError::InvalidEnumEncoding(x) => {
+                        AttributeError::InvalidEnumEncoding(x) => {
                             self.errors.push(AnalyzerError::invalid_enum_encoding(
+                                &x.to_string(),
+                                self.text,
+                                &arg.identifier.as_ref().into(),
+                            ));
+                        }
+                        AttributeError::InvalidCondType(x) => {
+                            self.errors.push(AnalyzerError::invalid_cond_type(
                                 &x.to_string(),
                                 self.text,
                                 &arg.identifier.as_ref().into(),
@@ -71,6 +79,19 @@ impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
                         }
                     }
                 }
+            }
+        }
+        Ok(())
+    }
+
+    fn statement_block_group(&mut self, arg: &StatementBlockGroup) -> Result<(), ParolError> {
+        if let HandlerPoint::After = self.point {
+            let mut last_token = LastToken::default();
+            last_token.statement_block_group(arg);
+            let last_token = last_token.token().unwrap();
+
+            for _ in &arg.statement_block_group_list {
+                attribute_table::end(last_token);
             }
         }
         Ok(())

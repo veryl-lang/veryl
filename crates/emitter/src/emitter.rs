@@ -1,7 +1,9 @@
 use crate::aligner::{Aligner, Location};
 use std::fs;
 use std::path::Path;
-use veryl_analyzer::attribute::EnumEncodingItem;
+use veryl_analyzer::attribute::Attribute as Attr;
+use veryl_analyzer::attribute::{CondTypeItem, EnumEncodingItem};
+use veryl_analyzer::attribute_table;
 use veryl_analyzer::evaluator::{Evaluated, Evaluator};
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::TypeModifier as SymTypeModifier;
@@ -309,28 +311,35 @@ impl Emitter {
     }
 
     fn case_inside_statement(&mut self, arg: &CaseStatement) {
-        self.case(&arg.case);
+        let (prefix, force_last_item_default) = self.cond_type_prefix(&arg.case.case_token.token);
+        self.token(&arg.case.case_token.append(&prefix, &None));
         self.space(1);
         self.str("(");
         self.expression(&arg.expression);
         self.token_will_push(&arg.l_brace.l_brace_token.replace(") inside"));
+        let len = arg.case_statement_list.len();
         for (i, x) in arg.case_statement_list.iter().enumerate() {
+            let force_default = force_last_item_default & (i == (len - 1));
             self.newline_list(i);
-            self.case_inside_item(&x.case_item);
+            self.case_inside_item(&x.case_item, force_default);
         }
         self.newline_list_post(arg.case_statement_list.is_empty());
         self.token(&arg.r_brace.r_brace_token.replace("endcase"));
     }
 
-    fn case_inside_item(&mut self, arg: &CaseItem) {
+    fn case_inside_item(&mut self, arg: &CaseItem, force_default: bool) {
         let start = self.dst_column;
         match &*arg.case_item_group {
             CaseItemGroup::CaseCondition(x) => {
-                self.range_item(&x.case_condition.range_item);
-                for x in &x.case_condition.case_condition_list {
-                    self.comma(&x.comma);
-                    self.space(1);
-                    self.range_item(&x.range_item);
+                if force_default {
+                    self.str("default");
+                } else {
+                    self.range_item(&x.case_condition.range_item);
+                    for x in &x.case_condition.case_condition_list {
+                        self.comma(&x.comma);
+                        self.space(1);
+                        self.range_item(&x.range_item);
+                    }
                 }
             }
             CaseItemGroup::Defaul(x) => self.defaul(&x.defaul),
@@ -348,28 +357,35 @@ impl Emitter {
     }
 
     fn case_expaneded_statement(&mut self, arg: &CaseStatement) {
-        self.case(&arg.case);
+        let (prefix, force_last_item_default) = self.cond_type_prefix(&arg.case.case_token.token);
+        self.token(&arg.case.case_token.append(&prefix, &None));
         self.space(1);
         self.str("(");
         self.str("1'b1");
         self.token_will_push(&arg.l_brace.l_brace_token.replace(")"));
+        let len = arg.case_statement_list.len();
         for (i, x) in arg.case_statement_list.iter().enumerate() {
+            let force_default = force_last_item_default & (i == (len - 1));
             self.newline_list(i);
-            self.case_expanded_item(&arg.expression, &x.case_item);
+            self.case_expanded_item(&arg.expression, &x.case_item, force_default);
         }
         self.newline_list_post(arg.case_statement_list.is_empty());
         self.token(&arg.r_brace.r_brace_token.replace("endcase"));
     }
 
-    fn case_expanded_item(&mut self, lhs: &Expression, item: &CaseItem) {
+    fn case_expanded_item(&mut self, lhs: &Expression, item: &CaseItem, force_default: bool) {
         let start: u32 = self.dst_column;
         match &*item.case_item_group {
             CaseItemGroup::CaseCondition(x) => {
-                self.inside_element_operation(lhs, &x.case_condition.range_item);
-                for x in &x.case_condition.case_condition_list {
-                    self.comma(&x.comma);
-                    self.space(1);
-                    self.inside_element_operation(lhs, &x.range_item);
+                if force_default {
+                    self.str("default");
+                } else {
+                    self.inside_element_operation(lhs, &x.case_condition.range_item);
+                    for x in &x.case_condition.case_condition_list {
+                        self.comma(&x.comma);
+                        self.space(1);
+                        self.inside_element_operation(lhs, &x.range_item);
+                    }
                 }
             }
             CaseItemGroup::Defaul(x) => self.defaul(&x.defaul),
@@ -511,11 +527,11 @@ impl Emitter {
 
     fn always_ff_if_reset_exists(&mut self, arg: &AlwaysFfDeclaration) -> bool {
         if let Some(x) = arg.statement_block.statement_block_list.first() {
-            match &*x.statement_block_item {
-                StatementBlockItem::Statement(x) => {
-                    matches!(*x.statement, Statement::IfResetStatement(_))
-                }
-                _ => false,
+            let x: Vec<_> = x.statement_block_group.as_ref().into();
+            if let Some(StatementBlockItem::Statement(x)) = x.first() {
+                matches!(*x.statement, Statement::IfResetStatement(_))
+            } else {
+                false
             }
         } else {
             false
@@ -655,27 +671,29 @@ impl Emitter {
 
     fn emit_statement_block(&mut self, arg: &StatementBlock, begin_kw: &str, end_kw: &str) {
         self.token_will_push(&arg.l_brace.l_brace_token.replace(begin_kw));
-        let mut base = 0;
-        for (i, x) in arg
+
+        let statement_block_list: Vec<_> = arg
             .statement_block_list
             .iter()
-            .filter(|x| {
-                is_var_declaration(&x.statement_block_item)
-                    || is_let_statement(&x.statement_block_item)
-            })
+            .flat_map(|x| Into::<Vec<StatementBlockItem>>::into(x.statement_block_group.as_ref()))
+            .collect();
+
+        let mut base = 0;
+        for (i, x) in statement_block_list
+            .iter()
+            .filter(|x| is_var_declaration(x) || is_let_statement(x))
             .enumerate()
         {
             self.newline_list(i);
-            base += self.statement_variable_declatation_only(&x.statement_block_item);
+            base += self.statement_variable_declatation_only(x);
         }
-        for (i, x) in arg
-            .statement_block_list
+        for (i, x) in statement_block_list
             .iter()
-            .filter(|x| !is_var_declaration(&x.statement_block_item))
+            .filter(|x| !is_var_declaration(x))
             .enumerate()
         {
             self.newline_list(base + i);
-            match &*x.statement_block_item {
+            match &x {
                 StatementBlockItem::LetStatement(x) => self.let_statement(&x.let_statement),
                 StatementBlockItem::Statement(x) => self.statement(&x.statement),
                 _ => unreachable!(),
@@ -705,6 +723,32 @@ impl Emitter {
                 1
             }
             _ => 0,
+        }
+    }
+
+    fn cond_type_prefix(&self, token: &Token) -> (Option<String>, bool) {
+        fn prefix(token: &Token) -> Option<String> {
+            let mut attrs = attribute_table::get(token);
+            attrs.reverse();
+            for attr in attrs {
+                match attr {
+                    Attr::CondType(CondTypeItem::None) => {
+                        return None;
+                    }
+                    Attr::CondType(x) => {
+                        return Some(format!("{} ", x));
+                    }
+                    _ => (),
+                }
+            }
+            None
+        }
+
+        let prefix = prefix(token);
+        if self.build_opt.emit_cond_type {
+            (prefix, false)
+        } else {
+            (None, prefix.is_some())
         }
     }
 }
@@ -1687,23 +1731,33 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'IfStatement'
     fn if_statement(&mut self, arg: &IfStatement) {
-        self.r#if(&arg.r#if);
+        let (prefix, force_last_item_default) = self.cond_type_prefix(&arg.r#if.if_token.token);
+        self.token(&arg.r#if.if_token.append(&prefix, &None));
         self.space(1);
         self.str("(");
         self.expression(&arg.expression);
         self.str(")");
         self.space(1);
         self.statement_block(&arg.statement_block);
-        for x in &arg.if_statement_list {
-            self.space(1);
-            self.r#else(&x.r#else);
-            self.space(1);
-            self.r#if(&x.r#if);
-            self.space(1);
-            self.str("(");
-            self.expression(&x.expression);
-            self.str(")");
-            self.space(1);
+        let len = arg.if_statement_list.len();
+        for (i, x) in arg.if_statement_list.iter().enumerate() {
+            let force_default =
+                force_last_item_default & (i == (len - 1)) & arg.if_statement_opt.is_none();
+            if force_default {
+                self.space(1);
+                self.str("else");
+                self.space(1);
+            } else {
+                self.space(1);
+                self.r#else(&x.r#else);
+                self.space(1);
+                self.r#if(&x.r#if);
+                self.space(1);
+                self.str("(");
+                self.expression(&x.expression);
+                self.str(")");
+                self.space(1);
+            }
             self.statement_block(&x.statement_block);
         }
         if let Some(ref x) = arg.if_statement_opt {
@@ -1716,7 +1770,14 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'IfResetStatement'
     fn if_reset_statement(&mut self, arg: &IfResetStatement) {
-        self.token(&arg.if_reset.if_reset_token.replace("if"));
+        let (prefix, force_last_item_default) =
+            self.cond_type_prefix(&arg.if_reset.if_reset_token.token);
+        self.token(
+            &arg.if_reset
+                .if_reset_token
+                .replace("if")
+                .append(&prefix, &None),
+        );
         self.space(1);
         self.str("(");
         let reset_signal = self.reset_signal.clone().unwrap();
@@ -1724,16 +1785,25 @@ impl VerylWalker for Emitter {
         self.str(")");
         self.space(1);
         self.statement_block(&arg.statement_block);
-        for x in &arg.if_reset_statement_list {
-            self.space(1);
-            self.r#else(&x.r#else);
-            self.space(1);
-            self.r#if(&x.r#if);
-            self.space(1);
-            self.str("(");
-            self.expression(&x.expression);
-            self.str(")");
-            self.space(1);
+        let len = arg.if_reset_statement_list.len();
+        for (i, x) in arg.if_reset_statement_list.iter().enumerate() {
+            let force_default =
+                force_last_item_default & (i == (len - 1)) & arg.if_reset_statement_opt.is_none();
+            if force_default {
+                self.space(1);
+                self.str("else");
+                self.space(1);
+            } else {
+                self.space(1);
+                self.r#else(&x.r#else);
+                self.space(1);
+                self.r#if(&x.r#if);
+                self.space(1);
+                self.str("(");
+                self.expression(&x.expression);
+                self.str(")");
+                self.space(1);
+            }
             self.statement_block(&x.statement_block);
         }
         if let Some(ref x) = arg.if_reset_statement_opt {

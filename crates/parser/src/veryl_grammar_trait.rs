@@ -122,3 +122,4 @@ group_to_item!(Interface);
 group_to_item!(Generate);
 group_to_item!(Package);
 group_to_item!(Description);
+group_to_item!(StatementBlock);

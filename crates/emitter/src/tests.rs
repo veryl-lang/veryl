@@ -467,3 +467,183 @@ endmodule
 
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn emit_cond_type() {
+    let code = r#"module ModuleA (
+    i_clk: input clock,
+    i_rst: input reset,
+) {
+    let x: logic = 1;
+    var a: logic;
+    var b: logic;
+    var c: logic;
+    var d: logic;
+    var e: logic;
+    var f: logic;
+    var g: logic;
+    var h: logic;
+    var i: logic;
+
+    always_comb {
+        #[cond_type(unique)]
+        case x {
+            0: a = 1;
+            1: a = 1;
+        }
+        #[cond_type(unique0)]
+        case x {
+            0: b = 1;
+            1: b = 1;
+        }
+        #[cond_type(priority)]
+        case x {
+            0: c = 1;
+            1: c = 1;
+        }
+    }
+
+    always_comb {
+        #[cond_type(unique)]
+        if x == 0 {
+            d = 1;
+        } else if x == 1 {
+            d = 1;
+        }
+        #[cond_type(unique0)]
+        if x == 0 {
+            e = 1;
+        } else if x == 1 {
+            e = 1;
+        }
+        #[cond_type(priority)]
+        if x == 0 {
+            f = 1;
+        } else if x == 1 {
+            f = 1;
+        }
+    }
+
+    always_ff {
+        #[cond_type(unique)]
+        if_reset {
+            g = 1;
+        } else if x == 1 {
+            g = 1;
+        }
+    }
+    always_ff {
+        #[cond_type(unique0)]
+        if_reset {
+            h = 1;
+        } else if x == 1 {
+            h = 1;
+        }
+    }
+    always_ff {
+        #[cond_type(priority)]
+        if_reset {
+            i = 1;
+        } else if x == 1 {
+            i = 1;
+        }
+    }
+}
+"#;
+
+    let expect = r#"module prj_ModuleA (
+    input logic i_clk,
+    input logic i_rst
+);
+    logic x;
+    always_comb x = 1;
+    logic a;
+    logic b;
+    logic c;
+    logic d;
+    logic e;
+    logic f;
+    logic g;
+    logic h;
+    logic i;
+
+    always_comb begin
+
+        unique case (x) inside
+            0: a = 1;
+            1: a = 1;
+        endcase
+
+        unique0 case (x) inside
+            0: b = 1;
+            1: b = 1;
+        endcase
+
+        priority case (x) inside
+            0: c = 1;
+            1: c = 1;
+        endcase
+    end
+
+    always_comb begin
+
+        unique if (x == 0) begin
+            d = 1;
+        end else if (x == 1) begin
+            d = 1;
+        end
+
+        unique0 if (x == 0) begin
+            e = 1;
+        end else if (x == 1) begin
+            e = 1;
+        end
+
+        priority if (x == 0) begin
+            f = 1;
+        end else if (x == 1) begin
+            f = 1;
+        end
+    end
+
+    always_ff @ (posedge i_clk, negedge i_rst) begin
+
+        unique if (!i_rst) begin
+            g <= 1;
+        end else if (x == 1) begin
+            g <= 1;
+        end
+    end
+    always_ff @ (posedge i_clk, negedge i_rst) begin
+
+        unique0 if (!i_rst) begin
+            h <= 1;
+        end else if (x == 1) begin
+            h <= 1;
+        end
+    end
+    always_ff @ (posedge i_clk, negedge i_rst) begin
+
+        priority if (!i_rst) begin
+            i <= 1;
+        end else if (x == 1) begin
+            i <= 1;
+        end
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let mut metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+
+    metadata.build.emit_cond_type = true;
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    assert_eq!(ret, expect);
+}
