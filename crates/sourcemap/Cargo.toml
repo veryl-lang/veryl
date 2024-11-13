@@ -13,5 +13,5 @@ description.workspace = true
 [dependencies]
 miette        = {workspace = true}
 relative-path = "1.9"
-sourcemap     = "9.0"
+sourcemap     = "9.1"
 thiserror     = {workspace = true}
