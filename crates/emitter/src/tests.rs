@@ -264,10 +264,10 @@ fn expand_case_statement() {
                              a = 1;
                              a = 1;
                          end
-            (x) ==? (3), (x) ==? (4   ): a = 1;
-            ((x) >= (5)) && ((x) <= (7  )): a = 1;
-            (x) ==? (y - 1  ): a = 1;
-            default: a = 1;
+            (x) ==? (3), (x) ==? (4    ): a = 1;
+            ((x) >= (5)) && ((x) <= (7)): a = 1;
+            (x) ==? (y - 1             ): a = 1;
+            default                     : a = 1;
         endcase
     end
 endmodule

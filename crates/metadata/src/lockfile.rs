@@ -186,11 +186,9 @@ impl Lockfile {
                 let resolve_path = Self::resolve_path(&lock.url)?;
                 let dependency_path = Self::dependency_path(&lock.url, &lock.revision)?;
                 if resolve_path.exists() {
-                    dbg!(&resolve_path);
                     fs::remove_dir_all(&resolve_path)?;
                 }
                 if dependency_path.exists() {
-                    dbg!(&dependency_path);
                     fs::remove_dir_all(&dependency_path)?;
                 }
             }

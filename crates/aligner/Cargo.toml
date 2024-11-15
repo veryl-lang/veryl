@@ -1,0 +1,14 @@
+[package]
+name                  = "veryl-aligner"
+version               = "0.13.2"
+authors.workspace     = true
+repository.workspace  = true
+keywords.workspace    = true
+categories.workspace  = true
+license.workspace     = true
+readme.workspace      = true
+description.workspace = true
+edition               = "2021"
+
+[dependencies]
+veryl-parser = {version = "0.13.2", path = "../parser"}

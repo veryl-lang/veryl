@@ -6,7 +6,7 @@ module veryl_testcase_Module45;
 
     always_ff @ (posedge a) begin
         logic [10-1:0] x;
-        x = 1;
+        x =  1;
         b <= x * 1;
     end
 

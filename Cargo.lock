@@ -4918,6 +4918,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "veryl-aligner"
+version = "0.13.2"
+dependencies = [
+ "veryl-parser",
+]
+
+[[package]]
 name = "veryl-analyzer"
 version = "0.13.2"
 dependencies = [
@@ -4939,6 +4946,7 @@ dependencies = [
  "serde",
  "strnum_bitwidth",
  "toml 0.8.19",
+ "veryl-aligner",
  "veryl-analyzer",
  "veryl-metadata",
  "veryl-parser",
@@ -4949,6 +4957,7 @@ dependencies = [
 name = "veryl-formatter"
 version = "0.13.2"
 dependencies = [
+ "veryl-aligner",
  "veryl-metadata",
  "veryl-parser",
 ]

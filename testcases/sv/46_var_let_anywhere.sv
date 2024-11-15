@@ -10,7 +10,7 @@ module veryl_testcase_Module46;
         logic [10-1:0] x;
         d <= 1;
 
-        x = 1;
+        x =  1;
         b <= x * 1;
     end
 

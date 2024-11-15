@@ -5,11 +5,11 @@ pub module ram #(
     } else {
         1
     },
-    param DATA_WIDTH   : u32       = 8                                         ,
-    param DATA_TYPE    : type      = logic<DATA_WIDTH>                         ,
-    param BUFFER_OUT   : bit       = 0                                         ,
-    param USE_RESET    : bit       = 0                                         ,
-    param INITIAL_VALUE: DATA_TYPE = 0 as DATA_TYPE                            ,
+    param DATA_WIDTH   : u32       = 8                                             ,
+    param DATA_TYPE    : type      = logic<DATA_WIDTH>                             ,
+    param BUFFER_OUT   : bit       = 0                                             ,
+    param USE_RESET    : bit       = 0                                             ,
+    param INITIAL_VALUE: DATA_TYPE = 0 as DATA_TYPE                                ,
 ) (
     i_clk : input  clock                   ,
     i_rst : input  reset                   ,
