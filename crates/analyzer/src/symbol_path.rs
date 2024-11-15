@@ -250,21 +250,13 @@ impl GenericSymbol {
         }
     }
 
-    pub fn get_generic_instance(
-        &self,
-        base: &Symbol,
-    ) -> Option<(Token, Symbol, Vec<GenericSymbolPath>)> {
+    pub fn get_generic_instance(&self, base: &Symbol) -> Option<(Token, Symbol)> {
         if self.arguments.is_empty() {
             None
         } else {
-            let mut arguments = self.arguments.clone();
-            for arg in &mut arguments {
-                arg.resolve_imported(&base.namespace);
-            }
-
             let property = GenericInstanceProperty {
                 base: base.id,
-                arguments: arguments.clone(),
+                arguments: self.arguments.clone(),
             };
             let kind = SymbolKind::GenericInstance(property);
             let token = &self.base;
@@ -278,8 +270,7 @@ impl GenericSymbol {
             );
             let symbol = Symbol::new(&token, kind, &base.namespace, false, DocComment::default());
 
-            // return arguments which is modified by `resolve_imported`
-            Some((token, symbol, arguments))
+            Some((token, symbol))
         }
     }
 }
@@ -395,26 +386,34 @@ impl GenericSymbolPath {
         if !self.is_resolvable() {
             return;
         }
-        if symbol_table::resolve((&self.generic_path(), namespace)).is_err() {
-            let self_namespace = namespace_table::get(self.range.beg.id).unwrap();
-            let TokenSource::File(self_file_path) = self.range.beg.source else {
-                return;
-            };
-            if let Ok(symbol) = symbol_table::resolve((&self.generic_path(), &self_namespace)) {
-                let mut parent = symbol.found.namespace.clone();
-                parent.strip_prefix(&namespace_table::get_default());
+        if let Ok(symbol) = symbol_table::resolve((&self.generic_path(), namespace)) {
+            if symbol.imported {
+                let self_namespace = namespace_table::get(self.range.beg.id).unwrap();
+                let TokenSource::File(self_file_path) = self.range.beg.source else {
+                    return;
+                };
+                if let Ok(symbol) = symbol_table::resolve((&self.generic_path(), &self_namespace)) {
+                    let mut parent = symbol.found.namespace.clone();
+                    parent.strip_prefix(&namespace_table::get_default());
 
-                // If symbol belongs Package, it can be expanded
-                if let Ok(parent_symbol) = symbol_table::resolve((&parent.paths, &self_namespace)) {
-                    if matches!(parent_symbol.found.kind, SymbolKind::Package(_)) {
-                        for (i, path) in parent.paths.iter().enumerate() {
-                            let token = Token::generate(*path);
-                            namespace_table::insert(token.id, self_file_path, &self_namespace);
-                            let generic_symbol = GenericSymbol {
-                                base: token,
-                                arguments: vec![],
-                            };
-                            self.paths.insert(i, generic_symbol);
+                    if parent.depth() == 0 {
+                        return;
+                    }
+
+                    // If symbol belongs Package, it can be expanded
+                    if let Ok(parent_symbol) =
+                        symbol_table::resolve((&parent.paths, &self_namespace))
+                    {
+                        if matches!(parent_symbol.found.kind, SymbolKind::Package(_)) {
+                            for (i, path) in parent.paths.iter().enumerate() {
+                                let token = Token::generate(*path);
+                                namespace_table::insert(token.id, self_file_path, &self_namespace);
+                                let generic_symbol = GenericSymbol {
+                                    base: token,
+                                    arguments: vec![],
+                                };
+                                self.paths.insert(i, generic_symbol);
+                            }
                         }
                     }
                 }

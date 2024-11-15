@@ -1090,6 +1090,7 @@ impl VerylWalker for Emitter {
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) {
         let namespace = namespace_table::get(arg.identifier().token.id).unwrap();
         let mut path: GenericSymbolPath = arg.into();
+        path.resolve_imported(&namespace);
 
         for i in 0..path.len() {
             let base_path = path.base_path(i);

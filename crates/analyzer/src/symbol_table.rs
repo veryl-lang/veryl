@@ -13,6 +13,7 @@ use veryl_parser::veryl_token::{Token, TokenSource};
 pub struct ResolveResult {
     pub found: Symbol,
     pub full_path: Vec<SymbolId>,
+    pub imported: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -169,25 +170,30 @@ impl SymbolTable {
                 return Ok(ResolveResult {
                     found: symbol,
                     full_path: context.full_path,
+                    imported: context.imported,
                 });
             }
 
             if let Some(ids) = self.name_table.get(name) {
                 for id in ids {
                     let symbol = self.symbol_table.get(id).unwrap();
-                    let included = if context.inner {
-                        context.namespace.matched(&symbol.namespace)
+                    let (included, imported) = if context.inner {
+                        (context.namespace.matched(&symbol.namespace), false)
                     } else {
-                        context.namespace.included(&symbol.namespace)
-                            || symbol
-                                .imported
-                                .iter()
-                                .any(|x| context.namespace.included(x))
+                        let imported = symbol
+                            .imported
+                            .iter()
+                            .any(|x| context.namespace.included(x));
+                        (
+                            context.namespace.included(&symbol.namespace) || imported,
+                            imported,
+                        )
                     };
                     if included && symbol.namespace.depth() >= max_depth {
                         symbol.evaluate();
                         context.found = Some(symbol);
                         context.last_found = Some(symbol);
+                        context.imported = imported;
                         max_depth = symbol.namespace.depth();
                     }
                 }
@@ -306,6 +312,7 @@ impl SymbolTable {
             Ok(ResolveResult {
                 found,
                 full_path: context.full_path,
+                imported: context.imported,
             })
         } else {
             let cause = ResolveErrorCause::NotFound(context.namespace.pop().unwrap());
@@ -538,6 +545,7 @@ struct ResolveContext<'a> {
     inner: bool,
     other_prj: bool,
     sv_member: bool,
+    imported: bool,
 }
 
 impl<'a> ResolveContext<'a> {
@@ -551,6 +559,7 @@ impl<'a> ResolveContext<'a> {
             inner: false,
             other_prj: false,
             sv_member: false,
+            imported: false,
         }
     }
 }
