@@ -73,6 +73,9 @@ impl<'a> CreateReference<'a> {
             return;
         }
 
+        let mut path = path.clone();
+        path.resolve_imported(namespace);
+
         for i in 0..path.len() {
             let base_path = path.base_path(i);
 
@@ -108,14 +111,12 @@ impl<'a> CreateReference<'a> {
                             .push(param.1.default_value.as_ref().unwrap().clone());
                     }
 
-                    if let Some((token, new_symbol, arguments)) =
-                        path.get_generic_instance(&symbol.found)
-                    {
+                    if let Some((token, new_symbol)) = path.get_generic_instance(&symbol.found) {
                         if let Some(ref x) = symbol_table::insert(&token, new_symbol) {
                             symbol_table::add_generic_instance(symbol.found.id, *x);
                         }
 
-                        let table = symbol.found.generic_table(&arguments);
+                        let table = symbol.found.generic_table(&path.arguments);
                         let map = vec![GenericMap {
                             name: "".to_string(),
                             map: table,
@@ -190,8 +191,10 @@ impl<'a> VerylGrammarTrait for CreateReference<'a> {
         // Should be executed after scoped_identifier to handle hierarchical access only
         if let HandlerPoint::After = self.point {
             let ident = arg.identifier().token;
-            let mut path: SymbolPath = arg.scoped_identifier.as_ref().into();
             let namespace = namespace_table::get(ident.id).unwrap();
+            let mut path: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
+            path.resolve_imported(&namespace);
+            let mut path = path.mangled_path();
 
             for x in &arg.expression_identifier_list0 {
                 path.push(x.identifier.identifier_token.token.text);
