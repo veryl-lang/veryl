@@ -737,7 +737,7 @@ PortDeclarationItem: Identifier Colon ( PortTypeConcrete | PortTypeAbstract );
 
 PortTypeConcrete: Direction [ ClockDomain ] ArrayType;
 
-PortTypeAbstract: [ ClockDomain ] Interface [ Array ];
+PortTypeAbstract: [ ClockDomain ] Interface [ ColonColon Identifier ] [ Array ];
 
 Direction: Input
          | Output

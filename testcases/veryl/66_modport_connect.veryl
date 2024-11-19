@@ -9,15 +9,18 @@ interface Interface66 {
 module Module66 (
     a: modport Interface66::port,
     b: interface,
+    c: interface::port,
 ) {
 
     inst u: Module66A (
         a: a,
         b: b,
+        c: c,
     );
 }
 
 module Module66A (
     a: modport Interface66::port,
     b: interface,
+    c: interface::port,
 ) {}

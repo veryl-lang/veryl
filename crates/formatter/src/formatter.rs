@@ -1789,6 +1789,10 @@ impl VerylWalker for Formatter {
                 }
                 self.interface(&x.interface);
                 if let Some(ref x) = x.port_type_abstract_opt0 {
+                    self.colon_colon(&x.colon_colon);
+                    self.identifier(&x.identifier);
+                }
+                if let Some(ref x) = x.port_type_abstract_opt1 {
                     self.space(1);
                     self.array(&x.array);
                 }

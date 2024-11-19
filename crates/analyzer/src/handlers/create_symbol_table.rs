@@ -1034,6 +1034,28 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
                     } else {
                         SymClockDomain::None
                     };
+                    //  TODO:
+                    //  Need to store modport type and array size for connected interface check
+                    //let kind = if let Some(ref x) = x.port_type_abstract_opt0 {
+                    //    TypeKind::UserDefined(vec![x.identifier.identifier_token.token.text])
+                    //} else {
+                    //    TypeKind::UserDefined(vec![])
+                    //};
+                    //let mut array = Vec::new();
+                    //if let Some(ref x) = x.port_type_abstract_opt1 {
+                    //    let x = &x.array;
+                    //    array.push(*x.expression.clone());
+                    //    for x in &x.array_list {
+                    //        array.push(*x.expression.clone());
+                    //    }
+                    //}
+                    //let r#type = SymType {
+                    //    kind,
+                    //    modifier: vec![],
+                    //    width: vec![],
+                    //    array,
+                    //    is_const: false,
+                    //};
                     PortProperty {
                         token,
                         r#type: None,

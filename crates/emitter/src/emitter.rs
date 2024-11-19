@@ -3026,12 +3026,16 @@ impl VerylWalker for Emitter {
             PortDeclarationItemGroup::PortTypeAbstract(x) => {
                 let x = x.port_type_abstract.as_ref();
                 self.interface(&x.interface);
+                if let Some(ref x) = x.port_type_abstract_opt0 {
+                    self.str(".");
+                    self.identifier(&x.identifier);
+                }
                 self.space(1);
                 self.align_start(align_kind::IDENTIFIER);
                 self.identifier(&arg.identifier);
                 self.align_finish(align_kind::IDENTIFIER);
                 self.align_start(align_kind::ARRAY);
-                if let Some(ref x) = x.port_type_abstract_opt0 {
+                if let Some(ref x) = x.port_type_abstract_opt1 {
                     self.space(1);
                     self.array(&x.array);
                 } else {

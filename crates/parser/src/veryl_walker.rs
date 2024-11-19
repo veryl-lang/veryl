@@ -2482,6 +2482,10 @@ pub trait VerylWalker {
         }
         self.interface(&arg.interface);
         if let Some(ref x) = arg.port_type_abstract_opt0 {
+            self.colon_colon(&x.colon_colon);
+            self.identifier(&x.identifier);
+        }
+        if let Some(ref x) = arg.port_type_abstract_opt1 {
             self.array(&x.array);
         }
     }
