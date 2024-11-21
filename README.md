@@ -27,6 +27,7 @@ If you have any idea, please open [Issue](https://github.com/veryl-lang/veryl/is
 * [Example](#example)
 * [FAQ](#faq)
 * [Installation & Usage](#installation--usage)
+* [Publications](#plublications)
 * [License](#license)
 * [Contribution](#contribution)
 
@@ -156,6 +157,15 @@ Therefore syntax features which introduce large complexity in exchange for sligh
 
 See [Getting Started](https://doc.veryl-lang.org/book/03_getting_started.html).
 
+## Publications
+
+* Naoya Hatta, Taichi Ishitani, Ryota Shioya.
+  Veryl: A New Hardware Description Language as an Alternative to SystemVerilog.
+  August 2024. In: The Design & Verification Conference (DVCon) Japan 2024.
+  [[Paper]](https://veryl-lang.org/docs/veryl_dvcon-jpn-2024.pdf)
+  [[Slides]](https://veryl-lang.org/docs/veryl_dvcon-jpn-2024-slide.pdf)
+  [[arXiv]](http://arxiv.org/abs/2411.12983)
+
 ## License
 
 Licensed under either of
@@ -171,11 +181,3 @@ Unless you explicitly state otherwise, any contribution intentionally
 submitted for inclusion in the work by you, as defined in the Apache-2.0
 license, shall be dual licensed as above, without any additional terms or
 conditions.
-
-## Publications
-
-* Naoya Hatta, Taichi Ishitani, Ryota Shioya.
-  Veryl: A New Hardware Description Language as an Alternative to SystemVerilog.
-  August 2024. In: The Design & Verification Conference (DVCon) Japan 2024.
-  [[Paper]](https://veryl-lang.org/docs/veryl_dvcon-jpn-2024.pdf)
-  [[Slides]](https://veryl-lang.org/docs/veryl_dvcon-jpn-2024-slide.pdf)
