@@ -1023,7 +1023,8 @@ fn completion_symbol(
 }
 
 fn current_namespace(url: &Url, line: usize, column: usize) -> Option<Namespace> {
-    let url = resource_table::get_path_id(Path::new(url.path()).to_path_buf()).unwrap();
+    let path = url.to_file_path().ok()?;
+    let url = resource_table::get_path_id(path)?;
 
     let mut ret = None;
     let mut ret_func = None;
