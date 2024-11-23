@@ -543,6 +543,8 @@ CastingType: U32
            | ResetSyncHigh
            | ResetSyncLow
            | UserDefinedType
+           | Based
+           | BaseLess
            ;
 
 // ----------------------------------------------------------------------------

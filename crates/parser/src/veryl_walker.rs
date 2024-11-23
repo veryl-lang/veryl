@@ -1516,6 +1516,8 @@ pub trait VerylWalker {
             CastingType::ResetSyncHigh(x) => self.reset_sync_high(&x.reset_sync_high),
             CastingType::ResetSyncLow(x) => self.reset_sync_low(&x.reset_sync_low),
             CastingType::UserDefinedType(x) => self.user_defined_type(&x.user_defined_type),
+            CastingType::Based(x) => self.based(&x.based),
+            CastingType::BaseLess(x) => self.base_less(&x.base_less),
         }
         after!(self, casting_type, arg);
     }
