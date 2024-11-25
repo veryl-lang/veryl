@@ -247,7 +247,9 @@ impl SymbolTable {
                             context.inner = true;
                         }
                         SymbolKind::Instance(ref x) => {
-                            let path = SymbolPath::new(&x.type_name);
+                            let mut type_name = x.type_name.clone();
+                            type_name.resolve_imported(&context.namespace);
+                            let path = type_name.mangled_path();
                             let symbol = self.resolve(&path, &context.namespace)?;
                             if let SymbolKind::GenericInstance(x) = &symbol.found.kind {
                                 let symbol = self.symbol_table.get(&x.base).unwrap();
@@ -255,7 +257,7 @@ impl SymbolTable {
                                 context.inner = true;
                             } else {
                                 context.namespace = Namespace::default();
-                                for x in &x.type_name {
+                                for x in path.as_slice() {
                                     context.namespace.push(*x);
                                 }
                                 context.inner = true;
