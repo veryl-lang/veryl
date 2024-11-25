@@ -1,22 +1,25 @@
 module Module56 {
-    inst u0: Interface56A::<Package56A>;
-    inst u1: Interface56A::<Package56B>;
-    inst u2: Interface56B::<Package56A>;
-    inst u4: Interface56B::<Package56A>;
-    inst u3: Interface56B::<>;
+    import Package56A::X;
+    inst u0: Interface56A::<Package56A::X>;
+    inst u1: Interface56A::<Package56B::X>;
+    inst u2: Interface56B::<Package56A::X>;
+    inst u3: Interface56B::<Package56A::X>;
+    inst u4: Interface56B::<>;
+    inst u5: Interface56B::<X>;
 
     let _a: logic = u0._a;
     let _b: logic = u2._b;
+    let _c: logic = u5._b;
 }
 
 /// Generic interface test for doc comment
 pub interface Interface56A::<T: const> {
-    var _a: logic<T::X>;
+    var _a: logic<T>;
 }
 
 /// Generic interface test for doc comment
-pub interface Interface56B::<T: const = Package56B> {
-    var _b: logic<T::X>;
+pub interface Interface56B::<T: const = 3> {
+    var _b: logic<T>;
 }
 
 package Package56A {

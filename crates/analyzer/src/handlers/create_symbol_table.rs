@@ -856,8 +856,7 @@ impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
 
     fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::After = self.point {
-            let type_name: SymbolPath = arg.scoped_identifier.as_ref().into();
-            let type_name = type_name.to_vec();
+            let type_name: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
             let connects = self.connects.drain().collect();
             let property = InstanceProperty {
                 type_name,

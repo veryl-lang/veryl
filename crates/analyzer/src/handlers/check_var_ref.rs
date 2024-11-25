@@ -474,7 +474,10 @@ impl<'a> VerylGrammarTrait for CheckVarRef<'a> {
                     let mut port_unknown = false;
                     let mut sv_instance = false;
 
-                    if let Ok(x) = symbol_table::resolve((&x.type_name, &symbol.found.namespace)) {
+                    if let Ok(x) = symbol_table::resolve((
+                        &x.type_name.mangled_path(),
+                        &symbol.found.namespace,
+                    )) {
                         match x.found.kind {
                             SymbolKind::Module(ref x) => {
                                 for port in &x.ports {

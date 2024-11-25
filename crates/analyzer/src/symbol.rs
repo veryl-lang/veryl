@@ -453,13 +453,7 @@ impl fmt::Display for SymbolKind {
                 }
             }
             SymbolKind::Instance(x) => {
-                let mut type_name = String::new();
-                for (i, x) in x.type_name.iter().enumerate() {
-                    if i != 0 {
-                        type_name.push_str("::");
-                    }
-                    type_name.push_str(&format!("{x}"));
-                }
+                let type_name = x.type_name.to_string();
                 format!("instance ({type_name})")
             }
             SymbolKind::Block => "block".to_string(),
@@ -1191,7 +1185,7 @@ impl From<&syntax_tree::ExpressionIdentifier> for ConnectTarget {
 
 #[derive(Debug, Clone)]
 pub struct InstanceProperty {
-    pub type_name: Vec<StrId>,
+    pub type_name: GenericSymbolPath,
     pub connects: HashMap<Token, Vec<ConnectTarget>>,
 }
 
