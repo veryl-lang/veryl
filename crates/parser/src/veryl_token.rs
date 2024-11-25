@@ -669,6 +669,16 @@ impl From<&CastingType> for TokenRange {
             CastingType::UserDefinedType(x) => {
                 x.user_defined_type.scoped_identifier.as_ref().into()
             }
+            CastingType::Based(x) => {
+                let beg = x.based.based_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+            CastingType::BaseLess(x) => {
+                let beg = x.base_less.base_less_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
         }
     }
 }

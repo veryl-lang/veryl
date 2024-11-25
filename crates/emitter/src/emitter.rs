@@ -1293,6 +1293,14 @@ impl VerylWalker for Emitter {
                     self.user_defined_type(&x.user_defined_type);
                     self.str("'(");
                 }
+                CastingType::Based(x) => {
+                    self.based(&x.based);
+                    self.str("'(");
+                }
+                CastingType::BaseLess(x) => {
+                    self.base_less(&x.base_less);
+                    self.str("'(");
+                }
                 // casting to clock type doesn't change polarity
                 CastingType::Clock(_)
                 | CastingType::ClockPosedge(_)
@@ -1350,9 +1358,11 @@ impl VerylWalker for Emitter {
                 | CastingType::U64(_)
                 | CastingType::I32(_)
                 | CastingType::I64(_) => self.str("))"),
-                CastingType::F32(_) | CastingType::F64(_) | CastingType::UserDefinedType(_) => {
-                    self.str(")")
-                }
+                CastingType::F32(_)
+                | CastingType::F64(_)
+                | CastingType::UserDefinedType(_)
+                | CastingType::Based(_)
+                | CastingType::BaseLess(_) => self.str(")"),
                 _ => (),
             }
         }
