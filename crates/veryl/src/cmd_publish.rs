@@ -4,7 +4,7 @@ use log::{info, warn};
 use miette::{bail, IntoDiagnostic, Result, WrapErr};
 use std::fs;
 use veryl_analyzer::Analyzer;
-use veryl_metadata::Metadata;
+use veryl_metadata::{Metadata, UrlPath};
 use veryl_parser::Parser;
 
 pub struct CmdPublish {
@@ -25,6 +25,15 @@ impl CmdPublish {
                 bail!(
                     "path \"{}\" is symbolic link, it can't be published",
                     path.src.to_string_lossy()
+                );
+            }
+        }
+
+        for url in metadata.dependencies.keys() {
+            if let UrlPath::Path(x) = url {
+                bail!(
+                    "path dependency \"{}\" is used, it can't be published",
+                    x.to_string_lossy()
                 );
             }
         }

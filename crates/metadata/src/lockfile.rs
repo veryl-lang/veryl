@@ -1,5 +1,5 @@
 use crate::git::Git;
-use crate::metadata::{Dependency, Metadata};
+use crate::metadata::{Dependency, Metadata, UrlPath};
 use crate::metadata_error::MetadataError;
 use crate::pubfile::{Pubfile, Release};
 use log::info;
@@ -9,7 +9,6 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use url::Url;
 use uuid::Uuid;
 use veryl_path::PathSet;
 
@@ -18,9 +17,11 @@ use veryl_path::PathSet;
 pub struct Lockfile {
     projects: Vec<Lock>,
     #[serde(skip)]
-    pub lock_table: HashMap<Url, Vec<Lock>>,
+    pub lock_table: HashMap<UrlPath, Vec<Lock>>,
     #[serde(skip)]
     force_update: bool,
+    #[serde(skip)]
+    pub metadata_path: PathBuf,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -29,7 +30,7 @@ pub struct Lock {
     pub name: String,
     pub uuid: Uuid,
     pub version: Version,
-    pub url: Url,
+    pub url: UrlPath,
     pub revision: String,
     pub dependencies: Vec<LockDependency>,
     #[serde(skip)]
@@ -41,15 +42,17 @@ pub struct Lock {
 pub struct LockDependency {
     pub name: String,
     pub version: Version,
-    pub url: Url,
+    pub url: UrlPath,
     pub revision: String,
 }
 
 impl Lockfile {
-    pub fn load<T: AsRef<Path>>(path: T) -> Result<Self, MetadataError> {
-        let path = path.as_ref().canonicalize()?;
+    pub fn load(metadata: &Metadata) -> Result<Self, MetadataError> {
+        let path = metadata.lockfile_path.canonicalize()?;
         let text = fs::read_to_string(path)?;
         let mut ret = Self::from_str(&text)?;
+        ret.metadata_path = metadata.metadata_path.clone();
+
         let mut locks = Vec::new();
         locks.append(&mut ret.projects);
 
@@ -82,7 +85,10 @@ impl Lockfile {
     }
 
     pub fn new(metadata: &Metadata) -> Result<Self, MetadataError> {
-        let mut ret = Lockfile::default();
+        let mut ret = Lockfile {
+            metadata_path: metadata.metadata_path.clone(),
+            ..Default::default()
+        };
 
         let mut name_table = HashSet::new();
         let mut uuid_table = HashSet::new();
@@ -196,14 +202,30 @@ impl Lockfile {
         Ok(())
     }
 
+    fn git_clone(&self, url: &UrlPath, path: &Path) -> Result<Git, MetadataError> {
+        let url = match url {
+            UrlPath::Url(x) => UrlPath::Url(x.clone()),
+            UrlPath::Path(x) => {
+                if x.is_relative() {
+                    let path = self.metadata_path.parent().unwrap().join(x);
+                    UrlPath::Path(path)
+                } else {
+                    UrlPath::Path(x.clone())
+                }
+            }
+        };
+
+        Git::clone(&url, path)
+    }
+
     fn sort_table(&mut self) {
         for locks in self.lock_table.values_mut() {
             locks.sort_by(|a, b| b.version.cmp(&a.version));
         }
     }
 
-    fn gen_uuid(url: &Url, revision: &str) -> Result<Uuid, MetadataError> {
-        let mut url = url.as_str().to_string();
+    fn gen_uuid(url: &UrlPath, revision: &str) -> Result<Uuid, MetadataError> {
+        let mut url = url.to_string();
         url.push_str(revision);
         Ok(Uuid::new_v5(&Uuid::NAMESPACE_URL, url.as_bytes()))
     }
@@ -287,7 +309,7 @@ impl Lockfile {
 
     fn resolve_dependency(
         &mut self,
-        url: &Url,
+        url: &UrlPath,
         dep: &Dependency,
     ) -> Result<Vec<(Release, Option<String>)>, MetadataError> {
         Ok(match dep {
@@ -312,7 +334,7 @@ impl Lockfile {
 
     fn resolve_version(
         &mut self,
-        url: &Url,
+        url: &UrlPath,
         version_req: &VersionReq,
     ) -> Result<Release, MetadataError> {
         if let Some(release) = self.resolve_version_from_lockfile(url, version_req)? {
@@ -330,7 +352,7 @@ impl Lockfile {
 
     fn resolve_version_from_lockfile(
         &mut self,
-        url: &Url,
+        url: &UrlPath,
         version_req: &VersionReq,
     ) -> Result<Option<Release>, MetadataError> {
         if let Some(locks) = self.lock_table.get_mut(url) {
@@ -348,7 +370,7 @@ impl Lockfile {
         Ok(None)
     }
 
-    fn resolve_path(url: &Url) -> Result<PathBuf, MetadataError> {
+    fn resolve_path(url: &UrlPath) -> Result<PathBuf, MetadataError> {
         let resolve_dir = veryl_path::cache_path().join("resolve");
         let uuid = Self::gen_uuid(url, "")?;
         Ok(resolve_dir.join(uuid.simple().encode_lower(&mut Uuid::encode_buffer())))
@@ -356,7 +378,7 @@ impl Lockfile {
 
     fn resolve_version_from_latest(
         &mut self,
-        url: &Url,
+        url: &UrlPath,
         version_req: &VersionReq,
     ) -> Result<Release, MetadataError> {
         let resolve_dir = veryl_path::cache_path().join("resolve");
@@ -367,7 +389,7 @@ impl Lockfile {
 
         let path = Self::resolve_path(url)?;
         let lock = veryl_path::lock_dir("resolve")?;
-        let git = Git::clone(url, &path)?;
+        let git = self.git_clone(url, &path)?;
         git.fetch()?;
         git.checkout(None)?;
         veryl_path::unlock_dir(lock)?;
@@ -389,13 +411,13 @@ impl Lockfile {
         })
     }
 
-    fn dependency_path(url: &Url, revision: &str) -> Result<PathBuf, MetadataError> {
+    fn dependency_path(url: &UrlPath, revision: &str) -> Result<PathBuf, MetadataError> {
         let dependencies_dir = veryl_path::cache_path().join("dependencies");
         let uuid = Self::gen_uuid(url, revision)?;
         Ok(dependencies_dir.join(uuid.simple().encode_lower(&mut Uuid::encode_buffer())))
     }
 
-    fn get_metadata(&self, url: &Url, revision: &str) -> Result<Metadata, MetadataError> {
+    fn get_metadata(&self, url: &UrlPath, revision: &str) -> Result<Metadata, MetadataError> {
         let dependencies_dir = veryl_path::cache_path().join("dependencies");
 
         if !dependencies_dir.exists() {
@@ -407,7 +429,7 @@ impl Lockfile {
 
         if !path.exists() {
             let lock = veryl_path::lock_dir("dependencies")?;
-            let git = Git::clone(url, &path)?;
+            let git = self.git_clone(url, &path)?;
             git.fetch()?;
             git.checkout(Some(revision))?;
             veryl_path::unlock_dir(lock)?;
@@ -419,7 +441,7 @@ impl Lockfile {
             if !ret || !toml.exists() {
                 let lock = veryl_path::lock_dir("dependencies")?;
                 fs::remove_dir_all(&path)?;
-                let git = Git::clone(url, &path)?;
+                let git = self.git_clone(url, &path)?;
                 git.fetch()?;
                 git.checkout(Some(revision))?;
                 veryl_path::unlock_dir(lock)?;

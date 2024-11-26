@@ -1,16 +1,16 @@
+use crate::metadata::UrlPath;
 use crate::metadata_error::MetadataError;
 use log::debug;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use thiserror::Error;
-use url::Url;
 
 pub struct Git {
     path: PathBuf,
 }
 
 #[derive(Error, Debug)]
-#[error("git operation failure: \"{msg}\"\n  {context}")]
+#[error("git command failed: \"{msg}\"\n  {context}")]
 pub struct GitCommandError {
     msg: String,
     context: String,
@@ -52,14 +52,14 @@ impl Git {
         })
     }
 
-    pub fn clone(url: &Url, path: &Path) -> Result<Self, MetadataError> {
+    pub fn clone(url: &UrlPath, path: &Path) -> Result<Self, MetadataError> {
         let current_dir = path.parent().unwrap();
         let target = path.file_name().unwrap();
 
         if !path.exists() {
             let output = Command::new(GIT_COMMAND)
                 .arg("clone")
-                .arg(url.as_str())
+                .arg(url.to_string())
                 .arg(target)
                 .current_dir(current_dir)
                 .output()?;
@@ -80,7 +80,7 @@ impl Git {
                 }
 
                 let context = String::from_utf8_lossy(&output.stderr).to_string();
-                let msg = format!("failed to clone repository: {}", url.as_str());
+                let msg = format!("failed to clone repository: {}", url);
                 return Err(GitCommandError { msg, context }.into());
             }
             debug!("Cloned repository ({})", url);
