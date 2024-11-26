@@ -1,3 +1,4 @@
+use crate::metadata::UrlPath;
 use miette::{self, Diagnostic};
 use semver::Version;
 use std::path::PathBuf;
@@ -24,7 +25,7 @@ pub enum MetadataError {
     StripPrefix(#[from] std::path::StripPrefixError),
 
     #[diagnostic(code(MetadataError::Git), help(""))]
-    #[error("git operation failure")]
+    #[error("git operation failure: {0}")]
     Git(Box<dyn std::error::Error + Sync + Send>),
 
     #[diagnostic(
@@ -55,7 +56,7 @@ pub enum MetadataError {
 
     #[diagnostic(code(MetadataError::VersionNotFound), help(""))]
     #[error("{version} @ {url} is not found")]
-    VersionNotFound { url: Url, version: String },
+    VersionNotFound { url: UrlPath, version: String },
 
     #[diagnostic(code(MetadataError::GitSpec), help(""))]
     #[error("no version/rev/tag/branch specification of {0}")]

@@ -13,7 +13,7 @@ impl CmdUpdate {
 
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
         if metadata.lockfile_path.exists() {
-            let mut lockfile = Lockfile::load(&metadata.lockfile_path)?;
+            let mut lockfile = Lockfile::load(metadata)?;
             let modified = lockfile.update(metadata, true)?;
             if modified {
                 lockfile.save(&metadata.lockfile_path)?;

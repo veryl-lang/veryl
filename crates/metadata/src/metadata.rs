@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use spdx::Expression;
 use std::collections::HashMap;
 use std::env;
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -47,7 +48,7 @@ pub struct Metadata {
     #[serde(default)]
     pub test: Test,
     #[serde(default)]
-    pub dependencies: HashMap<Url, Dependency>,
+    pub dependencies: HashMap<UrlPath, Dependency>,
     #[serde(skip)]
     pub metadata_path: PathBuf,
     #[serde(skip)]
@@ -58,6 +59,25 @@ pub struct Metadata {
     pub lockfile_path: PathBuf,
     #[serde(skip)]
     pub lockfile: Lockfile,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(untagged)]
+pub enum UrlPath {
+    Url(Url),
+    Path(PathBuf),
+}
+
+impl fmt::Display for UrlPath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            UrlPath::Url(x) => x.fmt(f),
+            UrlPath::Path(x) => {
+                let text = x.to_string_lossy();
+                text.fmt(f)
+            }
+        }
+    }
 }
 
 static VALID_PROJECT_NAME: Lazy<Regex> =
@@ -201,7 +221,7 @@ impl Metadata {
 
     pub fn update_lockfile(&mut self) -> Result<(), MetadataError> {
         let modified = if self.lockfile_path.exists() {
-            let mut lockfile = Lockfile::load(&self.lockfile_path)?;
+            let mut lockfile = Lockfile::load(self)?;
             let modified = lockfile.update(self, false)?;
             self.lockfile = lockfile;
             modified

@@ -17,7 +17,7 @@ pub use doc::Doc;
 pub use format::Format;
 pub use lint::{Case, Lint};
 pub use lockfile::Lockfile;
-pub use metadata::{BumpKind, Metadata};
+pub use metadata::{BumpKind, Metadata, UrlPath};
 pub use metadata_error::MetadataError;
 pub use project::Project;
 pub use pubfile::{Pubfile, Release};
