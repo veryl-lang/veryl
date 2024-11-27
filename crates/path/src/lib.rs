@@ -50,6 +50,7 @@ pub fn gather_files_with_extension<T: AsRef<Path>>(
     let mut ret = Vec::new();
     for entry in WalkDir::new(base_dir.as_ref())
         .follow_links(symlink)
+        .sort_by_file_name()
         .into_iter()
         .flatten()
     {

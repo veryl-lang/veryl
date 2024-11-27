@@ -11,5 +11,4 @@ module ModuleC {
         i_adrb: _,
         o_qb  : _,
     );
-
 }
