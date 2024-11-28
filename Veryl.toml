@@ -30,4 +30,5 @@ compile_args = ["-full64"]
 "https://github.com/veryl-lang/sample" = [
     {version = "0.13.0", name = "veryl_sample1"},
     {version = "0.14.0", name = "veryl_sample2"},
+    {version = "0.15.0", name = "veryl_sample3"},
 ]
