@@ -1,21 +1,22 @@
 module Module25 (
-    i_clk: input  clock,
-    i_rst: input  reset,
-    i_d  : input  logic,
-    o_d0 : output logic,
-    o_d1 : output logic,
+    i_clk : input   clock                         ,
+    i_rst : input   reset                         ,
+    in_if : modport veryl_sample3::data_if::mp_in ,
+    out_if: modport veryl_sample3::data_if::mp_out,
 ) {
+    inst data_if: veryl_sample3::data_if;
+
     inst u0: veryl_sample1::delay (
-        i_clk         ,
-        i_rst_n: i_rst,
-        i_d           ,
-        o_d    : o_d0 ,
+        i_clk                ,
+        i_rst_n: i_rst       ,
+        i_d    : in_if.data  ,
+        o_d    : data_if.data,
     );
 
     inst u1: veryl_sample2::delay (
-        i_clk         ,
-        i_rst_n: i_rst,
-        i_d           ,
-        o_d    : o_d1 ,
+        i_clk                ,
+        i_rst_n: i_rst       ,
+        i_d    : data_if.data,
+        o_d    : out_if.data ,
     );
 }

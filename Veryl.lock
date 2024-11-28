@@ -15,3 +15,11 @@ version = "0.14.0"
 url = "https://github.com/veryl-lang/sample"
 revision = "bfe86a4a232752413b8d0e91f61f47c11a2db927"
 dependencies = []
+
+[[projects]]
+name = "veryl_sample3"
+uuid = "b7032300-fe14-5c75-9e08-640d3dc74db5"
+version = "0.15.0"
+url = "https://github.com/veryl-lang/sample"
+revision = "7b4076a1203f89a2b08feee758c8557e208afb31"
+dependencies = []
