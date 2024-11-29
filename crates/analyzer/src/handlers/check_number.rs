@@ -23,13 +23,13 @@ impl<'a> CheckNumber<'a> {
     }
 }
 
-impl<'a> Handler for CheckNumber<'a> {
+impl Handler for CheckNumber<'_> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl<'a> VerylGrammarTrait for CheckNumber<'a> {
+impl VerylGrammarTrait for CheckNumber<'_> {
     fn based(&mut self, arg: &Based) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let token = &arg.based_token.token;

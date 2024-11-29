@@ -64,7 +64,7 @@ impl<'a> CheckVarRef<'a> {
     }
 }
 
-impl<'a> Handler for CheckVarRef<'a> {
+impl Handler for CheckVarRef<'_> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
@@ -109,7 +109,7 @@ fn has_cond_type(token: &Token) -> bool {
     false
 }
 
-impl<'a> VerylGrammarTrait for CheckVarRef<'a> {
+impl VerylGrammarTrait for CheckVarRef<'_> {
     fn r#else(&mut self, arg: &Else) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if self.in_if_expression.is_empty() {

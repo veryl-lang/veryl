@@ -21,13 +21,13 @@ impl<'a> CheckProto<'a> {
     }
 }
 
-impl<'a> Handler for CheckProto<'a> {
+impl Handler for CheckProto<'_> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl<'a> VerylGrammarTrait for CheckProto<'a> {
+impl VerylGrammarTrait for CheckProto<'_> {
     fn module_declaration(&mut self, arg: &ModuleDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if let Some(ref x) = arg.module_declaration_opt1 {

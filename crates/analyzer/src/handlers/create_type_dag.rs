@@ -116,13 +116,13 @@ impl<'a> CreateTypeDag<'a> {
     }
 }
 
-impl<'a> Handler for CreateTypeDag<'a> {
+impl Handler for CreateTypeDag<'_> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl<'a> VerylGrammarTrait for CreateTypeDag<'a> {
+impl VerylGrammarTrait for CreateTypeDag<'_> {
     fn struct_union_declaration(&mut self, arg: &StructUnionDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {

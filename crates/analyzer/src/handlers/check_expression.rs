@@ -26,13 +26,13 @@ impl<'a> CheckExpression<'a> {
     }
 }
 
-impl<'a> Handler for CheckExpression<'a> {
+impl Handler for CheckExpression<'_> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl<'a> VerylGrammarTrait for CheckExpression<'a> {
+impl VerylGrammarTrait for CheckExpression<'_> {
     fn case_condition(&mut self, _arg: &CaseCondition) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => self.case_condition_depth += 1,

@@ -20,13 +20,13 @@ impl<'a> CheckUnsafe<'a> {
     }
 }
 
-impl<'a> Handler for CheckUnsafe<'a> {
+impl Handler for CheckUnsafe<'_> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl<'a> VerylGrammarTrait for CheckUnsafe<'a> {
+impl VerylGrammarTrait for CheckUnsafe<'_> {
     fn unsafe_block(&mut self, arg: &UnsafeBlock) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {

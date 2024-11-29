@@ -280,13 +280,13 @@ impl<'a> CheckIdentifier<'a> {
     }
 }
 
-impl<'a> Handler for CheckIdentifier<'a> {
+impl Handler for CheckIdentifier<'_> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl<'a> VerylGrammarTrait for CheckIdentifier<'a> {
+impl VerylGrammarTrait for CheckIdentifier<'_> {
     fn clock_domain(&mut self, arg: &ClockDomain) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             self.check(&arg.identifier.identifier_token.token, Kind::ClockDomain);

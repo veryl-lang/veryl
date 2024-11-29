@@ -22,13 +22,13 @@ impl<'a> CheckFunction<'a> {
     }
 }
 
-impl<'a> Handler for CheckFunction<'a> {
+impl Handler for CheckFunction<'_> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl<'a> VerylGrammarTrait for CheckFunction<'a> {
+impl VerylGrammarTrait for CheckFunction<'_> {
     fn identifier_statement(&mut self, arg: &IdentifierStatement) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if let IdentifierStatementGroup::FunctionCall(_) = &*arg.identifier_statement_group {

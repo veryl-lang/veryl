@@ -547,7 +547,7 @@ struct ResolveContext<'a> {
     imported: bool,
 }
 
-impl<'a> ResolveContext<'a> {
+impl ResolveContext<'_> {
     fn new(namespace: &Namespace) -> Self {
         Self {
             found: None,

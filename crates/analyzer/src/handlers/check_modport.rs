@@ -21,13 +21,13 @@ impl<'a> CheckModport<'a> {
     }
 }
 
-impl<'a> Handler for CheckModport<'a> {
+impl Handler for CheckModport<'_> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl<'a> VerylGrammarTrait for CheckModport<'a> {
+impl VerylGrammarTrait for CheckModport<'_> {
     fn modport_item(&mut self, arg: &ModportItem) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {

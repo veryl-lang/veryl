@@ -22,13 +22,13 @@ impl<'a> CheckDirection<'a> {
     }
 }
 
-impl<'a> Handler for CheckDirection<'a> {
+impl Handler for CheckDirection<'_> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl<'a> VerylGrammarTrait for CheckDirection<'a> {
+impl VerylGrammarTrait for CheckDirection<'_> {
     fn port_declaration_item(&mut self, arg: &PortDeclarationItem) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if let PortDeclarationItemGroup::PortTypeConcrete(x) =

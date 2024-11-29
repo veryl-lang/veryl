@@ -146,13 +146,13 @@ impl<'a> CreateReference<'a> {
     }
 }
 
-impl<'a> Handler for CreateReference<'a> {
+impl Handler for CreateReference<'_> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl<'a> VerylGrammarTrait for CreateReference<'a> {
+impl VerylGrammarTrait for CreateReference<'_> {
     fn hierarchical_identifier(&mut self, arg: &HierarchicalIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             match symbol_table::resolve(arg) {

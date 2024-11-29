@@ -62,13 +62,13 @@ impl<'a> CheckClockDomain<'a> {
     }
 }
 
-impl<'a> Handler for CheckClockDomain<'a> {
+impl Handler for CheckClockDomain<'_> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl<'a> VerylGrammarTrait for CheckClockDomain<'a> {
+impl VerylGrammarTrait for CheckClockDomain<'_> {
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if let Ok(symbol) = symbol_table::resolve(arg) {

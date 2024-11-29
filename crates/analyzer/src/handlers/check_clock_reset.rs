@@ -30,13 +30,13 @@ impl<'a> CheckClockReset<'a> {
     }
 }
 
-impl<'a> Handler for CheckClockReset<'a> {
+impl Handler for CheckClockReset<'_> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl<'a> VerylGrammarTrait for CheckClockReset<'a> {
+impl VerylGrammarTrait for CheckClockReset<'_> {
     fn module_declaration(&mut self, arg: &ModuleDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {

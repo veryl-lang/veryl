@@ -22,7 +22,7 @@ impl<'a> CheckEnum<'a> {
     }
 }
 
-impl<'a> Handler for CheckEnum<'a> {
+impl Handler for CheckEnum<'_> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
@@ -32,7 +32,7 @@ fn calc_width(value: usize) -> usize {
     (usize::BITS - value.leading_zeros()) as usize
 }
 
-impl<'a> VerylGrammarTrait for CheckEnum<'a> {
+impl VerylGrammarTrait for CheckEnum<'_> {
     fn enum_declaration(&mut self, arg: &EnumDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let enum_symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();

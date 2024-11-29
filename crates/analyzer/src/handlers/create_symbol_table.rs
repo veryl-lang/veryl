@@ -369,7 +369,7 @@ impl<'a> CreateSymbolTable<'a> {
     }
 }
 
-impl<'a> Handler for CreateSymbolTable<'a> {
+impl Handler for CreateSymbolTable<'_> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
@@ -384,7 +384,7 @@ fn scoped_identifier_tokens(arg: &ScopedIdentifier) -> Vec<Token> {
     ret
 }
 
-impl<'a> VerylGrammarTrait for CreateSymbolTable<'a> {
+impl VerylGrammarTrait for CreateSymbolTable<'_> {
     fn identifier(&mut self, arg: &Identifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let id = arg.identifier_token.token.id;

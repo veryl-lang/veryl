@@ -23,13 +23,13 @@ impl<'a> CheckEmbedInclude<'a> {
     }
 }
 
-impl<'a> Handler for CheckEmbedInclude<'a> {
+impl Handler for CheckEmbedInclude<'_> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl<'a> VerylGrammarTrait for CheckEmbedInclude<'a> {
+impl VerylGrammarTrait for CheckEmbedInclude<'_> {
     fn embed_declaration(&mut self, arg: &EmbedDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let way = arg.identifier.identifier_token.to_string();

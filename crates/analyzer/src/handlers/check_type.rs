@@ -32,7 +32,7 @@ impl<'a> CheckType<'a> {
     }
 }
 
-impl<'a> Handler for CheckType<'a> {
+impl Handler for CheckType<'_> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
@@ -66,7 +66,7 @@ fn is_casting_type(symbol: &Symbol) -> bool {
     }
 }
 
-impl<'a> VerylGrammarTrait for CheckType<'a> {
+impl VerylGrammarTrait for CheckType<'_> {
     fn user_defined_type(&mut self, _arg: &UserDefinedType) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {

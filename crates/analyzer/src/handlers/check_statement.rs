@@ -26,13 +26,13 @@ impl<'a> CheckStatement<'a> {
     }
 }
 
-impl<'a> Handler for CheckStatement<'a> {
+impl Handler for CheckStatement<'_> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl<'a> VerylGrammarTrait for CheckStatement<'a> {
+impl VerylGrammarTrait for CheckStatement<'_> {
     fn statement(&mut self, _arg: &Statement) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             self.statement_depth_in_always_ff += 1;

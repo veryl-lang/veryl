@@ -22,13 +22,13 @@ impl<'a> CheckAttribute<'a> {
     }
 }
 
-impl<'a> Handler for CheckAttribute<'a> {
+impl Handler for CheckAttribute<'_> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl<'a> VerylGrammarTrait for CheckAttribute<'a> {
+impl VerylGrammarTrait for CheckAttribute<'_> {
     fn attribute(&mut self, arg: &Attribute) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let attr: Result<crate::attribute::Attribute, crate::attribute::AttributeError> =

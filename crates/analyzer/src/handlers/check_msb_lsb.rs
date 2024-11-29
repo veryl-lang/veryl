@@ -34,7 +34,7 @@ impl<'a> CheckMsbLsb<'a> {
     }
 }
 
-impl<'a> Handler for CheckMsbLsb<'a> {
+impl Handler for CheckMsbLsb<'_> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
@@ -52,7 +52,7 @@ fn trace_type(r#type: &SymType, namespace: &Namespace) -> Vec<SymType> {
     ret
 }
 
-impl<'a> VerylGrammarTrait for CheckMsbLsb<'a> {
+impl VerylGrammarTrait for CheckMsbLsb<'_> {
     fn lsb(&mut self, arg: &Lsb) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if !(self.in_expression_identifier && self.in_select) {

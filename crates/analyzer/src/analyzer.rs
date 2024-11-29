@@ -34,7 +34,7 @@ impl<'a> AnalyzerPass1<'a> {
     }
 }
 
-impl<'a> VerylWalker for AnalyzerPass1<'a> {
+impl VerylWalker for AnalyzerPass1<'_> {
     fn get_handlers(&mut self) -> Option<Vec<&mut dyn Handler>> {
         Some(self.handlers.get_handlers())
     }
@@ -52,7 +52,7 @@ impl<'a> AnalyzerPass2<'a> {
     }
 }
 
-impl<'a> VerylWalker for AnalyzerPass2<'a> {
+impl VerylWalker for AnalyzerPass2<'_> {
     fn get_handlers(&mut self) -> Option<Vec<&mut dyn Handler>> {
         Some(self.handlers.get_handlers())
     }
