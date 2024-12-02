@@ -4,6 +4,15 @@ module veryl_testcase_Module12_1 (
 );
     logic a;
     logic b;
+    logic c;
+
+    always_ff @ (posedge i_clk, negedge i_rst_n) begin
+        if (!i_rst_n) begin
+            c <= 0;
+        end else begin
+            c <= ~a;
+        end
+    end
 
     always_ff @ (posedge i_clk, negedge i_rst_n) begin
         if (!i_rst_n) begin

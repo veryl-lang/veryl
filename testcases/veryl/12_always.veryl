@@ -4,6 +4,15 @@ module Module12_1 (
 ) {
     var a: logic;
     var b: logic;
+    var c: logic;
+
+    always_ff (i_clk) {
+        if_reset {
+            c = 0;
+        } else {
+            c = ~a;
+        }
+    }
 
     always_ff {
         if_reset {
