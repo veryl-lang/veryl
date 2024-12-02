@@ -16,7 +16,7 @@ module veryl_testcase_Module16;
                    a = 1; // comment
                    a = 1;
                    a = 1;
-               end
+               end //
             3, 4   : a = 1;
             [5:7  ]: a = 1;
             y - 1  : a = 1;
@@ -32,7 +32,7 @@ module veryl_testcase_Module16;
                         b = 1;
                         b = 1;
                         b = 1;
-                    end
+                    end //
             z == 3, z == 4: b = 1;
             default       : b = 1;
         endcase
