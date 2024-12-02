@@ -625,9 +625,9 @@ ConstDeclaration: Const Identifier Colon ( ArrayType | Type ) Equ Expression Sem
 
 TypeDefDeclaration: Type Identifier Equ ArrayType Semicolon;
 
-AlwaysFfDeclaration: AlwaysFf [ AlwayfFfEventList ] StatementBlock;
+AlwaysFfDeclaration: AlwaysFf [ AlwaysFfEventList ] StatementBlock;
 
-AlwayfFfEventList: LParen AlwaysFfClock [ Comma AlwaysFfReset ] RParen;
+AlwaysFfEventList: LParen AlwaysFfClock [ Comma AlwaysFfReset ] RParen;
 
 AlwaysFfClock: HierarchicalIdentifier;
 

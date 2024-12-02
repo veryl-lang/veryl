@@ -1160,16 +1160,16 @@ impl VerylWalker for Formatter {
         self.always_ff(&arg.always_ff);
         self.space(1);
         if let Some(ref x) = arg.always_ff_declaration_opt {
-            self.alwayf_ff_event_list(&x.alwayf_ff_event_list);
+            self.always_ff_event_list(&x.always_ff_event_list);
         }
         self.statement_block(&arg.statement_block);
     }
 
-    /// Semantic action for non-terminal 'AlwayfFfEventList'
-    fn alwayf_ff_event_list(&mut self, arg: &AlwayfFfEventList) {
+    /// Semantic action for non-terminal 'AlwaysFfEventList'
+    fn always_ff_event_list(&mut self, arg: &AlwaysFfEventList) {
         self.l_paren(&arg.l_paren);
         self.always_ff_clock(&arg.always_ff_clock);
-        if let Some(ref x) = arg.alwayf_ff_event_list_opt {
+        if let Some(ref x) = arg.always_ff_event_list_opt {
             self.comma(&x.comma);
             self.space(1);
             self.always_ff_reset(&x.always_ff_reset);

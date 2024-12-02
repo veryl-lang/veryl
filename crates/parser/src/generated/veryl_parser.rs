@@ -519,16 +519,16 @@ pub const NON_TERMINALS: &[&str; 673] = &[
     /*   0 */ "AllBit",
     /*   1 */ "AllBitTerm",
     /*   2 */ "AllBitToken",
-    /*   3 */ "AlwayfFfEventList",
-    /*   4 */ "AlwayfFfEventListOpt",
-    /*   5 */ "AlwaysComb",
-    /*   6 */ "AlwaysCombDeclaration",
-    /*   7 */ "AlwaysCombTerm",
-    /*   8 */ "AlwaysCombToken",
-    /*   9 */ "AlwaysFf",
-    /*  10 */ "AlwaysFfClock",
-    /*  11 */ "AlwaysFfDeclaration",
-    /*  12 */ "AlwaysFfDeclarationOpt",
+    /*   3 */ "AlwaysComb",
+    /*   4 */ "AlwaysCombDeclaration",
+    /*   5 */ "AlwaysCombTerm",
+    /*   6 */ "AlwaysCombToken",
+    /*   7 */ "AlwaysFf",
+    /*   8 */ "AlwaysFfClock",
+    /*   9 */ "AlwaysFfDeclaration",
+    /*  10 */ "AlwaysFfDeclarationOpt",
+    /*  11 */ "AlwaysFfEventList",
+    /*  12 */ "AlwaysFfEventListOpt",
     /*  13 */ "AlwaysFfReset",
     /*  14 */ "AlwaysFfTerm",
     /*  15 */ "AlwaysFfToken",
@@ -1210,64 +1210,64 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 673] = &[
         transitions: &[],
         k: 0,
     },
-    /* 3 - "AlwayfFfEventList" */
-    LookaheadDFA {
-        prod0: 646,
-        transitions: &[],
-        k: 0,
-    },
-    /* 4 - "AlwayfFfEventListOpt" */
-    LookaheadDFA {
-        prod0: -1,
-        transitions: &[Trans(0, 32, 1, 647), Trans(0, 46, 2, 648)],
-        k: 1,
-    },
-    /* 5 - "AlwaysComb" */
+    /* 3 - "AlwaysComb" */
     LookaheadDFA {
         prod0: 272,
         transitions: &[],
         k: 0,
     },
-    /* 6 - "AlwaysCombDeclaration" */
+    /* 4 - "AlwaysCombDeclaration" */
     LookaheadDFA {
         prod0: 651,
         transitions: &[],
         k: 0,
     },
-    /* 7 - "AlwaysCombTerm" */
+    /* 5 - "AlwaysCombTerm" */
     LookaheadDFA {
         prod0: 44,
         transitions: &[],
         k: 0,
     },
-    /* 8 - "AlwaysCombToken" */
+    /* 6 - "AlwaysCombToken" */
     LookaheadDFA {
         prod0: 160,
         transitions: &[],
         k: 0,
     },
-    /* 9 - "AlwaysFf" */
+    /* 7 - "AlwaysFf" */
     LookaheadDFA {
         prod0: 273,
         transitions: &[],
         k: 0,
     },
-    /* 10 - "AlwaysFfClock" */
+    /* 8 - "AlwaysFfClock" */
     LookaheadDFA {
         prod0: 649,
         transitions: &[],
         k: 0,
     },
-    /* 11 - "AlwaysFfDeclaration" */
+    /* 9 - "AlwaysFfDeclaration" */
     LookaheadDFA {
         prod0: 643,
         transitions: &[],
         k: 0,
     },
-    /* 12 - "AlwaysFfDeclarationOpt" */
+    /* 10 - "AlwaysFfDeclarationOpt" */
     LookaheadDFA {
         prod0: -1,
         transitions: &[Trans(0, 40, 2, 645), Trans(0, 42, 1, 644)],
+        k: 1,
+    },
+    /* 11 - "AlwaysFfEventList" */
+    LookaheadDFA {
+        prod0: 646,
+        transitions: &[],
+        k: 0,
+    },
+    /* 12 - "AlwaysFfEventListOpt" */
+    LookaheadDFA {
+        prod0: -1,
+        transitions: &[Trans(0, 32, 1, 647), Trans(0, 46, 2, 648)],
         k: 1,
     },
     /* 13 - "AlwaysFfReset" */
@@ -21332,7 +21332,7 @@ pub const PRODUCTIONS: &[Production; 964] = &[
     },
     // 44 - AlwaysCombTerm: /(?-u:\b)always_comb(?-u:\b)/;
     Production {
-        lhs: 7,
+        lhs: 5,
         production: &[ParseType::T(49)],
     },
     // 45 - AlwaysFfTerm: /(?-u:\b)always_ff(?-u:\b)/;
@@ -21912,8 +21912,8 @@ pub const PRODUCTIONS: &[Production; 964] = &[
     },
     // 160 - AlwaysCombToken: AlwaysCombTerm : crate::veryl_token::Token  Comments;
     Production {
-        lhs: 8,
-        production: &[ParseType::N(101), ParseType::N(7)],
+        lhs: 6,
+        production: &[ParseType::N(101), ParseType::N(5)],
     },
     // 161 - AlwaysFfToken: AlwaysFfTerm : crate::veryl_token::Token  Comments;
     Production {
@@ -22472,12 +22472,12 @@ pub const PRODUCTIONS: &[Production; 964] = &[
     },
     // 272 - AlwaysComb: AlwaysCombToken : crate::veryl_token::VerylToken ;
     Production {
-        lhs: 5,
-        production: &[ParseType::N(8)],
+        lhs: 3,
+        production: &[ParseType::N(6)],
     },
     // 273 - AlwaysFf: AlwaysFfToken : crate::veryl_token::VerylToken ;
     Production {
-        lhs: 9,
+        lhs: 7,
         production: &[ParseType::N(15)],
     },
     // 274 - As: AsToken : crate::veryl_token::VerylToken ;
@@ -24525,42 +24525,42 @@ pub const PRODUCTIONS: &[Production; 964] = &[
     },
     // 643 - AlwaysFfDeclaration: AlwaysFf AlwaysFfDeclarationOpt /* Option */ StatementBlock;
     Production {
-        lhs: 11,
-        production: &[ParseType::N(571), ParseType::N(12), ParseType::N(9)],
+        lhs: 9,
+        production: &[ParseType::N(571), ParseType::N(10), ParseType::N(7)],
     },
-    // 644 - AlwaysFfDeclarationOpt: AlwayfFfEventList;
+    // 644 - AlwaysFfDeclarationOpt: AlwaysFfEventList;
     Production {
-        lhs: 12,
-        production: &[ParseType::N(3)],
+        lhs: 10,
+        production: &[ParseType::N(11)],
     },
     // 645 - AlwaysFfDeclarationOpt: ;
     Production {
-        lhs: 12,
+        lhs: 10,
         production: &[],
     },
-    // 646 - AlwayfFfEventList: LParen AlwaysFfClock AlwayfFfEventListOpt /* Option */ RParen;
+    // 646 - AlwaysFfEventList: LParen AlwaysFfClock AlwaysFfEventListOpt /* Option */ RParen;
     Production {
-        lhs: 3,
+        lhs: 11,
         production: &[
             ParseType::N(511),
-            ParseType::N(4),
-            ParseType::N(10),
+            ParseType::N(12),
+            ParseType::N(8),
             ParseType::N(363),
         ],
     },
-    // 647 - AlwayfFfEventListOpt: Comma AlwaysFfReset;
+    // 647 - AlwaysFfEventListOpt: Comma AlwaysFfReset;
     Production {
-        lhs: 4,
+        lhs: 12,
         production: &[ParseType::N(13), ParseType::N(98)],
     },
-    // 648 - AlwayfFfEventListOpt: ;
+    // 648 - AlwaysFfEventListOpt: ;
     Production {
-        lhs: 4,
+        lhs: 12,
         production: &[],
     },
     // 649 - AlwaysFfClock: HierarchicalIdentifier;
     Production {
-        lhs: 10,
+        lhs: 8,
         production: &[ParseType::N(259)],
     },
     // 650 - AlwaysFfReset: HierarchicalIdentifier;
@@ -24570,8 +24570,8 @@ pub const PRODUCTIONS: &[Production; 964] = &[
     },
     // 651 - AlwaysCombDeclaration: AlwaysComb StatementBlock;
     Production {
-        lhs: 6,
-        production: &[ParseType::N(571), ParseType::N(5)],
+        lhs: 4,
+        production: &[ParseType::N(571), ParseType::N(3)],
     },
     // 652 - AssignDeclaration: Assign HierarchicalIdentifier Equ Expression Semicolon;
     Production {
@@ -25924,12 +25924,12 @@ pub const PRODUCTIONS: &[Production; 964] = &[
     // 894 - GenerateItem: AlwaysFfDeclaration;
     Production {
         lhs: 249,
-        production: &[ParseType::N(11)],
+        production: &[ParseType::N(9)],
     },
     // 895 - GenerateItem: AlwaysCombDeclaration;
     Production {
         lhs: 249,
-        production: &[ParseType::N(6)],
+        production: &[ParseType::N(4)],
     },
     // 896 - GenerateItem: AssignDeclaration;
     Production {

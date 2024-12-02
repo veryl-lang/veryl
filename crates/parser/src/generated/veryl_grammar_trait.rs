@@ -2090,8 +2090,8 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'AlwayfFfEventList'
-    fn alwayf_ff_event_list(&mut self, _arg: &AlwayfFfEventList) -> Result<()> {
+    /// Semantic action for non-terminal 'AlwaysFfEventList'
+    fn always_ff_event_list(&mut self, _arg: &AlwaysFfEventList) -> Result<()> {
         Ok(())
     }
 
@@ -4846,30 +4846,6 @@ pub struct AllBitToken {
 }
 
 ///
-/// Type derived for non-terminal AlwayfFfEventList
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct AlwayfFfEventList {
-    pub l_paren: Box<LParen>,
-    pub always_ff_clock: Box<AlwaysFfClock>,
-    pub alwayf_ff_event_list_opt: Option<AlwayfFfEventListOpt>,
-    pub r_paren: Box<RParen>,
-}
-
-///
-/// Type derived for non-terminal AlwayfFfEventListOpt
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct AlwayfFfEventListOpt {
-    pub comma: Box<Comma>,
-    pub always_ff_reset: Box<AlwaysFfReset>,
-}
-
-///
 /// Type derived for non-terminal AlwaysComb
 ///
 #[allow(dead_code)]
@@ -4950,7 +4926,31 @@ pub struct AlwaysFfDeclaration {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct AlwaysFfDeclarationOpt {
-    pub alwayf_ff_event_list: Box<AlwayfFfEventList>,
+    pub always_ff_event_list: Box<AlwaysFfEventList>,
+}
+
+///
+/// Type derived for non-terminal AlwaysFfEventList
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct AlwaysFfEventList {
+    pub l_paren: Box<LParen>,
+    pub always_ff_clock: Box<AlwaysFfClock>,
+    pub always_ff_event_list_opt: Option<AlwaysFfEventListOpt>,
+    pub r_paren: Box<RParen>,
+}
+
+///
+/// Type derived for non-terminal AlwaysFfEventListOpt
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct AlwaysFfEventListOpt {
+    pub comma: Box<Comma>,
+    pub always_ff_reset: Box<AlwaysFfReset>,
 }
 
 ///
@@ -12173,8 +12173,6 @@ pub enum ASTType {
     AllBit(AllBit),
     AllBitTerm(AllBitTerm),
     AllBitToken(AllBitToken),
-    AlwayfFfEventList(AlwayfFfEventList),
-    AlwayfFfEventListOpt(Option<AlwayfFfEventListOpt>),
     AlwaysComb(AlwaysComb),
     AlwaysCombDeclaration(AlwaysCombDeclaration),
     AlwaysCombTerm(AlwaysCombTerm),
@@ -12183,6 +12181,8 @@ pub enum ASTType {
     AlwaysFfClock(AlwaysFfClock),
     AlwaysFfDeclaration(AlwaysFfDeclaration),
     AlwaysFfDeclarationOpt(Option<AlwaysFfDeclarationOpt>),
+    AlwaysFfEventList(AlwaysFfEventList),
+    AlwaysFfEventListOpt(Option<AlwaysFfEventListOpt>),
     AlwaysFfReset(AlwaysFfReset),
     AlwaysFfTerm(AlwaysFfTerm),
     AlwaysFfToken(AlwaysFfToken),
@@ -27158,19 +27158,19 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 644:
     ///
-    /// `AlwaysFfDeclarationOpt /* Option<T>::Some */: AlwayfFfEventList;`
+    /// `AlwaysFfDeclarationOpt /* Option<T>::Some */: AlwaysFfEventList;`
     ///
     #[parol_runtime::function_name::named]
     fn always_ff_declaration_opt_0(
         &mut self,
-        _alwayf_ff_event_list: &ParseTreeType<'t>,
+        _always_ff_event_list: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let alwayf_ff_event_list =
-            pop_item!(self, alwayf_ff_event_list, AlwayfFfEventList, context);
+        let always_ff_event_list =
+            pop_item!(self, always_ff_event_list, AlwaysFfEventList, context);
         let always_ff_declaration_opt_0_built = AlwaysFfDeclarationOpt {
-            alwayf_ff_event_list: Box::new(alwayf_ff_event_list),
+            always_ff_event_list: Box::new(always_ff_event_list),
         };
         self.push(
             ASTType::AlwaysFfDeclarationOpt(Some(always_ff_declaration_opt_0_built)),
@@ -27193,38 +27193,38 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 646:
     ///
-    /// `AlwayfFfEventList: LParen AlwaysFfClock AlwayfFfEventListOpt /* Option */ RParen;`
+    /// `AlwaysFfEventList: LParen AlwaysFfClock AlwaysFfEventListOpt /* Option */ RParen;`
     ///
     #[parol_runtime::function_name::named]
-    fn alwayf_ff_event_list(
+    fn always_ff_event_list(
         &mut self,
         _l_paren: &ParseTreeType<'t>,
         _always_ff_clock: &ParseTreeType<'t>,
-        _alwayf_ff_event_list_opt: &ParseTreeType<'t>,
+        _always_ff_event_list_opt: &ParseTreeType<'t>,
         _r_paren: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let r_paren = pop_item!(self, r_paren, RParen, context);
-        let alwayf_ff_event_list_opt = pop_item!(
+        let always_ff_event_list_opt = pop_item!(
             self,
-            alwayf_ff_event_list_opt,
-            AlwayfFfEventListOpt,
+            always_ff_event_list_opt,
+            AlwaysFfEventListOpt,
             context
         );
         let always_ff_clock = pop_item!(self, always_ff_clock, AlwaysFfClock, context);
         let l_paren = pop_item!(self, l_paren, LParen, context);
-        let alwayf_ff_event_list_built = AlwayfFfEventList {
+        let always_ff_event_list_built = AlwaysFfEventList {
             l_paren: Box::new(l_paren),
             always_ff_clock: Box::new(always_ff_clock),
-            alwayf_ff_event_list_opt,
+            always_ff_event_list_opt,
             r_paren: Box::new(r_paren),
         };
         // Calling user action here
         self.user_grammar
-            .alwayf_ff_event_list(&alwayf_ff_event_list_built)?;
+            .always_ff_event_list(&always_ff_event_list_built)?;
         self.push(
-            ASTType::AlwayfFfEventList(alwayf_ff_event_list_built),
+            ASTType::AlwaysFfEventList(always_ff_event_list_built),
             context,
         );
         Ok(())
@@ -27232,10 +27232,10 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 647:
     ///
-    /// `AlwayfFfEventListOpt /* Option<T>::Some */: Comma AlwaysFfReset;`
+    /// `AlwaysFfEventListOpt /* Option<T>::Some */: Comma AlwaysFfReset;`
     ///
     #[parol_runtime::function_name::named]
-    fn alwayf_ff_event_list_opt_0(
+    fn always_ff_event_list_opt_0(
         &mut self,
         _comma: &ParseTreeType<'t>,
         _always_ff_reset: &ParseTreeType<'t>,
@@ -27244,12 +27244,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         trace!("{}", self.trace_item_stack(context));
         let always_ff_reset = pop_item!(self, always_ff_reset, AlwaysFfReset, context);
         let comma = pop_item!(self, comma, Comma, context);
-        let alwayf_ff_event_list_opt_0_built = AlwayfFfEventListOpt {
+        let always_ff_event_list_opt_0_built = AlwaysFfEventListOpt {
             comma: Box::new(comma),
             always_ff_reset: Box::new(always_ff_reset),
         };
         self.push(
-            ASTType::AlwayfFfEventListOpt(Some(alwayf_ff_event_list_opt_0_built)),
+            ASTType::AlwaysFfEventListOpt(Some(always_ff_event_list_opt_0_built)),
             context,
         );
         Ok(())
@@ -27257,13 +27257,13 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 648:
     ///
-    /// `AlwayfFfEventListOpt /* Option<T>::None */: ;`
+    /// `AlwaysFfEventListOpt /* Option<T>::None */: ;`
     ///
     #[parol_runtime::function_name::named]
-    fn alwayf_ff_event_list_opt_1(&mut self) -> Result<()> {
+    fn always_ff_event_list_opt_1(&mut self) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        self.push(ASTType::AlwayfFfEventListOpt(None), context);
+        self.push(ASTType::AlwaysFfEventListOpt(None), context);
         Ok(())
     }
 
@@ -35487,10 +35487,10 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             644 => self.always_ff_declaration_opt_0(&children[0]),
             645 => self.always_ff_declaration_opt_1(),
             646 => {
-                self.alwayf_ff_event_list(&children[0], &children[1], &children[2], &children[3])
+                self.always_ff_event_list(&children[0], &children[1], &children[2], &children[3])
             }
-            647 => self.alwayf_ff_event_list_opt_0(&children[0], &children[1]),
-            648 => self.alwayf_ff_event_list_opt_1(),
+            647 => self.always_ff_event_list_opt_0(&children[0], &children[1]),
+            648 => self.always_ff_event_list_opt_1(),
             649 => self.always_ff_clock(&children[0]),
             650 => self.always_ff_reset(&children[0]),
             651 => self.always_comb_declaration(&children[0], &children[1]),

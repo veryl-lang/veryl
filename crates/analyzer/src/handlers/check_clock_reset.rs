@@ -96,7 +96,7 @@ impl VerylGrammarTrait for CheckClockReset<'_> {
 
                 // Check first if_reset when reset signel exists
                 let if_reset_required = if let Some(ref x) = arg.always_ff_declaration_opt {
-                    if x.alwayf_ff_event_list.alwayf_ff_event_list_opt.is_some() {
+                    if x.always_ff_event_list.always_ff_event_list_opt.is_some() {
                         if let Some(x) = arg.statement_block.statement_block_list.first() {
                             let x: Vec<_> = x.statement_block_group.as_ref().into();
                             if let Some(StatementBlockItem::Statement(x)) = x.first() {
@@ -124,7 +124,7 @@ impl VerylGrammarTrait for CheckClockReset<'_> {
                 // Check reset signal when if_reset exists
                 if self.if_reset_exist {
                     let reset_signal_exists = if let Some(ref x) = arg.always_ff_declaration_opt {
-                        x.alwayf_ff_event_list.alwayf_ff_event_list_opt.is_some()
+                        x.always_ff_event_list.always_ff_event_list_opt.is_some()
                     } else {
                         false
                     };

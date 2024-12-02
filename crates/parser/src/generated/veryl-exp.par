@@ -656,11 +656,11 @@
 /* 641 */ ConstDeclarationGroup: Type;
 /* 642 */ TypeDefDeclaration: Type Identifier Equ ArrayType Semicolon;
 /* 643 */ AlwaysFfDeclaration: AlwaysFf AlwaysFfDeclarationOpt /* Option */ StatementBlock;
-/* 644 */ AlwaysFfDeclarationOpt /* Option<T>::Some */: AlwayfFfEventList;
+/* 644 */ AlwaysFfDeclarationOpt /* Option<T>::Some */: AlwaysFfEventList;
 /* 645 */ AlwaysFfDeclarationOpt /* Option<T>::None */: ;
-/* 646 */ AlwayfFfEventList: LParen AlwaysFfClock AlwayfFfEventListOpt /* Option */ RParen;
-/* 647 */ AlwayfFfEventListOpt /* Option<T>::Some */: Comma AlwaysFfReset;
-/* 648 */ AlwayfFfEventListOpt /* Option<T>::None */: ;
+/* 646 */ AlwaysFfEventList: LParen AlwaysFfClock AlwaysFfEventListOpt /* Option */ RParen;
+/* 647 */ AlwaysFfEventListOpt /* Option<T>::Some */: Comma AlwaysFfReset;
+/* 648 */ AlwaysFfEventListOpt /* Option<T>::None */: ;
 /* 649 */ AlwaysFfClock: HierarchicalIdentifier;
 /* 650 */ AlwaysFfReset: HierarchicalIdentifier;
 /* 651 */ AlwaysCombDeclaration: AlwaysComb StatementBlock;

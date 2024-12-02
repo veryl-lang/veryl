@@ -130,7 +130,7 @@ impl VerylGrammarTrait for CheckClockDomain<'_> {
                 if let Some(ref x) = arg.always_ff_declaration_opt {
                     // clock domain is assigned to base identifier
                     let ident = x
-                        .alwayf_ff_event_list
+                        .always_ff_event_list
                         .always_ff_clock
                         .hierarchical_identifier
                         .identifier
