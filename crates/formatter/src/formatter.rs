@@ -110,6 +110,17 @@ impl Formatter {
         self.str(&" ".repeat(indent_width));
     }
 
+    fn case_item_indent_push(&mut self, x: usize) {
+        self.case_item_indent.push(x);
+    }
+
+    fn case_item_indent_pop(&mut self) {
+        // cancel indent and re-indent after pop
+        self.unindent();
+        self.case_item_indent.pop();
+        self.indent();
+    }
+
     fn newline_push(&mut self) {
         if self.mode == Mode::Align {
             return;
@@ -991,9 +1002,9 @@ impl VerylWalker for Formatter {
         match &*arg.case_item_group0 {
             CaseItemGroup0::Statement(x) => self.statement(&x.statement),
             CaseItemGroup0::StatementBlock(x) => {
-                self.case_item_indent.push(self.column() - start);
+                self.case_item_indent_push(self.column() - start);
                 self.statement_block(&x.statement_block);
-                self.case_item_indent.pop();
+                self.case_item_indent_pop();
             }
         }
     }
@@ -1035,9 +1046,9 @@ impl VerylWalker for Formatter {
         match &*arg.switch_item_group0 {
             SwitchItemGroup0::Statement(x) => self.statement(&x.statement),
             SwitchItemGroup0::StatementBlock(x) => {
-                self.case_item_indent.push(self.column() - start);
+                self.case_item_indent_push(self.column() - start);
                 self.statement_block(&x.statement_block);
-                self.case_item_indent.pop();
+                self.case_item_indent_pop();
             }
         }
     }

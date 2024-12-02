@@ -201,6 +201,17 @@ impl Emitter {
         self.str(&" ".repeat(indent_width));
     }
 
+    fn case_item_indent_push(&mut self, x: usize) {
+        self.case_item_indent = Some(x);
+    }
+
+    fn case_item_indent_pop(&mut self) {
+        // cancel indent and re-indent after pop
+        self.unindent();
+        self.case_item_indent = None;
+        self.indent();
+    }
+
     fn newline_push(&mut self) {
         if self.mode == Mode::Align {
             return;
@@ -432,9 +443,9 @@ impl Emitter {
         match arg.case_item_group0.as_ref() {
             CaseItemGroup0::Statement(x) => self.statement(&x.statement),
             CaseItemGroup0::StatementBlock(x) => {
-                self.case_item_indent = Some((self.dst_column - start) as usize);
+                self.case_item_indent_push((self.dst_column - start) as usize);
                 self.statement_block(&x.statement_block);
-                self.case_item_indent = None;
+                self.case_item_indent_pop();
             }
         }
     }
@@ -480,9 +491,9 @@ impl Emitter {
         match item.case_item_group0.as_ref() {
             CaseItemGroup0::Statement(x) => self.statement(&x.statement),
             CaseItemGroup0::StatementBlock(x) => {
-                self.case_item_indent = Some((self.dst_column - start) as usize);
+                self.case_item_indent_push((self.dst_column - start) as usize);
                 self.statement_block(&x.statement_block);
-                self.case_item_indent = None;
+                self.case_item_indent_pop();
             }
         }
     }
@@ -2059,12 +2070,12 @@ impl VerylWalker for Emitter {
         self.align_finish(align_kind::EXPRESSION);
         self.colon(&arg.colon);
         self.space(1);
-        self.case_item_indent = Some((self.dst_column - start) as usize);
+        self.case_item_indent_push((self.dst_column - start) as usize);
         match &*arg.switch_item_group0 {
             SwitchItemGroup0::Statement(x) => self.statement(&x.statement),
             SwitchItemGroup0::StatementBlock(x) => self.statement_block(&x.statement_block),
         }
-        self.case_item_indent = None;
+        self.case_item_indent_pop();
     }
 
     /// Semantic action for non-terminal 'Attribute'
