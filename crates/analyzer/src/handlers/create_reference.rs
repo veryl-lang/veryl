@@ -1,7 +1,7 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol::{GenericMap, SymbolKind};
+use crate::symbol::{Direction, GenericMap, SymbolKind};
 use crate::symbol_path::{GenericSymbolPath, SymbolPath};
 use crate::symbol_table::{self, ResolveError, ResolveErrorCause};
 use veryl_parser::veryl_grammar_trait::*;
@@ -34,10 +34,18 @@ impl<'a> CreateReference<'a> {
             let name = last_found.token.to_string();
             match err.cause {
                 ResolveErrorCause::NotFound(not_found) => {
-                    let member = format!("{}", not_found);
-                    self.errors.push(AnalyzerError::unknown_member(
-                        &name, &member, self.text, token,
-                    ));
+                    let is_generic_if = if let SymbolKind::Port(ref port) = last_found.kind {
+                        port.direction == Direction::Interface
+                    } else {
+                        false
+                    };
+
+                    if !is_generic_if {
+                        let member = format!("{}", not_found);
+                        self.errors.push(AnalyzerError::unknown_member(
+                            &name, &member, self.text, token,
+                        ));
+                    }
                 }
                 ResolveErrorCause::Private => {
                     self.errors
