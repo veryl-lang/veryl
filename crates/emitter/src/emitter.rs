@@ -580,6 +580,25 @@ impl Emitter {
         }
     }
 
+    fn always_ff_explicit_event_list(
+        &mut self,
+        arg: &AlwaysFfEventList,
+        decl: &AlwaysFfDeclaration,
+    ) {
+        self.l_paren(&arg.l_paren);
+        self.always_ff_clock(&arg.always_ff_clock);
+        if let Some(ref x) = arg.always_ff_event_list_opt {
+            if self.always_ff_reset_exist_in_sensitivity_list(&x.always_ff_reset) {
+                self.comma(&x.comma);
+                self.space(1);
+            }
+            self.always_ff_reset(&x.always_ff_reset);
+        } else if self.always_ff_if_reset_exists(decl) {
+            self.always_ff_implicit_reset_event();
+        }
+        self.r_paren(&arg.r_paren);
+    }
+
     fn always_ff_implicit_event_list(&mut self, arg: &AlwaysFfDeclaration) {
         self.str("(");
         self.always_ff_implicit_clock_event();
@@ -2303,27 +2322,13 @@ impl VerylWalker for Emitter {
         self.str("@");
         self.space(1);
         if let Some(ref x) = arg.always_ff_declaration_opt {
-            self.always_ff_event_list(&x.always_ff_event_list);
+            self.always_ff_explicit_event_list(&x.always_ff_event_list, arg);
         } else {
             self.always_ff_implicit_event_list(arg);
         }
         self.space(1);
         self.statement_block(&arg.statement_block);
         self.in_always_ff = false;
-    }
-
-    /// Semantic action for non-terminal 'AlwaysFfEventList'
-    fn always_ff_event_list(&mut self, arg: &AlwaysFfEventList) {
-        self.l_paren(&arg.l_paren);
-        self.always_ff_clock(&arg.always_ff_clock);
-        if let Some(ref x) = arg.always_ff_event_list_opt {
-            if self.always_ff_reset_exist_in_sensitivity_list(&x.always_ff_reset) {
-                self.comma(&x.comma);
-                self.space(1);
-            }
-            self.always_ff_reset(&x.always_ff_reset);
-        }
-        self.r_paren(&arg.r_paren);
     }
 
     /// Semantic action for non-terminal 'AlwaysFfClock'
