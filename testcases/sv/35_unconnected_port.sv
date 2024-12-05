@@ -10,9 +10,13 @@ module veryl_testcase_Module35;
 endmodule
 
 module veryl_testcase_Module35B (
-    input int unsigned aa  ,
-    input int unsigned bb  ,
-    input int unsigned bbbb
+    input  int unsigned aa  ,
+    output int unsigned bb  ,
+    output int unsigned bbbb
 );
+    always_comb begin
+        bb   = 0;
+        bbbb = 0;
+    end
 endmodule
 //# sourceMappingURL=../map/testcases/sv/35_unconnected_port.sv.map

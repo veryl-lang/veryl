@@ -2848,9 +2848,7 @@ impl VerylWalker for Emitter {
         if let Some(ref x) = arg.inst_port_item_opt {
             self.token(&x.colon.colon_token.replace(""));
             self.align_start(align_kind::EXPRESSION);
-            let mut stringifier = Stringifier::new();
-            stringifier.expression(&x.expression);
-            if stringifier.as_str() != "_" {
+            if !is_anonymous_expression(&x.expression) {
                 self.expression(&x.expression);
             }
             self.align_finish(align_kind::EXPRESSION);
