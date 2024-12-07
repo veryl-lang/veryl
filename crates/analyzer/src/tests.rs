@@ -2792,3 +2792,93 @@ fn unresolvable_generic_argument() {
         AnalyzerError::UnresolvableGenericArgument { .. }
     ));
 }
+
+#[test]
+fn wrong_seperator() {
+    let code = r#"
+    package A {
+        enum B {
+            C,
+        }
+    }
+    module Module {
+        var _a: A::B;
+
+        always_comb {
+            _a = A.B.C;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::WrongSeparator { .. }));
+
+    let code = r#"
+    package A {
+        enum B {
+            C,
+        }
+    }
+    module Module {
+        var _a: A::B;
+
+        always_comb {
+            _a = A::B.C;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::WrongSeparator { .. }));
+
+    let code = r#"
+    module Module {
+        struct B {
+            b: logic,
+        }
+
+        var _a: B;
+        always_comb {
+            _a::b = '0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::WrongSeparator { .. }));
+
+    let code = r#"
+    interface B {
+        var c: logic;
+        modport mp {
+            c: input,
+        }
+    }
+    module Module (
+        b: modport B::mp
+    ) {
+        var _a: logic;
+        always_comb {
+            _a = b::c;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::WrongSeparator { .. }));
+
+    let code = r#"
+    interface A {
+        var b: logic;
+    }
+    module Module {
+        inst a: A;
+        always_comb {
+            a::b = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::WrongSeparator { .. }));
+}
