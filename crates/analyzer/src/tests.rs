@@ -2217,6 +2217,26 @@ fn invalid_factor_kind() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport master {
+            a: input,
+        }
+    }
+    module ModuleA (
+        b: modport InterfaceA::master,
+    ) {
+        var a: logic;
+        always_comb {
+            a = b;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
 }
 
 #[test]

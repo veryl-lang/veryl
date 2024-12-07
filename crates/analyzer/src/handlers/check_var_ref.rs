@@ -184,11 +184,9 @@ impl VerylGrammarTrait for CheckVarRef<'_> {
                             Direction::Output => ExpressionTargetType::OutputPort,
                             Direction::Inout => ExpressionTargetType::InoutPort,
                             Direction::Ref => ExpressionTargetType::RefPort,
-                            _ => unreachable!(),
+                            _ => return Ok(()),
                         },
-                        _ => {
-                            return Ok(());
-                        }
+                        _ => return Ok(()),
                     };
                     self.add_expression(&path, r#type);
                 }
