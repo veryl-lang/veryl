@@ -2079,6 +2079,88 @@ fn uncovered_branch() {
 }
 
 #[test]
+fn anonymous_identifier() {
+    let code = r#"
+    module ModuleA (
+        i_clk: input `_ clock,
+    ) {
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module _ {
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::AnonymousIdentifierUsage { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        let a: logic = _ + 1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::AnonymousIdentifierUsage { .. }
+    ));
+
+    let code = r#"
+    module SubA (
+        i_a: input logic
+    ) {
+    }
+    module ModuleA {
+        inst u_sub: SubA (
+            i_a: _
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::AnonymousIdentifierUsage { .. }
+    ));
+
+    let code = r#"
+    module SubA (
+        o_a: output logic
+    ) {
+        assign o_a = 0;
+    }
+    module ModuleA {
+        inst u_sub: SubA (
+            o_a: _
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        inst u_sub: $sv::Sub (
+            i_a: _,
+            o_b: _,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
 fn reserved_identifier() {
     let code = r#"
     module __ModuleA {

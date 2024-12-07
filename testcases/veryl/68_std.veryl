@@ -1,15 +1,22 @@
-module Module68 {
+module Module68 (
+    i_clk : input  clock   ,
+    i_rst : input  reset   ,
+    i_push: input  logic   ,
+    i_data: input  logic<8>,
+    i_pop : input  logic   ,
+    o_data: output logic<8>,
+) {
     inst u: $std::fifo (
-        i_clk        : _,
-        i_rst        : _,
-        i_clear      : _,
-        o_empty      : _,
-        o_almost_full: _,
-        o_full       : _,
-        o_word_count : _,
-        i_push       : _,
-        i_data       : _,
-        i_pop        : _,
-        o_data       : _,
+        i_clk            ,
+        i_rst            ,
+        i_clear      : '0,
+        o_empty      : _ ,
+        o_almost_full: _ ,
+        o_full       : _ ,
+        o_word_count : _ ,
+        i_push           ,
+        i_data           ,
+        i_pop            ,
+        o_data           ,
     );
 }
