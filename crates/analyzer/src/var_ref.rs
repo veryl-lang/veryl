@@ -400,6 +400,10 @@ impl TryFrom<&ExpressionIdentifier> for VarRefPath {
         };
 
         path_items.push(full_path.pop().unwrap());
+        for _x in &arg.scoped_identifier.scoped_identifier_list {
+            path_items.push(full_path.pop().unwrap());
+        }
+
         for x in &arg.expression_identifier_list {
             path_items.push(VarRefPathItem::from(&*x.select));
         }
