@@ -1020,6 +1020,22 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
     },
+
+    #[diagnostic(
+        severity(Error),
+        code(wrong_seperator),
+        help("replace valid separator \"{valid_separator}\""),
+        url("")
+    )]
+    #[error("separator \"{separator}\" can't be used at here")]
+    WrongSeparator {
+        separator: String,
+        valid_separator: String,
+        #[source_code]
+        input: NamedSource<String>,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
 }
 
 impl AnalyzerError {
@@ -1674,6 +1690,16 @@ impl AnalyzerError {
         AnalyzerError::IncludeFailure {
             name: name.to_string(),
             cause: cause.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn wrong_seperator(separator: &str, source: &str, token: &TokenRange) -> Self {
+        let valid_separator = if separator == "." { "::" } else { "." };
+        AnalyzerError::WrongSeparator {
+            separator: separator.to_string(),
+            valid_separator: valid_separator.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
         }

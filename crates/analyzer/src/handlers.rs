@@ -11,6 +11,7 @@ pub mod check_modport;
 pub mod check_msb_lsb;
 pub mod check_number;
 pub mod check_proto;
+pub mod check_separator;
 pub mod check_statement;
 pub mod check_type;
 pub mod check_unsafe;
@@ -31,6 +32,7 @@ use check_modport::*;
 use check_msb_lsb::*;
 use check_number::*;
 use check_proto::*;
+use check_separator::*;
 use check_statement::*;
 use check_type::*;
 use check_unsafe::*;
@@ -97,6 +99,7 @@ impl<'a> Pass1Handlers<'a> {
 }
 
 pub struct Pass2Handlers<'a> {
+    check_separator: CheckSeparator<'a>,
     check_enum: CheckEnum<'a>,
     check_modport: CheckModport<'a>,
     check_function: CheckFunction<'a>,
@@ -114,6 +117,7 @@ pub struct Pass2Handlers<'a> {
 impl<'a> Pass2Handlers<'a> {
     pub fn new(text: &'a str, _build_opt: &'a Build, _lint_opt: &'a Lint) -> Self {
         Self {
+            check_separator: CheckSeparator::new(text),
             check_enum: CheckEnum::new(text),
             check_modport: CheckModport::new(text),
             check_function: CheckFunction::new(text),
@@ -131,6 +135,7 @@ impl<'a> Pass2Handlers<'a> {
 
     pub fn get_handlers(&mut self) -> Vec<&mut dyn Handler> {
         vec![
+            &mut self.check_separator as &mut dyn Handler,
             &mut self.check_enum as &mut dyn Handler,
             &mut self.check_modport as &mut dyn Handler,
             &mut self.check_function as &mut dyn Handler,
@@ -148,6 +153,7 @@ impl<'a> Pass2Handlers<'a> {
 
     pub fn get_errors(&mut self) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
+        ret.append(&mut self.check_separator.errors);
         ret.append(&mut self.check_enum.errors);
         ret.append(&mut self.check_modport.errors);
         ret.append(&mut self.check_function.errors);
