@@ -9,7 +9,12 @@ module Module35 {
 }
 
 module Module35B (
-    aa  : input u32,
-    bb  : input u32,
-    bbbb: input u32,
-) {}
+    aa  : input  u32,
+    bb  : output u32,
+    bbbb: output u32,
+) {
+    always_comb {
+        bb   = 0;
+        bbbb = 0;
+    }
+}

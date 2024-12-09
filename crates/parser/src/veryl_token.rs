@@ -83,6 +83,15 @@ impl Token {
     }
 }
 
+pub fn is_anonymous_text(text: StrId) -> bool {
+    let anonymous_id = resource_table::insert_str("_");
+    text == anonymous_id
+}
+
+pub fn is_anonymous_token(token: &Token) -> bool {
+    is_anonymous_text(token.text)
+}
+
 impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let text = format!("{}", self.text);

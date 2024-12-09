@@ -1,11 +1,11 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol::{Direction, GenericMap, SymbolKind};
-use crate::symbol_path::{GenericSymbolPath, SymbolPath};
+use crate::symbol::{Direction, GenericBoundKind, GenericMap, Port, SymbolKind};
+use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table::{self, ResolveError, ResolveErrorCause};
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::{Token, TokenRange};
+use veryl_parser::veryl_token::{is_anonymous_text, Token, TokenRange};
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
@@ -14,6 +14,9 @@ pub struct CreateReference<'a> {
     pub errors: Vec<AnalyzerError>,
     text: &'a str,
     point: HandlerPoint,
+    inst_ports: Vec<Port>,
+    inst_sv_module: bool,
+    is_anonymous_identifier: bool,
 }
 
 impl<'a> CreateReference<'a> {
@@ -62,6 +65,9 @@ impl<'a> CreateReference<'a> {
                         token,
                         &generics_token.into(),
                     ));
+            } else if is_anonymous_text(not_found) {
+                self.errors
+                    .push(AnalyzerError::anonymous_identifier_usage(self.text, token));
             } else {
                 self.errors
                     .push(AnalyzerError::undefined_identifier(&name, self.text, token));
@@ -142,8 +148,7 @@ impl<'a> CreateReference<'a> {
                 }
                 Err(err) => {
                     let single_path = path.paths.len() == 1;
-                    let anonymous = path.paths[0].base.to_string() == "_";
-                    if single_path && (anonymous || !path.is_resolvable()) {
+                    if single_path && !path.is_resolvable() {
                         return;
                     }
 
@@ -170,11 +175,11 @@ impl VerylGrammarTrait for CreateReference<'_> {
                     }
                 }
                 Err(err) => {
-                    let is_single_identifier = SymbolPath::from(arg).as_slice().len() == 1;
-                    let name = arg.identifier.identifier_token.to_string();
-                    if name == "_" && is_single_identifier {
-                        return Ok(());
-                    }
+                    // hierarchical identifier is used for:
+                    //  - LHS of assign declaratoin
+                    //  - identifier to specfy clock/reset in always_ff event list
+                    // therefore, it should be known indentifer
+                    // and we don't have to consider it is anonymous
 
                     // TODO check SV-side member to suppress error
                     self.push_resolve_error(err, &arg.into(), None);
@@ -186,11 +191,13 @@ impl VerylGrammarTrait for CreateReference<'_> {
 
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let ident = arg.identifier().token;
-            let path: GenericSymbolPath = arg.into();
-            let namespace = namespace_table::get(ident.id).unwrap();
+            if !self.is_anonymous_identifier {
+                let ident = arg.identifier().token;
+                let path: GenericSymbolPath = arg.into();
+                let namespace = namespace_table::get(ident.id).unwrap();
 
-            self.generic_symbol_path(&path, &namespace, None);
+                self.generic_symbol_path(&path, &namespace, None);
+            }
         }
         Ok(())
     }
@@ -236,21 +243,73 @@ impl VerylGrammarTrait for CreateReference<'_> {
         Ok(())
     }
 
-    fn inst_port_item(&mut self, arg: &InstPortItem) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            // implicit port connection by name
-            if arg.inst_port_item_opt.is_none() {
-                match symbol_table::resolve(arg.identifier.as_ref()) {
-                    Ok(symbol) => {
-                        for id in symbol.full_path {
-                            symbol_table::add_reference(id, &arg.identifier.identifier_token.token);
+    fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                if let Ok(symbol) = symbol_table::resolve(arg.scoped_identifier.as_ref()) {
+                    match symbol.found.kind {
+                        SymbolKind::Module(x) => self.inst_ports.extend(x.ports),
+                        SymbolKind::GenericParameter(x) => {
+                            if let GenericBoundKind::Proto(ref prot) = x.bound {
+                                if let SymbolKind::ProtoModule(prot) =
+                                    symbol_table::resolve((prot, &symbol.found.namespace))
+                                        .unwrap()
+                                        .found
+                                        .kind
+                                {
+                                    self.inst_ports.extend(prot.ports);
+                                }
+                            }
                         }
-                    }
-                    Err(err) => {
-                        self.push_resolve_error(err, &arg.identifier.as_ref().into(), None);
+                        SymbolKind::SystemVerilog => self.inst_sv_module = true,
+                        _ => {}
                     }
                 }
             }
+            HandlerPoint::After => {
+                self.inst_ports.clear();
+                self.inst_sv_module = false;
+            }
+        }
+        Ok(())
+    }
+
+    fn inst_port_item(&mut self, arg: &InstPortItem) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                if let Some(ref x) = arg.inst_port_item_opt {
+                    if let Some(port) = self
+                        .inst_ports
+                        .iter()
+                        .find(|x| x.name == arg.identifier.identifier_token.token.text)
+                    {
+                        if let SymbolKind::Port(port) = symbol_table::get(port.symbol).unwrap().kind
+                        {
+                            self.is_anonymous_identifier = port.direction == Direction::Output
+                                && is_anonymous_expression(&x.expression);
+                        }
+                    } else if self.inst_sv_module {
+                        // For SV module, any ports can be connected with anonymous identifier
+                        self.is_anonymous_identifier = is_anonymous_expression(&x.expression);
+                    }
+                } else {
+                    // implicit port connection by name
+                    match symbol_table::resolve(arg.identifier.as_ref()) {
+                        Ok(symbol) => {
+                            for id in symbol.full_path {
+                                symbol_table::add_reference(
+                                    id,
+                                    &arg.identifier.identifier_token.token,
+                                );
+                            }
+                        }
+                        Err(err) => {
+                            self.push_resolve_error(err, &arg.identifier.as_ref().into(), None);
+                        }
+                    }
+                }
+            }
+            HandlerPoint::After => self.is_anonymous_identifier = false,
         }
         Ok(())
     }

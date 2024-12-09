@@ -4,6 +4,15 @@ use veryl_parser::veryl_token::TokenRange;
 
 #[derive(Error, Diagnostic, Debug)]
 pub enum AnalyzerError {
+    #[diagnostic(severity(Error), code(anonymous_identifier_usage), help(""), url(""))]
+    #[error("Anonymous identifier can't be placed at here")]
+    AnonymousIdentifierUsage {
+        #[source_code]
+        input: NamedSource<String>,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
     #[diagnostic(
         severity(Error),
         code(call_non_function),
@@ -1016,6 +1025,13 @@ pub enum AnalyzerError {
 impl AnalyzerError {
     fn named_source(source: &str, token: &TokenRange) -> NamedSource<String> {
         NamedSource::new(token.beg.source.to_string(), source.to_string())
+    }
+
+    pub fn anonymous_identifier_usage(source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::AnonymousIdentifierUsage {
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
     }
 
     pub fn call_non_function(
