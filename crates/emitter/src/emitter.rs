@@ -1419,9 +1419,6 @@ impl VerylWalker for Emitter {
             self.space(1);
             self.concatenation_item(&x.concatenation_item);
         }
-        if let Some(ref x) = arg.concatenation_list_opt {
-            self.comma(&x.comma);
-        }
     }
 
     /// Semantic action for non-terminal 'ConcatenationItem'
@@ -1445,9 +1442,6 @@ impl VerylWalker for Emitter {
             self.comma(&x.comma);
             self.space(1);
             self.array_literal_item(&x.array_literal_item);
-        }
-        if let Some(ref x) = arg.array_literal_list_opt {
-            self.comma(&x.comma);
         }
     }
 

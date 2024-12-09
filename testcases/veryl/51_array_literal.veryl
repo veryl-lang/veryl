@@ -1,5 +1,5 @@
 module Module51 {
-    let _a: logic [2] = '{1, 1};
+    let _a: logic [2] = '{1, 1,};
     let _b: logic [2] = '{1 repeat 2};
     let _c: logic [2] = '{default: 1};
 }
