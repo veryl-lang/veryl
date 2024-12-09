@@ -122,9 +122,28 @@ impl VerylGrammarTrait for CheckType<'_> {
 
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            // Check variable type
-            if !self.in_user_defined_type.is_empty() && self.in_generic_argument.is_empty() {
-                if let Ok(symbol) = symbol_table::resolve(arg) {
+            if let Ok(symbol) = symbol_table::resolve(arg) {
+                // Check enum variant should be scoped by enum
+                // refs: https://github.com/veryl-lang/veryl/issues/1114
+                if matches!(symbol.found.kind, SymbolKind::EnumMember(_)) {
+                    let preceed_id = symbol.full_path.get(symbol.full_path.len() - 2).unwrap();
+                    let preceed_symbol = symbol_table::get(*preceed_id).unwrap();
+                    if !matches!(
+                        preceed_symbol.kind,
+                        SymbolKind::Enum(_) | SymbolKind::TypeDef(_)
+                    ) {
+                        self.errors.push(AnalyzerError::mismatch_type(
+                            &preceed_symbol.token.to_string(),
+                            "enum",
+                            &preceed_symbol.kind.to_kind_name(),
+                            self.text,
+                            &preceed_symbol.token.into(),
+                        ));
+                    }
+                }
+
+                // Check variable type
+                if !self.in_user_defined_type.is_empty() && self.in_generic_argument.is_empty() {
                     if self.in_modport {
                         if !matches!(symbol.found.kind, SymbolKind::Modport(_)) {
                             self.errors.push(AnalyzerError::mismatch_type(

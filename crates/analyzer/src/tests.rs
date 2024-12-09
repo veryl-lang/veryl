@@ -1167,6 +1167,35 @@ fn mismatch_type() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    module ModuleA {
+        enum EnumA {
+            B,
+        }
+        let _a: EnumA = EnumA::B;
+        let _b: EnumA = _a::B;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    module ModuleA {
+        enum EnumA {
+            A,
+            B,
+        }
+        type EnumB = EnumA;
+
+        let _a: EnumA = EnumA::A;
+        let _b: EnumB = EnumB::B;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
