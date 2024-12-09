@@ -3,6 +3,6 @@ module Module18 {
     var b: logic;
     let c: logic = 1;
 
-    assign a = {a[10:0], c};
+    assign a = {a[10:0], c,};
     assign b = {a[10:0] repeat 10, c repeat 4};
 }
