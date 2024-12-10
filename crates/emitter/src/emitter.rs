@@ -112,6 +112,13 @@ impl Default for Emitter {
     }
 }
 
+fn is_ifdef_attribute(arg: &Attribute) -> bool {
+    matches!(
+        arg.identifier.identifier_token.token.to_string().as_str(),
+        "ifdef" | "ifndef"
+    )
+}
+
 impl Emitter {
     pub fn new(metadata: &Metadata, src_path: &Path, dst_path: &Path, map_path: &Path) -> Self {
         let source_map = SourceMap::new(src_path, dst_path, map_path);
@@ -790,28 +797,55 @@ impl Emitter {
         let statement_block_list: Vec<_> = arg
             .statement_block_list
             .iter()
-            .flat_map(|x| Into::<Vec<StatementBlockItem>>::into(x.statement_block_group.as_ref()))
+            .map(|x| Into::<Vec<StatementBlockItem>>::into(x.statement_block_group.as_ref()))
             .collect();
 
         let mut base = 0;
-        for (i, x) in statement_block_list
-            .iter()
-            .filter(|x| is_var_declaration(x) || is_let_statement(x))
-            .enumerate()
-        {
-            self.newline_list(i);
-            base += self.statement_variable_declatation_only(x);
+        let mut n_newlines = 0;
+        for x in &statement_block_list {
+            for x in x {
+                if is_var_declaration(x) || is_let_statement(x) {
+                    self.newline_list(n_newlines);
+                    base += self.statement_variable_declatation_only(x);
+                    n_newlines += 1;
+                }
+            }
         }
-        for (i, x) in statement_block_list
-            .iter()
-            .filter(|x| !is_var_declaration(x))
-            .enumerate()
-        {
-            self.newline_list(base + i);
-            match &x {
-                StatementBlockItem::LetStatement(x) => self.let_statement(&x.let_statement),
-                StatementBlockItem::Statement(x) => self.statement(&x.statement),
-                _ => unreachable!(),
+
+        let mut n_newlines = 0;
+        for (i, x) in statement_block_list.iter().enumerate() {
+            for x in x {
+                let ifdef_attributes: Vec<_> = arg.statement_block_list[i]
+                    .statement_block_group
+                    .statement_block_group_list
+                    .iter()
+                    .filter(|x| is_ifdef_attribute(&x.attribute))
+                    .collect();
+
+                for (j, x) in ifdef_attributes.iter().enumerate() {
+                    if i == 0 && j == 0 {
+                        self.newline_list(base + n_newlines);
+                        n_newlines += 1;
+                    }
+                    self.attribute(&x.attribute);
+                }
+
+                if !is_var_declaration(x) {
+                    if i != 0 || ifdef_attributes.is_empty() {
+                        self.newline_list(base + n_newlines);
+                        n_newlines += 1;
+                    }
+
+                    match &x {
+                        StatementBlockItem::LetStatement(x) => self.let_statement(&x.let_statement),
+                        StatementBlockItem::Statement(x) => self.statement(&x.statement),
+                        _ => unreachable!(),
+                    }
+                }
+
+                for _ in ifdef_attributes {
+                    self.attribute_end();
+                }
             }
         }
         self.newline_list_post(arg.statement_block_list.is_empty());

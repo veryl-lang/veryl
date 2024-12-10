@@ -38,6 +38,13 @@ module veryl_testcase_Module23 #(
     always_comb _c = 1;
     `endif
 
+    logic _d;
+    always_comb begin
+        `ifdef DEFINE_D
+        _d = 0;
+        `endif
+
+    end
 endmodule
 
 `ifdef DEFINE_A

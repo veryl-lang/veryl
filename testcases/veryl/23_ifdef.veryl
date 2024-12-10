@@ -28,6 +28,14 @@ module Module23 #(
         let _b: logic<10> = 1;
         let _c: logic<10> = 1;
     }
+
+    var _d: logic;
+    always_comb {
+        #[ifdef(DEFINE_D)]
+        {
+            _d = 0;
+        }
+    }
 }
 
 #[ifdef(DEFINE_A)]
