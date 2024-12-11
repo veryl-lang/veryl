@@ -183,54 +183,67 @@ impl VerylGrammarTrait for CreateTypeDag<'_> {
 
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            if !self.ctx.is_empty() && self.ctx.last() != Some(&Context::ExpressionIdentifier) {
-                let generic_path: GenericSymbolPath = arg.into();
-                if generic_path.is_generic_reference() {
-                    return Ok(());
-                }
+            let generic_path: GenericSymbolPath = arg.into();
+            if generic_path.is_generic_reference() {
+                return Ok(());
+            }
 
+            let (path, name) = if !self.ctx.is_empty()
+                && self.ctx.last() != Some(&Context::ExpressionIdentifier)
+            {
                 let path: SymbolPathNamespace = arg.into();
-                let name = to_string(arg);
-                let token = arg.identifier().token;
-                let child = self.insert_node(&path, &name, &token);
-                if let (Some(parent), Some(child)) = (self.parent.last(), child) {
-                    if !self.is_owned(*parent, child) {
-                        self.insert_edge(*parent, child, *self.ctx.last().unwrap());
-                    }
+                let name = to_string(arg, false);
+                (path, name)
+            } else if include_package_or_enum(arg) {
+                if arg.scoped_identifier_list.is_empty() {
+                    let path: SymbolPathNamespace = arg.into();
+                    let name = to_string(arg, false);
+                    (path, name)
+                } else {
+                    let mut path: SymbolPathNamespace = arg.into();
+                    let name = to_string(arg, true);
+                    path.0.pop();
+                    (path, name)
                 }
+            } else {
+                return Ok(());
+            };
 
-                // If symbol is GenricInstance, base symbol should be added to DAG too
-                let namespace = path.1.clone();
-                if let Ok(sym) = symbol_table::resolve(&path) {
-                    if let SymbolKind::GenericInstance(x) = sym.found.kind {
-                        if let Some(base) = symbol_table::get(x.base) {
-                            let path: SymbolPathNamespace = (&base.token).into();
-                            let name = base.token.to_string();
-                            let token = base.token;
-                            let base = self.insert_node(&path, &name, &token);
-                            if let (Some(parent), Some(base)) = (self.parent.last(), base) {
-                                if !self.is_owned(*parent, base) {
-                                    self.insert_edge(*parent, base, *self.ctx.last().unwrap());
-                                }
+            let token = arg.identifier().token;
+            let child = self.insert_node(&path, &name, &token);
+            if let (Some(parent), Some(child)) = (self.parent.last(), child) {
+                if !self.is_owned(*parent, child) {
+                    self.insert_edge(*parent, child, *self.ctx.last().unwrap());
+                }
+            }
+
+            // If symbol is GenricInstance, base symbol should be added to DAG too
+            let namespace = path.1.clone();
+            if let Ok(sym) = symbol_table::resolve(&path) {
+                if let SymbolKind::GenericInstance(x) = sym.found.kind {
+                    if let Some(base) = symbol_table::get(x.base) {
+                        let path: SymbolPathNamespace = (&base.token).into();
+                        let name = base.token.to_string();
+                        let token = base.token;
+                        let base = self.insert_node(&path, &name, &token);
+                        if let (Some(parent), Some(base)) = (self.parent.last(), base) {
+                            if !self.is_owned(*parent, base) {
+                                self.insert_edge(*parent, base, *self.ctx.last().unwrap());
                             }
+                        }
 
-                            // Add edge from GenericInstance to GenericArgument
-                            for path in &generic_path.paths {
-                                for arg in &path.arguments {
-                                    if arg.is_resolvable() {
-                                        let path = arg.mangled_path();
-                                        let path = SymbolPathNamespace(path, namespace.clone());
-                                        if let Ok(sym) = symbol_table::resolve(&path) {
-                                            let name = sym.found.token.to_string();
-                                            let token = sym.found.token;
-                                            let arg = self.insert_node(&path, &name, &token);
-                                            if let (Some(arg), Some(base)) = (arg, base) {
-                                                self.insert_edge(
-                                                    base,
-                                                    arg,
-                                                    Context::GenericInstance,
-                                                );
-                                            }
+                        // Add edge from GenericInstance to GenericArgument
+                        for path in &generic_path.paths {
+                            for arg in &path.arguments {
+                                if arg.is_resolvable() {
+                                    let path = arg.mangled_path();
+                                    let path = SymbolPathNamespace(path, namespace.clone());
+                                    if let Ok(sym) = symbol_table::resolve(&path) {
+                                        let name = sym.found.token.to_string();
+                                        let token = sym.found.token;
+                                        let arg = self.insert_node(&path, &name, &token);
+                                        if let (Some(arg), Some(base)) = (arg, base) {
+                                            self.insert_edge(base, arg, Context::GenericInstance);
                                         }
                                     }
                                 }
@@ -385,7 +398,7 @@ impl VerylGrammarTrait for CreateTypeDag<'_> {
                         let x = &x.import_declaration.scoped_identifier;
 
                         let path: SymbolPathNamespace = x.as_ref().into();
-                        let name = to_string(x);
+                        let name = to_string(x, false);
                         let token = x.identifier().token;
                         let child = self.insert_node(&path, &name, &token);
                         self.file_scope_import.push(child);
@@ -397,7 +410,7 @@ impl VerylGrammarTrait for CreateTypeDag<'_> {
     }
 }
 
-fn to_string(sid: &ScopedIdentifier) -> String {
+fn to_string(sid: &ScopedIdentifier, base_only: bool) -> String {
     let mut rv: String = "".into();
 
     let f = |id: &VerylToken, scope: bool| -> String {
@@ -407,10 +420,27 @@ fn to_string(sid: &ScopedIdentifier) -> String {
     };
     rv.push_str(&f(sid.identifier(), false));
 
-    for sidl in sid.scoped_identifier_list.iter() {
-        let id = &sidl.identifier.identifier_token;
-        rv.push_str(&f(id, true));
+    for (i, sidl) in sid.scoped_identifier_list.iter().enumerate() {
+        if !base_only || ((i + 1) == sid.scoped_identifier_list.len()) {
+            let id = &sidl.identifier.identifier_token;
+            rv.push_str(&f(id, true));
+        }
     }
 
     rv
+}
+
+fn include_package_or_enum(sid: &ScopedIdentifier) -> bool {
+    if let Ok(symbol) = symbol_table::resolve(sid) {
+        if matches!(symbol.found.kind, SymbolKind::EnumMember(_)) {
+            return true;
+        }
+
+        symbol.full_path.into_iter().any(|path| {
+            let symbol = symbol_table::get(path).unwrap();
+            matches!(symbol.kind, SymbolKind::Package(_) | SymbolKind::Enum(_))
+        })
+    } else {
+        false
+    }
 }

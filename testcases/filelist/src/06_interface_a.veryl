@@ -1,0 +1,7 @@
+interface InterfaceA {
+  var a: logic<PackageA::A>;
+
+  modport mp {
+    a: input,
+  }
+}
