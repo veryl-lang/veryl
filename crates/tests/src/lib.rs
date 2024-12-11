@@ -321,17 +321,20 @@ mod filelist {
         dbg!(&paths);
 
         let all = &[
-            "01_package_a.veryl",
-            "02_package_b.veryl",
-            "03_module_a.veryl",
-            "04_module_b.veryl",
-            "05_module_c.veryl",
+            "01_module_a.veryl",
+            "02_module_b.veryl",
+            "03_module_c.veryl",
+            "04_package_a.veryl",
+            "05_package_b.veryl",
+            "06_interface_a.veryl",
             "ram.veryl",
         ];
         check_list(&paths, all);
 
-        check_order(&paths, "01_package_a.veryl", "03_module_a.veryl");
-        check_order(&paths, "02_package_b.veryl", "04_module_b.veryl");
-        check_order(&paths, "ram.veryl", "05_module_c.veryl");
+        check_order(&paths, "04_package_a.veryl", "06_interface_a.veryl");
+        check_order(&paths, "06_interface_a.veryl", "01_module_a.veryl");
+        check_order(&paths, "04_package_a.veryl", "01_module_a.veryl");
+        check_order(&paths, "05_package_a.veryl", "02_module_b.veryl");
+        check_order(&paths, "ram.veryl", "03_module_c.veryl");
     }
 }

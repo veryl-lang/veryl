@@ -1,5 +1,5 @@
 module ModuleC {
-    inst u: $std::ram (
+    inst u0: $std::ram (
         i_clk : _,
         i_rst : _,
         i_clr : _,

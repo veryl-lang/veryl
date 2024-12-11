@@ -1,0 +1,5 @@
+module ModuleA (
+    port_a: modport InterfaceA::mp,
+) {
+    let _a: PackageA::StructA = 0;
+}

@@ -2,4 +2,5 @@ package PackageA {
     struct StructA {
         A: logic,
     }
+    const A: u32 = 1;
 }
