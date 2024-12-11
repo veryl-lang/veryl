@@ -6,10 +6,16 @@ module Module56 {
     inst u3: Interface56B::<Package56A::X>;
     inst u4: Interface56B::<>;
     inst u5: Interface56B::<X>;
+    inst u6: Module56Sub::<1>;
 
     let _a: logic = u0._a;
     let _b: logic = u2._b;
     let _c: logic = u5._b;
+}
+
+module Module56Sub::<T: const> {
+    inst u: Interface56A::<T>;
+    function f () {}
 }
 
 /// Generic interface test for doc comment

@@ -6,6 +6,7 @@ module veryl_testcase_Module56;
     veryl_testcase___Interface56B__Package56A_X u3 ();
     veryl_testcase___Interface56B__3 u4 ();
     veryl_testcase___Interface56B__Package56A_X u5 ();
+    veryl_testcase___Module56Sub__1 u6 ();
 
     logic _a;
     always_comb _a = u0._a;
@@ -15,14 +16,25 @@ module veryl_testcase_Module56;
     always_comb _c = u5._b;
 endmodule
 
+module veryl_testcase___Module56Sub__1;
+    veryl_testcase___Interface56A__1 u ();
+    function automatic void f() ;
+    endfunction
+endmodule
+
 /// Generic interface test for doc comment
 interface veryl_testcase___Interface56A__Package56A_X;
-    logic [veryl_testcase_Package56A::X-1:0] _a;
+    logic [veryl_testcase_Package56A::X-1:0]                            _a;
 endinterface
 
 /// Generic interface test for doc comment
 interface veryl_testcase___Interface56A__Package56B_X;
-    logic [veryl_testcase_Package56B::X-1:0] _a;
+    logic [veryl_testcase_Package56B::X-1:0]                            _a;
+endinterface
+
+/// Generic interface test for doc comment
+interface veryl_testcase___Interface56A__1;
+    logic [1-1:0]                            _a;
 endinterface
 
 /// Generic interface test for doc comment
