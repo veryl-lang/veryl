@@ -1,3 +1,6 @@
+pub mod create_type_dag;
+
+use crate::analyzer::create_type_dag::*;
 use crate::analyzer::resource_table::PathId;
 use crate::analyzer_error::AnalyzerError;
 use crate::attribute_table;
@@ -72,6 +75,12 @@ impl<'a> AnalyzerPass3<'a> {
             text,
             symbols,
         }
+    }
+
+    pub fn create_type_dag(&self) -> Vec<AnalyzerError> {
+        let mut dag_creator = CreateTypeDag::new(self.text);
+        dag_creator.create_type_dag(&self.symbols);
+        dag_creator.errors
     }
 
     pub fn check_variables(&self) -> Vec<AnalyzerError> {
@@ -289,6 +298,7 @@ impl Analyzer {
 
         namespace_table::set_default(&[project_name.into()]);
         let pass3 = AnalyzerPass3::new(path.as_ref(), text);
+        ret.append(&mut pass3.create_type_dag());
         ret.append(&mut pass3.check_variables());
         ret.append(&mut pass3.check_assignment());
         ret.append(&mut pass3.check_unassigned());

@@ -66,6 +66,7 @@ pub struct Symbol {
     pub kind: SymbolKind,
     pub namespace: Namespace,
     pub references: Vec<Token>,
+    pub dependencies: Vec<SymbolId>,
     pub generic_instances: Vec<SymbolId>,
     pub imported: Vec<Namespace>,
     pub evaluated: Cell<Option<Evaluated>>,
@@ -73,6 +74,26 @@ pub struct Symbol {
     pub public: bool,
     pub doc_comment: DocComment,
     pub r#type: Option<Type>,
+}
+
+// Return true if the given symbol may be referred from
+// outside of the scope where it is defined and includes tyep infomation.
+// Such symbols can be treated as 'dependencies' and are used to create type dag.
+pub fn is_dependency_symbol(symbol: &Symbol) -> bool {
+    match symbol.kind {
+        SymbolKind::Module(_)
+        | SymbolKind::Interface(_)
+        | SymbolKind::Modport(_)
+        | SymbolKind::Package(_)
+        | SymbolKind::Enum(_)
+        | SymbolKind::EnumMember(_)
+        | SymbolKind::TypeDef(_)
+        | SymbolKind::Struct(_)
+        | SymbolKind::Union(_)
+        | SymbolKind::Function(_) => true,
+        SymbolKind::Parameter(ref x) => matches!(x.kind, ParameterKind::Const),
+        _ => false,
+    }
 }
 
 impl Symbol {
@@ -89,6 +110,7 @@ impl Symbol {
             kind,
             namespace: namespace.to_owned(),
             references: Vec::new(),
+            dependencies: Vec::new(),
             generic_instances: Vec::new(),
             imported: Vec::new(),
             evaluated: Cell::new(None),
@@ -97,6 +119,20 @@ impl Symbol {
             doc_comment,
             r#type: None,
         }
+    }
+
+    pub fn get_parent(&self) -> Option<Symbol> {
+        let mut namespace = self.namespace.clone();
+        if let Some(path) = namespace.pop() {
+            if namespace.depth() >= 1 {
+                let path = SymbolPath::new(&[path]);
+                if let Ok(symbol) = symbol_table::resolve((&path, &namespace)) {
+                    return Some(symbol.found);
+                }
+            }
+        }
+
+        None
     }
 
     pub fn evaluate(&self) -> Evaluated {

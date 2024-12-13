@@ -1,8 +1,10 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol::{Direction, GenericBoundKind, GenericMap, Port, SymbolKind};
-use crate::symbol_path::GenericSymbolPath;
+use crate::symbol::{
+    is_dependency_symbol, Direction, GenericBoundKind, GenericMap, Port, Symbol, SymbolKind,
+};
+use crate::symbol_path::{GenericSymbolPath, SymbolPathNamespace};
 use crate::symbol_table::{self, ResolveError, ResolveErrorCause};
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::{is_anonymous_text, Token, TokenRange};
@@ -14,6 +16,7 @@ pub struct CreateReference<'a> {
     pub errors: Vec<AnalyzerError>,
     text: &'a str,
     point: HandlerPoint,
+    scopes: Vec<Symbol>,
     inst_ports: Vec<Port>,
     inst_sv_module: bool,
     is_anonymous_identifier: bool,
@@ -97,6 +100,10 @@ impl<'a> CreateReference<'a> {
                 Ok(symbol) => {
                     symbol_table::add_reference(symbol.found.id, &path.paths[0].base);
 
+                    if (i + 1) == path.len() {
+                        self.add_dependency_to_parent_scope(&symbol.found);
+                    }
+
                     // Check number of arguments
                     let params = symbol.found.generic_parameters();
                     let n_args = path.paths[i].arguments.len();
@@ -115,6 +122,13 @@ impl<'a> CreateReference<'a> {
                             &path.range,
                         ));
                         continue;
+                    }
+
+                    for arg in &path.paths[i].arguments {
+                        let arg_path = SymbolPathNamespace(arg.mangled_path(), namespace.clone());
+                        if let Ok(arg_symbol) = symbol_table::resolve(&arg_path) {
+                            add_dependency(&symbol.found, &arg_symbol.found);
+                        }
                     }
 
                     let mut path = path.paths[i].clone();
@@ -155,6 +169,12 @@ impl<'a> CreateReference<'a> {
                     self.push_resolve_error(err, &path.range, generics_token);
                 }
             }
+        }
+    }
+
+    fn add_dependency_to_parent_scope(&mut self, dependency: &Symbol) {
+        if let Some(parent) = self.scopes.last() {
+            add_dependency(parent, dependency);
         }
     }
 }
@@ -339,4 +359,132 @@ impl VerylGrammarTrait for CreateReference<'_> {
         }
         Ok(())
     }
+
+    fn module_declaration(&mut self, arg: &ModuleDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
+                self.add_dependency_to_parent_scope(&symbol.found);
+                self.scopes.push(symbol.found);
+            }
+            HandlerPoint::After => {
+                self.scopes.pop();
+            }
+        }
+        Ok(())
+    }
+
+    fn interface_declaration(&mut self, arg: &InterfaceDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
+                self.add_dependency_to_parent_scope(&symbol.found);
+                self.scopes.push(symbol.found);
+            }
+            HandlerPoint::After => {
+                self.scopes.pop();
+            }
+        }
+        Ok(())
+    }
+
+    fn package_declaration(&mut self, arg: &PackageDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
+                self.add_dependency_to_parent_scope(&symbol.found);
+                self.scopes.push(symbol.found);
+            }
+            HandlerPoint::After => {
+                self.scopes.pop();
+            }
+        }
+        Ok(())
+    }
+
+    fn enum_declaration(&mut self, arg: &EnumDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
+                self.add_dependency_to_parent_scope(&symbol.found);
+                self.scopes.push(symbol.found);
+            }
+            HandlerPoint::After => {
+                self.scopes.pop();
+            }
+        }
+        Ok(())
+    }
+
+    fn struct_union_declaration(&mut self, arg: &StructUnionDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
+                self.add_dependency_to_parent_scope(&symbol.found);
+                self.scopes.push(symbol.found);
+            }
+            HandlerPoint::After => {
+                self.scopes.pop();
+            }
+        }
+        Ok(())
+    }
+
+    fn const_declaration(&mut self, arg: &ConstDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
+                self.add_dependency_to_parent_scope(&symbol.found);
+                self.scopes.push(symbol.found);
+            }
+            HandlerPoint::After => {
+                self.scopes.pop();
+            }
+        }
+        Ok(())
+    }
+
+    fn type_def_declaration(&mut self, arg: &TypeDefDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
+                self.add_dependency_to_parent_scope(&symbol.found);
+                self.scopes.push(symbol.found);
+            }
+            HandlerPoint::After => {
+                self.scopes.pop();
+            }
+        }
+        Ok(())
+    }
+
+    fn function_declaration(&mut self, arg: &FunctionDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
+                self.add_dependency_to_parent_scope(&symbol.found);
+                self.scopes.push(symbol.found);
+            }
+            HandlerPoint::After => {
+                self.scopes.pop();
+            }
+        }
+        Ok(())
+    }
+}
+
+fn add_dependency(target: &Symbol, dependency: &Symbol) {
+    if !is_dependency_symbol(target) {
+        return;
+    }
+    if !is_dependency_symbol(dependency) {
+        return;
+    }
+
+    let dependency_id = if matches!(dependency.kind, SymbolKind::EnumMember(_)) {
+        dependency.get_parent().unwrap().id
+    } else {
+        dependency.id
+    };
+    symbol_table::add_dependency(target.id, dependency_id);
 }

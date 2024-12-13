@@ -395,6 +395,15 @@ impl SymbolTable {
         }
     }
 
+    pub fn add_dependency(&mut self, target: SymbolId, depndency: SymbolId) {
+        for (_, symbol) in self.symbol_table.iter_mut() {
+            if symbol.id == target && !symbol.dependencies.contains(&depndency) {
+                symbol.dependencies.push(depndency);
+                break;
+            }
+        }
+    }
+
     pub fn add_generic_instance(&mut self, target: SymbolId, instance: SymbolId) {
         for (_, symbol) in self.symbol_table.iter_mut() {
             if symbol.id == target && !symbol.generic_instances.contains(&instance) {
@@ -1059,6 +1068,10 @@ pub fn drop(file_path: PathId) {
 
 pub fn add_reference(target: SymbolId, token: &Token) {
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_reference(target, token))
+}
+
+pub fn add_dependency(target: SymbolId, dependency: SymbolId) {
+    SYMBOL_TABLE.with(|f| f.borrow_mut().add_dependency(target, dependency))
 }
 
 pub fn add_generic_instance(target: SymbolId, instance: SymbolId) {
