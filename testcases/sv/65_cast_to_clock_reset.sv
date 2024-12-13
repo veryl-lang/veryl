@@ -2,7 +2,7 @@ module veryl_testcase_Module65;
     logic a  ;
     always_comb a = 1;
     logic b_n;
-    always_comb b = 1;
+    always_comb b_n = 1;
     logic c  ;
     always_comb c = 1;
     logic d  ;
@@ -25,12 +25,12 @@ module veryl_testcase_Module65;
     logic _x5  ;
     always_comb _x5 = b_n;
     logic _x6_n;
-    always_comb _x6 = ~c;
+    always_comb _x6_n = ~c;
     logic _x7_n;
-    always_comb _x7 = d;
+    always_comb _x7_n = d;
     logic _x8_n;
-    always_comb _x8 = ~e;
+    always_comb _x8_n = ~e;
     logic _x9_n;
-    always_comb _x9 = f;
+    always_comb _x9_n = f;
 endmodule
 //# sourceMappingURL=../map/testcases/sv/65_cast_to_clock_reset.sv.map
