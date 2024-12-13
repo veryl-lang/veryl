@@ -1,6 +1,9 @@
 module Module62 {
     var r#clock: logic;
     var r#reset: logic;
+    let r#in   : logic = 0;
+    var r#out  : logic;
     assign r#clock = 1;
     assign r#reset = 1;
+    assign r#out   = r#in;
 }

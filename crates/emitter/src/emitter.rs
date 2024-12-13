@@ -774,7 +774,7 @@ impl Emitter {
     }
 
     fn emit_generate_named_block(&mut self, arg: &GenerateNamedBlock, prefix: &str) {
-        self.default_block = Some(arg.identifier.identifier_token.to_string());
+        self.default_block = Some(emitting_identifier(arg.identifier.as_ref()).to_string());
         self.token_will_push(
             &arg.l_brace
                 .l_brace_token
@@ -1085,16 +1085,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Identifier'
     fn identifier(&mut self, arg: &Identifier) {
-        let (prefix, suffix) = if let Ok(found) = symbol_table::resolve(arg) {
-            match &found.found.kind {
-                SymbolKind::Port(x) => (x.prefix.clone(), x.suffix.clone()),
-                SymbolKind::Variable(x) => (x.prefix.clone(), x.suffix.clone()),
-                _ => (None, None),
-            }
-        } else {
-            (None, None)
-        };
-        self.veryl_token(&identifier_with_prefix_suffix(arg, &prefix, &suffix));
+        self.veryl_token(&emitting_identifier(arg));
     }
 
     /// Semantic action for non-terminal 'HierarchicalIdentifier'
@@ -1838,7 +1829,7 @@ impl VerylWalker for Emitter {
         //self.str(";");
         //self.newline();
         self.align_start(align_kind::IDENTIFIER);
-        self.str(&arg.identifier.identifier_token.to_string());
+        self.str(&emitting_identifier(arg.identifier.as_ref()).to_string());
         self.align_finish(align_kind::IDENTIFIER);
         self.space(1);
         self.equ(&arg.equ);
@@ -2243,7 +2234,7 @@ impl VerylWalker for Emitter {
             self.str("always_comb");
         }
         self.space(1);
-        self.str(&arg.identifier.identifier_token.to_string());
+        self.str(&emitting_identifier(arg.identifier.as_ref()).to_string());
         self.space(1);
         self.equ(&arg.equ);
         self.space(1);
@@ -2600,11 +2591,11 @@ impl VerylWalker for Emitter {
             unreachable!();
         };
 
-        self.token(
-            &arg.identifier
-                .identifier_token
-                .append(&Some(format!("{}_", prefix)), &None),
-        );
+        self.token(&identifier_with_prefix_suffix(
+            &arg.identifier,
+            &Some(format!("{}_", prefix)),
+            &None,
+        ));
         if let Some(ref x) = arg.enum_item_opt {
             self.space(1);
             self.equ(&x.equ);
@@ -2881,17 +2872,7 @@ impl VerylWalker for Emitter {
             }
             self.align_finish(align_kind::EXPRESSION);
         } else {
-            let (prefix, suffix) = if let Ok(found) = symbol_table::resolve(arg.identifier.as_ref())
-            {
-                match &found.found.kind {
-                    SymbolKind::Port(x) => (x.prefix.clone(), x.suffix.clone()),
-                    SymbolKind::Variable(x) => (x.prefix.clone(), x.suffix.clone()),
-                    _ => (None, None),
-                }
-            } else {
-                unreachable!()
-            };
-            let token = identifier_with_prefix_suffix(&arg.identifier, &prefix, &suffix);
+            let token = emitting_identifier(arg.identifier.as_ref());
             self.align_start(align_kind::EXPRESSION);
             self.align_duplicated_token(align_kind::EXPRESSION, &token, 0);
             self.duplicated_token(&token, 0);
@@ -3740,10 +3721,18 @@ fn namespace_string(namespace: &Namespace, context: &SymbolContext) -> String {
 pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContext) -> String {
     let mut ret = String::new();
     let namespace = namespace_table::get(token.token.id).unwrap();
+
+    let token_text = symbol.token.to_string();
+    let token_text = if let Some(text) = token_text.strip_prefix("r#") {
+        text.to_string()
+    } else {
+        token_text
+    };
+
     match &symbol.kind {
         SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_) => {
             ret.push_str(&namespace_string(&symbol.namespace, context));
-            ret.push_str(&symbol.token.to_string());
+            ret.push_str(&token_text);
         }
         SymbolKind::Parameter(_)
         | SymbolKind::Function(_)
@@ -3754,10 +3743,10 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
             let visible = namespace.included(&symbol.namespace)
                 || symbol.imported.iter().any(|x| *x == namespace);
             if visible & !context.in_import {
-                ret.push_str(&symbol.token.to_string());
+                ret.push_str(&token_text);
             } else {
                 ret.push_str(&namespace_string(&symbol.namespace, context));
-                ret.push_str(&symbol.token.to_string());
+                ret.push_str(&token_text);
             }
         }
         SymbolKind::EnumMember(x) => {
@@ -3770,15 +3759,15 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
             }
             ret.push_str(&x.prefix);
             ret.push('_');
-            ret.push_str(&symbol.token.to_string());
+            ret.push_str(&token_text);
         }
         SymbolKind::Modport(_) => {
             ret.push_str(&namespace_string(&symbol.namespace, context));
-            ret.push_str(&symbol.token.to_string());
+            ret.push_str(&token_text);
         }
         SymbolKind::SystemVerilog => {
             ret.push_str(&namespace_string(&symbol.namespace, context));
-            ret.push_str(&symbol.token.to_string());
+            ret.push_str(&token_text);
         }
         SymbolKind::GenericInstance(x) => {
             let base = symbol_table::get(x.base).unwrap();
@@ -3791,14 +3780,14 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
             if !visible | top_level {
                 ret.push_str(&namespace_string(&base.namespace, context));
             }
-            ret.push_str(&symbol.token.to_string());
+            ret.push_str(&token_text);
         }
         SymbolKind::GenericParameter(_) | SymbolKind::ProtoModule(_) => (),
         SymbolKind::Port(x) => {
             if let Some(ref x) = x.prefix {
                 ret.push_str(x);
             }
-            ret.push_str(&symbol.token.to_string());
+            ret.push_str(&token_text);
             if let Some(ref x) = x.suffix {
                 ret.push_str(x);
             }
@@ -3807,7 +3796,7 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
             if let Some(ref x) = x.prefix {
                 ret.push_str(x);
             }
-            ret.push_str(&symbol.token.to_string());
+            ret.push_str(&token_text);
             if let Some(ref x) = x.suffix {
                 ret.push_str(x);
             }
@@ -3820,7 +3809,7 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
         | SymbolKind::ModportFunctionMember(_)
         | SymbolKind::Genvar
         | SymbolKind::Namespace
-        | SymbolKind::SystemFunction => ret.push_str(&symbol.token.to_string()),
+        | SymbolKind::SystemFunction => ret.push_str(&token_text),
         SymbolKind::ClockDomain | SymbolKind::EnumMemberMangled | SymbolKind::Test(_) => {
             unreachable!()
         }
@@ -3839,4 +3828,17 @@ pub fn identifier_with_prefix_suffix(
     } else {
         identifier.identifier_token.strip_prefix("r#")
     }
+}
+
+pub fn emitting_identifier(arg: &Identifier) -> VerylToken {
+    let (prefix, suffix) = if let Ok(found) = symbol_table::resolve(arg) {
+        match &found.found.kind {
+            SymbolKind::Port(x) => (x.prefix.clone(), x.suffix.clone()),
+            SymbolKind::Variable(x) => (x.prefix.clone(), x.suffix.clone()),
+            _ => (None, None),
+        }
+    } else {
+        (None, None)
+    };
+    identifier_with_prefix_suffix(arg, &prefix, &suffix)
 }
