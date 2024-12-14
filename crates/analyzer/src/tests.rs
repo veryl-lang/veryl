@@ -2836,10 +2836,10 @@ fn unresolvable_generic_argument() {
     "#;
 
     let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::UnresolvableGenericArgument { .. }
-    ));
+    // This pattern also causes CyclicTypeDependency error
+    assert!(errors
+        .iter()
+        .any(|e| matches!(e, AnalyzerError::UnresolvableGenericArgument { .. })));
 }
 
 #[test]

@@ -1,5 +1,4 @@
 use crate::symbol::{Symbol, SymbolId};
-use crate::symbol_path::SymbolPathNamespace;
 use crate::symbol_table;
 use bimap::BiMap;
 use daggy::petgraph::visit::Dfs;
@@ -20,7 +19,7 @@ pub struct TypeDag {
 
 #[derive(Clone, Debug)]
 pub struct TypeResolveInfo {
-    pub path: SymbolPathNamespace,
+    pub symbol_id: SymbolId,
     pub name: String,
     pub token: Token,
 }
@@ -32,19 +31,19 @@ pub enum Context {
     Struct,
     Union,
     Enum,
+    Function,
     TypeDef,
+    Const,
     Module,
     Interface,
     Package,
     Modport,
-    ExpressionIdentifier,
     GenericInstance,
 }
 
 #[derive(Debug, Clone)]
 pub enum DagError {
     Cyclic(Symbol, Symbol),
-    UnableToResolve(Box<TypeResolveInfo>),
 }
 
 impl TypeDag {
@@ -61,34 +60,22 @@ impl TypeDag {
         }
     }
 
-    fn insert_node(
-        &mut self,
-        path: &SymbolPathNamespace,
-        id: &str,
-        token: &Token,
-    ) -> Result<u32, DagError> {
+    fn insert_node(&mut self, symbol_id: SymbolId, name: &str) -> Result<u32, DagError> {
+        let symbol = symbol_table::get(symbol_id).unwrap();
         let trinfo = TypeResolveInfo {
-            path: path.clone(),
-            name: id.into(),
-            token: *token,
+            symbol_id,
+            name: name.into(),
+            token: symbol.token,
         };
-        let sym = match symbol_table::resolve(&trinfo.path) {
-            Ok(rr) => rr.found,
-            Err(_) => {
-                let e = DagError::UnableToResolve(Box::new(trinfo));
-                return Err(e);
-            }
-        };
-        match self.nodes.get_by_left(&sym.id) {
-            Some(node_idx) => Ok(*node_idx),
-            None => {
-                let node_idx = self.dag.add_node(()).index() as u32;
-                self.insert_edge(self.source, node_idx, Context::Irrelevant)?;
-                self.nodes.insert(sym.id, node_idx);
-                self.paths.insert(node_idx, trinfo);
-                self.symbols.insert(node_idx, sym);
-                Ok(node_idx)
-            }
+        if let Some(node_index) = self.nodes.get_by_left(&symbol_id) {
+            Ok(*node_index)
+        } else {
+            let node_index = self.dag.add_node(()).index() as u32;
+            self.insert_edge(self.source, node_index, Context::Irrelevant)?;
+            self.nodes.insert(symbol_id, node_index);
+            self.paths.insert(node_index, trinfo);
+            self.symbols.insert(node_index, symbol);
+            Ok(node_index)
         }
     }
 
@@ -234,8 +221,8 @@ pub fn remove_edge(start: u32, end: u32) {
     TYPE_DAG.with(|f| f.borrow_mut().remove_edge(start, end))
 }
 
-pub fn insert_node(start: &SymbolPathNamespace, id: &str, token: &Token) -> Result<u32, DagError> {
-    TYPE_DAG.with(|f| f.borrow_mut().insert_node(start, id, token))
+pub fn insert_node(symbol_id: SymbolId, name: &str) -> Result<u32, DagError> {
+    TYPE_DAG.with(|f| f.borrow_mut().insert_node(symbol_id, name))
 }
 
 pub fn get_symbol(node: u32) -> Symbol {
