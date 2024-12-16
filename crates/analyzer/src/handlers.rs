@@ -18,7 +18,6 @@ pub mod check_unsafe;
 pub mod check_var_ref;
 pub mod create_reference;
 pub mod create_symbol_table;
-pub mod create_type_dag;
 use check_attribute::*;
 use check_clock_domain::*;
 use check_clock_reset::*;
@@ -43,8 +42,6 @@ use create_symbol_table::*;
 use crate::analyzer_error::AnalyzerError;
 use veryl_metadata::{Build, Lint};
 use veryl_parser::veryl_walker::Handler;
-
-use self::create_type_dag::CreateTypeDag;
 
 pub struct Pass1Handlers<'a> {
     check_attribute: CheckAttribute<'a>,
@@ -107,7 +104,6 @@ pub struct Pass2Handlers<'a> {
     check_var_ref: CheckVarRef<'a>,
     check_clock_reset: CheckClockReset<'a>,
     create_reference: CreateReference<'a>,
-    create_type_dag: CreateTypeDag<'a>,
     check_expression: CheckExpression<'a>,
     check_clock_domain: CheckClockDomain<'a>,
     check_proto: CheckProto<'a>,
@@ -125,7 +121,6 @@ impl<'a> Pass2Handlers<'a> {
             check_var_ref: CheckVarRef::new(text),
             check_clock_reset: CheckClockReset::new(text),
             create_reference: CreateReference::new(text),
-            create_type_dag: CreateTypeDag::new(text),
             check_expression: CheckExpression::new(text),
             check_clock_domain: CheckClockDomain::new(text),
             check_proto: CheckProto::new(text),
@@ -143,7 +138,6 @@ impl<'a> Pass2Handlers<'a> {
             &mut self.check_var_ref as &mut dyn Handler,
             &mut self.check_clock_reset as &mut dyn Handler,
             &mut self.create_reference as &mut dyn Handler,
-            &mut self.create_type_dag as &mut dyn Handler,
             &mut self.check_expression as &mut dyn Handler,
             &mut self.check_clock_domain as &mut dyn Handler,
             &mut self.check_proto as &mut dyn Handler,
@@ -161,7 +155,6 @@ impl<'a> Pass2Handlers<'a> {
         ret.append(&mut self.check_var_ref.errors);
         ret.append(&mut self.check_clock_reset.errors);
         ret.append(&mut self.create_reference.errors);
-        ret.append(&mut self.create_type_dag.errors);
         ret.append(&mut self.check_expression.errors);
         ret.append(&mut self.check_clock_domain.errors);
         ret.append(&mut self.check_proto.errors);

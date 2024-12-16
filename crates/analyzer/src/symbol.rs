@@ -99,6 +99,20 @@ impl Symbol {
         }
     }
 
+    pub fn get_parent(&self) -> Option<Symbol> {
+        let mut namespace = self.namespace.clone();
+        if let Some(path) = namespace.pop() {
+            if namespace.depth() >= 1 {
+                let path = SymbolPath::new(&[path]);
+                if let Ok(symbol) = symbol_table::resolve((&path, &namespace)) {
+                    return Some(symbol.found);
+                }
+            }
+        }
+
+        None
+    }
+
     pub fn evaluate(&self) -> Evaluated {
         if let Some(evaluated) = self.evaluated.get() {
             evaluated
