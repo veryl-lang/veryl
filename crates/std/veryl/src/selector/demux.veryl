@@ -1,0 +1,36 @@
+import selector_pkg::*;
+
+pub module demux #(
+    param WIDTH       : u32           = 1                               ,
+    param DATA_TYPE   : type          = logic<WIDTH>                    ,
+    param DEFUALT_DATA: u32           = 0 as DATA_TYPE                  ,
+    param ENTRIES     : u32           = 2                               ,
+    param KIND        : selector_kind = selector_kind::BINARY           ,
+    param SELECT_WIDTH: u32           = calc_select_width(ENTRIES, KIND),
+) (
+    i_select: input  logic    <SELECT_WIDTH>,
+    i_data  : input  DATA_TYPE              ,
+    o_data  : output DATA_TYPE<ENTRIES>     ,
+) {
+    if KIND == selector_kind::BINARY :g_demux {
+        always_comb {
+            for i: u32 in 0..ENTRIES {
+                o_data[i] = if i_select == i as SELECT_WIDTH {
+                    i_data
+                } else {
+                    DEFUALT_DATA
+                };
+            }
+        }
+    } else {
+        always_comb {
+            for i: u32 in 0..ENTRIES {
+                o_data[i] = if i_select[i] {
+                    i_data
+                } else {
+                    DEFUALT_DATA
+                };
+            }
+        }
+    }
+}
