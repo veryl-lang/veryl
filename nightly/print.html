@@ -210,6 +210,10 @@
 </td>
 </tr>
 <tr>
+    <th class="table_list_item"><a href="demux.html">demux</a></th>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
     <th class="table_list_item"><a href="edge_detector.html">edge_detector</a></th>
     <td class="table_list_item"> Edge detector
 </td>
@@ -235,6 +239,10 @@
 </tr>
 <tr>
     <th class="table_list_item"><a href="lfsr_galois.html">lfsr_galois</a></th>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item"><a href="mux.html">mux</a></th>
     <td class="table_list_item"></td>
 </tr>
 <tr>
@@ -267,6 +275,10 @@
 <hr />
 <table class="table_list">
 <tbody>
+<tr>
+    <th class="table_list_item"><a href="selector_pkg.html">selector_pkg</a></th>
+    <td class="table_list_item"></td>
+</tr>
 <tr>
     <th class="table_list_item"><a href="types.html">types</a></th>
     <td class="table_list_item"> A package for pre-defined types
@@ -313,6 +325,10 @@
 </td>
 </tr>
 <tr>
+    <th class="table_list_item"><a href="demux.html">demux</a></th>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
     <th class="table_list_item"><a href="edge_detector.html">edge_detector</a></th>
     <td class="table_list_item"> Edge detector
 </td>
@@ -338,6 +354,10 @@
 </tr>
 <tr>
     <th class="table_list_item"><a href="lfsr_galois.html">lfsr_galois</a></th>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item"><a href="mux.html">mux</a></th>
     <td class="table_list_item"></td>
 </tr>
 <tr>
@@ -979,9 +999,70 @@ a bit vector with a unary encoding.</p>
 </tr>
 </tbody>
 </table>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="demux"><a class="header" href="#demux">demux</a></h2>
+<h3 id="parameters-7"><a class="header" href="#parameters-7">Parameters</a></h3>
+<hr />
+<table class="table_list">
+<tbody>
+<tr>
+    <th class="table_list_item">WIDTH</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">DATA_TYPE</th>
+    <td class="table_list_item"><span class="hljs-type">type</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">DEFUALT_DATA</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">ENTRIES</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">KIND</th>
+    <td class="table_list_item"><span class="hljs-type">selector_kind</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">SELECT_WIDTH</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+</tbody>
+</table>
+<h3 id="ports-7"><a class="header" href="#ports-7">Ports</a></h3>
+<hr />
+<table class="table_list">
+<tbody>
+<tr>
+    <th class="table_list_item">i_select</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic<SELECT_WIDTH></span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">i_data</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">DATA_TYPE</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">o_data</th>
+    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
+    <td class="table_list_item"><span class="hljs-type">DATA_TYPE<ENTRIES></span></td>
+    <td class="table_list_item"></td>
+</tr>
+</tbody>
+</table>
 <div style="break-before: page; page-break-before: always;"></div><h2 id="edge_detector"><a class="header" href="#edge_detector">edge_detector</a></h2>
 <p>Edge detector</p>
-<h3 id="parameters-7"><a class="header" href="#parameters-7">Parameters</a></h3>
+<h3 id="parameters-8"><a class="header" href="#parameters-8">Parameters</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
@@ -999,7 +1080,7 @@ a bit vector with a unary encoding.</p>
 </tr>
 </tbody>
 </table>
-<h3 id="ports-7"><a class="header" href="#ports-7">Ports</a></h3>
+<h3 id="ports-8"><a class="header" href="#ports-8">Ports</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
@@ -1055,7 +1136,7 @@ a bit vector with a unary encoding.</p>
 </tbody>
 </table>
 <div style="break-before: page; page-break-before: always;"></div><h2 id="fifo"><a class="header" href="#fifo">fifo</a></h2>
-<h3 id="parameters-8"><a class="header" href="#parameters-8">Parameters</a></h3>
+<h3 id="parameters-9"><a class="header" href="#parameters-9">Parameters</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
@@ -1116,7 +1197,7 @@ a bit vector with a unary encoding.</p>
 </tr>
 </tbody>
 </table>
-<h3 id="ports-8"><a class="header" href="#ports-8">Ports</a></h3>
+<h3 id="ports-9"><a class="header" href="#ports-9">Ports</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
@@ -1190,7 +1271,7 @@ a bit vector with a unary encoding.</p>
 </table>
 <div style="break-before: page; page-break-before: always;"></div><h2 id="gray_counter"><a class="header" href="#gray_counter">gray_counter</a></h2>
 <p>Value counter using Gray Encoding</p>
-<h3 id="parameters-9"><a class="header" href="#parameters-9">Parameters</a></h3>
+<h3 id="parameters-10"><a class="header" href="#parameters-10">Parameters</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
@@ -1226,7 +1307,7 @@ a bit vector with a unary encoding.</p>
 </tr>
 </tbody>
 </table>
-<h3 id="ports-9"><a class="header" href="#ports-9">Ports</a></h3>
+<h3 id="ports-10"><a class="header" href="#ports-10">Ports</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
@@ -1308,7 +1389,7 @@ a bit vector with a unary encoding.</p>
 <li>Space Complexity: O(WIDTH log WIDTH)</li>
 <li>Time Complexity: O(log WIDTH)</li>
 </ul>
-<h3 id="parameters-10"><a class="header" href="#parameters-10">Parameters</a></h3>
+<h3 id="parameters-11"><a class="header" href="#parameters-11">Parameters</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
@@ -1320,7 +1401,7 @@ a bit vector with a unary encoding.</p>
 </tr>
 </tbody>
 </table>
-<h3 id="ports-10"><a class="header" href="#ports-10">Ports</a></h3>
+<h3 id="ports-11"><a class="header" href="#ports-11">Ports</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
@@ -1347,7 +1428,7 @@ a bit vector with a unary encoding.</p>
 <li>Space Complexity: O(WIDTH)</li>
 <li>Time Complexity: O(1)</li>
 </ul>
-<h3 id="parameters-11"><a class="header" href="#parameters-11">Parameters</a></h3>
+<h3 id="parameters-12"><a class="header" href="#parameters-12">Parameters</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
@@ -1359,7 +1440,7 @@ a bit vector with a unary encoding.</p>
 </tr>
 </tbody>
 </table>
-<h3 id="ports-11"><a class="header" href="#ports-11">Ports</a></h3>
+<h3 id="ports-12"><a class="header" href="#ports-12">Ports</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
@@ -1380,7 +1461,7 @@ a bit vector with a unary encoding.</p>
 </tbody>
 </table>
 <div style="break-before: page; page-break-before: always;"></div><h2 id="lfsr_galois"><a class="header" href="#lfsr_galois">lfsr_galois</a></h2>
-<h3 id="parameters-12"><a class="header" href="#parameters-12">Parameters</a></h3>
+<h3 id="parameters-13"><a class="header" href="#parameters-13">Parameters</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
@@ -1399,7 +1480,7 @@ a bit vector with a unary encoding.</p>
 </tr>
 </tbody>
 </table>
-<h3 id="ports-12"><a class="header" href="#ports-12">Ports</a></h3>
+<h3 id="ports-13"><a class="header" href="#ports-13">Ports</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
@@ -1440,8 +1521,59 @@ a bit vector with a unary encoding.</p>
 </tr>
 </tbody>
 </table>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="mux"><a class="header" href="#mux">mux</a></h2>
+<h3 id="parameters-14"><a class="header" href="#parameters-14">Parameters</a></h3>
+<hr />
+<table class="table_list">
+<tbody>
+<tr>
+    <th class="table_list_item">WIDTH</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">DATA_TYPE</th>
+    <td class="table_list_item"><span class="hljs-type">type</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">ENTRIES</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">KIND</th>
+    <td class="table_list_item"><span class="hljs-type">selector_kind</span></td>
+    <td class="table_list_item"></td>
+</tr>
+</tbody>
+</table>
+<h3 id="ports-14"><a class="header" href="#ports-14">Ports</a></h3>
+<hr />
+<table class="table_list">
+<tbody>
+<tr>
+    <th class="table_list_item">i_select</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic<SELECT_WIDTH></span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">i_data</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">DATA_TYPE<ENTRIES></span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">o_data</th>
+    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
+    <td class="table_list_item"><span class="hljs-type">DATA_TYPE</span></td>
+    <td class="table_list_item"></td>
+</tr>
+</tbody>
+</table>
 <div style="break-before: page; page-break-before: always;"></div><h2 id="onehot"><a class="header" href="#onehot">onehot</a></h2>
-<h3 id="parameters-13"><a class="header" href="#parameters-13">Parameters</a></h3>
+<h3 id="parameters-15"><a class="header" href="#parameters-15">Parameters</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
@@ -1452,7 +1584,7 @@ a bit vector with a unary encoding.</p>
 </tr>
 </tbody>
 </table>
-<h3 id="ports-13"><a class="header" href="#ports-13">Ports</a></h3>
+<h3 id="ports-15"><a class="header" href="#ports-15">Ports</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
@@ -1479,7 +1611,7 @@ a bit vector with a unary encoding.</p>
 </tbody>
 </table>
 <div style="break-before: page; page-break-before: always;"></div><h2 id="ram"><a class="header" href="#ram">ram</a></h2>
-<h3 id="parameters-14"><a class="header" href="#parameters-14">Parameters</a></h3>
+<h3 id="parameters-16"><a class="header" href="#parameters-16">Parameters</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
@@ -1520,7 +1652,7 @@ a bit vector with a unary encoding.</p>
 </tr>
 </tbody>
 </table>
-<h3 id="ports-14"><a class="header" href="#ports-14">Ports</a></h3>
+<h3 id="ports-16"><a class="header" href="#ports-16">Ports</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
@@ -1597,7 +1729,7 @@ a bit vector with a unary encoding.</p>
 </tbody>
 </table>
 <div style="break-before: page; page-break-before: always;"></div><h2 id="synchronizer"><a class="header" href="#synchronizer">synchronizer</a></h2>
-<h3 id="parameters-15"><a class="header" href="#parameters-15">Parameters</a></h3>
+<h3 id="parameters-17"><a class="header" href="#parameters-17">Parameters</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
@@ -1613,7 +1745,7 @@ a bit vector with a unary encoding.</p>
 </tr>
 </tbody>
 </table>
-<h3 id="ports-15"><a class="header" href="#ports-15">Ports</a></h3>
+<h3 id="ports-17"><a class="header" href="#ports-17">Ports</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
@@ -1654,12 +1786,17 @@ a bit vector with a unary encoding.</p>
 <table class="table_list">
 <tbody>
 <tr>
+    <th class="table_list_item"><a href="selector_pkg.html">selector_pkg</a></th>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
     <th class="table_list_item"><a href="types.html">types</a></th>
     <td class="table_list_item"> A package for pre-defined types
 </td>
 </tr>
 </tbody>
 </table>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="selector_pkg"><a class="header" href="#selector_pkg">selector_pkg</a></h2>
 <div style="break-before: page; page-break-before: always;"></div><h2 id="types"><a class="header" href="#types">types</a></h2>
 <p>A package for pre-defined types</p>
 
