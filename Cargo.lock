@@ -4898,7 +4898,7 @@ dependencies = [
  "serde_json",
  "similar",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.7",
  "tokio",
  "tokio-util",
  "veryl-analyzer",
@@ -4926,7 +4926,7 @@ dependencies = [
  "itertools 0.13.0",
  "miette",
  "strnum_bitwidth",
- "thiserror 1.0.69",
+ "thiserror 2.0.7",
  "toml 0.8.19",
  "veryl-metadata",
  "veryl-parser",
@@ -4989,7 +4989,7 @@ dependencies = [
  "serde_regex",
  "spdx",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.7",
  "toml 0.8.19",
  "url",
  "uuid",
@@ -5010,7 +5010,7 @@ dependencies = [
  "parol_runtime",
  "paste",
  "regex",
- "thiserror 1.0.69",
+ "thiserror 2.0.7",
 ]
 
 [[package]]
@@ -5021,7 +5021,7 @@ dependencies = [
  "fs4",
  "log",
  "miette",
- "thiserror 1.0.69",
+ "thiserror 2.0.7",
  "walkdir",
 ]
 
@@ -5032,7 +5032,7 @@ dependencies = [
  "miette",
  "relative-path",
  "sourcemap",
- "thiserror 1.0.69",
+ "thiserror 2.0.7",
 ]
 
 [[package]]
@@ -5042,7 +5042,7 @@ dependencies = [
  "merkle_hash",
  "miette",
  "rust-embed",
- "thiserror 1.0.69",
+ "thiserror 2.0.7",
  "veryl-path",
 ]
 
