@@ -25,21 +25,20 @@ module veryl_testcase_Module06;
     logic [ParamX-1:0] a;
     always_comb a = 1;
     logic [ParamX-1:0] b;
-    always_comb b = 1;
     logic [ParamX-1:0] c;
-    always_comb c = 1;
     logic [ParamX-1:0] d;
     logic [ParamX-1:0] e;
+    logic [ParamX-1:0] f;
 
     // function call
     always_comb d = FuncA(a, b, c);
 
     // void function call
     initial begin
-        FuncC(a, c);
+        FuncC(a, e);
     end
 
     // system function call
-    always_comb e = $clog2(a);
+    always_comb f = $clog2(a);
 endmodule
 //# sourceMappingURL=../map/testcases/sv/06_function.sv.map

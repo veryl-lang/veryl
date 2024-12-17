@@ -22,19 +22,20 @@ module Module06 {
     }
 
     let a: logic<ParamX> = 1;
-    let b: logic<ParamX> = 1;
-    let c: logic<ParamX> = 1;
+    var b: logic<ParamX>;
+    var c: logic<ParamX>;
     var d: logic<ParamX>;
     var e: logic<ParamX>;
+    var f: logic<ParamX>;
 
     // function call
     assign d = FuncA(a, b, c);
 
     // void function call
     initial {
-        FuncC(a, c);
+        FuncC(a, e);
     }
 
     // system function call
-    assign e = $clog2(a);
+    assign f = $clog2(a);
 }
