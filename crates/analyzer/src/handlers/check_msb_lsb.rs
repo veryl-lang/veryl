@@ -3,7 +3,7 @@ use crate::msb_table;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::Type as SymType;
-use crate::symbol::{SymbolKind, TypeKind};
+use crate::symbol::{Direction, SymbolKind, TypeKind};
 use crate::symbol_path::{SymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
 use veryl_parser::veryl_grammar_trait::*;
@@ -40,10 +40,11 @@ impl Handler for CheckMsbLsb<'_> {
     }
 }
 
-fn trace_type(r#type: &SymType, namespace: &Namespace) -> Vec<SymType> {
-    let mut ret = vec![r#type.clone()];
+fn trace_type(r#type: &SymType, namespace: &Namespace) -> Vec<(SymType, Option<SymbolKind>)> {
+    let mut ret = vec![(r#type.clone(), None)];
     if let TypeKind::UserDefined(ref x) = r#type.kind {
         if let Ok(symbol) = symbol_table::resolve((&SymbolPath::new(x), namespace)) {
+            ret.last_mut().unwrap().1 = Some(symbol.found.kind.clone());
             if let SymbolKind::TypeDef(ref x) = symbol.found.kind {
                 ret.append(&mut trace_type(&x.r#type, namespace));
             }
@@ -73,32 +74,63 @@ impl VerylGrammarTrait for CheckMsbLsb<'_> {
                 {
                     let namespace = &x.found.namespace;
 
-                    let r#type = match x.found.kind {
-                        SymbolKind::Variable(x) => Some(x.r#type),
-                        SymbolKind::Port(x) => x.r#type,
-                        _ => None,
+                    let via_interface = x.full_path.iter().any(|path| {
+                        let symbol = symbol_table::get(*path).unwrap();
+                        match symbol.kind {
+                            SymbolKind::Port(x) => {
+                                matches!(x.direction, Direction::Interface | Direction::Modport)
+                            }
+                            SymbolKind::Instance(_) => true,
+                            _ => false,
+                        }
+                    });
+                    let r#type = if !via_interface {
+                        match x.found.kind {
+                            SymbolKind::Variable(x) => Some(x.r#type),
+                            SymbolKind::Port(x) => x.r#type,
+                            SymbolKind::Parameter(x) => Some(x.r#type),
+                            SymbolKind::StructMember(x) => Some(x.r#type),
+                            SymbolKind::UnionMember(x) => Some(x.r#type),
+                            _ => None,
+                        }
+                    } else {
+                        None
                     };
 
                     if let Some(x) = r#type {
                         let types = trace_type(&x, namespace);
                         let mut select_dimension = *self.select_dimension.last().unwrap();
 
-                        let mut expression = None;
-                        for t in types {
+                        let mut demension_number = None;
+                        for (i, (t, k)) in types.iter().enumerate() {
                             if select_dimension < t.array.len() {
-                                expression = t.array.get(select_dimension).cloned();
+                                demension_number = Some(select_dimension + 1);
                                 break;
                             }
                             select_dimension -= t.array.len();
+
                             if select_dimension < t.width.len() {
-                                expression = t.width.get(select_dimension).cloned();
+                                demension_number = Some(select_dimension + 1);
                                 break;
                             }
                             select_dimension -= t.width.len();
+
+                            if select_dimension == 0
+                                && (i + 1) == types.len()
+                                && matches!(
+                                    k,
+                                    Some(SymbolKind::Enum(_))
+                                        | Some(SymbolKind::Struct(_))
+                                        | Some(SymbolKind::Union(_))
+                                )
+                            {
+                                demension_number = Some(0);
+                                break;
+                            }
                         }
 
-                        if let Some(expression) = expression {
-                            msb_table::insert(arg.msb_token.token.id, &expression);
+                        if let Some(demension_number) = demension_number {
+                            msb_table::insert(arg.msb_token.token.id, demension_number);
                             true
                         } else {
                             false

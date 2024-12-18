@@ -71,6 +71,7 @@ pub struct Emitter {
     assignment_lefthand_side: Option<ExpressionIdentifier>,
     generic_map: Vec<GenericMap>,
     source_map: Option<SourceMap>,
+    resolved_identifier: Vec<String>,
 }
 
 impl Default for Emitter {
@@ -108,6 +109,7 @@ impl Default for Emitter {
             assignment_lefthand_side: None,
             generic_map: Vec::new(),
             source_map: None,
+            resolved_identifier: Vec::new(),
         }
     }
 }
@@ -900,6 +902,12 @@ impl Emitter {
             (None, prefix.is_some())
         }
     }
+
+    fn push_resolved_identifier(&mut self, x: &str) {
+        if let Some(identifier) = self.resolved_identifier.last_mut() {
+            identifier.push_str(x);
+        }
+    }
 }
 
 fn is_var_declaration(arg: &StatementBlockItem) -> bool {
@@ -1057,10 +1065,15 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Msb'
     fn msb(&mut self, arg: &Msb) {
-        let expression = msb_table::get(arg.msb_token.token.id).unwrap();
-        self.str("((");
-        self.expression(&expression);
-        self.str(") - 1)");
+        let identifier = self.resolved_identifier.last().unwrap();
+        let demension_number = msb_table::get(arg.msb_token.token.id).unwrap();
+
+        let text = if demension_number == 0 {
+            format!("($bits({}) - 1)", identifier)
+        } else {
+            format!("($size({}, {}) - 1)", identifier, demension_number)
+        };
+        self.token(&arg.msb_token.replace(&text));
     }
 
     /// Semantic action for non-terminal 'Param'
@@ -1085,7 +1098,9 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Identifier'
     fn identifier(&mut self, arg: &Identifier) {
-        self.veryl_token(&emitting_identifier(arg));
+        let text = emitting_identifier(arg);
+        self.veryl_token(&text);
+        self.push_resolved_identifier(&text.to_string());
     }
 
     /// Semantic action for non-terminal 'HierarchicalIdentifier'
@@ -1166,26 +1181,37 @@ impl VerylWalker for Emitter {
             let context: SymbolContext = self.into();
             let text = symbol_string(arg.identifier(), &symbol.found, &context);
             self.veryl_token(&arg.identifier().replace(&text));
+            self.push_resolved_identifier(&text);
         } else if !path.is_resolvable() {
             // emit literal by generics
             let text = path.base_path(0).0[0].to_string();
             self.veryl_token(&arg.identifier().replace(&text));
+            self.push_resolved_identifier(&text);
         }
     }
 
     /// Semantic action for non-terminal 'ExpressionIdentifier'
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) {
+        self.resolved_identifier.push("".to_string());
         self.scoped_identifier(&arg.scoped_identifier);
         for x in &arg.expression_identifier_list {
             self.select(&x.select);
         }
+        for _x in &arg.expression_identifier_list {
+            self.push_resolved_identifier("[0]");
+        }
         for x in &arg.expression_identifier_list0 {
             self.dot(&x.dot);
+            self.push_resolved_identifier(".");
             self.identifier(&x.identifier);
             for x in &x.expression_identifier_list0_list {
                 self.select(&x.select);
             }
+            for _x in &x.expression_identifier_list0_list {
+                self.push_resolved_identifier("[0]");
+            }
         }
+        self.resolved_identifier.pop();
     }
 
     /// Semantic action for non-terminal 'Expression'

@@ -1,4 +1,4 @@
-module Module28 (
+module Module28A (
     c: input logic<30, 40>,
 ) {
     const WIDTH0: u32 = 10;
@@ -10,4 +10,30 @@ module Module28 (
     let _x: logic = a[msb][msb:lsb + 1];
     let _y: logic = b[msb - 3][msb + 5:lsb];
     let _z: logic = c[msb][msb];
+}
+
+package Package28A::<W: const> {
+    struct StructA {
+        a: logic<W>,
+    }
+}
+
+package Package28B {
+    const B: u32 = 2;
+}
+
+package Package28C {
+    const W: u32       = 2;
+    const N: u32       = 3;
+    const C: bit<N, W> = 0;
+}
+
+module ModuleB {
+    var a  : Package28A::<Package28B::B>::StructA;
+    assign a.a = 0;
+
+    let _w: logic = a[msb];
+    let _x: logic = a.a[msb];
+    let _y: logic = Package28C::C[msb];
+    let _z: logic = Package28C::C[0][msb];
 }
