@@ -2056,6 +2056,50 @@ fn unassign_variable() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    interface InterfaceA {
+        function FuncA(
+            a: output logic,
+            b: ref    logic
+        ) {
+            a = 0;
+            b = 1;
+        }
+        modport mp {
+            FuncA: import,
+        }
+    }
+    module ModuleA (
+        if_a: modport InterfaceA::mp
+    ){
+        function FuncB(
+            a: output logic,
+            b: ref    logic,
+        ) -> logic {
+            a = 0;
+            b = 1;
+            return 0;
+        }
+
+        var _a: logic;
+        var _b: logic;
+        var _c: logic;
+        var _d: logic;
+        var _e: logic;
+
+        always_comb {
+            if_a.FuncA(_a, _b);
+        }
+
+        always_comb {
+            _c = FuncB(_d, _e);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
