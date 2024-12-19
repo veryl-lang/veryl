@@ -11,10 +11,11 @@ use crate::symbol::{
 use crate::symbol_table;
 use crate::type_dag;
 use crate::var_ref::{
-    AssignPosition, AssignPositionTree, AssignPositionType, ExpressionTargetType,
+    AssignPosition, AssignPositionTree, AssignPositionType, ExpressionTargetType, VarRef,
     VarRefAffiliation, VarRefPath, VarRefType,
 };
 use itertools::Itertools;
+use std::collections::HashMap;
 use std::path::Path;
 use veryl_metadata::{Build, Lint, Metadata};
 use veryl_parser::resource_table;
@@ -61,16 +62,19 @@ pub struct AnalyzerPass3<'a> {
     path: PathId,
     text: &'a str,
     symbols: Vec<Symbol>,
+    var_refs: HashMap<VarRefAffiliation, Vec<VarRef>>,
 }
 
 impl<'a> AnalyzerPass3<'a> {
     pub fn new(path: &'a Path, text: &'a str) -> Self {
         let symbols = symbol_table::get_all();
+        let var_refs = symbol_table::get_var_ref_list();
         let path = resource_table::get_path_id(path.to_path_buf()).unwrap();
         AnalyzerPass3 {
             path,
             text,
             symbols,
+            var_refs,
         }
     }
 
@@ -168,27 +172,45 @@ impl<'a> AnalyzerPass3<'a> {
     pub fn check_unassigned(&self) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
 
-        for (key, list) in symbol_table::get_var_ref_list() {
-            if matches!(key, VarRefAffiliation::AlwaysComb { .. }) {
-                let list: Vec<_> = list.iter().enumerate().collect();
-                let assign_list: Vec<_> = list.iter().filter(|(_i, x)| x.is_assign()).collect();
-                for (i, var_ref) in &list {
-                    if let VarRefType::ExpressionTarget { r#type } = var_ref.r#type {
-                        if matches!(
+        let var_refs = self.var_refs.iter().filter(|(key, _)| {
+            matches!(
+                key,
+                VarRefAffiliation::AlwaysComb { token } if token.source == self.path
+            )
+        });
+        for (_, list) in var_refs {
+            let assign_list: Vec<_> = list
+                .iter()
+                .enumerate()
+                .filter(|(_, x)| x.is_assign())
+                .collect();
+            let target_list: Vec<_> = list
+                .iter()
+                .enumerate()
+                .filter(|(_, x)| {
+                    if let VarRefType::ExpressionTarget { r#type } = x.r#type {
+                        matches!(
                             r#type,
                             ExpressionTargetType::Variable | ExpressionTargetType::OutputPort
-                        ) && assign_list.iter().any(|(index, assign)| {
-                            index > i && assign.path.may_fully_included(&var_ref.path)
-                        }) {
-                            let full_path = var_ref.path.full_path();
-                            let symbol = symbol_table::get(*full_path.first().unwrap()).unwrap();
-                            ret.push(AnalyzerError::unassign_variable(
-                                &var_ref.path.to_string(),
-                                self.text,
-                                &symbol.token.into(),
-                            ));
-                        }
+                        )
+                    } else {
+                        false
                     }
+                })
+                .collect();
+
+            for (ref_index, var_ref) in target_list {
+                let before_assign = assign_list.iter().any(|(assing_index, assign)| {
+                    *assing_index > ref_index && assign.path.may_fully_included(&var_ref.path)
+                });
+                if before_assign {
+                    let full_path = var_ref.path.full_path();
+                    let symbol = symbol_table::get(*full_path.first().unwrap()).unwrap();
+                    ret.push(AnalyzerError::unassign_variable(
+                        &var_ref.path.to_string(),
+                        self.text,
+                        &symbol.token.into(),
+                    ));
                 }
             }
         }
