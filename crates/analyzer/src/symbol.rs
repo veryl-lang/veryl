@@ -328,7 +328,11 @@ pub enum SymbolKind {
 impl SymbolKind {
     pub fn to_kind_name(&self) -> String {
         match self {
-            SymbolKind::Port(_) => "port".to_string(),
+            SymbolKind::Port(x) => match x.direction {
+                Direction::Modport => "modport".to_string(),
+                Direction::Import => "function import".to_string(),
+                _ => format!("{} port", x.direction),
+            },
             SymbolKind::Variable(_) => "variable".to_string(),
             SymbolKind::Module(_) => "module".to_string(),
             SymbolKind::ProtoModule(_) => "proto module".to_string(),
@@ -348,7 +352,12 @@ impl SymbolKind {
             SymbolKind::EnumMemberMangled => "enum member mangled".to_string(),
             SymbolKind::Modport(_) => "modport".to_string(),
             SymbolKind::Genvar => "genvar".to_string(),
-            SymbolKind::ModportVariableMember(_) => "modport variable member".to_string(),
+            SymbolKind::ModportVariableMember(x) => match x.direction {
+                Direction::Input | Direction::Output | Direction::Inout => {
+                    format!("modport {} variable member", x.direction)
+                }
+                _ => unreachable!(),
+            },
             SymbolKind::ModportFunctionMember(_) => "modport function member".to_string(),
             SymbolKind::SystemVerilog => "systemverilog item".to_string(),
             SymbolKind::Namespace => "namespace".to_string(),
