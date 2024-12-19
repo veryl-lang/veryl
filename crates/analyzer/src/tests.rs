@@ -1771,6 +1771,62 @@ fn unknown_msb() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UnknownMsb { .. }));
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic<2>;
+        modport mp {
+            a: input
+        }
+    }
+    module ModuleA (
+        if_a: modport InterfaceA::mp
+    ) {
+        let a: logic = if_a.a[msb];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnknownMsb { .. }));
+
+    let code = r#"
+    interface InterfaceA #(
+        param W: u32 = 2
+    ){
+        var a: logic<W>;
+    }
+    module ModuleA {
+        inst if_a: InterfaceA;
+        assign if_a.a = 0;
+        let a: logic = if_a.a[msb];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnknownMsb { .. }));
+
+    let code = r#"
+    package PackageA::<W: const> {
+        struct StructA {
+            a: logic<W>,
+        }
+    }
+    package PackageB {
+        const B: u32 = 2;
+    }
+    package PackageC {
+        const C: bit<2> = 0;
+    }
+    module ModuleA {
+        var a: PackageA::<PackageB::B>::StructA;
+        assign a.a = 0;
+        let _b: logic = a.a[msb];
+        let _c: logic = PackageC::C[msb];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
