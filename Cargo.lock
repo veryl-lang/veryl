@@ -3232,7 +3232,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b7cafe60d6cf8e62e1b9b2ea516a089c008945bb5a275416789e7db0bc199dc"
 dependencies = [
  "memchr",
- "thiserror 2.0.8",
+ "thiserror 2.0.9",
  "ucd-trie",
 ]
 
@@ -4391,11 +4391,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.8"
+version = "2.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08f5383f3e0071702bf93ab5ee99b52d26936be9dedd9413067cbdcddcb6141a"
+checksum = "f072643fd0190df67a8bab670c20ef5d8737177d6ac6b2e9a236cb096206b2cc"
 dependencies = [
- "thiserror-impl 2.0.8",
+ "thiserror-impl 2.0.9",
 ]
 
 [[package]]
@@ -4411,9 +4411,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.8"
+version = "2.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2f357fcec90b3caef6623a099691be676d033b40a058ac95d2a6ade6fa0c943"
+checksum = "7b50fa271071aae2e6ee85f842e2e28ba8cd2c5fb67f11fcb1fd70b276f9e7d4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4706,7 +4706,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e640d9b0964e9d39df633548591090ab92f7a4567bc31d3891af23471a3365c6"
 dependencies = [
  "lazy_static",
- "thiserror 2.0.8",
+ "thiserror 2.0.9",
  "ts-rs-macros",
 ]
 
@@ -4898,7 +4898,7 @@ dependencies = [
  "serde_json",
  "similar",
  "tempfile",
- "thiserror 2.0.8",
+ "thiserror 2.0.9",
  "tokio",
  "tokio-util",
  "veryl-analyzer",
@@ -4926,7 +4926,7 @@ dependencies = [
  "itertools 0.13.0",
  "miette",
  "strnum_bitwidth",
- "thiserror 2.0.8",
+ "thiserror 2.0.9",
  "toml 0.8.19",
  "veryl-metadata",
  "veryl-parser",
@@ -4989,7 +4989,7 @@ dependencies = [
  "serde_regex",
  "spdx",
  "tempfile",
- "thiserror 2.0.8",
+ "thiserror 2.0.9",
  "toml 0.8.19",
  "url",
  "uuid",
@@ -5010,7 +5010,7 @@ dependencies = [
  "parol_runtime",
  "paste",
  "regex",
- "thiserror 2.0.8",
+ "thiserror 2.0.9",
 ]
 
 [[package]]
@@ -5021,7 +5021,7 @@ dependencies = [
  "fs4",
  "log",
  "miette",
- "thiserror 2.0.8",
+ "thiserror 2.0.9",
  "walkdir",
 ]
 
@@ -5032,7 +5032,7 @@ dependencies = [
  "miette",
  "relative-path",
  "sourcemap",
- "thiserror 2.0.8",
+ "thiserror 2.0.9",
 ]
 
 [[package]]
@@ -5042,7 +5042,7 @@ dependencies = [
  "merkle_hash",
  "miette",
  "rust-embed",
- "thiserror 2.0.8",
+ "thiserror 2.0.9",
  "veryl-path",
 ]
 
