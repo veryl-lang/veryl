@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::fmt;
 use veryl_parser::resource_table::{PathId, StrId};
 use veryl_parser::veryl_grammar_trait as syntax_tree;
-use veryl_parser::veryl_token::{Token, TokenRange};
+use veryl_parser::veryl_token::{Token, TokenRange, VerylToken};
 use veryl_parser::veryl_walker::VerylWalker;
 use veryl_parser::Stringifier;
 
@@ -196,7 +196,12 @@ impl Symbol {
             "".to_string()
         };
 
-        for i in &self.generic_instances {
+        let generic_instances = if matches!(self.kind, SymbolKind::GenericInstance(_)) {
+            &vec![self.id]
+        } else {
+            &self.generic_instances
+        };
+        for i in generic_instances {
             let symbol = symbol_table::get(*i).unwrap();
             let map = if let SymbolKind::GenericInstance(ref x) = symbol.kind {
                 self.generic_table(&x.arguments)
@@ -275,6 +280,10 @@ impl Symbol {
                 .iter()
                 .map(|x| get_generic_parameter(*x))
                 .collect(),
+            SymbolKind::GenericInstance(x) => {
+                let symbol = symbol_table::get(x.base).unwrap();
+                symbol.generic_parameters()
+            }
             _ => Vec::new(),
         }
     }
@@ -766,11 +775,13 @@ impl TryFrom<&syntax_tree::Expression> for Type {
                 let factor_type: Type = x.factor_type.as_ref().into();
                 Ok(factor_type)
             }
-            syntax_tree::Factor::ExpressionIdentifierFactorOpt(x) => {
-                if x.factor_opt.is_some() {
+            syntax_tree::Factor::IdentifierFactor(x) => {
+                let factor = &x.identifier_factor;
+
+                if factor.identifier_factor_opt.is_some() {
                     Err(())
                 } else {
-                    let x = x.expression_identifier.as_ref();
+                    let x = factor.expression_identifier.as_ref();
                     if !x.expression_identifier_list.is_empty() {
                         return Err(());
                     }
@@ -998,18 +1009,19 @@ pub struct PortProperty {
     pub prefix: Option<String>,
     pub suffix: Option<String>,
     pub clock_domain: ClockDomain,
+    pub default_value: Option<syntax_tree::Expression>,
     pub is_proto: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct Port {
-    pub name: StrId,
+    pub token: VerylToken,
     pub symbol: SymbolId,
 }
 
 impl fmt::Display for Port {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let text = format!("{} [{}]", self.name, self.property().direction);
+        let text = format!("{} [{}]", self.name(), self.property().direction);
         text.fmt(f)
     }
 }
@@ -1021,6 +1033,10 @@ impl Port {
         } else {
             unreachable!()
         }
+    }
+
+    pub fn name(&self) -> StrId {
+        self.token.token.text
     }
 }
 
@@ -1098,14 +1114,18 @@ impl ProtoModuleProperty {
             .iter()
             .map(|x| (x.name, x.property()))
             .collect();
-        let actual_ports: HashMap<_, _> = p.ports.iter().map(|x| (x.name, x.property())).collect();
+        let actual_ports: HashMap<_, _> =
+            p.ports.iter().map(|x| (x.name(), x.property())).collect();
         let mut proto_params: HashMap<_, _> = self
             .parameters
             .iter()
             .map(|x| (x.name, x.property()))
             .collect();
-        let mut proto_ports: HashMap<_, _> =
-            self.ports.iter().map(|x| (x.name, x.property())).collect();
+        let mut proto_ports: HashMap<_, _> = self
+            .ports
+            .iter()
+            .map(|x| (x.name(), x.property()))
+            .collect();
 
         for (name, actual_param) in actual_params {
             if let Some(proto_param) = proto_params.remove(&name) {

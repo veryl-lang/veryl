@@ -215,7 +215,7 @@ impl VerylGrammarTrait for CheckClockDomain<'_> {
                             let mut connection_table =
                                 HashMap::<ClockDomain, (ClockDomain, TokenRange)>::new();
                             for x in &x.ports {
-                                if let Some(connected) = self.inst_clock_domains.get(&x.name) {
+                                if let Some(connected) = self.inst_clock_domains.get(&x.name()) {
                                     let port_domain = x.property().clock_domain;
                                     if let Some(assigned) = connection_table.get(&port_domain) {
                                         if !assigned.0.compatible(&connected.0)

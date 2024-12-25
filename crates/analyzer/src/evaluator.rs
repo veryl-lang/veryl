@@ -675,13 +675,13 @@ impl Evaluator {
     fn factor(&mut self, arg: &Factor) -> Evaluated {
         match arg {
             Factor::Number(x) => self.number(&x.number),
-            Factor::ExpressionIdentifierFactorOpt(x) => {
-                if x.factor_opt.is_some() {
+            Factor::IdentifierFactor(x) => {
+                if x.identifier_factor.identifier_factor_opt.is_some() {
                     // Function call
                     Evaluated::Unknown
                 } else {
                     // Identifier
-                    self.expression_identifier(x.expression_identifier.as_ref())
+                    self.expression_identifier(x.identifier_factor.expression_identifier.as_ref())
                 }
             }
             Factor::LParenExpressionRParen(x) => self.expression(&x.expression),

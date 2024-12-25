@@ -1785,6 +1785,17 @@ impl VerylWalker for Formatter {
                     self.align_finish(align_kind::CLOCK_DOMAIN);
                 }
                 self.array_type(&x.array_type);
+                self.align_start(align_kind::EXPRESSION);
+                if let Some(ref x) = x.port_type_concrete_opt0 {
+                    self.space(1);
+                    self.equ(&x.equ);
+                    self.space(1);
+                    self.expression(&x.port_default_value.expression);
+                } else {
+                    let loc = self.align_last_location(align_kind::ARRAY);
+                    self.align_dummy_location(align_kind::EXPRESSION, loc);
+                }
+                self.align_finish(align_kind::EXPRESSION);
             }
             PortDeclarationItemGroup::PortTypeAbstract(x) => {
                 let x = x.port_type_abstract.as_ref();
@@ -1839,6 +1850,7 @@ impl VerylWalker for Formatter {
             self.space(1);
         }
         if let Some(ref x) = arg.function_declaration_opt1 {
+            self.align_reset();
             self.minus_g_t(&x.minus_g_t);
             self.space(1);
             self.scalar_type(&x.scalar_type);

@@ -966,7 +966,7 @@ fn completion_symbol(
                 VerylSymbolKind::Module(ref x) => {
                     let mut ports = String::new();
                     for port in &x.ports {
-                        ports.push_str(&format!("{}, ", port.name));
+                        ports.push_str(&format!("{}, ", port.name()));
                     }
                     let text = format!("{}{} ({});", prefix, symbol.token.text, ports);
                     (text, Some(CompletionItemKind::CLASS))

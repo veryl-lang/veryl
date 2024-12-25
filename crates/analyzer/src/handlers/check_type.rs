@@ -363,13 +363,14 @@ impl VerylGrammarTrait for CheckType<'_> {
 
                 if check_port_connection {
                     for port in &ports {
-                        if !connected_ports.contains(&port.name)
+                        if !connected_ports.contains(&port.name())
+                            && port.property().default_value.is_none()
                             && !attribute_table::contains(
                                 &arg.inst.inst_token.token,
                                 Attr::Allow(AllowItem::MissingPort),
                             )
                         {
-                            let port = resource_table::get_str_value(port.name).unwrap();
+                            let port = resource_table::get_str_value(port.name()).unwrap();
                             self.errors.push(AnalyzerError::missing_port(
                                 name,
                                 &port,
@@ -390,7 +391,7 @@ impl VerylGrammarTrait for CheckType<'_> {
                         }
                     }
                     for port in &connected_ports {
-                        if !ports.iter().any(|x| &x.name == port) {
+                        if !ports.iter().any(|x| &x.name() == port) {
                             let port = resource_table::get_str_value(*port).unwrap();
                             self.errors.push(AnalyzerError::unknown_port(
                                 name,

@@ -74,64 +74,61 @@ impl VerylGrammarTrait for CheckFunction<'_> {
         Ok(())
     }
 
-    fn factor(&mut self, arg: &Factor) -> Result<(), ParolError> {
+    fn identifier_factor(&mut self, arg: &IdentifierFactor) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            if let Factor::ExpressionIdentifierFactorOpt(x) = arg {
-                // not function call
-                if x.factor_opt.is_none() {
-                    return Ok(());
-                }
-                // skip system function
-                if matches!(
-                    x.expression_identifier
-                        .scoped_identifier
-                        .scoped_identifier_group
-                        .as_ref(),
-                    ScopedIdentifierGroup::DollarIdentifier(_)
-                ) {
-                    return Ok(());
-                }
+            // not function call
+            if arg.identifier_factor_opt.is_none() {
+                return Ok(());
+            }
+            // skip system function
+            if matches!(
+                arg.expression_identifier
+                    .scoped_identifier
+                    .scoped_identifier_group
+                    .as_ref(),
+                ScopedIdentifierGroup::DollarIdentifier(_)
+            ) {
+                return Ok(());
+            }
 
-                if let Ok(symbol) = symbol_table::resolve(x.expression_identifier.as_ref()) {
-                    let arity = match symbol.found.kind {
-                        SymbolKind::Function(x) => Some(x.ports.len()),
-                        SymbolKind::ModportFunctionMember(x) => {
-                            if let SymbolKind::Function(x) =
-                                symbol_table::get(x.function).unwrap().kind
-                            {
-                                Some(x.ports.len())
-                            } else {
-                                unreachable!();
-                            }
-                        }
-                        _ => None,
-                    };
-
-                    let mut args = 0;
-                    if let Some(ref x) = x.factor_opt {
-                        if let Some(ref x) = x.function_call.function_call_opt {
-                            args += 1;
-                            args += x.argument_list.argument_list_list.len();
+            if let Ok(symbol) = symbol_table::resolve(arg.expression_identifier.as_ref()) {
+                let arity = match symbol.found.kind {
+                    SymbolKind::Function(x) => Some(x.ports.len()),
+                    SymbolKind::ModportFunctionMember(x) => {
+                        if let SymbolKind::Function(x) = symbol_table::get(x.function).unwrap().kind
+                        {
+                            Some(x.ports.len())
+                        } else {
+                            unreachable!();
                         }
                     }
+                    _ => None,
+                };
 
-                    if let Some(arity) = arity {
-                        if arity != args {
-                            let name = format!(
-                                "{}",
-                                SymbolPath::from(x.expression_identifier.as_ref())
-                                    .as_slice()
-                                    .last()
-                                    .unwrap()
-                            );
-                            self.errors.push(AnalyzerError::mismatch_function_arity(
-                                &name,
-                                arity,
-                                args,
-                                self.text,
-                                &x.expression_identifier.as_ref().into(),
-                            ));
-                        }
+                let mut args = 0;
+                if let Some(ref x) = arg.identifier_factor_opt {
+                    if let Some(ref x) = x.function_call.function_call_opt {
+                        args += 1;
+                        args += x.argument_list.argument_list_list.len();
+                    }
+                }
+
+                if let Some(arity) = arity {
+                    if arity != args {
+                        let name = format!(
+                            "{}",
+                            SymbolPath::from(arg.expression_identifier.as_ref())
+                                .as_slice()
+                                .last()
+                                .unwrap()
+                        );
+                        self.errors.push(AnalyzerError::mismatch_function_arity(
+                            &name,
+                            arity,
+                            args,
+                            self.text,
+                            &arg.expression_identifier.as_ref().into(),
+                        ));
                     }
                 }
             }

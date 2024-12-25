@@ -303,6 +303,17 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
+    #[diagnostic(severity(Error), code(invalid_port_default_value), help(""), url(""))]
+    #[error("#{direction} port #{identifier} cannot have a port default value")]
+    InvalidPortDefaultValue {
+        identifier: String,
+        direction: String,
+        #[source_code]
+        input: NamedSource<String>,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
     #[diagnostic(
         severity(Error),
         code(invalid_reset),
@@ -1278,6 +1289,20 @@ impl AnalyzerError {
     ) -> Self {
         AnalyzerError::InvalidModportFunctionItem {
             identifier: identifier.into(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn invalid_port_default_value(
+        identifier: &str,
+        direction: &str,
+        source: &str,
+        token: &TokenRange,
+    ) -> Self {
+        AnalyzerError::InvalidPortDefaultValue {
+            identifier: identifier.into(),
+            direction: direction.into(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
         }

@@ -401,7 +401,9 @@ impl From<&Factor> for TokenRange {
     fn from(value: &Factor) -> Self {
         match value {
             Factor::Number(x) => x.number.as_ref().into(),
-            Factor::ExpressionIdentifierFactorOpt(x) => x.expression_identifier.as_ref().into(),
+            Factor::IdentifierFactor(x) => {
+                x.identifier_factor.expression_identifier.as_ref().into()
+            }
             Factor::LParenExpressionRParen(x) => x.into(),
             Factor::LBraceConcatenationListRBrace(x) => x.into(),
             Factor::QuoteLBraceArrayLiteralListRBrace(x) => x.into(),

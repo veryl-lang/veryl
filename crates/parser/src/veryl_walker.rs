@@ -1059,12 +1059,7 @@ pub trait VerylWalker {
         before!(self, factor, arg);
         match arg {
             Factor::Number(x) => self.number(&x.number),
-            Factor::ExpressionIdentifierFactorOpt(x) => {
-                self.expression_identifier(&x.expression_identifier);
-                if let Some(ref x) = x.factor_opt {
-                    self.function_call(&x.function_call);
-                }
-            }
+            Factor::IdentifierFactor(x) => self.identifier_factor(&x.identifier_factor),
             Factor::LParenExpressionRParen(x) => {
                 self.l_paren(&x.l_paren);
                 self.expression(&x.expression);
@@ -1110,6 +1105,16 @@ pub trait VerylWalker {
             }
         }
         after!(self, factor, arg);
+    }
+
+    /// Semantic action for non-terminal 'IdentifierFactor'
+    fn identifier_factor(&mut self, arg: &IdentifierFactor) {
+        before!(self, identifier_factor, arg);
+        self.expression_identifier(&arg.expression_identifier);
+        if let Some(ref x) = arg.identifier_factor_opt {
+            self.function_call(&x.function_call);
+        }
+        after!(self, identifier_factor, arg);
     }
 
     /// Semantic action for non-terminal 'FunctionCall'
@@ -2470,11 +2475,24 @@ pub trait VerylWalker {
 
     /// Semantic action for non-terminal 'PortTypeConcrete'
     fn port_type_concrete(&mut self, arg: &PortTypeConcrete) {
+        before!(self, port_type_concrete, arg);
         if let Some(ref x) = arg.port_type_concrete_opt {
             self.clock_domain(&x.clock_domain);
         }
         self.direction(&arg.direction);
         self.array_type(&arg.array_type);
+        if let Some(ref x) = arg.port_type_concrete_opt0 {
+            self.equ(&x.equ);
+            self.port_default_value(&x.port_default_value);
+        }
+        after!(self, port_type_concrete, arg);
+    }
+
+    /// Semantic action for non-terminal 'PortDefaultValue'
+    fn port_default_value(&mut self, arg: &PortDefaultValue) {
+        before!(self, port_default_value, arg);
+        self.expression(&arg.expression);
+        after!(self, port_default_value, arg);
     }
 
     /// Semantic action for non-terminal 'PortTypeAbstract'
