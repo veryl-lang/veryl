@@ -8,7 +8,7 @@ use veryl_parser::Parser;
 #[cfg(target_os = "linux")]
 mod perf;
 
-const EXCLUDES: [&str; 1] = [r"52_include.veryl"];
+const EXCLUDES: [&str; 2] = [r"52_include.veryl", r"67_cocotb.veryl"];
 
 fn criterion_benchmark(c: &mut Criterion) {
     let mut text = String::new();
@@ -37,6 +37,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             Analyzer::analyze_post_pass1();
             analyzer.analyze_pass2(prj, black_box(&text), &"", &parser.veryl);
             analyzer.analyze_pass3(prj, black_box(&text), &"", &parser.veryl);
+            analyzer.clear();
         })
     });
     group.bench_function("format", |b| {
