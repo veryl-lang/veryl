@@ -17,12 +17,17 @@ fn main() {
 
     let text = fs::read_to_string(par_file).unwrap();
     let mut keywords = "pub const KEYWORDS: &[&str] = &[\n".to_string();
+    let mut in_keyword = false;
     for line in text.lines() {
-        if line.contains("(?-u:\\b)") {
+        if line == "// -- keyword end --" {
+            in_keyword = false;
+        }
+        if in_keyword {
             let keyword = line.split('/').nth(1).unwrap();
-            let keyword = keyword.replace("(?-u:\\b)", "");
-            let keyword = keyword.replace("(?-u:\\b)", "");
             keywords.push_str(&format!("    \"{keyword}\",\n"));
+        }
+        if line == "// -- keyword begin --" {
+            in_keyword = true;
         }
     }
     keywords.push_str("];\n");

@@ -52,9 +52,19 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
     group.bench_function("format", |b| {
         b.iter_with_large_drop(|| {
-            let parser = Parser::parse(black_box(&text), &"").unwrap();
-            let mut formatter = Formatter::new(&metadata);
-            formatter.format(&parser.veryl);
+            if let Ok(parser) = Parser::parse(black_box(&text), &"") {
+                let mut formatter = Formatter::new(&metadata);
+                formatter.format(&parser.veryl);
+            } else {
+                for (i, line) in text.lines().enumerate() {
+                    if i >= 986 && i <= 988 {
+                        dbg!(line);
+                    }
+                }
+            }
+            //let parser = Parser::parse(black_box(&text), &"").unwrap();
+            //let mut formatter = Formatter::new(&metadata);
+            //formatter.format(&parser.veryl);
         })
     });
     group.bench_function("analyze", |b| {

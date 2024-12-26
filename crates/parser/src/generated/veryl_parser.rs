@@ -18,127 +18,138 @@ use parol_runtime::lexer::tokenizer::{
     ERROR_TOKEN, NEW_LINE_TOKEN, UNMATCHABLE_TOKEN, WHITESPACE_TOKEN,
 };
 
-pub const TERMINALS: &[&str; 119] = &[
-    /*   0 */ UNMATCHABLE_TOKEN,
-    /*   1 */ UNMATCHABLE_TOKEN,
-    /*   2 */ UNMATCHABLE_TOKEN,
-    /*   3 */ UNMATCHABLE_TOKEN,
-    /*   4 */ UNMATCHABLE_TOKEN,
-    /*   5 */ r"(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+",
+pub const TERMINALS: &[(&str, Option<(bool, &str)>); 119] = &[
+    /*   0 */ (UNMATCHABLE_TOKEN, None),
+    /*   1 */ (UNMATCHABLE_TOKEN, None),
+    /*   2 */ (UNMATCHABLE_TOKEN, None),
+    /*   3 */ (UNMATCHABLE_TOKEN, None),
+    /*   4 */ (UNMATCHABLE_TOKEN, None),
+    /*   5 */ (r"(((//.*(\r\n|\r|\n)?)|(/\*([^*]|\*[^/])*\*/))\s*)+", None),
     /*   6 */
-    r"\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}",
-    /*   7 */ r"[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*",
-    /*   8 */ r"[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*",
-    /*   9 */ r"(?:[0-9]+(?:_[0-9]+)*)?'s?[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*",
-    /*  10 */ r"(?:[0-9]+(?:_[0-9]+)*)?'[01xzXZ]",
-    /*  11 */ r"[0-9]+(?:_[0-9]+)*",
-    /*  12 */ r"\-:",
-    /*  13 */ r"\->",
-    /*  14 */ r"\+:",
-    /*  15 */ r"\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<=|>>=|<<<=|>>>=",
-    /*  16 */ r"\*\*",
-    /*  17 */ r"/|%",
-    /*  18 */ r"\+|-",
-    /*  19 */ r"<<<|>>>|<<|>>",
-    /*  20 */ r"<=|>=|<:|>:",
-    /*  21 */ r"===|==\?|!==|!=\?|==|!=",
-    /*  22 */ r"&&",
-    /*  23 */ r"\|\|",
-    /*  24 */ r"&",
-    /*  25 */ r"\^~|\^|~\^",
-    /*  26 */ r"\|",
-    /*  27 */ r"~&|~\||!|~",
-    /*  28 */ r"`",
-    /*  29 */ r"::<",
-    /*  30 */ r"::",
-    /*  31 */ r":",
-    /*  32 */ r",",
-    /*  33 */ r"\.\.=",
-    /*  34 */ r"\.\.",
-    /*  35 */ r"\.",
-    /*  36 */ r"=",
-    /*  37 */ r"\#",
-    /*  38 */ r"<",
-    /*  39 */ r"'\{",
-    /*  40 */ r"\{",
-    /*  41 */ r"\[",
-    /*  42 */ r"\(",
-    /*  43 */ r">",
-    /*  44 */ r"\}",
-    /*  45 */ r"\]",
-    /*  46 */ r"\)",
-    /*  47 */ r";",
-    /*  48 */ r"\*",
-    /*  49 */ r"(?-u:\b)always_comb(?-u:\b)",
-    /*  50 */ r"(?-u:\b)always_ff(?-u:\b)",
-    /*  51 */ r"(?-u:\b)assign(?-u:\b)",
-    /*  52 */ r"(?-u:\b)as(?-u:\b)",
-    /*  53 */ r"(?-u:\b)bit(?-u:\b)",
-    /*  54 */ r"(?-u:\b)case(?-u:\b)",
-    /*  55 */ r"(?-u:\b)clock(?-u:\b)",
-    /*  56 */ r"(?-u:\b)clock_posedge(?-u:\b)",
-    /*  57 */ r"(?-u:\b)clock_negedge(?-u:\b)",
-    /*  58 */ r"(?-u:\b)const(?-u:\b)",
-    /*  59 */ r"(?-u:\b)default(?-u:\b)",
-    /*  60 */ r"(?-u:\b)else(?-u:\b)",
-    /*  61 */ r"(?-u:\b)embed(?-u:\b)",
-    /*  62 */ r"(?-u:\b)enum(?-u:\b)",
-    /*  63 */ r"(?-u:\b)export(?-u:\b)",
-    /*  64 */ r"(?-u:\b)f32(?-u:\b)",
-    /*  65 */ r"(?-u:\b)f64(?-u:\b)",
-    /*  66 */ r"(?-u:\b)final(?-u:\b)",
-    /*  67 */ r"(?-u:\b)for(?-u:\b)",
-    /*  68 */ r"(?-u:\b)function(?-u:\b)",
-    /*  69 */ r"(?-u:\b)i32(?-u:\b)",
-    /*  70 */ r"(?-u:\b)i64(?-u:\b)",
-    /*  71 */ r"(?-u:\b)if_reset(?-u:\b)",
-    /*  72 */ r"(?-u:\b)if(?-u:\b)",
-    /*  73 */ r"(?-u:\b)import(?-u:\b)",
-    /*  74 */ r"(?-u:\b)include(?-u:\b)",
-    /*  75 */ r"(?-u:\b)initial(?-u:\b)",
-    /*  76 */ r"(?-u:\b)inout(?-u:\b)",
-    /*  77 */ r"(?-u:\b)input(?-u:\b)",
-    /*  78 */ r"(?-u:\b)inside(?-u:\b)",
-    /*  79 */ r"(?-u:\b)inst(?-u:\b)",
-    /*  80 */ r"(?-u:\b)interface(?-u:\b)",
-    /*  81 */ r"(?-u:\b)in(?-u:\b)",
-    /*  82 */ r"(?-u:\b)let(?-u:\b)",
-    /*  83 */ r"(?-u:\b)logic(?-u:\b)",
-    /*  84 */ r"(?-u:\b)lsb(?-u:\b)",
-    /*  85 */ r"(?-u:\b)modport(?-u:\b)",
-    /*  86 */ r"(?-u:\b)module(?-u:\b)",
-    /*  87 */ r"(?-u:\b)msb(?-u:\b)",
-    /*  88 */ r"(?-u:\b)output(?-u:\b)",
-    /*  89 */ r"(?-u:\b)outside(?-u:\b)",
-    /*  90 */ r"(?-u:\b)package(?-u:\b)",
-    /*  91 */ r"(?-u:\b)param(?-u:\b)",
-    /*  92 */ r"(?-u:\b)proto(?-u:\b)",
-    /*  93 */ r"(?-u:\b)pub(?-u:\b)",
-    /*  94 */ r"(?-u:\b)ref(?-u:\b)",
-    /*  95 */ r"(?-u:\b)repeat(?-u:\b)",
-    /*  96 */ r"(?-u:\b)reset(?-u:\b)",
-    /*  97 */ r"(?-u:\b)reset_async_high(?-u:\b)",
-    /*  98 */ r"(?-u:\b)reset_async_low(?-u:\b)",
-    /*  99 */ r"(?-u:\b)reset_sync_high(?-u:\b)",
-    /* 100 */ r"(?-u:\b)reset_sync_low(?-u:\b)",
-    /* 101 */ r"(?-u:\b)return(?-u:\b)",
-    /* 102 */ r"(?-u:\b)break(?-u:\b)",
-    /* 103 */ r"(?-u:\b)signed(?-u:\b)",
-    /* 104 */ r"(?-u:\b)step(?-u:\b)",
-    /* 105 */ r"(?-u:\b)string(?-u:\b)",
-    /* 106 */ r"(?-u:\b)struct(?-u:\b)",
-    /* 107 */ r"(?-u:\b)switch(?-u:\b)",
-    /* 108 */ r"(?-u:\b)tri(?-u:\b)",
-    /* 109 */ r"(?-u:\b)type(?-u:\b)",
-    /* 110 */ r"(?-u:\b)u32(?-u:\b)",
-    /* 111 */ r"(?-u:\b)u64(?-u:\b)",
-    /* 112 */ r"(?-u:\b)union(?-u:\b)",
-    /* 113 */ r"(?-u:\b)unsafe(?-u:\b)",
-    /* 114 */ r"(?-u:\b)var(?-u:\b)",
-    /* 115 */ r"\$[a-zA-Z_][0-9a-zA-Z_$]*",
-    /* 116 */ r"(?:r#)?[a-zA-Z_][0-9a-zA-Z_$]*",
-    /* 117 */ r"[^{}]*",
-    /* 118 */ ERROR_TOKEN,
+    (
+        r"\u{0022}(\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}",
+        None,
+    ),
+    /*   7 */
+    (
+        r"[0-9]+(_[0-9]+)*\.[0-9]+(_[0-9]+)*[eE][+-]?[0-9]+(_[0-9]+)*",
+        None,
+    ),
+    /*   8 */ (r"[0-9]+(_[0-9]+)*\.[0-9]+(_[0-9]+)*", None),
+    /*   9 */
+    (
+        r"([0-9]+(_[0-9]+)*)?'s?[bodh][0-9a-fA-FxzXZ]+(_[0-9a-fA-FxzXZ]+)*",
+        None,
+    ),
+    /*  10 */ (r"([0-9]+(_[0-9]+)*)?'[01xzXZ]", None),
+    /*  11 */ (r"[0-9]+(_[0-9]+)*", None),
+    /*  12 */ (r"\-:", None),
+    /*  13 */ (r"\->", None),
+    /*  14 */ (r"\+:", None),
+    /*  15 */ (r"\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<=|>>=|<<<=|>>>=", None),
+    /*  16 */ (r"\*\*", None),
+    /*  17 */ (r"/|%", None),
+    /*  18 */ (r"\+|-", None),
+    /*  19 */ (r"<<<|>>>|<<|>>", None),
+    /*  20 */ (r"<=|>=|<:|>:", None),
+    /*  21 */ (r"===|==\?|!==|!=\?|==|!=", None),
+    /*  22 */ (r"&&", None),
+    /*  23 */ (r"\|\|", None),
+    /*  24 */ (r"&", None),
+    /*  25 */ (r"\^~|\^|~\^", None),
+    /*  26 */ (r"\|", None),
+    /*  27 */ (r"~&|~\||!|~", None),
+    /*  28 */ (r"`", None),
+    /*  29 */ (r"::<", None),
+    /*  30 */ (r"::", None),
+    /*  31 */ (r":", None),
+    /*  32 */ (r",", None),
+    /*  33 */ (r"\.\.=", None),
+    /*  34 */ (r"\.\.", None),
+    /*  35 */ (r"\.", None),
+    /*  36 */ (r"=", None),
+    /*  37 */ (r"\#", None),
+    /*  38 */ (r"<", None),
+    /*  39 */ (r"'\{", None),
+    /*  40 */ (r"\{", None),
+    /*  41 */ (r"\[", None),
+    /*  42 */ (r"\(", None),
+    /*  43 */ (r">", None),
+    /*  44 */ (r"\}", None),
+    /*  45 */ (r"\]", None),
+    /*  46 */ (r"\)", None),
+    /*  47 */ (r";", None),
+    /*  48 */ (r"\*", None),
+    /*  49 */ (r"always_comb", None),
+    /*  50 */ (r"always_ff", None),
+    /*  51 */ (r"assign", None),
+    /*  52 */ (r"as", None),
+    /*  53 */ (r"bit", None),
+    /*  54 */ (r"case", None),
+    /*  55 */ (r"clock", None),
+    /*  56 */ (r"clock_posedge", None),
+    /*  57 */ (r"clock_negedge", None),
+    /*  58 */ (r"const", None),
+    /*  59 */ (r"default", None),
+    /*  60 */ (r"else", None),
+    /*  61 */ (r"embed", None),
+    /*  62 */ (r"enum", None),
+    /*  63 */ (r"export", None),
+    /*  64 */ (r"f32", None),
+    /*  65 */ (r"f64", None),
+    /*  66 */ (r"final", None),
+    /*  67 */ (r"for", None),
+    /*  68 */ (r"function", None),
+    /*  69 */ (r"i32", None),
+    /*  70 */ (r"i64", None),
+    /*  71 */ (r"if_reset", None),
+    /*  72 */ (r"if", None),
+    /*  73 */ (r"import", None),
+    /*  74 */ (r"include", None),
+    /*  75 */ (r"initial", None),
+    /*  76 */ (r"inout", None),
+    /*  77 */ (r"input", None),
+    /*  78 */ (r"inside", None),
+    /*  79 */ (r"inst", None),
+    /*  80 */ (r"interface", None),
+    /*  81 */ (r"in", None),
+    /*  82 */ (r"let", None),
+    /*  83 */ (r"logic", None),
+    /*  84 */ (r"lsb", None),
+    /*  85 */ (r"modport", None),
+    /*  86 */ (r"module", None),
+    /*  87 */ (r"msb", None),
+    /*  88 */ (r"output", None),
+    /*  89 */ (r"outside", None),
+    /*  90 */ (r"package", None),
+    /*  91 */ (r"param", None),
+    /*  92 */ (r"proto", None),
+    /*  93 */ (r"pub", None),
+    /*  94 */ (r"ref", None),
+    /*  95 */ (r"repeat", None),
+    /*  96 */ (r"reset", None),
+    /*  97 */ (r"reset_async_high", None),
+    /*  98 */ (r"reset_async_low", None),
+    /*  99 */ (r"reset_sync_high", None),
+    /* 100 */ (r"reset_sync_low", None),
+    /* 101 */ (r"return", None),
+    /* 102 */ (r"break", None),
+    /* 103 */ (r"signed", None),
+    /* 104 */ (r"step", None),
+    /* 105 */ (r"string", None),
+    /* 106 */ (r"struct", None),
+    /* 107 */ (r"switch", None),
+    /* 108 */ (r"tri", None),
+    /* 109 */ (r"type", None),
+    /* 110 */ (r"u32", None),
+    /* 111 */ (r"u64", None),
+    /* 112 */ (r"union", None),
+    /* 113 */ (r"unsafe", None),
+    /* 114 */ (r"var", None),
+    /* 115 */ (r"\$[a-zA-Z_][0-9a-zA-Z_$]*", None),
+    /* 116 */ (r"(r#)?[a-zA-Z_][0-9a-zA-Z_$]*", None),
+    /* 117 */ (r"[^{}]*", None),
+    /* 118 */ (ERROR_TOKEN, None),
 ];
 
 pub const TERMINAL_NAMES: &[&str; 119] = &[
@@ -21112,37 +21123,37 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 676] = &[
 ];
 
 pub const PRODUCTIONS: &[Production; 969] = &[
-    // 0 - CommentsTerm: "(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+";
+    // 0 - CommentsTerm: "(((//.*(\r\n|\r|\n)?)|(/\*([^*]|\*[^/])*\*/))\s*)+";
     Production {
         lhs: 103,
         production: &[ParseType::T(5)],
     },
-    // 1 - StringLiteralTerm: "\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}";
+    // 1 - StringLiteralTerm: "\u{0022}(\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}";
     Production {
         lhs: 586,
         production: &[ParseType::T(6)],
     },
-    // 2 - ExponentTerm: /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/;
+    // 2 - ExponentTerm: /[0-9]+(_[0-9]+)*\.[0-9]+(_[0-9]+)*[eE][+-]?[0-9]+(_[0-9]+)*/;
     Production {
         lhs: 164,
         production: &[ParseType::T(7)],
     },
-    // 3 - FixedPointTerm: /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/;
+    // 3 - FixedPointTerm: /[0-9]+(_[0-9]+)*\.[0-9]+(_[0-9]+)*/;
     Production {
         lhs: 221,
         production: &[ParseType::T(8)],
     },
-    // 4 - BasedTerm: /(?:[0-9]+(?:_[0-9]+)*)?'s?[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/;
+    // 4 - BasedTerm: /([0-9]+(_[0-9]+)*)?'s?[bodh][0-9a-fA-FxzXZ]+(_[0-9a-fA-FxzXZ]+)*/;
     Production {
         lhs: 56,
         production: &[ParseType::T(9)],
     },
-    // 5 - AllBitTerm: /(?:[0-9]+(?:_[0-9]+)*)?'[01xzXZ]/;
+    // 5 - AllBitTerm: /([0-9]+(_[0-9]+)*)?'[01xzXZ]/;
     Production {
         lhs: 1,
         production: &[ParseType::T(10)],
     },
-    // 6 - BaseLessTerm: /[0-9]+(?:_[0-9]+)*/;
+    // 6 - BaseLessTerm: /[0-9]+(_[0-9]+)*/;
     Production {
         lhs: 53,
         production: &[ParseType::T(11)],
@@ -21332,332 +21343,332 @@ pub const PRODUCTIONS: &[Production; 969] = &[
         lhs: 569,
         production: &[ParseType::T(48)],
     },
-    // 44 - AlwaysCombTerm: /(?-u:\b)always_comb(?-u:\b)/;
+    // 44 - AlwaysCombTerm: /always_comb/;
     Production {
         lhs: 5,
         production: &[ParseType::T(49)],
     },
-    // 45 - AlwaysFfTerm: /(?-u:\b)always_ff(?-u:\b)/;
+    // 45 - AlwaysFfTerm: /always_ff/;
     Production {
         lhs: 14,
         production: &[ParseType::T(50)],
     },
-    // 46 - AssignTerm: /(?-u:\b)assign(?-u:\b)/;
+    // 46 - AssignTerm: /assign/;
     Production {
         lhs: 36,
         production: &[ParseType::T(51)],
     },
-    // 47 - AsTerm: /(?-u:\b)as(?-u:\b)/;
+    // 47 - AsTerm: /as/;
     Production {
         lhs: 32,
         production: &[ParseType::T(52)],
     },
-    // 48 - BitTerm: /(?-u:\b)bit(?-u:\b)/;
+    // 48 - BitTerm: /bit/;
     Production {
         lhs: 59,
         production: &[ParseType::T(53)],
     },
-    // 49 - CaseTerm: /(?-u:\b)case(?-u:\b)/;
+    // 49 - CaseTerm: /case/;
     Production {
         lhs: 76,
         production: &[ParseType::T(54)],
     },
-    // 50 - ClockTerm: /(?-u:\b)clock(?-u:\b)/;
+    // 50 - ClockTerm: /clock/;
     Production {
         lhs: 87,
         production: &[ParseType::T(55)],
     },
-    // 51 - ClockPosedgeTerm: /(?-u:\b)clock_posedge(?-u:\b)/;
+    // 51 - ClockPosedgeTerm: /clock_posedge/;
     Production {
         lhs: 85,
         production: &[ParseType::T(56)],
     },
-    // 52 - ClockNegedgeTerm: /(?-u:\b)clock_negedge(?-u:\b)/;
+    // 52 - ClockNegedgeTerm: /clock_negedge/;
     Production {
         lhs: 82,
         production: &[ParseType::T(57)],
     },
-    // 53 - ConstTerm: /(?-u:\b)const(?-u:\b)/;
+    // 53 - ConstTerm: /const/;
     Production {
         lhs: 112,
         production: &[ParseType::T(58)],
     },
-    // 54 - DefaultTerm: /(?-u:\b)default(?-u:\b)/;
+    // 54 - DefaultTerm: /default/;
     Production {
         lhs: 115,
         production: &[ParseType::T(59)],
     },
-    // 55 - ElseTerm: /(?-u:\b)else(?-u:\b)/;
+    // 55 - ElseTerm: /else/;
     Production {
         lhs: 136,
         production: &[ParseType::T(60)],
     },
-    // 56 - EmbedTerm: /(?-u:\b)embed(?-u:\b)/;
+    // 56 - EmbedTerm: /embed/;
     Production {
         lhs: 145,
         production: &[ParseType::T(61)],
     },
-    // 57 - EnumTerm: /(?-u:\b)enum(?-u:\b)/;
+    // 57 - EnumTerm: /enum/;
     Production {
         lhs: 158,
         production: &[ParseType::T(62)],
     },
-    // 58 - ExportTerm: /(?-u:\b)export(?-u:\b)/;
+    // 58 - ExportTerm: /export/;
     Production {
         lhs: 170,
         production: &[ParseType::T(63)],
     },
-    // 59 - F32Term: /(?-u:\b)f32(?-u:\b)/;
+    // 59 - F32Term: /f32/;
     Production {
         lhs: 206,
         production: &[ParseType::T(64)],
     },
-    // 60 - F64Term: /(?-u:\b)f64(?-u:\b)/;
+    // 60 - F64Term: /f64/;
     Production {
         lhs: 209,
         production: &[ParseType::T(65)],
     },
-    // 61 - FinalTerm: /(?-u:\b)final(?-u:\b)/;
+    // 61 - FinalTerm: /final/;
     Production {
         lhs: 218,
         production: &[ParseType::T(66)],
     },
-    // 62 - ForTerm: /(?-u:\b)for(?-u:\b)/;
+    // 62 - ForTerm: /for/;
     Production {
         lhs: 227,
         production: &[ParseType::T(67)],
     },
-    // 63 - FunctionTerm: /(?-u:\b)function(?-u:\b)/;
+    // 63 - FunctionTerm: /function/;
     Production {
         lhs: 236,
         production: &[ParseType::T(68)],
     },
-    // 64 - I32Term: /(?-u:\b)i32(?-u:\b)/;
+    // 64 - I32Term: /i32/;
     Production {
         lhs: 263,
         production: &[ParseType::T(69)],
     },
-    // 65 - I64Term: /(?-u:\b)i64(?-u:\b)/;
+    // 65 - I64Term: /i64/;
     Production {
         lhs: 266,
         production: &[ParseType::T(70)],
     },
-    // 66 - IfResetTerm: /(?-u:\b)if_reset(?-u:\b)/;
+    // 66 - IfResetTerm: /if_reset/;
     Production {
         lhs: 282,
         production: &[ParseType::T(71)],
     },
-    // 67 - IfTerm: /(?-u:\b)if(?-u:\b)/;
+    // 67 - IfTerm: /if/;
     Production {
         lhs: 287,
         production: &[ParseType::T(72)],
     },
-    // 68 - ImportTerm: /(?-u:\b)import(?-u:\b)/;
+    // 68 - ImportTerm: /import/;
     Production {
         lhs: 292,
         production: &[ParseType::T(73)],
     },
-    // 69 - IncludeTerm: /(?-u:\b)include(?-u:\b)/;
+    // 69 - IncludeTerm: /include/;
     Production {
         lhs: 299,
         production: &[ParseType::T(74)],
     },
-    // 70 - InitialTerm: /(?-u:\b)initial(?-u:\b)/;
+    // 70 - InitialTerm: /initial/;
     Production {
         lhs: 303,
         production: &[ParseType::T(75)],
     },
-    // 71 - InoutTerm: /(?-u:\b)inout(?-u:\b)/;
+    // 71 - InoutTerm: /inout/;
     Production {
         lhs: 306,
         production: &[ParseType::T(76)],
     },
-    // 72 - InputTerm: /(?-u:\b)input(?-u:\b)/;
+    // 72 - InputTerm: /input/;
     Production {
         lhs: 309,
         production: &[ParseType::T(77)],
     },
-    // 73 - InsideTerm: /(?-u:\b)inside(?-u:\b)/;
+    // 73 - InsideTerm: /inside/;
     Production {
         lhs: 313,
         production: &[ParseType::T(78)],
     },
-    // 74 - InstTerm: /(?-u:\b)inst(?-u:\b)/;
+    // 74 - InstTerm: /inst/;
     Production {
         lhs: 339,
         production: &[ParseType::T(79)],
     },
-    // 75 - InterfaceTerm: /(?-u:\b)interface(?-u:\b)/;
+    // 75 - InterfaceTerm: /interface/;
     Production {
         lhs: 353,
         production: &[ParseType::T(80)],
     },
-    // 76 - InTerm: /(?-u:\b)in(?-u:\b)/;
+    // 76 - InTerm: /in/;
     Production {
         lhs: 295,
         production: &[ParseType::T(81)],
     },
-    // 77 - LetTerm: /(?-u:\b)let(?-u:\b)/;
+    // 77 - LetTerm: /let/;
     Production {
         lhs: 372,
         production: &[ParseType::T(82)],
     },
-    // 78 - LogicTerm: /(?-u:\b)logic(?-u:\b)/;
+    // 78 - LogicTerm: /logic/;
     Production {
         lhs: 375,
         production: &[ParseType::T(83)],
     },
-    // 79 - LsbTerm: /(?-u:\b)lsb(?-u:\b)/;
+    // 79 - LsbTerm: /lsb/;
     Production {
         lhs: 378,
         production: &[ParseType::T(84)],
     },
-    // 80 - ModportTerm: /(?-u:\b)modport(?-u:\b)/;
+    // 80 - ModportTerm: /modport/;
     Production {
         lhs: 395,
         production: &[ParseType::T(85)],
     },
-    // 81 - ModuleTerm: /(?-u:\b)module(?-u:\b)/;
+    // 81 - ModuleTerm: /module/;
     Production {
         lhs: 410,
         production: &[ParseType::T(86)],
     },
-    // 82 - MsbTerm: /(?-u:\b)msb(?-u:\b)/;
+    // 82 - MsbTerm: /msb/;
     Production {
         lhs: 413,
         production: &[ParseType::T(87)],
     },
-    // 83 - OutputTerm: /(?-u:\b)output(?-u:\b)/;
+    // 83 - OutputTerm: /output/;
     Production {
         lhs: 450,
         production: &[ParseType::T(88)],
     },
-    // 84 - OutsideTerm: /(?-u:\b)outside(?-u:\b)/;
+    // 84 - OutsideTerm: /outside/;
     Production {
         lhs: 454,
         production: &[ParseType::T(89)],
     },
-    // 85 - PackageTerm: /(?-u:\b)package(?-u:\b)/;
+    // 85 - PackageTerm: /package/;
     Production {
         lhs: 466,
         production: &[ParseType::T(90)],
     },
-    // 86 - ParamTerm: /(?-u:\b)param(?-u:\b)/;
+    // 86 - ParamTerm: /param/;
     Production {
         lhs: 469,
         production: &[ParseType::T(91)],
     },
-    // 87 - ProtoTerm: /(?-u:\b)proto(?-u:\b)/;
+    // 87 - ProtoTerm: /proto/;
     Production {
         lhs: 497,
         production: &[ParseType::T(92)],
     },
-    // 88 - PubTerm: /(?-u:\b)pub(?-u:\b)/;
+    // 88 - PubTerm: /pub/;
     Production {
         lhs: 500,
         production: &[ParseType::T(93)],
     },
-    // 89 - RefTerm: /(?-u:\b)ref(?-u:\b)/;
+    // 89 - RefTerm: /ref/;
     Production {
         lhs: 526,
         production: &[ParseType::T(94)],
     },
-    // 90 - RepeatTerm: /(?-u:\b)repeat(?-u:\b)/;
+    // 90 - RepeatTerm: /repeat/;
     Production {
         lhs: 529,
         production: &[ParseType::T(95)],
     },
-    // 91 - ResetTerm: /(?-u:\b)reset(?-u:\b)/;
+    // 91 - ResetTerm: /reset/;
     Production {
         lhs: 544,
         production: &[ParseType::T(96)],
     },
-    // 92 - ResetAsyncHighTerm: /(?-u:\b)reset_async_high(?-u:\b)/;
+    // 92 - ResetAsyncHighTerm: /reset_async_high/;
     Production {
         lhs: 533,
         production: &[ParseType::T(97)],
     },
-    // 93 - ResetAsyncLowTerm: /(?-u:\b)reset_async_low(?-u:\b)/;
+    // 93 - ResetAsyncLowTerm: /reset_async_low/;
     Production {
         lhs: 536,
         production: &[ParseType::T(98)],
     },
-    // 94 - ResetSyncHighTerm: /(?-u:\b)reset_sync_high(?-u:\b)/;
+    // 94 - ResetSyncHighTerm: /reset_sync_high/;
     Production {
         lhs: 539,
         production: &[ParseType::T(99)],
     },
-    // 95 - ResetSyncLowTerm: /(?-u:\b)reset_sync_low(?-u:\b)/;
+    // 95 - ResetSyncLowTerm: /reset_sync_low/;
     Production {
         lhs: 542,
         production: &[ParseType::T(100)],
     },
-    // 96 - ReturnTerm: /(?-u:\b)return(?-u:\b)/;
+    // 96 - ReturnTerm: /return/;
     Production {
         lhs: 548,
         production: &[ParseType::T(101)],
     },
-    // 97 - BreakTerm: /(?-u:\b)break(?-u:\b)/;
+    // 97 - BreakTerm: /break/;
     Production {
         lhs: 63,
         production: &[ParseType::T(102)],
     },
-    // 98 - SignedTerm: /(?-u:\b)signed(?-u:\b)/;
+    // 98 - SignedTerm: /signed/;
     Production {
         lhs: 566,
         production: &[ParseType::T(103)],
     },
-    // 99 - StepTerm: /(?-u:\b)step(?-u:\b)/;
+    // 99 - StepTerm: /step/;
     Production {
         lhs: 582,
         production: &[ParseType::T(104)],
     },
-    // 100 - StringTerm: /(?-u:\b)string(?-u:\b)/;
+    // 100 - StringTerm: /string/;
     Production {
         lhs: 588,
         production: &[ParseType::T(105)],
     },
-    // 101 - StructTerm: /(?-u:\b)struct(?-u:\b)/;
+    // 101 - StructTerm: /struct/;
     Production {
         lhs: 591,
         production: &[ParseType::T(106)],
     },
-    // 102 - SwitchTerm: /(?-u:\b)switch(?-u:\b)/;
+    // 102 - SwitchTerm: /switch/;
     Production {
         lhs: 614,
         production: &[ParseType::T(107)],
     },
-    // 103 - TriTerm: /(?-u:\b)tri(?-u:\b)/;
+    // 103 - TriTerm: /tri/;
     Production {
         lhs: 617,
         production: &[ParseType::T(108)],
     },
-    // 104 - TypeTerm: /(?-u:\b)type(?-u:\b)/;
+    // 104 - TypeTerm: /type/;
     Production {
         lhs: 623,
         production: &[ParseType::T(109)],
     },
-    // 105 - U32Term: /(?-u:\b)u32(?-u:\b)/;
+    // 105 - U32Term: /u32/;
     Production {
         lhs: 626,
         production: &[ParseType::T(110)],
     },
-    // 106 - U64Term: /(?-u:\b)u64(?-u:\b)/;
+    // 106 - U64Term: /u64/;
     Production {
         lhs: 629,
         production: &[ParseType::T(111)],
     },
-    // 107 - UnionTerm: /(?-u:\b)union(?-u:\b)/;
+    // 107 - UnionTerm: /union/;
     Production {
         lhs: 635,
         production: &[ParseType::T(112)],
     },
-    // 108 - UnsafeTerm: /(?-u:\b)unsafe(?-u:\b)/;
+    // 108 - UnsafeTerm: /unsafe/;
     Production {
         lhs: 640,
         production: &[ParseType::T(113)],
     },
-    // 109 - VarTerm: /(?-u:\b)var(?-u:\b)/;
+    // 109 - VarTerm: /var/;
     Production {
         lhs: 646,
         production: &[ParseType::T(114)],
@@ -21667,7 +21678,7 @@ pub const PRODUCTIONS: &[Production; 969] = &[
         lhs: 124,
         production: &[ParseType::T(115)],
     },
-    // 111 - IdentifierTerm: /(?:r#)?[a-zA-Z_][0-9a-zA-Z_$]*/;
+    // 111 - IdentifierTerm: /(r#)?[a-zA-Z_][0-9a-zA-Z_$]*/;
     Production {
         lhs: 273,
         production: &[ParseType::T(116)],
@@ -26367,11 +26378,11 @@ static SCANNERS: Lazy<Vec<ScannerConfig>> = Lazy::new(|| {
     ]
 });
 
-pub fn parse<'t, T>(
-    input: &'t str,
+pub fn parse<T>(
+    input: &str,
     file_name: T,
     user_actions: &mut VerylGrammar,
-) -> Result<ParseTree<'t>, ParolError>
+) -> Result<ParseTree, ParolError>
 where
     T: AsRef<Path>,
 {

@@ -32,7 +32,6 @@ fn main() {
             .expanded_grammar_output_file("veryl-exp.par")
             .parser_output_file("veryl_parser.rs")
             .actions_output_file("veryl_grammar_trait.rs")
-            .enable_auto_generation()
             .user_type_name("VerylGrammar")
             .user_trait_module_name("veryl_grammar")
             .trim_parse_tree()
