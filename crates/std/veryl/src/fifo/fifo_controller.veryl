@@ -110,7 +110,7 @@ module fifo_controller #(
         pop         : input logic     ,
         clear       : input logic  <2>,
         word_counter: input COUNTER   ,
-    ) -> COUNTER    {
+    ) -> COUNTER {
         var up  : logic;
         var down: logic;
         up   = push && (!pop);
@@ -150,7 +150,7 @@ module fifo_controller #(
     }
 
     function get_status_flag (
-        word_count: input COUNTER      ,
+        word_count: input COUNTER,
     ) -> s_status_flag {
         var flag            : s_status_flag;
         flag.empty       = word_count == 0;

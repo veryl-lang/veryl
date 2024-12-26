@@ -18,7 +18,7 @@ pub package selector_pkg {
     function calc_select_width (
         entries: input u32          ,
         kind   : input selector_kind,
-    ) -> u32           {
+    ) -> u32 {
         if kind == selector_kind::BINARY {
             return calc_binary_select_width(entries);
         } else {

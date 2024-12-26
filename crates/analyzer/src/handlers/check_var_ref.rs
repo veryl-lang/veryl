@@ -220,11 +220,16 @@ fn map_assignable_factor(arg: &Expression) -> Option<VarRefPath> {
         return None;
     }
 
-    if let Factor::ExpressionIdentifierFactorOpt(factor) = &*exp.factor {
-        if factor.factor_opt.is_none() {
-            if let Ok(symbol) = symbol_table::resolve(factor.expression_identifier.as_ref()) {
+    if let Factor::IdentifierFactor(factor) = &*exp.factor {
+        if factor.identifier_factor.identifier_factor_opt.is_none() {
+            if let Ok(symbol) =
+                symbol_table::resolve(factor.identifier_factor.expression_identifier.as_ref())
+            {
                 if is_assignable_symbol(&symbol.found) {
-                    let path = VarRefPath::try_from(factor.expression_identifier.as_ref()).unwrap();
+                    let path = VarRefPath::try_from(
+                        factor.identifier_factor.expression_identifier.as_ref(),
+                    )
+                    .unwrap();
                     return Some(path);
                 }
             }
@@ -283,14 +288,12 @@ impl VerylGrammarTrait for CheckVarRef<'_> {
         Ok(())
     }
 
-    fn factor(&mut self, arg: &Factor) -> Result<(), ParolError> {
-        if let Factor::ExpressionIdentifierFactorOpt(factor) = arg {
-            if factor.factor_opt.is_some() {
-                match self.point {
-                    HandlerPoint::Before => self.push_function_call(&factor.expression_identifier),
-                    HandlerPoint::After => {
-                        self.function_call.pop();
-                    }
+    fn identifier_factor(&mut self, arg: &IdentifierFactor) -> Result<(), ParolError> {
+        if arg.identifier_factor_opt.is_some() {
+            match self.point {
+                HandlerPoint::Before => self.push_function_call(&arg.expression_identifier),
+                HandlerPoint::After => {
+                    self.function_call.pop();
                 }
             }
         }
@@ -657,7 +660,7 @@ impl VerylGrammarTrait for CheckVarRef<'_> {
                         match x.found.kind {
                             SymbolKind::Module(ref x) => {
                                 for port in &x.ports {
-                                    ports.insert(port.name, port.property());
+                                    ports.insert(port.name(), port.property());
                                 }
                             }
                             SymbolKind::SystemVerilog => {

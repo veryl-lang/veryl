@@ -730,6 +730,61 @@ fn invalid_modport_item() {
 }
 
 #[test]
+fn invalid_port_default_value() {
+    let code = r#"
+    module ModuleA (
+        a: output logic = 0,
+    ){}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidPortDefaultValue { .. }
+    ));
+
+    let code = r#"
+    module ModuleA (
+        a: inout tri logic = 0,
+    ){}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidPortDefaultValue { .. }
+    ));
+
+    let code = r#"
+    module ModuleA (
+        a: ref logic = 0,
+    ){}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidPortDefaultValue { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        function FuncA(
+            a: output logic = _,
+        ) {
+            a = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidPortDefaultValue { .. }
+    ));
+}
+
+#[test]
 fn mismatch_function_arity() {
     let code = r#"
     module ModuleA {
@@ -1228,6 +1283,22 @@ fn missing_port() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::MissingPort { .. }));
+
+    let code = r#"
+    module ModuleA {
+        inst u: ModuleB;
+    }
+
+    module ModuleB (
+        i_a: input  logic = 0,
+        o_b: output logic = _,
+    ) {
+        assign o_b = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -2287,6 +2358,29 @@ fn anonymous_identifier() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA (
+        i_a: input logic = _,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::AnonymousIdentifierUsage { .. }
+    ));
+
+    let code = r#"
+    module ModuleA (
+        o_a: output logic = _,
+    ) {
+        assign o_a = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -2366,6 +2460,29 @@ fn invalid_factor_kind() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+
+    let code = r#"
+    module ModuleA #(
+        param A: bit = 0
+    )(
+        a: input logic = A,
+    ){}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+
+    let code = r#"
+    package PackageA {
+        const A: bit = 0;
+    }
+    module ModuleA (
+        a: input  logic = PackageA::A,
+    ){}
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

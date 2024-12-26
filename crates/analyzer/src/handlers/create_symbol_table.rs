@@ -1040,6 +1040,10 @@ impl VerylGrammarTrait for CreateSymbolTable<'_> {
                     } else {
                         SymClockDomain::None
                     };
+                    let default_value = x
+                        .port_type_concrete_opt0
+                        .as_ref()
+                        .map(|x| *x.port_default_value.expression.clone());
                     PortProperty {
                         token,
                         r#type: Some(r#type),
@@ -1047,6 +1051,7 @@ impl VerylGrammarTrait for CreateSymbolTable<'_> {
                         prefix,
                         suffix,
                         clock_domain,
+                        default_value,
                         is_proto: self.in_proto,
                     }
                 }
@@ -1088,6 +1093,7 @@ impl VerylGrammarTrait for CreateSymbolTable<'_> {
                         prefix: None,
                         suffix: None,
                         clock_domain,
+                        default_value: None,
                         is_proto: self.in_proto,
                     }
                 }
@@ -1098,7 +1104,7 @@ impl VerylGrammarTrait for CreateSymbolTable<'_> {
                 self.insert_symbol(&arg.identifier.identifier_token.token, kind.clone(), false)
             {
                 let port = Port {
-                    name: arg.identifier.identifier_token.token.text,
+                    token: arg.identifier.identifier_token.clone(),
                     symbol: id,
                 };
                 self.ports.last_mut().unwrap().push(port);

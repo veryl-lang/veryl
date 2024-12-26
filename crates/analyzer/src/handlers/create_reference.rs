@@ -22,6 +22,7 @@ pub struct CreateReference<'a> {
     inst_ports: Vec<Port>,
     inst_sv_module: bool,
     is_anonymous_identifier: bool,
+    port_direction: Option<Direction>,
     dag_scope_parent: Vec<u32>,
     dag_scope_context: Vec<Context>,
     dag_type_parent: Vec<u32>,
@@ -499,7 +500,7 @@ impl VerylGrammarTrait for CreateReference<'_> {
                     if let Some(port) = self
                         .inst_ports
                         .iter()
-                        .find(|x| x.name == arg.identifier.identifier_token.token.text)
+                        .find(|x| x.name() == arg.identifier.identifier_token.token.text)
                     {
                         if let SymbolKind::Port(port) = symbol_table::get(port.symbol).unwrap().kind
                         {
@@ -528,6 +529,31 @@ impl VerylGrammarTrait for CreateReference<'_> {
                 }
             }
             HandlerPoint::After => self.is_anonymous_identifier = false,
+        }
+        Ok(())
+    }
+
+    fn port_type_concrete(&mut self, arg: &PortTypeConcrete) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                if arg.port_type_concrete_opt0.is_some() {
+                    self.port_direction = Some(arg.direction.as_ref().into());
+                }
+            }
+            HandlerPoint::After => self.port_direction = None,
+        }
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'PortDefaultValue'
+    fn port_default_value(&mut self, arg: &PortDefaultValue) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.is_anonymous_identifier =
+                    matches!(self.port_direction.unwrap(), Direction::Output)
+                        && is_anonymous_expression(&arg.expression);
+            }
+            _ => self.is_anonymous_identifier = false,
         }
         Ok(())
     }

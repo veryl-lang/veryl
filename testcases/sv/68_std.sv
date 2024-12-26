@@ -9,15 +9,15 @@ module veryl_testcase_Module68 (
     std_fifo u (
         .i_clk         (i_clk  ),
         .i_rst_n       (i_rst_n),
-        .i_clear       ('0       ),
-        .o_empty       (),
-        .o_almost_full (),
-        .o_full        (),
-        .o_word_count  (),
-        .i_push        (i_push),
-        .i_data        (i_data),
-        .i_pop         (i_pop ),
-        .o_data        (o_data)
+        .i_clear       ('0     ),
+        .o_empty       (       ),
+        .o_almost_full (       ),
+        .o_full        (       ),
+        .o_word_count  (       ),
+        .i_push        (i_push ),
+        .i_data        (i_data ),
+        .i_pop         (i_pop  ),
+        .o_data        (o_data )
     );
 endmodule
 //# sourceMappingURL=../map/testcases/sv/68_std.sv.map

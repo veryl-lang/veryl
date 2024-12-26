@@ -17,14 +17,14 @@ pub module mux #(
     function binary_mux (
         select: input logic    <BINARY_SELECT_WIDTH>,
         data  : input DATA_TYPE<ENTRIES>            ,
-    ) -> DATA_TYPE                      {
+    ) -> DATA_TYPE {
         return data[select];
     }
 
     function vector_mux (
         select: input logic    <ENTRIES>,
         data  : input DATA_TYPE<ENTRIES>,
-    ) -> DATA_TYPE          {
+    ) -> DATA_TYPE {
         var current_n     : u32               ;
         var current_select: logic    <ENTRIES>;
         var current_data  : DATA_TYPE<ENTRIES>;
@@ -59,7 +59,7 @@ pub module mux #(
     function onehot_mux (
         select: input logic    <ENTRIES>,
         data  : input DATA_TYPE<ENTRIES>,
-    ) -> DATA_TYPE          {
+    ) -> DATA_TYPE {
         var current_n   : u32               ;
         var current_data: DATA_TYPE<ENTRIES>;
         var next_n      : u32               ;

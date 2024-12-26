@@ -1,7 +1,6 @@
 pub mod check_attribute;
 pub mod check_clock_domain;
 pub mod check_clock_reset;
-pub mod check_direction;
 pub mod check_embed_include;
 pub mod check_enum;
 pub mod check_expression;
@@ -10,6 +9,7 @@ pub mod check_identifier;
 pub mod check_modport;
 pub mod check_msb_lsb;
 pub mod check_number;
+pub mod check_port;
 pub mod check_proto;
 pub mod check_separator;
 pub mod check_statement;
@@ -21,7 +21,6 @@ pub mod create_symbol_table;
 use check_attribute::*;
 use check_clock_domain::*;
 use check_clock_reset::*;
-use check_direction::*;
 use check_embed_include::*;
 use check_enum::*;
 use check_expression::*;
@@ -30,6 +29,7 @@ use check_identifier::*;
 use check_modport::*;
 use check_msb_lsb::*;
 use check_number::*;
+use check_port::*;
 use check_proto::*;
 use check_separator::*;
 use check_statement::*;
@@ -45,7 +45,7 @@ use veryl_parser::veryl_walker::Handler;
 
 pub struct Pass1Handlers<'a> {
     check_attribute: CheckAttribute<'a>,
-    check_direction: CheckDirection<'a>,
+    check_port: CheckPort<'a>,
     check_embed_include: CheckEmbedInclude<'a>,
     check_identifier: CheckIdentifier<'a>,
     check_number: CheckNumber<'a>,
@@ -58,7 +58,7 @@ impl<'a> Pass1Handlers<'a> {
     pub fn new(text: &'a str, build_opt: &'a Build, lint_opt: &'a Lint) -> Self {
         Self {
             check_attribute: CheckAttribute::new(text),
-            check_direction: CheckDirection::new(text),
+            check_port: CheckPort::new(text),
             check_embed_include: CheckEmbedInclude::new(text),
             check_identifier: CheckIdentifier::new(text, lint_opt),
             check_number: CheckNumber::new(text),
@@ -71,7 +71,7 @@ impl<'a> Pass1Handlers<'a> {
     pub fn get_handlers(&mut self) -> Vec<&mut dyn Handler> {
         vec![
             &mut self.check_attribute as &mut dyn Handler,
-            &mut self.check_direction as &mut dyn Handler,
+            &mut self.check_port as &mut dyn Handler,
             &mut self.check_embed_include as &mut dyn Handler,
             &mut self.check_identifier as &mut dyn Handler,
             &mut self.check_number as &mut dyn Handler,
@@ -84,7 +84,7 @@ impl<'a> Pass1Handlers<'a> {
     pub fn get_errors(&mut self) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
         ret.append(&mut self.check_attribute.errors);
-        ret.append(&mut self.check_direction.errors);
+        ret.append(&mut self.check_port.errors);
         ret.append(&mut self.check_embed_include.errors);
         ret.append(&mut self.check_identifier.errors);
         ret.append(&mut self.check_number.errors);

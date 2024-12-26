@@ -1,0 +1,55 @@
+package Package73 {
+    const A: bit = 0;
+}
+
+module Module73A::<B: const> (
+    i_a: input  logic = Package73::A,
+    i_b: input  logic = B           ,
+    i_c: input  logic = 0           ,
+    o_d: output logic = _           ,
+) {
+    assign o_d = 0;
+}
+
+module Module73B {
+    inst u0: Module73A::<0>;
+    inst u1: Module73A::<1>;
+    inst u2: Module73A::<1> (
+        i_a: 0,
+        i_b: 0,
+    );
+}
+
+module Module73C {
+    function FuncC::<B: const> (
+        i_a: input logic = Package73::A,
+        i_b: input logic = B           ,
+        i_c: input logic = 1           ,
+    ) {}
+
+    always_comb {
+        FuncC::<0>();
+        FuncC::<1>();
+        FuncC::<1>(0, 0);
+    }
+}
+
+module Module73D {
+    function FuncD::<B: const> (
+        i_a: input logic = Package73::A,
+        i_b: input logic = B           ,
+        i_c: input logic = 1           ,
+    ) -> bit {
+        return 0;
+    }
+
+    var _d: bit;
+    var _e: bit;
+    var _f: bit;
+
+    always_comb {
+        _d = FuncD::<0>();
+        _e = FuncD::<1>();
+        _f = FuncD::<1>(0, 0);
+    }
+}

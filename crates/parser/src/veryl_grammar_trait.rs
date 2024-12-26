@@ -1,6 +1,7 @@
 pub use crate::generated::veryl_grammar_trait::*;
 use crate::veryl_token::is_anonymous_token;
 use paste::paste;
+use std::fmt;
 
 macro_rules! list_group_to_item {
     ($x:ident) => {
@@ -191,8 +192,10 @@ pub fn is_anonymous_expression(arg: &Expression) -> bool {
     }
 
     match &*exp.factor {
-        Factor::ExpressionIdentifierFactorOpt(factor) => {
-            if factor.factor_opt.is_some() {
+        Factor::IdentifierFactor(x) => {
+            let factor = &x.identifier_factor;
+
+            if factor.identifier_factor_opt.is_some() {
                 return false;
             }
 
@@ -216,5 +219,19 @@ pub fn is_anonymous_expression(arg: &Expression) -> bool {
             is_anonymous_token(&token)
         }
         _ => false,
+    }
+}
+
+impl fmt::Display for Direction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let token = match self {
+            Direction::Input(x) => &x.input.input_token,
+            Direction::Output(x) => &x.output.output_token,
+            Direction::Inout(x) => &x.inout.inout_token,
+            Direction::Ref(x) => &x.r#ref.ref_token,
+            Direction::Modport(x) => &x.modport.modport_token,
+            Direction::Import(x) => &x.import.import_token,
+        };
+        token.fmt(f)
     }
 }

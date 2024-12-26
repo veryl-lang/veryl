@@ -690,7 +690,7 @@ impl DocBuilder {
                         None
                     };
                     PortData {
-                        name: x.name.to_string(),
+                        name: x.name().to_string(),
                         direction: format!("{}", x.property().direction),
                         clock_domain,
                         typ: x.property().r#type.as_ref().map(|x| format!("{}", x)),
@@ -753,7 +753,7 @@ impl DocBuilder {
                         None
                     };
                     PortData {
-                        name: x.name.to_string(),
+                        name: x.name().to_string(),
                         direction: format!("{}", x.property().direction),
                         clock_domain,
                         typ: x.property().r#type.as_ref().map(|x| format!("{}", x)),

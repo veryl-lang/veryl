@@ -434,7 +434,7 @@ Expression11: Expression12 [ As CastingType ];
 Expression12: { ( UnaryOperator | Operator09 | Operator05 | Operator03 | Operator04 ) } Factor;
 
 Factor: Number
-      | ExpressionIdentifier [ FunctionCall ]
+      | IdentifierFactor
       | LParen Expression RParen
       | LBrace ConcatenationList RBrace
       | QuoteLBrace ArrayLiteralList RBrace
@@ -448,6 +448,8 @@ Factor: Number
       | TypeExpression
       | FactorType
       ;
+
+IdentifierFactor: ExpressionIdentifier [ FunctionCall ];
 
 FunctionCall: LParen [ ArgumentList ] RParen;
 
@@ -737,7 +739,9 @@ PortDeclarationGroup: { Attribute } ( LBrace PortDeclarationList RBrace | PortDe
 
 PortDeclarationItem: Identifier Colon ( PortTypeConcrete | PortTypeAbstract );
 
-PortTypeConcrete: Direction [ ClockDomain ] ArrayType;
+PortTypeConcrete: Direction [ ClockDomain ] ArrayType [ Equ PortDefaultValue ];
+
+PortDefaultValue: Expression;
 
 PortTypeAbstract: [ ClockDomain ] Interface [ ColonColon Identifier ] [ Array ];
 
