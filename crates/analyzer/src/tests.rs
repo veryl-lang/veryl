@@ -1759,6 +1759,67 @@ fn undefined_identifier() {
 }
 
 #[test]
+fn referring_package_before_definition() {
+    let code = r#"
+    module ModuleA {
+        const A: u32 = PakcageB::B;
+    }
+    package PakcageB {
+        const B: u32 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ReferringPackageBeforeDefinition { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceA {
+        const A: u32 = PakcageB::B;
+    }
+    package PakcageB {
+        const B: u32 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ReferringPackageBeforeDefinition { .. }
+    ));
+
+    let code = r#"
+    package PackageA {
+        const A: u32 = PakcageB::B;
+    }
+    package PakcageB {
+        const B: u32 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ReferringPackageBeforeDefinition { .. }
+    ));
+
+    let code = r#"
+    import PakcageB::B;
+    package PakcageB {
+        const B: u32 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ReferringPackageBeforeDefinition { .. }
+    ));
+}
+
+#[test]
 fn unknown_attribute() {
     let code = r#"
     module ModuleA {

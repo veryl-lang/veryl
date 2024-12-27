@@ -1,3 +1,11 @@
+package veryl_testcase_Package56A;
+    localparam int unsigned X = 1;
+endpackage
+
+package veryl_testcase_Package56B;
+    localparam int unsigned X = 2;
+endpackage
+
 module veryl_testcase_Module56;
     import veryl_testcase_Package56A::X;
     veryl_testcase___Interface56A__Package56A_X u0 ();
@@ -44,12 +52,4 @@ endinterface
 interface veryl_testcase___Interface56B__3;
     logic [3-1:0]                            _b;
 endinterface
-
-package veryl_testcase_Package56A;
-    localparam int unsigned X = 1;
-endpackage
-
-package veryl_testcase_Package56B;
-    localparam int unsigned X = 2;
-endpackage
 //# sourceMappingURL=../map/testcases/sv/56_generic_interface.sv.map

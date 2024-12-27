@@ -1,3 +1,11 @@
+package Package56A {
+    const X: u32 = 1;
+}
+
+package Package56B {
+    const X: u32 = 2;
+}
+
 module Module56 {
     import Package56A::X;
     inst u0: Interface56A::<Package56A::X>;
@@ -26,12 +34,4 @@ pub interface Interface56A::<T: const> {
 /// Generic interface test for doc comment
 pub interface Interface56B::<T: const = 3> {
     var _b: logic<T>;
-}
-
-package Package56A {
-    const X: u32 = 1;
-}
-
-package Package56B {
-    const X: u32 = 2;
 }

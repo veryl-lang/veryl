@@ -10,7 +10,7 @@ use crate::type_dag::{self, Context, DagError};
 use std::collections::HashMap;
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::{is_anonymous_text, Token, TokenRange};
+use veryl_parser::veryl_token::{is_anonymous_text, Token, TokenRange, TokenSource};
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
@@ -107,6 +107,7 @@ impl<'a> CreateReference<'a> {
 
             match symbol_table::resolve((&base_path, namespace)) {
                 Ok(symbol) => {
+                    self.check_pacakge_reference(&symbol.found, &path.range);
                     symbol_table::add_reference(symbol.found.id, &path.paths[0].base);
 
                     // Check number of arguments
@@ -177,6 +178,31 @@ impl<'a> CreateReference<'a> {
 
                     self.push_resolve_error(err, &path.range, generics_token);
                 }
+            }
+        }
+    }
+
+    fn check_pacakge_reference(&mut self, symbol: &Symbol, token_range: &TokenRange) {
+        if !matches!(symbol.kind, SymbolKind::Package(_)) {
+            return;
+        }
+
+        let base_token = token_range.end;
+        let package_token = symbol.token;
+        if let (TokenSource::File(package_file), TokenSource::File(base_file)) =
+            (package_token.source, base_token.source)
+        {
+            let referecne_before_definition = package_file == base_file
+                && (package_token.line > base_token.line
+                    || package_token.line == base_token.line
+                        && package_token.column > base_token.column);
+            if referecne_before_definition {
+                self.errors
+                    .push(AnalyzerError::referring_package_before_definition(
+                        &package_token.to_string(),
+                        self.text,
+                        token_range,
+                    ));
             }
         }
     }

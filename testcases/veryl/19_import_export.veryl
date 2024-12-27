@@ -1,6 +1,10 @@
 import $sv::PackageA::A;
 import $sv::PackageA::*;
 
+package PackageA {
+    const A: u32 = 0;
+}
+
 module Module19 {
     import PackageA::A;
     import PackageA::*;
@@ -16,8 +20,4 @@ package Package19 {
     import PackageA::*;
     export PackageA::A;
     export *;
-}
-
-package PackageA {
-    const A: u32 = 0;
 }

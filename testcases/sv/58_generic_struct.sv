@@ -1,3 +1,8 @@
+package veryl_testcase_Package58;
+    typedef int unsigned     B;
+    typedef longint unsigned C;
+endpackage
+
 module veryl_testcase_Module58;
     typedef struct packed {
         veryl_testcase_Package58::B A;
@@ -31,9 +36,4 @@ module veryl_testcase_Module58;
     __StructB__C           _e;
     __StructC__C__C        _g;
 endmodule
-
-package veryl_testcase_Package58;
-    typedef int unsigned     B;
-    typedef longint unsigned C;
-endpackage
 //# sourceMappingURL=../map/testcases/sv/58_generic_struct.sv.map

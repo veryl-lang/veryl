@@ -1,6 +1,12 @@
 
 
 
+package veryl_testcase_PackageA;
+    import PackageA::A;
+    import PackageA::*;
+    localparam int unsigned A = 0;
+endpackage
+
 module veryl_testcase_Module19
     import PackageA::A;
     import PackageA::*;
@@ -24,11 +30,5 @@ package veryl_testcase_Package19;
     import veryl_testcase_PackageA::*;
     export A;
     export *::*;
-endpackage
-
-package veryl_testcase_PackageA;
-    import PackageA::A;
-    import PackageA::*;
-    localparam int unsigned A = 0;
 endpackage
 //# sourceMappingURL=../map/testcases/sv/19_import_export.sv.map
