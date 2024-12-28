@@ -760,6 +760,21 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(referring_package_before_definition),
+        help("change order of package definitions"),
+        url("")
+    )]
+    #[error("pakcakge {identifier} is referred before it is defined.")]
+    ReferringPackageBeforeDefinition {
+        identifier: String,
+        #[source_code]
+        input: NamedSource<String>,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(unresolvable_generic_argument),
         help(""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unresolvable_generic_argument")
@@ -1563,6 +1578,18 @@ impl AnalyzerError {
 
     pub fn undefined_identifier(identifier: &str, source: &str, token: &TokenRange) -> Self {
         AnalyzerError::UndefinedIdentifier {
+            identifier: identifier.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn referring_package_before_definition(
+        identifier: &str,
+        source: &str,
+        token: &TokenRange,
+    ) -> Self {
+        AnalyzerError::ReferringPackageBeforeDefinition {
             identifier: identifier.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),

@@ -1,3 +1,8 @@
+package Package58 {
+    type B = u32;
+    type C = u64;
+}
+
 module Module58 {
     struct StructA::<T: type> {
         A: T,
@@ -21,9 +26,4 @@ module Module58 {
     var _f: StructB::<Package58::C>;
     var _e: StructB::<>            ;
     var _g: StructC::<C, C>        ;
-}
-
-package Package58 {
-    type B = u32;
-    type C = u64;
 }

@@ -1,8 +1,3 @@
-module Module37 {
-    let _a: u32 = Package37::A;
-    let _b: u32 = Package37::B::C;
-    let _c: u32 = Package37::X();
-}
 package Package37 {
     const A: u32 = 1;
 
@@ -13,4 +8,10 @@ package Package37 {
     function X -> u32 {
         return 0;
     }
+}
+
+module Module37 {
+    let _a: u32 = Package37::A;
+    let _b: u32 = Package37::B::C;
+    let _c: u32 = Package37::X();
 }

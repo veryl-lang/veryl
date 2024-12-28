@@ -1,3 +1,11 @@
+package Package44A {
+    const z: u32 = 0;
+}
+
+package Package44B {
+    const y: u32 = 0;
+}
+
 module Module44 {
     var a: logic<10>;
     var b: logic<10>;
@@ -9,12 +17,4 @@ module Module44 {
     assign a = Package44A::z;
     assign b = z;
     assign c = y;
-}
-
-package Package44A {
-    const z: u32 = 0;
-}
-
-package Package44B {
-    const y: u32 = 0;
 }
