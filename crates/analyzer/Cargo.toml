@@ -13,7 +13,7 @@ edition               = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-itertools       = "0.13.0"
+itertools       = "0.14.0"
 strnum_bitwidth = {workspace = true}
 thiserror       = {workspace = true}
 veryl-metadata  = {version = "0.13.3", path = "../metadata"}
