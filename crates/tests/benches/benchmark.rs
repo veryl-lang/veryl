@@ -74,7 +74,8 @@ include!(concat!(env!("OUT_DIR"), "/test.rs"));
 #[cfg(target_os = "linux")]
 criterion_group! {
     name = benches;
-    config = Criterion::default().with_profiler(perf::FlamegraphProfiler::new(100));
+    //config = Criterion::default().with_profiler(perf::FlamegraphProfiler::new(100));
+    config = Criterion::default();
     targets = criterion_benchmark
 }
 
