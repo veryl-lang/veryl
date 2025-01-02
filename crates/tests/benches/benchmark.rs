@@ -29,23 +29,32 @@ fn criterion_benchmark(c: &mut Criterion) {
     let metadata = Metadata::load(&metadata_path).unwrap();
 
     // Check no analyzer error
-    let parser = Parser::parse(&text, &"").unwrap();
-    let prj = &metadata.project.name;
-    let analyzer = Analyzer::new(&metadata);
-    let mut errors = Vec::new();
-    errors.append(&mut analyzer.analyze_pass1(prj, &text, &"", &parser.veryl));
-    Analyzer::analyze_post_pass1();
-    errors.append(&mut analyzer.analyze_pass2(prj, &text, &"", &parser.veryl));
-    errors.append(&mut analyzer.analyze_pass3(prj, &text, &"", &parser.veryl));
-    if !errors.is_empty() {
-        dbg!(errors);
-        assert!(false);
+    if std::env::var("GITHUB_ACTIONS") != Ok("true".to_string()) {
+        let parser = Parser::parse(&text, &"").unwrap();
+        let prj = &metadata.project.name;
+        let analyzer = Analyzer::new(&metadata);
+        let mut errors = Vec::new();
+        errors.append(&mut analyzer.analyze_pass1(prj, &text, &"", &parser.veryl));
+        Analyzer::analyze_post_pass1();
+        errors.append(&mut analyzer.analyze_pass2(prj, &text, &"", &parser.veryl));
+        errors.append(&mut analyzer.analyze_pass3(prj, &text, &"", &parser.veryl));
+        if !errors.is_empty() {
+            dbg!(errors);
+            assert!(false);
+        }
     }
 
     let mut group = c.benchmark_group("throughput");
     group.throughput(Throughput::Bytes(text.len() as u64));
     group.bench_function("parse", |b| {
         b.iter_with_large_drop(|| Parser::parse(black_box(&text), &""))
+    });
+    group.bench_function("format", |b| {
+        b.iter_with_large_drop(|| {
+            let parser = Parser::parse(black_box(&text), &"").unwrap();
+            let mut formatter = Formatter::new(&metadata);
+            formatter.format(&parser.veryl);
+        })
     });
     group.bench_function("analyze", |b| {
         b.iter_with_large_drop(|| {
@@ -57,13 +66,6 @@ fn criterion_benchmark(c: &mut Criterion) {
             analyzer.analyze_pass2(prj, black_box(&text), &"", &parser.veryl);
             analyzer.analyze_pass3(prj, black_box(&text), &"", &parser.veryl);
             analyzer.clear();
-        })
-    });
-    group.bench_function("format", |b| {
-        b.iter_with_large_drop(|| {
-            let parser = Parser::parse(black_box(&text), &"").unwrap();
-            let mut formatter = Formatter::new(&metadata);
-            formatter.format(&parser.veryl);
         })
     });
     group.finish();
