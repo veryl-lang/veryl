@@ -126,7 +126,7 @@ impl CmdBuild {
 
         self.gen_filelist(metadata, &paths, temp_dir, include_tests)?;
 
-        let _ = check_error.check_all()?;
+        let _ = check_error.check_err()?;
         Ok(true)
     }
 
