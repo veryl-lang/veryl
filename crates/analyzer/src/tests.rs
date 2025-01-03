@@ -770,6 +770,21 @@ fn invalid_port_default_value() {
     let code = r#"
     module ModuleA {
         function FuncA(
+            a: input logic = 1,
+        ) {
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidPortDefaultValue { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        function FuncA(
             a: output logic = _,
         ) {
             a = 0;
