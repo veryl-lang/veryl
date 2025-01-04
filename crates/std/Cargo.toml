@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl-std"
-version               = "0.13.3"
+version               = "0.13.4"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -14,7 +14,7 @@ edition               = "2021"
 miette      = {workspace = true}
 rust-embed  = {version = "8.5", features = ["debug-embed", "compression", "include-exclude"]}
 thiserror   = {workspace = true}
-veryl-path  = {version = "0.13.3", path = "../path"}
+veryl-path  = {version = "0.13.4", path = "../path"}
 
 [build-dependencies]
 merkle_hash = "3.7"

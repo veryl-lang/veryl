@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl-formatter"
-version               = "0.13.3"
+version               = "0.13.4"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -13,6 +13,6 @@ edition               = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-veryl-aligner  = {version = "0.13.3", path = "../aligner"}
-veryl-metadata = {version = "0.13.3", path = "../metadata"}
-veryl-parser   = {version = "0.13.3", path = "../parser"}
+veryl-aligner  = {version = "0.13.4", path = "../aligner"}
+veryl-metadata = {version = "0.13.4", path = "../metadata"}
+veryl-parser   = {version = "0.13.4", path = "../parser"}

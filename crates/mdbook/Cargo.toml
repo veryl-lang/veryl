@@ -1,6 +1,6 @@
 [package]
 name                  = "mdbook-veryl"
-version               = "0.13.3"
+version               = "0.13.4"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -23,7 +23,7 @@ semver          = {workspace = true}
 serde_json      = {workspace = true}
 similar         = {workspace = true}
 toml            = {workspace = true}
-veryl-analyzer  = {version = "0.13.3", path = "../analyzer"}
-veryl-formatter = {version = "0.13.3", path = "../formatter"}
-veryl-metadata  = {version = "0.13.3", path = "../metadata"}
-veryl-parser    = {version = "0.13.3", path = "../parser"}
+veryl-analyzer  = {version = "0.13.4", path = "../analyzer"}
+veryl-formatter = {version = "0.13.4", path = "../formatter"}
+veryl-metadata  = {version = "0.13.4", path = "../metadata"}
+veryl-parser    = {version = "0.13.4", path = "../parser"}
