@@ -54,9 +54,15 @@ impl VerylGrammarTrait for CheckPort<'_> {
 
                 if let Some(x) = &x.port_type_concrete_opt0 {
                     let is_valid_port_default_value = match direction {
-                        Direction::Input(_) => true,
-                        Direction::Output(_) if !self.in_function => {
-                            is_anonymous_expression(&x.port_default_value.expression)
+                        Direction::Input(_) => {
+                            // For now, port default value is allowed for module only.
+                            // https://github.com/veryl-lang/veryl/issues/1178#issuecomment-2568996379
+                            !self.in_function
+                        }
+                        Direction::Output(_) => {
+                            // For SystemVerilog, output ports of a function cannot be released.
+                            !self.in_function
+                                && is_anonymous_expression(&x.port_default_value.expression)
                         }
                         _ => false,
                     };
