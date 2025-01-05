@@ -912,16 +912,18 @@ fn completion_member(url: &Url, line: usize, column: usize, text: &str) -> Vec<C
                 VerylSymbolKind::Port(x) => {
                     if let Some(ref x) = x.r#type {
                         if let TypeKind::UserDefined(ref x) = x.kind {
-                            if let Ok(symbol) = symbol_table::resolve((x, &namespace)) {
-                                items.append(&mut get_member(&symbol.found));
+                            if let Some(id) = x.symbol {
+                                let symbol = symbol_table::get(id).unwrap();
+                                items.append(&mut get_member(&symbol));
                             }
                         }
                     }
                 }
                 VerylSymbolKind::Variable(x) => {
                     if let TypeKind::UserDefined(ref x) = x.r#type.kind {
-                        if let Ok(symbol) = symbol_table::resolve((x, &namespace)) {
-                            items.append(&mut get_member(&symbol.found));
+                        if let Some(id) = x.symbol {
+                            let symbol = symbol_table::get(id).unwrap();
+                            items.append(&mut get_member(&symbol));
                         }
                     }
                 }

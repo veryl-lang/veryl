@@ -281,6 +281,7 @@ impl Analyzer {
 
     pub fn analyze_post_pass1() {
         symbol_table::apply_import();
+        symbol_table::resolve_user_defined();
     }
 
     pub fn analyze_pass2<T: AsRef<Path>>(
@@ -349,8 +350,8 @@ fn traverse_type_symbol(id: SymbolId, path: &VarRefPath) -> Vec<VarRefPath> {
         match &symbol.kind {
             SymbolKind::Variable(x) => {
                 if let TypeKind::UserDefined(ref x) = x.r#type.kind {
-                    if let Ok(symbol) = symbol_table::resolve((x, &symbol.namespace)) {
-                        return traverse_type_symbol(symbol.found.id, path);
+                    if let Some(id) = x.symbol {
+                        return traverse_type_symbol(id, path);
                     }
                 } else {
                     return vec![path.clone()];
@@ -358,8 +359,8 @@ fn traverse_type_symbol(id: SymbolId, path: &VarRefPath) -> Vec<VarRefPath> {
             }
             SymbolKind::StructMember(x) => {
                 if let TypeKind::UserDefined(ref x) = x.r#type.kind {
-                    if let Ok(symbol) = symbol_table::resolve((x, &symbol.namespace)) {
-                        return traverse_type_symbol(symbol.found.id, path);
+                    if let Some(id) = x.symbol {
+                        return traverse_type_symbol(id, path);
                     }
                 } else {
                     return vec![path.clone()];
@@ -367,8 +368,8 @@ fn traverse_type_symbol(id: SymbolId, path: &VarRefPath) -> Vec<VarRefPath> {
             }
             SymbolKind::UnionMember(x) => {
                 if let TypeKind::UserDefined(ref x) = x.r#type.kind {
-                    if let Ok(symbol) = symbol_table::resolve((x, &symbol.namespace)) {
-                        return traverse_type_symbol(symbol.found.id, path);
+                    if let Some(id) = x.symbol {
+                        return traverse_type_symbol(id, path);
                     }
                 } else {
                     return vec![path.clone()];
@@ -376,8 +377,8 @@ fn traverse_type_symbol(id: SymbolId, path: &VarRefPath) -> Vec<VarRefPath> {
             }
             SymbolKind::TypeDef(x) => {
                 if let TypeKind::UserDefined(ref x) = x.r#type.kind {
-                    if let Ok(symbol) = symbol_table::resolve((x, &symbol.namespace)) {
-                        return traverse_type_symbol(symbol.found.id, path);
+                    if let Some(id) = x.symbol {
+                        return traverse_type_symbol(id, path);
                     }
                 } else {
                     return vec![path.clone()];
@@ -387,8 +388,8 @@ fn traverse_type_symbol(id: SymbolId, path: &VarRefPath) -> Vec<VarRefPath> {
                 let r#type: Result<crate::symbol::Type, ()> = (&x.value).try_into();
                 if let Ok(r#type) = r#type {
                     if let TypeKind::UserDefined(ref x) = r#type.kind {
-                        if let Ok(symbol) = symbol_table::resolve((x, &symbol.namespace)) {
-                            return traverse_type_symbol(symbol.found.id, path);
+                        if let Some(id) = x.symbol {
+                            return traverse_type_symbol(id, path);
                         }
                     } else {
                         return vec![path.clone()];
@@ -451,8 +452,8 @@ fn traverse_assignable_symbol(id: SymbolId, path: &VarRefPath) -> Vec<VarRefPath
             SymbolKind::Port(x) if is_assignable(&x.direction) && !x.is_proto => {
                 if let Some(ref x) = x.r#type {
                     if let TypeKind::UserDefined(ref x) = x.kind {
-                        if let Ok(symbol) = symbol_table::resolve((x, &symbol.namespace)) {
-                            return traverse_type_symbol(symbol.found.id, path);
+                        if let Some(id) = x.symbol {
+                            return traverse_type_symbol(id, path);
                         }
                     } else {
                         return vec![path.clone()];
@@ -465,8 +466,8 @@ fn traverse_assignable_symbol(id: SymbolId, path: &VarRefPath) -> Vec<VarRefPath
                     || x.affiliation == VariableAffiliation::StatementBlock =>
             {
                 if let TypeKind::UserDefined(ref x) = x.r#type.kind {
-                    if let Ok(symbol) = symbol_table::resolve((x, &symbol.namespace)) {
-                        return traverse_type_symbol(symbol.found.id, path);
+                    if let Some(id) = x.symbol {
+                        return traverse_type_symbol(id, path);
                     }
                 } else {
                     return vec![path.clone()];
