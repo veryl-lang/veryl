@@ -1,6 +1,5 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::msb_table;
-use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::Type as SymType;
 use crate::symbol::{Direction, SymbolKind, TypeKind};
@@ -40,13 +39,14 @@ impl Handler for CheckMsbLsb<'_> {
     }
 }
 
-fn trace_type(r#type: &SymType, namespace: &Namespace) -> Vec<(SymType, Option<SymbolKind>)> {
+fn trace_type(r#type: &SymType) -> Vec<(SymType, Option<SymbolKind>)> {
     let mut ret = vec![(r#type.clone(), None)];
     if let TypeKind::UserDefined(ref x) = r#type.kind {
-        if let Ok(symbol) = symbol_table::resolve((&SymbolPath::new(x), namespace)) {
-            ret.last_mut().unwrap().1 = Some(symbol.found.kind.clone());
-            if let SymbolKind::TypeDef(ref x) = symbol.found.kind {
-                ret.append(&mut trace_type(&x.r#type, namespace));
+        if let Some(id) = x.symbol {
+            let symbol = symbol_table::get(id).unwrap();
+            ret.last_mut().unwrap().1 = Some(symbol.kind.clone());
+            if let SymbolKind::TypeDef(ref x) = symbol.kind {
+                ret.append(&mut trace_type(&x.r#type));
             }
         }
     }
@@ -72,8 +72,6 @@ impl VerylGrammarTrait for CheckMsbLsb<'_> {
                 let resolved = if let Ok(x) =
                     symbol_table::resolve(self.identifier_path.last().unwrap().clone())
                 {
-                    let namespace = &x.found.namespace;
-
                     let via_interface = x.full_path.iter().any(|path| {
                         let symbol = symbol_table::get(*path).unwrap();
                         match symbol.kind {
@@ -98,7 +96,7 @@ impl VerylGrammarTrait for CheckMsbLsb<'_> {
                     };
 
                     if let Some(x) = r#type {
-                        let types = trace_type(&x, namespace);
+                        let types = trace_type(&x);
                         let mut select_dimension = *self.select_dimension.last().unwrap();
 
                         let mut demension_number = None;

@@ -6,7 +6,6 @@ use crate::evaluator::Evaluated;
 use crate::evaluator::Evaluator;
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol;
 use crate::symbol::ClockDomain as SymClockDomain;
 use crate::symbol::Direction as SymDirection;
 use crate::symbol::Type as SymType;
@@ -116,16 +115,6 @@ impl<'a> CreateSymbolTable<'a> {
     }
 
     fn insert_symbol(&mut self, token: &Token, kind: SymbolKind, public: bool) -> Option<SymbolId> {
-        self.insert_symbol_with_type(token, kind, public, None)
-    }
-
-    fn insert_symbol_with_type(
-        &mut self,
-        token: &Token,
-        kind: SymbolKind,
-        public: bool,
-        r#type: Option<symbol::Type>,
-    ) -> Option<SymbolId> {
         let line = token.line;
         let doc_comment = if let TokenSource::File(file) = token.source {
             if line == 0 {
@@ -157,7 +146,6 @@ impl<'a> CreateSymbolTable<'a> {
             symbol.allow_unused = true;
         }
 
-        symbol.r#type = r#type;
         let id = symbol_table::insert(token, symbol);
         if id.is_none() {
             self.errors.push(AnalyzerError::duplicated_identifier(
@@ -590,12 +578,9 @@ impl VerylGrammarTrait for CreateSymbolTable<'_> {
             };
             let kind = SymbolKind::Variable(property);
 
-            if let Some(id) = self.insert_symbol_with_type(
-                &arg.identifier.identifier_token.token,
-                kind.clone(),
-                false,
-                None,
-            ) {
+            if let Some(id) =
+                self.insert_symbol(&arg.identifier.identifier_token.token, kind.clone(), false)
+            {
                 if self.is_default_clock_candidate(kind.clone()) {
                     self.default_clock_candidates.push(id);
                 } else if self.is_default_reset_candidate(kind.clone()) {

@@ -118,12 +118,12 @@ impl SymbolTable {
         if let TypeKind::UserDefined(ref x) = kind {
             // Detect infinite loop in trace_user_defined
             if let Some(last_found) = context.last_found {
-                if *x.first().unwrap() == last_found.token.text {
+                if *x.path.first().unwrap() == last_found.token.text {
                     return Ok(context);
                 }
             }
 
-            let symbol = self.resolve(&SymbolPath::new(x), &context.namespace)?;
+            let symbol = self.resolve(&SymbolPath::new(&x.path), &context.namespace)?;
             match symbol.found.kind {
                 SymbolKind::SystemVerilog => context.sv_member = true,
                 SymbolKind::TypeDef(x) => {
@@ -442,6 +442,32 @@ impl SymbolTable {
                     _ => {
                         self.add_imported_item(symbol.token.id, &import.namespace);
                     }
+                }
+            }
+        }
+    }
+
+    pub fn get_user_defined(&self) -> Vec<(SymbolId, SymbolId)> {
+        let mut resolved = Vec::new();
+        for symbol in self.symbol_table.values() {
+            if let Some(x) = symbol.kind.get_type() {
+                if let TypeKind::UserDefined(x) = &x.kind {
+                    let path = SymbolPath::new(&x.path);
+                    if let Ok(type_symbol) = self.resolve(&path, &symbol.namespace) {
+                        resolved.push((symbol.id, type_symbol.found.id));
+                    }
+                }
+            }
+        }
+        resolved
+    }
+
+    pub fn set_user_defined(&mut self, resolved: Vec<(SymbolId, SymbolId)>) {
+        for (id, type_id) in resolved {
+            let symbol = self.symbol_table.get_mut(&id).unwrap();
+            if let Some(x) = symbol.kind.get_type_mut() {
+                if let TypeKind::UserDefined(x) = &mut x.kind {
+                    x.symbol = Some(type_id);
                 }
             }
         }
@@ -1071,6 +1097,11 @@ pub fn add_import(import: Import) {
 
 pub fn apply_import() {
     SYMBOL_TABLE.with(|f| f.borrow_mut().apply_import())
+}
+
+pub fn resolve_user_defined() {
+    let resolved = SYMBOL_TABLE.with(|f| f.borrow().get_user_defined());
+    SYMBOL_TABLE.with(|f| f.borrow_mut().set_user_defined(resolved))
 }
 
 pub fn add_project_local(prj: StrId, from: StrId, to: StrId) {

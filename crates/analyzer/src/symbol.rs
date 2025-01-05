@@ -72,7 +72,6 @@ pub struct Symbol {
     pub allow_unused: bool,
     pub public: bool,
     pub doc_comment: DocComment,
-    pub r#type: Option<Type>,
 }
 
 impl Symbol {
@@ -95,7 +94,6 @@ impl Symbol {
             allow_unused: false,
             public,
             doc_comment,
-            r#type: None,
         }
     }
 
@@ -428,6 +426,32 @@ impl SymbolKind {
             _ => None,
         }
     }
+
+    pub fn get_type(&self) -> Option<&Type> {
+        match self {
+            SymbolKind::Port(x) => x.r#type.as_ref(),
+            SymbolKind::Variable(x) => Some(&x.r#type),
+            SymbolKind::Function(x) => x.ret.as_ref(),
+            SymbolKind::Parameter(x) => Some(&x.r#type),
+            SymbolKind::StructMember(x) => Some(&x.r#type),
+            SymbolKind::UnionMember(x) => Some(&x.r#type),
+            SymbolKind::TypeDef(x) => Some(&x.r#type),
+            _ => None,
+        }
+    }
+
+    pub fn get_type_mut(&mut self) -> Option<&mut Type> {
+        match self {
+            SymbolKind::Port(x) => x.r#type.as_mut(),
+            SymbolKind::Variable(x) => Some(&mut x.r#type),
+            SymbolKind::Function(x) => x.ret.as_mut(),
+            SymbolKind::Parameter(x) => Some(&mut x.r#type),
+            SymbolKind::StructMember(x) => Some(&mut x.r#type),
+            SymbolKind::UnionMember(x) => Some(&mut x.r#type),
+            SymbolKind::TypeDef(x) => Some(&mut x.r#type),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for SymbolKind {
@@ -608,7 +632,7 @@ pub enum TypeKind {
     F64,
     Type,
     String,
-    UserDefined(Vec<StrId>),
+    UserDefined(UserDefinedType),
 }
 
 impl TypeKind {
@@ -628,6 +652,18 @@ impl TypeKind {
                 | TypeKind::ResetSyncHigh
                 | TypeKind::ResetSyncLow
         )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserDefinedType {
+    pub path: Vec<StrId>,
+    pub symbol: Option<SymbolId>,
+}
+
+impl UserDefinedType {
+    fn new(path: Vec<StrId>) -> Self {
+        Self { path, symbol: None }
     }
 }
 
@@ -665,9 +701,9 @@ impl fmt::Display for Type {
             TypeKind::F64 => text.push_str("f64"),
             TypeKind::Type => text.push_str("type"),
             TypeKind::String => text.push_str("string"),
-            TypeKind::UserDefined(paths) => {
-                text.push_str(&format!("{}", paths.first().unwrap()));
-                for path in &paths[1..] {
+            TypeKind::UserDefined(x) => {
+                text.push_str(&format!("{}", x.path.first().unwrap()));
+                for path in &x.path[1..] {
                     text.push_str(&format!("::{path}"));
                 }
             }
@@ -801,7 +837,7 @@ impl TryFrom<&syntax_tree::Expression> for Type {
                     for x in &x.scoped_identifier.scoped_identifier_list {
                         name.push(x.identifier.identifier_token.token.text);
                     }
-                    let kind = TypeKind::UserDefined(name);
+                    let kind = TypeKind::UserDefined(UserDefinedType::new(name));
                     let mut width = Vec::new();
                     if let Some(ref x) = x.expression_identifier_opt {
                         let x = &x.width;
@@ -902,7 +938,7 @@ impl From<&syntax_tree::ScalarType> for Type {
                 for x in &ident.scoped_identifier_list {
                     name.push(x.identifier.identifier_token.token.text);
                 }
-                let kind = TypeKind::UserDefined(name);
+                let kind = TypeKind::UserDefined(UserDefinedType::new(name));
                 let mut width = Vec::new();
                 if let Some(ref x) = x.scalar_type_opt {
                     let x = &x.width;
