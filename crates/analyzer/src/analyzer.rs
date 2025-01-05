@@ -499,6 +499,19 @@ fn check_multiple_assignment(
         return vec![];
     }
 
+    // Earyl return to avoid calling AnalyzerError constructor
+    for i in 0..len {
+        let x_type = &x_pos.0[i];
+        let y_type = &y_pos.0[i];
+        if x_type != y_type {
+            match x_type {
+                AssignPositionType::DeclarationBranch { .. }
+                | AssignPositionType::Declaration { .. } => (),
+                _ => return vec![],
+            }
+        }
+    }
+
     for i in 0..len {
         let x_type = &x_pos.0[i];
         let y_type = &y_pos.0[i];
@@ -516,7 +529,7 @@ fn check_multiple_assignment(
                         ));
                     }
                 }
-                _ => return vec![],
+                _ => (),
             }
         }
     }

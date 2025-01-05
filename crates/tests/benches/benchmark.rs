@@ -38,6 +38,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         Analyzer::analyze_post_pass1();
         errors.append(&mut analyzer.analyze_pass2(prj, &text, &"", &parser.veryl));
         errors.append(&mut analyzer.analyze_pass3(prj, &text, &"", &parser.veryl));
+        analyzer.clear();
         if !errors.is_empty() {
             dbg!(errors);
             assert!(false);

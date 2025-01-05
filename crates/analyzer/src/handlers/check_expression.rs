@@ -85,21 +85,21 @@ impl VerylGrammarTrait for CheckExpression<'_> {
             if let Ok(rr) = symbol_table::resolve(expid) {
                 let identifier = rr.found.token.to_string();
                 let token: TokenRange = arg.expression_identifier.as_ref().into();
-                let error = AnalyzerError::invalid_factor(
-                    &identifier,
-                    &rr.found.kind.to_kind_name(),
-                    self.text,
-                    &token,
-                );
+                let kind_name = rr.found.kind.to_kind_name();
+
+                // Closure to delay AnalyzerError constructor to actual error
+                let error =
+                    || AnalyzerError::invalid_factor(&identifier, &kind_name, self.text, &token);
+
                 match rr.found.kind {
                     SymbolKind::Function(_) | SymbolKind::ModportFunctionMember(_) => {
                         if arg.identifier_factor_opt.is_none() {
-                            self.errors.push(error);
+                            self.errors.push(error());
                         }
                     }
                     SymbolKind::SystemFunction => {
                         if arg.identifier_factor_opt.is_none() {
-                            self.errors.push(error);
+                            self.errors.push(error());
                         }
                     }
                     // instance can be used as factor in inst_declaration
@@ -114,20 +114,20 @@ impl VerylGrammarTrait for CheckExpression<'_> {
                     | SymbolKind::Namespace
                     | SymbolKind::ClockDomain
                     | SymbolKind::Test(_) => {
-                        self.errors.push(error);
+                        self.errors.push(error());
                     }
                     SymbolKind::Port(x) => {
                         if !self.in_inst_declaration {
                             match x.direction {
                                 Direction::Interface | Direction::Modport => {
                                     // modport and interface direction can be used as factor in inst_declaration
-                                    self.errors.push(error);
+                                    self.errors.push(error());
                                 }
                                 _ => {}
                             }
                         } else if self.in_input_port_default_value {
                             // port cannot be used for port default value
-                            self.errors.push(error);
+                            self.errors.push(error());
                         }
                     }
                     SymbolKind::Parameter(_)
@@ -137,16 +137,16 @@ impl VerylGrammarTrait for CheckExpression<'_> {
                         if self.in_input_port_default_value =>
                     {
                         if !is_defined_in_package(&rr.full_path) {
-                            self.errors.push(error);
+                            self.errors.push(error());
                         }
                     }
                     SymbolKind::GenericParameter(x) if self.in_input_port_default_value => {
                         if !matches!(x.bound, GenericBoundKind::Const) {
-                            self.errors.push(error);
+                            self.errors.push(error());
                         }
                     }
                     _ if self.in_input_port_default_value => {
-                        self.errors.push(error);
+                        self.errors.push(error());
                     }
                     _ => {}
                 }
