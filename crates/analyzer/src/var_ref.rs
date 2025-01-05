@@ -258,19 +258,34 @@ impl fmt::Display for VarRefPathItem {
 }
 
 #[derive(Clone, Debug)]
-pub struct VarRefPath(pub Vec<VarRefPathItem>);
+pub struct VarRefPath(Vec<VarRefPathItem>, Vec<SymbolId>);
 
 impl VarRefPath {
-    pub fn new(x: VarRefPathItem) -> Self {
-        Self(vec![x])
+    pub fn new(x: Vec<VarRefPathItem>) -> Self {
+        let mut full_path = Vec::new();
+
+        for path in &x {
+            if let VarRefPathItem::Identifier { symbol_id } = path {
+                full_path.push(*symbol_id);
+            }
+        }
+
+        Self(x, full_path)
     }
 
     pub fn push(&mut self, x: VarRefPathItem) {
+        if let VarRefPathItem::Identifier { symbol_id } = x {
+            self.1.push(symbol_id);
+        }
         self.0.push(x)
     }
 
     pub fn pop(&mut self) -> Option<VarRefPathItem> {
-        self.0.pop()
+        let poped = self.0.pop();
+        if let Some(VarRefPathItem::Identifier { .. }) = poped {
+            self.1.pop();
+        }
+        poped
     }
 
     pub fn included(&self, x: &VarRefPath) -> bool {
@@ -303,16 +318,8 @@ impl VarRefPath {
         true
     }
 
-    pub fn full_path(&self) -> Vec<SymbolId> {
-        let mut ret = Vec::new();
-
-        for path in &self.0 {
-            if let VarRefPathItem::Identifier { symbol_id } = path {
-                ret.push(*symbol_id);
-            }
-        }
-
-        ret
+    pub fn full_path(&self) -> &[SymbolId] {
+        &self.1
     }
 
     pub fn is_partial(&self) -> bool {
@@ -342,7 +349,7 @@ impl TryFrom<&Identifier> for VarRefPath {
     fn try_from(arg: &Identifier) -> Result<Self, Self::Error> {
         if let Ok(symbol) = symbol_table::resolve(arg) {
             let path_items = symbol.full_path.iter().map(VarRefPathItem::from).collect();
-            Ok(VarRefPath(path_items))
+            Ok(VarRefPath::new(path_items))
         } else {
             Err(())
         }
@@ -378,7 +385,7 @@ impl TryFrom<&HierarchicalIdentifier> for VarRefPath {
             }
         }
 
-        Ok(VarRefPath(path_items))
+        Ok(VarRefPath::new(path_items))
     }
 }
 
@@ -415,7 +422,7 @@ impl TryFrom<&ExpressionIdentifier> for VarRefPath {
             }
         }
 
-        Ok(VarRefPath(path_items))
+        Ok(VarRefPath::new(path_items))
     }
 }
 
@@ -442,7 +449,7 @@ impl TryFrom<(&ConnectTarget, &Namespace)> for VarRefPath {
                     path_items.push(VarRefPathItem::from(select));
                 }
             }
-            Ok(VarRefPath(path_items))
+            Ok(VarRefPath::new(path_items))
         } else {
             Err(())
         }

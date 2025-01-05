@@ -111,7 +111,7 @@ impl<'a> AnalyzerPass3<'a> {
             if symbol.token.source == self.path {
                 assignable_list.append(&mut traverse_assignable_symbol(
                     symbol.id,
-                    &VarRefPath::new((&symbol.id).into()),
+                    &VarRefPath::new(vec![(&symbol.id).into()]),
                 ));
             }
         }
