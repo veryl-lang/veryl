@@ -397,7 +397,7 @@ impl VerylGrammarTrait for CheckVarRef<'_> {
                             let full_path = path.full_path();
                             let symbol = symbol_table::get(*full_path.last().unwrap()).unwrap();
 
-                            if can_assign(&full_path) {
+                            if can_assign(full_path) {
                                 self.assign_position.push(AssignPositionType::Statement {
                                     token,
                                     resettable: true,
@@ -620,7 +620,7 @@ impl VerylGrammarTrait for CheckVarRef<'_> {
         if let HandlerPoint::After = self.point {
             if let Ok(path) = VarRefPath::try_from(arg.hierarchical_identifier.as_ref()) {
                 let full_path = path.full_path();
-                if can_assign(&full_path) {
+                if can_assign(full_path) {
                     self.assign_position.push(AssignPositionType::Declaration {
                         token: arg.assign.assign_token.token,
                         r#type: AssignDeclarationType::Assign,
