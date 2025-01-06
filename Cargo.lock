@@ -1975,17 +1975,18 @@ dependencies = [
 
 [[package]]
 name = "handlebars"
-version = "6.2.0"
+version = "6.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd4ccde012831f9a071a637b0d4e31df31c0f6c525784b35ae76a9ac6bc1e315"
+checksum = "3d6b224b95c1e668ac0270325ad563b2eef1469fbbb8959bc7c692c844b813d9"
 dependencies = [
+ "derive_builder",
  "log",
  "num-order",
  "pest",
  "pest_derive",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.9",
 ]
 
 [[package]]
