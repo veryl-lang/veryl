@@ -45,7 +45,7 @@ similar         = {version = "2.6.0", features = ["text", "inline"]}
 strnum_bitwidth = "0.1.2"
 tempfile        = "3.15"
 thiserror       = "2.0"
-tokio           = {version = "1.42.0", features = ["full"]}
+tokio           = {version = "1.43.0", features = ["full"]}
 toml            = "0.8.19"
 url             = {version = "2.5", features = ["serde"]}
 walkdir         = "2.5.0"
