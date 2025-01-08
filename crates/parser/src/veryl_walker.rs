@@ -2333,6 +2333,10 @@ pub trait VerylWalker {
         match arg {
             GenericBound::Const(x) => self.r#const(&x.r#const),
             GenericBound::Type(x) => self.r#type(&x.r#type),
+            GenericBound::InstScopedIdentifier(x) => {
+                self.inst(&x.inst);
+                self.scoped_identifier(&x.scoped_identifier);
+            }
             GenericBound::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
         }
         after!(self, generic_bound, arg);

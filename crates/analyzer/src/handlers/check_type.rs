@@ -2,6 +2,7 @@ use crate::analyzer_error::AnalyzerError;
 use crate::attribute::AllowItem;
 use crate::attribute::Attribute as Attr;
 use crate::attribute_table;
+use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::{GenericBoundKind, Symbol, SymbolKind, TypeKind};
 use crate::symbol_path::GenericSymbolPath;
@@ -64,6 +65,42 @@ fn is_casting_type(symbol: &Symbol) -> bool {
         ),
         _ => is_variable_type(symbol),
     }
+}
+
+fn resolve_inst_generic_arg_type(arg: &GenericSymbolPath, namespace: &Namespace) -> Option<Symbol> {
+    if !arg.is_resolvable() {
+        return None;
+    }
+
+    let arg_symbol = symbol_table::resolve((&arg.generic_path(), namespace)).ok()?;
+    let inst_symbol = if let SymbolKind::Instance(inst) = arg_symbol.found.kind {
+        symbol_table::resolve((&inst.type_name.mangled_path(), namespace)).ok()?
+    } else {
+        return None;
+    };
+
+    if let Some(ref proto) = inst_symbol.found.proto() {
+        symbol_table::resolve((proto, namespace))
+            .ok()
+            .map(|s| s.found)
+    } else {
+        Some(inst_symbol.found)
+    }
+}
+
+fn resolve_proto_generic_arg_type(
+    arg: &GenericSymbolPath,
+    namespace: &Namespace,
+) -> Option<Symbol> {
+    if !arg.is_resolvable() {
+        return None;
+    }
+
+    let arg_symbol = symbol_table::resolve((&arg.generic_path(), namespace)).ok()?;
+    let proto = arg_symbol.found.proto()?;
+    symbol_table::resolve((&proto, namespace))
+        .ok()
+        .map(|s| s.found)
 }
 
 impl VerylGrammarTrait for CheckType<'_> {
@@ -210,33 +247,37 @@ impl VerylGrammarTrait for CheckType<'_> {
                                         ));
                                     }
                                 }
-                                GenericBoundKind::Proto(proto) => {
-                                    let proto_match = if arg.is_resolvable() {
-                                        if let Ok(symbol) =
-                                            symbol_table::resolve((&arg.generic_path(), &namespace))
-                                        {
-                                            if let Some(ref x) = symbol.found.kind.proto() {
-                                                let actual = symbol_table::resolve((x, &namespace));
-                                                let required = symbol_table::resolve((
-                                                    proto,
-                                                    &defined_namespace,
-                                                ));
-                                                if let (Ok(actual), Ok(required)) =
-                                                    (actual, required)
-                                                {
-                                                    actual.found.id == required.found.id
-                                                } else {
-                                                    false
-                                                }
-                                            } else {
-                                                false
-                                            }
+                                GenericBoundKind::Inst(proto) => {
+                                    let actual = resolve_inst_generic_arg_type(arg, &namespace);
+                                    let required =
+                                        symbol_table::resolve((proto, &defined_namespace));
+                                    let proto_match =
+                                        if let (Some(actual), Ok(required)) = (actual, required) {
+                                            actual.id == required.found.id
                                         } else {
                                             false
-                                        }
-                                    } else {
-                                        false
-                                    };
+                                        };
+
+                                    if !proto_match {
+                                        self.errors.push(AnalyzerError::mismatch_type(
+                                            &symbol.found.token.to_string(),
+                                            &format!("inst {proto}"),
+                                            &symbol.found.kind.to_kind_name(),
+                                            self.text,
+                                            &arg.range,
+                                        ));
+                                    }
+                                }
+                                GenericBoundKind::Proto(proto) => {
+                                    let actual = resolve_proto_generic_arg_type(arg, &namespace);
+                                    let required =
+                                        symbol_table::resolve((proto, &defined_namespace));
+                                    let proto_match =
+                                        if let (Some(actual), Ok(required)) = (actual, required) {
+                                            actual.id == required.found.id
+                                        } else {
+                                            false
+                                        };
 
                                     if !proto_match {
                                         self.errors.push(AnalyzerError::mismatch_type(

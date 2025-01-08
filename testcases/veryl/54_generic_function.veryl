@@ -20,4 +20,16 @@ module Module54 {
     let _f: logic<12> = FuncB::<10>(1);
     let _g: logic<14> = FuncB::<10, 4>(1);
     let _h: logic<14> = FuncB::<10, 4>(1);
+
+    function FuncC::<IF: inst Interface54> () -> logic {
+        return IF.a;
+    }
+
+    inst u: Interface54;
+
+    let _i: logic = FuncC::<u>();
+}
+
+interface Interface54 {
+    var a: logic;
 }

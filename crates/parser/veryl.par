@@ -707,6 +707,7 @@ WithParameterItem: ( Param | Const ) Identifier Colon ( ArrayType | Type ) Equ E
 
 GenericBound: Const
             | Type
+            | Inst ScopedIdentifier
             | ScopedIdentifier;
 
 WithGenericParameter: ColonColonLAngle WithGenericParameterList RAngle;

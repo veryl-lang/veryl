@@ -297,6 +297,17 @@ impl Symbol {
             _ => Vec::new(),
         }
     }
+
+    pub fn proto(&self) -> Option<SymbolPath> {
+        match &self.kind {
+            SymbolKind::Module(x) => x.proto.clone(),
+            SymbolKind::GenericParameter(x) => match x.bound {
+                GenericBoundKind::Proto(ref x) => Some(x.clone()),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -413,17 +424,6 @@ impl SymbolKind {
             }
             SymbolKind::Variable(x) => x.r#type.kind.is_reset(),
             _ => false,
-        }
-    }
-
-    pub fn proto(&self) -> Option<SymbolPath> {
-        match self {
-            SymbolKind::Module(x) => x.proto.clone(),
-            SymbolKind::GenericParameter(x) => match x.bound {
-                GenericBoundKind::Proto(ref x) => Some(x.clone()),
-                _ => None,
-            },
-            _ => None,
         }
     }
 
@@ -1354,6 +1354,7 @@ pub struct ModportFunctionMemberProperty {
 pub enum GenericBoundKind {
     Const,
     Type,
+    Inst(SymbolPath),
     Proto(SymbolPath),
 }
 
@@ -1362,6 +1363,7 @@ impl fmt::Display for GenericBoundKind {
         let text = match self {
             GenericBoundKind::Const => "const".to_string(),
             GenericBoundKind::Type => "type".to_string(),
+            GenericBoundKind::Inst(x) => x.to_string(),
             GenericBoundKind::Proto(x) => x.to_string(),
         };
         text.fmt(f)

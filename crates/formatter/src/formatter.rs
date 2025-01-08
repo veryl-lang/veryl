@@ -1633,6 +1633,20 @@ impl VerylWalker for Formatter {
         }
     }
 
+    /// Semantic action for non-terminal 'GenericBound'
+    fn generic_bound(&mut self, arg: &GenericBound) {
+        match arg {
+            GenericBound::Const(x) => self.r#const(&x.r#const),
+            GenericBound::Type(x) => self.r#type(&x.r#type),
+            GenericBound::InstScopedIdentifier(x) => {
+                self.inst(&x.inst);
+                self.space(1);
+                self.scoped_identifier(&x.scoped_identifier);
+            }
+            GenericBound::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
+        }
+    }
+
     /// Semantic action for non-terminal 'WithParameterItem'
     fn with_parameter_item(&mut self, arg: &WithParameterItem) {
         self.align_start(align_kind::PARAMETER);

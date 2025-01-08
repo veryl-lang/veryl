@@ -1,6 +1,6 @@
 use crate::evaluator::Evaluated;
 use crate::namespace::Namespace;
-use crate::symbol::{DocComment, Symbol, SymbolId, SymbolKind, TypeKind};
+use crate::symbol::{DocComment, GenericBoundKind, Symbol, SymbolId, SymbolKind, TypeKind};
 use crate::symbol_path::{SymbolPath, SymbolPathNamespace};
 use crate::var_ref::{Assign, VarRef, VarRefAffiliation};
 use std::cell::RefCell;
@@ -268,9 +268,15 @@ impl SymbolTable {
                                 .generic_namespace_map
                                 .insert(symbol.token.text, found.token.text);
                         }
-                        SymbolKind::GenericParameter(_) => {
-                            context.namespace = found.inner_namespace();
-                            context.inner = true;
+                        SymbolKind::GenericParameter(ref x) => {
+                            if let GenericBoundKind::Inst(proto) = &x.bound {
+                                let symbol = self.resolve(proto, &found.namespace)?;
+                                context.namespace = symbol.found.inner_namespace();
+                                context.inner = true;
+                            } else {
+                                context.namespace = found.inner_namespace();
+                                context.inner = true;
+                            }
                         }
                         // don't trace inner item
                         SymbolKind::Function(_)
