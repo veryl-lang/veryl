@@ -84,7 +84,7 @@ module test_std_types_pkg;
         else $error("error detected"); \
         `ifndef VERILATOR \
             VARIABLE = 'x; \
-            assert(VARIABLE === '0) \
+            assert((!$isunknown(VARIABLE)) && (VARIABLE == '0)) \
             else $error("error detected"); \
         `endif \
     end
@@ -99,7 +99,7 @@ module test_std_types_pkg;
         else $error("error detected"); \
         `ifndef VERILATOR \
             VARIABLE = 'x; \
-            assert(VARIABLE === '0) \
+            assert((!$isunknown(VARIABLE)) && (VARIABLE == '0)) \
             else $error("error detected"); \
         `endif \
     end
