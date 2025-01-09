@@ -17,6 +17,7 @@ If you have any idea, please open [Issue](https://github.com/veryl-lang/veryl/is
 
 ## External resources
 
+* [Web Site](https://veryl-lang.org)
 * [Language Reference](https://doc.veryl-lang.org/book/)
     * [日本語](https://doc.veryl-lang.org/book/ja/)
 * [PlayGround](https://doc.veryl-lang.org/playground/)
