@@ -435,7 +435,7 @@ impl Lockfile {
             veryl_path::unlock_dir(lock)?;
         } else {
             let git = Git::open(&path)?;
-            let ret = git.is_clean().map_or(false, |x| x);
+            let ret = git.is_clean().is_ok_and(|x| x);
 
             // If the existing path is not git repository, cleanup and re-try
             if !ret || !toml.exists() {

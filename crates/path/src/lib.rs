@@ -81,7 +81,7 @@ pub fn lock_dir<T: AsRef<Path>>(path: T) -> Result<File, PathError> {
 
 #[cfg(not(target_family = "wasm"))]
 pub fn unlock_dir(lock: File) -> Result<(), PathError> {
-    lock.unlock()?;
+    fs4::fs_std::FileExt::unlock(&lock)?;
     Ok(())
 }
 
