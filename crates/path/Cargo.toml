@@ -11,7 +11,7 @@ description.workspace = true
 edition               = "2021"
 
 [dependencies]
-directories = "5.0"
+directories = "6.0"
 log         = {workspace = true}
 thiserror   = {workspace = true}
 walkdir     = {workspace = true}
