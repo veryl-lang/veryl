@@ -38,5 +38,18 @@ module veryl_testcase_Module54;
     always_comb _g = __FuncB__10__4(1);
     logic [14-1:0] _h;
     always_comb _h = __FuncB__10__4(1);
+
+    function automatic logic __FuncC__u() ;
+        return u.a;
+    endfunction
+
+    veryl_testcase_Interface54 u ();
+
+    logic _i;
+    always_comb _i = __FuncC__u();
 endmodule
+
+interface veryl_testcase_Interface54;
+    logic a;
+endinterface
 //# sourceMappingURL=../map/testcases/sv/54_generic_function.sv.map

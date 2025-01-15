@@ -1012,9 +1012,9 @@ fn mismatch_type() {
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
-    module ModuleB_0 {}
-    module ModuleB_1 {
-        inst u: ModuleB_0;
+    module ModuleA {}
+    module ModuleB {
+        inst u: ModuleA;
         let _b: u = 1;
     }
     "#;
@@ -1023,11 +1023,11 @@ fn mismatch_type() {
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
-    module ModuleC {
-        function FuncC() -> logic {
+    module ModuleA {
+        function FuncA() -> logic {
             return 0;
         }
-        let _c: FuncC = 1;
+        let _a: FuncA = 1;
     }
     "#;
 
@@ -1035,9 +1035,9 @@ fn mismatch_type() {
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
-    module ModuleD_0 {}
-    module ModuleD_1 {
-        let _d: ModuleD_0 = 0;
+    module ModuleA {}
+    module ModuleB {
+        let _a: ModuleA = 0;
     }
     "#;
 
@@ -1045,9 +1045,9 @@ fn mismatch_type() {
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
-    interface InterfaceE {}
-    module ModuleE {
-        let _e: InterfaceE = 0;
+    interface InterfaceA {}
+    module ModuleA {
+        let _a: InterfaceA = 0;
     }
     "#;
 
@@ -1055,9 +1055,9 @@ fn mismatch_type() {
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
-    package PackageF {}
-    module ModuleF {
-        let _f: PackageF = 0;
+    package PackageA {}
+    module ModuleA {
+        let _a: PackageA = 0;
     }
     "#;
 
@@ -1065,14 +1065,14 @@ fn mismatch_type() {
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
-    module ModuleG {
-        function FuncG::<T: type> -> T {
-            var g: T;
-            g = 0;
-            return g;
+    module ModuleA {
+        function FuncA::<T: type> -> T {
+            var a: T;
+            a = 0;
+            return a;
         }
 
-        let _g: logic = FuncG::<2>();
+        let _a: logic = FuncA::<2>();
     }
     "#;
 
@@ -1080,15 +1080,15 @@ fn mismatch_type() {
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
-    module ModuleH {
-        function FuncH::<T: type> -> T {
-            var h: T;
-            h = 0;
-            return h;
+    module ModuleA {
+        function FuncA::<T: type> -> T {
+            var a: T;
+            a = 0;
+            return a;
         }
 
         type my_logic = logic;
-        let _h: logic = FuncH::<my_logic>();
+        let _a: logic = FuncA::<my_logic>();
     }
     "#;
 
@@ -1096,10 +1096,10 @@ fn mismatch_type() {
     assert!(errors.is_empty());
 
     let code = r#"
-    interface InterfaceI {}
+    interface InterfaceA {}
 
-    module ModuleI (
-        a: modport InterfaceI,
+    module ModuleA (
+        a: modport InterfaceA,
     ) {}
     "#;
 
@@ -1107,15 +1107,15 @@ fn mismatch_type() {
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
-    module ModuleJ {
-        function FuncJ::<T: type> -> T {
-            var g: T;
-            g = 0;
-            return g;
+    module ModuleA {
+        function FuncA::<T: type> -> T {
+            var a: T;
+            a = 0;
+            return a;
         }
 
         const X: u32 = 1;
-        let _g: logic = FuncJ::<X>();
+        let _a: logic = FuncA::<X>();
     }
     "#;
 
@@ -1123,17 +1123,17 @@ fn mismatch_type() {
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
-    proto module ProtoK0;
-    proto module ProtoK1;
+    proto module ProtoA;
+    proto module ProtoB;
 
-    module ModuleK0::<T: ProtoK0> {
+    module ModuleA::<T: ProtoA> {
         inst u: T;
     }
 
-    module ModuleK1 for ProtoK1 {}
+    module ModuleB for ProtoB {}
 
-    module ModuleK2 {
-        inst u: ModuleK0::<ModuleK1>();
+    module ModuleC {
+        inst u: ModuleA::<ModuleB>();
     }
     "#;
 
@@ -1141,9 +1141,9 @@ fn mismatch_type() {
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
-    interface InterfaceL0 {}
-    interface InterfaceL1 {
-      inst u: InterfaceL0();
+    interface InterfaceA {}
+    interface InterfaceB {
+      inst u: InterfaceA();
     }
     "#;
 
@@ -1151,9 +1151,9 @@ fn mismatch_type() {
     assert!(errors.is_empty());
 
     let code = r#"
-    module ModuleM0 {}
-    interface InterfaceM1 {
-      inst u: ModuleM0();
+    module ModuleA {}
+    interface InterfaceA {
+      inst u: ModuleA();
     }
     "#;
 
@@ -1161,14 +1161,54 @@ fn mismatch_type() {
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
-    interface InterfaceN1 {
+    interface InterfaceA {
+        var a: logic;
+    }
+
+    module ModuleA {
+        function FuncA::<IF: inst InterfaceA>() -> logic {
+            return IF.a;
+        }
+
+        inst if_a: InterfaceA;
+        let _a: logic = FuncA::<if_a>();
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    interface InerfaceA {
+        var a: logic;
+    }
+
+    interface InterfaceB {
+        var b: logic;
+    }
+
+    module ModuleA {
+        function FuncA::<IF: inst InerfaceA>() -> logic {
+            return IF.a;
+        }
+
+        inst if_b: InterfaceB;
+        let _b: logic = FuncA::<if_b>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    interface InterfaceA {
         var a: logic;
         modport mp {
             a: input,
         }
     }
-    module ModuleN1 (
-        port_n1: input InterfaceN1::mp,
+    module ModuleA (
+        port_a: input InterfaceA::mp,
     ){}
     "#;
 
@@ -1176,14 +1216,14 @@ fn mismatch_type() {
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
-    interface InterfaceN2::<W: const> {
+    interface InterfaceA::<W: const> {
         var a: logic<W>;
         modport mp {
             a: input,
         }
     }
-    module ModuleN2 (
-        port_n2: input InterfaceN2::<2>::mp,
+    module ModuleA (
+        port_a: input InterfaceA::<2>::mp,
     ){}
     "#;
 
@@ -1191,11 +1231,11 @@ fn mismatch_type() {
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
-    interface InterfaceN3 {
+    interface InterfaceA {
         var a: logic;
     }
-    module ModuleN3 (
-        port_n3: input InterfaceN3,
+    module ModuleA (
+        port_a: input InterfaceA,
     ){}
     "#;
 
@@ -1203,11 +1243,11 @@ fn mismatch_type() {
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
-    interface InterfaceN4::<W: const> {
+    interface InterfaceA::<W: const> {
         var a: logic<W>;
     }
-    module ModuleN4 (
-        port_n4: input InterfaceN4::<2>,
+    module ModuleA (
+        port_a: input InterfaceA::<2>,
     ){}
     "#;
 
@@ -1215,11 +1255,11 @@ fn mismatch_type() {
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
-    interface InterfaceO1 {
+    interface InterfaceA {
         var a: logic;
     }
-    module ModuleO1 (
-        port_o1: modport InterfaceO1,
+    module ModuleA (
+        port_a: modport InterfaceA,
     ){}
     "#;
 
@@ -1227,11 +1267,11 @@ fn mismatch_type() {
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
-    interface InterfaceO2::<W: const> {
+    interface InterfaceA::<W: const> {
         var a: logic<W>;
     }
-    module ModuleO2 (
-        port_o2: modport InterfaceO2::<2>,
+    module ModuleA (
+        port_a: modport InterfaceA::<2>,
     ){}
     "#;
 
