@@ -2,8 +2,7 @@ use crate::analyzer_error::AnalyzerError;
 use crate::attribute::Attribute as Attr;
 use crate::attribute::{AllowItem, EnumEncodingItem};
 use crate::attribute_table;
-use crate::evaluator::Evaluated;
-use crate::evaluator::Evaluator;
+use crate::evaluator::{EvaluatedValue, Evaluator};
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::ClockDomain as SymClockDomain;
@@ -300,7 +299,7 @@ impl<'a> CreateSymbolTable<'a> {
     fn evaluate_enum_value(&mut self, arg: &EnumItem) -> EnumMemberValue {
         if let Some(ref x) = arg.enum_item_opt {
             let evaluated = Evaluator::new().expression(&x.expression);
-            if let Evaluated::Fixed { value, .. } = evaluated {
+            if let EvaluatedValue::Fixed(value) = evaluated.value {
                 let valid_variant = match self.enum_encoding {
                     EnumEncodingItem::OneHot => value.count_ones() == 1,
                     EnumEncodingItem::Gray => {
@@ -741,7 +740,11 @@ impl VerylGrammarTrait for CreateSymbolTable<'_> {
                     .as_ref()
                     .map(|x| x.scalar_type.as_ref().into());
                 let width = if let Some(x) = r#type.clone() {
-                    Evaluator::new().type_width(x).unwrap_or(0)
+                    if let Some(x) = Evaluator::new().type_width(x) {
+                        *x.first().unwrap_or(&0)
+                    } else {
+                        0
+                    }
                 } else {
                     calc_width(members.len() - 1).max(self.enum_member_width)
                 };

@@ -39,30 +39,34 @@ impl VerylGrammarTrait for CheckEnum<'_> {
             if let SymbolKind::Enum(r#enum) = enum_symbol.found.kind {
                 if let Some(r#type) = r#enum.r#type {
                     if let Some(width) = Evaluator::new().type_width(r#type) {
-                        let variants = r#enum.members.len();
-                        if calc_width(variants - 1) > width {
-                            let name = arg.identifier.identifier_token.to_string();
-                            self.errors.push(AnalyzerError::too_much_enum_variant(
-                                &name,
-                                variants,
-                                width,
-                                self.text,
-                                &arg.identifier.as_ref().into(),
-                            ));
-                        }
+                        if width.len() != 1 {
+                            unimplemented!();
+                        } else {
+                            let variants = r#enum.members.len();
+                            if calc_width(variants - 1) > width[0] {
+                                let name = arg.identifier.identifier_token.to_string();
+                                self.errors.push(AnalyzerError::too_much_enum_variant(
+                                    &name,
+                                    variants,
+                                    width[0],
+                                    self.text,
+                                    &arg.identifier.as_ref().into(),
+                                ));
+                            }
 
-                        for id in r#enum.members {
-                            let member_symbol = symbol_table::get(id).unwrap();
-                            if let SymbolKind::EnumMember(member) = member_symbol.kind {
-                                let member_value = member.value.value().unwrap_or(0);
-                                if calc_width(member_value) > width {
-                                    self.errors.push(AnalyzerError::too_large_enum_variant(
-                                        &member_symbol.token.to_string(),
-                                        member_value as isize,
-                                        width,
-                                        self.text,
-                                        &member_symbol.token.into(),
-                                    ));
+                            for id in r#enum.members {
+                                let member_symbol = symbol_table::get(id).unwrap();
+                                if let SymbolKind::EnumMember(member) = member_symbol.kind {
+                                    let member_value = member.value.value().unwrap_or(0);
+                                    if calc_width(member_value) > width[0] {
+                                        self.errors.push(AnalyzerError::too_large_enum_variant(
+                                            &member_symbol.token.to_string(),
+                                            member_value as isize,
+                                            width[0],
+                                            self.text,
+                                            &member_symbol.token.into(),
+                                        ));
+                                    }
                                 }
                             }
                         }

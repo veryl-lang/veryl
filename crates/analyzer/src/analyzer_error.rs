@@ -1,3 +1,4 @@
+use crate::evaluator::EvaluatedError;
 use miette::{self, Diagnostic, NamedSource, SourceSpan};
 use thiserror::Error;
 use veryl_parser::veryl_token::TokenRange;
@@ -1754,6 +1755,23 @@ impl AnalyzerError {
             valid_separator: valid_separator.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
+        }
+    }
+
+    pub fn evaluated_error(source: &str, error: &EvaluatedError) -> Self {
+        match error {
+            EvaluatedError::InvalidFactor { kind, token } => AnalyzerError::InvalidFactor {
+                identifier: token.to_string(),
+                kind: kind.clone(),
+                input: AnalyzerError::named_source(source, &token.into()),
+                error_location: token.into(),
+            },
+            EvaluatedError::CallNonFunction { kind, token } => AnalyzerError::CallNonFunction {
+                identifier: token.to_string(),
+                kind: kind.clone(),
+                input: AnalyzerError::named_source(source, &token.into()),
+                error_location: token.into(),
+            },
         }
     }
 }

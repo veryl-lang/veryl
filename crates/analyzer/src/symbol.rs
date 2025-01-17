@@ -1,9 +1,11 @@
 use crate::attribute::EnumEncodingItem;
-use crate::evaluator::{Evaluated, Evaluator};
+use crate::evaluator::{
+    Evaluated, EvaluatedError, EvaluatedTypeClockKind, EvaluatedTypeResetKind, Evaluator,
+};
 use crate::namespace::Namespace;
 use crate::symbol_path::{GenericSymbolPath, SymbolPath};
 use crate::symbol_table;
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
 use veryl_parser::resource_table::{PathId, StrId};
@@ -68,7 +70,7 @@ pub struct Symbol {
     pub references: Vec<Token>,
     pub generic_instances: Vec<SymbolId>,
     pub imported: Vec<Namespace>,
-    pub evaluated: Cell<Option<Evaluated>>,
+    pub evaluated: RefCell<Option<Evaluated>>,
     pub allow_unused: bool,
     pub public: bool,
     pub doc_comment: DocComment,
@@ -90,7 +92,7 @@ impl Symbol {
             references: Vec::new(),
             generic_instances: Vec::new(),
             imported: Vec::new(),
-            evaluated: Cell::new(None),
+            evaluated: RefCell::new(None),
             allow_unused: false,
             public,
             doc_comment,
@@ -112,66 +114,115 @@ impl Symbol {
     }
 
     pub fn evaluate(&self) -> Evaluated {
-        if let Some(evaluated) = self.evaluated.get() {
-            evaluated
+        if self.evaluated.borrow().is_some() {
+            self.evaluated.borrow().clone().unwrap()
         } else {
             let evaluated = match &self.kind {
                 SymbolKind::Variable(x) => {
                     let mut evaluator = Evaluator::new();
-                    if x.r#type.kind.is_clock() | x.r#type.kind.is_reset() {
-                        match x.r#type.kind {
-                            TypeKind::Clock => Evaluated::Clock,
-                            TypeKind::ClockPosedge => Evaluated::ClockPosedge,
-                            TypeKind::ClockNegedge => Evaluated::ClockNegedge,
-                            TypeKind::Reset => Evaluated::Reset,
-                            TypeKind::ResetAsyncHigh => Evaluated::ResetAsyncHigh,
-                            TypeKind::ResetAsyncLow => Evaluated::ResetAsyncLow,
-                            TypeKind::ResetSyncHigh => Evaluated::ResetSyncHigh,
-                            TypeKind::ResetSyncLow => Evaluated::ResetSyncLow,
-                            _ => unreachable!(),
-                        }
-                    } else if let Some(width) = evaluator.type_width(x.r#type.clone()) {
-                        if x.loop_variable {
-                            Evaluated::UnknownStatic
+                    let width = evaluator.type_width(x.r#type.clone());
+                    let array = evaluator.type_width(x.r#type.clone());
+
+                    if let (Some(width), Some(array)) = (width, array) {
+                        if x.r#type.kind.is_clock() {
+                            let kind = match x.r#type.kind {
+                                TypeKind::Clock => EvaluatedTypeClockKind::Implicit,
+                                TypeKind::ClockPosedge => EvaluatedTypeClockKind::Posedge,
+                                TypeKind::ClockNegedge => EvaluatedTypeClockKind::Negedge,
+                                _ => unreachable!(),
+                            };
+                            Evaluated::create_clock(kind, width, array)
+                        } else if x.r#type.kind.is_reset() {
+                            let kind = match x.r#type.kind {
+                                TypeKind::Reset => EvaluatedTypeResetKind::Implicit,
+                                TypeKind::ResetAsyncHigh => EvaluatedTypeResetKind::AsyncHigh,
+                                TypeKind::ResetAsyncLow => EvaluatedTypeResetKind::AsyncLow,
+                                TypeKind::ResetSyncHigh => EvaluatedTypeResetKind::SyncHigh,
+                                TypeKind::ResetSyncLow => EvaluatedTypeResetKind::SyncLow,
+                                _ => unreachable!(),
+                            };
+                            Evaluated::create_reset(kind, width, array)
+                        } else if x.loop_variable {
+                            Evaluated::create_unknown_static()
                         } else {
-                            Evaluated::Variable { width }
+                            let signed = x.r#type.modifier.contains(&TypeModifier::Signed);
+                            Evaluated::create_variable(signed, width, array)
                         }
                     } else {
-                        Evaluated::Unknown
+                        Evaluated::create_unknown()
                     }
                 }
                 SymbolKind::Port(x) => {
                     if let Some(x) = &x.r#type {
-                        match x.kind {
-                            TypeKind::Clock => Evaluated::Clock,
-                            TypeKind::ClockPosedge => Evaluated::ClockPosedge,
-                            TypeKind::ClockNegedge => Evaluated::ClockNegedge,
-                            TypeKind::Reset => Evaluated::Reset,
-                            TypeKind::ResetAsyncHigh => Evaluated::ResetAsyncHigh,
-                            TypeKind::ResetAsyncLow => Evaluated::ResetAsyncLow,
-                            TypeKind::ResetSyncHigh => Evaluated::ResetSyncHigh,
-                            TypeKind::ResetSyncLow => Evaluated::ResetSyncLow,
-                            _ => Evaluated::Unknown,
+                        let mut evaluator = Evaluator::new();
+                        let width = evaluator.type_width(x.clone());
+                        let array = evaluator.type_width(x.clone());
+
+                        if let (Some(width), Some(array)) = (width, array) {
+                            if x.kind.is_clock() {
+                                let kind = match x.kind {
+                                    TypeKind::Clock => EvaluatedTypeClockKind::Implicit,
+                                    TypeKind::ClockPosedge => EvaluatedTypeClockKind::Posedge,
+                                    TypeKind::ClockNegedge => EvaluatedTypeClockKind::Negedge,
+                                    _ => unreachable!(),
+                                };
+                                Evaluated::create_clock(kind, width, array)
+                            } else if x.kind.is_reset() {
+                                let kind = match x.kind {
+                                    TypeKind::Reset => EvaluatedTypeResetKind::Implicit,
+                                    TypeKind::ResetAsyncHigh => EvaluatedTypeResetKind::AsyncHigh,
+                                    TypeKind::ResetAsyncLow => EvaluatedTypeResetKind::AsyncLow,
+                                    TypeKind::ResetSyncHigh => EvaluatedTypeResetKind::SyncHigh,
+                                    TypeKind::ResetSyncLow => EvaluatedTypeResetKind::SyncLow,
+                                    _ => unreachable!(),
+                                };
+                                Evaluated::create_reset(kind, width, array)
+                            } else {
+                                let signed = x.modifier.contains(&TypeModifier::Signed);
+                                Evaluated::create_variable(signed, width, array)
+                            }
+                        } else {
+                            Evaluated::create_unknown()
                         }
                     } else {
-                        Evaluated::Unknown
+                        Evaluated::create_unknown()
                     }
                 }
                 SymbolKind::Parameter(x) => {
                     let mut evaluator = Evaluator::new();
                     if let Some(width) = evaluator.type_width(x.r#type.clone()) {
-                        evaluator.context_width.push(width);
+                        evaluator.context_width = width;
                     }
                     evaluator.expression(&x.value)
                 }
                 SymbolKind::EnumMember(_) => {
                     // TODO: Actually Evaluate its Width
-                    Evaluated::UnknownStatic
+                    Evaluated::create_unknown_static()
                 }
-                SymbolKind::Genvar => Evaluated::UnknownStatic,
-                _ => Evaluated::Unknown,
+                SymbolKind::Genvar => Evaluated::create_unknown_static(),
+                SymbolKind::Module(_)
+                | SymbolKind::ProtoModule(_)
+                | SymbolKind::Interface(_)
+                | SymbolKind::Function(_)
+                | SymbolKind::Block
+                | SymbolKind::Package(_)
+                | SymbolKind::Modport(_)
+                | SymbolKind::ModportFunctionMember(_)
+                | SymbolKind::Namespace
+                | SymbolKind::SystemFunction
+                | SymbolKind::GenericInstance(_)
+                | SymbolKind::ClockDomain
+                | SymbolKind::Test(_) => {
+                    let mut ret = Evaluated::create_unknown();
+                    ret.errors.push(EvaluatedError::InvalidFactor {
+                        kind: self.kind.to_kind_name(),
+                        token: self.token,
+                    });
+                    ret
+                }
+                _ => Evaluated::create_unknown(),
             };
-            self.evaluated.replace(Some(evaluated));
+            self.evaluated.replace(Some(evaluated.clone()));
             evaluated
         }
     }
@@ -423,6 +474,26 @@ impl SymbolKind {
                 }
             }
             SymbolKind::Variable(x) => x.r#type.kind.is_reset(),
+            _ => false,
+        }
+    }
+
+    pub fn is_function(&self) -> bool {
+        match self {
+            SymbolKind::Function(_)
+            | SymbolKind::SystemVerilog
+            | SymbolKind::ModportFunctionMember(..)
+            | SymbolKind::SystemFunction => true,
+            SymbolKind::GenericInstance(x) => {
+                let base = symbol_table::get(x.base).unwrap();
+                matches!(
+                    base.kind,
+                    SymbolKind::Function(_)
+                        | SymbolKind::SystemVerilog
+                        | SymbolKind::ModportFunctionMember(..)
+                        | SymbolKind::SystemFunction
+                )
+            }
             _ => false,
         }
     }

@@ -109,6 +109,16 @@ impl From<&syntax_tree::ExpressionIdentifier> for SymbolPath {
     }
 }
 
+impl From<&str> for SymbolPath {
+    fn from(value: &str) -> Self {
+        let mut path = Vec::new();
+        for x in value.split("::") {
+            path.push(x.into());
+        }
+        SymbolPath(path)
+    }
+}
+
 #[derive(Clone, Default, Debug, PartialEq, Eq)]
 pub struct SymbolPathNamespace(pub SymbolPath, pub Namespace);
 

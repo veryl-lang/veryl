@@ -1,4 +1,4 @@
-use crate::evaluator::Evaluated;
+use crate::evaluator::EvaluatedValue;
 use crate::namespace::Namespace;
 use crate::symbol::{DocComment, GenericBoundKind, Symbol, SymbolId, SymbolKind, TypeKind};
 use crate::symbol_path::{SymbolPath, SymbolPathNamespace};
@@ -537,9 +537,9 @@ impl fmt::Display for SymbolTable {
         for (k, v) in &vec {
             for id in *v {
                 let symbol = self.symbol_table.get(id).unwrap();
-                let evaluated = if let Some(evaluated) = symbol.evaluated.get() {
-                    match evaluated {
-                        Evaluated::Unknown => "".to_string(),
+                let evaluated = if let Some(evaluated) = symbol.evaluated.borrow().as_ref() {
+                    match evaluated.value {
+                        EvaluatedValue::Unknown => "".to_string(),
                         _ => format!(" ( {evaluated:?} )"),
                     }
                 } else {

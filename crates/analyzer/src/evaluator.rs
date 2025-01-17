@@ -1,168 +1,526 @@
-use crate::symbol::{Type, TypeKind};
+use crate::symbol::{SymbolId, Type, TypeKind};
 use crate::symbol_table::{self, ResolveError, ResolveResult};
 use veryl_parser::veryl_grammar_trait::*;
+use veryl_parser::veryl_token::Token;
 
-#[derive(Clone, Copy, Debug)]
-pub enum Evaluated {
-    Fixed { width: usize, value: isize },
-    Variable { width: usize },
-    Clock,
-    ClockPosedge,
-    ClockNegedge,
-    Reset,
-    ResetAsyncHigh,
-    ResetAsyncLow,
-    ResetSyncHigh,
-    ResetSyncLow,
+#[derive(Clone, Debug)]
+pub struct Evaluated {
+    pub value: EvaluatedValue,
+    pub r#type: EvaluatedType,
+    pub errors: Vec<EvaluatedError>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EvaluatedValue {
+    Fixed(isize),
+    FixedArray(Vec<isize>),
     Unknown,
-    UnknownStatic, // A temporary enum value to indicate that a value is knowable statically,
-                   // even if, currently, the compiler doesn't know what its value is
+    UnknownStatic,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EvaluatedType {
+    Clock(EvaluatedTypeClock),
+    Reset(EvaluatedTypeReset),
+    Bit(EvaluatedTypeBit),
+    Logic(EvaluatedTypeLogic),
+    UserDefined(EvaluatedTypeUserDefined),
+    Unknown,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EvaluatedTypeClock {
+    pub kind: EvaluatedTypeClockKind,
+    pub width: Vec<usize>,
+    pub array: Vec<usize>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EvaluatedTypeClockKind {
+    Implicit,
+    Posedge,
+    Negedge,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EvaluatedTypeReset {
+    pub kind: EvaluatedTypeResetKind,
+    pub width: Vec<usize>,
+    pub array: Vec<usize>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EvaluatedTypeResetKind {
+    Implicit,
+    AsyncHigh,
+    AsyncLow,
+    SyncHigh,
+    SyncLow,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EvaluatedTypeBit {
+    pub signed: bool,
+    pub width: Vec<usize>,
+    pub array: Vec<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EvaluatedTypeLogic {
+    pub signed: bool,
+    pub width: Vec<usize>,
+    pub array: Vec<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EvaluatedTypeUserDefined {
+    pub symbol: SymbolId,
+    pub width: Vec<usize>,
+    pub array: Vec<usize>,
+}
+
+#[derive(Clone, Debug)]
+pub enum EvaluatedError {
+    InvalidFactor { kind: String, token: Token },
+    CallNonFunction { kind: String, token: Token },
+}
+
+fn reduction<T: Fn(isize, isize) -> isize>(
+    value: isize,
+    width: Option<usize>,
+    func: T,
+) -> Option<isize> {
+    if let Some(width) = width {
+        let mut tmp = value;
+        let mut ret = tmp & 1;
+        for _ in 1..width {
+            tmp >>= 1;
+            ret = func(ret, tmp & 1);
+        }
+        Some(ret)
+    } else {
+        None
+    }
 }
 
 impl Evaluated {
-    fn is_known_static(&self) -> bool {
-        matches!(self, Evaluated::Fixed { .. } | Evaluated::UnknownStatic)
+    pub fn is_known_static(&self) -> bool {
+        matches!(
+            self.value,
+            EvaluatedValue::Fixed(_)
+                | EvaluatedValue::FixedArray(_)
+                | EvaluatedValue::UnknownStatic
+        )
     }
 
     pub fn is_clock(&self) -> bool {
-        matches!(
-            self,
-            Evaluated::Clock | Evaluated::ClockPosedge | Evaluated::ClockNegedge
-        )
+        matches!(self.r#type, EvaluatedType::Clock(_))
     }
 
     pub fn is_reset(&self) -> bool {
-        matches!(
-            self,
-            Evaluated::Reset
-                | Evaluated::ResetAsyncHigh
-                | Evaluated::ResetAsyncLow
-                | Evaluated::ResetSyncHigh
-                | Evaluated::ResetSyncLow
-        )
+        matches!(self.r#type, EvaluatedType::Reset(_))
     }
 
-    fn binary_op<T: Fn(usize, usize) -> usize, U: Fn(isize, isize) -> Option<isize>>(
-        left: Evaluated,
-        right: Evaluated,
-        width: T,
-        value: U,
-    ) -> Evaluated {
-        if let (
-            Evaluated::Fixed {
-                width: width0,
-                value: value0,
-            },
-            Evaluated::Fixed {
-                width: width1,
-                value: value1,
-            },
-        ) = (left, right)
-        {
-            let value = value(value0, value1);
-            if let Some(value) = value {
-                Evaluated::Fixed {
-                    width: width(width0, width1),
-                    value,
-                }
+    pub fn get_value(&self) -> Option<isize> {
+        if let EvaluatedValue::Fixed(x) = self.value {
+            Some(x)
+        } else {
+            None
+        }
+    }
+
+    pub fn get_width(&self) -> Vec<usize> {
+        match &self.r#type {
+            EvaluatedType::Clock(x) => x.width.clone(),
+            EvaluatedType::Reset(x) => x.width.clone(),
+            EvaluatedType::Bit(x) => x.width.clone(),
+            EvaluatedType::Logic(x) => x.width.clone(),
+            EvaluatedType::UserDefined(x) => x.width.clone(),
+            EvaluatedType::Unknown => Vec::new(),
+        }
+    }
+
+    pub fn get_array(&self) -> Vec<usize> {
+        match &self.r#type {
+            EvaluatedType::Clock(x) => x.array.clone(),
+            EvaluatedType::Reset(x) => x.array.clone(),
+            EvaluatedType::Bit(x) => x.array.clone(),
+            EvaluatedType::Logic(x) => x.array.clone(),
+            EvaluatedType::UserDefined(x) => x.array.clone(),
+            EvaluatedType::Unknown => Vec::new(),
+        }
+    }
+
+    pub fn get_total_width(&self) -> Option<usize> {
+        let width = match &self.r#type {
+            EvaluatedType::Clock(x) => Some(&x.width),
+            EvaluatedType::Reset(x) => Some(&x.width),
+            EvaluatedType::Bit(x) => Some(&x.width),
+            EvaluatedType::Logic(x) => Some(&x.width),
+            // TODO calc width of user defined type
+            EvaluatedType::UserDefined(_) => None,
+            EvaluatedType::Unknown => None,
+        };
+        if let Some(width) = width {
+            if width.is_empty() {
+                None
             } else {
-                Evaluated::Variable {
-                    width: width(width0, width1),
-                }
-            }
-        } else if let (
-            Evaluated::Fixed { width: width0, .. },
-            Evaluated::Variable { width: width1 },
-        ) = (left, right)
-        {
-            Evaluated::Variable {
-                width: width(width0, width1),
-            }
-        } else if let (
-            Evaluated::Variable { width: width0 },
-            Evaluated::Fixed { width: width1, .. },
-        ) = (left, right)
-        {
-            Evaluated::Variable {
-                width: width(width0, width1),
-            }
-        } else if let (
-            Evaluated::Variable { width: width0 },
-            Evaluated::Variable { width: width1 },
-        ) = (left, right)
-        {
-            Evaluated::Variable {
-                width: width(width0, width1),
+                Some(width.iter().product())
             }
         } else {
-            Evaluated::Unknown
+            None
         }
+    }
+
+    pub fn set_value(&mut self, value: isize) {
+        if let EvaluatedValue::Fixed(x) = &mut self.value {
+            *x = value;
+        }
+    }
+
+    pub fn set_width(&mut self, width: Vec<usize>) {
+        match &mut self.r#type {
+            EvaluatedType::Clock(x) => x.width = width,
+            EvaluatedType::Reset(x) => x.width = width,
+            EvaluatedType::Bit(x) => x.width = width,
+            EvaluatedType::Logic(x) => x.width = width,
+            EvaluatedType::UserDefined(x) => x.width = width,
+            EvaluatedType::Unknown => (),
+        }
+    }
+
+    pub fn set_array(&mut self, array: Vec<usize>) {
+        match &mut self.r#type {
+            EvaluatedType::Clock(x) => x.array = array,
+            EvaluatedType::Reset(x) => x.array = array,
+            EvaluatedType::Bit(x) => x.array = array,
+            EvaluatedType::Logic(x) => x.array = array,
+            EvaluatedType::UserDefined(x) => x.array = array,
+            EvaluatedType::Unknown => (),
+        }
+    }
+
+    pub fn get_clock_kind(&self) -> Option<EvaluatedTypeClockKind> {
+        match &self.r#type {
+            EvaluatedType::Clock(x) => Some(x.kind),
+            _ => None,
+        }
+    }
+
+    pub fn get_reset_kind(&self) -> Option<EvaluatedTypeResetKind> {
+        match &self.r#type {
+            EvaluatedType::Reset(x) => Some(x.kind),
+            _ => None,
+        }
+    }
+
+    pub fn create_unknown() -> Evaluated {
+        Evaluated {
+            value: EvaluatedValue::Unknown,
+            r#type: EvaluatedType::Unknown,
+            errors: vec![],
+        }
+    }
+
+    pub fn set_unknown(&mut self) {
+        self.value = EvaluatedValue::Unknown;
+        self.r#type = EvaluatedType::Unknown;
+    }
+
+    pub fn create_unknown_static() -> Evaluated {
+        let mut ret = Self::create_unknown();
+        ret.set_unknown_static();
+        ret
+    }
+
+    pub fn set_unknown_static(&mut self) {
+        self.value = EvaluatedValue::UnknownStatic;
+        self.r#type = EvaluatedType::Unknown;
+    }
+
+    pub fn create_fixed(
+        value: isize,
+        signed: bool,
+        width: Vec<usize>,
+        array: Vec<usize>,
+    ) -> Evaluated {
+        let mut ret = Self::create_unknown();
+        ret.set_fixed(value, signed, width, array);
+        ret
+    }
+
+    pub fn set_fixed(&mut self, value: isize, signed: bool, width: Vec<usize>, array: Vec<usize>) {
+        self.value = EvaluatedValue::Fixed(value);
+        self.r#type = EvaluatedType::Bit(EvaluatedTypeBit {
+            signed,
+            width,
+            array,
+        });
+    }
+
+    pub fn create_variable(signed: bool, width: Vec<usize>, array: Vec<usize>) -> Evaluated {
+        let mut ret = Self::create_unknown();
+        ret.set_variable(signed, width, array);
+        ret
+    }
+
+    pub fn set_variable(&mut self, signed: bool, width: Vec<usize>, array: Vec<usize>) {
+        self.value = EvaluatedValue::Unknown;
+        self.r#type = EvaluatedType::Logic(EvaluatedTypeLogic {
+            signed,
+            width,
+            array,
+        });
+    }
+
+    pub fn create_clock(
+        kind: EvaluatedTypeClockKind,
+        width: Vec<usize>,
+        array: Vec<usize>,
+    ) -> Evaluated {
+        let mut ret = Self::create_unknown();
+        ret.set_clock(kind, width, array);
+        ret
+    }
+
+    pub fn set_clock(
+        &mut self,
+        kind: EvaluatedTypeClockKind,
+        width: Vec<usize>,
+        array: Vec<usize>,
+    ) {
+        self.value = EvaluatedValue::Unknown;
+        self.r#type = EvaluatedType::Clock(EvaluatedTypeClock { kind, width, array });
+    }
+
+    pub fn create_reset(
+        kind: EvaluatedTypeResetKind,
+        width: Vec<usize>,
+        array: Vec<usize>,
+    ) -> Evaluated {
+        let mut ret = Self::create_unknown();
+        ret.set_reset(kind, width, array);
+        ret
+    }
+
+    pub fn set_reset(
+        &mut self,
+        kind: EvaluatedTypeResetKind,
+        width: Vec<usize>,
+        array: Vec<usize>,
+    ) {
+        self.value = EvaluatedValue::Unknown;
+        self.r#type = EvaluatedType::Reset(EvaluatedTypeReset { kind, width, array });
+    }
+
+    pub fn select(mut self, mut beg: Evaluated, mut end: Evaluated) -> Evaluated {
+        let value = self.get_value();
+        let width = self.get_width();
+        let array = self.get_array();
+        if let (Some(beg), Some(end)) = (beg.get_value(), end.get_value()) {
+            if let Some(x) = array.first() {
+                if *x == 1 {
+                    // select width
+
+                    let select_width = width.first().unwrap_or(&0);
+                    let mut rest = width[1..].to_vec();
+                    dbg!(select_width);
+                    if end > beg {
+                        // TODO index error
+                        self.set_unknown();
+                    } else if beg >= *select_width as isize {
+                        // TODO out of range error
+                        self.set_unknown();
+                    } else {
+                        let part_size: usize = if rest.is_empty() {
+                            1
+                        } else {
+                            rest.iter().product()
+                        };
+
+                        let end_bit = end * part_size as isize;
+                        let beg_bit = beg * part_size as isize;
+
+                        if let Some(value) = value {
+                            let mask = !(1 << (beg_bit - end_bit + 1));
+                            let new_value = (value >> end_bit) & mask;
+                            self.set_value(new_value);
+                        }
+
+                        let new_width = if beg == end {
+                            if rest.is_empty() {
+                                vec![1]
+                            } else {
+                                rest
+                            }
+                        } else {
+                            let mut new_width = vec![(beg - end + 1) as usize];
+                            new_width.append(&mut rest);
+                            new_width
+                        };
+
+                        self.set_width(new_width);
+                    }
+                } else {
+                    // select array
+
+                    let select_array = array.first().unwrap_or(&0);
+                    let _rest: Vec<_> = array[1..].iter().collect();
+                    if beg > end {
+                        // TODO index error
+                        self.set_unknown();
+                    } else if end >= *select_array as isize {
+                        // TODO out of range error
+                        self.set_unknown();
+                    } else {
+                        self.set_unknown();
+                    }
+                }
+            } else {
+                self.set_unknown();
+            }
+        } else {
+            self.set_unknown();
+        }
+
+        self.errors.append(&mut beg.errors);
+        self.errors.append(&mut end.errors);
+        self
+    }
+
+    fn binary_op<
+        T: Fn(usize, usize, Option<&usize>) -> usize,
+        U: Fn(isize, isize) -> Option<isize>,
+    >(
+        mut left: Evaluated,
+        mut right: Evaluated,
+        context_width: Option<&usize>,
+        calc_width: T,
+        calc_value: U,
+    ) -> Evaluated {
+        // TODO array error
+
+        let mut ret = match (
+            left.get_value(),
+            right.get_value(),
+            left.get_total_width(),
+            right.get_total_width(),
+        ) {
+            (Some(value0), Some(value1), Some(width0), Some(width1)) => {
+                let value = calc_value(value0, value1);
+                let width = calc_width(width0, width1, context_width);
+                if let Some(value) = value {
+                    Evaluated::create_fixed(value, false, vec![width], vec![1])
+                } else {
+                    Evaluated::create_variable(false, vec![width], vec![1])
+                }
+            }
+            (_, _, Some(width0), Some(width1)) => {
+                let width = calc_width(width0, width1, context_width);
+                Evaluated::create_variable(false, vec![width], vec![1])
+            }
+            _ => Evaluated::create_unknown(),
+        };
+
+        ret.errors.append(&mut left.errors);
+        ret.errors.append(&mut right.errors);
+        ret
     }
 
     fn unary_op<T: Fn(usize) -> usize, U: Fn(isize) -> Option<isize>>(
-        left: Evaluated,
-        width: T,
-        value: U,
+        mut left: Evaluated,
+        calc_width: T,
+        calc_value: U,
     ) -> Evaluated {
-        if let Evaluated::Fixed {
-            width: width0,
-            value: value0,
-        } = left
-        {
-            let value = value(value0);
-            if let Some(value) = value {
-                Evaluated::Fixed {
-                    width: width(width0),
-                    value,
-                }
-            } else {
-                Evaluated::Variable {
-                    width: width(width0),
+        // TODO array error
+
+        let mut ret = match (left.get_value(), left.get_total_width()) {
+            (Some(value0), Some(width0)) => {
+                let value = calc_value(value0);
+                let width = calc_width(width0);
+                if let Some(value) = value {
+                    Evaluated::create_fixed(value, false, vec![width], vec![1])
+                } else {
+                    Evaluated::create_variable(false, vec![width], vec![1])
                 }
             }
-        } else if let Evaluated::Variable { width: width0 } = left {
-            Evaluated::Variable {
-                width: width(width0),
+            (_, Some(width0)) => {
+                let width = calc_width(width0);
+                Evaluated::create_variable(false, vec![width], vec![1])
             }
-        } else {
-            Evaluated::Unknown
-        }
+            _ => Evaluated::create_unknown(),
+        };
+
+        ret.errors.append(&mut left.errors);
+        ret
     }
 
-    fn pow(self, exp: Evaluated) -> Evaluated {
+    fn pow(self, exp: Evaluated, context_width: Option<&usize>) -> Evaluated {
         Self::binary_op(
             self,
             exp,
-            |x, _| x,
+            context_width,
+            |x, y, z| x.max(y).max(*z.unwrap_or(&0)),
             |x, y| y.try_into().map(|y| x.checked_pow(y)).ok().flatten(),
         )
     }
 
-    fn div(self, exp: Evaluated) -> Evaluated {
-        Self::binary_op(self, exp, |x, y| x.max(y), |x, y| x.checked_div(y))
-    }
-
-    fn rem(self, exp: Evaluated) -> Evaluated {
-        Self::binary_op(self, exp, |x, y| x.max(y), |x, y| x.checked_rem(y))
-    }
-
-    fn mul(self, exp: Evaluated) -> Evaluated {
-        Self::binary_op(self, exp, |x, y| x.max(y), |x, y| x.checked_mul(y))
-    }
-
-    fn add(self, exp: Evaluated) -> Evaluated {
-        Self::binary_op(self, exp, |x, y| x.max(y), |x, y| x.checked_add(y))
-    }
-
-    fn sub(self, exp: Evaluated) -> Evaluated {
-        Self::binary_op(self, exp, |x, y| x.max(y), |x, y| x.checked_sub(y))
-    }
-
-    fn unsigned_shl(self, exp: Evaluated) -> Evaluated {
+    fn div(self, exp: Evaluated, context_width: Option<&usize>) -> Evaluated {
         Self::binary_op(
             self,
             exp,
-            |x, _| x,
+            context_width,
+            |x, y, z| x.max(y).max(*z.unwrap_or(&0)),
+            |x, y| x.checked_div(y),
+        )
+    }
+
+    fn rem(self, exp: Evaluated, context_width: Option<&usize>) -> Evaluated {
+        Self::binary_op(
+            self,
+            exp,
+            context_width,
+            |x, y, z| x.max(y).max(*z.unwrap_or(&0)),
+            |x, y| x.checked_rem(y),
+        )
+    }
+
+    fn mul(self, exp: Evaluated, context_width: Option<&usize>) -> Evaluated {
+        Self::binary_op(
+            self,
+            exp,
+            context_width,
+            |x, y, z| x.max(y).max(*z.unwrap_or(&0)),
+            |x, y| x.checked_mul(y),
+        )
+    }
+
+    fn add(self, exp: Evaluated, context_width: Option<&usize>) -> Evaluated {
+        Self::binary_op(
+            self,
+            exp,
+            context_width,
+            |x, y, z| x.max(y).max(*z.unwrap_or(&0)),
+            |x, y| x.checked_add(y),
+        )
+    }
+
+    fn sub(self, exp: Evaluated, context_width: Option<&usize>) -> Evaluated {
+        Self::binary_op(
+            self,
+            exp,
+            context_width,
+            |x, y, z| x.max(y).max(*z.unwrap_or(&0)),
+            |x, y| x.checked_sub(y),
+        )
+    }
+
+    fn unsigned_shl(self, exp: Evaluated, context_width: Option<&usize>) -> Evaluated {
+        Self::binary_op(
+            self,
+            exp,
+            context_width,
+            |x, _, z| x.max(*z.unwrap_or(&0)),
             |x, y| {
                 y.try_into()
                     .map(|y| (x as usize).checked_shl(y).map(|x| x as isize))
@@ -172,11 +530,12 @@ impl Evaluated {
         )
     }
 
-    fn unsigned_shr(self, exp: Evaluated) -> Evaluated {
+    fn unsigned_shr(self, exp: Evaluated, context_width: Option<&usize>) -> Evaluated {
         Self::binary_op(
             self,
             exp,
-            |x, _| x,
+            context_width,
+            |x, _, z| x.max(*z.unwrap_or(&0)),
             |x, y| {
                 y.try_into()
                     .map(|y| (x as usize).checked_shr(y).map(|x| x as isize))
@@ -186,53 +545,92 @@ impl Evaluated {
         )
     }
 
-    fn signed_shl(self, exp: Evaluated) -> Evaluated {
+    fn signed_shl(self, exp: Evaluated, context_width: Option<&usize>) -> Evaluated {
         Self::binary_op(
             self,
             exp,
-            |x, _| x,
+            context_width,
+            |x, _, z| x.max(*z.unwrap_or(&0)),
             |x, y| y.try_into().map(|y| x.checked_shl(y)).ok().flatten(),
         )
     }
 
-    fn signed_shr(self, exp: Evaluated) -> Evaluated {
+    fn signed_shr(self, exp: Evaluated, context_width: Option<&usize>) -> Evaluated {
         Self::binary_op(
             self,
             exp,
-            |x, _| x,
+            context_width,
+            |x, _, z| x.max(*z.unwrap_or(&0)),
             |x, y| y.try_into().map(|y| x.checked_shr(y)).ok().flatten(),
         )
     }
 
     fn le(self, exp: Evaluated) -> Evaluated {
-        Self::binary_op(self, exp, |_, _| 1, |x, y| Some(x.cmp(&y).is_le() as isize))
+        Self::binary_op(
+            self,
+            exp,
+            None,
+            |_, _, _| 1,
+            |x, y| Some(x.cmp(&y).is_le() as isize),
+        )
     }
 
     fn ge(self, exp: Evaluated) -> Evaluated {
-        Self::binary_op(self, exp, |_, _| 1, |x, y| Some(x.cmp(&y).is_ge() as isize))
+        Self::binary_op(
+            self,
+            exp,
+            None,
+            |_, _, _| 1,
+            |x, y| Some(x.cmp(&y).is_ge() as isize),
+        )
     }
 
     fn lt(self, exp: Evaluated) -> Evaluated {
-        Self::binary_op(self, exp, |_, _| 1, |x, y| Some(x.cmp(&y).is_lt() as isize))
+        Self::binary_op(
+            self,
+            exp,
+            None,
+            |_, _, _| 1,
+            |x, y| Some(x.cmp(&y).is_lt() as isize),
+        )
     }
 
     fn gt(self, exp: Evaluated) -> Evaluated {
-        Self::binary_op(self, exp, |_, _| 1, |x, y| Some(x.cmp(&y).is_gt() as isize))
+        Self::binary_op(
+            self,
+            exp,
+            None,
+            |_, _, _| 1,
+            |x, y| Some(x.cmp(&y).is_gt() as isize),
+        )
     }
 
     fn eq(self, exp: Evaluated) -> Evaluated {
-        Self::binary_op(self, exp, |_, _| 1, |x, y| Some(x.cmp(&y).is_eq() as isize))
+        Self::binary_op(
+            self,
+            exp,
+            None,
+            |_, _, _| 1,
+            |x, y| Some(x.cmp(&y).is_eq() as isize),
+        )
     }
 
     fn ne(self, exp: Evaluated) -> Evaluated {
-        Self::binary_op(self, exp, |_, _| 1, |x, y| Some(x.cmp(&y).is_ne() as isize))
+        Self::binary_op(
+            self,
+            exp,
+            None,
+            |_, _, _| 1,
+            |x, y| Some(x.cmp(&y).is_ne() as isize),
+        )
     }
 
     fn andand(self, exp: Evaluated) -> Evaluated {
         Self::binary_op(
             self,
             exp,
-            |_, _| 1,
+            None,
+            |_, _, _| 1,
             |x, y| Some((x != 0 && y != 0) as isize),
         )
     }
@@ -241,25 +639,28 @@ impl Evaluated {
         Self::binary_op(
             self,
             exp,
-            |_, _| 1,
+            None,
+            |_, _, _| 1,
             |x, y| Some((x != 0 || y != 0) as isize),
         )
     }
 
     fn and(self, exp: Evaluated) -> Evaluated {
-        Self::binary_op(self, exp, |x, y| x.max(y), |x, y| Some(x & y))
+        Self::binary_op(self, exp, None, |x, y, _| x.max(y), |x, y| Some(x & y))
     }
 
     fn or(self, exp: Evaluated) -> Evaluated {
-        Self::binary_op(self, exp, |x, y| x.max(y), |x, y| Some(x | y))
+        Self::binary_op(self, exp, None, |x, y, _| x.max(y), |x, y| Some(x | y))
     }
 
     fn xor(self, exp: Evaluated) -> Evaluated {
-        Self::binary_op(self, exp, |x, y| x.max(y), |x, y| Some(x ^ y))
+        let ret = Self::binary_op(self, exp, None, |x, y, _| x.max(y), |x, y| Some(x ^ y));
+        dbg!(&ret);
+        ret
     }
 
     fn xnor(self, exp: Evaluated) -> Evaluated {
-        Self::binary_op(self, exp, |x, y| x.max(y), |x, y| Some(!(x ^ y)))
+        Self::binary_op(self, exp, None, |x, y, _| x.max(y), |x, y| Some(!(x ^ y)))
     }
 
     fn plus(self) -> Evaluated {
@@ -279,27 +680,54 @@ impl Evaluated {
     }
 
     fn reduction_and(self) -> Evaluated {
-        Self::unary_op(self, |_| 1, |_| None)
+        let width = self.get_total_width();
+        Self::unary_op(self, |_| 1, |x| reduction(x, width, |x, y| x & y))
     }
 
     fn reduction_or(self) -> Evaluated {
-        Self::unary_op(self, |_| 1, |_| None)
+        let width = self.get_total_width();
+        Self::unary_op(self, |_| 1, |x| reduction(x, width, |x, y| x | y))
     }
 
     fn reduction_nand(self) -> Evaluated {
-        Self::unary_op(self, |_| 1, |_| None)
+        let width = self.get_total_width();
+        Self::unary_op(
+            self,
+            |_| 1,
+            |x| {
+                let ret = reduction(x, width, |x, y| x & y);
+                ret.map(|x| if x == 0 { 1 } else { 0 })
+            },
+        )
     }
 
     fn reduction_nor(self) -> Evaluated {
-        Self::unary_op(self, |_| 1, |_| None)
+        let width = self.get_total_width();
+        Self::unary_op(
+            self,
+            |_| 1,
+            |x| {
+                let ret = reduction(x, width, |x, y| x | y);
+                ret.map(|x| if x == 0 { 1 } else { 0 })
+            },
+        )
     }
 
     fn reduction_xor(self) -> Evaluated {
-        Self::unary_op(self, |_| 1, |_| None)
+        let width = self.get_total_width();
+        Self::unary_op(self, |_| 1, |x| reduction(x, width, |x, y| x ^ y))
     }
 
     fn reduction_xnor(self) -> Evaluated {
-        Self::unary_op(self, |_| 1, |_| None)
+        let width = self.get_total_width();
+        Self::unary_op(
+            self,
+            |_| 1,
+            |x| {
+                let ret = reduction(x, width, |x, y| x ^ y);
+                ret.map(|x| if x == 0 { 1 } else { 0 })
+            },
+        )
     }
 }
 
@@ -315,20 +743,20 @@ impl Evaluator {
 
     fn binary_operator(&mut self, operator: &str, left: Evaluated, right: Evaluated) -> Evaluated {
         match operator {
-            "**" => left.pow(right),
-            "/" => left.div(right),
-            "*" => left.mul(right),
-            "%" => left.rem(right),
-            "+" => left.add(right),
-            "-" => left.sub(right),
-            "<<<" => left.signed_shl(right),
-            ">>>" => left.signed_shr(right),
-            "<<" => left.unsigned_shl(right),
-            ">>" => left.unsigned_shr(right),
+            "**" => left.pow(right, self.context_width.first()),
+            "/" => left.div(right, self.context_width.first()),
+            "*" => left.mul(right, self.context_width.first()),
+            "%" => left.rem(right, self.context_width.first()),
+            "+" => left.add(right, self.context_width.first()),
+            "-" => left.sub(right, self.context_width.first()),
+            "<<<" => left.signed_shl(right, self.context_width.first()),
+            ">>>" => left.signed_shr(right, self.context_width.first()),
+            "<<" => left.unsigned_shl(right, self.context_width.first()),
+            ">>" => left.unsigned_shr(right, self.context_width.first()),
             "<=" => left.le(right),
             ">=" => left.ge(right),
-            "<" => left.lt(right),
-            ">" => left.gt(right),
+            "<:" => left.lt(right),
+            ">:" => left.gt(right),
             "===" => left.eq(right),
             "==?" => left.eq(right),
             "!==" => left.ne(right),
@@ -342,7 +770,7 @@ impl Evaluator {
             "^" => left.xor(right),
             "~^" => left.xnor(right),
             "|" => left.or(right),
-            _ => Evaluated::Unknown,
+            _ => Evaluated::create_unknown(),
         }
     }
 
@@ -359,54 +787,88 @@ impl Evaluator {
             "^" => left.reduction_xor(),
             "~^" => left.reduction_xnor(),
             "^~" => left.reduction_xnor(),
-            _ => Evaluated::Unknown,
+            _ => Evaluated::create_unknown(),
         }
     }
 
-    pub fn type_width(&mut self, x: Type) -> Option<usize> {
+    pub fn type_width(&mut self, x: Type) -> Option<Vec<usize>> {
         match x.kind {
             TypeKind::U32 | TypeKind::I32 | TypeKind::F32 => {
                 if x.width.is_empty() {
-                    Some(32)
+                    Some(vec![32])
                 } else {
+                    // TODO error
                     None
                 }
             }
             TypeKind::U64 | TypeKind::I64 | TypeKind::F64 => {
                 if x.width.is_empty() {
-                    Some(64)
+                    Some(vec![64])
                 } else {
+                    // TODO error
                     None
                 }
             }
-            TypeKind::Bit | TypeKind::Logic => {
-                if x.width.len() == 1 {
-                    let width = self.expression(&x.width[0]);
-                    if let Evaluated::Fixed { value, .. } = width {
-                        if let Ok(width) = value.try_into() {
-                            Some(width)
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                } else if x.width.is_empty() {
-                    Some(1)
+            TypeKind::Bit
+            | TypeKind::Logic
+            | TypeKind::Clock
+            | TypeKind::ClockPosedge
+            | TypeKind::ClockNegedge
+            | TypeKind::Reset
+            | TypeKind::ResetAsyncHigh
+            | TypeKind::ResetAsyncLow
+            | TypeKind::ResetSyncHigh
+            | TypeKind::ResetSyncLow => {
+                if x.width.is_empty() {
+                    Some(vec![1])
                 } else {
-                    None
+                    let mut ret = Vec::new();
+                    for x in &x.width {
+                        let width = self.expression(x);
+                        if let EvaluatedValue::Fixed(value) = width.value {
+                            if let Ok(width) = value.try_into() {
+                                ret.push(width);
+                            } else {
+                                return None;
+                            }
+                        } else {
+                            return None;
+                        }
+                    }
+                    Some(ret)
                 }
             }
             _ => None,
         }
     }
 
+    pub fn type_array(&mut self, x: Type) -> Option<Vec<usize>> {
+        if x.array.is_empty() {
+            Some(vec![1])
+        } else {
+            let mut ret = Vec::new();
+            for x in &x.array {
+                let width = self.expression(x);
+                if let EvaluatedValue::Fixed(value) = width.value {
+                    if let Ok(width) = value.try_into() {
+                        ret.push(width);
+                    } else {
+                        return None;
+                    }
+                } else {
+                    return None;
+                }
+            }
+            Some(ret)
+        }
+    }
+
     fn exponent(&mut self, _arg: &Exponent) -> Evaluated {
-        Evaluated::Unknown
+        Evaluated::create_unknown()
     }
 
     fn fixed_point(&mut self, _arg: &FixedPoint) -> Evaluated {
-        Evaluated::Unknown
+        Evaluated::create_unknown()
     }
 
     fn based(&mut self, arg: &Based) -> Evaluated {
@@ -422,24 +884,24 @@ impl Evaluator {
                 "h" => 16,
                 _ => unreachable!(),
             };
-            let width = width.parse();
+            let width = str::parse::<usize>(width);
             let value = isize::from_str_radix(value, radix);
             if let (Ok(width), Ok(value)) = (width, value) {
-                Evaluated::Fixed { width, value }
+                Evaluated::create_fixed(value, signed, vec![width], vec![1])
             } else {
-                Evaluated::Unknown
+                Evaluated::create_unknown_static()
             }
         } else {
-            Evaluated::Unknown
+            Evaluated::create_unknown_static()
         }
     }
 
     fn base_less(&mut self, arg: &BaseLess) -> Evaluated {
         let text = arg.base_less_token.to_string().replace('_', "");
-        if let Ok(value) = text.parse() {
-            Evaluated::Fixed { width: 32, value }
+        if let Ok(value) = str::parse::<isize>(&text) {
+            Evaluated::create_fixed(value, false, vec![32], vec![1])
         } else {
-            Evaluated::Unknown
+            Evaluated::create_unknown()
         }
     }
 
@@ -466,12 +928,10 @@ impl Evaluator {
             }
         };
         if unknown {
-            Evaluated::Unknown
+            Evaluated::create_unknown()
         } else {
-            Evaluated::Fixed {
-                width: *self.context_width.last().unwrap_or(&0),
-                value,
-            }
+            let width = *self.context_width.last().unwrap_or(&0);
+            Evaluated::create_fixed(value, false, vec![width], vec![1])
         }
     }
 
@@ -611,19 +1071,56 @@ impl Evaluator {
     }
 
     fn expression11(&mut self, arg: &Expression11) -> Evaluated {
-        let ret = self.expression12(&arg.expression12);
+        let mut ret = self.expression12(&arg.expression12);
         if let Some(x) = &arg.expression11_opt {
-            match x.casting_type.as_ref() {
-                CastingType::Clock(_) => Evaluated::Clock,
-                CastingType::ClockPosedge(_) => Evaluated::ClockPosedge,
-                CastingType::ClockNegedge(_) => Evaluated::ClockNegedge,
-                CastingType::Reset(_) => Evaluated::Reset,
-                CastingType::ResetAsyncHigh(_) => Evaluated::ResetAsyncHigh,
-                CastingType::ResetAsyncLow(_) => Evaluated::ResetAsyncLow,
-                CastingType::ResetSyncHigh(_) => Evaluated::ResetSyncHigh,
-                CastingType::ResetSyncLow(_) => Evaluated::ResetSyncLow,
-                _ => ret,
+            let new_type = match x.casting_type.as_ref() {
+                CastingType::Clock(_) => Some(Evaluated::create_clock(
+                    EvaluatedTypeClockKind::Implicit,
+                    vec![1],
+                    vec![1],
+                )),
+                CastingType::ClockPosedge(_) => Some(Evaluated::create_clock(
+                    EvaluatedTypeClockKind::Posedge,
+                    vec![1],
+                    vec![1],
+                )),
+                CastingType::ClockNegedge(_) => Some(Evaluated::create_clock(
+                    EvaluatedTypeClockKind::Negedge,
+                    vec![1],
+                    vec![1],
+                )),
+                CastingType::Reset(_) => Some(Evaluated::create_reset(
+                    EvaluatedTypeResetKind::Implicit,
+                    vec![1],
+                    vec![1],
+                )),
+                CastingType::ResetAsyncHigh(_) => Some(Evaluated::create_reset(
+                    EvaluatedTypeResetKind::AsyncHigh,
+                    vec![1],
+                    vec![1],
+                )),
+                CastingType::ResetAsyncLow(_) => Some(Evaluated::create_reset(
+                    EvaluatedTypeResetKind::AsyncLow,
+                    vec![1],
+                    vec![1],
+                )),
+                CastingType::ResetSyncHigh(_) => Some(Evaluated::create_reset(
+                    EvaluatedTypeResetKind::SyncHigh,
+                    vec![1],
+                    vec![1],
+                )),
+                CastingType::ResetSyncLow(_) => Some(Evaluated::create_reset(
+                    EvaluatedTypeResetKind::SyncLow,
+                    vec![1],
+                    vec![1],
+                )),
+                _ => None,
+            };
+            if let Some(x) = new_type {
+                // TODO check casting error
+                ret.r#type = x.r#type;
             }
+            ret
         } else {
             ret
         }
@@ -658,7 +1155,7 @@ impl Evaluator {
         if let Ok(symbol) = symbol {
             symbol.found.evaluate()
         } else {
-            Evaluated::Unknown
+            Evaluated::create_unknown()
         }
     }
 
@@ -668,17 +1165,72 @@ impl Evaluator {
     }
 
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) -> Evaluated {
+        // TODO array / bit select
         let symbol = symbol_table::resolve(arg);
-        self.identifier_helper(symbol)
+
+        let last_select: Vec<_> = if arg.expression_identifier_list0.is_empty() {
+            arg.expression_identifier_list
+                .iter()
+                .map(|x| x.select.clone())
+                .collect()
+        } else {
+            arg.expression_identifier_list0
+                .last()
+                .unwrap()
+                .expression_identifier_list0_list
+                .iter()
+                .map(|x| x.select.clone())
+                .collect()
+        };
+
+        let mut ret = self.identifier_helper(symbol);
+
+        for s in &last_select {
+            let beg = self.expression(s.expression.as_ref());
+            let end = if let Some(x) = &s.select_opt {
+                self.expression(x.expression.as_ref())
+            } else {
+                beg.clone()
+            };
+
+            ret = ret.select(beg, end);
+        }
+
+        ret
     }
 
     fn factor(&mut self, arg: &Factor) -> Evaluated {
         match arg {
             Factor::Number(x) => self.number(&x.number),
             Factor::IdentifierFactor(x) => {
-                if x.identifier_factor.identifier_factor_opt.is_some() {
-                    // Function call
-                    Evaluated::Unknown
+                if let Some(args) = &x.identifier_factor.identifier_factor_opt {
+                    let args = &args.function_call.function_call_opt;
+                    let func = x
+                        .identifier_factor
+                        .expression_identifier
+                        .identifier()
+                        .to_string();
+
+                    if func.starts_with("$") {
+                        self.system_function(&func, args)
+                    } else {
+                        let mut ret = Evaluated::create_unknown();
+
+                        if let Ok(symbol) = symbol_table::resolve(
+                            x.identifier_factor.expression_identifier.as_ref(),
+                        ) {
+                            if !symbol.found.kind.is_function() {
+                                ret.errors.push(EvaluatedError::CallNonFunction {
+                                    kind: symbol.found.kind.to_kind_name(),
+                                    token: symbol.found.token,
+                                });
+                            }
+                        }
+
+                        // TODO return type of function
+
+                        ret
+                    }
                 } else {
                     // Identifier
                     self.expression_identifier(x.identifier_factor.expression_identifier.as_ref())
@@ -694,58 +1246,79 @@ impl Evaluator {
             Factor::IfExpression(x) => self.if_expression(&x.if_expression),
             Factor::CaseExpression(x) => self.case_expression(&x.case_expression),
             Factor::SwitchExpression(x) => self.switch_expression(&x.switch_expression),
-            Factor::StringLiteral(_) => Evaluated::Unknown,
-            Factor::FactorGroup(_) => Evaluated::Unknown,
-            Factor::InsideExpression(_) => Evaluated::Unknown,
-            Factor::OutsideExpression(_) => Evaluated::Unknown,
-            Factor::TypeExpression(_) => Evaluated::Unknown,
-            Factor::FactorTypeFactor(_) => Evaluated::Unknown,
+            Factor::StringLiteral(_) => Evaluated::create_unknown(),
+            Factor::FactorGroup(_) => Evaluated::create_unknown(),
+            Factor::InsideExpression(_) => Evaluated::create_unknown(),
+            Factor::OutsideExpression(_) => Evaluated::create_unknown(),
+            Factor::TypeExpression(_) => Evaluated::create_unknown(),
+            Factor::FactorTypeFactor(_) => Evaluated::create_unknown(),
         }
     }
 
-    fn do_concatenation(&mut self, exp: Evaluated, rep: Evaluated) -> Evaluated {
-        match exp {
-            Evaluated::Fixed {
-                width: ewidth,
-                value: eval,
-            } => match rep {
-                Evaluated::Fixed {
-                    width: rwidth,
-                    value: rval,
-                } => {
-                    let width = ewidth * rwidth;
-                    let mut value = eval;
-                    for _ in 0..rval {
-                        value <<= ewidth;
-                        value |= eval;
+    fn system_function(&mut self, name: &str, args: &Option<FunctionCallOpt>) -> Evaluated {
+        let args: Vec<ArgumentItem> = if let Some(x) = args {
+            x.argument_list.as_ref().into()
+        } else {
+            Vec::new()
+        };
+
+        match name {
+            "$clog2" => {
+                if let Some(arg) = args.first() {
+                    let arg = self.expression(&arg.expression);
+                    if let EvaluatedValue::Fixed(x) = arg.value {
+                        let ret = isize::BITS - x.leading_zeros();
+                        Evaluated::create_fixed(ret as isize, false, vec![32], vec![1])
+                    } else {
+                        Evaluated::create_unknown()
                     }
-                    Evaluated::Fixed { width, value }
+                } else {
+                    Evaluated::create_unknown()
                 }
-                Evaluated::Variable { width: rwidth } => Evaluated::Variable {
-                    width: ewidth * rwidth,
-                },
-                Evaluated::UnknownStatic => Evaluated::UnknownStatic,
-                _ => Evaluated::Unknown,
-            },
-            Evaluated::Variable { width: ewidth } => match rep {
-                Evaluated::Fixed { width: rwidth, .. } | Evaluated::Variable { width: rwidth } => {
-                    Evaluated::Variable {
-                        width: ewidth * rwidth,
-                    }
-                }
-                Evaluated::UnknownStatic => Evaluated::UnknownStatic,
-                _ => Evaluated::Unknown,
-            },
-            Evaluated::UnknownStatic => Evaluated::UnknownStatic,
-            _ => Evaluated::Unknown,
+            }
+            _ => Evaluated::create_unknown(),
         }
+    }
+
+    fn do_concatenation(&mut self, mut x: Evaluated, mut y: Evaluated) -> Evaluated {
+        let mut ret = match (
+            x.get_value(),
+            y.get_value(),
+            x.get_total_width(),
+            y.get_total_width(),
+        ) {
+            (Some(value0), Some(value1), Some(width0), Some(width1)) => {
+                let width = width0 + width1;
+                let value = (value0 << width1) | value1;
+                Evaluated::create_fixed(value, false, vec![width], vec![1])
+            }
+            _ => {
+                if x.is_known_static() && y.is_known_static() {
+                    Evaluated::create_unknown_static()
+                } else {
+                    Evaluated::create_unknown()
+                }
+            }
+        };
+
+        ret.errors.append(&mut x.errors);
+        ret.errors.append(&mut y.errors);
+        ret
     }
 
     fn concatenation_item(&mut self, arg: &ConcatenationItem) -> Evaluated {
         let e = self.expression(arg.expression.as_ref());
         if let Some(cio) = &arg.concatenation_item_opt {
             let c = self.expression(cio.expression.as_ref());
-            self.do_concatenation(e, c)
+            if let EvaluatedValue::Fixed(c) = c.value {
+                let mut tmp = Evaluated::create_fixed(0, false, vec![0], vec![1]);
+                for _ in 0..c {
+                    tmp = self.do_concatenation(tmp, e.clone());
+                }
+                tmp
+            } else {
+                Evaluated::create_unknown()
+            }
         } else {
             e
         }
@@ -761,22 +1334,20 @@ impl Evaluator {
         for cll in arg.concatenation_list_list.iter() {
             eval_vec.push(self.concatenation_list_list(cll));
         }
-        eval_vec.reverse();
-        let default_value = Evaluated::Fixed { width: 1, value: 0 };
-        eval_vec
-            .iter()
-            .fold(default_value, |acc, x| self.do_concatenation(acc, *x))
+        let default_value = Evaluated::create_fixed(0, false, vec![0], vec![1]);
+        eval_vec.iter().fold(default_value, |acc, x| {
+            self.do_concatenation(acc, x.clone())
+        })
     }
 
     fn array_literal_item_group_default_colon_expression(
         &mut self,
         arg: &ArrayLiteralItemGroupDefaulColonExpression,
     ) -> Evaluated {
-        match self.expression(arg.expression.as_ref()) {
-            Evaluated::Fixed { .. } => Evaluated::UnknownStatic,
-            Evaluated::Variable { .. } => Evaluated::Unknown,
-            Evaluated::UnknownStatic => unreachable!(),
-            _ => Evaluated::Unknown,
+        match self.expression(arg.expression.as_ref()).value {
+            EvaluatedValue::Fixed(_) => Evaluated::create_unknown_static(),
+            EvaluatedValue::UnknownStatic => unreachable!(),
+            _ => Evaluated::create_unknown(),
         }
     }
 
@@ -817,24 +1388,30 @@ impl Evaluator {
                 .map(|x| self.array_literal_list_list(x).is_known_static())
                 .fold(true, |acc, b| acc & b);
             if is_known_static {
-                Evaluated::UnknownStatic
+                Evaluated::create_unknown_static()
             } else {
-                Evaluated::Unknown
+                Evaluated::create_unknown()
             }
         } else {
-            Evaluated::Unknown
+            Evaluated::create_unknown()
         }
     }
 
-    fn if_expression(&mut self, _arg: &IfExpression) -> Evaluated {
-        Evaluated::Unknown
+    fn if_expression(&mut self, arg: &IfExpression) -> Evaluated {
+        let cond = self.expression(&arg.expression);
+
+        if let EvaluatedValue::Fixed(1) = cond.value {
+            self.expression(&arg.expression0)
+        } else {
+            self.expression(&arg.expression1)
+        }
     }
 
     fn case_expression(&mut self, _arg: &CaseExpression) -> Evaluated {
-        Evaluated::Unknown
+        Evaluated::create_unknown()
     }
 
     fn switch_expression(&mut self, _arg: &SwitchExpression) -> Evaluated {
-        Evaluated::Unknown
+        Evaluated::create_unknown()
     }
 }
