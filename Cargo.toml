@@ -41,7 +41,7 @@ regex           = "1.11.1"
 semver          = {version = "1.0", features = ["serde"]}
 serde           = {version = "1.0", features = ["derive"]}
 serde_json      = "1.0"
-similar         = {version = "2.6.0", features = ["text", "inline"]}
+similar         = {version = "2.7.0", features = ["text", "inline"]}
 strnum_bitwidth = "0.1.2"
 tempfile        = "3.15"
 thiserror       = "2.0"
