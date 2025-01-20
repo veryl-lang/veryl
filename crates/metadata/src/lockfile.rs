@@ -32,6 +32,7 @@ pub struct Lock {
     pub version: Version,
     pub url: UrlPath,
     pub revision: String,
+    pub path: Option<PathBuf>,
     pub dependencies: Vec<LockDependency>,
     #[serde(skip)]
     used: bool,
@@ -44,6 +45,12 @@ pub struct LockDependency {
     pub version: Version,
     pub url: UrlPath,
     pub revision: String,
+}
+
+struct ResolvedDependency {
+    pub release: Release,
+    pub name: Option<String>,
+    pub path: Option<PathBuf>,
 }
 
 impl Lockfile {
@@ -124,9 +131,9 @@ impl Lockfile {
 
         for lock in &locks {
             let add = if let Some(old_locks) = old_table.get(&lock.url) {
-                !old_locks
-                    .iter()
-                    .any(|x| x.version == lock.version && x.name == lock.name)
+                !old_locks.iter().any(|x| {
+                    x.version == lock.version && x.name == lock.name && x.path == lock.path
+                })
             } else {
                 true
             };
@@ -163,7 +170,7 @@ impl Lockfile {
 
         for locks in self.lock_table.values() {
             for lock in locks {
-                let metadata = self.get_metadata(&lock.url, &lock.revision)?;
+                let metadata = self.get_metadata(&lock.url, &lock.revision, &lock.path)?;
                 let path = metadata.project_path();
 
                 for src in &veryl_path::gather_files_with_extension(&path, "veryl", false)? {
@@ -242,9 +249,9 @@ impl Lockfile {
         // breadth first search because root has top priority of name
         let mut dependencies_metadata = Vec::new();
         for (url, dep) in &metadata.dependencies {
-            for (release, name) in self.resolve_dependency(url, dep)? {
-                let metadata = self.get_metadata(url, &release.revision)?;
-                let mut name = name.unwrap_or(metadata.project.name.clone());
+            for x in self.resolve_dependency(url, dep)? {
+                let metadata = self.get_metadata(url, &x.release.revision, &x.path)?;
+                let mut name = x.name.unwrap_or(metadata.project.name.clone());
 
                 // avoid name conflict by adding suffix
                 if name_table.contains(&name) {
@@ -265,29 +272,30 @@ impl Lockfile {
 
                 let mut dependencies = Vec::new();
                 for (url, dep) in &metadata.dependencies {
-                    for (release, name) in self.resolve_dependency(url, dep)? {
-                        let metadata = self.get_metadata(url, &release.revision)?;
-                        let name = name.unwrap_or(metadata.project.name.clone());
+                    for x in self.resolve_dependency(url, dep)? {
+                        let metadata = self.get_metadata(url, &x.release.revision, &x.path)?;
+                        let name = x.name.unwrap_or(metadata.project.name.clone());
                         // project local name is not required to check name_table
 
                         let dependency = LockDependency {
                             name: name.clone(),
-                            version: release.version.clone(),
+                            version: x.release.version.clone(),
                             url: url.clone(),
-                            revision: release.revision.clone(),
+                            revision: x.release.revision.clone(),
                         };
                         dependencies.push(dependency);
                     }
                 }
 
-                let uuid = Self::gen_uuid(url, &release.revision)?;
+                let uuid = Self::gen_uuid(url, &x.release.revision)?;
                 if !uuid_table.contains(&uuid) {
                     let lock = Lock {
                         name: name.clone(),
                         uuid,
-                        version: release.version,
+                        version: x.release.version,
                         url: url.clone(),
-                        revision: release.revision,
+                        revision: x.release.revision,
+                        path: x.path,
                         dependencies,
                         used: true,
                     };
@@ -311,21 +319,33 @@ impl Lockfile {
         &mut self,
         url: &UrlPath,
         dep: &Dependency,
-    ) -> Result<Vec<(Release, Option<String>)>, MetadataError> {
+    ) -> Result<Vec<ResolvedDependency>, MetadataError> {
         Ok(match dep {
             Dependency::Version(x) => {
                 let release = self.resolve_version(url, x)?;
-                vec![(release, None)]
+                vec![ResolvedDependency {
+                    release,
+                    name: None,
+                    path: None,
+                }]
             }
             Dependency::Single(x) => {
                 let release = self.resolve_version(url, &x.version)?;
-                vec![(release, Some(x.name.clone()))]
+                vec![ResolvedDependency {
+                    release,
+                    name: x.name.clone(),
+                    path: x.path.clone(),
+                }]
             }
             Dependency::Multi(x) => {
                 let mut ret = Vec::new();
                 for x in x {
                     let release = self.resolve_version(url, &x.version)?;
-                    ret.push((release, Some(x.name.clone())));
+                    ret.push(ResolvedDependency {
+                        release,
+                        name: x.name.clone(),
+                        path: x.path.clone(),
+                    });
                 }
                 ret
             }
@@ -417,39 +437,60 @@ impl Lockfile {
         Ok(dependencies_dir.join(uuid.simple().encode_lower(&mut Uuid::encode_buffer())))
     }
 
-    fn get_metadata(&self, url: &UrlPath, revision: &str) -> Result<Metadata, MetadataError> {
-        let dependencies_dir = veryl_path::cache_path().join("dependencies");
+    fn get_metadata(
+        &self,
+        url: &UrlPath,
+        revision: &str,
+        path: &Option<PathBuf>,
+    ) -> Result<Metadata, MetadataError> {
+        // Get metadata from local path
+        let path = path.as_ref().and_then(|x| {
+            let path = self.metadata_path.parent().unwrap().join(x);
+            let path = path.join("Veryl.toml");
+            if path.exists() {
+                Some(path)
+            } else {
+                None
+            }
+        });
 
-        if !dependencies_dir.exists() {
-            fs::create_dir_all(&dependencies_dir)?;
-        }
-
-        let path = Self::dependency_path(url, revision)?;
-        let toml = path.join("Veryl.toml");
-
-        if !path.exists() {
-            let lock = veryl_path::lock_dir("dependencies")?;
-            let git = self.git_clone(url, &path)?;
-            git.fetch()?;
-            git.checkout(Some(revision))?;
-            veryl_path::unlock_dir(lock)?;
+        if let Some(path) = path {
+            let metadata = Metadata::load(path)?;
+            Ok(metadata)
         } else {
-            let git = Git::open(&path)?;
-            let ret = git.is_clean().is_ok_and(|x| x);
+            let dependencies_dir = veryl_path::cache_path().join("dependencies");
 
-            // If the existing path is not git repository, cleanup and re-try
-            if !ret || !toml.exists() {
+            if !dependencies_dir.exists() {
+                fs::create_dir_all(&dependencies_dir)?;
+            }
+
+            let path = Self::dependency_path(url, revision)?;
+            let toml = path.join("Veryl.toml");
+
+            if !path.exists() {
                 let lock = veryl_path::lock_dir("dependencies")?;
-                fs::remove_dir_all(&path)?;
                 let git = self.git_clone(url, &path)?;
                 git.fetch()?;
                 git.checkout(Some(revision))?;
                 veryl_path::unlock_dir(lock)?;
-            }
-        }
+            } else {
+                let git = Git::open(&path)?;
+                let ret = git.is_clean().is_ok_and(|x| x);
 
-        let metadata = Metadata::load(toml)?;
-        Ok(metadata)
+                // If the existing path is not git repository, cleanup and re-try
+                if !ret || !toml.exists() {
+                    let lock = veryl_path::lock_dir("dependencies")?;
+                    fs::remove_dir_all(&path)?;
+                    let git = self.git_clone(url, &path)?;
+                    git.fetch()?;
+                    git.checkout(Some(revision))?;
+                    veryl_path::unlock_dir(lock)?;
+                }
+            }
+
+            let metadata = Metadata::load(toml)?;
+            Ok(metadata)
+        }
     }
 }
 
