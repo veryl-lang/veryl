@@ -356,6 +356,7 @@ pub enum Dependency {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DependencyEntry {
-    pub name: String,
     pub version: VersionReq,
+    pub name: Option<String>,
+    pub path: Option<PathBuf>,
 }
