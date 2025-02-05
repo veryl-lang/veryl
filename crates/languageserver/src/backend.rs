@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use crate::server::{semantic_legend, MsgFromServer, MsgToServer, Server, ServerConfigItem};
 use async_channel::{unbounded, Receiver, Sender};
 use serde_json::Value;
@@ -58,7 +60,23 @@ impl LanguageServer for Backend {
                         supported: Some(true),
                         change_notifications: Some(OneOf::Left(true)),
                     }),
-                    file_operations: None,
+                    file_operations: Some(WorkspaceFileOperationsServerCapabilities {
+                        did_create: None,
+                        will_create: None,
+                        did_rename: Some(FileOperationRegistrationOptions {
+                            filters: vec![FileOperationFilter {
+                                scheme: Some("file".to_string()),
+                                pattern: FileOperationPattern {
+                                    glob: "**/*.veryl".to_string(),
+                                    matches: Some(FileOperationPatternKind::File),
+                                    options: None,
+                                },
+                            }],
+                        }),
+                        will_rename: None,
+                        did_delete: None,
+                        will_delete: None,
+                    }),
                 }),
                 definition_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
@@ -146,6 +164,20 @@ impl LanguageServer for Backend {
                     self.send(MsgToServer::DidChangeConfiguration(x)).await;
                 }
             }
+        }
+    }
+
+    async fn did_rename_files(&self, params: RenameFilesParams) {
+        self.client
+            .log_message(MessageType::INFO, "did_rename")
+            .await;
+
+        for file in params.files {
+            self.send(MsgToServer::DidRenameFile {
+                old_url: file.old_uri,
+                new_url: file.new_uri,
+            })
+            .await;
         }
     }
 
