@@ -9,7 +9,7 @@ use std::str::FromStr;
 use tower_lsp::lsp_types::*;
 use tower_lsp::Client;
 use veryl_analyzer::namespace::Namespace;
-use veryl_analyzer::symbol::{self, SymbolKind as VerylSymbolKind};
+use veryl_analyzer::symbol::SymbolKind as VerylSymbolKind;
 use veryl_analyzer::symbol::{Symbol, TypeKind};
 use veryl_analyzer::symbol_path::SymbolPath;
 use veryl_analyzer::{namespace_table, symbol_table, Analyzer, AnalyzerError};
@@ -32,9 +32,15 @@ pub enum MsgToServer {
         version: i32,
     },
     DidChangeConfiguration(ServerConfigItem),
-    DidRenameFile {
+    WillRenameFile {
         old_url: String,
+        // new_uri: String, // This is not used currently
+    },
+    DidRenameFile {
         new_url: String,
+    },
+    WillDeleteFile{
+        url: String,
     },
     Completion {
         url: Url,
@@ -148,10 +154,9 @@ impl Server {
                         self.latest_change = Some((url, text, version));
                     }
                     MsgToServer::DidChangeConfiguration(x) => self.config.set(x),
-                    MsgToServer::DidRenameFile { old_url, new_url } => {
-                        self.on_remove(old_url);
-                        // self.on_change("", &Url::from_str(&new_url).unwrap(), text, version);
-                    }
+                    MsgToServer::WillRenameFile { old_url: old_uri } => self.on_remove(old_uri),
+                    MsgToServer::DidRenameFile { new_url } => self.did_rename_files(new_url),
+                    MsgToServer::WillDeleteFile { url } => self.on_remove(url),
                     MsgToServer::Completion {
                         url,
                         line,
@@ -241,6 +246,36 @@ impl Server {
             self.on_change(&metadata.project.name, url, text, version);
         } else {
             self.on_change("", url, text, version);
+        }
+    }
+
+    fn did_rename_files(&mut self, new_path: String) {
+
+        // Do not dispatch if there's already a pending analysis
+        if !self.background_done{
+            return;
+        }
+
+        self.background_done = false;
+        if let Ok(url) = Url::from_str(&new_path) {
+            if let Some(mut metadata) = self.get_metadata(&url) {
+                if let Ok(paths) = metadata.paths::<&str>(&[], true) {
+                    let total = paths.len();
+                    let task = BackgroundTask {
+                        metadata,
+                        paths,
+                        total,
+                        progress: false,
+                    };
+                    self.background_tasks.push_back(task);
+                } else {
+                    self.background_done = true;
+                }
+            } else {
+                self.background_done = true;
+            }
+        } else {
+            self.background_done = true;
         }
     }
 
@@ -710,29 +745,6 @@ impl Server {
                 if let Some(path_id) = resource_table::get_path_id(Path::new(&path).to_path_buf()) {
                     symbol_table::drop(path_id);
                     namespace_table::drop(path_id);
-
-                    block_on(self.client.log_message(
-                        MessageType::INFO,
-                        format!("Symbols from {} are dropped!", path.to_string_lossy()),
-                    ));
-                }
-
-                self.background_done = false;
-                if let Some(mut metadata) = self.get_metadata(&url) {
-                    if let Ok(paths) = metadata.paths::<&str>(&[], true) {
-                        let total = paths.len();
-                        let task = BackgroundTask {
-                            metadata,
-                            paths,
-                            total,
-                            progress: false,
-                        };
-                        self.background_tasks.push_back(task);
-                    } else {
-                        self.background_done = true;
-                    }
-                } else {
-                    self.background_done = true;
                 }
             }
         }

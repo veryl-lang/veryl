@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use crate::server::{semantic_legend, MsgFromServer, MsgToServer, Server, ServerConfigItem};
 use async_channel::{unbounded, Receiver, Sender};
 use serde_json::Value;
@@ -73,9 +71,27 @@ impl LanguageServer for Backend {
                                 },
                             }],
                         }),
-                        will_rename: None,
+                        will_rename: Some(FileOperationRegistrationOptions {
+                            filters: vec![FileOperationFilter {
+                                scheme: Some("file".to_string()),
+                                pattern: FileOperationPattern {
+                                    glob: "**/*.veryl".to_string(),
+                                    matches: Some(FileOperationPatternKind::File),
+                                    options: None,
+                                },
+                            }],
+                        }),
                         did_delete: None,
-                        will_delete: None,
+                        will_delete: Some(FileOperationRegistrationOptions {
+                            filters: vec![FileOperationFilter {
+                                scheme: Some("file".to_string()),
+                                pattern: FileOperationPattern {
+                                    glob: "**/*.veryl".to_string(),
+                                    matches: Some(FileOperationPatternKind::File),
+                                    options: None,
+                                },
+                            }],
+                        }),
                     }),
                 }),
                 definition_provider: Some(OneOf::Left(true)),
@@ -167,18 +183,44 @@ impl LanguageServer for Backend {
         }
     }
 
-    async fn did_rename_files(&self, params: RenameFilesParams) {
+    async fn will_rename_files(&self, params: RenameFilesParams) -> Result<Option<WorkspaceEdit>> {
         self.client
-            .log_message(MessageType::INFO, "did_rename")
+            .log_message(MessageType::INFO, "will_rename_files")
             .await;
 
         for file in params.files {
-            self.send(MsgToServer::DidRenameFile {
+            self.send(MsgToServer::WillRenameFile {
                 old_url: file.old_uri,
-                new_url: file.new_uri,
             })
             .await;
         }
+        Ok(None)
+    }
+
+    async fn did_rename_files(&self, params: RenameFilesParams) {
+        self.client
+            .log_message(MessageType::INFO, "did_rename_files")
+            .await;
+
+        // Currently it only triggers a background analysis, so no need to pass all the uris.
+        if params.files.len() > 0 {
+            self.send(MsgToServer::DidRenameFile {
+                new_url: params.files[0].new_uri.to_owned(),
+            })
+            .await;
+        }
+    }
+
+    async fn will_delete_files(&self, params: DeleteFilesParams) -> Result<Option<WorkspaceEdit>> {
+        self.client
+            .log_message(MessageType::INFO, "will_delete_files")
+            .await;
+
+        for file in params.files {
+            self.send(MsgToServer::WillDeleteFile { url: file.uri })
+                .await;
+        }
+        Ok(None)
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
