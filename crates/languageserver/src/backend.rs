@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use crate::server::{semantic_legend, MsgFromServer, MsgToServer, Server, ServerConfigItem};
 use async_channel::{unbounded, Receiver, Sender};
 use serde_json::Value;
@@ -58,7 +60,41 @@ impl LanguageServer for Backend {
                         supported: Some(true),
                         change_notifications: Some(OneOf::Left(true)),
                     }),
-                    file_operations: None,
+                    file_operations: Some(WorkspaceFileOperationsServerCapabilities {
+                        did_create: None,
+                        will_create: None,
+                        did_rename: Some(FileOperationRegistrationOptions {
+                            filters: vec![FileOperationFilter {
+                                scheme: Some("file".to_string()),
+                                pattern: FileOperationPattern {
+                                    glob: "**/*.veryl".to_string(),
+                                    matches: Some(FileOperationPatternKind::File),
+                                    options: None,
+                                },
+                            }],
+                        }),
+                        will_rename: Some(FileOperationRegistrationOptions {
+                            filters: vec![FileOperationFilter {
+                                scheme: Some("file".to_string()),
+                                pattern: FileOperationPattern {
+                                    glob: "**/*.veryl".to_string(),
+                                    matches: Some(FileOperationPatternKind::File),
+                                    options: None,
+                                },
+                            }],
+                        }),
+                        did_delete: None,
+                        will_delete: Some(FileOperationRegistrationOptions {
+                            filters: vec![FileOperationFilter {
+                                scheme: Some("file".to_string()),
+                                pattern: FileOperationPattern {
+                                    glob: "**/*.veryl".to_string(),
+                                    matches: Some(FileOperationPatternKind::File),
+                                    options: None,
+                                },
+                            }],
+                        }),
+                    }),
                 }),
                 definition_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
@@ -147,6 +183,47 @@ impl LanguageServer for Backend {
                 }
             }
         }
+    }
+
+    async fn will_rename_files(&self, params: RenameFilesParams) -> Result<Option<WorkspaceEdit>> {
+        self.client
+            .log_message(MessageType::INFO, "will_rename_files")
+            .await;
+
+        for file in params.files {
+            if let Ok(url) = Url::from_str(file.old_uri.as_str()) {
+                self.send(MsgToServer::WillRenameFile { old_url: url })
+                    .await;
+            }
+        }
+        Ok(None)
+    }
+
+    async fn did_rename_files(&self, params: RenameFilesParams) {
+        self.client
+            .log_message(MessageType::INFO, "did_rename_files")
+            .await;
+
+        // Currently it only triggers a background analysis, so no need to send all the uris.
+        for file in params.files {
+            if let Ok(url) = Url::from_str(file.old_uri.as_str()) {
+                self.send(MsgToServer::DidRenameFile { new_url: url }).await;
+                break;
+            }
+        }
+    }
+
+    async fn will_delete_files(&self, params: DeleteFilesParams) -> Result<Option<WorkspaceEdit>> {
+        self.client
+            .log_message(MessageType::INFO, "will_delete_files")
+            .await;
+
+        for file in params.files {
+            if let Ok(url) = Url::from_str(file.uri.as_str()) {
+                self.send(MsgToServer::WillDeleteFile { url }).await;
+            }
+        }
+        Ok(None)
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
