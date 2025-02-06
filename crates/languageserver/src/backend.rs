@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use crate::server::{semantic_legend, MsgFromServer, MsgToServer, Server, ServerConfigItem};
 use async_channel::{unbounded, Receiver, Sender};
 use serde_json::Value;
@@ -189,10 +191,10 @@ impl LanguageServer for Backend {
             .await;
 
         for file in params.files {
-            self.send(MsgToServer::WillRenameFile {
-                old_url: file.old_uri,
-            })
-            .await;
+            if let Ok(url) = Url::from_str(file.old_uri.as_str()) {
+                self.send(MsgToServer::WillRenameFile { old_url: url })
+                    .await;
+            }
         }
         Ok(None)
     }
@@ -202,12 +204,12 @@ impl LanguageServer for Backend {
             .log_message(MessageType::INFO, "did_rename_files")
             .await;
 
-        // Currently it only triggers a background analysis, so no need to pass all the uris.
-        if params.files.len() > 0 {
-            self.send(MsgToServer::DidRenameFile {
-                new_url: params.files[0].new_uri.to_owned(),
-            })
-            .await;
+        // Currently it only triggers a background analysis, so no need to send all the uris.
+        for file in params.files {
+            if let Ok(url) = Url::from_str(file.old_uri.as_str()) {
+                self.send(MsgToServer::DidRenameFile { new_url: url }).await;
+                break;
+            }
         }
     }
 
@@ -217,8 +219,9 @@ impl LanguageServer for Backend {
             .await;
 
         for file in params.files {
-            self.send(MsgToServer::WillDeleteFile { url: file.uri })
-                .await;
+            if let Ok(url) = Url::from_str(&file.uri.as_str()) {
+                self.send(MsgToServer::WillDeleteFile { url }).await;
+            }
         }
         Ok(None)
     }

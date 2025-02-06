@@ -5,7 +5,6 @@ use futures::executor::block_on;
 use ropey::Rope;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 use tower_lsp::lsp_types::*;
 use tower_lsp::Client;
 use veryl_analyzer::namespace::Namespace;
@@ -33,14 +32,14 @@ pub enum MsgToServer {
     },
     DidChangeConfiguration(ServerConfigItem),
     WillRenameFile {
-        old_url: String,
+        old_url: Url,
         // new_uri: String, // This is not used currently
     },
     DidRenameFile {
-        new_url: String,
+        new_url: Url,
     },
-    WillDeleteFile{
-        url: String,
+    WillDeleteFile {
+        url: Url,
     },
     Completion {
         url: Url,
@@ -154,7 +153,7 @@ impl Server {
                         self.latest_change = Some((url, text, version));
                     }
                     MsgToServer::DidChangeConfiguration(x) => self.config.set(x),
-                    MsgToServer::WillRenameFile { old_url: old_uri } => self.on_remove(old_uri),
+                    MsgToServer::WillRenameFile { old_url } => self.on_remove(old_url),
                     MsgToServer::DidRenameFile { new_url } => self.did_rename_files(new_url),
                     MsgToServer::WillDeleteFile { url } => self.on_remove(url),
                     MsgToServer::Completion {
@@ -249,28 +248,23 @@ impl Server {
         }
     }
 
-    fn did_rename_files(&mut self, new_path: String) {
-
+    fn did_rename_files(&mut self, new_path: Url) {
         // Do not dispatch if there's already a pending analysis
-        if !self.background_done{
+        if !self.background_done {
             return;
         }
 
         self.background_done = false;
-        if let Ok(url) = Url::from_str(&new_path) {
-            if let Some(mut metadata) = self.get_metadata(&url) {
-                if let Ok(paths) = metadata.paths::<&str>(&[], true) {
-                    let total = paths.len();
-                    let task = BackgroundTask {
-                        metadata,
-                        paths,
-                        total,
-                        progress: false,
-                    };
-                    self.background_tasks.push_back(task);
-                } else {
-                    self.background_done = true;
-                }
+        if let Some(mut metadata) = self.get_metadata(&new_path) {
+            if let Ok(paths) = metadata.paths::<&str>(&[], true) {
+                let total = paths.len();
+                let task = BackgroundTask {
+                    metadata,
+                    paths,
+                    total,
+                    progress: false,
+                };
+                self.background_tasks.push_back(task);
             } else {
                 self.background_done = true;
             }
@@ -739,13 +733,11 @@ impl Server {
         }
     }
 
-    fn on_remove(&mut self, path: String) {
-        if let Ok(url) = Url::from_str(&path) {
-            if let Ok(path) = url.to_file_path() {
-                if let Some(path_id) = resource_table::get_path_id(Path::new(&path).to_path_buf()) {
-                    symbol_table::drop(path_id);
-                    namespace_table::drop(path_id);
-                }
+    fn on_remove(&mut self, path: Url) {
+        if let Ok(path) = path.to_file_path() {
+            if let Some(path_id) = resource_table::get_path_id(Path::new(&path).to_path_buf()) {
+                symbol_table::drop(path_id);
+                namespace_table::drop(path_id);
             }
         }
     }
