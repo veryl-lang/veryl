@@ -219,7 +219,7 @@ impl LanguageServer for Backend {
             .await;
 
         for file in params.files {
-            if let Ok(url) = Url::from_str(&file.uri.as_str()) {
+            if let Ok(url) = Url::from_str(file.uri.as_str()) {
                 self.send(MsgToServer::WillDeleteFile { url }).await;
             }
         }
