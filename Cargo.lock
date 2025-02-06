@@ -2857,7 +2857,7 @@ dependencies = [
  "semver 1.0.25",
  "serde_json",
  "similar",
- "toml 0.8.19",
+ "toml 0.8.20",
  "veryl-analyzer",
  "veryl-formatter",
  "veryl-metadata",
@@ -4616,9 +4616,9 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.8.19"
+version = "0.8.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1ed1f98e3fdc28d6d910e6737ae6ab1a93bf1985935a1193e68f93eeb68d24e"
+checksum = "cd87a5cdd6ffab733b2f74bc4fd7ee5fff6634124999ac278c35fc78c6120148"
 dependencies = [
  "serde",
  "serde_spanned",
@@ -4637,9 +4637,9 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.22.22"
+version = "0.22.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ae48d6208a266e853d946088ed816055e556cc6028c5e8e2b84d9fa5dd7c7f5"
+checksum = "02a8b472d1a3d7c18e2d61a489aee3453fd9031c33e4f55bd533f4a7adca1bee"
 dependencies = [
  "indexmap",
  "serde",
@@ -4916,9 +4916,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.12.1"
+version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3758f5e68192bb96cc8f9b7e2c2cfdabb435499a28499a42f8f984092adad4b"
+checksum = "ced87ca4be083373936a67f8de945faa23b6b42384bd5b64434850802c6dccd0"
 dependencies = [
  "serde",
  "sha1_smol",
@@ -4980,7 +4980,7 @@ dependencies = [
  "miette",
  "strnum_bitwidth",
  "thiserror 2.0.11",
- "toml 0.8.19",
+ "toml 0.8.20",
  "veryl-metadata",
  "veryl-parser",
 ]
@@ -4991,7 +4991,7 @@ version = "0.13.5"
 dependencies = [
  "serde",
  "strnum_bitwidth",
- "toml 0.8.19",
+ "toml 0.8.20",
  "veryl-aligner",
  "veryl-analyzer",
  "veryl-metadata",
@@ -5043,7 +5043,7 @@ dependencies = [
  "spdx",
  "tempfile",
  "thiserror 2.0.11",
- "toml 0.8.19",
+ "toml 0.8.20",
  "url",
  "uuid",
  "veryl-parser",
@@ -5522,9 +5522,9 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
 name = "winnow"
-version = "0.6.22"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39281189af81c07ec09db316b302a3e67bf9bd7cbf6c820b50e35fee9c2fa980"
+checksum = "86e376c75f4f43f44db463cf729e0d3acbf954d13e22c51e26e4c264b4ab545f"
 dependencies = [
  "memchr",
 ]
