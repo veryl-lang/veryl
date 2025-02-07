@@ -10,8 +10,8 @@ module async_fifo_reset_sync::<S: synchronizer> #(
     od_rst: output `d reset,
 ) {
     if MERGE_RESET :g_reset {
-        var s_rst: `s logic;
-        var d_rst: `d logic;
+        var s_rst: `s reset;
+        var d_rst: `d reset;
 
         unsafe (cdc) {
             always_comb {
