@@ -96,6 +96,7 @@ impl<'a> Pass1Handlers<'a> {
 }
 
 pub struct Pass2Handlers<'a> {
+    create_reference: CreateReference<'a>,
     check_separator: CheckSeparator<'a>,
     check_enum: CheckEnum<'a>,
     check_modport: CheckModport<'a>,
@@ -103,7 +104,6 @@ pub struct Pass2Handlers<'a> {
     check_msb_lsb: CheckMsbLsb<'a>,
     check_var_ref: CheckVarRef<'a>,
     check_clock_reset: CheckClockReset<'a>,
-    create_reference: CreateReference<'a>,
     check_expression: CheckExpression<'a>,
     check_clock_domain: CheckClockDomain<'a>,
     check_proto: CheckProto<'a>,

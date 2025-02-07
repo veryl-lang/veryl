@@ -2343,6 +2343,36 @@ fn unassign_variable() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA::<A: const>(
+        o_a: output logic,
+    ) {
+        assign o_a = 0;
+    }
+
+    module ModuleB {
+        var a: logic;
+        inst u: ModuleA::<0> (o_a: a);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto module ProtoA (
+        o_a: output logic,
+    );
+
+    module ModuleB::<A: ProtoA> {
+        var a: logic;
+        inst u: A (o_a: a);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
