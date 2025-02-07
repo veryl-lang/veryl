@@ -646,7 +646,9 @@ impl VerylGrammarTrait for CheckVarRef<'_> {
     }
 
     fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
+        if let HandlerPoint::After = self.point {
+            // Mangled module is also resolved during resolving the inst symbol.
+            // To get correct result, this statement should be executed after resolving generic parameters.
             if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
                 if let SymbolKind::Instance(ref x) = symbol.found.kind {
                     let mut ports = HashMap::new();
@@ -663,13 +665,37 @@ impl VerylGrammarTrait for CheckVarRef<'_> {
                                     ports.insert(port.name(), port.property());
                                 }
                             }
+                            SymbolKind::GenericInstance(ref x) => {
+                                let base = symbol_table::get(x.base).unwrap();
+                                if let SymbolKind::Module(ref x) = base.kind {
+                                    for port in &x.ports {
+                                        ports.insert(port.name(), port.property());
+                                    }
+                                }
+                            }
+                            SymbolKind::GenericParameter(ref _x) => {
+                                // TODO
+                                // Restore the statement below after implementing the proto type
+                                // of the std synchnozier.
+                                // This proto type is required for the std async fifo module.
+
+                                //if let GenericBoundKind::Proto(ref x) = x.bound {
+                                //    if let Ok(symbol) =
+                                //        symbol_table::resolve((x, &symbol.found.namespace))
+                                //    {
+                                //        if let SymbolKind::ProtoModule(x) = symbol.found.kind {
+                                //            for port in &x.ports {
+                                //                ports.insert(port.name(), port.property());
+                                //            }
+                                //        }
+                                //    }
+                                //}
+                                port_unknown = true;
+                            }
                             SymbolKind::SystemVerilog => {
                                 port_unknown = true;
                                 sv_instance = true;
                             }
-                            // TODO this should be removed after implementing bounded generic
-                            // parameter
-                            SymbolKind::GenericParameter(_) => port_unknown = true,
                             _ => (),
                         }
                     }
