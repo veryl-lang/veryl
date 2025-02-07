@@ -2,7 +2,7 @@ use crate::analyzer_error::AnalyzerError;
 use crate::attribute::Attribute as Attr;
 use crate::attribute::{AllowItem, CondTypeItem};
 use crate::attribute_table;
-use crate::symbol::{Direction, Symbol, SymbolId, SymbolKind, TypeKind};
+use crate::symbol::{Direction, GenericBoundKind, Symbol, SymbolId, SymbolKind, TypeKind};
 use crate::symbol_table;
 use crate::var_ref::{
     AssignDeclarationType, AssignPosition, AssignPositionType, AssignStatementBranchItemType,
@@ -673,24 +673,18 @@ impl VerylGrammarTrait for CheckVarRef<'_> {
                                     }
                                 }
                             }
-                            SymbolKind::GenericParameter(ref _x) => {
-                                // TODO
-                                // Restore the statement below after implementing the proto type
-                                // of the std synchnozier.
-                                // This proto type is required for the std async fifo module.
-
-                                //if let GenericBoundKind::Proto(ref x) = x.bound {
-                                //    if let Ok(symbol) =
-                                //        symbol_table::resolve((x, &symbol.found.namespace))
-                                //    {
-                                //        if let SymbolKind::ProtoModule(x) = symbol.found.kind {
-                                //            for port in &x.ports {
-                                //                ports.insert(port.name(), port.property());
-                                //            }
-                                //        }
-                                //    }
-                                //}
-                                port_unknown = true;
+                            SymbolKind::GenericParameter(ref x) => {
+                                if let GenericBoundKind::Proto(ref x) = x.bound {
+                                    if let Ok(symbol) =
+                                        symbol_table::resolve((x, &symbol.found.namespace))
+                                    {
+                                        if let SymbolKind::ProtoModule(x) = symbol.found.kind {
+                                            for port in &x.ports {
+                                                ports.insert(port.name(), port.property());
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             SymbolKind::SystemVerilog => {
                                 port_unknown = true;

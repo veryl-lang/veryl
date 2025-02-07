@@ -2362,6 +2362,20 @@ fn unassign_variable() {
 
     let code = r#"
     proto module ProtoA (
+        i_a: input logic,
+    );
+
+    module ModuleB::<A: ProtoA> {
+        var a: logic;
+        inst u: A (i_a: a);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
+
+    let code = r#"
+    proto module ProtoA (
         o_a: output logic,
     );
 
