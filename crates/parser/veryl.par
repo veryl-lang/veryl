@@ -446,10 +446,12 @@ Factor: Number
       | InsideExpression
       | OutsideExpression
       | TypeExpression
-      | FactorType
+      | FactorTypeFactor
       ;
 
 IdentifierFactor: ExpressionIdentifier [ FunctionCall ];
+
+FactorTypeFactor: { TypeModifier } FactorType;
 
 FunctionCall: LParen [ ArgumentList ] RParen;
 

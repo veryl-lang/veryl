@@ -461,6 +461,15 @@ impl VerylWalker for Formatter {
         }
     }
 
+    /// Semantic action for non-terminal 'FactorTypeFactor'
+    fn factor_type_factor(&mut self, arg: &FactorTypeFactor) {
+        for x in &arg.factor_type_factor_list {
+            self.type_modifier(&x.type_modifier);
+            self.space(1);
+        }
+        self.factor_type(&arg.factor_type);
+    }
+
     /// Semantic action for non-terminal 'ArgumentList'
     #[inline(never)]
     fn argument_list(&mut self, arg: &ArgumentList) {
