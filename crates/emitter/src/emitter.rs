@@ -1900,6 +1900,7 @@ impl VerylWalker for Emitter {
                 if self.signed {
                     self.space(1);
                     self.str("signed");
+                    self.signed = false;
                 }
                 if self.in_scalar_type {
                     self.align_finish(align_kind::TYPE);
@@ -1949,6 +1950,7 @@ impl VerylWalker for Emitter {
                 if self.signed {
                     self.space(1);
                     self.str("signed");
+                    self.signed = false;
                 }
                 self.align_finish(align_kind::TYPE);
                 self.align_start(align_kind::WIDTH);
@@ -1962,7 +1964,6 @@ impl VerylWalker for Emitter {
             }
             ScalarTypeGroup::FactorType(x) => self.factor_type(&x.factor_type),
         }
-        self.signed = false;
         self.in_scalar_type = false;
         self.align_finish(align_kind::WIDTH);
     }

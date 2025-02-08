@@ -699,7 +699,7 @@ impl Evaluator {
             Factor::InsideExpression(_) => Evaluated::Unknown,
             Factor::OutsideExpression(_) => Evaluated::Unknown,
             Factor::TypeExpression(_) => Evaluated::Unknown,
-            Factor::FactorType(_) => Evaluated::Unknown,
+            Factor::FactorTypeFactor(_) => Evaluated::Unknown,
         }
     }
 

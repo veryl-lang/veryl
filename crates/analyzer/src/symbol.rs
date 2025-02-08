@@ -807,8 +807,18 @@ impl TryFrom<&syntax_tree::Expression> for Type {
         };
 
         match value {
-            syntax_tree::Factor::FactorType(x) => {
-                let factor_type: Type = x.factor_type.as_ref().into();
+            syntax_tree::Factor::FactorTypeFactor(x) => {
+                let factor = &x.factor_type_factor;
+
+                let mut modifier = Vec::new();
+                for x in &factor.factor_type_factor_list {
+                    match &*x.type_modifier {
+                        syntax_tree::TypeModifier::Tri(_) => modifier.push(TypeModifier::Tri),
+                        syntax_tree::TypeModifier::Signed(_) => modifier.push(TypeModifier::Signed),
+                    }
+                }
+                let mut factor_type: Type = factor.factor_type.as_ref().into();
+                factor_type.modifier = modifier;
                 Ok(factor_type)
             }
             syntax_tree::Factor::IdentifierFactor(x) => {

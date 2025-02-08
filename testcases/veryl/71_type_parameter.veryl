@@ -11,8 +11,8 @@ module Module71 #(
 }
 
 module Module71A #(
-    param T1: type = logic,
-    param T2: type = logic,
-    param T3: type = logic,
-    param T4: type = logic,
+    param T1: type = logic       ,
+    param T2: type = signed logic,
+    param T3: type = logic       ,
+    param T4: type = logic       ,
 ) {}

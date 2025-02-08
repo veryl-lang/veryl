@@ -11,10 +11,10 @@ module veryl_testcase_Module71 #(
 endmodule
 
 module veryl_testcase_Module71A #(
-    parameter type T1 = logic,
-    parameter type T2 = logic,
-    parameter type T3 = logic,
-    parameter type T4 = logic
+    parameter type T1 = logic       ,
+    parameter type T2 = logic signed,
+    parameter type T3 = logic       ,
+    parameter type T4 = logic   
 );
 endmodule
 //# sourceMappingURL=../map/testcases/sv/71_type_parameter.sv.map

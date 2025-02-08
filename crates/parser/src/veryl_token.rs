@@ -302,6 +302,17 @@ impl From<&Number> for TokenRange {
     }
 }
 
+impl From<&TypeModifier> for TokenRange {
+    fn from(value: &TypeModifier) -> Self {
+        let beg = match value {
+            TypeModifier::Tri(x) => x.tri.tri_token.token,
+            TypeModifier::Signed(x) => x.signed.signed_token.token,
+        };
+        let end = beg;
+        TokenRange { beg, end }
+    }
+}
+
 macro_rules! impl_token_range {
     ($typename:ty, $first:ident, $firsttok:ident, $last:ident, $lasttok:ident) => {
         impl From<&$typename> for TokenRange {
@@ -397,6 +408,21 @@ impl From<&FactorGroup> for TokenRange {
     }
 }
 
+impl From<&FactorTypeFactor> for TokenRange {
+    fn from(value: &FactorTypeFactor) -> Self {
+        let beg: TokenRange = if let Some(x) = value.factor_type_factor_list.first() {
+            x.type_modifier.as_ref().into()
+        } else {
+            value.factor_type.as_ref().into()
+        };
+        let end: TokenRange = value.factor_type.as_ref().into();
+        TokenRange {
+            beg: beg.beg,
+            end: end.end,
+        }
+    }
+}
+
 impl From<&Factor> for TokenRange {
     fn from(value: &Factor) -> Self {
         match value {
@@ -415,7 +441,7 @@ impl From<&Factor> for TokenRange {
             Factor::InsideExpression(x) => x.inside_expression.as_ref().into(),
             Factor::OutsideExpression(x) => x.outside_expression.as_ref().into(),
             Factor::TypeExpression(x) => x.type_expression.as_ref().into(),
-            Factor::FactorType(x) => x.factor_type.as_ref().into(),
+            Factor::FactorTypeFactor(x) => x.factor_type_factor.as_ref().into(),
         }
     }
 }

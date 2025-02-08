@@ -1100,8 +1100,8 @@ pub trait VerylWalker {
             Factor::TypeExpression(x) => {
                 self.type_expression(&x.type_expression);
             }
-            Factor::FactorType(x) => {
-                self.factor_type(&x.factor_type);
+            Factor::FactorTypeFactor(x) => {
+                self.factor_type_factor(&x.factor_type_factor);
             }
         }
         after!(self, factor, arg);
@@ -1115,6 +1115,16 @@ pub trait VerylWalker {
             self.function_call(&x.function_call);
         }
         after!(self, identifier_factor, arg);
+    }
+
+    /// Semantic action for non-terminal 'FactorTypeFactor'
+    fn factor_type_factor(&mut self, arg: &FactorTypeFactor) {
+        before!(self, factor_type_factor, arg);
+        for x in &arg.factor_type_factor_list {
+            self.type_modifier(&x.type_modifier);
+        }
+        self.factor_type(&arg.factor_type);
+        after!(self, factor_type_factor, arg);
     }
 
     /// Semantic action for non-terminal 'FunctionCall'
