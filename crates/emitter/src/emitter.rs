@@ -920,6 +920,8 @@ impl Emitter {
                 .iter()
                 .any(|y| x.name() == y.identifier.identifier_token.token.text)
         });
+
+        let src_line = self.src_line;
         for (i, port) in unconnected_ports.enumerate() {
             if i >= 1 || !connected_ports.is_empty() {
                 self.str(",");
@@ -928,6 +930,7 @@ impl Emitter {
 
             let property = port.property();
             self.str(".");
+            self.clear_adjust_line();
             self.align_start(align_kind::IDENTIFIER);
             self.token(&port.token);
             self.align_finish(align_kind::IDENTIFIER);
@@ -939,6 +942,7 @@ impl Emitter {
             self.str(")");
         }
 
+        self.src_line = src_line;
         self.generic_map.pop();
     }
 

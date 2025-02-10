@@ -7,15 +7,20 @@ module Module73A::<B: const> (
     i_b: input  logic = B           ,
     i_c: input  logic = 0           ,
     o_d: output logic = _           ,
+    o_e: output logic = _           ,
 ) {
     assign o_d = 0;
+    assign o_e = 0;
 }
 
 module Module73B {
+    var _d: logic;
+
     inst u0: Module73A::<0>;
     inst u1: Module73A::<1>;
     inst u2: Module73A::<1> (
-        i_a: 0,
-        i_b: 0,
+        i_a: 0 ,
+        i_b: 0 ,
+        o_d: _d,
     );
 }
