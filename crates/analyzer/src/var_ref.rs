@@ -1,4 +1,4 @@
-use crate::evaluator::{Evaluated, Evaluator};
+use crate::evaluator::{Evaluated, EvaluatedValue, Evaluator};
 use crate::namespace::Namespace;
 use crate::symbol::{ConnectTarget, SymbolId};
 use crate::symbol_table;
@@ -75,7 +75,7 @@ impl VarRefAffiliation {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum VarRefPathItem {
     Identifier {
         symbol_id: SymbolId,
@@ -119,35 +119,32 @@ impl VarRefPathItem {
 
     fn select_range(&self, x: &VarRefPathItem) -> Option<RangeInclusive<isize>> {
         match x {
-            VarRefPathItem::SelectSingle {
-                index: Evaluated::Fixed { value: index, .. },
-            } => Some(*index..=*index),
-            VarRefPathItem::SelectColon { msb, lsb } => match (msb, lsb) {
-                (Evaluated::Fixed { value: msb, .. }, Evaluated::Fixed { value: lsb, .. }) => {
-                    Some(*lsb..=*msb)
+            VarRefPathItem::SelectSingle { index } => match index.value {
+                EvaluatedValue::Fixed(x) => Some(x..=x),
+                _ => None,
+            },
+            VarRefPathItem::SelectColon { msb, lsb } => match (&msb.value, &lsb.value) {
+                (EvaluatedValue::Fixed(msb), EvaluatedValue::Fixed(lsb)) => Some(*lsb..=*msb),
+                _ => None,
+            },
+            VarRefPathItem::SelectPlusClon { position, width } => {
+                match (&position.value, &width.value) {
+                    (EvaluatedValue::Fixed(position), EvaluatedValue::Fixed(width)) => {
+                        Some(*position..=position + width - 1)
+                    }
+                    _ => None,
                 }
-                _ => None,
-            },
-            VarRefPathItem::SelectPlusClon { position, width } => match (position, width) {
-                (
-                    Evaluated::Fixed {
-                        value: position, ..
-                    },
-                    Evaluated::Fixed { value: width, .. },
-                ) => Some(*position..=position + width - 1),
-                _ => None,
-            },
-            VarRefPathItem::SelectMinusColon { position, width } => match (position, width) {
-                (
-                    Evaluated::Fixed {
-                        value: position, ..
-                    },
-                    Evaluated::Fixed { value: width, .. },
-                ) => Some(position - width + 1..=*position),
-                _ => None,
-            },
-            VarRefPathItem::SelectStep { index, step } => match (index, step) {
-                (Evaluated::Fixed { value: index, .. }, Evaluated::Fixed { value: step, .. }) => {
+            }
+            VarRefPathItem::SelectMinusColon { position, width } => {
+                match (&position.value, &width.value) {
+                    (EvaluatedValue::Fixed(position), EvaluatedValue::Fixed(width)) => {
+                        Some(position - width + 1..=*position)
+                    }
+                    _ => None,
+                }
+            }
+            VarRefPathItem::SelectStep { index, step } => match (&index.value, &step.value) {
+                (EvaluatedValue::Fixed(index), EvaluatedValue::Fixed(step)) => {
                     Some(step * index..=step * (index + 1) - 1)
                 }
                 _ => None,
@@ -212,42 +209,36 @@ impl fmt::Display for VarRefPathItem {
                 }
             }
             VarRefPathItem::SelectSingle { index } => {
-                if let Evaluated::Fixed { value: index, .. } = index {
+                if let EvaluatedValue::Fixed(index) = index.value {
                     format!("[{}]", index)
                 } else {
                     "[]".to_string()
                 }
             }
-            VarRefPathItem::SelectColon { msb, lsb } => match (msb, lsb) {
-                (Evaluated::Fixed { value: msb, .. }, Evaluated::Fixed { value: lsb, .. }) => {
+            VarRefPathItem::SelectColon { msb, lsb } => match (&msb.value, &lsb.value) {
+                (EvaluatedValue::Fixed(msb), EvaluatedValue::Fixed(lsb)) => {
                     format!("[{}:{}]", msb, lsb)
                 }
                 _ => "[]".to_string(),
             },
-            VarRefPathItem::SelectPlusClon { position, width } => match (position, width) {
-                (
-                    Evaluated::Fixed {
-                        value: position, ..
-                    },
-                    Evaluated::Fixed { value: width, .. },
-                ) => {
-                    format!("[{}+:{}]", position, width)
+            VarRefPathItem::SelectPlusClon { position, width } => {
+                match (&position.value, &width.value) {
+                    (EvaluatedValue::Fixed(position), EvaluatedValue::Fixed(width)) => {
+                        format!("[{}+:{}]", position, width)
+                    }
+                    _ => "[]".to_string(),
                 }
-                _ => "[]".to_string(),
-            },
-            VarRefPathItem::SelectMinusColon { position, width } => match (position, width) {
-                (
-                    Evaluated::Fixed {
-                        value: position, ..
-                    },
-                    Evaluated::Fixed { value: width, .. },
-                ) => {
-                    format!("[{}-:{}]", position, width)
+            }
+            VarRefPathItem::SelectMinusColon { position, width } => {
+                match (&position.value, &width.value) {
+                    (EvaluatedValue::Fixed(position), EvaluatedValue::Fixed(width)) => {
+                        format!("[{}-:{}]", position, width)
+                    }
+                    _ => "[]".to_string(),
                 }
-                _ => "[]".to_string(),
-            },
-            VarRefPathItem::SelectStep { index, step } => match (index, step) {
-                (Evaluated::Fixed { value: index, .. }, Evaluated::Fixed { value: step, .. }) => {
+            }
+            VarRefPathItem::SelectStep { index, step } => match (&index.value, &step.value) {
+                (EvaluatedValue::Fixed(index), EvaluatedValue::Fixed(step)) => {
                     format!("[{} step {}]", index, step)
                 }
                 _ => "[]".to_string(),

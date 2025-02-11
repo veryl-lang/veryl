@@ -63,7 +63,7 @@ pub module counter #(
         down         : input logic,
         current_count: input COUNT,
     ) -> COUNT {
-        case 1'b1 {
+        switch {
             clear          : return INITIAL_COUNT;
             set            : return set_value;
             (up && (!down)): return count_up(current_count);

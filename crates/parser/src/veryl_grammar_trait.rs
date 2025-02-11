@@ -109,6 +109,32 @@ impl From<&ScopedIdentifier> for Vec<Option<WithGenericArgument>> {
     }
 }
 
+impl From<&CaseCondition> for Vec<RangeItem> {
+    fn from(value: &CaseCondition) -> Self {
+        let mut ret = Vec::new();
+        ret.push(value.range_item.as_ref().clone());
+
+        for x in &value.case_condition_list {
+            ret.push(x.range_item.as_ref().clone());
+        }
+
+        ret
+    }
+}
+
+impl From<&SwitchCondition> for Vec<Expression> {
+    fn from(value: &SwitchCondition) -> Self {
+        let mut ret = Vec::new();
+        ret.push(value.expression.as_ref().clone());
+
+        for x in &value.switch_condition_list {
+            ret.push(x.expression.as_ref().clone());
+        }
+
+        ret
+    }
+}
+
 list_group_to_item!(Modport);
 list_group_to_item!(Enum);
 list_group_to_item!(StructUnion);
@@ -119,6 +145,7 @@ list_group_to_item!(PortDeclaration);
 list_to_item!(WithGenericParameter);
 list_to_item!(WithGenericArgument);
 list_to_item!(Attribute);
+list_to_item!(Argument);
 group_to_item!(Module);
 group_to_item!(Interface);
 group_to_item!(Generate);

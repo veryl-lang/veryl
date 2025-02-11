@@ -1,5 +1,5 @@
 use crate::analyzer_error::AnalyzerError;
-use crate::evaluator::{Evaluated, Evaluator};
+use crate::evaluator::{EvaluatedValue, Evaluator};
 use crate::symbol::{SymbolKind, TypeKind};
 use crate::symbol_table;
 use veryl_parser::veryl_grammar_trait::*;
@@ -256,12 +256,11 @@ impl VerylGrammarTrait for CheckClockReset<'_> {
     }
 
     fn assignment(&mut self, arg: &Assignment) -> Result<(), ParolError> {
-        use Evaluated::*;
         if let HandlerPoint::Before = self.point {
             if self.in_if_reset {
                 // Check to see right hand side of reset is const evaluable
-                match self.evaluator.expression(&arg.expression) {
-                    UnknownStatic | Fixed { .. } => (),
+                match self.evaluator.expression(&arg.expression).value {
+                    EvaluatedValue::UnknownStatic | EvaluatedValue::Fixed(_) => (),
                     _ => {
                         self.errors
                             .push(AnalyzerError::invalid_reset_non_elaborative(

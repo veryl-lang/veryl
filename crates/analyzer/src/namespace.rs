@@ -106,3 +106,13 @@ impl From<&[StrId]> for Namespace {
         }
     }
 }
+
+impl From<&str> for Namespace {
+    fn from(value: &str) -> Self {
+        let mut paths = Vec::new();
+        for x in value.split("::") {
+            paths.push(x.into());
+        }
+        Namespace { paths }
+    }
+}

@@ -4,7 +4,7 @@ use veryl_aligner::{align_kind, Aligner, Location};
 use veryl_analyzer::attribute::Attribute as Attr;
 use veryl_analyzer::attribute::{AllowItem, CondTypeItem, EnumEncodingItem};
 use veryl_analyzer::attribute_table;
-use veryl_analyzer::evaluator::{Evaluated, Evaluator};
+use veryl_analyzer::evaluator::{EvaluatedTypeResetKind, Evaluator};
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::TypeModifier as SymTypeModifier;
 use veryl_analyzer::symbol::{
@@ -1518,17 +1518,26 @@ impl VerylWalker for Emitter {
                     let dst = x.casting_type.as_ref();
                     let reset_type = self.build_opt.reset_type;
 
-                    let src_is_high =
-                        matches!((src, reset_type), (Evaluated::Reset, ResetType::AsyncHigh))
-                            | matches!((src, reset_type), (Evaluated::Reset, ResetType::SyncHigh))
-                            | matches!(src, Evaluated::ResetAsyncHigh)
-                            | matches!(src, Evaluated::ResetSyncHigh);
+                    let src_kind = &src.get_reset_kind();
 
-                    let src_is_low =
-                        matches!((src, reset_type), (Evaluated::Reset, ResetType::AsyncLow))
-                            | matches!((src, reset_type), (Evaluated::Reset, ResetType::SyncLow))
-                            | matches!(src, Evaluated::ResetAsyncLow)
-                            | matches!(src, Evaluated::ResetSyncLow);
+                    let src_is_high =
+                        matches!(
+                            (src_kind, reset_type),
+                            (Some(EvaluatedTypeResetKind::Implicit), ResetType::AsyncHigh)
+                        ) | matches!(
+                            (src_kind, reset_type),
+                            (Some(EvaluatedTypeResetKind::Implicit), ResetType::SyncHigh)
+                        ) | matches!(src_kind, Some(EvaluatedTypeResetKind::AsyncHigh))
+                            | matches!(src_kind, Some(EvaluatedTypeResetKind::SyncHigh));
+
+                    let src_is_low = matches!(
+                        (src_kind, reset_type),
+                        (Some(EvaluatedTypeResetKind::Implicit), ResetType::AsyncLow)
+                    ) | matches!(
+                        (src_kind, reset_type),
+                        (Some(EvaluatedTypeResetKind::Implicit), ResetType::SyncLow)
+                    ) | matches!(src_kind, Some(EvaluatedTypeResetKind::AsyncLow))
+                        | matches!(src_kind, Some(EvaluatedTypeResetKind::SyncLow));
 
                     let dst_is_high = matches!(
                         (dst, reset_type),
