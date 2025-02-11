@@ -1,15 +1,85 @@
+use crate::analyzer::AnalyzerPass2Expression;
 use crate::analyzer_error::AnalyzerError;
-use crate::evaluator::{Evaluated, EvaluatedError, EvaluatedType, Evaluator};
-use crate::symbol::{Direction, GenericBoundKind, Symbol, SymbolId, SymbolKind};
+use crate::definition_table::{self, Definition};
+use crate::evaluator::{Evaluated, EvaluatedError, EvaluatedType, EvaluatedValue, Evaluator};
+use crate::symbol::{Direction, GenericBoundKind, ModuleProperty, Symbol, SymbolId, SymbolKind};
 use crate::symbol_table;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use veryl_parser::resource_table::StrId;
 use veryl_parser::resource_table::TokenId;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::TokenRange;
-use veryl_parser::veryl_walker::{Handler, HandlerPoint};
+use veryl_parser::veryl_walker::{Handler, HandlerPoint, VerylWalker};
 use veryl_parser::ParolError;
 
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct InstanceSignature {
+    symbol: SymbolId,
+    params: Vec<(StrId, EvaluatedValue)>,
+}
+
+impl InstanceSignature {
+    fn new(symbol: SymbolId) -> Self {
+        Self {
+            symbol,
+            params: Vec::new(),
+        }
+    }
+
+    fn add_param(&mut self, id: StrId, value: EvaluatedValue) {
+        self.params.push((id, value));
+    }
+
+    fn normalize(&mut self) {
+        self.params.sort();
+    }
+}
+
 #[derive(Default)]
+pub struct InstanceHistory {
+    pub depth_limit: usize,
+    pub total_limit: usize,
+    pub hierarchy: Vec<InstanceSignature>,
+    full: HashSet<InstanceSignature>,
+}
+
+impl InstanceHistory {
+    fn push(&mut self, mut sig: InstanceSignature) -> Result<bool, InstanceHistoryError> {
+        sig.normalize();
+        if self.hierarchy.len() > self.depth_limit {
+            return Err(InstanceHistoryError::ExceedDepthLimit);
+        }
+        if self.full.len() > self.total_limit {
+            return Err(InstanceHistoryError::ExceedTotalLimit);
+        }
+        if self.hierarchy.iter().any(|x| *x == sig)
+            && sig.params.iter().all(|x| x.1.get_value().is_some())
+        {
+            return Err(InstanceHistoryError::InfiniteRecursion);
+        }
+        if self.full.contains(&sig) {
+            Ok(false)
+        } else {
+            self.hierarchy.push(sig.clone());
+            self.full.insert(sig);
+            Ok(true)
+        }
+    }
+
+    fn pop(&mut self) {
+        self.hierarchy.pop();
+    }
+}
+
+#[derive(Debug)]
+pub enum InstanceHistoryError {
+    ExceedDepthLimit,
+    ExceedTotalLimit,
+    InfiniteRecursion,
+}
+
+impl InstanceHistoryError {}
+
 pub struct CheckExpression<'a> {
     pub errors: Vec<AnalyzerError>,
     text: &'a str,
@@ -21,21 +91,55 @@ pub struct CheckExpression<'a> {
     disable: bool,
     disable_block_beg: HashSet<TokenId>,
     disable_block_end: HashSet<TokenId>,
+    inst_context: Vec<TokenRange>,
+    inst_history: &'a mut InstanceHistory,
 }
 
 impl<'a> CheckExpression<'a> {
-    pub fn new(text: &'a str) -> Self {
+    pub fn new(
+        text: &'a str,
+        inst_context: Vec<TokenRange>,
+        inst_history: &'a mut InstanceHistory,
+    ) -> Self {
         Self {
+            errors: Vec::new(),
             text,
-            ..Default::default()
+            point: HandlerPoint::default(),
+            evaluator: Evaluator::default(),
+            in_inst_declaration: false,
+            port_direction: None,
+            in_input_port_default_value: false,
+            disable: false,
+            disable_block_beg: HashSet::new(),
+            disable_block_end: HashSet::new(),
+            inst_context,
+            inst_history,
         }
     }
 
     fn evaluated_error(&mut self, errors: &[EvaluatedError]) {
         for e in errors {
-            self.errors
-                .push(AnalyzerError::evaluated_error(self.text, e));
+            self.errors.push(AnalyzerError::evaluated_error(
+                self.text,
+                e,
+                &self.inst_context,
+            ));
         }
+    }
+
+    fn inst_history_error(&mut self, error: InstanceHistoryError, token: &TokenRange) {
+        let error = match error {
+            InstanceHistoryError::ExceedDepthLimit => {
+                AnalyzerError::exceed_limit("hierarchy depth limit", self.text, token)
+            }
+            InstanceHistoryError::ExceedTotalLimit => {
+                AnalyzerError::exceed_limit("total instance limit", self.text, token)
+            }
+            InstanceHistoryError::InfiniteRecursion => {
+                AnalyzerError::infinite_recursion(self.text, token)
+            }
+        };
+        self.errors.push(error);
     }
 
     fn check_assignment(
@@ -64,6 +168,7 @@ impl<'a> CheckExpression<'a> {
                         &format!("{}-D array", dst_array_dim),
                         self.text,
                         token,
+                        &self.inst_context,
                     ));
                 }
 
@@ -73,12 +178,47 @@ impl<'a> CheckExpression<'a> {
                         "2-state variable",
                         self.text,
                         token,
+                        &self.inst_context,
                     ));
                 }
 
                 // TODO type checks
             }
         }
+    }
+
+    fn get_overridden_params(&mut self, arg: &InstDeclaration) -> HashMap<StrId, Evaluated> {
+        let mut ret = HashMap::new();
+
+        let params = if let Some(x) = &arg.inst_declaration_opt0 {
+            if let Some(x) = &x.inst_parameter.inst_parameter_opt {
+                x.inst_parameter_list.as_ref().into()
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+
+        for param in params {
+            let value = if let Some(x) = &param.inst_parameter_item_opt {
+                self.evaluator.expression(&x.expression)
+            } else if let Ok(symbol) = symbol_table::resolve(param.identifier.as_ref()) {
+                symbol.found.evaluate()
+            } else {
+                Evaluated::create_unknown()
+            };
+
+            let name = param.identifier.identifier_token.token.text;
+            ret.insert(name, value);
+        }
+
+        ret
+    }
+
+    fn check_port_connection(&mut self, _arg: &InstDeclaration, _module: &ModuleProperty) {
+        // TODO check port connection
+        //
     }
 }
 
@@ -130,8 +270,8 @@ impl VerylGrammarTrait for CheckExpression<'_> {
     }
 
     fn identifier_factor(&mut self, arg: &IdentifierFactor) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if !self.disable {
+        if !self.disable {
+            if let HandlerPoint::Before = self.point {
                 let expid = arg.expression_identifier.as_ref();
                 if let Ok(rr) = symbol_table::resolve(expid) {
                     // Only generic const or globally visible identifier can be used as port default value
@@ -154,6 +294,7 @@ impl VerylGrammarTrait for CheckExpression<'_> {
                                 &kind_name,
                                 self.text,
                                 &token,
+                                &self.inst_context,
                             ));
                         }
                     }
@@ -164,8 +305,8 @@ impl VerylGrammarTrait for CheckExpression<'_> {
     }
 
     fn let_statement(&mut self, arg: &LetStatement) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if !self.disable {
+        if !self.disable {
+            if let HandlerPoint::Before = self.point {
                 let exp = self.evaluator.expression(&arg.expression);
                 self.evaluated_error(&exp.errors);
 
@@ -179,8 +320,8 @@ impl VerylGrammarTrait for CheckExpression<'_> {
     }
 
     fn identifier_statement(&mut self, arg: &IdentifierStatement) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if !self.disable {
+        if !self.disable {
+            if let HandlerPoint::Before = self.point {
                 match arg.identifier_statement_group.as_ref() {
                     IdentifierStatementGroup::FunctionCall(_) => {
                         // TODO function check
@@ -202,8 +343,8 @@ impl VerylGrammarTrait for CheckExpression<'_> {
     }
 
     fn if_statement(&mut self, arg: &IfStatement) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if !self.disable {
+        if !self.disable {
+            if let HandlerPoint::Before = self.point {
                 let exp = self.evaluator.expression(&arg.expression);
                 self.evaluated_error(&exp.errors);
 
@@ -222,8 +363,8 @@ impl VerylGrammarTrait for CheckExpression<'_> {
     }
 
     fn if_reset_statement(&mut self, arg: &IfResetStatement) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if !self.disable {
+        if !self.disable {
+            if let HandlerPoint::Before = self.point {
                 for x in &arg.if_reset_statement_list {
                     let exp = self.evaluator.expression(&x.expression);
                     self.evaluated_error(&exp.errors);
@@ -237,8 +378,8 @@ impl VerylGrammarTrait for CheckExpression<'_> {
     }
 
     fn return_statement(&mut self, arg: &ReturnStatement) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if !self.disable {
+        if !self.disable {
+            if let HandlerPoint::Before = self.point {
                 let exp = self.evaluator.expression(&arg.expression);
                 self.evaluated_error(&exp.errors);
 
@@ -250,8 +391,8 @@ impl VerylGrammarTrait for CheckExpression<'_> {
     }
 
     fn for_statement(&mut self, arg: &ForStatement) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if !self.disable {
+        if !self.disable {
+            if let HandlerPoint::Before = self.point {
                 let exp = self.evaluator.expression(&arg.range.expression);
                 self.evaluated_error(&exp.errors);
 
@@ -277,8 +418,8 @@ impl VerylGrammarTrait for CheckExpression<'_> {
     }
 
     fn case_statement(&mut self, arg: &CaseStatement) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if !self.disable {
+        if !self.disable {
+            if let HandlerPoint::Before = self.point {
                 let exp = self.evaluator.expression(&arg.expression);
                 self.evaluated_error(&exp.errors);
             }
@@ -288,8 +429,8 @@ impl VerylGrammarTrait for CheckExpression<'_> {
     }
 
     fn case_condition(&mut self, arg: &CaseCondition) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if !self.disable {
+        if !self.disable {
+            if let HandlerPoint::Before = self.point {
                 let range_items: Vec<RangeItem> = arg.into();
 
                 for x in range_items {
@@ -329,8 +470,8 @@ impl VerylGrammarTrait for CheckExpression<'_> {
     }
 
     fn switch_condition(&mut self, arg: &SwitchCondition) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if !self.disable {
+        if !self.disable {
+            if let HandlerPoint::Before = self.point {
                 let expressions: Vec<Expression> = arg.into();
 
                 for x in expressions {
@@ -346,8 +487,8 @@ impl VerylGrammarTrait for CheckExpression<'_> {
     }
 
     fn let_declaration(&mut self, arg: &LetDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if !self.disable {
+        if !self.disable {
+            if let HandlerPoint::Before = self.point {
                 let exp = self.evaluator.expression(&arg.expression);
                 self.evaluated_error(&exp.errors);
 
@@ -361,8 +502,8 @@ impl VerylGrammarTrait for CheckExpression<'_> {
     }
 
     fn const_declaration(&mut self, arg: &ConstDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if !self.disable {
+        if !self.disable {
+            if let HandlerPoint::Before = self.point {
                 let exp = self.evaluator.expression(&arg.expression);
                 self.evaluated_error(&exp.errors);
 
@@ -376,8 +517,8 @@ impl VerylGrammarTrait for CheckExpression<'_> {
     }
 
     fn assign_declaration(&mut self, arg: &AssignDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if !self.disable {
+        if !self.disable {
+            if let HandlerPoint::Before = self.point {
                 let exp = self.evaluator.expression(&arg.expression);
                 self.evaluated_error(&exp.errors);
 
@@ -392,8 +533,8 @@ impl VerylGrammarTrait for CheckExpression<'_> {
     }
 
     fn enum_item(&mut self, arg: &EnumItem) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if !self.disable {
+        if !self.disable {
+            if let HandlerPoint::Before = self.point {
                 if let Some(x) = &arg.enum_item_opt {
                     let exp = self.evaluator.expression(&x.expression);
                     self.evaluated_error(&exp.errors);
@@ -406,21 +547,81 @@ impl VerylGrammarTrait for CheckExpression<'_> {
         Ok(())
     }
 
-    fn inst_declaration(&mut self, _arg: &InstDeclaration) -> Result<(), ParolError> {
-        match self.point {
-            HandlerPoint::Before => {
-                self.in_inst_declaration = true;
+    fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<(), ParolError> {
+        if !self.disable {
+            match self.point {
+                HandlerPoint::Before => {
+                    self.in_inst_declaration = true;
 
-                // TODO check port connection
+                    if let Ok(symbol) = symbol_table::resolve(arg.scoped_identifier.as_ref()) {
+                        if matches!(
+                            symbol.found.kind,
+                            SymbolKind::Module(_) | SymbolKind::Interface(_)
+                        ) {
+                            let parameters = symbol.found.kind.get_parameters();
+                            let definition = symbol.found.kind.get_definition().unwrap();
+
+                            let mut sig = InstanceSignature::new(symbol.found.id);
+
+                            // Push override parameters
+                            let params = self.get_overridden_params(arg);
+                            for x in parameters {
+                                if let Some(value) = params.get(&x.name) {
+                                    symbol_table::push_override(x.symbol, value.clone());
+                                    sig.add_param(x.name, value.value.clone());
+                                }
+                            }
+
+                            symbol_table::clear_evaluated_cache(&symbol.found.inner_namespace());
+
+                            if let SymbolKind::Module(x) = &symbol.found.kind {
+                                self.check_port_connection(arg, x);
+                            }
+
+                            match self.inst_history.push(sig) {
+                                Ok(true) => {
+                                    // Check expression with overridden parameters
+                                    let def = definition_table::get(definition).unwrap();
+                                    if let Definition::Module { text, decl } = def {
+                                        let mut inst_context = self.inst_context.clone();
+                                        inst_context.push(arg.identifier.as_ref().into());
+                                        let mut analyzer = AnalyzerPass2Expression::new(
+                                            &text,
+                                            inst_context,
+                                            self.inst_history,
+                                        );
+                                        analyzer.module_declaration(&decl);
+                                        self.errors.append(&mut analyzer.get_errors());
+                                    }
+                                    self.inst_history.pop();
+                                }
+                                // Skip duplicated signature
+                                Ok(false) => (),
+                                Err(x) => {
+                                    self.inst_history_error(x, &arg.identifier.as_ref().into())
+                                }
+                            }
+
+                            symbol_table::clear_evaluated_cache(&symbol.found.inner_namespace());
+
+                            // Pop override parameters
+                            for x in parameters {
+                                if params.contains_key(&x.name) {
+                                    symbol_table::pop_override(x.symbol);
+                                }
+                            }
+                        }
+                    }
+                }
+                HandlerPoint::After => self.in_inst_declaration = false,
             }
-            HandlerPoint::After => self.in_inst_declaration = false,
         }
         Ok(())
     }
 
     fn with_parameter_item(&mut self, arg: &WithParameterItem) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if !self.disable {
+        if !self.disable {
+            if let HandlerPoint::Before = self.point {
                 let exp = self.evaluator.expression(&arg.expression);
                 self.evaluated_error(&exp.errors);
 
@@ -432,11 +633,11 @@ impl VerylGrammarTrait for CheckExpression<'_> {
     }
 
     fn port_type_concrete(&mut self, arg: &PortTypeConcrete) -> Result<(), ParolError> {
-        match self.point {
-            HandlerPoint::Before => {
-                self.port_direction = Some(arg.direction.as_ref().into());
+        if !self.disable {
+            match self.point {
+                HandlerPoint::Before => {
+                    self.port_direction = Some(arg.direction.as_ref().into());
 
-                if !self.disable {
                     if let Some(x) = &arg.port_type_concrete_opt0 {
                         let exp = self.evaluator.expression(&x.port_default_value.expression);
                         self.evaluated_error(&exp.errors);
@@ -444,26 +645,30 @@ impl VerylGrammarTrait for CheckExpression<'_> {
                         // TODO type check
                     }
                 }
+                HandlerPoint::After => self.port_direction = None,
             }
-            HandlerPoint::After => self.port_direction = None,
         }
+
         Ok(())
     }
 
     fn port_default_value(&mut self, _arg: &PortDefaultValue) -> Result<(), ParolError> {
-        match self.point {
-            HandlerPoint::Before => {
-                self.in_input_port_default_value =
-                    matches!(self.port_direction.unwrap(), Direction::Input)
+        if !self.disable {
+            match self.point {
+                HandlerPoint::Before => {
+                    self.in_input_port_default_value =
+                        matches!(self.port_direction.unwrap(), Direction::Input)
+                }
+                HandlerPoint::After => self.in_input_port_default_value = false,
             }
-            HandlerPoint::After => self.in_input_port_default_value = false,
         }
+
         Ok(())
     }
 
     fn generate_if_declaration(&mut self, arg: &GenerateIfDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if !self.disable {
+        if !self.disable {
+            if let HandlerPoint::Before = self.point {
                 let exp = self.evaluator.expression(&arg.expression);
                 self.evaluated_error(&exp.errors);
 
@@ -514,8 +719,8 @@ impl VerylGrammarTrait for CheckExpression<'_> {
     }
 
     fn generate_for_declaration(&mut self, arg: &GenerateForDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if !self.disable {
+        if !self.disable {
+            if let HandlerPoint::Before = self.point {
                 let exp = self.evaluator.expression(&arg.range.expression);
                 self.evaluated_error(&exp.errors);
 

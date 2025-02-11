@@ -18,8 +18,10 @@ module Module29 (
     }
 
     #[allow(missing_port)]
-    inst u0: Module29 (
-
-
-    );
+    inst u0: Module29A;
 }
+
+module Module29A (
+    clk: input clock,
+    rst: input reset,
+) {}

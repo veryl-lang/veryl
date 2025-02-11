@@ -1,6 +1,7 @@
 use crate::analyzer::resource_table::PathId;
 use crate::analyzer_error::AnalyzerError;
 use crate::attribute_table;
+use crate::handlers::check_expression::{CheckExpression, InstanceHistory};
 use crate::handlers::*;
 use crate::msb_table;
 use crate::namespace::Namespace;
@@ -21,7 +22,7 @@ use std::path::Path;
 use veryl_metadata::{Build, Lint, Metadata};
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::{Token, TokenSource};
+use veryl_parser::veryl_token::{Token, TokenRange, TokenSource};
 use veryl_parser::veryl_walker::{Handler, VerylWalker};
 
 pub struct AnalyzerPass1<'a> {
@@ -47,9 +48,14 @@ pub struct AnalyzerPass2<'a> {
 }
 
 impl<'a> AnalyzerPass2<'a> {
-    pub fn new(text: &'a str, build_opt: &'a Build, lint_opt: &'a Lint) -> Self {
+    pub fn new(
+        text: &'a str,
+        build_opt: &'a Build,
+        lint_opt: &'a Lint,
+        inst_history: &'a mut InstanceHistory,
+    ) -> Self {
         AnalyzerPass2 {
-            handlers: Pass2Handlers::new(text, build_opt, lint_opt),
+            handlers: Pass2Handlers::new(text, build_opt, lint_opt, inst_history),
         }
     }
 }
@@ -59,6 +65,33 @@ impl VerylWalker for AnalyzerPass2<'_> {
         Some(self.handlers.get_handlers())
     }
 }
+
+pub struct AnalyzerPass2Expression<'a> {
+    check_expression: CheckExpression<'a>,
+}
+
+impl<'a> AnalyzerPass2Expression<'a> {
+    pub fn new(
+        text: &'a str,
+        inst_context: Vec<TokenRange>,
+        inst_history: &'a mut InstanceHistory,
+    ) -> Self {
+        AnalyzerPass2Expression {
+            check_expression: CheckExpression::new(text, inst_context, inst_history),
+        }
+    }
+
+    pub fn get_errors(&mut self) -> Vec<AnalyzerError> {
+        self.check_expression.errors.drain(0..).collect()
+    }
+}
+
+impl VerylWalker for AnalyzerPass2Expression<'_> {
+    fn get_handlers(&mut self) -> Option<Vec<&mut dyn Handler>> {
+        Some(vec![&mut self.check_expression as &mut dyn Handler])
+    }
+}
+
 pub struct AnalyzerPass3<'a> {
     path: PathId,
     text: &'a str,
@@ -300,7 +333,11 @@ impl Analyzer {
         let mut ret = Vec::new();
 
         namespace_table::set_default(&[project_name.into()]);
-        let mut pass2 = AnalyzerPass2::new(text, &self.build_opt, &self.lint_opt);
+        let mut inst_history = InstanceHistory::default();
+        inst_history.depth_limit = self.build_opt.instance_depth_limit;
+        inst_history.total_limit = self.build_opt.instance_total_limit;
+        let mut pass2 =
+            AnalyzerPass2::new(text, &self.build_opt, &self.lint_opt, &mut inst_history);
         pass2.veryl(input);
         ret.append(&mut pass2.handlers.get_errors());
 

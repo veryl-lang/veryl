@@ -3500,3 +3500,48 @@ fn skip_disabled_generate_block() {
     let errors = analyze(code);
     assert!(errors.is_empty());
 }
+
+#[test]
+fn parameter_override() {
+    let code = r#"
+    module ModuleA #(
+        param X: u32 = 1,
+    ) {
+        let _a: logic<2> = 1;
+        let _b: logic    = _a[X];
+    }
+
+    module ModuleB {
+        inst u: ModuleA #(X: 3);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidSelect { .. }));
+}
+
+#[test]
+fn exceed_limit() {
+    let code = r#"
+    module ModuleA #(
+        param X: u32 = 1,
+    ) {
+        inst u: ModuleA #(X: X + 1);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::ExceedLimit { .. }));
+}
+
+#[test]
+fn infinite_recursion() {
+    let code = r#"
+    module ModuleA {
+        inst u: ModuleA;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InfiniteRecursion { .. }));
+}

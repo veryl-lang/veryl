@@ -2,6 +2,7 @@ use crate::analyzer_error::AnalyzerError;
 use crate::attribute::Attribute as Attr;
 use crate::attribute::{AllowItem, EnumEncodingItem};
 use crate::attribute_table;
+use crate::definition_table::{self, Definition};
 use crate::evaluator::{EvaluatedValue, Evaluator};
 use crate::namespace::Namespace;
 use crate::namespace_table;
@@ -1241,6 +1242,10 @@ impl VerylGrammarTrait for CreateSymbolTable<'_> {
                     .as_ref()
                     .map(|x| x.scoped_identifier.as_ref().into());
 
+                let definition = definition_table::insert(Definition::Module {
+                    text: self.text.to_string(),
+                    decl: arg.clone(),
+                });
                 let property = ModuleProperty {
                     range,
                     proto,
@@ -1250,6 +1255,7 @@ impl VerylGrammarTrait for CreateSymbolTable<'_> {
                     ports,
                     default_clock,
                     default_reset,
+                    definition,
                 };
                 let public = arg.module_declaration_opt.is_some();
                 self.insert_symbol(
@@ -1350,11 +1356,16 @@ impl VerylGrammarTrait for CreateSymbolTable<'_> {
                 let range =
                     TokenRange::new(&arg.interface.interface_token, &arg.r_brace.r_brace_token);
 
+                let definition = definition_table::insert(Definition::Interface {
+                    text: self.text.to_string(),
+                    decl: arg.clone(),
+                });
                 let property = InterfaceProperty {
                     range,
                     generic_parameters,
                     generic_references,
                     parameters,
+                    definition,
                 };
                 let public = arg.interface_declaration_opt.is_some();
                 self.insert_symbol(

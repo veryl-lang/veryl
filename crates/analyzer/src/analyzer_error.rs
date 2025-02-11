@@ -30,6 +30,8 @@ pub enum AnalyzerError {
         input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
+        #[label(collection, "instantiated at")]
+        inst_context: Vec<SourceSpan>,
     },
 
     #[diagnostic(
@@ -164,6 +166,8 @@ pub enum AnalyzerError {
         input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
+        #[label(collection, "instantiated at")]
+        inst_context: Vec<SourceSpan>,
     },
 
     #[diagnostic(
@@ -179,6 +183,8 @@ pub enum AnalyzerError {
         input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
+        #[label(collection, "instantiated at")]
+        inst_context: Vec<SourceSpan>,
     },
 
     #[diagnostic(
@@ -532,6 +538,8 @@ pub enum AnalyzerError {
         input: NamedSource<String>,
         #[label("Error location")]
         error_location: SourceSpan,
+        #[label(collection, "instantiated at")]
+        inst_context: Vec<SourceSpan>,
     },
 
     #[diagnostic(
@@ -1094,6 +1102,25 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
     },
+
+    #[diagnostic(severity(Error), code(infinite_recursion), help(""), url(""))]
+    #[error("infinite instance recustion is detected")]
+    InfiniteRecursion {
+        #[source_code]
+        input: NamedSource<String>,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(severity(Error), code(exceed_limit), help(""), url(""))]
+    #[error("exceed {kind} limit")]
+    ExceedLimit {
+        kind: String,
+        #[source_code]
+        input: NamedSource<String>,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
 }
 
 impl AnalyzerError {
@@ -1103,20 +1130,6 @@ impl AnalyzerError {
 
     pub fn anonymous_identifier_usage(source: &str, token: &TokenRange) -> Self {
         AnalyzerError::AnonymousIdentifierUsage {
-            input: AnalyzerError::named_source(source, token),
-            error_location: token.into(),
-        }
-    }
-
-    pub fn call_non_function(
-        identifier: &str,
-        kind: &str,
-        source: &str,
-        token: &TokenRange,
-    ) -> Self {
-        AnalyzerError::CallNonFunction {
-            identifier: identifier.into(),
-            kind: kind.into(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
         }
@@ -1204,12 +1217,20 @@ impl AnalyzerError {
         }
     }
 
-    pub fn invalid_factor(identifier: &str, kind: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn invalid_factor(
+        identifier: &str,
+        kind: &str,
+        source: &str,
+        token: &TokenRange,
+        inst_context: &[TokenRange],
+    ) -> Self {
+        let inst_context = inst_context.iter().map(|x| x.into()).collect();
         AnalyzerError::InvalidFactor {
             identifier: identifier.to_string(),
             kind: kind.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
+            inst_context,
         }
     }
 
@@ -1443,12 +1464,20 @@ impl AnalyzerError {
         }
     }
 
-    pub fn mismatch_assignment(src: &str, dst: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn mismatch_assignment(
+        src: &str,
+        dst: &str,
+        source: &str,
+        token: &TokenRange,
+        inst_context: &[TokenRange],
+    ) -> Self {
+        let inst_context = inst_context.iter().map(|x| x.into()).collect();
         AnalyzerError::MismatchAssignment {
             src: src.to_string(),
             dst: dst.to_string(),
             input: AnalyzerError::named_source(source, token),
             error_location: token.into(),
+            inst_context,
         }
     }
 
@@ -1798,24 +1827,47 @@ impl AnalyzerError {
         }
     }
 
-    pub fn evaluated_error(source: &str, error: &EvaluatedError) -> Self {
+    pub fn infinite_recursion(source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InfiniteRecursion {
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn exceed_limit(kind: &str, source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::ExceedLimit {
+            kind: kind.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn evaluated_error(
+        source: &str,
+        error: &EvaluatedError,
+        inst_context: &[TokenRange],
+    ) -> Self {
+        let inst_context = inst_context.iter().map(|x| x.into()).collect();
         match error {
             EvaluatedError::InvalidFactor { kind, token } => AnalyzerError::InvalidFactor {
                 identifier: token.to_string(),
                 kind: kind.clone(),
                 input: AnalyzerError::named_source(source, &token.into()),
                 error_location: token.into(),
+                inst_context,
             },
             EvaluatedError::CallNonFunction { kind, token } => AnalyzerError::CallNonFunction {
                 identifier: token.to_string(),
                 kind: kind.clone(),
                 input: AnalyzerError::named_source(source, &token.into()),
                 error_location: token.into(),
+                inst_context,
             },
             EvaluatedError::InvalidSelect { kind, range } => AnalyzerError::InvalidSelect {
                 kind: kind.to_string(),
                 input: AnalyzerError::named_source(source, range),
                 error_location: range.into(),
+                inst_context,
             },
         }
     }
