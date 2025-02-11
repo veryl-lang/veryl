@@ -1,10 +1,10 @@
 module Module13 {
-    var a: logic;
-    var b: logic;
-    var c: logic;
-    var d: logic;
-    var e: logic;
-    let X: logic = 1;
+    var a: logic    ;
+    var b: logic    ;
+    var c: logic    ;
+    var d: logic    ;
+    var e: logic    ;
+    let X: logic<10> = 1;
 
     // bit select
     assign a = X[0];

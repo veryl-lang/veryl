@@ -22,10 +22,10 @@ module Module02 {
     let _eee: bit<10, 10> = 1;
 
     // array
-    let _f     : u32 [10] = 1;
-    let _ff    : u64 [10] = 1;
-    let _fff   : i32 [10] = 1;
-    let _ffff  : i64 [10] = 1;
-    let _fffff : f32 [10] = 1;
-    let _ffffff: f64 [10] = 1;
+    let _f     : u32 [2] = '{1, 1};
+    let _ff    : u64 [2] = '{1, 1};
+    let _fff   : i32 [2] = '{1, 1};
+    let _ffff  : i64 [2] = '{1, 1};
+    let _fffff : f32 [2] = '{1, 1};
+    let _ffffff: f64 [2] = '{1, 1};
 }

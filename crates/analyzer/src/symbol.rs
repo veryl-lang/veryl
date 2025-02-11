@@ -121,7 +121,7 @@ impl Symbol {
                 SymbolKind::Variable(x) => {
                     let mut evaluator = Evaluator::new();
                     let width = evaluator.type_width(x.r#type.clone());
-                    let array = evaluator.type_width(x.r#type.clone());
+                    let array = evaluator.type_array(x.r#type.clone());
 
                     if let (Some(width), Some(array)) = (width, array) {
                         if x.r#type.kind.is_clock() {
@@ -146,7 +146,8 @@ impl Symbol {
                             Evaluated::create_unknown_static()
                         } else {
                             let signed = x.r#type.modifier.contains(&TypeModifier::Signed);
-                            Evaluated::create_variable(signed, width, array)
+                            let is_4state = x.r#type.kind.is_4state();
+                            Evaluated::create_variable(signed, is_4state, width, array)
                         }
                     } else {
                         Evaluated::create_unknown()
@@ -156,7 +157,7 @@ impl Symbol {
                     if let Some(x) = &x.r#type {
                         let mut evaluator = Evaluator::new();
                         let width = evaluator.type_width(x.clone());
-                        let array = evaluator.type_width(x.clone());
+                        let array = evaluator.type_array(x.clone());
 
                         if let (Some(width), Some(array)) = (width, array) {
                             if x.kind.is_clock() {
@@ -179,7 +180,8 @@ impl Symbol {
                                 Evaluated::create_reset(kind, width, array)
                             } else {
                                 let signed = x.modifier.contains(&TypeModifier::Signed);
-                                Evaluated::create_variable(signed, width, array)
+                                let is_4state = x.kind.is_4state();
+                                Evaluated::create_variable(signed, is_4state, width, array)
                             }
                         } else {
                             Evaluated::create_unknown()
@@ -723,6 +725,23 @@ impl TypeKind {
                 | TypeKind::ResetSyncHigh
                 | TypeKind::ResetSyncLow
         )
+    }
+
+    pub fn is_2state(&self) -> bool {
+        matches!(
+            self,
+            TypeKind::Bit
+                | TypeKind::U32
+                | TypeKind::U64
+                | TypeKind::I32
+                | TypeKind::I64
+                | TypeKind::F32
+                | TypeKind::F64
+        )
+    }
+
+    pub fn is_4state(&self) -> bool {
+        self.is_clock() | self.is_reset() | (*self == TypeKind::Logic)
     }
 }
 
