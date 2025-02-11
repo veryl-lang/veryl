@@ -653,8 +653,7 @@ impl Evaluated {
     }
 
     fn xor(self, exp: Evaluated) -> Evaluated {
-        let ret = Self::binary_op(self, exp, None, |x, y, _| x.max(y), |x, y| Some(x ^ y));
-        ret
+        Self::binary_op(self, exp, None, |x, y, _| x.max(y), |x, y| Some(x ^ y))
     }
 
     fn xnor(self, exp: Evaluated) -> Evaluated {
