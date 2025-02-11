@@ -1348,6 +1348,34 @@ fn mismatch_assignment() {
         errors[0],
         AnalyzerError::MismatchAssignment { .. }
     ));
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport mp {
+            a: input
+        }
+    }
+    interface InterfaceB {
+        var a: logic;
+        modport mp {
+            a: input
+        }
+    }
+    module ModuleA (
+        a: modport InterfaceA::mp,
+    ) {}
+    module ModuleB {
+        inst x: InterfaceB;
+        inst y: ModuleA (a: x);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAssignment { .. }
+    ));
 }
 
 #[test]

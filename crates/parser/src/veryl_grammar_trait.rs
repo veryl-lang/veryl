@@ -136,6 +136,32 @@ impl From<&SwitchCondition> for Vec<Expression> {
     }
 }
 
+impl From<&Width> for Vec<Expression> {
+    fn from(value: &Width) -> Self {
+        let mut ret = Vec::new();
+        ret.push(value.expression.as_ref().clone());
+
+        for x in &value.width_list {
+            ret.push(x.expression.as_ref().clone());
+        }
+
+        ret
+    }
+}
+
+impl From<&Array> for Vec<Expression> {
+    fn from(value: &Array) -> Self {
+        let mut ret = Vec::new();
+        ret.push(value.expression.as_ref().clone());
+
+        for x in &value.array_list {
+            ret.push(x.expression.as_ref().clone());
+        }
+
+        ret
+    }
+}
+
 list_group_to_item!(Modport);
 list_group_to_item!(Enum);
 list_group_to_item!(StructUnion);

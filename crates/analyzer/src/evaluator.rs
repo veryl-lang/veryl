@@ -365,6 +365,25 @@ impl Evaluated {
         self.r#type = EvaluatedType::Reset(EvaluatedTypeReset { kind, width, array });
     }
 
+    pub fn create_user_defined(
+        symbol: SymbolId,
+        width: Vec<usize>,
+        array: Vec<usize>,
+    ) -> Evaluated {
+        let mut ret = Self::create_unknown();
+        ret.set_user_defined(symbol, width, array);
+        ret
+    }
+
+    pub fn set_user_defined(&mut self, symbol: SymbolId, width: Vec<usize>, array: Vec<usize>) {
+        self.value = EvaluatedValue::Unknown;
+        self.r#type = EvaluatedType::UserDefined(EvaluatedTypeUserDefined {
+            symbol,
+            width,
+            array,
+        });
+    }
+
     pub fn select(
         mut self,
         mut beg: Evaluated,
@@ -958,11 +977,15 @@ impl Evaluator {
     }
 
     pub fn type_array(&mut self, x: Type) -> Option<Vec<usize>> {
-        if x.array.is_empty() {
+        self.expression_list(&x.array)
+    }
+
+    pub fn expression_list(&mut self, x: &[Expression]) -> Option<Vec<usize>> {
+        if x.is_empty() {
             Some(vec![])
         } else {
             let mut ret = Vec::new();
-            for x in &x.array {
+            for x in x {
                 let width = self.expression(x);
                 if let EvaluatedValue::Fixed(value) = width.value {
                     if let Ok(width) = value.try_into() {

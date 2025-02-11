@@ -9,9 +9,9 @@ module Module35 {
 }
 
 module Module35B (
-    aa  : input  u32,
-    bb  : output u32,
-    bbbb: output u32,
+    aa  : input  logic<32>,
+    bb  : output logic<32>,
+    bbbb: output logic<32>,
 ) {
     always_comb {
         bb   = 0;

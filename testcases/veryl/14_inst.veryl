@@ -35,9 +35,9 @@ module Module14C #(
     param X: u32 = 1,
     param Y: u32 = 1,
 ) (
-    a   : input u32,
-    bb  : input u32,
-    bbbb: input u32,
+    a   : input logic<32>,
+    bb  : input logic<32>,
+    bbbb: input logic<32>,
 ) {}
 
 interface InterfaceA #(
