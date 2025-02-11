@@ -324,7 +324,6 @@ impl Evaluated {
 
                     let select_width = width.first().unwrap_or(&0);
                     let mut rest = width[1..].to_vec();
-                    dbg!(select_width);
                     if end > beg {
                         // TODO index error
                         self.set_unknown();
@@ -655,7 +654,6 @@ impl Evaluated {
 
     fn xor(self, exp: Evaluated) -> Evaluated {
         let ret = Self::binary_op(self, exp, None, |x, y, _| x.max(y), |x, y| Some(x ^ y));
-        dbg!(&ret);
         ret
     }
 
