@@ -72,6 +72,8 @@ pub struct Emitter {
     generic_map: Vec<Vec<GenericMap>>,
     source_map: Option<SourceMap>,
     resolved_identifier: Vec<String>,
+    last_token: Option<VerylToken>,
+    duplicated_index: usize,
 }
 
 impl Default for Emitter {
@@ -110,6 +112,8 @@ impl Default for Emitter {
             generic_map: Vec::new(),
             source_map: None,
             resolved_identifier: Vec::new(),
+            last_token: None,
+            duplicated_index: 0,
         }
     }
 }
@@ -138,10 +142,12 @@ impl Emitter {
     pub fn emit(&mut self, project_name: &str, input: &Veryl) {
         namespace_table::set_default(&[project_name.into()]);
         self.mode = Mode::Align;
+        self.duplicated_index = 0;
         self.veryl(input);
         self.aligner.finish_group();
         self.aligner.gather_additions();
         self.mode = Mode::Emit;
+        self.duplicated_index = 0;
         self.veryl(input);
     }
 
@@ -367,6 +373,8 @@ impl Emitter {
                 self.aligner.token(x);
             }
         }
+
+        self.last_token = Some(x.clone());
     }
 
     fn token(&mut self, x: &VerylToken) {
@@ -377,10 +385,16 @@ impl Emitter {
         self.process_token(x, true, None)
     }
 
-    fn duplicated_token(&mut self, x: &VerylToken, i: usize) {
-        if self.mode == Mode::Emit {
-            self.process_token(x, false, Some(i))
+    fn duplicated_token(&mut self, x: &VerylToken) {
+        match self.mode {
+            Mode::Align => {
+                self.aligner.duplicated_token(x, self.duplicated_index);
+            }
+            Mode::Emit => {
+                self.process_token(x, false, Some(self.duplicated_index));
+            }
         }
+        self.duplicated_index += 1;
     }
 
     fn align_start(&mut self, kind: usize) {
@@ -402,12 +416,6 @@ impl Emitter {
     fn align_dummy_location(&mut self, kind: usize, loc: Option<Location>) {
         if self.mode == Mode::Align {
             self.aligner.aligns[kind].dummy_location(loc.unwrap());
-        }
-    }
-
-    fn align_duplicated_token(&mut self, kind: usize, x: &VerylToken, i: usize) {
-        if self.mode == Mode::Align {
-            self.aligner.aligns[kind].duplicated_token(x, i);
         }
     }
 
@@ -921,6 +929,10 @@ impl Emitter {
                 .any(|y| x.name() == y.identifier.identifier_token.token.text)
         });
 
+        // Disable aligner auto finish based on line number
+        // because line number of default values are not reliable
+        self.aligner.disable_auto_finish();
+
         let src_line = self.src_line;
         for (i, port) in unconnected_ports.enumerate() {
             if i >= 1 || !connected_ports.is_empty() {
@@ -938,9 +950,16 @@ impl Emitter {
             self.str("(");
             self.align_start(align_kind::EXPRESSION);
             self.expression(&property.default_value.unwrap());
+
+            // Create a dummy token from the last token in expression to add align information
+            let token = self.last_token.as_ref().unwrap().replace("");
+            self.duplicated_token(&token);
+
             self.align_finish(align_kind::EXPRESSION);
             self.str(")");
         }
+
+        self.aligner.enable_auto_finish();
 
         self.src_line = src_line;
         self.generic_map.pop();
@@ -3022,12 +3041,7 @@ impl VerylWalker for Emitter {
             self.align_finish(align_kind::EXPRESSION);
         } else {
             self.align_start(align_kind::EXPRESSION);
-            self.align_duplicated_token(
-                align_kind::EXPRESSION,
-                &arg.identifier.identifier_token,
-                0,
-            );
-            self.duplicated_token(&arg.identifier.identifier_token, 0);
+            self.duplicated_token(&arg.identifier.identifier_token);
             self.align_finish(align_kind::EXPRESSION);
         }
         self.str(")");
@@ -3078,8 +3092,7 @@ impl VerylWalker for Emitter {
         } else {
             let token = emitting_identifier(arg.identifier.as_ref());
             self.align_start(align_kind::EXPRESSION);
-            self.align_duplicated_token(align_kind::EXPRESSION, &token, 0);
-            self.duplicated_token(&token, 0);
+            self.duplicated_token(&token);
             self.align_finish(align_kind::EXPRESSION);
         }
         self.str(")");

@@ -40,6 +40,7 @@ pub struct Align {
     line: u32,
     rest: Vec<(Location, u32)>,
     additions: HashMap<Location, u32>,
+    disable_auto_finish: bool,
     pub last_location: Option<Location>,
 }
 
@@ -55,7 +56,7 @@ impl Align {
     pub fn finish_item(&mut self) {
         self.enable = false;
         if let Some(loc) = self.last_location {
-            if self.line > loc.line || loc.line - self.line > 1 {
+            if !self.disable_auto_finish && (self.line > loc.line || loc.line - self.line > 1) {
                 self.finish_group();
             }
             self.max_width = u32::max(self.max_width, self.width);
@@ -140,6 +141,12 @@ impl Aligner {
         }
     }
 
+    pub fn duplicated_token(&mut self, x: &VerylToken, idx: usize) {
+        for i in 0..self.aligns.len() {
+            self.aligns[i].duplicated_token(x, idx);
+        }
+    }
+
     pub fn space(&mut self, x: usize) {
         for i in 0..self.aligns.len() {
             self.aligns[i].space(x);
@@ -160,6 +167,18 @@ impl Aligner {
                     .and_modify(|val| *val += *y)
                     .or_insert(*y);
             }
+        }
+    }
+
+    pub fn enable_auto_finish(&mut self) {
+        for align in &mut self.aligns {
+            align.disable_auto_finish = false;
+        }
+    }
+
+    pub fn disable_auto_finish(&mut self) {
+        for align in &mut self.aligns {
+            align.disable_auto_finish = true;
         }
     }
 }
