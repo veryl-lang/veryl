@@ -59,5 +59,8 @@ opt-level = 3
 [profile.release.build-override]
 opt-level = 3
 
+[profile.release]
+lto = true
+
 [profile.bench]
 debug = true
