@@ -2482,7 +2482,7 @@ pub trait VerylGrammarTrait {
 
     /// This method provides skipped language comments.
     /// If you need comments please provide your own implementation of this method.
-    fn on_comment_parsed(&mut self, _token: Token<'_>) {}
+    fn on_comment(&mut self, _token: Token<'_>) {}
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -5018,7 +5018,7 @@ pub struct AlwaysFfToken {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct AnyTerm {
-    pub any_term: crate::veryl_token::Token, /* [^{}]* */
+    pub any_term: crate::veryl_token::Token, /* [^{}]+ */
 }
 
 ///
@@ -15192,7 +15192,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 112:
     ///
-    /// `AnyTerm: <Embed>/[^{}]*/ : Token;`
+    /// `AnyTerm: <Embed>/[^{}]+/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn any_term(&mut self, any_term: &ParseTreeType<'t>) -> Result<()> {
@@ -36240,7 +36240,7 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
         }
     }
 
-    fn on_comment_parsed(&mut self, token: Token<'t>) {
-        self.user_grammar.on_comment_parsed(token)
+    fn on_comment(&mut self, token: Token<'t>) {
+        self.user_grammar.on_comment(token)
     }
 }

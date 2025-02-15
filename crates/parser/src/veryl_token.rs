@@ -104,15 +104,15 @@ impl<'t> TryFrom<&parol_runtime::lexer::Token<'t>> for Token {
     fn try_from(x: &parol_runtime::lexer::Token<'t>) -> Result<Self, anyhow::Error> {
         let id = resource_table::new_token_id();
         let text = resource_table::insert_str(x.text());
-        let pos = x.location.scanner_switch_pos + x.location.offset - x.location.length as usize;
+        let pos = x.location.start;
         let source = TokenSource::File(resource_table::insert_path(&x.location.file_name));
         Ok(Token {
             id,
             text,
             line: x.location.start_line,
             column: x.location.start_column,
-            length: x.location.length,
-            pos: pos as u32,
+            length: x.location.len() as u32,
+            pos,
             source,
         })
     }

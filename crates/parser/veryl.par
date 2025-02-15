@@ -133,7 +133,7 @@ UnsafeTerm            : <INITIAL, Generic       >/(?-u:\b)unsafe(?-u:\b)/       
 VarTerm               : <INITIAL, Generic       >/(?-u:\b)var(?-u:\b)/                                                                 : Token;
 DollarIdentifierTerm  : <INITIAL, Generic       >/\$[a-zA-Z_][0-9a-zA-Z_$]*/                                                           : Token;
 IdentifierTerm        : <INITIAL, Generic       >/(?:r#)?[a-zA-Z_][0-9a-zA-Z_$]*/                                                      : Token;
-AnyTerm               : <                  Embed>/[^{}]*/                                                                              : Token;
+AnyTerm               : <                  Embed>/[^{}]+/                                                                              : Token;
 
 // ----------------------------------------------------------------------------
 // Token

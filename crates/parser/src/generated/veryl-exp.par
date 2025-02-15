@@ -124,7 +124,7 @@
 /* 109 */ VarTerm: <INITIAL, Generic>/(?-u:\b)var(?-u:\b)/ : Token;
 /* 110 */ DollarIdentifierTerm: <INITIAL, Generic>/\$[a-zA-Z_][0-9a-zA-Z_$]*/ : Token;
 /* 111 */ IdentifierTerm: <INITIAL, Generic>/(?:r#)?[a-zA-Z_][0-9a-zA-Z_$]*/ : Token;
-/* 112 */ AnyTerm: <Embed>/[^{}]*/ : Token;
+/* 112 */ AnyTerm: <Embed>/[^{}]+/ : Token;
 /* 113 */ Comments: CommentsOpt /* Option */;
 /* 114 */ CommentsOpt /* Option<T>::Some */: CommentsTerm;
 /* 115 */ CommentsOpt /* Option<T>::None */: ;
