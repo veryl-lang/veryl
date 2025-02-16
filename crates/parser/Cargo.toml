@@ -17,7 +17,7 @@ exclude               = ["build.rs"]
 anyhow        = {workspace = true}
 bimap         = "0.6.3"
 once_cell     = {workspace = true}
-parol_runtime = {version = "1.0", features = ["auto_generation"]}
+parol_runtime = {version = "2.2", features = ["regex_automata"], default-features = false}
 paste         = "1.0"
 regex         = {workspace = true}
 thiserror     = {workspace = true}
@@ -29,5 +29,5 @@ miette        = {workspace = true, features = ["fancy-no-syscall"]}
 miette        = {workspace = true, features = ["fancy"]}
 
 [build-dependencies]
-parol         =  "1.0"
-parol_runtime = {version = "1.0", features = ["auto_generation"]}
+parol         = "2.2"
+parol_runtime = "2.2"
