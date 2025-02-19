@@ -686,7 +686,7 @@ impl Server {
                         }
                         let analyzer = Analyzer::new(&metadata);
                         let mut errors = analyzer.analyze_pass1(prj, text, &path, &x.veryl);
-                        Analyzer::analyze_post_pass1();
+                        errors.append(&mut Analyzer::analyze_post_pass1());
                         errors.append(&mut analyzer.analyze_pass2(prj, text, &path, &x.veryl));
                         errors.append(&mut analyzer.analyze_pass3(prj, text, &path, &x.veryl));
                         let ret: Vec<_> = errors

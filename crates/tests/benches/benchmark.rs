@@ -35,7 +35,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         let analyzer = Analyzer::new(&metadata);
         let mut errors = Vec::new();
         errors.append(&mut analyzer.analyze_pass1(prj, &text, &"", &parser.veryl));
-        Analyzer::analyze_post_pass1();
+        errors.append(&mut Analyzer::analyze_post_pass1());
         errors.append(&mut analyzer.analyze_pass2(prj, &text, &"", &parser.veryl));
         errors.append(&mut analyzer.analyze_pass3(prj, &text, &"", &parser.veryl));
         analyzer.clear();

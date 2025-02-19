@@ -17,22 +17,27 @@ pub enum ReferenceCandidate {
     HierarchicalIdentifier {
         arg: HierarchicalIdentifier,
         source: TokenSource,
+        namespace: Namespace,
     },
     ScopedIdentifier {
         arg: ScopedIdentifier,
         source: TokenSource,
+        namespace: Namespace,
     },
     ExpressionIdentifier {
         arg: ExpressionIdentifier,
         source: TokenSource,
+        namespace: Namespace,
     },
     ModportItem {
         arg: ModportItem,
         source: TokenSource,
+        namespace: Namespace,
     },
     InstPortItem {
         arg: InstPortItem,
         source: TokenSource,
+        namespace: Namespace,
     },
 }
 
@@ -53,6 +58,7 @@ impl From<&HierarchicalIdentifier> for ReferenceCandidate {
         Self::HierarchicalIdentifier {
             arg: value.clone(),
             source: value.identifier.identifier_token.token.source,
+            namespace: namespace_table::get_default(),
         }
     }
 }
@@ -62,6 +68,7 @@ impl From<&ScopedIdentifier> for ReferenceCandidate {
         Self::ScopedIdentifier {
             arg: value.clone(),
             source: value.identifier().token.source,
+            namespace: namespace_table::get_default(),
         }
     }
 }
@@ -71,6 +78,7 @@ impl From<&ExpressionIdentifier> for ReferenceCandidate {
         Self::ExpressionIdentifier {
             arg: value.clone(),
             source: value.identifier().token.source,
+            namespace: namespace_table::get_default(),
         }
     }
 }
@@ -80,6 +88,7 @@ impl From<&ModportItem> for ReferenceCandidate {
         Self::ModportItem {
             arg: value.clone(),
             source: value.identifier.identifier_token.token.source,
+            namespace: namespace_table::get_default(),
         }
     }
 }
@@ -89,6 +98,7 @@ impl From<&InstPortItem> for ReferenceCandidate {
         Self::InstPortItem {
             arg: value.clone(),
             source: value.identifier.identifier_token.token.source,
+            namespace: namespace_table::get_default(),
         }
     }
 }
@@ -154,8 +164,7 @@ impl ReferenceTable {
                         &generics_token.into(),
                     ));
             } else if is_anonymous_text(not_found) {
-                //self.errors
-                //    .push(AnalyzerError::anonymous_identifier_usage(text, token));
+                // AnonymousIdentifierUsage is handled at create_type_dag
             } else {
                 self.errors
                     .push(AnalyzerError::undefined_identifier(&name, text, token));
@@ -286,7 +295,13 @@ impl ReferenceTable {
 
         for x in &candidates {
             match x {
-                ReferenceCandidate::HierarchicalIdentifier { arg, source } => {
+                ReferenceCandidate::HierarchicalIdentifier {
+                    arg,
+                    source,
+                    namespace,
+                } => {
+                    namespace_table::set_default(&namespace.paths);
+
                     match symbol_table::resolve(arg) {
                         Ok(symbol) => {
                             for id in symbol.full_path {
@@ -308,14 +323,26 @@ impl ReferenceTable {
                         }
                     }
                 }
-                ReferenceCandidate::ScopedIdentifier { arg, source } => {
+                ReferenceCandidate::ScopedIdentifier {
+                    arg,
+                    source,
+                    namespace,
+                } => {
+                    namespace_table::set_default(&namespace.paths);
+
                     let ident = arg.identifier().token;
                     let path: GenericSymbolPath = arg.into();
                     let namespace = namespace_table::get(ident.id).unwrap();
 
                     self.generic_symbol_path(source, &path, &namespace, None);
                 }
-                ReferenceCandidate::ExpressionIdentifier { arg, source } => {
+                ReferenceCandidate::ExpressionIdentifier {
+                    arg,
+                    source,
+                    namespace,
+                } => {
+                    namespace_table::set_default(&namespace.paths);
+
                     let ident = arg.identifier().token;
                     let namespace = namespace_table::get(ident.id).unwrap();
                     let mut path: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
@@ -335,7 +362,13 @@ impl ReferenceTable {
                         }
                     }
                 }
-                ReferenceCandidate::ModportItem { arg, source } => {
+                ReferenceCandidate::ModportItem {
+                    arg,
+                    source,
+                    namespace,
+                } => {
+                    namespace_table::set_default(&namespace.paths);
+
                     match symbol_table::resolve(arg.identifier.as_ref()) {
                         Ok(symbol) => {
                             for id in symbol.full_path {
@@ -355,7 +388,13 @@ impl ReferenceTable {
                         }
                     }
                 }
-                ReferenceCandidate::InstPortItem { arg, source } => {
+                ReferenceCandidate::InstPortItem {
+                    arg,
+                    source,
+                    namespace,
+                } => {
+                    namespace_table::set_default(&namespace.paths);
+
                     if arg.inst_port_item_opt.is_none() {
                         // implicit port connection by name
                         match symbol_table::resolve(arg.identifier.as_ref()) {

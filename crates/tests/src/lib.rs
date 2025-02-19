@@ -53,7 +53,9 @@ mod analyzer {
         dbg!(&errors);
         assert!(errors.is_empty());
 
-        Analyzer::analyze_post_pass1();
+        let errors = Analyzer::analyze_post_pass1();
+        dbg!(&errors);
+        assert!(errors.is_empty());
 
         let errors = analyzer.analyze_pass2(&prj, &input, &file, &ret.veryl);
         dbg!(&errors);
@@ -137,7 +139,7 @@ mod emitter {
         let prj = &metadata.project.name;
         let analyzer = Analyzer::new(&metadata);
         let _ = analyzer.analyze_pass1(&prj, &input, &src_path, &ret.veryl);
-        Analyzer::analyze_post_pass1();
+        let _ = Analyzer::analyze_post_pass1();
         let _ = analyzer.analyze_pass2(&prj, &input, &src_path, &ret.veryl);
         let mut emitter = Emitter::new(&metadata, &src_path, &dst_path, &map_path);
         emitter.emit(&prj, &ret.veryl);
@@ -302,7 +304,7 @@ mod filelist {
             contexts.push((path, input, parser, analyzer));
         }
 
-        Analyzer::analyze_post_pass1();
+        let _ = Analyzer::analyze_post_pass1();
 
         for (path, input, parser, analyzer) in &contexts {
             let _ = analyzer.analyze_pass2(&path.prj, input, &path.src, &parser.veryl);
