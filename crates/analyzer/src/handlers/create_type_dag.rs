@@ -1,21 +1,19 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol::{
-    Direction, GenericBoundKind, GenericMap, ParameterKind, Port, Symbol, SymbolKind,
-};
+use crate::symbol::{Direction, GenericBoundKind, ParameterKind, Port, Symbol, SymbolKind};
 use crate::symbol_path::GenericSymbolPath;
-use crate::symbol_table::{self, ResolveError, ResolveErrorCause};
+use crate::symbol_table::{self, ResolveErrorCause};
 use crate::type_dag::{self, Context, DagError};
 use std::collections::HashMap;
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::{is_anonymous_text, Token, TokenRange, TokenSource};
+use veryl_parser::veryl_token::is_anonymous_text;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
 #[derive(Default)]
-pub struct CreateReference<'a> {
+pub struct CreateTypeDag<'a> {
     pub errors: Vec<AnalyzerError>,
     text: &'a str,
     point: HandlerPoint,
@@ -31,7 +29,7 @@ pub struct CreateReference<'a> {
     dag_file_imports: Vec<u32>,
 }
 
-impl<'a> CreateReference<'a> {
+impl<'a> CreateTypeDag<'a> {
     pub fn new(text: &'a str) -> Self {
         Self {
             text,
@@ -39,62 +37,7 @@ impl<'a> CreateReference<'a> {
         }
     }
 
-    fn push_resolve_error(
-        &mut self,
-        err: ResolveError,
-        token: &TokenRange,
-        generics_token: Option<Token>,
-    ) {
-        if let Some(last_found) = err.last_found {
-            let name = last_found.token.to_string();
-            match err.cause {
-                ResolveErrorCause::NotFound(not_found) => {
-                    let is_generic_if = if let SymbolKind::Port(ref port) = last_found.kind {
-                        port.direction == Direction::Interface
-                    } else {
-                        false
-                    };
-
-                    if !is_generic_if {
-                        let member = format!("{}", not_found);
-                        self.errors.push(AnalyzerError::unknown_member(
-                            &name, &member, self.text, token,
-                        ));
-                    }
-                }
-                ResolveErrorCause::Private => {
-                    self.errors
-                        .push(AnalyzerError::private_member(&name, self.text, token));
-                }
-            }
-        } else if let ResolveErrorCause::NotFound(not_found) = err.cause {
-            let name = format!("{}", not_found);
-            if let Some(generics_token) = generics_token {
-                self.errors
-                    .push(AnalyzerError::unresolvable_generic_argument(
-                        &name,
-                        self.text,
-                        token,
-                        &generics_token.into(),
-                    ));
-            } else if is_anonymous_text(not_found) {
-                self.errors
-                    .push(AnalyzerError::anonymous_identifier_usage(self.text, token));
-            } else {
-                self.errors
-                    .push(AnalyzerError::undefined_identifier(&name, self.text, token));
-            }
-        } else {
-            unreachable!();
-        }
-    }
-
-    fn generic_symbol_path(
-        &mut self,
-        path: &GenericSymbolPath,
-        namespace: &Namespace,
-        generics_token: Option<Token>,
-    ) {
+    fn generic_symbol_path(&mut self, path: &GenericSymbolPath, namespace: &Namespace) {
         if path.is_generic_reference() {
             return;
         }
@@ -107,29 +50,6 @@ impl<'a> CreateReference<'a> {
 
             match symbol_table::resolve((&base_path, namespace)) {
                 Ok(symbol) => {
-                    self.check_pacakge_reference(&symbol.found, &path.range);
-                    symbol_table::add_reference(symbol.found.id, &path.paths[0].base);
-
-                    // Check number of arguments
-                    let params = symbol.found.generic_parameters();
-                    let n_args = path.paths[i].arguments.len();
-                    let match_artiy = if params.len() > n_args {
-                        params[n_args].1.default_value.is_some()
-                    } else {
-                        params.len() == n_args
-                    };
-
-                    if !match_artiy {
-                        self.errors.push(AnalyzerError::mismatch_generics_arity(
-                            &path.paths[i].base.to_string(),
-                            params.len(),
-                            n_args,
-                            self.text,
-                            &path.range,
-                        ));
-                        continue;
-                    }
-
                     let generic_args: Vec<_> = path.paths[i]
                         .arguments
                         .iter()
@@ -140,69 +60,17 @@ impl<'a> CreateReference<'a> {
                         })
                         .collect();
                     self.insert_base_path_dag_node(&symbol.found, &generic_args);
-
-                    let mut path = path.paths[i].clone();
-
-                    for param in params.iter().skip(n_args) {
-                        //  apply default value
-                        path.arguments
-                            .push(param.1.default_value.as_ref().unwrap().clone());
-                    }
-
-                    if let Some((token, new_symbol)) = path.get_generic_instance(&symbol.found) {
-                        if let Some(ref x) = symbol_table::insert(&token, new_symbol) {
-                            symbol_table::add_generic_instance(symbol.found.id, *x);
-                        }
-
-                        let table = symbol.found.generic_table(&path.arguments);
-                        let map = vec![GenericMap {
-                            name: "".to_string(),
-                            map: table,
-                        }];
-                        let mut references = symbol.found.generic_references();
-                        for path in &mut references {
-                            path.apply_map(&map);
-                            self.generic_symbol_path(
-                                path,
-                                &symbol.found.inner_namespace(),
-                                Some(symbol.found.token),
-                            );
-                        }
-                    }
                 }
                 Err(err) => {
-                    let single_path = path.paths.len() == 1;
-                    if single_path && !path.is_resolvable() {
-                        return;
+                    if let ResolveErrorCause::NotFound(not_found) = err.cause {
+                        if is_anonymous_text(not_found) {
+                            self.errors.push(AnalyzerError::anonymous_identifier_usage(
+                                self.text,
+                                &path.range,
+                            ));
+                        }
                     }
-
-                    self.push_resolve_error(err, &path.range, generics_token);
                 }
-            }
-        }
-    }
-
-    fn check_pacakge_reference(&mut self, symbol: &Symbol, token_range: &TokenRange) {
-        if !matches!(symbol.kind, SymbolKind::Package(_)) {
-            return;
-        }
-
-        let base_token = token_range.end;
-        let package_token = symbol.token;
-        if let (TokenSource::File(package_file), TokenSource::File(base_file)) =
-            (package_token.source, base_token.source)
-        {
-            let referecne_before_definition = package_file == base_file
-                && (package_token.line > base_token.line
-                    || package_token.line == base_token.line
-                        && package_token.column > base_token.column);
-            if referecne_before_definition {
-                self.errors
-                    .push(AnalyzerError::referring_package_before_definition(
-                        &package_token.to_string(),
-                        self.text,
-                        token_range,
-                    ));
             }
         }
     }
@@ -345,36 +213,13 @@ impl<'a> CreateReference<'a> {
     }
 }
 
-impl Handler for CreateReference<'_> {
+impl Handler for CreateTypeDag<'_> {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl VerylGrammarTrait for CreateReference<'_> {
-    fn hierarchical_identifier(&mut self, arg: &HierarchicalIdentifier) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            match symbol_table::resolve(arg) {
-                Ok(symbol) => {
-                    for id in symbol.full_path {
-                        symbol_table::add_reference(id, &arg.identifier.identifier_token.token);
-                    }
-                }
-                Err(err) => {
-                    // hierarchical identifier is used for:
-                    //  - LHS of assign declaratoin
-                    //  - identifier to specfy clock/reset in always_ff event list
-                    // therefore, it should be known indentifer
-                    // and we don't have to consider it is anonymous
-
-                    // TODO check SV-side member to suppress error
-                    self.push_resolve_error(err, &arg.into(), None);
-                }
-            }
-        }
-        Ok(())
-    }
-
+impl VerylGrammarTrait for CreateTypeDag<'_> {
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if !self.is_anonymous_identifier {
@@ -382,32 +227,7 @@ impl VerylGrammarTrait for CreateReference<'_> {
                 let path: GenericSymbolPath = arg.into();
                 let namespace = namespace_table::get(ident.id).unwrap();
 
-                self.generic_symbol_path(&path, &namespace, None);
-            }
-        }
-        Ok(())
-    }
-
-    fn expression_identifier(&mut self, arg: &ExpressionIdentifier) -> Result<(), ParolError> {
-        // Should be executed after scoped_identifier to handle hierarchical access only
-        if let HandlerPoint::After = self.point {
-            let ident = arg.identifier().token;
-            let namespace = namespace_table::get(ident.id).unwrap();
-            let mut path: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
-            path.resolve_imported(&namespace);
-            let mut path = path.mangled_path();
-
-            for x in &arg.expression_identifier_list0 {
-                path.push(x.identifier.identifier_token.token.text);
-
-                match symbol_table::resolve((&path, &namespace)) {
-                    Ok(symbol) => {
-                        symbol_table::add_reference(symbol.found.id, &ident);
-                    }
-                    Err(err) => {
-                        self.push_resolve_error(err, &arg.into(), None);
-                    }
-                }
+                self.generic_symbol_path(&path, &namespace);
             }
         }
         Ok(())
@@ -453,22 +273,6 @@ impl VerylGrammarTrait for CreateReference<'_> {
                 self.insert_type_declaration_dag_node(&symbol.found, Context::Modport);
             }
             HandlerPoint::After => self.pop_type_dag(),
-        }
-        Ok(())
-    }
-
-    fn modport_item(&mut self, arg: &ModportItem) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            match symbol_table::resolve(arg.identifier.as_ref()) {
-                Ok(symbol) => {
-                    for id in symbol.full_path {
-                        symbol_table::add_reference(id, &arg.identifier.identifier_token.token);
-                    }
-                }
-                Err(err) => {
-                    self.push_resolve_error(err, &arg.identifier.as_ref().into(), None);
-                }
-            }
         }
         Ok(())
     }
@@ -537,21 +341,6 @@ impl VerylGrammarTrait for CreateReference<'_> {
                         // For SV module, any ports can be connected with anonymous identifier
                         self.is_anonymous_identifier = is_anonymous_expression(&x.expression);
                     }
-                } else {
-                    // implicit port connection by name
-                    match symbol_table::resolve(arg.identifier.as_ref()) {
-                        Ok(symbol) => {
-                            for id in symbol.full_path {
-                                symbol_table::add_reference(
-                                    id,
-                                    &arg.identifier.identifier_token.token,
-                                );
-                            }
-                        }
-                        Err(err) => {
-                            self.push_resolve_error(err, &arg.identifier.as_ref().into(), None);
-                        }
-                    }
                 }
             }
             HandlerPoint::After => self.is_anonymous_identifier = false,
@@ -598,23 +387,18 @@ impl VerylGrammarTrait for CreateReference<'_> {
     fn import_declaration(&mut self, arg: &ImportDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let is_wildcard = arg.import_declaration_opt.is_some();
-            match symbol_table::resolve(arg.scoped_identifier.as_ref()) {
-                Ok(symbol) => {
-                    let symbol = symbol.found;
-                    match symbol.kind {
-                        SymbolKind::Package(_) if is_wildcard => (),
-                        SymbolKind::SystemVerilog => (),
-                        _ if is_wildcard => {
-                            self.errors.push(AnalyzerError::invalid_import(
-                                self.text,
-                                &arg.scoped_identifier.as_ref().into(),
-                            ));
-                        }
-                        _ => (),
+            if let Ok(symbol) = symbol_table::resolve(arg.scoped_identifier.as_ref()) {
+                let symbol = symbol.found;
+                match symbol.kind {
+                    SymbolKind::Package(_) if is_wildcard => (),
+                    SymbolKind::SystemVerilog => (),
+                    _ if is_wildcard => {
+                        self.errors.push(AnalyzerError::invalid_import(
+                            self.text,
+                            &arg.scoped_identifier.as_ref().into(),
+                        ));
                     }
-                }
-                Err(err) => {
-                    self.push_resolve_error(err, &arg.scoped_identifier.as_ref().into(), None);
+                    _ => (),
                 }
             }
         }
