@@ -5,6 +5,7 @@ use crate::handlers::*;
 use crate::msb_table;
 use crate::namespace::Namespace;
 use crate::namespace_table;
+use crate::reference_table;
 use crate::symbol::{
     Direction, DocComment, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiliation,
 };
@@ -279,9 +280,14 @@ impl Analyzer {
         ret
     }
 
-    pub fn analyze_post_pass1() {
+    pub fn analyze_post_pass1() -> Vec<AnalyzerError> {
+        let mut ret = Vec::new();
+
         symbol_table::apply_import();
         symbol_table::resolve_user_defined();
+        ret.append(&mut reference_table::apply());
+
+        ret
     }
 
     pub fn analyze_pass2<T: AsRef<Path>>(

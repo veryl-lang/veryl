@@ -8,6 +8,7 @@ pub mod msb_table;
 pub mod namespace;
 pub mod namespace_table;
 pub mod range_table;
+pub mod reference_table;
 pub mod symbol;
 pub mod symbol_path;
 pub mod symbol_table;

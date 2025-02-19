@@ -5,6 +5,7 @@ use crate::attribute_table;
 use crate::evaluator::{EvaluatedValue, Evaluator};
 use crate::namespace::Namespace;
 use crate::namespace_table;
+use crate::reference_table;
 use crate::symbol::ClockDomain as SymClockDomain;
 use crate::symbol::Direction as SymDirection;
 use crate::symbol::Type as SymType;
@@ -419,9 +420,19 @@ impl VerylGrammarTrait for CreateSymbolTable<'_> {
         Ok(())
     }
 
+    fn hierarchical_identifier(&mut self, arg: &HierarchicalIdentifier) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            reference_table::add(arg.into(), self.text);
+        }
+
+        Ok(())
+    }
+
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
+                reference_table::add(arg.into(), self.text);
+
                 // Add symbols under $sv namespace
                 if let ScopedIdentifierGroup::DollarIdentifier(x) =
                     arg.scoped_identifier_group.as_ref()
@@ -455,11 +466,15 @@ impl VerylGrammarTrait for CreateSymbolTable<'_> {
     }
 
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) -> Result<(), ParolError> {
-        // This should be `After` not `Before`.
-        // because namespace_table insertion of identifiers
-        // in the expression_identifier should be done until `arg.into()`.
         if let HandlerPoint::After = self.point {
+            // This should be `After` not `Before`.
+            // because namespace_table insertion of identifiers
+            // in the expression_identifier should be done until `arg.into()`.
             self.connect_targets.push(arg.into());
+
+            // This should be `After` not `Before`.
+            // Because this should be executed after scoped_identifier to handle hierarchical access only
+            reference_table::add(arg.into(), self.text);
         }
         Ok(())
     }
@@ -705,6 +720,13 @@ impl VerylGrammarTrait for CreateSymbolTable<'_> {
         Ok(())
     }
 
+    fn modport_item(&mut self, arg: &ModportItem) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            reference_table::add(arg.into(), self.text);
+        }
+        Ok(())
+    }
+
     fn enum_declaration(&mut self, arg: &EnumDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
@@ -884,7 +906,10 @@ impl VerylGrammarTrait for CreateSymbolTable<'_> {
 
     fn inst_port_item(&mut self, arg: &InstPortItem) -> Result<(), ParolError> {
         match self.point {
-            HandlerPoint::Before => self.connect_targets.clear(),
+            HandlerPoint::Before => {
+                reference_table::add(arg.into(), self.text);
+                self.connect_targets.clear();
+            }
             HandlerPoint::After => {
                 let port = arg.identifier.identifier_token.token;
                 let targets = if arg.inst_port_item_opt.is_some() {
