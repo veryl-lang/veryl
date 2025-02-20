@@ -168,6 +168,21 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Warning),
+        code(invalid_select),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_select")
+    )]
+    #[error("invalid select caused by {kind}")]
+    InvalidSelect {
+        kind: String,
+        #[source_code]
+        input: NamedSource<String>,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Warning),
         code(invalid_identifier),
         help("follow naming rule"),
         url(
@@ -501,6 +516,22 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
         #[label("clock domain {other_domain}")]
         other_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Warning),
+        code(mismatch_assignment),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mismatch_assignment")
+    )]
+    #[error("\"{src}\" can't be assigned to \"{dst}\"")]
+    MismatchAssignment {
+        src: String,
+        dst: String,
+        #[source_code]
+        input: NamedSource<String>,
+        #[label("Error location")]
+        error_location: SourceSpan,
     },
 
     #[diagnostic(
@@ -1412,6 +1443,15 @@ impl AnalyzerError {
         }
     }
 
+    pub fn mismatch_assignment(src: &str, dst: &str, source: &str, token: &TokenRange) -> Self {
+        AnalyzerError::MismatchAssignment {
+            src: src.to_string(),
+            dst: dst.to_string(),
+            input: AnalyzerError::named_source(source, token),
+            error_location: token.into(),
+        }
+    }
+
     pub fn missing_clock_signal(source: &str, token: &TokenRange) -> Self {
         AnalyzerError::MissingClockSignal {
             input: AnalyzerError::named_source(source, token),
@@ -1771,6 +1811,11 @@ impl AnalyzerError {
                 kind: kind.clone(),
                 input: AnalyzerError::named_source(source, &token.into()),
                 error_location: token.into(),
+            },
+            EvaluatedError::InvalidSelect { kind, range } => AnalyzerError::InvalidSelect {
+                kind: kind.to_string(),
+                input: AnalyzerError::named_source(source, range),
+                error_location: range.into(),
             },
         }
     }

@@ -1311,6 +1311,46 @@ fn mismatch_type() {
 }
 
 #[test]
+fn mismatch_assignment() {
+    let code = r#"
+    module ModuleA {
+        let _a: logic[2] = 1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAssignment { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        var _a: logic[2];
+        assign _a = 1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAssignment { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        let _a: u32 = 'x;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAssignment { .. }
+    ));
+}
+
+#[test]
 fn missing_if_reset() {
     let code = r#"
     module ModuleA (
@@ -2983,6 +3023,49 @@ fn invalid_test() {
 }
 
 #[test]
+fn invalid_select() {
+    let code = r#"
+    module ModuleA {
+        let _a: logic<2> = 1;
+        let _b: logic<2> = _a[2];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidSelect { .. }));
+
+    let code = r#"
+    module ModuleA {
+        let _a: logic[2] = '{1, 1};
+        let _b: logic<2> = _a[2];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidSelect { .. }));
+
+    let code = r#"
+    module ModuleA {
+        let _a: logic<2> = 1;
+        let _b: logic<2> = _a[0:1];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidSelect { .. }));
+
+    let code = r#"
+    module ModuleA {
+        let _a: logic[2] = '{1, 1};
+        let _b: logic[2] = _a[1:0];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidSelect { .. }));
+}
+
+#[test]
 fn clock_domain() {
     let code = r#"
     module ModuleA (
@@ -3396,4 +3479,24 @@ fn evaluator() {
     assert_eq!((i.get_value(), i.get_total_width()), (Some(10), Some(32)));
     assert_eq!((j.get_value(), j.get_total_width()), (Some(4), Some(32)));
     assert_eq!((k.get_value(), k.get_total_width()), (Some(3), Some(2)));
+}
+
+#[test]
+fn skip_disabled_generate_block() {
+    let code = r#"
+    module ModuleA {
+        const X: u32 = 1;
+
+        if X == 1 :label {
+            let _a: u32 = 1;
+        } else {
+            // This statement contains MismatchAssignment
+            // But it should be ignored because this block is disabled
+            let _a: u32 = 'x;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }

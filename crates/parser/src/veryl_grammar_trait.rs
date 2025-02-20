@@ -1,4 +1,5 @@
 pub use crate::generated::veryl_grammar_trait::*;
+use crate::resource_table::TokenId;
 use crate::veryl_token::is_anonymous_token;
 use paste::paste;
 use std::fmt;
@@ -260,5 +261,55 @@ impl fmt::Display for Direction {
             Direction::Import(x) => &x.import.import_token,
         };
         token.fmt(f)
+    }
+}
+
+impl From<&LBrace> for TokenId {
+    fn from(value: &LBrace) -> Self {
+        value.l_brace_token.token.id
+    }
+}
+
+impl From<&RBrace> for TokenId {
+    fn from(value: &RBrace) -> Self {
+        value.r_brace_token.token.id
+    }
+}
+
+impl ExpressionIdentifier {
+    pub fn last_select(&self) -> Vec<Select> {
+        if self.expression_identifier_list0.is_empty() {
+            self.expression_identifier_list
+                .iter()
+                .map(|x| x.select.as_ref().clone())
+                .collect()
+        } else {
+            self.expression_identifier_list0
+                .last()
+                .unwrap()
+                .expression_identifier_list0_list
+                .iter()
+                .map(|x| x.select.as_ref().clone())
+                .collect()
+        }
+    }
+}
+
+impl HierarchicalIdentifier {
+    pub fn last_select(&self) -> Vec<Select> {
+        if self.hierarchical_identifier_list0.is_empty() {
+            self.hierarchical_identifier_list
+                .iter()
+                .map(|x| x.select.as_ref().clone())
+                .collect()
+        } else {
+            self.hierarchical_identifier_list0
+                .last()
+                .unwrap()
+                .hierarchical_identifier_list0_list
+                .iter()
+                .map(|x| x.select.as_ref().clone())
+                .collect()
+        }
     }
 }

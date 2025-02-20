@@ -398,6 +398,30 @@ impl_token_range!(
     r_brace_token
 );
 impl_token_range!(TypeExpression, r#type, type_token, r_paren, r_paren_token);
+impl_token_range!(LetStatement, r#let, let_token, semicolon, semicolon_token);
+impl_token_range!(LetDeclaration, r#let, let_token, semicolon, semicolon_token);
+impl_token_range!(
+    ConstDeclaration,
+    r#const,
+    const_token,
+    semicolon,
+    semicolon_token
+);
+impl_token_range!(
+    AssignDeclaration,
+    assign,
+    assign_token,
+    semicolon,
+    semicolon_token
+);
+
+impl From<&IdentifierStatement> for TokenRange {
+    fn from(value: &IdentifierStatement) -> Self {
+        let beg: TokenRange = value.expression_identifier.as_ref().into();
+        let end = value.semicolon.semicolon_token.token;
+        TokenRange { beg: beg.beg, end }
+    }
+}
 
 impl From<&FactorGroup> for TokenRange {
     fn from(value: &FactorGroup) -> Self {

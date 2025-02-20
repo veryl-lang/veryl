@@ -37,11 +37,11 @@ module veryl_testcase_Module12_2 (
     input logic i_rst_sh,
     input logic i_rst_sl
 );
-    logic a ;
-    logic aa;
-    logic b ;
+    logic          a ;
+    logic          aa;
+    logic          b ;
     always_comb b = 1;
-    logic c ;
+    logic [10-1:0] c ;
     always_comb c = 1;
 
     // always_ff declaration with default polarity

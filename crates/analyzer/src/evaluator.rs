@@ -1,7 +1,7 @@
 use crate::symbol::{SymbolId, Type, TypeKind};
 use crate::symbol_table::{self, ResolveError, ResolveResult};
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::Token;
+use veryl_parser::veryl_token::{Token, TokenRange};
 
 #[derive(Clone, Debug)]
 pub struct Evaluated {
@@ -83,6 +83,7 @@ pub struct EvaluatedTypeUserDefined {
 pub enum EvaluatedError {
     InvalidFactor { kind: String, token: Token },
     CallNonFunction { kind: String, token: Token },
+    InvalidSelect { kind: String, range: TokenRange },
 }
 
 fn reduction<T: Fn(isize, isize) -> isize>(
@@ -121,6 +122,17 @@ impl Evaluated {
         matches!(self.r#type, EvaluatedType::Reset(_))
     }
 
+    pub fn is_4state(&self) -> bool {
+        matches!(
+            self.r#type,
+            EvaluatedType::Clock(_) | EvaluatedType::Reset(_) | EvaluatedType::Logic(_)
+        )
+    }
+
+    pub fn is_2state(&self) -> bool {
+        matches!(self.r#type, EvaluatedType::Bit(_))
+    }
+
     pub fn get_value(&self) -> Option<isize> {
         if let EvaluatedValue::Fixed(x) = self.value {
             Some(x)
@@ -129,25 +141,25 @@ impl Evaluated {
         }
     }
 
-    pub fn get_width(&self) -> Vec<usize> {
+    pub fn get_width(&self) -> Option<Vec<usize>> {
         match &self.r#type {
-            EvaluatedType::Clock(x) => x.width.clone(),
-            EvaluatedType::Reset(x) => x.width.clone(),
-            EvaluatedType::Bit(x) => x.width.clone(),
-            EvaluatedType::Logic(x) => x.width.clone(),
-            EvaluatedType::UserDefined(x) => x.width.clone(),
-            EvaluatedType::Unknown => Vec::new(),
+            EvaluatedType::Clock(x) => Some(x.width.clone()),
+            EvaluatedType::Reset(x) => Some(x.width.clone()),
+            EvaluatedType::Bit(x) => Some(x.width.clone()),
+            EvaluatedType::Logic(x) => Some(x.width.clone()),
+            EvaluatedType::UserDefined(x) => Some(x.width.clone()),
+            EvaluatedType::Unknown => None,
         }
     }
 
-    pub fn get_array(&self) -> Vec<usize> {
+    pub fn get_array(&self) -> Option<Vec<usize>> {
         match &self.r#type {
-            EvaluatedType::Clock(x) => x.array.clone(),
-            EvaluatedType::Reset(x) => x.array.clone(),
-            EvaluatedType::Bit(x) => x.array.clone(),
-            EvaluatedType::Logic(x) => x.array.clone(),
-            EvaluatedType::UserDefined(x) => x.array.clone(),
-            EvaluatedType::Unknown => Vec::new(),
+            EvaluatedType::Clock(x) => Some(x.array.clone()),
+            EvaluatedType::Reset(x) => Some(x.array.clone()),
+            EvaluatedType::Bit(x) => Some(x.array.clone()),
+            EvaluatedType::Logic(x) => Some(x.array.clone()),
+            EvaluatedType::UserDefined(x) => Some(x.array.clone()),
+            EvaluatedType::Unknown => None,
         }
     }
 
@@ -258,19 +270,53 @@ impl Evaluated {
         });
     }
 
-    pub fn create_variable(signed: bool, width: Vec<usize>, array: Vec<usize>) -> Evaluated {
+    pub fn create_undefine_fixed(signed: bool, width: Vec<usize>, array: Vec<usize>) -> Evaluated {
         let mut ret = Self::create_unknown();
-        ret.set_variable(signed, width, array);
+        ret.set_undefine_fixed(signed, width, array);
         ret
     }
 
-    pub fn set_variable(&mut self, signed: bool, width: Vec<usize>, array: Vec<usize>) {
-        self.value = EvaluatedValue::Unknown;
+    pub fn set_undefine_fixed(&mut self, signed: bool, width: Vec<usize>, array: Vec<usize>) {
+        self.value = EvaluatedValue::UnknownStatic;
         self.r#type = EvaluatedType::Logic(EvaluatedTypeLogic {
             signed,
             width,
             array,
         });
+    }
+
+    pub fn create_variable(
+        signed: bool,
+        is_4state: bool,
+        width: Vec<usize>,
+        array: Vec<usize>,
+    ) -> Evaluated {
+        let mut ret = Self::create_unknown();
+        ret.set_variable(signed, is_4state, width, array);
+        ret
+    }
+
+    pub fn set_variable(
+        &mut self,
+        signed: bool,
+        is_4state: bool,
+        width: Vec<usize>,
+        array: Vec<usize>,
+    ) {
+        self.value = EvaluatedValue::Unknown;
+        if is_4state {
+            self.r#type = EvaluatedType::Logic(EvaluatedTypeLogic {
+                signed,
+                width,
+                array,
+            });
+        } else {
+            self.r#type = EvaluatedType::Bit(EvaluatedTypeBit {
+                signed,
+                width,
+                array,
+            });
+        }
     }
 
     pub fn create_clock(
@@ -313,22 +359,70 @@ impl Evaluated {
         self.r#type = EvaluatedType::Reset(EvaluatedTypeReset { kind, width, array });
     }
 
-    pub fn select(mut self, mut beg: Evaluated, mut end: Evaluated) -> Evaluated {
+    pub fn select(
+        mut self,
+        mut beg: Evaluated,
+        mut end: Evaluated,
+        single: bool,
+        range: TokenRange,
+    ) -> Evaluated {
         let value = self.get_value();
         let width = self.get_width();
         let array = self.get_array();
-        if let (Some(beg), Some(end)) = (beg.get_value(), end.get_value()) {
-            if let Some(x) = array.first() {
-                if *x == 1 {
-                    // select width
+        if let (Some(width), Some(array)) = (width, array) {
+            if let Some(select_array) = array.first() {
+                // select array
 
-                    let select_width = width.first().unwrap_or(&0);
-                    let mut rest = width[1..].to_vec();
+                let mut rest: Vec<_> = array[1..].to_vec();
+                if let (Some(beg), Some(end)) = (beg.get_value(), end.get_value()) {
+                    if beg > end {
+                        self.errors.push(EvaluatedError::InvalidSelect {
+                            kind: "wrong index order".to_string(),
+                            range,
+                        });
+                        self.set_unknown();
+                    } else if end >= *select_array as isize {
+                        self.errors.push(EvaluatedError::InvalidSelect {
+                            kind: "out of range".to_string(),
+                            range,
+                        });
+                        self.set_unknown();
+                    } else {
+                        if single {
+                            self.set_array(rest);
+                        } else {
+                            let mut new_array = vec![(end - beg + 1) as usize];
+                            new_array.append(&mut rest);
+                            self.set_array(new_array);
+                        }
+                        self.set_unknown();
+                    }
+                } else if single {
+                    self.set_array(rest);
+                    self.set_unknown();
+                }
+            } else {
+                // select width
+
+                let select_width = width.first().unwrap_or(&0);
+                let mut rest = if width.is_empty() {
+                    vec![]
+                } else {
+                    width[1..].to_vec()
+                };
+
+                if let (Some(beg), Some(end)) = (beg.get_value(), end.get_value()) {
                     if end > beg {
-                        // TODO index error
+                        self.errors.push(EvaluatedError::InvalidSelect {
+                            kind: "wrong index order".to_string(),
+                            range,
+                        });
                         self.set_unknown();
                     } else if beg >= *select_width as isize {
-                        // TODO out of range error
+                        self.errors.push(EvaluatedError::InvalidSelect {
+                            kind: "out of range".to_string(),
+                            range,
+                        });
                         self.set_unknown();
                     } else {
                         let part_size: usize = if rest.is_empty() {
@@ -360,23 +454,10 @@ impl Evaluated {
 
                         self.set_width(new_width);
                     }
-                } else {
-                    // select array
-
-                    let select_array = array.first().unwrap_or(&0);
-                    let _rest: Vec<_> = array[1..].iter().collect();
-                    if beg > end {
-                        // TODO index error
-                        self.set_unknown();
-                    } else if end >= *select_array as isize {
-                        // TODO out of range error
-                        self.set_unknown();
-                    } else {
-                        self.set_unknown();
-                    }
+                } else if single {
+                    let new_width = if rest.is_empty() { vec![1] } else { rest };
+                    self.set_width(new_width);
                 }
-            } else {
-                self.set_unknown();
             }
         } else {
             self.set_unknown();
@@ -399,6 +480,8 @@ impl Evaluated {
     ) -> Evaluated {
         // TODO array error
 
+        let is_4state = left.is_4state() | right.is_4state();
+
         let mut ret = match (
             left.get_value(),
             right.get_value(),
@@ -409,14 +492,14 @@ impl Evaluated {
                 let value = calc_value(value0, value1);
                 let width = calc_width(width0, width1, context_width);
                 if let Some(value) = value {
-                    Evaluated::create_fixed(value, false, vec![width], vec![1])
+                    Evaluated::create_fixed(value, false, vec![width], vec![])
                 } else {
-                    Evaluated::create_variable(false, vec![width], vec![1])
+                    Evaluated::create_variable(false, is_4state, vec![width], vec![])
                 }
             }
             (_, _, Some(width0), Some(width1)) => {
                 let width = calc_width(width0, width1, context_width);
-                Evaluated::create_variable(false, vec![width], vec![1])
+                Evaluated::create_variable(false, is_4state, vec![width], vec![])
             }
             _ => Evaluated::create_unknown(),
         };
@@ -433,19 +516,21 @@ impl Evaluated {
     ) -> Evaluated {
         // TODO array error
 
+        let is_4state = left.is_4state();
+
         let mut ret = match (left.get_value(), left.get_total_width()) {
             (Some(value0), Some(width0)) => {
                 let value = calc_value(value0);
                 let width = calc_width(width0);
                 if let Some(value) = value {
-                    Evaluated::create_fixed(value, false, vec![width], vec![1])
+                    Evaluated::create_fixed(value, false, vec![width], vec![])
                 } else {
-                    Evaluated::create_variable(false, vec![width], vec![1])
+                    Evaluated::create_variable(false, is_4state, vec![width], vec![])
                 }
             }
             (_, Some(width0)) => {
                 let width = calc_width(width0);
-                Evaluated::create_variable(false, vec![width], vec![1])
+                Evaluated::create_variable(false, is_4state, vec![width], vec![])
             }
             _ => Evaluated::create_unknown(),
         };
@@ -738,6 +823,33 @@ impl Evaluator {
         Default::default()
     }
 
+    pub fn evaluate_select(&mut self, value: &Select) -> (Evaluated, Evaluated, bool) {
+        let beg = self.expression(value.expression.as_ref());
+        if let Some(x) = &value.select_opt {
+            let end = self.expression(x.expression.as_ref());
+            match x.select_operator.as_ref() {
+                SelectOperator::Colon(_) => (beg, end, false),
+                SelectOperator::PlusColon(_) => {
+                    let one = Evaluated::create_fixed(1, false, vec![32], vec![]);
+                    let calc = beg.clone().add(end, None).sub(one, None);
+                    (calc, beg, false)
+                }
+                SelectOperator::MinusColon(_) => {
+                    let one = Evaluated::create_fixed(1, false, vec![32], vec![]);
+                    let calc = beg.clone().sub(end, None).add(one, None);
+                    (beg, calc, false)
+                }
+                SelectOperator::Step(_) => (
+                    beg.clone().mul(end.clone(), None).add(end.clone(), None),
+                    beg.mul(end, None),
+                    false,
+                ),
+            }
+        } else {
+            (beg.clone(), beg, true)
+        }
+    }
+
     fn binary_operator(&mut self, operator: &str, left: Evaluated, right: Evaluated) -> Evaluated {
         match operator {
             "**" => left.pow(right, self.context_width.first()),
@@ -841,7 +953,7 @@ impl Evaluator {
 
     pub fn type_array(&mut self, x: Type) -> Option<Vec<usize>> {
         if x.array.is_empty() {
-            Some(vec![1])
+            Some(vec![])
         } else {
             let mut ret = Vec::new();
             for x in &x.array {
@@ -883,22 +995,24 @@ impl Evaluator {
             };
             let width = str::parse::<usize>(width);
             let value = isize::from_str_radix(value, radix);
-            if let (Ok(width), Ok(value)) = (width, value) {
-                Evaluated::create_fixed(value, signed, vec![width], vec![1])
-            } else {
-                Evaluated::create_unknown_static()
+            match (width, value) {
+                (Ok(width), Ok(value)) => {
+                    Evaluated::create_fixed(value, signed, vec![width], vec![])
+                }
+                (Ok(width), _) => Evaluated::create_undefine_fixed(signed, vec![width], vec![]),
+                _ => Evaluated::create_unknown_static(),
             }
         } else {
-            Evaluated::create_unknown_static()
+            unreachable!()
         }
     }
 
     fn base_less(&mut self, arg: &BaseLess) -> Evaluated {
         let text = arg.base_less_token.to_string().replace('_', "");
         if let Ok(value) = str::parse::<isize>(&text) {
-            Evaluated::create_fixed(value, false, vec![32], vec![1])
+            Evaluated::create_fixed(value, false, vec![32], vec![])
         } else {
-            Evaluated::create_unknown()
+            Evaluated::create_unknown_static()
         }
     }
 
@@ -924,11 +1038,12 @@ impl Evaluator {
                 0
             }
         };
+
+        let width = *self.context_width.last().unwrap_or(&0);
         if unknown {
-            Evaluated::create_unknown()
+            Evaluated::create_undefine_fixed(false, vec![width], vec![])
         } else {
-            let width = *self.context_width.last().unwrap_or(&0);
-            Evaluated::create_fixed(value, false, vec![width], vec![1])
+            Evaluated::create_fixed(value, false, vec![width], vec![])
         }
     }
 
@@ -1074,42 +1189,42 @@ impl Evaluator {
                 CastingType::Clock(_) => Some(Evaluated::create_clock(
                     EvaluatedTypeClockKind::Implicit,
                     vec![1],
-                    vec![1],
+                    vec![],
                 )),
                 CastingType::ClockPosedge(_) => Some(Evaluated::create_clock(
                     EvaluatedTypeClockKind::Posedge,
                     vec![1],
-                    vec![1],
+                    vec![],
                 )),
                 CastingType::ClockNegedge(_) => Some(Evaluated::create_clock(
                     EvaluatedTypeClockKind::Negedge,
                     vec![1],
-                    vec![1],
+                    vec![],
                 )),
                 CastingType::Reset(_) => Some(Evaluated::create_reset(
                     EvaluatedTypeResetKind::Implicit,
                     vec![1],
-                    vec![1],
+                    vec![],
                 )),
                 CastingType::ResetAsyncHigh(_) => Some(Evaluated::create_reset(
                     EvaluatedTypeResetKind::AsyncHigh,
                     vec![1],
-                    vec![1],
+                    vec![],
                 )),
                 CastingType::ResetAsyncLow(_) => Some(Evaluated::create_reset(
                     EvaluatedTypeResetKind::AsyncLow,
                     vec![1],
-                    vec![1],
+                    vec![],
                 )),
                 CastingType::ResetSyncHigh(_) => Some(Evaluated::create_reset(
                     EvaluatedTypeResetKind::SyncHigh,
                     vec![1],
-                    vec![1],
+                    vec![],
                 )),
                 CastingType::ResetSyncLow(_) => Some(Evaluated::create_reset(
                     EvaluatedTypeResetKind::SyncLow,
                     vec![1],
-                    vec![1],
+                    vec![],
                 )),
                 _ => None,
             };
@@ -1162,35 +1277,16 @@ impl Evaluator {
     }
 
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) -> Evaluated {
-        // TODO array / bit select
+        let range: TokenRange = arg.into();
         let symbol = symbol_table::resolve(arg);
 
-        let last_select: Vec<_> = if arg.expression_identifier_list0.is_empty() {
-            arg.expression_identifier_list
-                .iter()
-                .map(|x| x.select.clone())
-                .collect()
-        } else {
-            arg.expression_identifier_list0
-                .last()
-                .unwrap()
-                .expression_identifier_list0_list
-                .iter()
-                .map(|x| x.select.clone())
-                .collect()
-        };
+        let last_select: Vec<_> = arg.last_select();
 
         let mut ret = self.identifier_helper(symbol);
 
         for s in &last_select {
-            let beg = self.expression(s.expression.as_ref());
-            let end = if let Some(x) = &s.select_opt {
-                self.expression(x.expression.as_ref())
-            } else {
-                beg.clone()
-            };
-
-            ret = ret.select(beg, end);
+            let (beg, end, single) = self.evaluate_select(s);
+            ret = ret.select(beg, end, single, range);
         }
 
         ret
@@ -1265,7 +1361,7 @@ impl Evaluator {
                     let arg = self.expression(&arg.expression);
                     if let EvaluatedValue::Fixed(x) = arg.value {
                         let ret = isize::BITS - x.leading_zeros();
-                        Evaluated::create_fixed(ret as isize, false, vec![32], vec![1])
+                        Evaluated::create_fixed(ret as isize, false, vec![32], vec![])
                     } else {
                         Evaluated::create_unknown()
                     }
@@ -1287,7 +1383,7 @@ impl Evaluator {
             (Some(value0), Some(value1), Some(width0), Some(width1)) => {
                 let width = width0 + width1;
                 let value = (value0 << width1) | value1;
-                Evaluated::create_fixed(value, false, vec![width], vec![1])
+                Evaluated::create_fixed(value, false, vec![width], vec![])
             }
             _ => {
                 if x.is_known_static() && y.is_known_static() {
@@ -1308,7 +1404,7 @@ impl Evaluator {
         if let Some(cio) = &arg.concatenation_item_opt {
             let c = self.expression(cio.expression.as_ref());
             if let EvaluatedValue::Fixed(c) = c.value {
-                let mut tmp = Evaluated::create_fixed(0, false, vec![0], vec![1]);
+                let mut tmp = Evaluated::create_fixed(0, false, vec![0], vec![]);
                 for _ in 0..c {
                     tmp = self.do_concatenation(tmp, e.clone());
                 }
@@ -1331,7 +1427,7 @@ impl Evaluator {
         for cll in arg.concatenation_list_list.iter() {
             eval_vec.push(self.concatenation_list_list(cll));
         }
-        let default_value = Evaluated::create_fixed(0, false, vec![0], vec![1]);
+        let default_value = Evaluated::create_fixed(0, false, vec![0], vec![]);
         eval_vec.iter().fold(default_value, |acc, x| {
             self.do_concatenation(acc, x.clone())
         })
@@ -1351,10 +1447,15 @@ impl Evaluator {
     fn array_literal_item_group(&mut self, arg: &ArrayLiteralItemGroup) -> Evaluated {
         match arg {
             ArrayLiteralItemGroup::ExpressionArrayLiteralItemOpt(x) => {
-                let exp_eval = self.expression(x.expression.as_ref());
+                let mut exp_eval = self.expression(x.expression.as_ref());
                 if let Some(alio) = &x.array_literal_item_opt {
                     let repeat_exp = self.expression(alio.expression.as_ref());
-                    self.do_concatenation(exp_eval, repeat_exp)
+                    if let Some(value) = repeat_exp.get_value() {
+                        exp_eval.set_array(vec![value as usize]);
+                        exp_eval
+                    } else {
+                        Evaluated::create_unknown()
+                    }
                 } else {
                     exp_eval
                 }
@@ -1375,8 +1476,9 @@ impl Evaluator {
 
     fn array_literal_list(&mut self, arg: &ArrayLiteralList) -> Evaluated {
         // Currently only checking for `Defaul Colon Expression` syntax
-        let e = self.array_literal_item(arg.array_literal_item.as_ref());
+        let mut e = self.array_literal_item(arg.array_literal_item.as_ref());
         if arg.array_literal_list_list.is_empty() {
+            e.set_array(vec![1]);
             e
         } else if e.is_known_static() {
             let is_known_static: bool = arg

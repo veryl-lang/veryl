@@ -1,10 +1,10 @@
 module veryl_testcase_Module13;
-    logic a;
-    logic b;
-    logic c;
-    logic d;
-    logic e;
-    logic X;
+    logic          a;
+    logic          b;
+    logic          c;
+    logic          d;
+    logic          e;
+    logic [10-1:0] X;
     always_comb X = 1;
 
     // bit select

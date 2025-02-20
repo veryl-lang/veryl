@@ -34,17 +34,17 @@ module veryl_testcase_Module02;
     always_comb _eee = 1;
 
     // array
-    int unsigned     _f      [0:10-1];
-    always_comb _f = 1;
-    longint unsigned _ff     [0:10-1];
-    always_comb _ff = 1;
-    int signed       _fff    [0:10-1];
-    always_comb _fff = 1;
-    longint signed   _ffff   [0:10-1];
-    always_comb _ffff = 1;
-    shortreal        _fffff  [0:10-1];
-    always_comb _fffff = 1;
-    real             _ffffff [0:10-1];
-    always_comb _ffffff = 1;
+    int unsigned     _f      [0:2-1];
+    always_comb _f = '{1, 1};
+    longint unsigned _ff     [0:2-1];
+    always_comb _ff = '{1, 1};
+    int signed       _fff    [0:2-1];
+    always_comb _fff = '{1, 1};
+    longint signed   _ffff   [0:2-1];
+    always_comb _ffff = '{1, 1};
+    shortreal        _fffff  [0:2-1];
+    always_comb _fffff = '{1, 1};
+    real             _ffffff [0:2-1];
+    always_comb _ffffff = '{1, 1};
 endmodule
 //# sourceMappingURL=../map/testcases/sv/02_builtin_type.sv.map

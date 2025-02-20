@@ -37,10 +37,10 @@ module Module12_2 (
     i_rst_sh: input `_ reset_sync_high ,
     i_rst_sl: input `_ reset_sync_low  ,
 ) {
-    var a : logic;
-    var aa: logic;
-    let b : logic = 1;
-    let c : logic = 1;
+    var a : logic    ;
+    var aa: logic    ;
+    let b : logic     = 1;
+    let c : logic<10> = 1;
 
     // always_ff declaration with default polarity
     always_ff (i_clk, i_rst) {
