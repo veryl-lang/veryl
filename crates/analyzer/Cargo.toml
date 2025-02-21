@@ -18,7 +18,7 @@ strnum_bitwidth = {workspace = true}
 thiserror       = {workspace = true}
 veryl-metadata  = {version = "0.13.5", path = "../metadata"}
 veryl-parser    = {version = "0.13.5", path = "../parser"}
-daggy           = "0.8.0"
+daggy           = "0.8.1"
 bimap           = "0.6.3"
 
 [target.'cfg(target_family = "wasm")'.dependencies]
