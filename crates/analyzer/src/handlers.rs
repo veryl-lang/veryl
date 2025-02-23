@@ -43,28 +43,28 @@ use crate::analyzer_error::AnalyzerError;
 use veryl_metadata::{Build, Lint};
 use veryl_parser::veryl_walker::Handler;
 
-pub struct Pass1Handlers<'a> {
-    check_attribute: CheckAttribute<'a>,
-    check_port: CheckPort<'a>,
-    check_embed_include: CheckEmbedInclude<'a>,
-    check_identifier: CheckIdentifier<'a>,
-    check_number: CheckNumber<'a>,
-    check_statement: CheckStatement<'a>,
-    check_unsafe: CheckUnsafe<'a>,
-    create_symbol_table: CreateSymbolTable<'a>,
+pub struct Pass1Handlers {
+    check_attribute: CheckAttribute,
+    check_port: CheckPort,
+    check_embed_include: CheckEmbedInclude,
+    check_identifier: CheckIdentifier,
+    check_number: CheckNumber,
+    check_statement: CheckStatement,
+    check_unsafe: CheckUnsafe,
+    create_symbol_table: CreateSymbolTable,
 }
 
-impl<'a> Pass1Handlers<'a> {
-    pub fn new(text: &'a str, build_opt: &'a Build, lint_opt: &'a Lint) -> Self {
+impl Pass1Handlers {
+    pub fn new(build_opt: &Build, lint_opt: &Lint) -> Self {
         Self {
-            check_attribute: CheckAttribute::new(text),
-            check_port: CheckPort::new(text),
-            check_embed_include: CheckEmbedInclude::new(text),
-            check_identifier: CheckIdentifier::new(text, lint_opt),
-            check_number: CheckNumber::new(text),
-            check_statement: CheckStatement::new(text),
-            check_unsafe: CheckUnsafe::new(text),
-            create_symbol_table: CreateSymbolTable::new(text, build_opt),
+            check_attribute: CheckAttribute::new(),
+            check_port: CheckPort::new(),
+            check_embed_include: CheckEmbedInclude::new(),
+            check_identifier: CheckIdentifier::new(lint_opt),
+            check_number: CheckNumber::new(),
+            check_statement: CheckStatement::new(),
+            check_unsafe: CheckUnsafe::new(),
+            create_symbol_table: CreateSymbolTable::new(build_opt),
         }
     }
 
@@ -95,36 +95,36 @@ impl<'a> Pass1Handlers<'a> {
     }
 }
 
-pub struct Pass2Handlers<'a> {
-    create_type_dag: CreateTypeDag<'a>,
-    check_separator: CheckSeparator<'a>,
-    check_enum: CheckEnum<'a>,
-    check_modport: CheckModport<'a>,
-    check_function: CheckFunction<'a>,
-    check_msb_lsb: CheckMsbLsb<'a>,
-    check_var_ref: CheckVarRef<'a>,
-    check_clock_reset: CheckClockReset<'a>,
-    check_expression: CheckExpression<'a>,
-    check_clock_domain: CheckClockDomain<'a>,
-    check_proto: CheckProto<'a>,
-    check_type: CheckType<'a>,
+pub struct Pass2Handlers {
+    create_type_dag: CreateTypeDag,
+    check_separator: CheckSeparator,
+    check_enum: CheckEnum,
+    check_modport: CheckModport,
+    check_function: CheckFunction,
+    check_msb_lsb: CheckMsbLsb,
+    check_var_ref: CheckVarRef,
+    check_clock_reset: CheckClockReset,
+    check_expression: CheckExpression,
+    check_clock_domain: CheckClockDomain,
+    check_proto: CheckProto,
+    check_type: CheckType,
 }
 
-impl<'a> Pass2Handlers<'a> {
-    pub fn new(text: &'a str, _build_opt: &'a Build, _lint_opt: &'a Lint) -> Self {
+impl Pass2Handlers {
+    pub fn new(_build_opt: &Build, _lint_opt: &Lint) -> Self {
         Self {
-            check_separator: CheckSeparator::new(text),
-            check_enum: CheckEnum::new(text),
-            check_modport: CheckModport::new(text),
-            check_function: CheckFunction::new(text),
-            check_msb_lsb: CheckMsbLsb::new(text),
-            check_var_ref: CheckVarRef::new(text),
-            check_clock_reset: CheckClockReset::new(text),
-            create_type_dag: CreateTypeDag::new(text),
-            check_expression: CheckExpression::new(text, vec![]),
-            check_clock_domain: CheckClockDomain::new(text),
-            check_proto: CheckProto::new(text),
-            check_type: CheckType::new(text),
+            check_separator: CheckSeparator::new(),
+            check_enum: CheckEnum::new(),
+            check_modport: CheckModport::new(),
+            check_function: CheckFunction::new(),
+            check_msb_lsb: CheckMsbLsb::new(),
+            check_var_ref: CheckVarRef::new(),
+            check_clock_reset: CheckClockReset::new(),
+            create_type_dag: CreateTypeDag::new(),
+            check_expression: CheckExpression::new(vec![]),
+            check_clock_domain: CheckClockDomain::new(),
+            check_proto: CheckProto::new(),
+            check_type: CheckType::new(),
         }
     }
 

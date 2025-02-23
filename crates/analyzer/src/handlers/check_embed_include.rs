@@ -7,29 +7,25 @@ use veryl_parser::veryl_token::TokenSource;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
-pub struct CheckEmbedInclude<'a> {
+#[derive(Default)]
+pub struct CheckEmbedInclude {
     pub errors: Vec<AnalyzerError>,
-    text: &'a str,
     point: HandlerPoint,
 }
 
-impl<'a> CheckEmbedInclude<'a> {
-    pub fn new(text: &'a str) -> Self {
-        Self {
-            errors: Vec::new(),
-            text,
-            point: HandlerPoint::Before,
-        }
+impl CheckEmbedInclude {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
-impl Handler for CheckEmbedInclude<'_> {
+impl Handler for CheckEmbedInclude {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl VerylGrammarTrait for CheckEmbedInclude<'_> {
+impl VerylGrammarTrait for CheckEmbedInclude {
     fn embed_declaration(&mut self, arg: &EmbedDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let way = arg.identifier.identifier_token.to_string();
@@ -38,7 +34,6 @@ impl VerylGrammarTrait for CheckEmbedInclude<'_> {
             if !EMBED_WAY.contains(&way.as_str()) {
                 self.errors.push(AnalyzerError::unknown_embed_way(
                     &way,
-                    self.text,
                     &arg.identifier.as_ref().into(),
                 ));
             }
@@ -46,7 +41,6 @@ impl VerylGrammarTrait for CheckEmbedInclude<'_> {
             if !EMBED_LANG.contains(&lang.as_str()) {
                 self.errors.push(AnalyzerError::unknown_embed_lang(
                     &lang,
-                    self.text,
                     &arg.identifier0.as_ref().into(),
                 ));
             }
@@ -61,7 +55,6 @@ impl VerylGrammarTrait for CheckEmbedInclude<'_> {
             if !INCLUDE_WAY.contains(&way.as_str()) {
                 self.errors.push(AnalyzerError::unknown_include_way(
                     &way,
-                    self.text,
                     &arg.identifier.as_ref().into(),
                 ));
             }
@@ -69,7 +62,8 @@ impl VerylGrammarTrait for CheckEmbedInclude<'_> {
             let path = arg.string_literal.string_literal_token.to_string();
             let path = path.strip_prefix('"').unwrap();
             let path = path.strip_suffix('"').unwrap();
-            if let TokenSource::File(x) = arg.identifier.identifier_token.token.source {
+            if let TokenSource::File { path: x, .. } = arg.identifier.identifier_token.token.source
+            {
                 let mut base = resource_table::get_path_value(x).unwrap();
                 if base.starts_with("file://") {
                     base = PathBuf::from(base.to_string_lossy().strip_prefix("file://").unwrap());
@@ -81,7 +75,6 @@ impl VerylGrammarTrait for CheckEmbedInclude<'_> {
                     self.errors.push(AnalyzerError::include_failure(
                         path.to_string_lossy().as_ref(),
                         &err.to_string(),
-                        self.text,
                         &arg.string_literal.string_literal_token.token.into(),
                     ));
                 }

@@ -28,19 +28,19 @@ impl CmdDump {
                 .wrap_err("")?;
             let parser = Parser::parse(&input, &path.src)?;
             let analyzer = Analyzer::new(metadata);
-            analyzer.analyze_pass1(&path.prj, &input, &path.src, &parser.veryl);
+            analyzer.analyze_pass1(&path.prj, &path.src, &parser.veryl);
 
             contexts.push((path, input, parser, analyzer));
         }
 
         Analyzer::analyze_post_pass1();
 
-        for (path, input, parser, analyzer) in &contexts {
-            analyzer.analyze_pass2(&path.prj, input, &path.src, &parser.veryl);
+        for (path, _, parser, analyzer) in &contexts {
+            analyzer.analyze_pass2(&path.prj, &path.src, &parser.veryl);
         }
 
-        for (path, input, parser, analyzer) in &contexts {
-            analyzer.analyze_pass3(&path.prj, input, &path.src, &parser.veryl);
+        for (path, _, parser, analyzer) in &contexts {
+            analyzer.analyze_pass3(&path.prj, &path.src, &parser.veryl);
         }
 
         if self.opt.symbol_table {

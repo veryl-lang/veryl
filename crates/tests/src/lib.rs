@@ -38,7 +38,7 @@ mod analyzer {
                     let input = fs::read_to_string(&path.src).unwrap();
                     let ret = Parser::parse(&input, &path.src).unwrap();
                     let analyzer = Analyzer::new(&metadata);
-                    let _ = analyzer.analyze_pass1(&path.prj, &input, &path.src, &ret.veryl);
+                    let _ = analyzer.analyze_pass1(&path.prj, &path.src, &ret.veryl);
                 }
             }
         }
@@ -49,7 +49,7 @@ mod analyzer {
         let ret = Parser::parse(&input, &file).unwrap();
         let prj = &metadata.project.name;
         let analyzer = Analyzer::new(&metadata);
-        let errors = analyzer.analyze_pass1(&prj, &input, &file, &ret.veryl);
+        let errors = analyzer.analyze_pass1(&prj, &file, &ret.veryl);
         dbg!(&errors);
         assert!(errors.is_empty());
 
@@ -57,11 +57,11 @@ mod analyzer {
         dbg!(&errors);
         assert!(errors.is_empty());
 
-        let errors = analyzer.analyze_pass2(&prj, &input, &file, &ret.veryl);
+        let errors = analyzer.analyze_pass2(&prj, &file, &ret.veryl);
         dbg!(&errors);
         assert!(errors.is_empty());
 
-        let errors = analyzer.analyze_pass3(&prj, &input, &file, &ret.veryl);
+        let errors = analyzer.analyze_pass3(&prj, &file, &ret.veryl);
         dbg!(&errors);
         assert!(errors.is_empty());
     }
@@ -125,7 +125,7 @@ mod emitter {
                     let input = fs::read_to_string(&path.src).unwrap();
                     let ret = Parser::parse(&input, &path.src).unwrap();
                     let analyzer = Analyzer::new(&metadata);
-                    let _ = analyzer.analyze_pass1(&path.prj, &input, &path.src, &ret.veryl);
+                    let _ = analyzer.analyze_pass1(&path.prj, &path.src, &ret.veryl);
                 }
             }
         }
@@ -138,9 +138,9 @@ mod emitter {
         let ret = Parser::parse(&input, &src_path).unwrap();
         let prj = &metadata.project.name;
         let analyzer = Analyzer::new(&metadata);
-        let _ = analyzer.analyze_pass1(&prj, &input, &src_path, &ret.veryl);
+        let _ = analyzer.analyze_pass1(&prj, &src_path, &ret.veryl);
         let _ = Analyzer::analyze_post_pass1();
-        let _ = analyzer.analyze_pass2(&prj, &input, &src_path, &ret.veryl);
+        let _ = analyzer.analyze_pass2(&prj, &src_path, &ret.veryl);
         let mut emitter = Emitter::new(&metadata, &src_path, &dst_path, &map_path);
         emitter.emit(&prj, &ret.veryl);
 
@@ -300,18 +300,18 @@ mod filelist {
             let parser = Parser::parse(&input, &path.src).unwrap();
 
             let analyzer = Analyzer::new(&metadata);
-            let _ = analyzer.analyze_pass1(&path.prj, &input, &path.src, &parser.veryl);
+            let _ = analyzer.analyze_pass1(&path.prj, &path.src, &parser.veryl);
             contexts.push((path, input, parser, analyzer));
         }
 
         let _ = Analyzer::analyze_post_pass1();
 
-        for (path, input, parser, analyzer) in &contexts {
-            let _ = analyzer.analyze_pass2(&path.prj, input, &path.src, &parser.veryl);
+        for (path, _, parser, analyzer) in &contexts {
+            let _ = analyzer.analyze_pass2(&path.prj, &path.src, &parser.veryl);
         }
 
-        for (path, input, parser, analyzer) in &contexts {
-            let _ = analyzer.analyze_pass3(&path.prj, input, &path.src, &parser.veryl);
+        for (path, _, parser, analyzer) in &contexts {
+            let _ = analyzer.analyze_pass3(&path.prj, &path.src, &parser.veryl);
         }
 
         let paths = veryl::cmd_build::CmdBuild::sort_filelist(&metadata, &paths, false);

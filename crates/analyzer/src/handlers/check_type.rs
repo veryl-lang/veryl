@@ -13,9 +13,8 @@ use veryl_parser::veryl_walker::{Handler, HandlerPoint, VerylWalker};
 use veryl_parser::{ParolError, Stringifier};
 
 #[derive(Default)]
-pub struct CheckType<'a> {
+pub struct CheckType {
     pub errors: Vec<AnalyzerError>,
-    text: &'a str,
     point: HandlerPoint,
     in_module: bool,
     in_user_defined_type: Vec<()>,
@@ -24,16 +23,13 @@ pub struct CheckType<'a> {
     in_modport: bool,
 }
 
-impl<'a> CheckType<'a> {
-    pub fn new(text: &'a str) -> Self {
-        Self {
-            text,
-            ..Default::default()
-        }
+impl CheckType {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
-impl Handler for CheckType<'_> {
+impl Handler for CheckType {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
@@ -103,7 +99,7 @@ fn resolve_proto_generic_arg_type(
         .map(|s| s.found)
 }
 
-impl VerylGrammarTrait for CheckType<'_> {
+impl VerylGrammarTrait for CheckType {
     fn user_defined_type(&mut self, _arg: &UserDefinedType) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
@@ -173,7 +169,6 @@ impl VerylGrammarTrait for CheckType<'_> {
                             &preceed_symbol.token.to_string(),
                             "enum",
                             &preceed_symbol.kind.to_kind_name(),
-                            self.text,
                             &preceed_symbol.token.into(),
                         ));
                     }
@@ -187,7 +182,6 @@ impl VerylGrammarTrait for CheckType<'_> {
                                 &symbol.found.token.to_string(),
                                 "modport",
                                 &symbol.found.kind.to_kind_name(),
-                                self.text,
                                 &arg.identifier().token.into(),
                             ));
                         }
@@ -202,7 +196,6 @@ impl VerylGrammarTrait for CheckType<'_> {
                                 &symbol.found.token.to_string(),
                                 "enum or union or struct",
                                 &symbol.found.kind.to_kind_name(),
-                                self.text,
                                 &arg.identifier().token.into(),
                             ));
                         }
@@ -242,7 +235,6 @@ impl VerylGrammarTrait for CheckType<'_> {
                                             &symbol.found.token.to_string(),
                                             "enum or union or struct",
                                             &symbol.found.kind.to_kind_name(),
-                                            self.text,
                                             &arg.range,
                                         ));
                                     }
@@ -263,7 +255,6 @@ impl VerylGrammarTrait for CheckType<'_> {
                                             &symbol.found.token.to_string(),
                                             &format!("inst {proto}"),
                                             &symbol.found.kind.to_kind_name(),
-                                            self.text,
                                             &arg.range,
                                         ));
                                     }
@@ -284,7 +275,6 @@ impl VerylGrammarTrait for CheckType<'_> {
                                             &symbol.found.token.to_string(),
                                             &format!("proto {proto}"),
                                             &symbol.found.kind.to_kind_name(),
-                                            self.text,
                                             &arg.range,
                                         ));
                                     }
@@ -397,7 +387,6 @@ impl VerylGrammarTrait for CheckType<'_> {
                         name,
                         expected,
                         &symbol.found.kind.to_kind_name(),
-                        self.text,
                         &arg.identifier.as_ref().into(),
                     ));
                 }
@@ -415,7 +404,6 @@ impl VerylGrammarTrait for CheckType<'_> {
                             self.errors.push(AnalyzerError::missing_port(
                                 name,
                                 &port,
-                                self.text,
                                 &arg.identifier.as_ref().into(),
                             ));
                         }
@@ -426,7 +414,6 @@ impl VerylGrammarTrait for CheckType<'_> {
                             self.errors.push(AnalyzerError::unknown_param(
                                 name,
                                 &param,
-                                self.text,
                                 &arg.identifier.as_ref().into(),
                             ));
                         }
@@ -437,7 +424,6 @@ impl VerylGrammarTrait for CheckType<'_> {
                             self.errors.push(AnalyzerError::unknown_port(
                                 name,
                                 &port,
-                                self.text,
                                 &arg.identifier.as_ref().into(),
                             ));
                         }

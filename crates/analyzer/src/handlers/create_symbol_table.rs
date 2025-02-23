@@ -61,9 +61,8 @@ impl GenericContext {
 }
 
 #[derive(Default)]
-pub struct CreateSymbolTable<'a> {
+pub struct CreateSymbolTable {
     pub errors: Vec<AnalyzerError>,
-    text: &'a str,
     build_opt: Build,
     point: HandlerPoint,
     namespace: Namespace,
@@ -106,10 +105,9 @@ fn calc_width(value: usize) -> usize {
     (usize::BITS - value.leading_zeros()) as usize
 }
 
-impl<'a> CreateSymbolTable<'a> {
-    pub fn new(text: &'a str, build_opt: &'a Build) -> Self {
+impl CreateSymbolTable {
+    pub fn new(build_opt: &Build) -> Self {
         Self {
-            text,
             build_opt: build_opt.clone(),
             ..Default::default()
         }
@@ -117,10 +115,10 @@ impl<'a> CreateSymbolTable<'a> {
 
     fn insert_symbol(&mut self, token: &Token, kind: SymbolKind, public: bool) -> Option<SymbolId> {
         let line = token.line;
-        let doc_comment = if let TokenSource::File(file) = token.source {
+        let doc_comment = if let TokenSource::File { path, .. } = token.source {
             if line == 0 {
                 DocComment::default()
-            } else if let Some(doc_comment) = doc_comment_table::get(file, line) {
+            } else if let Some(doc_comment) = doc_comment_table::get(path, line) {
                 DocComment(vec![doc_comment])
             } else {
                 let mut candidate_line = line - 1;
@@ -131,7 +129,7 @@ impl<'a> CreateSymbolTable<'a> {
                     candidate_line -= 1;
                 }
                 let mut ret = Vec::new();
-                while let Some(doc_comment) = doc_comment_table::get(file, candidate_line) {
+                while let Some(doc_comment) = doc_comment_table::get(path, candidate_line) {
                     ret.push(doc_comment);
                     candidate_line -= 1;
                 }
@@ -151,7 +149,6 @@ impl<'a> CreateSymbolTable<'a> {
         if id.is_none() {
             self.errors.push(AnalyzerError::duplicated_identifier(
                 &token.to_string(),
-                self.text,
                 &token.into(),
             ));
         }
@@ -281,10 +278,8 @@ impl<'a> CreateSymbolTable<'a> {
     fn check_missing_clock_domain(&mut self, token: &Token, r#type: &SymType) {
         if r#type.kind.is_clock() {
             if self.exist_clock_without_domain {
-                self.errors.push(AnalyzerError::missing_clock_domain(
-                    self.text,
-                    &token.into(),
-                ));
+                self.errors
+                    .push(AnalyzerError::missing_clock_domain(&token.into()));
             }
             self.exist_clock_without_domain = true;
         }
@@ -309,7 +304,6 @@ impl<'a> CreateSymbolTable<'a> {
                     self.errors.push(AnalyzerError::invalid_enum_variant_value(
                         &arg.identifier.identifier_token.to_string(),
                         &self.enum_encoding.to_string(),
-                        self.text,
                         &arg.identifier.as_ref().into(),
                     ));
                 }
@@ -320,7 +314,6 @@ impl<'a> CreateSymbolTable<'a> {
             } else {
                 self.errors.push(AnalyzerError::unevaluatable_enum_variant(
                     &arg.identifier.identifier_token.to_string(),
-                    self.text,
                     &arg.identifier.as_ref().into(),
                 ));
                 EnumMemberValue::UnevaluableValue
@@ -330,7 +323,6 @@ impl<'a> CreateSymbolTable<'a> {
         } else {
             self.errors.push(AnalyzerError::unevaluatable_enum_variant(
                 &arg.identifier.identifier_token.to_string(),
-                self.text,
                 &arg.identifier.as_ref().into(),
             ));
             EnumMemberValue::UnevaluableValue
@@ -377,7 +369,7 @@ impl<'a> CreateSymbolTable<'a> {
     }
 }
 
-impl Handler for CreateSymbolTable<'_> {
+impl Handler for CreateSymbolTable {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
@@ -392,12 +384,12 @@ fn scoped_identifier_tokens(arg: &ScopedIdentifier) -> Vec<Token> {
     ret
 }
 
-impl VerylGrammarTrait for CreateSymbolTable<'_> {
+impl VerylGrammarTrait for CreateSymbolTable {
     fn identifier(&mut self, arg: &Identifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let id = arg.identifier_token.token.id;
-            if let TokenSource::File(file) = arg.identifier_token.token.source {
-                namespace_table::insert(id, file, &self.namespace);
+            if let TokenSource::File { path, .. } = arg.identifier_token.token.source {
+                namespace_table::insert(id, path, &self.namespace);
             }
         }
         Ok(())
@@ -406,8 +398,8 @@ impl VerylGrammarTrait for CreateSymbolTable<'_> {
     fn dollar_identifier(&mut self, arg: &DollarIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let id = arg.dollar_identifier_token.token.id;
-            if let TokenSource::File(file) = arg.dollar_identifier_token.token.source {
-                namespace_table::insert(id, file, &self.namespace);
+            if let TokenSource::File { path, .. } = arg.dollar_identifier_token.token.source {
+                namespace_table::insert(id, path, &self.namespace);
             }
         }
         Ok(())
@@ -415,7 +407,7 @@ impl VerylGrammarTrait for CreateSymbolTable<'_> {
 
     fn hierarchical_identifier(&mut self, arg: &HierarchicalIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            reference_table::add(arg.into(), self.text);
+            reference_table::add(arg.into());
         }
 
         Ok(())
@@ -424,7 +416,7 @@ impl VerylGrammarTrait for CreateSymbolTable<'_> {
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                reference_table::add(arg.into(), self.text);
+                reference_table::add(arg.into());
 
                 // Add symbols under $sv namespace
                 if let ScopedIdentifierGroup::DollarIdentifier(x) =
@@ -467,7 +459,7 @@ impl VerylGrammarTrait for CreateSymbolTable<'_> {
 
             // This should be `After` not `Before`.
             // Because this should be executed after scoped_identifier to handle hierarchical access only
-            reference_table::add(arg.into(), self.text);
+            reference_table::add(arg.into());
         }
         Ok(())
     }
@@ -715,7 +707,7 @@ impl VerylGrammarTrait for CreateSymbolTable<'_> {
 
     fn modport_item(&mut self, arg: &ModportItem) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            reference_table::add(arg.into(), self.text);
+            reference_table::add(arg.into());
         }
         Ok(())
     }
@@ -900,7 +892,7 @@ impl VerylGrammarTrait for CreateSymbolTable<'_> {
     fn inst_port_item(&mut self, arg: &InstPortItem) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                reference_table::add(arg.into(), self.text);
+                reference_table::add(arg.into());
                 self.connect_targets.clear();
             }
             HandlerPoint::After => {
@@ -1020,7 +1012,6 @@ impl VerylGrammarTrait for CreateSymbolTable<'_> {
             } else {
                 self.errors.push(AnalyzerError::missing_default_argument(
                     &arg.identifier.identifier_token.token.to_string(),
-                    self.text,
                     &arg.identifier.as_ref().into(),
                 ));
             }
@@ -1242,10 +1233,7 @@ impl VerylGrammarTrait for CreateSymbolTable<'_> {
                     .as_ref()
                     .map(|x| x.scoped_identifier.as_ref().into());
 
-                let definition = definition_table::insert(Definition::Module {
-                    text: self.text.to_string(),
-                    decl: arg.clone(),
-                });
+                let definition = definition_table::insert(Definition::Module(arg.clone()));
                 let property = ModuleProperty {
                     range,
                     proto,
@@ -1356,10 +1344,7 @@ impl VerylGrammarTrait for CreateSymbolTable<'_> {
                 let range =
                     TokenRange::new(&arg.interface.interface_token, &arg.r_brace.r_brace_token);
 
-                let definition = definition_table::insert(Definition::Interface {
-                    text: self.text.to_string(),
-                    decl: arg.clone(),
-                });
+                let definition = definition_table::insert(Definition::Interface(arg.clone()));
                 let property = InterfaceProperty {
                     range,
                     generic_parameters,
@@ -1483,15 +1468,15 @@ impl VerylGrammarTrait for CreateSymbolTable<'_> {
             };
 
             if let (Some((token, top)), Some(r#type)) = (test_attr, r#type) {
-                let path = if let TokenSource::File(x) = content.source {
-                    x
+                let path = if let TokenSource::File { path, .. } = content.source {
+                    path
                 } else {
                     unreachable!()
                 };
 
                 if top.is_none() && way == "cocotb" {
                     self.errors
-                        .push(AnalyzerError::invalid_test("`cocotb` test requires top module name at the second argument of `#[test]` attribute", self.text, &token.into()));
+                        .push(AnalyzerError::invalid_test("`cocotb` test requires top module name at the second argument of `#[test]` attribute", &token.into()));
                 }
 
                 let property = TestProperty { r#type, path, top };
@@ -1521,15 +1506,15 @@ impl VerylGrammarTrait for CreateSymbolTable<'_> {
             };
 
             if let (Some((token, top)), Some(r#type)) = (test_attr, r#type) {
-                let path = if let TokenSource::File(x) = content.source {
-                    x
+                let path = if let TokenSource::File { path, .. } = content.source {
+                    path
                 } else {
                     unreachable!()
                 };
 
                 if top.is_none() && way == "cocotb" {
                     self.errors
-                        .push(AnalyzerError::invalid_test("`cocotb` test requires top module name at the second argument of `#[test]` attribute", self.text, &token.into()));
+                        .push(AnalyzerError::invalid_test("`cocotb` test requires top module name at the second argument of `#[test]` attribute", &token.into()));
                 }
 
                 let property = TestProperty { r#type, path, top };

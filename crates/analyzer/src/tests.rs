@@ -14,10 +14,10 @@ fn analyze(code: &str) -> Vec<AnalyzerError> {
     let analyzer = Analyzer::new(&metadata);
 
     let mut errors = vec![];
-    errors.append(&mut analyzer.analyze_pass1(&"prj", &code, &"", &parser.veryl));
+    errors.append(&mut analyzer.analyze_pass1(&"prj", &"", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
-    errors.append(&mut analyzer.analyze_pass2(&"prj", &code, &"", &parser.veryl));
-    errors.append(&mut analyzer.analyze_pass3(&"prj", &code, &"", &parser.veryl));
+    errors.append(&mut analyzer.analyze_pass2(&"prj", &"", &parser.veryl));
+    errors.append(&mut analyzer.analyze_pass3(&"prj", &"", &parser.veryl));
     dbg!(&errors);
     errors
 }

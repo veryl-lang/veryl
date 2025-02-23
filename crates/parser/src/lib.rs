@@ -6,6 +6,7 @@ pub mod parser;
 pub mod parser_error;
 pub mod resource_table;
 pub mod stringifier;
+pub mod text_table;
 pub mod veryl_grammar;
 pub mod veryl_grammar_trait;
 pub mod veryl_parser;

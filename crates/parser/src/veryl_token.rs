@@ -1,5 +1,6 @@
 use crate::doc_comment_table;
 use crate::resource_table::{self, PathId, StrId, TokenId};
+use crate::text_table::{self, TextId};
 use crate::veryl_grammar_trait::*;
 use once_cell::sync::Lazy;
 use paste::paste;
@@ -8,7 +9,7 @@ use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenSource {
-    File(PathId),
+    File { path: PathId, text: TextId },
     Builtin,
     External,
     Generated,
@@ -17,7 +18,7 @@ pub enum TokenSource {
 impl fmt::Display for TokenSource {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let text = match self {
-            TokenSource::File(x) => x.to_string(),
+            TokenSource::File { path, .. } => path.to_string(),
             TokenSource::Builtin => "builtin".to_string(),
             TokenSource::External => "external".to_string(),
             TokenSource::Generated => "generated".to_string(),
@@ -28,8 +29,8 @@ impl fmt::Display for TokenSource {
 
 impl PartialEq<PathId> for TokenSource {
     fn eq(&self, other: &PathId) -> bool {
-        if let TokenSource::File(x) = self {
-            x == other
+        if let TokenSource::File { path, .. } = self {
+            path == other
         } else {
             false
         }
@@ -105,7 +106,10 @@ impl<'t> TryFrom<&parol_runtime::lexer::Token<'t>> for Token {
         let id = resource_table::new_token_id();
         let text = resource_table::insert_str(x.text());
         let pos = x.location.start;
-        let source = TokenSource::File(resource_table::insert_path(&x.location.file_name));
+        let source = TokenSource::File {
+            path: resource_table::insert_path(&x.location.file_name),
+            text: text_table::get_current_text(),
+        };
         Ok(Token {
             id,
             text,
@@ -867,8 +871,8 @@ fn split_comment_token(token: Token) -> Vec<Token> {
         let text = resource_table::insert_str(text);
 
         if is_doc_comment {
-            if let TokenSource::File(file) = token.source {
-                doc_comment_table::insert(file, line, text);
+            if let TokenSource::File { path, .. } = token.source {
+                doc_comment_table::insert(path, line, text);
             }
         }
 

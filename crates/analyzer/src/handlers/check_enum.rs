@@ -6,23 +6,19 @@ use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
-pub struct CheckEnum<'a> {
+#[derive(Default)]
+pub struct CheckEnum {
     pub errors: Vec<AnalyzerError>,
-    text: &'a str,
     point: HandlerPoint,
 }
 
-impl<'a> CheckEnum<'a> {
-    pub fn new(text: &'a str) -> Self {
-        Self {
-            errors: Vec::new(),
-            text,
-            point: HandlerPoint::Before,
-        }
+impl CheckEnum {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
-impl Handler for CheckEnum<'_> {
+impl Handler for CheckEnum {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
@@ -32,7 +28,7 @@ fn calc_width(value: usize) -> usize {
     (usize::BITS - value.leading_zeros()) as usize
 }
 
-impl VerylGrammarTrait for CheckEnum<'_> {
+impl VerylGrammarTrait for CheckEnum {
     fn enum_declaration(&mut self, arg: &EnumDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let enum_symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
@@ -49,7 +45,6 @@ impl VerylGrammarTrait for CheckEnum<'_> {
                                     &name,
                                     variants,
                                     width[0],
-                                    self.text,
                                     &arg.identifier.as_ref().into(),
                                 ));
                             }
@@ -63,7 +58,6 @@ impl VerylGrammarTrait for CheckEnum<'_> {
                                             &member_symbol.token.to_string(),
                                             member_value as isize,
                                             width[0],
-                                            self.text,
                                             &member_symbol.token.into(),
                                         ));
                                     }

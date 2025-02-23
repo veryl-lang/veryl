@@ -17,14 +17,8 @@ pub fn new_definition_id() -> DefinitionId {
 
 #[derive(Clone, Debug)]
 pub enum Definition {
-    Module {
-        text: String,
-        decl: ModuleDeclaration,
-    },
-    Interface {
-        text: String,
-        decl: InterfaceDeclaration,
-    },
+    Module(ModuleDeclaration),
+    Interface(InterfaceDeclaration),
 }
 
 #[derive(Clone, Default, Debug)]

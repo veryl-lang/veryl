@@ -13,9 +13,9 @@ use veryl_parser::veryl_token::TokenRange;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint, VerylWalker};
 use veryl_parser::ParolError;
 
-pub struct CheckExpression<'a> {
+#[derive(Default)]
+pub struct CheckExpression {
     pub errors: Vec<AnalyzerError>,
-    text: &'a str,
     point: HandlerPoint,
     evaluator: Evaluator,
     in_inst_declaration: bool,
@@ -27,44 +27,30 @@ pub struct CheckExpression<'a> {
     inst_context: Vec<TokenRange>,
 }
 
-impl<'a> CheckExpression<'a> {
-    pub fn new(text: &'a str, inst_context: Vec<TokenRange>) -> Self {
+impl CheckExpression {
+    pub fn new(inst_context: Vec<TokenRange>) -> Self {
         Self {
-            errors: Vec::new(),
-            text,
-            point: HandlerPoint::default(),
-            evaluator: Evaluator::default(),
-            in_inst_declaration: false,
-            port_direction: None,
-            in_input_port_default_value: false,
-            disable: false,
-            disable_block_beg: HashSet::new(),
-            disable_block_end: HashSet::new(),
             inst_context,
+            ..Default::default()
         }
     }
 
     fn evaluated_error(&mut self, errors: &[EvaluatedError]) {
         for e in errors {
-            self.errors.push(AnalyzerError::evaluated_error(
-                self.text,
-                e,
-                &self.inst_context,
-            ));
+            self.errors
+                .push(AnalyzerError::evaluated_error(e, &self.inst_context));
         }
     }
 
     fn inst_history_error(&mut self, error: InstanceHistoryError, token: &TokenRange) {
         let error = match error {
             InstanceHistoryError::ExceedDepthLimit => {
-                AnalyzerError::exceed_limit("hierarchy depth limit", self.text, token)
+                AnalyzerError::exceed_limit("hierarchy depth limit", token)
             }
             InstanceHistoryError::ExceedTotalLimit => {
-                AnalyzerError::exceed_limit("total instance limit", self.text, token)
+                AnalyzerError::exceed_limit("total instance limit", token)
             }
-            InstanceHistoryError::InfiniteRecursion => {
-                AnalyzerError::infinite_recursion(self.text, token)
-            }
+            InstanceHistoryError::InfiniteRecursion => AnalyzerError::infinite_recursion(token),
         };
         self.errors.push(error);
     }
@@ -93,7 +79,6 @@ impl<'a> CheckExpression<'a> {
                     self.errors.push(AnalyzerError::mismatch_assignment(
                         &format!("{}-D array", src_array_dim),
                         &format!("{}-D array", dst_array_dim),
-                        self.text,
                         token,
                         &self.inst_context,
                     ));
@@ -103,7 +88,6 @@ impl<'a> CheckExpression<'a> {
                     self.errors.push(AnalyzerError::mismatch_assignment(
                         "4-state value",
                         "2-state variable",
-                        self.text,
                         token,
                         &self.inst_context,
                     ));
@@ -149,7 +133,7 @@ impl<'a> CheckExpression<'a> {
     }
 }
 
-impl Handler for CheckExpression<'_> {
+impl Handler for CheckExpression {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
@@ -175,7 +159,7 @@ fn is_defined_in_package(full_path: &[SymbolId]) -> bool {
     false
 }
 
-impl VerylGrammarTrait for CheckExpression<'_> {
+impl VerylGrammarTrait for CheckExpression {
     fn l_brace(&mut self, arg: &LBrace) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if self.disable_block_beg.remove(&arg.l_brace_token.token.id) {
@@ -219,7 +203,6 @@ impl VerylGrammarTrait for CheckExpression<'_> {
                             self.errors.push(AnalyzerError::invalid_factor(
                                 &identifier,
                                 &kind_name,
-                                self.text,
                                 &token,
                                 &self.inst_context,
                             ));
@@ -369,7 +352,6 @@ impl VerylGrammarTrait for CheckExpression<'_> {
                     if !exp.is_known_static() {
                         self.errors
                             .push(AnalyzerError::invalid_case_condition_non_elaborative(
-                                self.text,
                                 &x.range.expression.as_ref().into(),
                             ));
                     }
@@ -383,7 +365,6 @@ impl VerylGrammarTrait for CheckExpression<'_> {
                         if !exp.is_known_static() {
                             self.errors.push(
                                 AnalyzerError::invalid_case_condition_non_elaborative(
-                                    self.text,
                                     &x.expression.as_ref().into(),
                                 ),
                             );
@@ -510,20 +491,20 @@ impl VerylGrammarTrait for CheckExpression<'_> {
                                     // Check expression with overridden parameters
                                     let def = definition_table::get(definition).unwrap();
                                     match def {
-                                        Definition::Module { text, decl } => {
+                                        Definition::Module(x) => {
                                             let mut inst_context = self.inst_context.clone();
                                             inst_context.push(arg.identifier.as_ref().into());
                                             let mut analyzer =
-                                                AnalyzerPass2Expression::new(&text, inst_context);
-                                            analyzer.module_declaration(&decl);
+                                                AnalyzerPass2Expression::new(inst_context);
+                                            analyzer.module_declaration(&x);
                                             self.errors.append(&mut analyzer.get_errors());
                                         }
-                                        Definition::Interface { text, decl } => {
+                                        Definition::Interface(x) => {
                                             let mut inst_context = self.inst_context.clone();
                                             inst_context.push(arg.identifier.as_ref().into());
                                             let mut analyzer =
-                                                AnalyzerPass2Expression::new(&text, inst_context);
-                                            analyzer.interface_declaration(&decl);
+                                                AnalyzerPass2Expression::new(inst_context);
+                                            analyzer.interface_declaration(&x);
                                             self.errors.append(&mut analyzer.get_errors());
                                         }
                                     }

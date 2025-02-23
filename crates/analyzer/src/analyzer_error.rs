@@ -1,7 +1,8 @@
 use crate::evaluator::EvaluatedError;
 use miette::{self, Diagnostic, NamedSource, SourceSpan};
 use thiserror::Error;
-use veryl_parser::veryl_token::TokenRange;
+use veryl_parser::text_table;
+use veryl_parser::veryl_token::{TokenRange, TokenSource};
 
 #[derive(Error, Diagnostic, Debug)]
 pub enum AnalyzerError {
@@ -1124,95 +1125,88 @@ pub enum AnalyzerError {
 }
 
 impl AnalyzerError {
-    fn named_source(source: &str, token: &TokenRange) -> NamedSource<String> {
-        NamedSource::new(token.beg.source.to_string(), source.to_string())
+    fn named_source(token: &TokenRange) -> NamedSource<String> {
+        let source = if let TokenSource::File { text, .. } = token.beg.source {
+            if let Some(text) = text_table::get(text) {
+                text.text
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+        NamedSource::new(token.beg.source.to_string(), source)
     }
 
-    pub fn anonymous_identifier_usage(source: &str, token: &TokenRange) -> Self {
+    pub fn anonymous_identifier_usage(token: &TokenRange) -> Self {
         AnalyzerError::AnonymousIdentifierUsage {
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn cyclic_type_dependency(
-        source: &str,
-        start: &str,
-        end: &str,
-        token: &TokenRange,
-    ) -> Self {
+    pub fn cyclic_type_dependency(start: &str, end: &str, token: &TokenRange) -> Self {
         AnalyzerError::CyclicTypeDependency {
             start: start.into(),
             end: end.into(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn duplicated_identifier(identifier: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn duplicated_identifier(identifier: &str, token: &TokenRange) -> Self {
         AnalyzerError::DuplicatedIdentifier {
             identifier: identifier.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
     pub fn multiple_assignment(
         identifier: &str,
-        source: &str,
         token: &TokenRange,
         assign_pos0: &TokenRange,
         assign_pos1: &TokenRange,
     ) -> Self {
         AnalyzerError::MultipleAssignment {
             identifier: identifier.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
             assign_pos0: assign_pos0.into(),
             assign_pos1: assign_pos1.into(),
         }
     }
 
-    pub fn invalid_allow(identifier: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn invalid_allow(identifier: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidAllow {
             identifier: identifier.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn invalid_assignment(
-        identifier: &str,
-        source: &str,
-        kind: &str,
-        token: &TokenRange,
-    ) -> Self {
+    pub fn invalid_assignment(identifier: &str, kind: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidAssignment {
             identifier: identifier.into(),
             kind: kind.into(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn invalid_assignment_to_const(
-        identifier: &str,
-        source: &str,
-        kind: &str,
-        token: &TokenRange,
-    ) -> Self {
+    pub fn invalid_assignment_to_const(identifier: &str, kind: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidAssignmentToConst {
             identifier: identifier.into(),
             kind: kind.into(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn invalid_direction(kind: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn invalid_direction(kind: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidDirection {
             kind: kind.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
@@ -1220,7 +1214,6 @@ impl AnalyzerError {
     pub fn invalid_factor(
         identifier: &str,
         kind: &str,
-        source: &str,
         token: &TokenRange,
         inst_context: &[TokenRange],
     ) -> Self {
@@ -1228,136 +1221,118 @@ impl AnalyzerError {
         AnalyzerError::InvalidFactor {
             identifier: identifier.to_string(),
             kind: kind.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
             inst_context,
         }
     }
 
-    pub fn invalid_identifier(
-        identifier: &str,
-        rule: &str,
-        source: &str,
-        token: &TokenRange,
-    ) -> Self {
+    pub fn invalid_identifier(identifier: &str, rule: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidIdentifier {
             identifier: identifier.to_string(),
             rule: rule.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn invalid_import(source: &str, token: &TokenRange) -> Self {
+    pub fn invalid_import(token: &TokenRange) -> Self {
         AnalyzerError::InvalidImport {
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn invalid_lsb(source: &str, token: &TokenRange) -> Self {
+    pub fn invalid_lsb(token: &TokenRange) -> Self {
         AnalyzerError::InvalidLsb {
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn invalid_msb(source: &str, token: &TokenRange) -> Self {
+    pub fn invalid_msb(token: &TokenRange) -> Self {
         AnalyzerError::InvalidMsb {
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn invalid_number_character(
-        cause: char,
-        kind: &str,
-        source: &str,
-        token: &TokenRange,
-    ) -> Self {
+    pub fn invalid_number_character(cause: char, kind: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidNumberCharacter {
             cause,
             kind: kind.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn invalid_statement(kind: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn invalid_statement(kind: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidStatement {
             kind: kind.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn invalid_clock(identifier: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn invalid_clock(identifier: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidClock {
             identifier: identifier.into(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn invalid_reset(identifier: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn invalid_reset(identifier: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidReset {
             identifier: identifier.into(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn invalid_reset_non_elaborative(source: &str, token: &TokenRange) -> Self {
+    pub fn invalid_reset_non_elaborative(token: &TokenRange) -> Self {
         AnalyzerError::InvalidResetNonElaborative {
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn invalid_case_condition_non_elaborative(source: &str, token: &TokenRange) -> Self {
+    pub fn invalid_case_condition_non_elaborative(token: &TokenRange) -> Self {
         AnalyzerError::InvalidCaseConditionNonElaborative {
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn invalid_cast(from: &str, to: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn invalid_cast(from: &str, to: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidCast {
             from: from.into(),
             to: to.into(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn invalid_test(cause: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn invalid_test(cause: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidTest {
             cause: cause.into(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn invalid_modport_variable_item(
-        identifier: &str,
-        source: &str,
-        token: &TokenRange,
-    ) -> Self {
+    pub fn invalid_modport_variable_item(identifier: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidModportVariableItem {
             identifier: identifier.into(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn invalid_modport_function_item(
-        identifier: &str,
-        source: &str,
-        token: &TokenRange,
-    ) -> Self {
+    pub fn invalid_modport_function_item(identifier: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidModportFunctionItem {
             identifier: identifier.into(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
@@ -1365,37 +1340,30 @@ impl AnalyzerError {
     pub fn invalid_port_default_value(
         identifier: &str,
         direction: &str,
-        source: &str,
         token: &TokenRange,
     ) -> Self {
         AnalyzerError::InvalidPortDefaultValue {
             identifier: identifier.into(),
             direction: direction.into(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn incompat_proto(
-        identifier: &str,
-        proto: &str,
-        cause: &str,
-        source: &str,
-        token: &TokenRange,
-    ) -> Self {
+    pub fn incompat_proto(identifier: &str, proto: &str, cause: &str, token: &TokenRange) -> Self {
         AnalyzerError::IncompatProto {
             identifier: identifier.into(),
             proto: proto.into(),
             cause: cause.into(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn missing_default_argument(identifier: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn missing_default_argument(identifier: &str, token: &TokenRange) -> Self {
         AnalyzerError::MissingDefaultArgument {
             identifier: identifier.into(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
@@ -1404,14 +1372,13 @@ impl AnalyzerError {
         name: &str,
         arity: usize,
         args: usize,
-        source: &str,
         token: &TokenRange,
     ) -> Self {
         AnalyzerError::MismatchFunctionArity {
             name: name.to_string(),
             arity,
             args,
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
@@ -1420,30 +1387,23 @@ impl AnalyzerError {
         name: &str,
         arity: usize,
         args: usize,
-        source: &str,
         token: &TokenRange,
     ) -> Self {
         AnalyzerError::MismatchGenericsArity {
             name: name.to_string(),
             arity,
             args,
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn mismatch_type(
-        name: &str,
-        expected: &str,
-        actual: &str,
-        source: &str,
-        token: &TokenRange,
-    ) -> Self {
+    pub fn mismatch_type(name: &str, expected: &str, actual: &str, token: &TokenRange) -> Self {
         AnalyzerError::MismatchType {
             name: name.to_string(),
             expected: expected.to_string(),
             actual: actual.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
@@ -1451,14 +1411,13 @@ impl AnalyzerError {
     pub fn mismatch_clock_domain(
         clock_domain: &str,
         other_domain: &str,
-        source: &str,
         token: &TokenRange,
         other_token: &TokenRange,
     ) -> Self {
         AnalyzerError::MismatchClockDomain {
             clock_domain: clock_domain.to_string(),
             other_domain: other_domain.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
             other_location: other_token.into(),
         }
@@ -1467,7 +1426,6 @@ impl AnalyzerError {
     pub fn mismatch_assignment(
         src: &str,
         dst: &str,
-        source: &str,
         token: &TokenRange,
         inst_context: &[TokenRange],
     ) -> Self {
@@ -1475,111 +1433,101 @@ impl AnalyzerError {
         AnalyzerError::MismatchAssignment {
             src: src.to_string(),
             dst: dst.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
             inst_context,
         }
     }
 
-    pub fn missing_clock_signal(source: &str, token: &TokenRange) -> Self {
+    pub fn missing_clock_signal(token: &TokenRange) -> Self {
         AnalyzerError::MissingClockSignal {
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn missing_if_reset(source: &str, token: &TokenRange) -> Self {
+    pub fn missing_if_reset(token: &TokenRange) -> Self {
         AnalyzerError::MissingIfReset {
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn missing_reset_signal(source: &str, token: &TokenRange) -> Self {
+    pub fn missing_reset_signal(token: &TokenRange) -> Self {
         AnalyzerError::MissingResetSignal {
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn missing_reset_statement(
-        name: &str,
-        source: &str,
-        token: &TokenRange,
-        reset: &TokenRange,
-    ) -> Self {
+    pub fn missing_reset_statement(name: &str, token: &TokenRange, reset: &TokenRange) -> Self {
         AnalyzerError::MissingResetStatement {
             name: name.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
             reset: reset.into(),
         }
     }
 
-    pub fn missing_tri(source: &str, token: &TokenRange) -> Self {
+    pub fn missing_tri(token: &TokenRange) -> Self {
         AnalyzerError::MissingTri {
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn missing_clock_domain(source: &str, token: &TokenRange) -> Self {
+    pub fn missing_clock_domain(token: &TokenRange) -> Self {
         AnalyzerError::MissingClockDomain {
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn mismatch_attribute_args(
-        name: &str,
-        expected: &str,
-        source: &str,
-        token: &TokenRange,
-    ) -> Self {
+    pub fn mismatch_attribute_args(name: &str, expected: &str, token: &TokenRange) -> Self {
         AnalyzerError::MismatchAttributeArgs {
             name: name.to_string(),
             expected: expected.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn missing_port(name: &str, port: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn missing_port(name: &str, port: &str, token: &TokenRange) -> Self {
         AnalyzerError::MissingPort {
             name: name.to_string(),
             port: port.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn sv_keyword_usage(identifier: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn sv_keyword_usage(identifier: &str, token: &TokenRange) -> Self {
         AnalyzerError::SvKeywordUsage {
             identifier: identifier.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn sv_with_implicit_reset(source: &str, token: &TokenRange) -> Self {
+    pub fn sv_with_implicit_reset(token: &TokenRange) -> Self {
         AnalyzerError::SvWithImplicitReset {
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn invalid_enum_encoding(identifier: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn invalid_enum_encoding(identifier: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidEnumEncoding {
             identifier: identifier.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn invalid_cond_type(identifier: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn invalid_cond_type(identifier: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidCondType {
             identifier: identifier.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
@@ -1588,22 +1536,21 @@ impl AnalyzerError {
         identifier: &str,
         value: isize,
         width: usize,
-        source: &str,
         token: &TokenRange,
     ) -> Self {
         AnalyzerError::TooLargeEnumVariant {
             identifier: identifier.to_string(),
             value,
             width,
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn unevaluatable_enum_variant(identifier: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn unevaluatable_enum_variant(identifier: &str, token: &TokenRange) -> Self {
         AnalyzerError::UnevaluatableEnumVariant {
             identifier: identifier.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
@@ -1611,21 +1558,20 @@ impl AnalyzerError {
     pub fn invalid_enum_variant_value(
         identifier: &str,
         encoding: &str,
-        source: &str,
         token: &TokenRange,
     ) -> Self {
         AnalyzerError::InvalidEnumVariant {
             identifier: identifier.to_string(),
             encoding: encoding.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn too_large_number(width: usize, source: &str, token: &TokenRange) -> Self {
+    pub fn too_large_number(width: usize, token: &TokenRange) -> Self {
         AnalyzerError::TooLargeNumber {
             width,
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
@@ -1634,238 +1580,223 @@ impl AnalyzerError {
         identifier: &str,
         number: usize,
         width: usize,
-        source: &str,
         token: &TokenRange,
     ) -> Self {
         AnalyzerError::TooMuchEnumVariant {
             identifier: identifier.to_string(),
             number,
             width,
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn undefined_identifier(identifier: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn undefined_identifier(identifier: &str, token: &TokenRange) -> Self {
         AnalyzerError::UndefinedIdentifier {
             identifier: identifier.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn referring_package_before_definition(
-        identifier: &str,
-        source: &str,
-        token: &TokenRange,
-    ) -> Self {
+    pub fn referring_package_before_definition(identifier: &str, token: &TokenRange) -> Self {
         AnalyzerError::ReferringPackageBeforeDefinition {
             identifier: identifier.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
     pub fn unresolvable_generic_argument(
         identifier: &str,
-        source: &str,
         token: &TokenRange,
         definition_token: &TokenRange,
     ) -> Self {
         AnalyzerError::UnresolvableGenericArgument {
             identifier: identifier.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
             definition_location: definition_token.into(),
         }
     }
 
-    pub fn unknown_attribute(name: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn unknown_attribute(name: &str, token: &TokenRange) -> Self {
         AnalyzerError::UnknownAttribute {
             name: name.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn unknown_embed_lang(name: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn unknown_embed_lang(name: &str, token: &TokenRange) -> Self {
         AnalyzerError::UnknownEmbedLang {
             name: name.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn unknown_embed_way(name: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn unknown_embed_way(name: &str, token: &TokenRange) -> Self {
         AnalyzerError::UnknownEmbedWay {
             name: name.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn unknown_include_way(name: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn unknown_include_way(name: &str, token: &TokenRange) -> Self {
         AnalyzerError::UnknownIncludeWay {
             name: name.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn unknown_member(name: &str, member: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn unknown_member(name: &str, member: &str, token: &TokenRange) -> Self {
         AnalyzerError::UnknownMember {
             name: name.to_string(),
             member: member.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn unknown_unsafe(name: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn unknown_unsafe(name: &str, token: &TokenRange) -> Self {
         AnalyzerError::UnknownUnsafe {
             name: name.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn private_member(name: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn private_member(name: &str, token: &TokenRange) -> Self {
         AnalyzerError::PrivateMember {
             name: name.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn unknown_msb(source: &str, token: &TokenRange) -> Self {
+    pub fn unknown_msb(token: &TokenRange) -> Self {
         AnalyzerError::UnknownMsb {
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn unknown_port(name: &str, port: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn unknown_port(name: &str, port: &str, token: &TokenRange) -> Self {
         AnalyzerError::UnknownPort {
             name: name.to_string(),
             port: port.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn unknown_param(name: &str, param: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn unknown_param(name: &str, param: &str, token: &TokenRange) -> Self {
         AnalyzerError::UnknownParam {
             name: name.to_string(),
             param: param.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn unused_variable(identifier: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn unused_variable(identifier: &str, token: &TokenRange) -> Self {
         AnalyzerError::UnusedVariable {
             identifier: identifier.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn unused_return(identifier: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn unused_return(identifier: &str, token: &TokenRange) -> Self {
         AnalyzerError::UnusedReturn {
             identifier: identifier.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn unassign_variable(identifier: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn unassign_variable(identifier: &str, token: &TokenRange) -> Self {
         AnalyzerError::UnassignVariable {
             identifier: identifier.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn uncovered_branch(
-        identifier: &str,
-        source: &str,
-        token: &TokenRange,
-        uncovered: &TokenRange,
-    ) -> Self {
+    pub fn uncovered_branch(identifier: &str, token: &TokenRange, uncovered: &TokenRange) -> Self {
         AnalyzerError::UncoveredBranch {
             identifier: identifier.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
             uncovered: uncovered.into(),
         }
     }
 
-    pub fn reserved_identifier(identifier: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn reserved_identifier(identifier: &str, token: &TokenRange) -> Self {
         AnalyzerError::ReservedIdentifier {
             identifier: identifier.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn include_failure(name: &str, cause: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn include_failure(name: &str, cause: &str, token: &TokenRange) -> Self {
         AnalyzerError::IncludeFailure {
             name: name.to_string(),
             cause: cause.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn wrong_seperator(separator: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn wrong_seperator(separator: &str, token: &TokenRange) -> Self {
         let valid_separator = if separator == "." { "::" } else { "." };
         AnalyzerError::WrongSeparator {
             separator: separator.to_string(),
             valid_separator: valid_separator.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn infinite_recursion(source: &str, token: &TokenRange) -> Self {
+    pub fn infinite_recursion(token: &TokenRange) -> Self {
         AnalyzerError::InfiniteRecursion {
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn exceed_limit(kind: &str, source: &str, token: &TokenRange) -> Self {
+    pub fn exceed_limit(kind: &str, token: &TokenRange) -> Self {
         AnalyzerError::ExceedLimit {
             kind: kind.to_string(),
-            input: AnalyzerError::named_source(source, token),
+            input: AnalyzerError::named_source(token),
             error_location: token.into(),
         }
     }
 
-    pub fn evaluated_error(
-        source: &str,
-        error: &EvaluatedError,
-        inst_context: &[TokenRange],
-    ) -> Self {
+    pub fn evaluated_error(error: &EvaluatedError, inst_context: &[TokenRange]) -> Self {
         let inst_context = inst_context.iter().map(|x| x.into()).collect();
         match error {
             EvaluatedError::InvalidFactor { kind, token } => AnalyzerError::InvalidFactor {
                 identifier: token.to_string(),
                 kind: kind.clone(),
-                input: AnalyzerError::named_source(source, &token.into()),
+                input: AnalyzerError::named_source(&token.into()),
                 error_location: token.into(),
                 inst_context,
             },
             EvaluatedError::CallNonFunction { kind, token } => AnalyzerError::CallNonFunction {
                 identifier: token.to_string(),
                 kind: kind.clone(),
-                input: AnalyzerError::named_source(source, &token.into()),
+                input: AnalyzerError::named_source(&token.into()),
                 error_location: token.into(),
                 inst_context,
             },
             EvaluatedError::InvalidSelect { kind, range } => AnalyzerError::InvalidSelect {
                 kind: kind.to_string(),
-                input: AnalyzerError::named_source(source, range),
+                input: AnalyzerError::named_source(range),
                 error_location: range.into(),
                 inst_context,
             },

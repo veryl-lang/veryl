@@ -7,9 +7,8 @@ use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
 #[derive(Default)]
-pub struct CheckClockReset<'a> {
+pub struct CheckClockReset {
     pub errors: Vec<AnalyzerError>,
-    text: &'a str,
     point: HandlerPoint,
     in_always_ff: bool,
     in_if_reset: bool,
@@ -21,22 +20,19 @@ pub struct CheckClockReset<'a> {
     evaluator: Evaluator,
 }
 
-impl<'a> CheckClockReset<'a> {
-    pub fn new(text: &'a str) -> Self {
-        Self {
-            text,
-            ..Default::default()
-        }
+impl CheckClockReset {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
-impl Handler for CheckClockReset<'_> {
+impl Handler for CheckClockReset {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl VerylGrammarTrait for CheckClockReset<'_> {
+impl VerylGrammarTrait for CheckClockReset {
     fn module_declaration(&mut self, arg: &ModuleDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
@@ -91,7 +87,7 @@ impl VerylGrammarTrait for CheckClockReset<'_> {
                 let clock_signal_exists = arg.always_ff_declaration_opt.is_some();
                 if !(self.default_clock_exists || clock_signal_exists) {
                     self.errors
-                        .push(AnalyzerError::missing_clock_signal(self.text, &arg.into()))
+                        .push(AnalyzerError::missing_clock_signal(&arg.into()))
                 }
 
                 // Check first if_reset when reset signel exists
@@ -115,7 +111,7 @@ impl VerylGrammarTrait for CheckClockReset<'_> {
                 };
                 if if_reset_required {
                     self.errors
-                        .push(AnalyzerError::missing_if_reset(self.text, &arg.into()));
+                        .push(AnalyzerError::missing_if_reset(&arg.into()));
                 }
 
                 self.in_always_ff = true;
@@ -130,7 +126,7 @@ impl VerylGrammarTrait for CheckClockReset<'_> {
                     };
                     if !(self.default_reset_exists || reset_signal_exists) {
                         self.errors
-                            .push(AnalyzerError::missing_reset_signal(self.text, &arg.into()));
+                            .push(AnalyzerError::missing_reset_signal(&arg.into()));
                     }
                 }
 
@@ -179,7 +175,6 @@ impl VerylGrammarTrait for CheckClockReset<'_> {
                             .token;
                         self.errors.push(AnalyzerError::invalid_clock(
                             &token.to_string(),
-                            self.text,
                             &arg.hierarchical_identifier.as_ref().into(),
                         ));
                     }
@@ -231,7 +226,6 @@ impl VerylGrammarTrait for CheckClockReset<'_> {
                             .token;
                         self.errors.push(AnalyzerError::invalid_reset(
                             &token.to_string(),
-                            self.text,
                             &arg.hierarchical_identifier.as_ref().into(),
                         ));
                     }
@@ -264,7 +258,6 @@ impl VerylGrammarTrait for CheckClockReset<'_> {
                     _ => {
                         self.errors
                             .push(AnalyzerError::invalid_reset_non_elaborative(
-                                self.text,
                                 &arg.expression.as_ref().into(),
                             ));
                     }
@@ -286,7 +279,6 @@ impl VerylGrammarTrait for CheckClockReset<'_> {
                             self.errors.push(AnalyzerError::invalid_cast(
                                 "non-clock type",
                                 "clock type",
-                                self.text,
                                 &arg.into(),
                             ));
                         }
@@ -300,7 +292,6 @@ impl VerylGrammarTrait for CheckClockReset<'_> {
                             self.errors.push(AnalyzerError::invalid_cast(
                                 "non-reset type",
                                 "reset type",
-                                self.text,
                                 &arg.into(),
                             ));
                         }

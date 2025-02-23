@@ -643,7 +643,7 @@ impl Server {
                     namespace_table::drop(src);
                 }
                 let analyzer = Analyzer::new(metadata);
-                let _ = analyzer.analyze_pass1(&path.prj, &text, &src, &x.veryl);
+                let _ = analyzer.analyze_pass1(&path.prj, &src, &x.veryl);
 
                 block_on(self.client.log_message(
                     MessageType::INFO,
@@ -685,10 +685,10 @@ impl Server {
                             namespace_table::drop(path);
                         }
                         let analyzer = Analyzer::new(&metadata);
-                        let mut errors = analyzer.analyze_pass1(prj, text, &path, &x.veryl);
+                        let mut errors = analyzer.analyze_pass1(prj, &path, &x.veryl);
                         errors.append(&mut Analyzer::analyze_post_pass1());
-                        errors.append(&mut analyzer.analyze_pass2(prj, text, &path, &x.veryl));
-                        errors.append(&mut analyzer.analyze_pass3(prj, text, &path, &x.veryl));
+                        errors.append(&mut analyzer.analyze_pass2(prj, &path, &x.veryl));
+                        errors.append(&mut analyzer.analyze_pass3(prj, &path, &x.veryl));
                         let ret: Vec<_> = errors
                             .drain(0..)
                             .filter(|x| {

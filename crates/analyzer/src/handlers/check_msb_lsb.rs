@@ -9,9 +9,9 @@ use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
-pub struct CheckMsbLsb<'a> {
+#[derive(Default)]
+pub struct CheckMsbLsb {
     pub errors: Vec<AnalyzerError>,
-    text: &'a str,
     point: HandlerPoint,
     identifier_path: Vec<SymbolPathNamespace>,
     select_dimension: Vec<usize>,
@@ -19,21 +19,13 @@ pub struct CheckMsbLsb<'a> {
     in_select: bool,
 }
 
-impl<'a> CheckMsbLsb<'a> {
-    pub fn new(text: &'a str) -> Self {
-        Self {
-            errors: Vec::new(),
-            text,
-            point: HandlerPoint::Before,
-            identifier_path: Vec::new(),
-            select_dimension: Vec::new(),
-            in_expression_identifier: false,
-            in_select: false,
-        }
+impl CheckMsbLsb {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
-impl Handler for CheckMsbLsb<'_> {
+impl Handler for CheckMsbLsb {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
@@ -53,14 +45,12 @@ fn trace_type(r#type: &SymType) -> Vec<(SymType, Option<SymbolKind>)> {
     ret
 }
 
-impl VerylGrammarTrait for CheckMsbLsb<'_> {
+impl VerylGrammarTrait for CheckMsbLsb {
     fn lsb(&mut self, arg: &Lsb) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if !(self.in_expression_identifier && self.in_select) {
-                self.errors.push(AnalyzerError::invalid_lsb(
-                    self.text,
-                    &arg.lsb_token.token.into(),
-                ));
+                self.errors
+                    .push(AnalyzerError::invalid_lsb(&arg.lsb_token.token.into()));
             }
         }
         Ok(())
@@ -140,16 +130,12 @@ impl VerylGrammarTrait for CheckMsbLsb<'_> {
                     false
                 };
                 if !resolved {
-                    self.errors.push(AnalyzerError::unknown_msb(
-                        self.text,
-                        &arg.msb_token.token.into(),
-                    ));
+                    self.errors
+                        .push(AnalyzerError::unknown_msb(&arg.msb_token.token.into()));
                 }
             } else {
-                self.errors.push(AnalyzerError::invalid_msb(
-                    self.text,
-                    &arg.msb_token.token.into(),
-                ));
+                self.errors
+                    .push(AnalyzerError::invalid_msb(&arg.msb_token.token.into()));
             }
         }
         Ok(())

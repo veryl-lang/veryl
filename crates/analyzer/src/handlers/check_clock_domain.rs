@@ -11,9 +11,8 @@ use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
 #[derive(Default)]
-pub struct CheckClockDomain<'a> {
+pub struct CheckClockDomain {
     pub errors: Vec<AnalyzerError>,
-    text: &'a str,
     point: HandlerPoint,
     expr_clock_domains: Vec<(ClockDomain, TokenRange)>,
     inst_clock_domains: HashMap<StrId, (ClockDomain, TokenRange)>,
@@ -21,12 +20,9 @@ pub struct CheckClockDomain<'a> {
     default_clock: Option<SymbolId>,
 }
 
-impl<'a> CheckClockDomain<'a> {
-    pub fn new(text: &'a str) -> Self {
-        Self {
-            text,
-            ..Default::default()
-        }
+impl CheckClockDomain {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     fn push_expr_clock_domain(&mut self, kind: &SymbolKind, range: TokenRange) {
@@ -49,7 +45,6 @@ impl<'a> CheckClockDomain<'a> {
                     self.errors.push(AnalyzerError::mismatch_clock_domain(
                         &curr.0.to_string(),
                         &prev.0.to_string(),
-                        self.text,
                         &curr.1,
                         &prev.1,
                     ));
@@ -62,13 +57,13 @@ impl<'a> CheckClockDomain<'a> {
     }
 }
 
-impl Handler for CheckClockDomain<'_> {
+impl Handler for CheckClockDomain {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl VerylGrammarTrait for CheckClockDomain<'_> {
+impl VerylGrammarTrait for CheckClockDomain {
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if let Ok(symbol) = symbol_table::resolve(arg) {
@@ -224,7 +219,6 @@ impl VerylGrammarTrait for CheckClockDomain<'_> {
                                             self.errors.push(AnalyzerError::mismatch_clock_domain(
                                                 &connected.0.to_string(),
                                                 &assigned.0.to_string(),
-                                                self.text,
                                                 &connected.1,
                                                 &assigned.1,
                                             ));
@@ -245,7 +239,6 @@ impl VerylGrammarTrait for CheckClockDomain<'_> {
                                         self.errors.push(AnalyzerError::mismatch_clock_domain(
                                             &curr.0.to_string(),
                                             &prev.0.to_string(),
-                                            self.text,
                                             &curr.1,
                                             &prev.1,
                                         ));
