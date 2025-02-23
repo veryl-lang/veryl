@@ -7,6 +7,7 @@ pub mod evaluator;
 pub mod handlers;
 pub mod instance_history;
 pub mod msb_table;
+pub mod multi_sources;
 pub mod namespace;
 pub mod namespace_table;
 pub mod range_table;
