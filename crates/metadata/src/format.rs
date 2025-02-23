@@ -11,9 +11,7 @@ const DEFAULT_INDENT_WIDTH: usize = 4;
 
 impl Default for Format {
     fn default() -> Self {
-        Self {
-            indent_width: default_indent_width(),
-        }
+        toml::from_str("").unwrap()
     }
 }
 
