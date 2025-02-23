@@ -1,8 +1,9 @@
 use crate::analyzer::resource_table::PathId;
 use crate::analyzer_error::AnalyzerError;
 use crate::attribute_table;
-use crate::handlers::check_expression::{CheckExpression, InstanceHistory};
+use crate::handlers::check_expression::CheckExpression;
 use crate::handlers::*;
+use crate::instance_history;
 use crate::msb_table;
 use crate::namespace::Namespace;
 use crate::namespace_table;
@@ -48,14 +49,9 @@ pub struct AnalyzerPass2<'a> {
 }
 
 impl<'a> AnalyzerPass2<'a> {
-    pub fn new(
-        text: &'a str,
-        build_opt: &'a Build,
-        lint_opt: &'a Lint,
-        inst_history: &'a mut InstanceHistory,
-    ) -> Self {
+    pub fn new(text: &'a str, build_opt: &'a Build, lint_opt: &'a Lint) -> Self {
         AnalyzerPass2 {
-            handlers: Pass2Handlers::new(text, build_opt, lint_opt, inst_history),
+            handlers: Pass2Handlers::new(text, build_opt, lint_opt),
         }
     }
 }
@@ -71,13 +67,9 @@ pub struct AnalyzerPass2Expression<'a> {
 }
 
 impl<'a> AnalyzerPass2Expression<'a> {
-    pub fn new(
-        text: &'a str,
-        inst_context: Vec<TokenRange>,
-        inst_history: &'a mut InstanceHistory,
-    ) -> Self {
+    pub fn new(text: &'a str, inst_context: Vec<TokenRange>) -> Self {
         AnalyzerPass2Expression {
-            check_expression: CheckExpression::new(text, inst_context, inst_history),
+            check_expression: CheckExpression::new(text, inst_context),
         }
     }
 
@@ -333,11 +325,10 @@ impl Analyzer {
         let mut ret = Vec::new();
 
         namespace_table::set_default(&[project_name.into()]);
-        let mut inst_history = InstanceHistory::default();
-        inst_history.depth_limit = self.build_opt.instance_depth_limit;
-        inst_history.total_limit = self.build_opt.instance_total_limit;
-        let mut pass2 =
-            AnalyzerPass2::new(text, &self.build_opt, &self.lint_opt, &mut inst_history);
+        instance_history::clear();
+        instance_history::set_depth_limit(self.build_opt.instance_depth_limit);
+        instance_history::set_total_limit(self.build_opt.instance_total_limit);
+        let mut pass2 = AnalyzerPass2::new(text, &self.build_opt, &self.lint_opt);
         pass2.veryl(input);
         ret.append(&mut pass2.handlers.get_errors());
 
