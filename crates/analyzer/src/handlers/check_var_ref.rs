@@ -20,9 +20,9 @@ struct FunctionCallContext {
     pub port_directions: Vec<Direction>,
 }
 
-pub struct CheckVarRef<'a> {
+#[derive(Default)]
+pub struct CheckVarRef {
     pub errors: Vec<AnalyzerError>,
-    text: &'a str,
     point: HandlerPoint,
     affiliation: Vec<VarRefAffiliation>,
     assign_position: AssignPosition,
@@ -32,19 +32,9 @@ pub struct CheckVarRef<'a> {
     branch_index: usize,
 }
 
-impl<'a> CheckVarRef<'a> {
-    pub fn new(text: &'a str) -> Self {
-        Self {
-            errors: Vec::new(),
-            text,
-            point: HandlerPoint::Before,
-            affiliation: Vec::new(),
-            assign_position: AssignPosition::default(),
-            in_expression: Vec::new(),
-            in_if_expression: Vec::new(),
-            function_call: Vec::new(),
-            branch_index: 0,
-        }
+impl CheckVarRef {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     fn add_assign(&mut self, path: &VarRefPath) {
@@ -107,7 +97,7 @@ impl<'a> CheckVarRef<'a> {
     }
 }
 
-impl Handler for CheckVarRef<'_> {
+impl Handler for CheckVarRef {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
@@ -239,7 +229,7 @@ fn map_assignable_factor(arg: &Expression) -> Option<VarRefPath> {
     None
 }
 
-impl VerylGrammarTrait for CheckVarRef<'_> {
+impl VerylGrammarTrait for CheckVarRef {
     fn r#else(&mut self, arg: &Else) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if self.in_if_expression.is_empty() {
@@ -407,7 +397,6 @@ impl VerylGrammarTrait for CheckVarRef<'_> {
                                 let token = arg.expression_identifier.identifier().token;
                                 self.errors.push(AnalyzerError::invalid_assignment(
                                     &token.to_string(),
-                                    self.text,
                                     &symbol.kind.to_kind_name(),
                                     &arg.expression_identifier.as_ref().into(),
                                 ));
@@ -419,7 +408,6 @@ impl VerylGrammarTrait for CheckVarRef<'_> {
                                     let token = arg.expression_identifier.identifier().token;
                                     self.errors.push(AnalyzerError::invalid_assignment_to_const(
                                         &token.to_string(),
-                                        self.text,
                                         &symbol.kind.to_kind_name(),
                                         &arg.expression_identifier.as_ref().into(),
                                     ));
@@ -635,7 +623,6 @@ impl VerylGrammarTrait for CheckVarRef<'_> {
                     let symbol = symbol_table::get(*full_path.last().unwrap()).unwrap();
                     self.errors.push(AnalyzerError::invalid_assignment(
                         &token.to_string(),
-                        self.text,
                         &symbol.kind.to_kind_name(),
                         &arg.hierarchical_identifier.as_ref().into(),
                     ));
@@ -738,7 +725,6 @@ impl VerylGrammarTrait for CheckVarRef<'_> {
                                         &token.text.to_string(),
                                         "clock type",
                                         "non-clock type",
-                                        self.text,
                                         &token.into(),
                                     ));
                                 }
@@ -748,7 +734,6 @@ impl VerylGrammarTrait for CheckVarRef<'_> {
                                         &token.text.to_string(),
                                         "reset type",
                                         "non-reset type",
-                                        self.text,
                                         &token.into(),
                                     ));
                                 }
@@ -761,10 +746,8 @@ impl VerylGrammarTrait for CheckVarRef<'_> {
                                 };
 
                                 if sv_instance && is_implicit_reset {
-                                    self.errors.push(AnalyzerError::sv_with_implicit_reset(
-                                        self.text,
-                                        &token.into(),
-                                    ));
+                                    self.errors
+                                        .push(AnalyzerError::sv_with_implicit_reset(&token.into()));
                                 }
                             }
                         }

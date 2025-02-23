@@ -3740,7 +3740,8 @@ impl VerylWalker for Emitter {
             let path = arg.string_literal.string_literal_token.to_string();
             let path = path.strip_prefix('"').unwrap();
             let path = path.strip_suffix('"').unwrap();
-            if let TokenSource::File(x) = arg.identifier.identifier_token.token.source {
+            if let TokenSource::File { path: x, .. } = arg.identifier.identifier_token.token.source
+            {
                 let base = resource_table::get_path_value(x).unwrap();
                 let base = base.parent().unwrap();
                 let path = base.join(path);

@@ -13,9 +13,8 @@ use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
 #[derive(Default)]
-pub struct CreateTypeDag<'a> {
+pub struct CreateTypeDag {
     pub errors: Vec<AnalyzerError>,
-    text: &'a str,
     point: HandlerPoint,
     inst_ports: Vec<Port>,
     inst_sv_module: bool,
@@ -29,12 +28,9 @@ pub struct CreateTypeDag<'a> {
     dag_file_imports: Vec<u32>,
 }
 
-impl<'a> CreateTypeDag<'a> {
-    pub fn new(text: &'a str) -> Self {
-        Self {
-            text,
-            ..Default::default()
-        }
+impl CreateTypeDag {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     fn generic_symbol_path(&mut self, path: &GenericSymbolPath, namespace: &Namespace) {
@@ -64,10 +60,8 @@ impl<'a> CreateTypeDag<'a> {
                 Err(err) => {
                     if let ResolveErrorCause::NotFound(not_found) = err.cause {
                         if is_anonymous_text(not_found) {
-                            self.errors.push(AnalyzerError::anonymous_identifier_usage(
-                                self.text,
-                                &path.range,
-                            ));
+                            self.errors
+                                .push(AnalyzerError::anonymous_identifier_usage(&path.range));
                         }
                     }
                 }
@@ -205,7 +199,6 @@ impl<'a> CreateTypeDag<'a> {
             None => "<unknown StrId>".into(),
         };
         self.errors.push(AnalyzerError::cyclic_type_dependency(
-            self.text,
             &start,
             &end,
             &e.token.into(),
@@ -213,13 +206,13 @@ impl<'a> CreateTypeDag<'a> {
     }
 }
 
-impl Handler for CreateTypeDag<'_> {
+impl Handler for CreateTypeDag {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl VerylGrammarTrait for CreateTypeDag<'_> {
+impl VerylGrammarTrait for CreateTypeDag {
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if !self.is_anonymous_identifier {
@@ -394,7 +387,6 @@ impl VerylGrammarTrait for CreateTypeDag<'_> {
                     SymbolKind::SystemVerilog => (),
                     _ if is_wildcard => {
                         self.errors.push(AnalyzerError::invalid_import(
-                            self.text,
                             &arg.scoped_identifier.as_ref().into(),
                         ));
                     }

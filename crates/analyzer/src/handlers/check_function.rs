@@ -6,29 +6,25 @@ use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
-pub struct CheckFunction<'a> {
+#[derive(Default)]
+pub struct CheckFunction {
     pub errors: Vec<AnalyzerError>,
-    text: &'a str,
     point: HandlerPoint,
 }
 
-impl<'a> CheckFunction<'a> {
-    pub fn new(text: &'a str) -> Self {
-        Self {
-            errors: Vec::new(),
-            text,
-            point: HandlerPoint::Before,
-        }
+impl CheckFunction {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
-impl Handler for CheckFunction<'_> {
+impl Handler for CheckFunction {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl VerylGrammarTrait for CheckFunction<'_> {
+impl VerylGrammarTrait for CheckFunction {
     fn identifier_statement(&mut self, arg: &IdentifierStatement) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if let IdentifierStatementGroup::FunctionCall(_) = &*arg.identifier_statement_group {
@@ -62,7 +58,6 @@ impl VerylGrammarTrait for CheckFunction<'_> {
                             );
                             self.errors.push(AnalyzerError::unused_return(
                                 &name,
-                                self.text,
                                 &arg.expression_identifier.as_ref().into(),
                             ));
                         }
@@ -126,7 +121,6 @@ impl VerylGrammarTrait for CheckFunction<'_> {
                             &name,
                             arity,
                             args,
-                            self.text,
                             &arg.expression_identifier.as_ref().into(),
                         ));
                     }

@@ -26,50 +26,50 @@ use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::{Token, TokenRange, TokenSource};
 use veryl_parser::veryl_walker::{Handler, VerylWalker};
 
-pub struct AnalyzerPass1<'a> {
-    handlers: Pass1Handlers<'a>,
+pub struct AnalyzerPass1 {
+    handlers: Pass1Handlers,
 }
 
-impl<'a> AnalyzerPass1<'a> {
-    pub fn new(text: &'a str, build_opt: &'a Build, lint_opt: &'a Lint) -> Self {
+impl AnalyzerPass1 {
+    pub fn new(build_opt: &Build, lint_opt: &Lint) -> Self {
         AnalyzerPass1 {
-            handlers: Pass1Handlers::new(text, build_opt, lint_opt),
+            handlers: Pass1Handlers::new(build_opt, lint_opt),
         }
     }
 }
 
-impl VerylWalker for AnalyzerPass1<'_> {
+impl VerylWalker for AnalyzerPass1 {
     fn get_handlers(&mut self) -> Option<Vec<&mut dyn Handler>> {
         Some(self.handlers.get_handlers())
     }
 }
 
-pub struct AnalyzerPass2<'a> {
-    handlers: Pass2Handlers<'a>,
+pub struct AnalyzerPass2 {
+    handlers: Pass2Handlers,
 }
 
-impl<'a> AnalyzerPass2<'a> {
-    pub fn new(text: &'a str, build_opt: &'a Build, lint_opt: &'a Lint) -> Self {
+impl AnalyzerPass2 {
+    pub fn new(build_opt: &Build, lint_opt: &Lint) -> Self {
         AnalyzerPass2 {
-            handlers: Pass2Handlers::new(text, build_opt, lint_opt),
+            handlers: Pass2Handlers::new(build_opt, lint_opt),
         }
     }
 }
 
-impl VerylWalker for AnalyzerPass2<'_> {
+impl VerylWalker for AnalyzerPass2 {
     fn get_handlers(&mut self) -> Option<Vec<&mut dyn Handler>> {
         Some(self.handlers.get_handlers())
     }
 }
 
-pub struct AnalyzerPass2Expression<'a> {
-    check_expression: CheckExpression<'a>,
+pub struct AnalyzerPass2Expression {
+    check_expression: CheckExpression,
 }
 
-impl<'a> AnalyzerPass2Expression<'a> {
-    pub fn new(text: &'a str, inst_context: Vec<TokenRange>) -> Self {
+impl AnalyzerPass2Expression {
+    pub fn new(inst_context: Vec<TokenRange>) -> Self {
         AnalyzerPass2Expression {
-            check_expression: CheckExpression::new(text, inst_context),
+            check_expression: CheckExpression::new(inst_context),
         }
     }
 
@@ -78,27 +78,25 @@ impl<'a> AnalyzerPass2Expression<'a> {
     }
 }
 
-impl VerylWalker for AnalyzerPass2Expression<'_> {
+impl VerylWalker for AnalyzerPass2Expression {
     fn get_handlers(&mut self) -> Option<Vec<&mut dyn Handler>> {
         Some(vec![&mut self.check_expression as &mut dyn Handler])
     }
 }
 
-pub struct AnalyzerPass3<'a> {
+pub struct AnalyzerPass3 {
     path: PathId,
-    text: &'a str,
     symbols: Vec<Symbol>,
     var_refs: HashMap<VarRefAffiliation, Vec<VarRef>>,
 }
 
-impl<'a> AnalyzerPass3<'a> {
-    pub fn new(path: &'a Path, text: &'a str) -> Self {
+impl AnalyzerPass3 {
+    pub fn new(path: &Path) -> Self {
         let symbols = symbol_table::get_all();
         let var_refs = symbol_table::get_var_ref_list();
         let path = resource_table::get_path_id(path.to_path_buf()).unwrap();
         AnalyzerPass3 {
             path,
-            text,
             symbols,
             var_refs,
         }
@@ -115,7 +113,6 @@ impl<'a> AnalyzerPass3<'a> {
                         if !name.starts_with('_') {
                             ret.push(AnalyzerError::unused_variable(
                                 &symbol.token.to_string(),
-                                self.text,
                                 &symbol.token.into(),
                             ));
                         }
@@ -161,7 +158,6 @@ impl<'a> AnalyzerPass3<'a> {
                         .collect();
                     ret.push(AnalyzerError::unassign_variable(
                         &path.join("."),
-                        self.text,
                         &symbol.token.into(),
                     ));
                 }
@@ -172,9 +168,7 @@ impl<'a> AnalyzerPass3<'a> {
 
             if positions.len() > 1 {
                 for comb in positions.iter().combinations(2) {
-                    ret.append(&mut check_multiple_assignment(
-                        &symbol, self.text, comb[0], comb[1],
-                    ));
+                    ret.append(&mut check_multiple_assignment(&symbol, comb[0], comb[1]));
                 }
             }
 
@@ -186,9 +180,7 @@ impl<'a> AnalyzerPass3<'a> {
                 }
             };
             if non_state_variable {
-                ret.append(&mut check_assign_position_tree(
-                    &symbol, self.text, positions,
-                ));
+                ret.append(&mut check_assign_position_tree(&symbol, positions));
             }
         }
 
@@ -234,7 +226,6 @@ impl<'a> AnalyzerPass3<'a> {
                     let symbol = symbol_table::get(*full_path.first().unwrap()).unwrap();
                     ret.push(AnalyzerError::unassign_variable(
                         &var_ref.path.to_string(),
-                        self.text,
                         &symbol.token.into(),
                     ));
                 }
@@ -291,14 +282,13 @@ impl Analyzer {
     pub fn analyze_pass1<T: AsRef<Path>>(
         &self,
         project_name: &str,
-        text: &str,
         _path: T,
         input: &Veryl,
     ) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
 
         namespace_table::set_default(&[project_name.into()]);
-        let mut pass1 = AnalyzerPass1::new(text, &self.build_opt, &self.lint_opt);
+        let mut pass1 = AnalyzerPass1::new(&self.build_opt, &self.lint_opt);
         pass1.veryl(input);
         ret.append(&mut pass1.handlers.get_errors());
 
@@ -318,7 +308,6 @@ impl Analyzer {
     pub fn analyze_pass2<T: AsRef<Path>>(
         &self,
         project_name: &str,
-        text: &str,
         _path: T,
         input: &Veryl,
     ) -> Vec<AnalyzerError> {
@@ -328,7 +317,7 @@ impl Analyzer {
         instance_history::clear();
         instance_history::set_depth_limit(self.build_opt.instance_depth_limit);
         instance_history::set_total_limit(self.build_opt.instance_total_limit);
-        let mut pass2 = AnalyzerPass2::new(text, &self.build_opt, &self.lint_opt);
+        let mut pass2 = AnalyzerPass2::new(&self.build_opt, &self.lint_opt);
         pass2.veryl(input);
         ret.append(&mut pass2.handlers.get_errors());
 
@@ -338,14 +327,13 @@ impl Analyzer {
     pub fn analyze_pass3<T: AsRef<Path>>(
         &self,
         project_name: &str,
-        text: &str,
         path: T,
         _input: &Veryl,
     ) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
 
         namespace_table::set_default(&[project_name.into()]);
-        let pass3 = AnalyzerPass3::new(path.as_ref(), text);
+        let pass3 = AnalyzerPass3::new(path.as_ref());
         ret.append(&mut pass3.check_variables());
         ret.append(&mut pass3.check_assignment());
         ret.append(&mut pass3.check_unassigned());
@@ -514,7 +502,6 @@ fn traverse_assignable_symbol(id: SymbolId, path: &VarRefPath) -> Vec<VarRefPath
 
 fn check_multiple_assignment(
     symbol: &Symbol,
-    text: &str,
     x: &(AssignPosition, bool),
     y: &(AssignPosition, bool),
 ) -> Vec<AnalyzerError> {
@@ -554,7 +541,6 @@ fn check_multiple_assignment(
                     if !x_partial | !y_partial {
                         ret.push(AnalyzerError::multiple_assignment(
                             &symbol.token.to_string(),
-                            text,
                             &symbol.token.into(),
                             &x_pos.0.last().unwrap().token().into(),
                             &y_pos.0.last().unwrap().token().into(),
@@ -571,7 +557,6 @@ fn check_multiple_assignment(
 
 fn check_assign_position_tree(
     symbol: &Symbol,
-    text: &str,
     positions: &[(AssignPosition, bool)],
 ) -> Vec<AnalyzerError> {
     let mut ret = Vec::new();
@@ -586,7 +571,6 @@ fn check_assign_position_tree(
     if let Some(token) = tree.check_always_comb_uncovered() {
         ret.push(AnalyzerError::uncovered_branch(
             &symbol.token.to_string(),
-            text,
             &symbol.token.into(),
             &token.into(),
         ));
@@ -595,7 +579,6 @@ fn check_assign_position_tree(
     if let Some(token) = tree.check_always_ff_missing_reset() {
         ret.push(AnalyzerError::missing_reset_statement(
             &symbol.token.to_string(),
-            text,
             &symbol.token.into(),
             &token.into(),
         ));

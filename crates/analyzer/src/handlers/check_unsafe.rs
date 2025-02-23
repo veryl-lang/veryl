@@ -4,29 +4,25 @@ use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
-pub struct CheckUnsafe<'a> {
+#[derive(Default)]
+pub struct CheckUnsafe {
     pub errors: Vec<AnalyzerError>,
-    text: &'a str,
     point: HandlerPoint,
 }
 
-impl<'a> CheckUnsafe<'a> {
-    pub fn new(text: &'a str) -> Self {
-        Self {
-            errors: Vec::new(),
-            text,
-            point: HandlerPoint::Before,
-        }
+impl CheckUnsafe {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
-impl Handler for CheckUnsafe<'_> {
+impl Handler for CheckUnsafe {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl VerylGrammarTrait for CheckUnsafe<'_> {
+impl VerylGrammarTrait for CheckUnsafe {
     fn unsafe_block(&mut self, arg: &UnsafeBlock) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
@@ -43,7 +39,6 @@ impl VerylGrammarTrait for CheckUnsafe<'_> {
                             crate::r#unsafe::UnsafeError::UnknownUnsafe => {
                                 self.errors.push(AnalyzerError::unknown_unsafe(
                                     &arg.identifier.identifier_token.to_string(),
-                                    self.text,
                                     &arg.identifier.as_ref().into(),
                                 ));
                             }

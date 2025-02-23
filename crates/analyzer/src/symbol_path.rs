@@ -399,7 +399,11 @@ impl GenericSymbolPath {
         if let Ok(symbol) = symbol_table::resolve((&self.generic_path(), namespace)) {
             if symbol.imported {
                 let self_namespace = namespace_table::get(self.range.beg.id).unwrap();
-                let TokenSource::File(self_file_path) = self.range.beg.source else {
+                let TokenSource::File {
+                    path: self_file_path,
+                    ..
+                } = self.range.beg.source
+                else {
                     return;
                 };
                 if let Ok(symbol) = symbol_table::resolve((&self.generic_path(), &self_namespace)) {

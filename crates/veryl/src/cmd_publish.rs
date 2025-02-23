@@ -50,7 +50,7 @@ impl CmdPublish {
             let parser = Parser::parse(&input, &path.src)?;
 
             let analyzer = Analyzer::new(metadata);
-            let mut errors = analyzer.analyze_pass1(&path.prj, &input, &path.src, &parser.veryl);
+            let mut errors = analyzer.analyze_pass1(&path.prj, &path.src, &parser.veryl);
             check_error = check_error.append(&mut errors).check_err()?;
 
             contexts.push((path, input, parser, analyzer));
@@ -59,13 +59,13 @@ impl CmdPublish {
         let mut errors = Analyzer::analyze_post_pass1();
         check_error = check_error.append(&mut errors).check_err()?;
 
-        for (path, input, parser, analyzer) in &contexts {
-            let mut errors = analyzer.analyze_pass2(&path.prj, input, &path.src, &parser.veryl);
+        for (path, _, parser, analyzer) in &contexts {
+            let mut errors = analyzer.analyze_pass2(&path.prj, &path.src, &parser.veryl);
             check_error = check_error.append(&mut errors).check_err()?;
         }
 
-        for (path, input, parser, analyzer) in &contexts {
-            let mut errors = analyzer.analyze_pass3(&path.prj, input, &path.src, &parser.veryl);
+        for (path, _, parser, analyzer) in &contexts {
+            let mut errors = analyzer.analyze_pass3(&path.prj, &path.src, &parser.veryl);
             check_error = check_error.append(&mut errors).check_err()?;
         }
 

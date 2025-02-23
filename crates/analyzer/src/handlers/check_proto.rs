@@ -6,28 +6,24 @@ use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
 #[derive(Default)]
-pub struct CheckProto<'a> {
+pub struct CheckProto {
     pub errors: Vec<AnalyzerError>,
-    text: &'a str,
     point: HandlerPoint,
 }
 
-impl<'a> CheckProto<'a> {
-    pub fn new(text: &'a str) -> Self {
-        Self {
-            text,
-            ..Default::default()
-        }
+impl CheckProto {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
-impl Handler for CheckProto<'_> {
+impl Handler for CheckProto {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl VerylGrammarTrait for CheckProto<'_> {
+impl VerylGrammarTrait for CheckProto {
     fn module_declaration(&mut self, arg: &ModuleDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if let Some(ref x) = arg.module_declaration_opt1 {
@@ -61,7 +57,6 @@ impl VerylGrammarTrait for CheckProto<'_> {
                                         &arg.identifier.identifier_token.to_string(),
                                         &symbol.found.token.to_string(),
                                         &cause,
-                                        self.text,
                                         &arg.identifier.identifier_token.token.into(),
                                     ));
                                 }
@@ -72,7 +67,6 @@ impl VerylGrammarTrait for CheckProto<'_> {
                             &symbol.found.token.to_string(),
                             "module prototype",
                             &symbol.found.kind.to_kind_name(),
-                            self.text,
                             &x.scoped_identifier.identifier().token.into(),
                         ));
                     }

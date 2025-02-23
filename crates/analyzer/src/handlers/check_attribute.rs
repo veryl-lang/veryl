@@ -6,29 +6,25 @@ use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint, VerylWalker};
 use veryl_parser::ParolError;
 
-pub struct CheckAttribute<'a> {
+#[derive(Default)]
+pub struct CheckAttribute {
     pub errors: Vec<AnalyzerError>,
-    text: &'a str,
     point: HandlerPoint,
 }
 
-impl<'a> CheckAttribute<'a> {
-    pub fn new(text: &'a str) -> Self {
-        Self {
-            errors: Vec::new(),
-            text,
-            point: HandlerPoint::Before,
-        }
+impl CheckAttribute {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
-impl Handler for CheckAttribute<'_> {
+impl Handler for CheckAttribute {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl VerylGrammarTrait for CheckAttribute<'_> {
+impl VerylGrammarTrait for CheckAttribute {
     fn attribute(&mut self, arg: &Attribute) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let attr: Result<crate::attribute::Attribute, crate::attribute::AttributeError> =
@@ -44,7 +40,6 @@ impl VerylGrammarTrait for CheckAttribute<'_> {
                         AttributeError::UnknownAttribute => {
                             self.errors.push(AnalyzerError::unknown_attribute(
                                 &arg.identifier.identifier_token.to_string(),
-                                self.text,
                                 &arg.identifier.as_ref().into(),
                             ));
                         }
@@ -52,28 +47,24 @@ impl VerylGrammarTrait for CheckAttribute<'_> {
                             self.errors.push(AnalyzerError::mismatch_attribute_args(
                                 &arg.identifier.identifier_token.to_string(),
                                 x,
-                                self.text,
                                 &arg.identifier.as_ref().into(),
                             ));
                         }
                         AttributeError::InvalidAllow(x) => {
                             self.errors.push(AnalyzerError::invalid_allow(
                                 &x.to_string(),
-                                self.text,
                                 &arg.identifier.as_ref().into(),
                             ));
                         }
                         AttributeError::InvalidEnumEncoding(x) => {
                             self.errors.push(AnalyzerError::invalid_enum_encoding(
                                 &x.to_string(),
-                                self.text,
                                 &arg.identifier.as_ref().into(),
                             ));
                         }
                         AttributeError::InvalidCondType(x) => {
                             self.errors.push(AnalyzerError::invalid_cond_type(
                                 &x.to_string(),
-                                self.text,
                                 &arg.identifier.as_ref().into(),
                             ));
                         }

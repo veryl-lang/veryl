@@ -8,28 +8,24 @@ const OCTAL_CHARS: [char; 12] = ['0', '1', '2', '3', '4', '5', '6', '7', 'x', 'z
 const DECIMAL_CHARS: [char; 10] = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
 
 #[derive(Default)]
-pub struct CheckNumber<'a> {
+pub struct CheckNumber {
     pub errors: Vec<AnalyzerError>,
-    text: &'a str,
     point: HandlerPoint,
 }
 
-impl<'a> CheckNumber<'a> {
-    pub fn new(text: &'a str) -> Self {
-        Self {
-            text,
-            ..Default::default()
-        }
+impl CheckNumber {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
-impl Handler for CheckNumber<'_> {
+impl Handler for CheckNumber {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl VerylGrammarTrait for CheckNumber<'_> {
+impl VerylGrammarTrait for CheckNumber {
     fn based(&mut self, arg: &Based) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let token = &arg.based_token.token;
@@ -53,7 +49,6 @@ impl VerylGrammarTrait for CheckNumber<'_> {
                         self.errors.push(AnalyzerError::invalid_number_character(
                             x,
                             "binary",
-                            self.text,
                             &token.into(),
                         ));
                     }
@@ -64,7 +59,6 @@ impl VerylGrammarTrait for CheckNumber<'_> {
                         self.errors.push(AnalyzerError::invalid_number_character(
                             x,
                             "octal",
-                            self.text,
                             &token.into(),
                         ));
                     }
@@ -75,7 +69,6 @@ impl VerylGrammarTrait for CheckNumber<'_> {
                         self.errors.push(AnalyzerError::invalid_number_character(
                             x,
                             "decimal",
-                            self.text,
                             &token.into(),
                         ));
                     }
@@ -88,20 +81,14 @@ impl VerylGrammarTrait for CheckNumber<'_> {
             if let Some(actual_width) = strnum_bitwidth::bitwidth(number, base) {
                 if let Some(width) = width {
                     if actual_width > width {
-                        self.errors.push(AnalyzerError::too_large_number(
-                            width,
-                            self.text,
-                            &token.into(),
-                        ));
+                        self.errors
+                            .push(AnalyzerError::too_large_number(width, &token.into()));
                     }
                 }
             } else if width.is_none() {
                 // bitwidth calculation may be failed over 128bit.
-                self.errors.push(AnalyzerError::too_large_number(
-                    128,
-                    self.text,
-                    &token.into(),
-                ));
+                self.errors
+                    .push(AnalyzerError::too_large_number(128, &token.into()));
             }
         }
 

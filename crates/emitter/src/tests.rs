@@ -9,9 +9,9 @@ fn emit(metadata: &Metadata, code: &str) -> String {
     let parser = Parser::parse(&code, &"").unwrap();
     let analyzer = Analyzer::new(metadata);
 
-    analyzer.analyze_pass1(&"prj", &code, &"", &parser.veryl);
+    analyzer.analyze_pass1(&"prj", &"", &parser.veryl);
     Analyzer::analyze_post_pass1();
-    analyzer.analyze_pass2(&"prj", &code, &"", &parser.veryl);
+    analyzer.analyze_pass2(&"prj", &"", &parser.veryl);
 
     let mut emitter = Emitter::new(
         metadata,

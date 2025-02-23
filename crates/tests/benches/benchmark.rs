@@ -34,10 +34,10 @@ fn criterion_benchmark(c: &mut Criterion) {
         let prj = &metadata.project.name;
         let analyzer = Analyzer::new(&metadata);
         let mut errors = Vec::new();
-        errors.append(&mut analyzer.analyze_pass1(prj, &text, &"", &parser.veryl));
+        errors.append(&mut analyzer.analyze_pass1(prj, &"", &parser.veryl));
         errors.append(&mut Analyzer::analyze_post_pass1());
-        errors.append(&mut analyzer.analyze_pass2(prj, &text, &"", &parser.veryl));
-        errors.append(&mut analyzer.analyze_pass3(prj, &text, &"", &parser.veryl));
+        errors.append(&mut analyzer.analyze_pass2(prj, &"", &parser.veryl));
+        errors.append(&mut analyzer.analyze_pass3(prj, &"", &parser.veryl));
         analyzer.clear();
         if !errors.is_empty() {
             dbg!(errors);
@@ -62,10 +62,10 @@ fn criterion_benchmark(c: &mut Criterion) {
             let parser = Parser::parse(black_box(&text), &"").unwrap();
             let prj = &metadata.project.name;
             let analyzer = Analyzer::new(black_box(&metadata));
-            analyzer.analyze_pass1(prj, black_box(&text), &"", &parser.veryl);
+            analyzer.analyze_pass1(prj, &"", &parser.veryl);
             Analyzer::analyze_post_pass1();
-            analyzer.analyze_pass2(prj, black_box(&text), &"", &parser.veryl);
-            analyzer.analyze_pass3(prj, black_box(&text), &"", &parser.veryl);
+            analyzer.analyze_pass2(prj, &"", &parser.veryl);
+            analyzer.analyze_pass3(prj, &"", &parser.veryl);
             analyzer.clear();
         })
     });

@@ -4,31 +4,27 @@ use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
 #[derive(Default)]
-pub struct CheckPort<'a> {
+pub struct CheckPort {
     pub errors: Vec<AnalyzerError>,
-    text: &'a str,
     point: HandlerPoint,
     in_function: bool,
     in_module: bool,
     in_modport: bool,
 }
 
-impl<'a> CheckPort<'a> {
-    pub fn new(text: &'a str) -> Self {
-        Self {
-            text,
-            ..Default::default()
-        }
+impl CheckPort {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
-impl Handler for CheckPort<'_> {
+impl Handler for CheckPort {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl VerylGrammarTrait for CheckPort<'_> {
+impl VerylGrammarTrait for CheckPort {
     fn port_declaration_item(&mut self, arg: &PortDeclarationItem) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if let PortDeclarationItemGroup::PortTypeConcrete(x) =
@@ -45,10 +41,8 @@ impl VerylGrammarTrait for CheckPort<'_> {
                         .any(|x| matches!(x.type_modifier.as_ref(), TypeModifier::Tri(_)));
 
                     if !is_tri {
-                        self.errors.push(AnalyzerError::missing_tri(
-                            self.text,
-                            &r#type.as_ref().into(),
-                        ));
+                        self.errors
+                            .push(AnalyzerError::missing_tri(&r#type.as_ref().into()));
                     }
                 }
 
@@ -70,7 +64,6 @@ impl VerylGrammarTrait for CheckPort<'_> {
                         self.errors.push(AnalyzerError::invalid_port_default_value(
                             &arg.identifier.identifier_token.to_string(),
                             &direction.to_string(),
-                            self.text,
                             &x.port_default_value.expression.as_ref().into(),
                         ));
                     }
@@ -87,7 +80,6 @@ impl VerylGrammarTrait for CheckPort<'_> {
                     if !self.in_function {
                         self.errors.push(AnalyzerError::invalid_direction(
                             "ref",
-                            self.text,
                             &x.r#ref.ref_token.token.into(),
                         ));
                     }
@@ -96,7 +88,6 @@ impl VerylGrammarTrait for CheckPort<'_> {
                     if !self.in_module || self.in_function {
                         self.errors.push(AnalyzerError::invalid_direction(
                             "modport",
-                            self.text,
                             &x.modport.modport_token.token.into(),
                         ));
                     }
@@ -105,7 +96,6 @@ impl VerylGrammarTrait for CheckPort<'_> {
                     if !self.in_modport {
                         self.errors.push(AnalyzerError::invalid_direction(
                             "import",
-                            self.text,
                             &x.import.import_token.token.into(),
                         ));
                     }

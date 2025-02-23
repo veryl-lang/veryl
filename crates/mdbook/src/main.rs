@@ -162,14 +162,14 @@ impl Preprocessor for Veryl {
 
                                         let mut errors = vec![];
                                         errors.append(
-                                            &mut analyzer.analyze_pass1(prj, &x, "", &ret.veryl),
+                                            &mut analyzer.analyze_pass1(prj, "", &ret.veryl),
                                         );
                                         errors.append(&mut Analyzer::analyze_post_pass1());
                                         errors.append(
-                                            &mut analyzer.analyze_pass2(prj, &x, "", &ret.veryl),
+                                            &mut analyzer.analyze_pass2(prj, "", &ret.veryl),
                                         );
                                         errors.append(
-                                            &mut analyzer.analyze_pass3(prj, &x, "", &ret.veryl),
+                                            &mut analyzer.analyze_pass3(prj, "", &ret.veryl),
                                         );
 
                                         if !errors.is_empty() {

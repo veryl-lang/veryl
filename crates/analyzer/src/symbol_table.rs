@@ -1242,7 +1242,7 @@ mod tests {
             toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
         let parser = Parser::parse(&CODE, &"").unwrap();
         let analyzer = Analyzer::new(&metadata);
-        analyzer.analyze_pass1(&"prj", &CODE, &"", &parser.veryl);
+        analyzer.analyze_pass1(&"prj", &"", &parser.veryl);
     }
 
     #[track_caller]

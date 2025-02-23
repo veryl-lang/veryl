@@ -7,10 +7,9 @@ use veryl_parser::veryl_token::{is_anonymous_token, Token};
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
-pub struct CheckIdentifier<'a> {
+pub struct CheckIdentifier {
     pub errors: Vec<AnalyzerError>,
-    text: &'a str,
-    lint_opt: &'a Lint,
+    lint_opt: Lint,
     point: HandlerPoint,
     in_always_comb: bool,
     in_always_ff: bool,
@@ -42,12 +41,11 @@ enum Kind {
     Wire,
 }
 
-impl<'a> CheckIdentifier<'a> {
-    pub fn new(text: &'a str, lint_opt: &'a Lint) -> Self {
+impl CheckIdentifier {
+    pub fn new(lint_opt: &Lint) -> Self {
         Self {
+            lint_opt: lint_opt.clone(),
             errors: Vec::new(),
-            text,
-            lint_opt,
             point: HandlerPoint::Before,
             in_always_comb: false,
             in_always_ff: false,
@@ -186,35 +184,26 @@ impl<'a> CheckIdentifier<'a> {
         let identifier = token.to_string();
 
         if !matches!(kind, Kind::ClockDomain) && is_anonymous_token(token) {
-            self.errors.push(AnalyzerError::anonymous_identifier_usage(
-                self.text,
-                &token.into(),
-            ));
+            self.errors
+                .push(AnalyzerError::anonymous_identifier_usage(&token.into()));
         }
 
         if identifier.starts_with("__") {
             self.errors.push(AnalyzerError::reserved_identifier(
                 &identifier,
-                self.text,
                 &token.into(),
             ));
         }
 
         if is_sv_keyword(&identifier) {
-            self.errors.push(AnalyzerError::sv_keyword_usage(
-                &identifier,
-                self.text,
-                &token.into(),
-            ))
+            self.errors
+                .push(AnalyzerError::sv_keyword_usage(&identifier, &token.into()))
         }
 
         if let Some(x) = identifier.strip_prefix("r#") {
             if is_sv_keyword(x) {
-                self.errors.push(AnalyzerError::sv_keyword_usage(
-                    &identifier,
-                    self.text,
-                    &token.into(),
-                ))
+                self.errors
+                    .push(AnalyzerError::sv_keyword_usage(&identifier, &token.into()))
             }
         }
 
@@ -223,7 +212,6 @@ impl<'a> CheckIdentifier<'a> {
                 self.errors.push(AnalyzerError::invalid_identifier(
                     &identifier,
                     &format!("prefix: {prefix}"),
-                    self.text,
                     &token.into(),
                 ));
             }
@@ -233,7 +221,6 @@ impl<'a> CheckIdentifier<'a> {
                 self.errors.push(AnalyzerError::invalid_identifier(
                     &identifier,
                     &format!("suffix: {suffix}"),
-                    self.text,
                     &token.into(),
                 ));
             }
@@ -249,7 +236,6 @@ impl<'a> CheckIdentifier<'a> {
                 self.errors.push(AnalyzerError::invalid_identifier(
                     &identifier,
                     &format!("case: {case}"),
-                    self.text,
                     &token.into(),
                 ));
             }
@@ -264,7 +250,6 @@ impl<'a> CheckIdentifier<'a> {
                 self.errors.push(AnalyzerError::invalid_identifier(
                     &identifier,
                     &format!("re_required: {re_required}"),
-                    self.text,
                     &token.into(),
                 ));
             }
@@ -279,7 +264,6 @@ impl<'a> CheckIdentifier<'a> {
                 self.errors.push(AnalyzerError::invalid_identifier(
                     &identifier,
                     &format!("re_forbidden: {re_forbidden}"),
-                    self.text,
                     &token.into(),
                 ));
             }
@@ -287,13 +271,13 @@ impl<'a> CheckIdentifier<'a> {
     }
 }
 
-impl Handler for CheckIdentifier<'_> {
+impl Handler for CheckIdentifier {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl VerylGrammarTrait for CheckIdentifier<'_> {
+impl VerylGrammarTrait for CheckIdentifier {
     fn clock_domain(&mut self, arg: &ClockDomain) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             self.check(&arg.identifier.identifier_token.token, Kind::ClockDomain);

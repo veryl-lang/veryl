@@ -7,18 +7,14 @@ use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
 #[derive(Default)]
-pub struct CheckSeparator<'a> {
+pub struct CheckSeparator {
     pub errors: Vec<AnalyzerError>,
-    text: &'a str,
     point: HandlerPoint,
 }
 
-impl<'a> CheckSeparator<'a> {
-    pub fn new(text: &'a str) -> Self {
-        Self {
-            text,
-            ..Default::default()
-        }
+impl CheckSeparator {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     fn check_separator(
@@ -58,20 +54,19 @@ impl<'a> CheckSeparator<'a> {
         if expect_dot_separator != check_dot_separator {
             self.errors.push(AnalyzerError::wrong_seperator(
                 &separator_token.to_string(),
-                self.text,
                 &separator_token.into(),
             ));
         }
     }
 }
 
-impl Handler for CheckSeparator<'_> {
+impl Handler for CheckSeparator {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl VerylGrammarTrait for CheckSeparator<'_> {
+impl VerylGrammarTrait for CheckSeparator {
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if let Ok(symbol) = symbol_table::resolve(arg) {

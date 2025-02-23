@@ -4,9 +4,8 @@ use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
 
 #[derive(Default)]
-pub struct CheckStatement<'a> {
+pub struct CheckStatement {
     pub errors: Vec<AnalyzerError>,
-    text: &'a str,
     point: HandlerPoint,
     in_always_ff: bool,
     in_always_comb: bool,
@@ -17,22 +16,19 @@ pub struct CheckStatement<'a> {
     statement_depth_in_loop: usize,
 }
 
-impl<'a> CheckStatement<'a> {
-    pub fn new(text: &'a str) -> Self {
-        Self {
-            text,
-            ..Default::default()
-        }
+impl CheckStatement {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
-impl Handler for CheckStatement<'_> {
+impl Handler for CheckStatement {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
 }
 
-impl VerylGrammarTrait for CheckStatement<'_> {
+impl VerylGrammarTrait for CheckStatement {
     fn statement(&mut self, _arg: &Statement) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             self.statement_depth_in_always_ff += 1;
@@ -51,7 +47,6 @@ impl VerylGrammarTrait for CheckStatement<'_> {
                 };
                 self.errors.push(AnalyzerError::invalid_statement(
                     "assignment",
-                    self.text,
                     &token.into(),
                 ));
             }
@@ -64,7 +59,6 @@ impl VerylGrammarTrait for CheckStatement<'_> {
             if !self.in_always_ff {
                 self.errors.push(AnalyzerError::invalid_statement(
                     "if_reset",
-                    self.text,
                     &arg.if_reset.if_reset_token.token.into(),
                 ));
             }
@@ -72,7 +66,6 @@ impl VerylGrammarTrait for CheckStatement<'_> {
             if self.in_always_ff && self.statement_depth_in_always_ff != 1 {
                 self.errors.push(AnalyzerError::invalid_statement(
                     "if_reset",
-                    self.text,
                     &arg.if_reset.if_reset_token.token.into(),
                 ));
             }
@@ -85,7 +78,6 @@ impl VerylGrammarTrait for CheckStatement<'_> {
             if !self.in_function {
                 self.errors.push(AnalyzerError::invalid_statement(
                     "return",
-                    self.text,
                     &arg.r#return.return_token.token.into(),
                 ));
             }
@@ -98,7 +90,6 @@ impl VerylGrammarTrait for CheckStatement<'_> {
             if self.statement_depth_in_loop == 0 {
                 self.errors.push(AnalyzerError::invalid_statement(
                     "break",
-                    self.text,
                     &arg.r#break.break_token.token.into(),
                 ));
             }

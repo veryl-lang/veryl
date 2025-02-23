@@ -23,7 +23,7 @@ where
     T: Clone + Eq + std::fmt::Display,
 {
     pub fn insert(&mut self, range: TokenRange, value: T) {
-        if let TokenSource::File(path) = range.beg.source {
+        if let TokenSource::File { path, .. } = range.beg.source {
             self.table
                 .entry(path)
                 .and_modify(|x| x.push((range, value.clone())))
@@ -48,7 +48,7 @@ where
     pub fn get(&self, token: &Token) -> Vec<T> {
         let mut ret = Vec::new();
 
-        if let TokenSource::File(path) = token.source {
+        if let TokenSource::File { path, .. } = token.source {
             if let Some(values) = self.table.get(&path) {
                 for (range, value) in values {
                     if range.include(path, token.line, token.column) {
