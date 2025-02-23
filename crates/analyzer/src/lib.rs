@@ -5,6 +5,7 @@ pub mod attribute_table;
 pub mod definition_table;
 pub mod evaluator;
 pub mod handlers;
+pub mod instance_history;
 pub mod msb_table;
 pub mod namespace;
 pub mod namespace_table;

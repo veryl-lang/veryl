@@ -1,7 +1,8 @@
 use crate::analyzer::AnalyzerPass2Expression;
 use crate::analyzer_error::AnalyzerError;
 use crate::definition_table::{self, Definition};
-use crate::evaluator::{Evaluated, EvaluatedError, EvaluatedType, EvaluatedValue, Evaluator};
+use crate::evaluator::{Evaluated, EvaluatedError, EvaluatedType, Evaluator};
+use crate::instance_history::{self, InstanceHistoryError, InstanceSignature};
 use crate::symbol::{Direction, GenericBoundKind, ModuleProperty, Symbol, SymbolId, SymbolKind};
 use crate::symbol_table;
 use std::collections::{HashMap, HashSet};
@@ -11,74 +12,6 @@ use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::TokenRange;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint, VerylWalker};
 use veryl_parser::ParolError;
-
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub struct InstanceSignature {
-    symbol: SymbolId,
-    params: Vec<(StrId, EvaluatedValue)>,
-}
-
-impl InstanceSignature {
-    fn new(symbol: SymbolId) -> Self {
-        Self {
-            symbol,
-            params: Vec::new(),
-        }
-    }
-
-    fn add_param(&mut self, id: StrId, value: EvaluatedValue) {
-        self.params.push((id, value));
-    }
-
-    fn normalize(&mut self) {
-        self.params.sort();
-    }
-}
-
-#[derive(Default)]
-pub struct InstanceHistory {
-    pub depth_limit: usize,
-    pub total_limit: usize,
-    pub hierarchy: Vec<InstanceSignature>,
-    full: HashSet<InstanceSignature>,
-}
-
-impl InstanceHistory {
-    fn push(&mut self, mut sig: InstanceSignature) -> Result<bool, InstanceHistoryError> {
-        sig.normalize();
-        if self.hierarchy.len() > self.depth_limit {
-            return Err(InstanceHistoryError::ExceedDepthLimit);
-        }
-        if self.full.len() > self.total_limit {
-            return Err(InstanceHistoryError::ExceedTotalLimit);
-        }
-        if self.hierarchy.iter().any(|x| *x == sig)
-            && sig.params.iter().all(|x| x.1.get_value().is_some())
-        {
-            return Err(InstanceHistoryError::InfiniteRecursion);
-        }
-        if self.full.contains(&sig) {
-            Ok(false)
-        } else {
-            self.hierarchy.push(sig.clone());
-            self.full.insert(sig);
-            Ok(true)
-        }
-    }
-
-    fn pop(&mut self) {
-        self.hierarchy.pop();
-    }
-}
-
-#[derive(Debug)]
-pub enum InstanceHistoryError {
-    ExceedDepthLimit,
-    ExceedTotalLimit,
-    InfiniteRecursion,
-}
-
-impl InstanceHistoryError {}
 
 pub struct CheckExpression<'a> {
     pub errors: Vec<AnalyzerError>,
@@ -92,15 +25,10 @@ pub struct CheckExpression<'a> {
     disable_block_beg: HashSet<TokenId>,
     disable_block_end: HashSet<TokenId>,
     inst_context: Vec<TokenRange>,
-    inst_history: &'a mut InstanceHistory,
 }
 
 impl<'a> CheckExpression<'a> {
-    pub fn new(
-        text: &'a str,
-        inst_context: Vec<TokenRange>,
-        inst_history: &'a mut InstanceHistory,
-    ) -> Self {
+    pub fn new(text: &'a str, inst_context: Vec<TokenRange>) -> Self {
         Self {
             errors: Vec::new(),
             text,
@@ -113,7 +41,6 @@ impl<'a> CheckExpression<'a> {
             disable_block_beg: HashSet::new(),
             disable_block_end: HashSet::new(),
             inst_context,
-            inst_history,
         }
     }
 
@@ -578,7 +505,7 @@ impl VerylGrammarTrait for CheckExpression<'_> {
                                 self.check_port_connection(arg, x);
                             }
 
-                            match self.inst_history.push(sig) {
+                            match instance_history::push(sig) {
                                 Ok(true) => {
                                     // Check expression with overridden parameters
                                     let def = definition_table::get(definition).unwrap();
@@ -586,27 +513,21 @@ impl VerylGrammarTrait for CheckExpression<'_> {
                                         Definition::Module { text, decl } => {
                                             let mut inst_context = self.inst_context.clone();
                                             inst_context.push(arg.identifier.as_ref().into());
-                                            let mut analyzer = AnalyzerPass2Expression::new(
-                                                &text,
-                                                inst_context,
-                                                self.inst_history,
-                                            );
+                                            let mut analyzer =
+                                                AnalyzerPass2Expression::new(&text, inst_context);
                                             analyzer.module_declaration(&decl);
                                             self.errors.append(&mut analyzer.get_errors());
                                         }
                                         Definition::Interface { text, decl } => {
                                             let mut inst_context = self.inst_context.clone();
                                             inst_context.push(arg.identifier.as_ref().into());
-                                            let mut analyzer = AnalyzerPass2Expression::new(
-                                                &text,
-                                                inst_context,
-                                                self.inst_history,
-                                            );
+                                            let mut analyzer =
+                                                AnalyzerPass2Expression::new(&text, inst_context);
                                             analyzer.interface_declaration(&decl);
                                             self.errors.append(&mut analyzer.get_errors());
                                         }
                                     }
-                                    self.inst_history.pop();
+                                    instance_history::pop();
                                 }
                                 // Skip duplicated signature
                                 Ok(false) => (),
