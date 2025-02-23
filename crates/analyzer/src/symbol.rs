@@ -154,37 +154,33 @@ impl Symbol {
                     }
                 }
                 SymbolKind::Port(x) => {
-                    if let Some(x) = &x.r#type {
-                        let mut evaluator = Evaluator::new();
-                        let width = evaluator.type_width(x.clone());
-                        let array = evaluator.type_array(x.clone());
+                    let mut evaluator = Evaluator::new();
+                    let width = evaluator.type_width(x.r#type.clone());
+                    let array = evaluator.type_array(x.r#type.clone());
 
-                        if let (Some(width), Some(array)) = (width, array) {
-                            if x.kind.is_clock() {
-                                let kind = match x.kind {
-                                    TypeKind::Clock => EvaluatedTypeClockKind::Implicit,
-                                    TypeKind::ClockPosedge => EvaluatedTypeClockKind::Posedge,
-                                    TypeKind::ClockNegedge => EvaluatedTypeClockKind::Negedge,
-                                    _ => unreachable!(),
-                                };
-                                Evaluated::create_clock(kind, width, array)
-                            } else if x.kind.is_reset() {
-                                let kind = match x.kind {
-                                    TypeKind::Reset => EvaluatedTypeResetKind::Implicit,
-                                    TypeKind::ResetAsyncHigh => EvaluatedTypeResetKind::AsyncHigh,
-                                    TypeKind::ResetAsyncLow => EvaluatedTypeResetKind::AsyncLow,
-                                    TypeKind::ResetSyncHigh => EvaluatedTypeResetKind::SyncHigh,
-                                    TypeKind::ResetSyncLow => EvaluatedTypeResetKind::SyncLow,
-                                    _ => unreachable!(),
-                                };
-                                Evaluated::create_reset(kind, width, array)
-                            } else {
-                                let signed = x.modifier.contains(&TypeModifier::Signed);
-                                let is_4state = x.kind.is_4state();
-                                Evaluated::create_variable(signed, is_4state, width, array)
-                            }
+                    if let (Some(width), Some(array)) = (width, array) {
+                        if x.r#type.kind.is_clock() {
+                            let kind = match x.r#type.kind {
+                                TypeKind::Clock => EvaluatedTypeClockKind::Implicit,
+                                TypeKind::ClockPosedge => EvaluatedTypeClockKind::Posedge,
+                                TypeKind::ClockNegedge => EvaluatedTypeClockKind::Negedge,
+                                _ => unreachable!(),
+                            };
+                            Evaluated::create_clock(kind, width, array)
+                        } else if x.r#type.kind.is_reset() {
+                            let kind = match x.r#type.kind {
+                                TypeKind::Reset => EvaluatedTypeResetKind::Implicit,
+                                TypeKind::ResetAsyncHigh => EvaluatedTypeResetKind::AsyncHigh,
+                                TypeKind::ResetAsyncLow => EvaluatedTypeResetKind::AsyncLow,
+                                TypeKind::ResetSyncHigh => EvaluatedTypeResetKind::SyncHigh,
+                                TypeKind::ResetSyncLow => EvaluatedTypeResetKind::SyncLow,
+                                _ => unreachable!(),
+                            };
+                            Evaluated::create_reset(kind, width, array)
                         } else {
-                            Evaluated::create_unknown()
+                            let signed = x.r#type.modifier.contains(&TypeModifier::Signed);
+                            let is_4state = x.r#type.kind.is_4state();
+                            Evaluated::create_variable(signed, is_4state, width, array)
                         }
                     } else {
                         Evaluated::create_unknown()
@@ -454,13 +450,7 @@ impl SymbolKind {
 
     pub fn is_clock(&self) -> bool {
         match self {
-            SymbolKind::Port(x) => {
-                if let Some(x) = &x.r#type {
-                    x.kind.is_clock()
-                } else {
-                    false
-                }
-            }
+            SymbolKind::Port(x) => x.r#type.kind.is_clock(),
             SymbolKind::Variable(x) => x.r#type.kind.is_clock(),
             _ => false,
         }
@@ -468,13 +458,7 @@ impl SymbolKind {
 
     pub fn is_reset(&self) -> bool {
         match self {
-            SymbolKind::Port(x) => {
-                if let Some(x) = &x.r#type {
-                    x.kind.is_reset()
-                } else {
-                    false
-                }
-            }
+            SymbolKind::Port(x) => x.r#type.kind.is_reset(),
             SymbolKind::Variable(x) => x.r#type.kind.is_reset(),
             _ => false,
         }
@@ -502,7 +486,7 @@ impl SymbolKind {
 
     pub fn get_type(&self) -> Option<&Type> {
         match self {
-            SymbolKind::Port(x) => x.r#type.as_ref(),
+            SymbolKind::Port(x) => Some(&x.r#type),
             SymbolKind::Variable(x) => Some(&x.r#type),
             SymbolKind::Function(x) => x.ret.as_ref(),
             SymbolKind::Parameter(x) => Some(&x.r#type),
@@ -515,7 +499,7 @@ impl SymbolKind {
 
     pub fn get_type_mut(&mut self) -> Option<&mut Type> {
         match self {
-            SymbolKind::Port(x) => x.r#type.as_mut(),
+            SymbolKind::Port(x) => Some(&mut x.r#type),
             SymbolKind::Variable(x) => Some(&mut x.r#type),
             SymbolKind::Function(x) => x.ret.as_mut(),
             SymbolKind::Parameter(x) => Some(&mut x.r#type),
@@ -531,11 +515,7 @@ impl fmt::Display for SymbolKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let text = match self {
             SymbolKind::Port(x) => {
-                if let Some(ref r#type) = x.r#type {
-                    format!("port ({} {})", x.direction, r#type)
-                } else {
-                    format!("port ({})", x.direction)
-                }
+                format!("port ({} {})", x.direction, x.r#type)
             }
             SymbolKind::Variable(x) => {
                 format!("variable ({})", x.r#type)
@@ -706,6 +686,7 @@ pub enum TypeKind {
     Type,
     String,
     UserDefined(UserDefinedType),
+    AbstractInterface(Option<StrId>),
 }
 
 impl TypeKind {
@@ -795,6 +776,13 @@ impl fmt::Display for Type {
                 text.push_str(&format!("{}", x.path.first().unwrap()));
                 for path in &x.path[1..] {
                     text.push_str(&format!("::{path}"));
+                }
+            }
+            TypeKind::AbstractInterface(x) => {
+                if let Some(x) = x {
+                    text.push_str(&format!("interface::{x}"));
+                } else {
+                    text.push_str("interface");
                 }
             }
         }
@@ -1140,7 +1128,7 @@ pub enum VariableAffiliation {
 #[derive(Debug, Clone)]
 pub struct PortProperty {
     pub token: Token,
-    pub r#type: Option<Type>,
+    pub r#type: Type,
     pub direction: Direction,
     pub prefix: Option<String>,
     pub suffix: Option<String>,
@@ -1278,9 +1266,7 @@ impl ProtoModuleProperty {
 
         for (name, actual_port) in actual_ports {
             if let Some(proto_port) = proto_ports.remove(&name) {
-                if proto_port.r#type.map(|x| x.to_string())
-                    != actual_port.r#type.map(|x| x.to_string())
-                {
+                if proto_port.r#type.to_string() != actual_port.r#type.to_string() {
                     ret.push(ProtoIncompatible::IncompatiblePort(name));
                 }
             } else {

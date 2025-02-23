@@ -628,11 +628,7 @@ impl Emitter {
     fn always_ff_implicit_clock_event(&mut self) {
         let symbol = symbol_table::get(self.default_clock.unwrap()).unwrap();
         let (clock_kind, prefix, suffix) = match symbol.kind {
-            SymbolKind::Port(x) => (
-                x.r#type.clone().unwrap().kind,
-                x.prefix.clone(),
-                x.suffix.clone(),
-            ),
+            SymbolKind::Port(x) => (x.r#type.kind, x.prefix.clone(), x.suffix.clone()),
             SymbolKind::Variable(x) => (x.r#type.kind, x.prefix.clone(), x.suffix.clone()),
             _ => unreachable!(),
         };
@@ -673,11 +669,7 @@ impl Emitter {
     fn always_ff_implicit_reset_event(&mut self) {
         let symbol = symbol_table::get(self.default_reset.unwrap()).unwrap();
         let (reset_kind, prefix, suffix) = match symbol.kind {
-            SymbolKind::Port(x) => (
-                x.r#type.clone().unwrap().kind,
-                x.prefix.clone(),
-                x.suffix.clone(),
-            ),
+            SymbolKind::Port(x) => (x.r#type.kind, x.prefix.clone(), x.suffix.clone()),
             SymbolKind::Variable(x) => (x.r#type.kind, x.prefix.clone(), x.suffix.clone()),
             _ => unreachable!(),
         };
@@ -723,7 +715,7 @@ impl Emitter {
     fn always_ff_reset_exist_in_sensitivity_list(&mut self, arg: &AlwaysFfReset) -> bool {
         if let Ok(found) = symbol_table::resolve(arg.hierarchical_identifier.as_ref()) {
             let reset_kind = match found.found.kind {
-                SymbolKind::Port(x) => x.r#type.clone().unwrap().kind,
+                SymbolKind::Port(x) => x.r#type.kind,
                 SymbolKind::Variable(x) => x.r#type.kind,
                 _ => unreachable!(),
             };
@@ -2543,7 +2535,7 @@ impl VerylWalker for Emitter {
     fn always_ff_clock(&mut self, arg: &AlwaysFfClock) {
         if let Ok(found) = symbol_table::resolve(arg.hierarchical_identifier.as_ref()) {
             let clock = match found.found.kind {
-                SymbolKind::Port(x) => x.r#type.clone().unwrap().kind,
+                SymbolKind::Port(x) => x.r#type.kind,
                 SymbolKind::Variable(x) => x.r#type.kind,
                 _ => unreachable!(),
             };
@@ -2569,11 +2561,7 @@ impl VerylWalker for Emitter {
     fn always_ff_reset(&mut self, arg: &AlwaysFfReset) {
         if let Ok(found) = symbol_table::resolve(arg.hierarchical_identifier.as_ref()) {
             let (reset_kind, prefix, suffix) = match found.found.kind {
-                SymbolKind::Port(x) => (
-                    x.r#type.clone().unwrap().kind,
-                    x.prefix.clone(),
-                    x.suffix.clone(),
-                ),
+                SymbolKind::Port(x) => (x.r#type.kind, x.prefix.clone(), x.suffix.clone()),
                 SymbolKind::Variable(x) => (x.r#type.kind, x.prefix.clone(), x.suffix.clone()),
                 _ => unreachable!(),
             };
@@ -2627,13 +2615,7 @@ impl VerylWalker for Emitter {
             if let Ok(symbol) = symbol_table::resolve(arg.hierarchical_identifier.as_ref()) {
                 match &symbol.found.kind {
                     SymbolKind::Variable(x) => x.r#type.modifier.contains(&SymTypeModifier::Tri),
-                    SymbolKind::Port(x) => {
-                        if let Some(ref x) = x.r#type {
-                            x.modifier.contains(&SymTypeModifier::Tri)
-                        } else {
-                            false
-                        }
-                    }
+                    SymbolKind::Port(x) => x.r#type.modifier.contains(&SymTypeModifier::Tri),
                     _ => false,
                 }
             } else {

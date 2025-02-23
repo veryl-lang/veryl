@@ -456,14 +456,12 @@ fn traverse_assignable_symbol(id: SymbolId, path: &VarRefPath) -> Vec<VarRefPath
     if let Some(symbol) = symbol_table::get(id) {
         match &symbol.kind {
             SymbolKind::Port(x) if is_assignable(&x.direction) && !x.is_proto => {
-                if let Some(ref x) = x.r#type {
-                    if let TypeKind::UserDefined(ref x) = x.kind {
-                        if let Some(id) = x.symbol {
-                            return traverse_type_symbol(id, path);
-                        }
-                    } else {
-                        return vec![path.clone()];
+                if let TypeKind::UserDefined(ref x) = x.r#type.kind {
+                    if let Some(id) = x.symbol {
+                        return traverse_type_symbol(id, path);
                     }
+                } else {
+                    return vec![path.clone()];
                 }
             }
             SymbolKind::Variable(x)

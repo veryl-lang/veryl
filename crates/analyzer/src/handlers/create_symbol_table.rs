@@ -222,15 +222,12 @@ impl<'a> CreateSymbolTable<'a> {
 
         match kind {
             SymbolKind::Port(x) => {
-                if let Some(clock) = x.r#type.clone() {
-                    match clock.kind {
-                        TypeKind::Clock | TypeKind::ClockPosedge | TypeKind::ClockNegedge => {
-                            clock.array.is_empty() && clock.width.is_empty()
-                        }
-                        _ => false,
+                let clock = &x.r#type;
+                match clock.kind {
+                    TypeKind::Clock | TypeKind::ClockPosedge | TypeKind::ClockNegedge => {
+                        clock.array.is_empty() && clock.width.is_empty()
                     }
-                } else {
-                    false
+                    _ => false,
                 }
             }
             SymbolKind::Variable(x) => {
@@ -255,19 +252,14 @@ impl<'a> CreateSymbolTable<'a> {
 
         match kind {
             SymbolKind::Port(x) => {
-                if let Some(reset) = x.r#type.clone() {
-                    match reset.kind {
-                        TypeKind::Reset
-                        | TypeKind::ResetAsyncHigh
-                        | TypeKind::ResetAsyncLow
-                        | TypeKind::ResetSyncHigh
-                        | TypeKind::ResetSyncLow => {
-                            reset.array.is_empty() && reset.width.is_empty()
-                        }
-                        _ => false,
-                    }
-                } else {
-                    false
+                let reset = &x.r#type;
+                match reset.kind {
+                    TypeKind::Reset
+                    | TypeKind::ResetAsyncHigh
+                    | TypeKind::ResetAsyncLow
+                    | TypeKind::ResetSyncHigh
+                    | TypeKind::ResetSyncLow => reset.array.is_empty() && reset.width.is_empty(),
+                    _ => false,
                 }
             }
             SymbolKind::Variable(x) => {
@@ -1062,7 +1054,7 @@ impl VerylGrammarTrait for CreateSymbolTable<'_> {
                         .map(|x| *x.port_default_value.expression.clone());
                     PortProperty {
                         token,
-                        r#type: Some(r#type),
+                        r#type,
                         direction,
                         prefix,
                         suffix,
@@ -1080,31 +1072,29 @@ impl VerylGrammarTrait for CreateSymbolTable<'_> {
                     } else {
                         SymClockDomain::None
                     };
-                    //  TODO:
-                    //  Need to store modport type and array size for connected interface check
-                    //let kind = if let Some(ref x) = x.port_type_abstract_opt0 {
-                    //    TypeKind::UserDefined(vec![x.identifier.identifier_token.token.text])
-                    //} else {
-                    //    TypeKind::UserDefined(vec![])
-                    //};
-                    //let mut array = Vec::new();
-                    //if let Some(ref x) = x.port_type_abstract_opt1 {
-                    //    let x = &x.array;
-                    //    array.push(*x.expression.clone());
-                    //    for x in &x.array_list {
-                    //        array.push(*x.expression.clone());
-                    //    }
-                    //}
-                    //let r#type = SymType {
-                    //    kind,
-                    //    modifier: vec![],
-                    //    width: vec![],
-                    //    array,
-                    //    is_const: false,
-                    //};
+                    let kind = if let Some(ref x) = x.port_type_abstract_opt0 {
+                        TypeKind::AbstractInterface(Some(x.identifier.identifier_token.token.text))
+                    } else {
+                        TypeKind::AbstractInterface(None)
+                    };
+                    let mut array = Vec::new();
+                    if let Some(ref x) = x.port_type_abstract_opt1 {
+                        let x = &x.array;
+                        array.push(*x.expression.clone());
+                        for x in &x.array_list {
+                            array.push(*x.expression.clone());
+                        }
+                    }
+                    let r#type = SymType {
+                        kind,
+                        modifier: vec![],
+                        width: vec![],
+                        array,
+                        is_const: false,
+                    };
                     PortProperty {
                         token,
-                        r#type: None,
+                        r#type,
                         direction: SymDirection::Interface,
                         prefix: None,
                         suffix: None,

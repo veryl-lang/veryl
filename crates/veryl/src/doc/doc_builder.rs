@@ -228,7 +228,7 @@ struct PortData {
     name: String,
     direction: String,
     clock_domain: Option<String>,
-    typ: Option<String>,
+    typ: String,
     description: Option<String>,
 }
 
@@ -693,7 +693,7 @@ impl DocBuilder {
                         name: x.name().to_string(),
                         direction: format!("{}", x.property().direction),
                         clock_domain,
-                        typ: x.property().r#type.as_ref().map(|x| format!("{}", x)),
+                        typ: x.property().r#type.to_string(),
                         description: get_comment_from_token(&x.property().token),
                     }
                 })
@@ -756,7 +756,7 @@ impl DocBuilder {
                         name: x.name().to_string(),
                         direction: format!("{}", x.property().direction),
                         clock_domain,
-                        typ: x.property().r#type.as_ref().map(|x| format!("{}", x)),
+                        typ: x.property().r#type.to_string(),
                         description: get_comment_from_token(&x.property().token),
                     }
                 })

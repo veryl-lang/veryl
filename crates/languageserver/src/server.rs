@@ -957,12 +957,10 @@ fn completion_member(url: &Url, line: usize, column: usize, text: &str) -> Vec<C
         if let Ok(symbol) = symbol_table::resolve((&vec![text], &namespace)) {
             match symbol.found.kind {
                 VerylSymbolKind::Port(x) => {
-                    if let Some(ref x) = x.r#type {
-                        if let TypeKind::UserDefined(ref x) = x.kind {
-                            if let Some(id) = x.symbol {
-                                let symbol = symbol_table::get(id).unwrap();
-                                items.append(&mut get_member(&symbol));
-                            }
+                    if let TypeKind::UserDefined(ref x) = x.r#type.kind {
+                        if let Some(id) = x.symbol {
+                            let symbol = symbol_table::get(id).unwrap();
+                            items.append(&mut get_member(&symbol));
                         }
                     }
                 }
