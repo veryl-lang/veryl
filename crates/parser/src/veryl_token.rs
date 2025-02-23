@@ -130,7 +130,7 @@ impl From<Token> for miette::SourceSpan {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TokenRange {
     pub beg: Token,
     pub end: Token,
@@ -740,6 +740,22 @@ impl From<&CastingType> for TokenRange {
                 let end = beg;
                 TokenRange { beg, end }
             }
+        }
+    }
+}
+
+impl From<&InstPortItem> for TokenRange {
+    fn from(value: &InstPortItem) -> Self {
+        let beg: TokenRange = value.identifier.as_ref().into();
+        let end = if let Some(x) = &value.inst_port_item_opt {
+            x.expression.as_ref().into()
+        } else {
+            beg
+        };
+
+        TokenRange {
+            beg: beg.beg,
+            end: end.end,
         }
     }
 }

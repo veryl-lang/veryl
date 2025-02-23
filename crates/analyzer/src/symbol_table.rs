@@ -1,4 +1,4 @@
-use crate::evaluator::EvaluatedValue;
+use crate::evaluator::{Evaluated, EvaluatedValue};
 use crate::namespace::Namespace;
 use crate::symbol::{DocComment, GenericBoundKind, Symbol, SymbolId, SymbolKind, TypeKind};
 use crate::symbol_path::{SymbolPath, SymbolPathNamespace};
@@ -511,6 +511,26 @@ impl SymbolTable {
 
     pub fn clear(&mut self) {
         self.clone_from(&Self::new());
+    }
+
+    pub fn clear_evaluated_cache(&mut self, path: &Namespace) {
+        for x in self.symbol_table.values_mut() {
+            if x.namespace.included(path) {
+                x.evaluated.borrow_mut().take();
+            }
+        }
+    }
+
+    pub fn push_override(&mut self, id: SymbolId, value: Evaluated) {
+        if let Some(x) = self.symbol_table.get_mut(&id) {
+            x.overrides.push(value);
+        }
+    }
+
+    pub fn pop_override(&mut self, id: SymbolId) {
+        if let Some(x) = self.symbol_table.get_mut(&id) {
+            x.overrides.pop();
+        }
     }
 }
 
@@ -1130,6 +1150,18 @@ pub fn get_assign_list() -> Vec<Assign> {
 
 pub fn clear() {
     SYMBOL_TABLE.with(|f| f.borrow_mut().clear())
+}
+
+pub fn clear_evaluated_cache(path: &Namespace) {
+    SYMBOL_TABLE.with(|f| f.borrow_mut().clear_evaluated_cache(path))
+}
+
+pub fn push_override(id: SymbolId, value: Evaluated) {
+    SYMBOL_TABLE.with(|f| f.borrow_mut().push_override(id, value))
+}
+
+pub fn pop_override(id: SymbolId) {
+    SYMBOL_TABLE.with(|f| f.borrow_mut().pop_override(id))
 }
 
 #[cfg(test)]

@@ -10,7 +10,7 @@ pub struct Evaluated {
     pub errors: Vec<EvaluatedError>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EvaluatedValue {
     Fixed(isize),
     FixedArray(Vec<isize>),
@@ -18,7 +18,17 @@ pub enum EvaluatedValue {
     UnknownStatic,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+impl EvaluatedValue {
+    pub fn get_value(&self) -> Option<isize> {
+        if let EvaluatedValue::Fixed(x) = self {
+            Some(*x)
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum EvaluatedType {
     Clock(EvaluatedTypeClock),
     Reset(EvaluatedTypeReset),
@@ -28,28 +38,28 @@ pub enum EvaluatedType {
     Unknown,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct EvaluatedTypeClock {
     pub kind: EvaluatedTypeClockKind,
     pub width: Vec<usize>,
     pub array: Vec<usize>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EvaluatedTypeClockKind {
     Implicit,
     Posedge,
     Negedge,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct EvaluatedTypeReset {
     pub kind: EvaluatedTypeResetKind,
     pub width: Vec<usize>,
     pub array: Vec<usize>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EvaluatedTypeResetKind {
     Implicit,
     AsyncHigh,
@@ -58,21 +68,21 @@ pub enum EvaluatedTypeResetKind {
     SyncLow,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct EvaluatedTypeBit {
     pub signed: bool,
     pub width: Vec<usize>,
     pub array: Vec<usize>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct EvaluatedTypeLogic {
     pub signed: bool,
     pub width: Vec<usize>,
     pub array: Vec<usize>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct EvaluatedTypeUserDefined {
     pub symbol: SymbolId,
     pub width: Vec<usize>,
@@ -134,11 +144,7 @@ impl Evaluated {
     }
 
     pub fn get_value(&self) -> Option<isize> {
-        if let EvaluatedValue::Fixed(x) = self.value {
-            Some(x)
-        } else {
-            None
-        }
+        self.value.get_value()
     }
 
     pub fn get_width(&self) -> Option<Vec<usize>> {
@@ -377,13 +383,13 @@ impl Evaluated {
                 if let (Some(beg), Some(end)) = (beg.get_value(), end.get_value()) {
                     if beg > end {
                         self.errors.push(EvaluatedError::InvalidSelect {
-                            kind: "wrong index order".to_string(),
+                            kind: format!("wrong index order [{beg}:{end}]"),
                             range,
                         });
                         self.set_unknown();
                     } else if end >= *select_array as isize {
                         self.errors.push(EvaluatedError::InvalidSelect {
-                            kind: "out of range".to_string(),
+                            kind: format!("out of range [{beg}:{end}] > {select_array}"),
                             range,
                         });
                         self.set_unknown();
@@ -414,13 +420,13 @@ impl Evaluated {
                 if let (Some(beg), Some(end)) = (beg.get_value(), end.get_value()) {
                     if end > beg {
                         self.errors.push(EvaluatedError::InvalidSelect {
-                            kind: "wrong index order".to_string(),
+                            kind: format!("wrong index order [{beg}:{end}]"),
                             range,
                         });
                         self.set_unknown();
                     } else if beg >= *select_width as isize {
                         self.errors.push(EvaluatedError::InvalidSelect {
-                            kind: "out of range".to_string(),
+                            kind: format!("out of range [{beg}:{end}] > {select_width}"),
                             range,
                         });
                         self.set_unknown();

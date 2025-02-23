@@ -111,7 +111,12 @@ pub struct Pass2Handlers<'a> {
 }
 
 impl<'a> Pass2Handlers<'a> {
-    pub fn new(text: &'a str, _build_opt: &'a Build, _lint_opt: &'a Lint) -> Self {
+    pub fn new(
+        text: &'a str,
+        _build_opt: &'a Build,
+        _lint_opt: &'a Lint,
+        inst_history: &'a mut InstanceHistory,
+    ) -> Self {
         Self {
             check_separator: CheckSeparator::new(text),
             check_enum: CheckEnum::new(text),
@@ -121,7 +126,7 @@ impl<'a> Pass2Handlers<'a> {
             check_var_ref: CheckVarRef::new(text),
             check_clock_reset: CheckClockReset::new(text),
             create_type_dag: CreateTypeDag::new(text),
-            check_expression: CheckExpression::new(text),
+            check_expression: CheckExpression::new(text, vec![], inst_history),
             check_clock_domain: CheckClockDomain::new(text),
             check_proto: CheckProto::new(text),
             check_type: CheckType::new(text),

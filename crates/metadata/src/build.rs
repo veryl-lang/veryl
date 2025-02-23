@@ -34,6 +34,18 @@ pub struct Build {
     pub exclude_std: bool,
     #[serde(default)]
     pub emit_cond_type: bool,
+    #[serde(default = "default_instance_depth_limit")]
+    pub instance_depth_limit: usize,
+    #[serde(default = "default_instance_total_limit")]
+    pub instance_total_limit: usize,
+}
+
+fn default_instance_depth_limit() -> usize {
+    128
+}
+
+fn default_instance_total_limit() -> usize {
+    1024 * 1024
 }
 
 impl Default for Build {

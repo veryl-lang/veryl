@@ -1,4 +1,5 @@
 use crate::attribute::EnumEncodingItem;
+use crate::definition_table::DefinitionId;
 use crate::evaluator::{
     Evaluated, EvaluatedError, EvaluatedTypeClockKind, EvaluatedTypeResetKind, Evaluator,
 };
@@ -71,6 +72,7 @@ pub struct Symbol {
     pub generic_instances: Vec<SymbolId>,
     pub imported: Vec<Namespace>,
     pub evaluated: RefCell<Option<Evaluated>>,
+    pub overrides: Vec<Evaluated>,
     pub allow_unused: bool,
     pub public: bool,
     pub doc_comment: DocComment,
@@ -93,6 +95,7 @@ impl Symbol {
             generic_instances: Vec::new(),
             imported: Vec::new(),
             evaluated: RefCell::new(None),
+            overrides: Vec::new(),
             allow_unused: false,
             public,
             doc_comment,
@@ -114,7 +117,9 @@ impl Symbol {
     }
 
     pub fn evaluate(&self) -> Evaluated {
-        if self.evaluated.borrow().is_some() {
+        if let Some(x) = self.overrides.last() {
+            x.clone()
+        } else if self.evaluated.borrow().is_some() {
             self.evaluated.borrow().clone().unwrap()
         } else {
             let evaluated = match &self.kind {
@@ -506,6 +511,22 @@ impl SymbolKind {
             SymbolKind::StructMember(x) => Some(&mut x.r#type),
             SymbolKind::UnionMember(x) => Some(&mut x.r#type),
             SymbolKind::TypeDef(x) => Some(&mut x.r#type),
+            _ => None,
+        }
+    }
+
+    pub fn get_parameters(&self) -> &[Parameter] {
+        match self {
+            SymbolKind::Module(x) => &x.parameters,
+            SymbolKind::Interface(x) => &x.parameters,
+            _ => &[],
+        }
+    }
+
+    pub fn get_definition(&self) -> Option<DefinitionId> {
+        match self {
+            SymbolKind::Module(x) => Some(x.definition),
+            SymbolKind::Interface(x) => Some(x.definition),
             _ => None,
         }
     }
@@ -1211,6 +1232,7 @@ pub struct ModuleProperty {
     pub ports: Vec<Port>,
     pub default_clock: Option<SymbolId>,
     pub default_reset: Option<SymbolId>,
+    pub definition: DefinitionId,
 }
 
 #[derive(Debug, Clone)]
@@ -1287,6 +1309,7 @@ pub struct InterfaceProperty {
     pub generic_parameters: Vec<SymbolId>,
     pub generic_references: Vec<GenericSymbolPath>,
     pub parameters: Vec<Parameter>,
+    pub definition: DefinitionId,
 }
 
 #[derive(Debug, Clone)]
