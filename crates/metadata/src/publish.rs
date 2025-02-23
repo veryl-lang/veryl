@@ -15,12 +15,7 @@ pub struct Publish {
 
 impl Default for Publish {
     fn default() -> Self {
-        Self {
-            bump_commit: false,
-            publish_commit: false,
-            bump_commit_message: default_bump_commit_message(),
-            publish_commit_message: default_publish_commit_message(),
-        }
+        toml::from_str("").unwrap()
     }
 }
 

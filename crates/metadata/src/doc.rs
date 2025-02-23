@@ -10,9 +10,7 @@ pub struct Doc {
 
 impl Default for Doc {
     fn default() -> Self {
-        Self {
-            path: default_path(),
-        }
+        toml::from_str("").unwrap()
     }
 }
 

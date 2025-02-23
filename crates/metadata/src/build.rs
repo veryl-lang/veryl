@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Build {
     #[serde(default)]
@@ -34,6 +34,12 @@ pub struct Build {
     pub exclude_std: bool,
     #[serde(default)]
     pub emit_cond_type: bool,
+}
+
+impl Default for Build {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
