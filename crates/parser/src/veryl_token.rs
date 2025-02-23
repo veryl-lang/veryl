@@ -37,6 +37,20 @@ impl PartialEq<PathId> for TokenSource {
     }
 }
 
+impl TokenSource {
+    pub fn get_text(&self) -> String {
+        if let TokenSource::File { text, .. } = self {
+            if let Some(x) = text_table::get(*text) {
+                x.text
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Token {
     pub id: TokenId,
@@ -164,6 +178,11 @@ impl TokenRange {
         } else {
             false
         }
+    }
+
+    pub fn offset(&mut self, value: u32) {
+        self.beg.pos += value;
+        self.end.pos += value;
     }
 }
 
