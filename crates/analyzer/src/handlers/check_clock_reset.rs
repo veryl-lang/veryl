@@ -149,7 +149,7 @@ impl VerylGrammarTrait for CheckClockReset<'_> {
                     let symbol = found.found;
                     let valid_clock = match symbol.kind {
                         SymbolKind::Port(x) => {
-                            let clock = x.r#type.clone().unwrap();
+                            let clock = x.r#type;
                             let n_of_select = clock.width.len() + clock.array.len();
                             match clock.kind {
                                 TypeKind::Clock
@@ -197,7 +197,7 @@ impl VerylGrammarTrait for CheckClockReset<'_> {
                     let symbol = found.found;
                     let valid_reset = match symbol.kind {
                         SymbolKind::Port(x) => {
-                            let reset = x.r#type.clone().unwrap();
+                            let reset = x.r#type;
                             let n_of_select = reset.width.len() + reset.array.len();
                             match reset.kind {
                                 TypeKind::Reset

@@ -85,7 +85,7 @@ impl VerylGrammarTrait for CheckMsbLsb<'_> {
                     let r#type = if !via_interface {
                         match x.found.kind {
                             SymbolKind::Variable(x) => Some(x.r#type),
-                            SymbolKind::Port(x) => x.r#type,
+                            SymbolKind::Port(x) => Some(x.r#type),
                             SymbolKind::Parameter(x) => Some(x.r#type),
                             SymbolKind::StructMember(x) => Some(x.r#type),
                             SymbolKind::UnionMember(x) => Some(x.r#type),

@@ -728,11 +728,7 @@ impl VerylGrammarTrait for CheckVarRef<'_> {
                                 // Check assignment of clock/reset type
                                 let (is_clock, is_reset) =
                                     if let Some(port) = ports.get(&token.text) {
-                                        if let Some(x) = &port.r#type {
-                                            (x.kind.is_clock(), x.kind.is_reset())
-                                        } else {
-                                            (false, false)
-                                        }
+                                        (port.r#type.kind.is_clock(), port.r#type.kind.is_reset())
                                     } else {
                                         (false, false)
                                     };
@@ -759,13 +755,7 @@ impl VerylGrammarTrait for CheckVarRef<'_> {
 
                                 // Check implicit reset to SV instance
                                 let is_implicit_reset = match &symbol.kind {
-                                    SymbolKind::Port(x) => {
-                                        if let Some(x) = &x.r#type {
-                                            x.kind == TypeKind::Reset
-                                        } else {
-                                            false
-                                        }
-                                    }
+                                    SymbolKind::Port(x) => x.r#type.kind == TypeKind::Reset,
                                     SymbolKind::Variable(x) => x.r#type.kind == TypeKind::Reset,
                                     _ => false,
                                 };

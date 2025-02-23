@@ -217,9 +217,7 @@ impl SymbolTable {
                             context = self.trace_user_defined(context, &x.r#type.kind)?;
                         }
                         SymbolKind::Port(ref x) => {
-                            if let Some(ref x) = x.r#type {
-                                context = self.trace_user_defined(context, &x.kind)?;
-                            }
+                            context = self.trace_user_defined(context, &x.r#type.kind)?;
                         }
                         SymbolKind::ModportVariableMember(_) => {
                             let path = SymbolPath::new(&[found.token.text]);
