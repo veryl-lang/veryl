@@ -43,7 +43,9 @@ impl TextTable {
         self.table.get(&id).cloned()
     }
 
-    // TODO drop for language server
+    pub fn drop(&mut self, id: PathId) {
+        self.table.retain(|_, x| x.path != id);
+    }
 }
 
 thread_local!(static TEXT_TABLE: RefCell<TextTable> = RefCell::new(TextTable::default()));
@@ -58,4 +60,8 @@ pub fn get_current_text() -> TextId {
 
 pub fn get(id: TextId) -> Option<TextInfo> {
     TEXT_TABLE.with(|f| f.borrow().get(id))
+}
+
+pub fn drop(id: PathId) {
+    TEXT_TABLE.with(|f| f.borrow_mut().drop(id))
 }
