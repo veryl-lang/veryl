@@ -941,7 +941,9 @@ impl Emitter {
             self.space(1);
             self.str("(");
             self.align_start(align_kind::EXPRESSION);
-            self.expression(&property.default_value.unwrap());
+            if let Some(x) = &property.default_value {
+                self.expression(x);
+            }
 
             // Create a dummy token from the last token in expression to add align information
             let token = self.last_token.as_ref().unwrap().replace("");
