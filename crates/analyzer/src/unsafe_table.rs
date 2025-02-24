@@ -1,6 +1,7 @@
 use crate::r#unsafe::Unsafe;
 use crate::range_table::RangeTable;
 use std::cell::RefCell;
+use veryl_parser::resource_table::PathId;
 use veryl_parser::veryl_token::{Token, TokenRange};
 
 thread_local!(static UNSAFE_TABLE: RefCell<RangeTable<Unsafe>> = RefCell::new(RangeTable::default()));
@@ -35,4 +36,8 @@ pub fn get_all() -> Vec<(TokenRange, Unsafe)> {
 
 pub fn clear() {
     UNSAFE_TABLE.with(|f| f.borrow_mut().clear())
+}
+
+pub fn drop(path: PathId) {
+    UNSAFE_TABLE.with(|f| f.borrow_mut().drop(path))
 }

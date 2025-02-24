@@ -84,6 +84,10 @@ where
     pub fn clear(&mut self) {
         self.table.clear()
     }
+
+    pub fn drop(&mut self, path: PathId) {
+        self.table.retain(|x, _| *x != path)
+    }
 }
 
 impl<T> fmt::Display for RangeTable<T>

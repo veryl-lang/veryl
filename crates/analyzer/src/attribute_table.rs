@@ -1,6 +1,7 @@
 use crate::attribute::Attribute;
 use crate::range_table::RangeTable;
 use std::cell::RefCell;
+use veryl_parser::resource_table::PathId;
 use veryl_parser::veryl_token::{Token, TokenRange};
 
 thread_local!(static ATTRIBUTE_TABLE: RefCell<RangeTable<Attribute>> = RefCell::new(RangeTable::default()));
@@ -35,4 +36,8 @@ pub fn get_all() -> Vec<(TokenRange, Attribute)> {
 
 pub fn clear() {
     ATTRIBUTE_TABLE.with(|f| f.borrow_mut().clear())
+}
+
+pub fn drop(path: PathId) {
+    ATTRIBUTE_TABLE.with(|f| f.borrow_mut().drop(path))
 }

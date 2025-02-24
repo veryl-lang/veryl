@@ -11,12 +11,17 @@ use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::SymbolKind as VerylSymbolKind;
 use veryl_analyzer::symbol::{Symbol, TypeKind};
 use veryl_analyzer::symbol_path::SymbolPath;
-use veryl_analyzer::{namespace_table, symbol_table, Analyzer, AnalyzerError};
+use veryl_analyzer::{
+    attribute_table, definition_table, namespace_table, symbol_table, unsafe_table, Analyzer,
+    AnalyzerError,
+};
 use veryl_formatter::Formatter;
 use veryl_metadata::Metadata;
+use veryl_parser::resource_table::{self, PathId};
+use veryl_parser::text_table;
 use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::VerylWalker;
-use veryl_parser::{resource_table, Finder, Parser, ParserError};
+use veryl_parser::{Finder, Parser, ParserError};
 use veryl_path::PathSet;
 
 pub enum MsgToServer {
@@ -639,8 +644,7 @@ impl Server {
             }
             if let Ok(x) = Parser::parse(&text, &src) {
                 if let Some(src) = resource_table::get_path_id(&src) {
-                    symbol_table::drop(src);
-                    namespace_table::drop(src);
+                    drop_tables(src);
                 }
                 let analyzer = Analyzer::new(metadata);
                 let _ = analyzer.analyze_pass1(&path.prj, &src, &x.veryl);
@@ -681,8 +685,7 @@ impl Server {
                         if let Some(path) =
                             resource_table::get_path_id(Path::new(&path).to_path_buf())
                         {
-                            symbol_table::drop(path);
-                            namespace_table::drop(path);
+                            drop_tables(path);
                         }
                         let analyzer = Analyzer::new(&metadata);
                         let mut errors = analyzer.analyze_pass1(prj, &path, &x.veryl);
@@ -736,8 +739,7 @@ impl Server {
     fn on_remove(&mut self, path: Url) {
         if let Ok(path) = path.to_file_path() {
             if let Some(path_id) = resource_table::get_path_id(Path::new(&path).to_path_buf()) {
-                symbol_table::drop(path_id);
-                namespace_table::drop(path_id);
+                drop_tables(path_id);
             }
         }
     }
@@ -1110,6 +1112,15 @@ fn current_namespace(url: &Url, line: usize, column: usize) -> Option<Namespace>
     }
 
     ret_func.or(ret)
+}
+
+fn drop_tables(path: PathId) {
+    symbol_table::drop(path);
+    namespace_table::drop(path);
+    text_table::drop(path);
+    attribute_table::drop(path);
+    unsafe_table::drop(path);
+    definition_table::drop(path);
 }
 
 fn completion_keyword(line: usize, column: usize) -> Vec<CompletionItem> {
