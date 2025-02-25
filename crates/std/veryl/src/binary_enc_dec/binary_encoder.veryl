@@ -79,11 +79,14 @@ module _binary_encoder #(
         );
 
         assign o_valid = r_valid_bot | r_valid_top;
-        assign o_bin   = {r_valid_top, if r_valid_top {
-            r_bin_top
-        } else {
-            r_bin_bot
-        }};
+        assign o_bin   = {
+            r_valid_top,
+            if r_valid_top {
+                r_bin_top
+            } else {
+                r_bin_bot
+            }
+        };
     }
 
 }

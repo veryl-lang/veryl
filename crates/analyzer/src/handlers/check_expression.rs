@@ -684,8 +684,8 @@ impl VerylGrammarTrait for CheckExpression {
                 let mut already_enabled = false;
                 if let Some(value) = exp.get_value() {
                     if value == 0 {
-                        let beg = arg.generate_named_block.l_brace.as_ref().into();
-                        let end = arg.generate_named_block.r_brace.as_ref().into();
+                        let beg = arg.generate_named_block.l_brace.id();
+                        let end = arg.generate_named_block.r_brace.id();
                         self.disable_block_beg.insert(beg);
                         self.disable_block_end.insert(end);
                     } else {
@@ -701,8 +701,8 @@ impl VerylGrammarTrait for CheckExpression {
 
                     if let Some(value) = exp.get_value() {
                         if value == 0 || already_enabled {
-                            let beg = x.generate_optional_named_block.l_brace.as_ref().into();
-                            let end = x.generate_optional_named_block.r_brace.as_ref().into();
+                            let beg = x.generate_optional_named_block.l_brace.id();
+                            let end = x.generate_optional_named_block.r_brace.id();
                             self.disable_block_beg.insert(beg);
                             self.disable_block_end.insert(end);
                         } else {
@@ -715,8 +715,8 @@ impl VerylGrammarTrait for CheckExpression {
 
                 if let Some(x) = &arg.generate_if_declaration_opt {
                     if already_enabled {
-                        let beg = x.generate_optional_named_block.l_brace.as_ref().into();
-                        let end = x.generate_optional_named_block.r_brace.as_ref().into();
+                        let beg = x.generate_optional_named_block.l_brace.id();
+                        let end = x.generate_optional_named_block.r_brace.id();
                         self.disable_block_beg.insert(beg);
                         self.disable_block_end.insert(end);
                     }

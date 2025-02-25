@@ -52,6 +52,7 @@ pub struct Emitter {
     in_start_token: bool,
     consumed_next_newline: bool,
     single_line: bool,
+    multi_line: bool,
     adjust_line: bool,
     case_item_indent: Option<usize>,
     in_always_ff: bool,
@@ -92,6 +93,7 @@ impl Default for Emitter {
             in_start_token: false,
             consumed_next_newline: false,
             single_line: false,
+            multi_line: false,
             adjust_line: false,
             case_item_indent: None,
             in_always_ff: false,
@@ -1597,6 +1599,61 @@ impl VerylWalker for Emitter {
         }
     }
 
+    /// Semantic action for non-terminal 'Factor'
+    fn factor(&mut self, arg: &Factor) {
+        match arg {
+            Factor::Number(x) => self.number(&x.number),
+            Factor::IdentifierFactor(x) => self.identifier_factor(&x.identifier_factor),
+            Factor::LParenExpressionRParen(x) => {
+                self.l_paren(&x.l_paren);
+                self.expression(&x.expression);
+                self.r_paren(&x.r_paren);
+            }
+            Factor::LBraceConcatenationListRBrace(x) => {
+                if x.l_brace.line() != x.r_brace.line() {
+                    self.multi_line = true;
+                }
+                self.l_brace(&x.l_brace);
+                self.concatenation_list(&x.concatenation_list);
+                self.r_brace(&x.r_brace);
+                self.multi_line = false;
+            }
+            Factor::QuoteLBraceArrayLiteralListRBrace(x) => {
+                self.quote_l_brace(&x.quote_l_brace);
+                self.array_literal_list(&x.array_literal_list);
+                self.r_brace(&x.r_brace);
+            }
+            Factor::IfExpression(x) => {
+                self.if_expression(&x.if_expression);
+            }
+            Factor::CaseExpression(x) => {
+                self.case_expression(&x.case_expression);
+            }
+            Factor::SwitchExpression(x) => {
+                self.switch_expression(&x.switch_expression);
+            }
+            Factor::StringLiteral(x) => {
+                self.string_literal(&x.string_literal);
+            }
+            Factor::FactorGroup(x) => match &*x.factor_group {
+                FactorGroup::Msb(x) => self.msb(&x.msb),
+                FactorGroup::Lsb(x) => self.lsb(&x.lsb),
+            },
+            Factor::InsideExpression(x) => {
+                self.inside_expression(&x.inside_expression);
+            }
+            Factor::OutsideExpression(x) => {
+                self.outside_expression(&x.outside_expression);
+            }
+            Factor::TypeExpression(x) => {
+                self.type_expression(&x.type_expression);
+            }
+            Factor::FactorTypeFactor(x) => {
+                self.factor_type_factor(&x.factor_type_factor);
+            }
+        }
+    }
+
     /// Semantic action for non-terminal 'IdentifierFactor'
     fn identifier_factor(&mut self, arg: &IdentifierFactor) {
         self.expression_identifier(&arg.expression_identifier);
@@ -1620,11 +1677,21 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ConcatenationList'
     fn concatenation_list(&mut self, arg: &ConcatenationList) {
+        if self.multi_line {
+            self.newline_push();
+        }
         self.concatenation_item(&arg.concatenation_item);
         for x in &arg.concatenation_list_list {
             self.comma(&x.comma);
-            self.space(1);
+            if x.comma.line() != x.concatenation_item.line() {
+                self.newline();
+            } else {
+                self.space(1);
+            }
             self.concatenation_item(&x.concatenation_item);
+        }
+        if self.multi_line {
+            self.newline_pop();
         }
     }
 

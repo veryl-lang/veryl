@@ -1411,8 +1411,12 @@ impl Evaluator {
         ) {
             (Some(value0), Some(value1), Some(width0), Some(width1)) => {
                 let width = width0 + width1;
-                let value = (value0 << width1) | value1;
-                Evaluated::create_fixed(value, false, vec![width], vec![])
+                if let Some(x) = value0.checked_shl(width1 as u32) {
+                    let value = x | value1;
+                    Evaluated::create_fixed(value, false, vec![width], vec![])
+                } else {
+                    Evaluated::create_undefine_fixed(false, vec![width], vec![])
+                }
             }
             _ => {
                 if x.is_known_static() && y.is_known_static() {
