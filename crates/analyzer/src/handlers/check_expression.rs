@@ -3,7 +3,9 @@ use crate::analyzer_error::AnalyzerError;
 use crate::definition_table::{self, Definition};
 use crate::evaluator::{Evaluated, EvaluatedError, EvaluatedType, Evaluator};
 use crate::instance_history::{self, InstanceHistoryError, InstanceSignature};
-use crate::symbol::{Direction, GenericBoundKind, ModuleProperty, Symbol, SymbolId, SymbolKind};
+use crate::symbol::{
+    Direction, GenericBoundKind, ModuleProperty, Symbol, SymbolId, SymbolKind, TypeKind,
+};
 use crate::symbol_table;
 use std::collections::{HashMap, HashSet};
 use veryl_parser::resource_table::StrId;
@@ -12,6 +14,12 @@ use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::TokenRange;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint, VerylWalker};
 use veryl_parser::ParolError;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Context {
+    Assignment,
+    PortConnection,
+}
 
 #[derive(Default)]
 pub struct CheckExpression {
@@ -55,8 +63,9 @@ impl CheckExpression {
         self.errors.push(error);
     }
 
-    fn check_assignment(
+    fn check_compatibility(
         &mut self,
+        _context: Context,
         src: &Evaluated,
         dst: &Symbol,
         dst_last_select: &[Select],
@@ -93,6 +102,31 @@ impl CheckExpression {
                     ));
                 }
 
+                if let TypeKind::UserDefined(x) = &dst_type.kind {
+                    let dst_symbol = symbol_table::get(x.symbol.unwrap()).unwrap();
+                    if let SymbolKind::Modport(dst) = &dst_symbol.kind {
+                        let dst_interface = symbol_table::get(dst.interface).unwrap();
+                        if let EvaluatedType::UserDefined(src) = &src.r#type {
+                            let src_symbol = symbol_table::get(src.symbol).unwrap();
+                            if dst.interface != src.symbol {
+                                self.errors.push(AnalyzerError::mismatch_assignment(
+                                    &format!("instance of {}", src_symbol.token),
+                                    &format!("modport of {}", dst_interface.token),
+                                    token,
+                                    &self.inst_context,
+                                ));
+                            }
+                        } else {
+                            self.errors.push(AnalyzerError::mismatch_assignment(
+                                "non-interface",
+                                &format!("modport of {}", dst_interface.token),
+                                token,
+                                &self.inst_context,
+                            ));
+                        }
+                    }
+                }
+
                 // TODO type checks
             }
         }
@@ -127,9 +161,39 @@ impl CheckExpression {
         ret
     }
 
-    fn check_port_connection(&mut self, _arg: &InstDeclaration, _module: &ModuleProperty) {
-        // TODO check port connection
-        //
+    fn check_port_connection(&mut self, arg: &InstDeclaration, module: &ModuleProperty) {
+        let connections = if let Some(x) = &arg.inst_declaration_opt1 {
+            if let Some(x) = &x.inst_declaration_opt2 {
+                x.inst_port_list.as_ref().into()
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+
+        let mut ports = HashMap::new();
+        for x in &module.ports {
+            let name = x.name();
+            let symbol = x.symbol();
+            ports.insert(name, symbol);
+        }
+
+        for connect in connections {
+            let src = if let Some(x) = &connect.inst_port_item_opt {
+                self.evaluator.expression(&x.expression)
+            } else if let Ok(symbol) = symbol_table::resolve(connect.identifier.as_ref()) {
+                symbol.found.evaluate()
+            } else {
+                Evaluated::create_unknown()
+            };
+
+            let token: TokenRange = (&connect).into();
+            let dst = connect.identifier.identifier_token.token.text;
+            if let Some(dst) = ports.get(&dst) {
+                self.check_compatibility(Context::PortConnection, &src, dst, &[], &token);
+            }
+        }
     }
 }
 
@@ -221,7 +285,13 @@ impl VerylGrammarTrait for CheckExpression {
                 self.evaluated_error(&exp.errors);
 
                 if let Ok(dst) = symbol_table::resolve(arg.identifier.as_ref()) {
-                    self.check_assignment(&exp, &dst.found, &[], &arg.into());
+                    self.check_compatibility(
+                        Context::Assignment,
+                        &exp,
+                        &dst.found,
+                        &[],
+                        &arg.into(),
+                    );
                 }
             }
         }
@@ -242,7 +312,13 @@ impl VerylGrammarTrait for CheckExpression {
 
                         if let Ok(dst) = symbol_table::resolve(arg.expression_identifier.as_ref()) {
                             let dst_last_select = arg.expression_identifier.last_select();
-                            self.check_assignment(&exp, &dst.found, &dst_last_select, &arg.into());
+                            self.check_compatibility(
+                                Context::Assignment,
+                                &exp,
+                                &dst.found,
+                                &dst_last_select,
+                                &arg.into(),
+                            );
                         }
                     }
                 }
@@ -401,7 +477,13 @@ impl VerylGrammarTrait for CheckExpression {
                 self.evaluated_error(&exp.errors);
 
                 if let Ok(dst) = symbol_table::resolve(arg.identifier.as_ref()) {
-                    self.check_assignment(&exp, &dst.found, &[], &arg.into());
+                    self.check_compatibility(
+                        Context::Assignment,
+                        &exp,
+                        &dst.found,
+                        &[],
+                        &arg.into(),
+                    );
                 }
             }
         }
@@ -416,7 +498,13 @@ impl VerylGrammarTrait for CheckExpression {
                 self.evaluated_error(&exp.errors);
 
                 if let Ok(dst) = symbol_table::resolve(arg.identifier.as_ref()) {
-                    self.check_assignment(&exp, &dst.found, &[], &arg.into());
+                    self.check_compatibility(
+                        Context::Assignment,
+                        &exp,
+                        &dst.found,
+                        &[],
+                        &arg.into(),
+                    );
                 }
             }
         }
@@ -432,7 +520,13 @@ impl VerylGrammarTrait for CheckExpression {
 
                 if let Ok(dst) = symbol_table::resolve(arg.hierarchical_identifier.as_ref()) {
                     let dst_last_select = arg.hierarchical_identifier.last_select();
-                    self.check_assignment(&exp, &dst.found, &dst_last_select, &arg.into());
+                    self.check_compatibility(
+                        Context::Assignment,
+                        &exp,
+                        &dst.found,
+                        &dst_last_select,
+                        &arg.into(),
+                    );
                 }
             }
         }

@@ -223,6 +223,29 @@ impl Symbol {
                     });
                     ret
                 }
+                SymbolKind::Instance(x) => {
+                    let mut evaluator = Evaluator::new();
+                    if let Ok(symbol) =
+                        symbol_table::resolve((&x.type_name.mangled_path(), &self.namespace))
+                    {
+                        if let SymbolKind::Interface(_) = symbol.found.kind {
+                            if let Some(array) = evaluator.expression_list(&x.array) {
+                                Evaluated::create_user_defined(symbol.found.id, vec![], array)
+                            } else {
+                                Evaluated::create_unknown()
+                            }
+                        } else {
+                            let mut ret = Evaluated::create_unknown();
+                            ret.errors.push(EvaluatedError::InvalidFactor {
+                                kind: self.kind.to_kind_name(),
+                                token: self.token,
+                            });
+                            ret
+                        }
+                    } else {
+                        Evaluated::create_unknown()
+                    }
+                }
                 _ => Evaluated::create_unknown(),
             };
             self.evaluated.replace(Some(evaluated.clone()));
@@ -947,14 +970,12 @@ impl TryFrom<&syntax_tree::Expression> for Type {
                         name.push(x.identifier.identifier_token.token.text);
                     }
                     let kind = TypeKind::UserDefined(UserDefinedType::new(name));
-                    let mut width = Vec::new();
-                    if let Some(ref x) = x.expression_identifier_opt {
-                        let x = &x.width;
-                        width.push(*x.expression.clone());
-                        for x in &x.width_list {
-                            width.push(*x.expression.clone());
-                        }
-                    }
+                    let width: Vec<syntax_tree::Expression> =
+                        if let Some(ref x) = x.expression_identifier_opt {
+                            x.width.as_ref().into()
+                        } else {
+                            Vec::new()
+                        };
                     Ok(Type {
                         kind,
                         modifier: vec![],
@@ -985,14 +1006,11 @@ impl From<&syntax_tree::FactorType> for Type {
                     syntax_tree::VariableType::Logic(_) => TypeKind::Logic,
                     syntax_tree::VariableType::Bit(_) => TypeKind::Bit,
                 };
-                let mut width = Vec::new();
-                if let Some(ref x) = x.factor_type_opt {
-                    let x = &x.width;
-                    width.push(*x.expression.clone());
-                    for x in &x.width_list {
-                        width.push(*x.expression.clone());
-                    }
-                }
+                let width: Vec<syntax_tree::Expression> = if let Some(ref x) = x.factor_type_opt {
+                    x.width.as_ref().into()
+                } else {
+                    Vec::new()
+                };
                 Type {
                     kind,
                     modifier: vec![],
@@ -1048,14 +1066,11 @@ impl From<&syntax_tree::ScalarType> for Type {
                     name.push(x.identifier.identifier_token.token.text);
                 }
                 let kind = TypeKind::UserDefined(UserDefinedType::new(name));
-                let mut width = Vec::new();
-                if let Some(ref x) = x.scalar_type_opt {
-                    let x = &x.width;
-                    width.push(*x.expression.clone());
-                    for x in &x.width_list {
-                        width.push(*x.expression.clone());
-                    }
-                }
+                let width: Vec<syntax_tree::Expression> = if let Some(ref x) = x.scalar_type_opt {
+                    x.width.as_ref().into()
+                } else {
+                    Vec::new()
+                };
                 Type {
                     kind,
                     modifier,
@@ -1081,14 +1096,11 @@ impl From<&syntax_tree::ScalarType> for Type {
 impl From<&syntax_tree::ArrayType> for Type {
     fn from(value: &syntax_tree::ArrayType) -> Self {
         let scalar_type: Type = value.scalar_type.as_ref().into();
-        let mut array = Vec::new();
-        if let Some(ref x) = value.array_type_opt {
-            let x = &x.array;
-            array.push(*x.expression.clone());
-            for x in &x.array_list {
-                array.push(*x.expression.clone());
-            }
-        }
+        let array: Vec<syntax_tree::Expression> = if let Some(ref x) = value.array_type_opt {
+            x.array.as_ref().into()
+        } else {
+            Vec::new()
+        };
         Type {
             kind: scalar_type.kind,
             modifier: scalar_type.modifier,
@@ -1173,11 +1185,15 @@ impl fmt::Display for Port {
 
 impl Port {
     pub fn property(&self) -> PortProperty {
-        if let SymbolKind::Port(x) = symbol_table::get(self.symbol).unwrap().kind {
+        if let SymbolKind::Port(x) = self.symbol().kind {
             x.clone()
         } else {
             unreachable!()
         }
+    }
+
+    pub fn symbol(&self) -> Symbol {
+        symbol_table::get(self.symbol).unwrap()
     }
 
     pub fn name(&self) -> StrId {
@@ -1373,6 +1389,7 @@ impl From<&syntax_tree::ExpressionIdentifier> for ConnectTarget {
 
 #[derive(Debug, Clone)]
 pub struct InstanceProperty {
+    pub array: Vec<syntax_tree::Expression>,
     pub type_name: GenericSymbolPath,
     pub connects: HashMap<Token, Vec<ConnectTarget>>,
 }
@@ -1446,6 +1463,7 @@ pub struct EnumMemberProperty {
 
 #[derive(Debug, Clone)]
 pub struct ModportProperty {
+    pub interface: SymbolId,
     pub members: Vec<SymbolId>,
 }
 

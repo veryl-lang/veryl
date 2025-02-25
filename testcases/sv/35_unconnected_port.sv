@@ -10,9 +10,9 @@ module veryl_testcase_Module35;
 endmodule
 
 module veryl_testcase_Module35B (
-    input  int unsigned aa  ,
-    output int unsigned bb  ,
-    output int unsigned bbbb
+    input  logic [32-1:0] aa  ,
+    output logic [32-1:0] bb  ,
+    output logic [32-1:0] bbbb
 );
     always_comb begin
         bb   = 0;

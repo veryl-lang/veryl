@@ -88,6 +88,7 @@ pub struct CreateSymbolTable {
     default_clock_candidates: Vec<SymbolId>,
     defualt_reset_candidates: Vec<SymbolId>,
     modport_member_ids: Vec<SymbolId>,
+    modport_ids: Vec<SymbolId>,
     function_ids: HashMap<StrId, SymbolId>,
     exist_clock_without_domain: bool,
     in_proto: bool,
@@ -698,9 +699,17 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
             self.namespace.pop();
 
-            let property = ModportProperty { members };
+            let property = ModportProperty {
+                // Dummy SymbolId, the actual value is inserted at interface_declaration
+                interface: SymbolId(0),
+                members,
+            };
             let kind = SymbolKind::Modport(property);
-            self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
+            if let Some(id) =
+                self.insert_symbol(&arg.identifier.identifier_token.token, kind, false)
+            {
+                self.modport_ids.push(id);
+            }
         }
         Ok(())
     }
@@ -877,9 +886,15 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
     fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::After = self.point {
+            let array: Vec<Expression> = if let Some(x) = &arg.inst_declaration_opt {
+                x.array.as_ref().into()
+            } else {
+                Vec::new()
+            };
             let type_name: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
             let connects = self.connects.drain().collect();
             let property = InstanceProperty {
+                array,
                 type_name,
                 connects,
             };
@@ -1069,14 +1084,11 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     } else {
                         TypeKind::AbstractInterface(None)
                     };
-                    let mut array = Vec::new();
-                    if let Some(ref x) = x.port_type_abstract_opt1 {
-                        let x = &x.array;
-                        array.push(*x.expression.clone());
-                        for x in &x.array_list {
-                            array.push(*x.expression.clone());
-                        }
-                    }
+                    let array: Vec<Expression> = if let Some(ref x) = x.port_type_abstract_opt1 {
+                        x.array.as_ref().into()
+                    } else {
+                        Vec::new()
+                    };
                     let r#type = SymType {
                         kind,
                         modifier: vec![],
@@ -1331,6 +1343,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.affiliation.push(VariableAffiliation::Intarface);
                 self.function_ids.clear();
                 self.modport_member_ids.clear();
+                self.modport_ids.clear();
 
                 self.apply_file_scope_import();
             }
@@ -1353,7 +1366,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     definition,
                 };
                 let public = arg.interface_declaration_opt.is_some();
-                self.insert_symbol(
+                let interface_id = self.insert_symbol(
                     &arg.identifier.identifier_token.token,
                     SymbolKind::Interface(property),
                     public,
@@ -1368,6 +1381,21 @@ impl VerylGrammarTrait for CreateSymbolTable {
                             let kind = SymbolKind::ModportFunctionMember(property);
                             mp_member.kind = kind;
                             symbol_table::update(mp_member);
+                        }
+                    }
+                }
+
+                for id in &self.modport_ids {
+                    let mut mp = symbol_table::get(*id).unwrap();
+                    if let SymbolKind::Modport(x) = mp.kind {
+                        if let Some(interface) = interface_id {
+                            let property = ModportProperty {
+                                interface,
+                                members: x.members.clone(),
+                            };
+                            let kind = SymbolKind::Modport(property);
+                            mp.kind = kind;
+                            symbol_table::update(mp);
                         }
                     }
                 }
