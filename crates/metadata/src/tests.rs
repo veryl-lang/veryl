@@ -93,10 +93,12 @@ fn create_metadata_multi() -> (Metadata, TempDir) {
 }
 
 fn create_project(root: &Path, name: &str, toml: &str, publish: bool) -> Metadata {
-    std::env::set_var("GIT_AUTHOR_NAME", "veryl");
-    std::env::set_var("GIT_AUTHOR_EMAIL", "veryl");
-    std::env::set_var("GIT_COMMITTER_NAME", "veryl");
-    std::env::set_var("GIT_COMMITTER_EMAIL", "veryl");
+    unsafe {
+        std::env::set_var("GIT_AUTHOR_NAME", "veryl");
+        std::env::set_var("GIT_AUTHOR_EMAIL", "veryl");
+        std::env::set_var("GIT_COMMITTER_NAME", "veryl");
+        std::env::set_var("GIT_COMMITTER_EMAIL", "veryl");
+    }
 
     let path = root.join(name);
     fs::create_dir(&path).unwrap();

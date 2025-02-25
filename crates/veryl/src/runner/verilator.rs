@@ -1,4 +1,4 @@
-use crate::runner::{copy_wave, remap_msg_by_regex, Runner};
+use crate::runner::{Runner, copy_wave, remap_msg_by_regex};
 use futures::prelude::*;
 use log::{error, info};
 use miette::{IntoDiagnostic, Result, WrapErr};

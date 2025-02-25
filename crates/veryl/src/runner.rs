@@ -1,5 +1,5 @@
 use anstyle::{AnsiColor, Style};
-use log::{debug, log_enabled, Level};
+use log::{Level, debug, log_enabled};
 use miette::{IntoDiagnostic, Result};
 use once_cell::sync::Lazy;
 use regex::Regex;

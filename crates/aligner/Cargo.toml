@@ -8,7 +8,7 @@ categories.workspace  = true
 license.workspace     = true
 readme.workspace      = true
 description.workspace = true
-edition               = "2021"
+edition.workspace     = true
 
 [dependencies]
 veryl-parser = {version = "0.13.5", path = "../parser"}

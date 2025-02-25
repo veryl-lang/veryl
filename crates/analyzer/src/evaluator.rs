@@ -466,11 +466,7 @@ impl Evaluated {
                         }
 
                         let new_width = if beg == end {
-                            if rest.is_empty() {
-                                vec![1]
-                            } else {
-                                rest
-                            }
+                            if rest.is_empty() { vec![1] } else { rest }
                         } else {
                             let mut new_width = vec![(beg - end + 1) as usize];
                             new_width.append(&mut rest);

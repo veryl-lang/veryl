@@ -1,5 +1,5 @@
-use crate::cmd_check::CheckError;
 use crate::OptBuild;
+use crate::cmd_check::CheckError;
 use log::{debug, info};
 use miette::{IntoDiagnostic, Result, WrapErr};
 use std::collections::HashMap;
@@ -10,10 +10,10 @@ use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::SymbolKind;
-use veryl_analyzer::{symbol_table, type_dag, Analyzer};
+use veryl_analyzer::{Analyzer, symbol_table, type_dag};
 use veryl_emitter::Emitter;
 use veryl_metadata::{FilelistType, Metadata, SourceMapTarget, Target};
-use veryl_parser::{resource_table, veryl_token::TokenSource, Parser};
+use veryl_parser::{Parser, resource_table, veryl_token::TokenSource};
 use veryl_path::PathSet;
 
 pub struct CmdBuild {

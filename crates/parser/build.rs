@@ -1,4 +1,4 @@
-use parol::{build::Builder, ParolErrorReporter};
+use parol::{ParolErrorReporter, build::Builder};
 use parol_runtime::Report;
 use std::env;
 use std::fs;

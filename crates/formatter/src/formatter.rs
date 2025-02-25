@@ -1,4 +1,4 @@
-use veryl_aligner::{align_kind, Aligner, Location};
+use veryl_aligner::{Aligner, Location, align_kind};
 use veryl_analyzer::attribute::AlignItem;
 use veryl_analyzer::attribute_table;
 use veryl_metadata::{Format, Metadata};

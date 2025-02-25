@@ -5,9 +5,9 @@ use crate::symbol::Type as SymType;
 use crate::symbol::{Direction, SymbolKind, TypeKind};
 use crate::symbol_path::{SymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
+use veryl_parser::ParolError;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
-use veryl_parser::ParolError;
 
 #[derive(Default)]
 pub struct CheckMsbLsb {

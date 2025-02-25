@@ -1,6 +1,6 @@
 use crate::namespace::Namespace;
 use crate::symbol_path::SymbolPath;
-use crate::{symbol_table, Analyzer, AnalyzerError};
+use crate::{Analyzer, AnalyzerError, symbol_table};
 use veryl_metadata::Metadata;
 use veryl_parser::Parser;
 
@@ -3427,9 +3427,11 @@ fn unresolvable_generic_argument() {
 
     let errors = analyze(code);
     // This pattern also causes CyclicTypeDependency error
-    assert!(errors
-        .iter()
-        .any(|e| matches!(e, AnalyzerError::UnresolvableGenericArgument { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::UnresolvableGenericArgument { .. }))
+    );
 }
 
 #[test]

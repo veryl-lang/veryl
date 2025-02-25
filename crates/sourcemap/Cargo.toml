@@ -1,7 +1,6 @@
 [package]
 name                  = "veryl-sourcemap"
 version               = "0.13.5"
-edition               = "2021"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -9,6 +8,7 @@ categories.workspace  = true
 license.workspace     = true
 readme.workspace      = true
 description.workspace = true
+edition.workspace     = true
 
 [dependencies]
 miette        = {workspace = true}

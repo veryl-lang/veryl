@@ -1,7 +1,7 @@
-use crate::cmd_check::CheckError;
 use crate::OptPublish;
+use crate::cmd_check::CheckError;
 use log::{info, warn};
-use miette::{bail, IntoDiagnostic, Result, WrapErr};
+use miette::{IntoDiagnostic, Result, WrapErr, bail};
 use std::fs;
 use veryl_analyzer::Analyzer;
 use veryl_metadata::{Metadata, UrlPath};

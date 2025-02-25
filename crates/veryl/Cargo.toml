@@ -8,7 +8,7 @@ categories.workspace  = true
 license.workspace     = true
 readme.workspace      = true
 description.workspace = true
-edition               = "2021"
+edition.workspace     = true
 
 [package.metadata.release]
 tag = true

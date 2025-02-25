@@ -25,12 +25,12 @@ use crate::symbol_table::Import as SymImport;
 use std::collections::{HashMap, HashSet};
 use veryl_metadata::ClockType;
 use veryl_metadata::{Build, ResetType};
+use veryl_parser::ParolError;
 use veryl_parser::doc_comment_table;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::{Token, TokenRange, TokenSource};
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
-use veryl_parser::ParolError;
 
 #[derive(Default)]
 struct GenericContext {

@@ -1,15 +1,15 @@
+use crate::AnalyzerError;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::{Direction, GenericMap, Symbol, SymbolKind};
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table;
 use crate::symbol_table::{ResolveError, ResolveErrorCause};
-use crate::AnalyzerError;
 use std::cell::RefCell;
 use veryl_parser::veryl_grammar_trait::{
     ExpressionIdentifier, HierarchicalIdentifier, InstPortItem, ModportItem, ScopedIdentifier,
 };
-use veryl_parser::veryl_token::{is_anonymous_text, Token, TokenRange, TokenSource};
+use veryl_parser::veryl_token::{Token, TokenRange, TokenSource, is_anonymous_text};
 
 #[derive(Clone, Debug)]
 pub enum ReferenceCandidate {

@@ -1,6 +1,6 @@
 use crate::OptInit;
 use log::info;
-use miette::{bail, IntoDiagnostic, Result};
+use miette::{IntoDiagnostic, Result, bail};
 use std::fs::File;
 use std::io::Write;
 use veryl_metadata::Metadata;

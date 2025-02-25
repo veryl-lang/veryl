@@ -1,5 +1,5 @@
-use crate::r#unsafe::Unsafe;
 use crate::range_table::RangeTable;
+use crate::r#unsafe::Unsafe;
 use std::cell::RefCell;
 use veryl_parser::resource_table::PathId;
 use veryl_parser::veryl_token::{Token, TokenRange};

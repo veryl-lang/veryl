@@ -1,10 +1,10 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::attribute::AttributeError;
 use crate::attribute_table;
+use veryl_parser::ParolError;
 use veryl_parser::last_token::LastToken;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint, VerylWalker};
-use veryl_parser::ParolError;
 
 #[derive(Default)]
 pub struct CheckAttribute {

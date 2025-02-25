@@ -1,14 +1,14 @@
-use crate::doc::{DocBuilder, TopLevelItem};
 use crate::OptDoc;
+use crate::doc::{DocBuilder, TopLevelItem};
 use log::info;
 use miette::{IntoDiagnostic, Result, WrapErr};
 use std::collections::BTreeMap;
 use std::fs;
 use veryl_analyzer::symbol::{SymbolId, SymbolKind};
-use veryl_analyzer::{symbol_table, Analyzer};
+use veryl_analyzer::{Analyzer, symbol_table};
 use veryl_metadata::Metadata;
-use veryl_parser::resource_table;
 use veryl_parser::Parser;
+use veryl_parser::resource_table;
 
 pub struct CmdDoc {
     opt: OptDoc,
