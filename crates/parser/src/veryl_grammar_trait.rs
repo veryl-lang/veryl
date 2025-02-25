@@ -1,6 +1,6 @@
 pub use crate::generated::veryl_grammar_trait::*;
 use crate::resource_table::TokenId;
-use crate::veryl_token::is_anonymous_token;
+use crate::veryl_token::{is_anonymous_token, Token, TokenRange};
 use paste::paste;
 use std::fmt;
 
@@ -290,18 +290,6 @@ impl fmt::Display for Direction {
     }
 }
 
-impl From<&LBrace> for TokenId {
-    fn from(value: &LBrace) -> Self {
-        value.l_brace_token.token.id
-    }
-}
-
-impl From<&RBrace> for TokenId {
-    fn from(value: &RBrace) -> Self {
-        value.r_brace_token.token.id
-    }
-}
-
 impl ExpressionIdentifier {
     pub fn last_select(&self) -> Vec<Select> {
         if self.expression_identifier_list0.is_empty() {
@@ -337,5 +325,46 @@ impl HierarchicalIdentifier {
                 .map(|x| x.select.as_ref().clone())
                 .collect()
         }
+    }
+}
+
+pub trait FirstToken {
+    fn token(&self) -> Token;
+    fn id(&self) -> TokenId {
+        self.token().id
+    }
+    fn line(&self) -> u32 {
+        self.token().line
+    }
+}
+
+impl FirstToken for LBrace {
+    fn token(&self) -> Token {
+        self.l_brace_token.token
+    }
+}
+
+impl FirstToken for RBrace {
+    fn token(&self) -> Token {
+        self.r_brace_token.token
+    }
+}
+
+impl FirstToken for Comma {
+    fn token(&self) -> Token {
+        self.comma_token.token
+    }
+}
+
+impl FirstToken for Expression {
+    fn token(&self) -> Token {
+        let range: TokenRange = self.into();
+        range.beg
+    }
+}
+
+impl FirstToken for ConcatenationItem {
+    fn token(&self) -> Token {
+        self.expression.as_ref().token()
     }
 }

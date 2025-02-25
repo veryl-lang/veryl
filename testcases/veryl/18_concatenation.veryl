@@ -5,4 +5,15 @@ module Module18 {
 
     assign a = {a[10:0], c,};
     assign b = {a[10:0] repeat 10, c repeat 4};
+
+    // multi-line concatenation
+    let _d: logic = {
+        a repeat 8, b repeat 8, c repeat 8,
+        a repeat 8, b repeat 8, c repeat 8,
+        a repeat 8, b repeat 8, c repeat 8,
+        a repeat 8, b repeat 8, c repeat 8,
+        a repeat 8, b repeat 8, c repeat 8,
+        a repeat 8, b repeat 8, c repeat 8,
+        a repeat 8, b repeat 8, c repeat 8,
+    };
 }
