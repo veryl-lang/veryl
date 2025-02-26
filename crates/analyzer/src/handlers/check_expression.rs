@@ -135,7 +135,7 @@ impl CheckExpression {
     fn get_overridden_params(&mut self, arg: &InstDeclaration) -> HashMap<StrId, Evaluated> {
         let mut ret = HashMap::new();
 
-        let params = if let Some(x) = &arg.inst_declaration_opt0 {
+        let params = if let Some(x) = &arg.inst_declaration_opt1 {
             if let Some(x) = &x.inst_parameter.inst_parameter_opt {
                 x.inst_parameter_list.as_ref().into()
             } else {
@@ -162,8 +162,8 @@ impl CheckExpression {
     }
 
     fn check_port_connection(&mut self, arg: &InstDeclaration, module: &ModuleProperty) {
-        let connections = if let Some(x) = &arg.inst_declaration_opt1 {
-            if let Some(x) = &x.inst_declaration_opt2 {
+        let connections = if let Some(x) = &arg.inst_declaration_opt2 {
+            if let Some(x) = &x.inst_declaration_opt3 {
                 x.inst_port_list.as_ref().into()
             } else {
                 Vec::new()

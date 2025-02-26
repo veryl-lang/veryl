@@ -1677,6 +1677,22 @@ fn missing_clock_domain() {
 }
 
 #[test]
+fn invalid_clock_domain() {
+    let code = r#"
+    module ModuleA {}
+    module ModuleB {
+        inst u: `a ModuleA;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidClockDomain { .. }
+    ));
+}
+
+#[test]
 fn too_large_enum_variant() {
     let code = r#"
     module ModuleA {
@@ -3231,6 +3247,62 @@ fn clock_domain() {
         always_comb {
             o_dat = i_dat;
         }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchClockDomain { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceI {
+      var v: logic;
+    }
+    module ModuleI (
+      i_clk: input `a clock,
+      i_dat: input `a logic,
+    ) {
+        inst intf: `a InterfaceI;
+        assign intf.v = i_dat;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    interface InterfaceJ {
+      var v: logic;
+    }
+    module ModuleJ (
+      i_clk: input `a clock,
+      i_dat: input `a logic,
+    ) {
+        inst intf: `b InterfaceJ;
+        assign intf.v = i_dat;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchClockDomain { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceK {
+      var v: logic;
+    }
+    module ModuleK (
+      i_clk: input  `a clock,
+      o_dat: output `b logic,
+    ) {
+        inst intf: `a InterfaceK;
+
+        assign intf.v = '0;
+        assign o_dat  = intf.v;
     }
     "#;
 

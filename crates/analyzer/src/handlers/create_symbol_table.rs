@@ -886,17 +886,24 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
     fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::After = self.point {
-            let array: Vec<Expression> = if let Some(x) = &arg.inst_declaration_opt {
+            let array: Vec<Expression> = if let Some(x) = &arg.inst_declaration_opt0 {
                 x.array.as_ref().into()
             } else {
                 Vec::new()
             };
             let type_name: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
             let connects = self.connects.drain().collect();
+            let clock_domain = if let Some(ref x) = arg.inst_declaration_opt {
+                self.insert_clock_domain(&x.clock_domain)
+            } else {
+                // Clock domain will be updated to 'Implicit' if the instance is for an interface
+                SymClockDomain::None
+            };
             let property = InstanceProperty {
                 array,
                 type_name,
                 connects,
+                clock_domain,
             };
             let kind = SymbolKind::Instance(property);
             self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);

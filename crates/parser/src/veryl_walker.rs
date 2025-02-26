@@ -2154,16 +2154,19 @@ pub trait VerylWalker {
         self.inst(&arg.inst);
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
-        self.scoped_identifier(&arg.scoped_identifier);
         if let Some(ref x) = arg.inst_declaration_opt {
+            self.clock_domain(&x.clock_domain);
+        }
+        self.scoped_identifier(&arg.scoped_identifier);
+        if let Some(ref x) = arg.inst_declaration_opt0 {
             self.array(&x.array);
         }
-        if let Some(ref x) = arg.inst_declaration_opt0 {
+        if let Some(ref x) = arg.inst_declaration_opt1 {
             self.inst_parameter(&x.inst_parameter);
         }
-        if let Some(ref x) = arg.inst_declaration_opt1 {
+        if let Some(ref x) = arg.inst_declaration_opt2 {
             self.l_paren(&x.l_paren);
-            if let Some(ref x) = x.inst_declaration_opt2 {
+            if let Some(ref x) = x.inst_declaration_opt3 {
                 self.inst_port_list(&x.inst_port_list);
             }
             self.r_paren(&x.r_paren);
