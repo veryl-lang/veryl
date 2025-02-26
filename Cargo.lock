@@ -5143,6 +5143,7 @@ name = "veryl-formatter"
 version = "0.13.5"
 dependencies = [
  "veryl-aligner",
+ "veryl-analyzer",
  "veryl-metadata",
  "veryl-parser",
 ]

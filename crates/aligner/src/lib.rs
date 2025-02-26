@@ -122,12 +122,13 @@ pub mod align_kind {
     pub const PARAMETER: usize = 6;
     pub const DIRECTION: usize = 7;
     pub const CLOCK_DOMAIN: usize = 8;
+    pub const NUMBER: usize = 9;
 }
 
 #[derive(Default)]
 pub struct Aligner {
     pub additions: HashMap<Location, u32>,
-    pub aligns: [Align; 9],
+    pub aligns: [Align; 10],
 }
 
 impl Aligner {
@@ -180,5 +181,9 @@ impl Aligner {
         for align in &mut self.aligns {
             align.disable_auto_finish = true;
         }
+    }
+
+    pub fn any_enabled(&self) -> bool {
+        self.aligns.iter().any(|x| x.enable)
     }
 }

@@ -1,0 +1,36 @@
+module Module74 {
+    let a  : logic<32> = 1;
+    let aa : logic<32> = 1;
+    let aaa: logic<32> = 1;
+
+    let _b: logic = {
+        a[0] repeat 1, a[0] repeat 1,
+        aa[1] repeat 8, aa[1] repeat 8,
+        aaa[2] repeat 16, aaa[2] repeat 16,
+        a[3] repeat 1, a[3] repeat 1,
+        aa[4] repeat 8, aa[4] repeat 8,
+        aaa[5] repeat 16, aaa[5] repeat 16,
+        a[6] repeat 1, a[6] repeat 1,
+        aa[7] repeat 8, aa[7] repeat 8,
+        aaa[8] repeat 16, aaa[8] repeat 16,
+        a[9] repeat 1, a[9] repeat 1,
+        aa[10] repeat 8, aa[10] repeat 8,
+        aaa[11] repeat 16, aaa[11] repeat 16,
+    };
+
+    #[align(number, identifier)]
+    let _c : logic = {
+        a  [0 ] repeat 1 , a  [0 ] repeat 1 ,
+        aa [1 ] repeat 8 , aa [1 ] repeat 8 ,
+        aaa[2 ] repeat 16, aaa[2 ] repeat 16,
+        a  [3 ] repeat 1 , a  [3 ] repeat 1 ,
+        aa [4 ] repeat 8 , aa [4 ] repeat 8 ,
+        aaa[5 ] repeat 16, aaa[5 ] repeat 16,
+        a  [6 ] repeat 1 , a  [6 ] repeat 1 ,
+        aa [7 ] repeat 8 , aa [7 ] repeat 8 ,
+        aaa[8 ] repeat 16, aaa[8 ] repeat 16,
+        a  [9 ] repeat 1 , a  [9 ] repeat 1 ,
+        aa [10] repeat 8 , aa [10] repeat 8 ,
+        aaa[11] repeat 16, aaa[11] repeat 16,
+    };
+}

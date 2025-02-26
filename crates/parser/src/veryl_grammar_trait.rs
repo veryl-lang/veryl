@@ -368,3 +368,37 @@ impl FirstToken for ConcatenationItem {
         self.expression.as_ref().token()
     }
 }
+
+impl FirstToken for Number {
+    fn token(&self) -> Token {
+        match self {
+            Number::IntegralNumber(x) => x.integral_number.token(),
+            Number::RealNumber(x) => x.real_number.token(),
+        }
+    }
+}
+
+impl FirstToken for IntegralNumber {
+    fn token(&self) -> Token {
+        match self {
+            IntegralNumber::BaseLess(x) => x.base_less.base_less_token.token,
+            IntegralNumber::Based(x) => x.based.based_token.token,
+            IntegralNumber::AllBit(x) => x.all_bit.all_bit_token.token,
+        }
+    }
+}
+
+impl FirstToken for RealNumber {
+    fn token(&self) -> Token {
+        match self {
+            RealNumber::Exponent(x) => x.exponent.exponent_token.token,
+            RealNumber::FixedPoint(x) => x.fixed_point.fixed_point_token.token,
+        }
+    }
+}
+
+impl FirstToken for Identifier {
+    fn token(&self) -> Token {
+        self.identifier_token.token
+    }
+}
