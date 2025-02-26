@@ -5,8 +5,7 @@ module veryl_testcase_Module29 (
     logic a;
     logic b;
 
-    logic c;
-    always_comb c = 1;
+    logic c; always_comb c = 1;
 
     always_ff @ (posedge clk, negedge rst_n) begin
         if (!rst_n) begin

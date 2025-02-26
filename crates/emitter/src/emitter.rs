@@ -2477,7 +2477,7 @@ impl VerylWalker for Emitter {
         }
         self.align_finish(align_kind::ARRAY);
         self.str(";");
-        self.newline();
+        self.space(1);
         if is_tri {
             self.str("assign");
         } else {

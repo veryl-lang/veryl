@@ -2,8 +2,7 @@ module veryl_testcase_Module72 (
     input logic i_clk  ,
     input logic i_rst_n
 );
-    logic x;
-    always_comb x = 1;
+    logic x; always_comb x = 1;
     logic a;
     logic b;
     logic c;

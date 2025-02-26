@@ -22,8 +22,7 @@ module veryl_testcase_Module06;
         c = a / 1;
     endfunction
 
-    logic [ParamX-1:0] a;
-    always_comb a = 1;
+    logic [ParamX-1:0] a; always_comb a = 1;
     logic [ParamX-1:0] b;
     logic [ParamX-1:0] c;
     logic [ParamX-1:0] d;

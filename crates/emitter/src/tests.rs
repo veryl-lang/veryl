@@ -62,10 +62,8 @@ module ModuleB (
         .rst_high_rst_rst_high (rst_high_rst_rst_high)
     );
 
-    logic _a;
-    always_comb _a = clk_pos_clk_clk_pos;
-    logic _b;
-    always_comb _b = rst_high_rst_rst_high;
+    logic _a; always_comb _a = clk_pos_clk_clk_pos;
+    logic _b; always_comb _b = rst_high_rst_rst_high;
 
     logic _c;
     always_ff @ (posedge clk_pos_clk_clk_pos, posedge rst_high_rst_rst_high) begin
@@ -143,10 +141,8 @@ module ModuleB (
         .rst_low_rst_rst_low (rst_low_rst_rst_low)
     );
 
-    logic _a;
-    always_comb _a = clk_neg_clk_clk_neg;
-    logic _b;
-    always_comb _b = rst_low_rst_rst_low;
+    logic _a; always_comb _a = clk_neg_clk_clk_neg;
+    logic _b; always_comb _b = rst_low_rst_rst_low;
 
     logic _c;
     always_ff @ (negedge clk_neg_clk_clk_neg) begin
@@ -252,8 +248,7 @@ fn expand_case_statement() {
     localparam bit y = 1;
 
     logic a;
-    logic x;
-    always_comb x = 1;
+    logic x; always_comb x = 1;
 
     always_comb begin
         case (1'b1)
@@ -342,8 +337,7 @@ fn expand_case_expression() {
 "#;
 
     let expect = r#"module ModuleA;
-    logic a;
-    always_comb a = 1;
+    logic a; always_comb a = 1;
     logic b;
 
     always_comb b = (((a) ==? (1)) ? (
@@ -397,14 +391,10 @@ fn async_reset_cast() {
     logic b;
     logic c;
 
-    logic d;
-    always_comb d = a;
-    logic e;
-    always_comb e = ~a;
-    logic f;
-    always_comb f = b;
-    logic g;
-    always_comb g = ~c;
+    logic d; always_comb d = a;
+    logic e; always_comb e = ~a;
+    logic f; always_comb f = b;
+    logic g; always_comb g = ~c;
 endmodule
 //# sourceMappingURL=test.sv.map
 "#;
@@ -442,14 +432,10 @@ fn sync_reset_cast() {
     logic b;
     logic c;
 
-    logic d;
-    always_comb d = ~a;
-    logic e;
-    always_comb e = a;
-    logic f;
-    always_comb f = ~b;
-    logic g;
-    always_comb g = c;
+    logic d; always_comb d = ~a;
+    logic e; always_comb e = a;
+    logic f; always_comb f = ~b;
+    logic g; always_comb g = c;
 endmodule
 //# sourceMappingURL=test.sv.map
 "#;
@@ -555,8 +541,7 @@ fn emit_cond_type() {
     input logic i_clk,
     input logic i_rst
 );
-    logic x;
-    always_comb x = 1;
+    logic x; always_comb x = 1;
     logic a;
     logic b;
     logic c;

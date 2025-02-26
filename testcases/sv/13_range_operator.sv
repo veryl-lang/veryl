@@ -4,8 +4,7 @@ module veryl_testcase_Module13;
     logic          c;
     logic          d;
     logic          e;
-    logic [10-1:0] X;
-    always_comb X = 1;
+    logic [10-1:0] X; always_comb X = 1;
 
     // bit select
     always_comb a = X[0];

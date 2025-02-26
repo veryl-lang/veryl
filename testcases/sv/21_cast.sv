@@ -1,8 +1,7 @@
 module veryl_testcase_Module21;
     logic         a;
     logic [2-1:0] b;
-    logic         c;
-    always_comb c = 1;
+    logic         c; always_comb c = 1;
 
     typedef enum logic {
         EnumA_A,
