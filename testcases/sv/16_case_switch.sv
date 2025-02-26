@@ -3,10 +3,8 @@ module veryl_testcase_Module16;
 
     logic         a;
     logic         b;
-    logic         x;
-    always_comb x = 1;
-    logic [3-1:0] z;
-    always_comb z = 1;
+    logic         x; always_comb x = 1;
+    logic [3-1:0] z; always_comb z = 1;
 
     always_comb begin
         case (x) inside

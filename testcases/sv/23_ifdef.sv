@@ -26,16 +26,13 @@ module veryl_testcase_Module23 #(
 );
     `ifdef DEFINE_A
     `ifdef DEFINE_B
-    logic [10-1:0] _a;
-    always_comb _a = 1;
+    logic [10-1:0] _a; always_comb _a = 1;
     `endif
     `endif
 
     `ifdef DEFINE_A
-    logic [10-1:0] _b;
-    always_comb _b = 1;
-    logic [10-1:0] _c;
-    always_comb _c = 1;
+    logic [10-1:0] _b; always_comb _b = 1;
+    logic [10-1:0] _c; always_comb _c = 1;
     `endif
 
     logic _d;

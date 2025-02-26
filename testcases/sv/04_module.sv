@@ -17,12 +17,9 @@ module veryl_testcase_Module04 #(
     localparam longint unsigned cc = 1;
 
     // variable declaration
-    logic                  _d  ;
-    always_comb _d = 1;
-    logic [10-1:0]         _dd ;
-    always_comb _dd = 1;
-    bit   [10-1:0][10-1:0] _ddd;
-    always_comb _ddd = 1;
+    logic                  _d  ; always_comb _d = 1;
+    logic [10-1:0]         _dd ; always_comb _dd = 1;
+    bit   [10-1:0][10-1:0] _ddd; always_comb _ddd = 1;
 
     always_comb bb  = 0;
     assign bbb = 0;

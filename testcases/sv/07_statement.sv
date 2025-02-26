@@ -1,8 +1,7 @@
 module veryl_testcase_Module07;
     logic a  ;
     logic aa ;
-    logic clk;
-    always_comb clk = 1;
+    logic clk; always_comb clk = 1;
 
     always_comb begin
         // assignment statement

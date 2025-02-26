@@ -16,12 +16,9 @@ module veryl_testcase_Module56;
     veryl_testcase___Interface56B__Package56A_X u5 ();
     veryl_testcase___Module56Sub__1 u6 ();
 
-    logic _a;
-    always_comb _a = u0._a;
-    logic _b;
-    always_comb _b = u2._b;
-    logic _c;
-    always_comb _c = u5._b;
+    logic _a; always_comb _a = u0._a;
+    logic _b; always_comb _b = u2._b;
+    logic _c; always_comb _c = u5._b;
 endmodule
 
 module veryl_testcase___Module56Sub__1;

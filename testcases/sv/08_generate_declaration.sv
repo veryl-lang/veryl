@@ -1,8 +1,7 @@
 module veryl_testcase_Module08;
     localparam int unsigned a     = 1;
     localparam int unsigned b     = 1;
-    logic        i_clk;
-    always_comb i_clk = 1;
+    logic        i_clk; always_comb i_clk = 1;
 
     // if declaration
     if (a == 1) begin :label

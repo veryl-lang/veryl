@@ -49,7 +49,6 @@ module veryl_testcase___Module55H__10;
         logic [10-1:0] value;
     } __StructH__10;
 
-    __StructH__10 _a;
-    always_comb _a = 0;
+    __StructH__10 _a; always_comb _a = 0;
 endmodule
 //# sourceMappingURL=../map/testcases/sv/55_generic_module.sv.map

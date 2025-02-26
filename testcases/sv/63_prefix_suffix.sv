@@ -19,8 +19,7 @@ module veryl_testcase_Module63 (
         end
     end
 
-    logic _b;
-    always_comb _b = i_rst_n;
+    logic _b; always_comb _b = i_rst_n;
 endmodule
 
 module veryl_testcase_Module63A (
