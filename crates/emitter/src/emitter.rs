@@ -52,7 +52,7 @@ pub struct Emitter {
     in_start_token: bool,
     consumed_next_newline: bool,
     single_line: bool,
-    multi_line: bool,
+    multi_line: Vec<()>,
     adjust_line: bool,
     case_item_indent: Option<usize>,
     in_always_ff: bool,
@@ -94,7 +94,7 @@ impl Default for Emitter {
             in_start_token: false,
             consumed_next_newline: false,
             single_line: false,
-            multi_line: false,
+            multi_line: Vec::new(),
             adjust_line: false,
             case_item_indent: None,
             in_always_ff: false,
@@ -1649,12 +1649,12 @@ impl VerylWalker for Emitter {
             }
             Factor::LBraceConcatenationListRBrace(x) => {
                 if x.l_brace.line() != x.r_brace.line() {
-                    self.multi_line = true;
+                    self.multi_line.push(());
                 }
                 self.l_brace(&x.l_brace);
                 self.concatenation_list(&x.concatenation_list);
                 self.r_brace(&x.r_brace);
-                self.multi_line = false;
+                self.multi_line.pop();
             }
             Factor::QuoteLBraceArrayLiteralListRBrace(x) => {
                 self.quote_l_brace(&x.quote_l_brace);
@@ -1715,7 +1715,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ConcatenationList'
     fn concatenation_list(&mut self, arg: &ConcatenationList) {
-        if self.multi_line {
+        if !self.multi_line.is_empty() {
             self.newline_push();
         }
         self.concatenation_item(&arg.concatenation_item);
@@ -1728,7 +1728,7 @@ impl VerylWalker for Emitter {
             }
             self.concatenation_item(&x.concatenation_item);
         }
-        if self.multi_line {
+        if !self.multi_line.is_empty() {
             self.newline_pop();
         }
     }

@@ -28,7 +28,7 @@ pub struct Formatter {
     in_start_token: bool,
     consumed_next_newline: bool,
     single_line: bool,
-    multi_line: bool,
+    multi_line: Vec<()>,
     adjust_line: bool,
     case_item_indent: Vec<usize>,
     in_scalar_type: bool,
@@ -48,7 +48,7 @@ impl Default for Formatter {
             in_start_token: false,
             consumed_next_newline: false,
             single_line: false,
-            multi_line: false,
+            multi_line: Vec::new(),
             adjust_line: false,
             case_item_indent: Vec::new(),
             in_scalar_type: false,
@@ -514,12 +514,12 @@ impl VerylWalker for Formatter {
             }
             Factor::LBraceConcatenationListRBrace(x) => {
                 if x.l_brace.line() != x.r_brace.line() {
-                    self.multi_line = true;
+                    self.multi_line.push(());
                 }
                 self.l_brace(&x.l_brace);
                 self.concatenation_list(&x.concatenation_list);
                 self.r_brace(&x.r_brace);
-                self.multi_line = false;
+                self.multi_line.pop();
             }
             Factor::QuoteLBraceArrayLiteralListRBrace(x) => {
                 self.quote_l_brace(&x.quote_l_brace);
@@ -582,7 +582,7 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'ConcatenationList'
     fn concatenation_list(&mut self, arg: &ConcatenationList) {
-        if self.multi_line {
+        if !self.multi_line.is_empty() {
             self.newline_push();
         }
         self.concatenation_item(&arg.concatenation_item);
@@ -598,7 +598,7 @@ impl VerylWalker for Formatter {
         if let Some(ref x) = arg.concatenation_list_opt {
             self.comma(&x.comma);
         }
-        if self.multi_line {
+        if !self.multi_line.is_empty() {
             self.newline_pop();
         }
     }
