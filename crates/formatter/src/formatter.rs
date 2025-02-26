@@ -1,4 +1,4 @@
-use veryl_aligner::{Aligner, Location, align_kind};
+use veryl_aligner::{Aligner, Location, Measure, align_kind};
 use veryl_analyzer::attribute::AlignItem;
 use veryl_analyzer::attribute_table;
 use veryl_metadata::{Format, Metadata};
@@ -25,6 +25,7 @@ pub struct Formatter {
     indent: usize,
     line: u32,
     aligner: Aligner,
+    measure: Measure,
     in_start_token: bool,
     consumed_next_newline: bool,
     single_line: bool,
@@ -45,6 +46,7 @@ impl Default for Formatter {
             indent: 0,
             line: 1,
             aligner: Aligner::new(),
+            measure: Measure::default(),
             in_start_token: false,
             consumed_next_newline: false,
             single_line: false,
@@ -90,6 +92,7 @@ impl Formatter {
             }
             Mode::Align => {
                 self.aligner.space(x.len());
+                self.measure.add(x.len() as u32);
             }
         }
     }
@@ -252,6 +255,7 @@ impl Formatter {
             }
             Mode::Align => {
                 self.aligner.token(x);
+                self.measure.add(x.token.length);
             }
         }
     }
@@ -311,6 +315,22 @@ impl Formatter {
                 .and_modify(|val| *val += width as u32)
                 .or_insert(width as u32);
         }
+    }
+
+    fn measure_start(&mut self) {
+        if self.mode == Mode::Align {
+            self.measure.start();
+        }
+    }
+
+    fn measure_finish(&mut self, token: &Token) {
+        if self.mode == Mode::Align {
+            self.measure.finish(token.id);
+        }
+    }
+
+    fn measure_get(&mut self, token: &Token) -> Option<u32> {
+        self.measure.get(token.id)
     }
 }
 
@@ -650,14 +670,33 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'IfExpression'
     fn if_expression(&mut self, arg: &IfExpression) {
+        self.measure_start();
+
+        let single_line = if self.mode == Mode::Emit {
+            let width = self.measure_get(&arg.token()).unwrap();
+            width < self.format_opt.max_width as u32
+        } else {
+            // calc line width as single_line in Align mode
+            true
+        };
+
         self.r#if(&arg.r#if);
         self.space(1);
         self.expression(&arg.expression);
         self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token);
-        self.newline_push();
+        if single_line {
+            self.l_brace(&arg.l_brace);
+            self.space(1);
+        } else {
+            self.token_will_push(&arg.l_brace.l_brace_token);
+            self.newline_push();
+        }
         self.expression(&arg.expression0);
-        self.newline_pop();
+        if single_line {
+            self.space(1);
+        } else {
+            self.newline_pop();
+        }
         self.r_brace(&arg.r_brace);
         for x in &arg.if_expression_list {
             self.space(1);
@@ -667,20 +706,40 @@ impl VerylWalker for Formatter {
             self.space(1);
             self.expression(&x.expression);
             self.space(1);
-            self.token_will_push(&x.l_brace.l_brace_token);
-            self.newline_push();
+            if single_line {
+                self.l_brace(&x.l_brace);
+                self.space(1);
+            } else {
+                self.token_will_push(&x.l_brace.l_brace_token);
+                self.newline_push();
+            }
             self.expression(&x.expression0);
-            self.newline_pop();
+            if single_line {
+                self.space(1);
+            } else {
+                self.newline_pop();
+            }
             self.r_brace(&x.r_brace);
         }
         self.space(1);
         self.r#else(&arg.r#else);
         self.space(1);
-        self.token_will_push(&arg.l_brace0.l_brace_token);
-        self.newline_push();
+        if single_line {
+            self.l_brace(&arg.l_brace0);
+            self.space(1);
+        } else {
+            self.token_will_push(&arg.l_brace0.l_brace_token);
+            self.newline_push();
+        }
         self.expression(&arg.expression1);
-        self.newline_pop();
+        if single_line {
+            self.space(1);
+        } else {
+            self.newline_pop();
+        }
         self.r_brace(&arg.r_brace0);
+
+        self.measure_finish(&arg.token());
     }
 
     /// Semantic action for non-terminal 'CaseExpression'

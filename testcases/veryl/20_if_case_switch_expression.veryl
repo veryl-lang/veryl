@@ -5,15 +5,7 @@ module Module20 {
     let x: logic = 1;
     let y: logic = 1;
 
-    assign a = if x {
-        1
-    } else {
-        if y {
-            1
-        } else {
-            2
-        }
-    };
+    assign a = if x { 1 } else { if y { 1 } else { 2 } };
 
     assign b = case a {
         1      : 0,

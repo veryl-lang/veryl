@@ -1,10 +1,6 @@
 pub module countones #(
-    param W    : u32 = 16,
-    const CLOGW: u32 = if (W >: 1) {
-        $clog2(W) + 1
-    } else {
-        1
-    },
+    param W    : u32 = 16                                      ,
+    const CLOGW: u32 = if (W >: 1) { $clog2(W) + 1 } else { 1 },
 ) (
     i_data: input  logic<W>    ,
     o_ones: output logic<CLOGW>,
@@ -17,16 +13,8 @@ pub module countones #(
         let data_bot: logic<WBOT> = i_data[WBOT - 1:0];
         let data_top: logic<WTOP> = i_data[W - 1:WBOT];
 
-        const CLOGWBOT: u32 = if (WBOT >: 1) {
-            $clog2(WBOT) + 1
-        } else {
-            1
-        };
-        const CLOGWTOP: u32 = if (WTOP >: 1) {
-            $clog2(WTOP) + 1
-        } else {
-            1
-        };
+        const CLOGWBOT: u32             = if (WBOT >: 1) { $clog2(WBOT) + 1 } else { 1 };
+        const CLOGWTOP: u32             = if (WTOP >: 1) { $clog2(WTOP) + 1 } else { 1 };
         var ones_bot: logic<CLOGWBOT>;
         var ones_top: logic<CLOGWTOP>;
 

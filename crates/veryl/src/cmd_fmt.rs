@@ -8,6 +8,7 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
+use veryl_analyzer::Analyzer;
 use veryl_formatter::Formatter;
 use veryl_metadata::Metadata;
 use veryl_parser::Parser;
@@ -32,6 +33,9 @@ impl CmdFmt {
                 .into_diagnostic()
                 .wrap_err("")?;
             let parser = Parser::parse(&input, &path.src)?;
+            let analyzer = Analyzer::new(metadata);
+            let _ = analyzer.analyze_pass1(&path.prj, &path.src, &parser.veryl);
+
             let mut formatter = Formatter::new(metadata);
             formatter.format(&parser.veryl);
 

@@ -15,21 +15,13 @@ pub module demux #(
     if KIND == selector_kind::BINARY :g_demux {
         always_comb {
             for i: u32 in 0..ENTRIES {
-                o_data[i] = if i_select == i as SELECT_WIDTH {
-                    i_data
-                } else {
-                    DEFUALT_DATA
-                };
+                o_data[i] = if i_select == i as SELECT_WIDTH { i_data } else { DEFUALT_DATA };
             }
         }
     } else {
         always_comb {
             for i: u32 in 0..ENTRIES {
-                o_data[i] = if i_select[i] {
-                    i_data
-                } else {
-                    DEFUALT_DATA
-                };
+                o_data[i] = if i_select[i] { i_data } else { DEFUALT_DATA };
             }
         }
     }
