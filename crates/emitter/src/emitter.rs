@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::Path;
-use veryl_aligner::{Aligner, Location, align_kind};
+use veryl_aligner::{Aligner, Location, Measure, align_kind};
 use veryl_analyzer::attribute::Attribute as Attr;
 use veryl_analyzer::attribute::{AlignItem, AllowItem, CondTypeItem, EnumEncodingItem};
 use veryl_analyzer::attribute_table;
@@ -49,6 +49,7 @@ pub struct Emitter {
     dst_line: u32,
     dst_column: u32,
     aligner: Aligner,
+    measure: Measure,
     in_start_token: bool,
     consumed_next_newline: bool,
     single_line: bool,
@@ -91,6 +92,7 @@ impl Default for Emitter {
             dst_line: 1,
             dst_column: 1,
             aligner: Aligner::new(),
+            measure: Measure::default(),
             in_start_token: false,
             consumed_next_newline: false,
             single_line: false,
@@ -178,6 +180,7 @@ impl Emitter {
             }
             Mode::Align => {
                 self.aligner.space(x.len());
+                self.measure.add(x.len() as u32);
             }
         }
     }
@@ -375,6 +378,7 @@ impl Emitter {
             }
             Mode::Align => {
                 self.aligner.token(x);
+                self.measure.add(x.token.length);
             }
         }
 
@@ -425,6 +429,22 @@ impl Emitter {
         if self.mode == Mode::Align {
             self.aligner.aligns[kind].dummy_location(loc.unwrap());
         }
+    }
+
+    fn measure_start(&mut self) {
+        if self.mode == Mode::Align {
+            self.measure.start();
+        }
+    }
+
+    fn measure_finish(&mut self, token: &Token) {
+        if self.mode == Mode::Align {
+            self.measure.finish(token.id);
+        }
+    }
+
+    fn measure_get(&mut self, token: &Token) -> Option<u32> {
+        self.measure.get(token.id)
     }
 
     fn case_inside_statement(&mut self, arg: &CaseStatement) {
@@ -1781,12 +1801,31 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'IfExpression'
     fn if_expression(&mut self, arg: &IfExpression) {
+        self.measure_start();
+
+        let single_line = if self.mode == Mode::Emit {
+            let width = self.measure_get(&arg.token()).unwrap();
+            width < self.format_opt.max_width as u32
+        } else {
+            // calc line width as single_line in Align mode
+            true
+        };
+
         self.token(&arg.r#if.if_token.replace("(("));
         self.expression(&arg.expression);
-        self.token_will_push(&arg.l_brace.l_brace_token.replace(") ? ("));
-        self.newline_push();
+        if single_line {
+            self.token(&arg.l_brace.l_brace_token.replace(") ? ("));
+            self.space(1);
+        } else {
+            self.token_will_push(&arg.l_brace.l_brace_token.replace(") ? ("));
+            self.newline_push();
+        }
         self.expression(&arg.expression0);
-        self.newline_pop();
+        if single_line {
+            self.space(1);
+        } else {
+            self.newline_pop();
+        }
         self.token(&arg.r_brace.r_brace_token.replace(")"));
         self.space(1);
         for x in &arg.if_expression_list {
@@ -1794,20 +1833,40 @@ impl VerylWalker for Emitter {
             self.space(1);
             self.token(&x.r#if.if_token.replace("("));
             self.expression(&x.expression);
-            self.token_will_push(&x.l_brace.l_brace_token.replace(") ? ("));
-            self.newline_push();
+            if single_line {
+                self.token(&x.l_brace.l_brace_token.replace(") ? ("));
+                self.space(1);
+            } else {
+                self.token_will_push(&x.l_brace.l_brace_token.replace(") ? ("));
+                self.newline_push();
+            }
             self.expression(&x.expression0);
-            self.newline_pop();
+            if single_line {
+                self.space(1);
+            } else {
+                self.newline_pop();
+            }
             self.token(&x.r_brace.r_brace_token.replace(")"));
             self.space(1);
         }
         self.token(&arg.r#else.else_token.replace(":"));
         self.space(1);
-        self.token_will_push(&arg.l_brace0.l_brace_token.replace("("));
-        self.newline_push();
+        if single_line {
+            self.token(&arg.l_brace0.l_brace_token.replace("("));
+            self.space(1);
+        } else {
+            self.token_will_push(&arg.l_brace0.l_brace_token.replace("("));
+            self.newline_push();
+        }
         self.expression(&arg.expression1);
-        self.newline_pop();
+        if single_line {
+            self.space(1);
+        } else {
+            self.newline_pop();
+        }
         self.token(&arg.r_brace0.r_brace_token.replace("))"));
+
+        self.measure_finish(&arg.token());
     }
 
     /// Semantic action for non-terminal 'CaseExpression'

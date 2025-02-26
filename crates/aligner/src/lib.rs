@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use veryl_parser::resource_table::TokenId;
 use veryl_parser::veryl_token::{Token, VerylToken};
 
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Hash)]
@@ -185,5 +186,32 @@ impl Aligner {
 
     pub fn any_enabled(&self) -> bool {
         self.aligns.iter().any(|x| x.enable)
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Measure {
+    widths: Vec<u32>,
+    table: HashMap<TokenId, u32>,
+}
+
+impl Measure {
+    pub fn start(&mut self) {
+        self.widths.push(0);
+    }
+
+    pub fn finish(&mut self, id: TokenId) {
+        let width = self.widths.pop().unwrap();
+        self.table.insert(id, width);
+    }
+
+    pub fn add(&mut self, value: u32) {
+        for w in &mut self.widths {
+            *w += value;
+        }
+    }
+
+    pub fn get(&mut self, id: TokenId) -> Option<u32> {
+        self.table.get(&id).copied()
     }
 }

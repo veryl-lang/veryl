@@ -90,17 +90,9 @@ pub module lfsr_galois #(
     for i in 0..(SIZE - 1) :g_taps {
         const K: u32 = SIZE - 2 - i;
         if TAPVEC[K] :g_tap {
-            assign val_next[K] = if i_set {
-                i_setval[K]
-            } else {
-                o_val[K + 1] ^ o_val[0]
-            };
+            assign val_next[K] = if i_set { i_setval[K] } else { o_val[K + 1] ^ o_val[0] };
         } else :g_notap {
-            assign val_next[K] = if i_set {
-                i_setval[K]
-            } else {
-                o_val[K + 1]
-            };
+            assign val_next[K] = if i_set { i_setval[K] } else { o_val[K + 1] };
         }
     }
 

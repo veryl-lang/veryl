@@ -402,3 +402,9 @@ impl FirstToken for Identifier {
         self.identifier_token.token
     }
 }
+
+impl FirstToken for IfExpression {
+    fn token(&self) -> Token {
+        self.r#if.if_token.token
+    }
+}

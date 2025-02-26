@@ -5,9 +5,10 @@ use serde::{Deserialize, Serialize};
 pub struct Format {
     #[serde(default = "default_indent_width")]
     pub indent_width: usize,
-}
 
-const DEFAULT_INDENT_WIDTH: usize = 4;
+    #[serde(default = "default_max_width")]
+    pub max_width: usize,
+}
 
 impl Default for Format {
     fn default() -> Self {
@@ -16,5 +17,9 @@ impl Default for Format {
 }
 
 fn default_indent_width() -> usize {
-    DEFAULT_INDENT_WIDTH
+    4
+}
+
+fn default_max_width() -> usize {
+    120
 }

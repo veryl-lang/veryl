@@ -1,15 +1,11 @@
 pub module ram #(
-    param WORD_SIZE    : u32 = 1,
-    param ADDRESS_WIDTH: u32 = if WORD_SIZE >= 2 {
-        $clog2(WORD_SIZE)
-    } else {
-        1
-    },
-    param DATA_WIDTH   : u32       = 8                                             ,
-    param DATA_TYPE    : type      = logic<DATA_WIDTH>                             ,
-    param BUFFER_OUT   : bit       = 0                                             ,
-    param USE_RESET    : bit       = 0                                             ,
-    param INITIAL_VALUE: DATA_TYPE = 0 as DATA_TYPE                                ,
+    param WORD_SIZE    : u32       = 1                                                 ,
+    param ADDRESS_WIDTH: u32       = if WORD_SIZE >= 2 { $clog2(WORD_SIZE) } else { 1 },
+    param DATA_WIDTH   : u32       = 8                                                 ,
+    param DATA_TYPE    : type      = logic<DATA_WIDTH>                                 ,
+    param BUFFER_OUT   : bit       = 0                                                 ,
+    param USE_RESET    : bit       = 0                                                 ,
+    param INITIAL_VALUE: DATA_TYPE = 0 as DATA_TYPE                                    ,
 ) (
     i_clk : input  clock                   ,
     i_rst : input  reset                   ,

@@ -24,11 +24,7 @@ pub module fifo #(
     i_pop        : input  logic  ,
     o_data       : output TYPE   ,
 ) {
-    const RAM_WORDS: u32 = if DATA_FF_OUT {
-        DEPTH - 1
-    } else {
-        DEPTH
-    };
+    const RAM_WORDS: u32 = if DATA_FF_OUT { DEPTH - 1 } else { DEPTH };
 
     var clear_data: logic;
 
@@ -39,11 +35,7 @@ pub module fifo #(
     //--------------------------------------------------------------
     //  controller
     //--------------------------------------------------------------
-    const RAM_POINTER_WIDTH: u32 = if RAM_WORDS >= 2 {
-        $clog2(RAM_WORDS)
-    } else {
-        1
-    };
+    const RAM_POINTER_WIDTH: u32 = if RAM_WORDS >= 2 { $clog2(RAM_WORDS) } else { 1 };
 
     var write_pointer: logic<RAM_POINTER_WIDTH>;
     var write_to_ff  : logic                   ;

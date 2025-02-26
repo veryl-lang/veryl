@@ -54,11 +54,7 @@ module _bin_decoder #(
             o_unary: r_unary,
         );
 
-        let mask_top: logic<REC_UNARY_WIDTH> = if i_bin[BIN_WIDTH - 1] {
-            '1
-        } else {
-            '0
-        };
+        let mask_top: logic<REC_UNARY_WIDTH> = if i_bin[BIN_WIDTH - 1] { '1 } else { '0 };
         let mask_bot: logic<REC_UNARY_WIDTH> = ~mask_top;
 
         assign o_unary = {r_unary, r_unary} & {mask_top, mask_bot};
