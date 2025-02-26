@@ -783,6 +783,14 @@ impl From<&InstPortItem> for TokenRange {
     }
 }
 
+impl From<&ClockDomain> for TokenRange {
+    fn from(clock_domain: &ClockDomain) -> Self {
+        let beg = clock_domain.back_quote.back_quote_token.token;
+        let end = clock_domain.identifier.identifier_token.token;
+        TokenRange { beg, end }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct VerylToken {
     pub token: Token,

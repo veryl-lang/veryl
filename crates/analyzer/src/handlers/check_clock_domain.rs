@@ -1,6 +1,6 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::r#unsafe::Unsafe;
-use crate::symbol::{ClockDomain, SymbolId, SymbolKind};
+use crate::symbol::{ClockDomain, GenericBoundKind, Port, Symbol, SymbolId, SymbolKind};
 use crate::symbol_table;
 use crate::unsafe_table;
 use std::collections::HashMap;
@@ -33,6 +33,9 @@ impl CheckClockDomain {
             SymbolKind::Port(x) => {
                 self.expr_clock_domains.push((x.clock_domain, range));
             }
+            SymbolKind::Instance(x) => {
+                self.expr_clock_domains.push((x.clock_domain, range));
+            }
             _ => (),
         }
     }
@@ -54,6 +57,30 @@ impl CheckClockDomain {
             prev = Some(*curr);
         }
         prev.map(|(x, _)| x).unwrap_or(ClockDomain::None)
+    }
+
+    fn check_cdc_on_port_connections(&mut self, ports: &Vec<Port>, unsafe_token: &Token) {
+        let mut connection_table = HashMap::<ClockDomain, (ClockDomain, TokenRange)>::new();
+
+        for port in ports {
+            if let Some(connected) = self.inst_clock_domains.get(&port.name()) {
+                let port_domain = port.property().clock_domain;
+                if let Some(assigned) = connection_table.get(&port_domain) {
+                    if !assigned.0.compatible(&connected.0)
+                        && !unsafe_table::contains(unsafe_token, Unsafe::Cdc)
+                    {
+                        self.errors.push(AnalyzerError::mismatch_clock_domain(
+                            &connected.0.to_string(),
+                            &assigned.0.to_string(),
+                            &connected.1,
+                            &assigned.1,
+                        ));
+                    }
+                } else {
+                    connection_table.insert(port_domain, *connected);
+                }
+            }
+        }
     }
 }
 
@@ -203,51 +230,57 @@ impl VerylGrammarTrait for CheckClockDomain {
         match self.point {
             HandlerPoint::Before => self.inst_clock_domains.clear(),
             HandlerPoint::After => {
-                let token = &arg.semicolon.semicolon_token.token;
-                if let Ok(symbol) = symbol_table::resolve(arg.scoped_identifier.as_ref()) {
-                    match &symbol.found.kind {
-                        SymbolKind::Module(x) => {
-                            let mut connection_table =
-                                HashMap::<ClockDomain, (ClockDomain, TokenRange)>::new();
-                            for x in &x.ports {
-                                if let Some(connected) = self.inst_clock_domains.get(&x.name()) {
-                                    let port_domain = x.property().clock_domain;
-                                    if let Some(assigned) = connection_table.get(&port_domain) {
-                                        if !assigned.0.compatible(&connected.0)
-                                            && !unsafe_table::contains(token, Unsafe::Cdc)
+                if let Ok(inst_symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
+                    if let Some(type_kind) = get_inst_type_kind(&inst_symbol.found) {
+                        if !matches!(type_kind, SymbolKind::Interface(_)) {
+                            if let Some(ref x) = arg.inst_declaration_opt {
+                                self.errors.push(AnalyzerError::invalid_clock_domain(
+                                    &x.clock_domain.as_ref().into(),
+                                ));
+                                return Ok(());
+                            }
+                        }
+
+                        let unsafe_token = &arg.semicolon.semicolon_token.token;
+                        match type_kind {
+                            SymbolKind::Module(x) => {
+                                self.check_cdc_on_port_connections(&x.ports, unsafe_token);
+                            }
+                            SymbolKind::Interface(_) => {
+                                if let SymbolKind::Instance(x) = &inst_symbol.found.kind {
+                                    if x.clock_domain == ClockDomain::None {
+                                        let mut property = x.clone();
+                                        property.clock_domain = ClockDomain::Implicit;
+
+                                        let mut symbol = inst_symbol.found.clone();
+                                        symbol.kind = SymbolKind::Instance(property);
+                                        symbol_table::update(symbol);
+                                    }
+                                }
+                            }
+                            SymbolKind::SystemVerilog => {
+                                let mut prev: Option<(ClockDomain, TokenRange)> = None;
+                                for curr in self.inst_clock_domains.values() {
+                                    if let Some(prev) = prev {
+                                        if !prev.0.compatible(&curr.0)
+                                            && !unsafe_table::contains(unsafe_token, Unsafe::Cdc)
                                         {
                                             self.errors.push(AnalyzerError::mismatch_clock_domain(
-                                                &connected.0.to_string(),
-                                                &assigned.0.to_string(),
-                                                &connected.1,
-                                                &assigned.1,
+                                                &curr.0.to_string(),
+                                                &prev.0.to_string(),
+                                                &curr.1,
+                                                &prev.1,
                                             ));
                                         }
-                                    } else {
-                                        connection_table.insert(port_domain, *connected);
                                     }
+                                    prev = Some(*curr);
                                 }
                             }
-                        }
-                        SymbolKind::SystemVerilog => {
-                            let mut prev: Option<(ClockDomain, TokenRange)> = None;
-                            for curr in self.inst_clock_domains.values() {
-                                if let Some(prev) = prev {
-                                    if !prev.0.compatible(&curr.0)
-                                        && !unsafe_table::contains(token, Unsafe::Cdc)
-                                    {
-                                        self.errors.push(AnalyzerError::mismatch_clock_domain(
-                                            &curr.0.to_string(),
-                                            &prev.0.to_string(),
-                                            &curr.1,
-                                            &prev.1,
-                                        ));
-                                    }
-                                }
-                                prev = Some(*curr);
+                            SymbolKind::ProtoModule(x) => {
+                                self.check_cdc_on_port_connections(&x.ports, unsafe_token);
                             }
+                            _ => {}
                         }
-                        _ => (),
                     }
                 }
             }
@@ -264,4 +297,34 @@ impl VerylGrammarTrait for CheckClockDomain {
         }
         Ok(())
     }
+}
+
+fn get_inst_type_kind(inst_symbol: &Symbol) -> Option<SymbolKind> {
+    if let SymbolKind::Instance(ref x) = inst_symbol.kind {
+        if let Ok(type_symbol) =
+            symbol_table::resolve((&x.type_name.mangled_path(), &inst_symbol.namespace))
+        {
+            match type_symbol.found.kind {
+                SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::SystemVerilog => {
+                    return Some(type_symbol.found.kind)
+                }
+                SymbolKind::GenericInstance(ref x) => {
+                    let base = symbol_table::get(x.base).unwrap();
+                    return Some(base.kind);
+                }
+                SymbolKind::GenericParameter(ref x) => {
+                    if let GenericBoundKind::Proto(ref x) = x.bound {
+                        if let Ok(proto_symbol) =
+                            symbol_table::resolve((x, &type_symbol.found.namespace))
+                        {
+                            return Some(proto_symbol.found.kind);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    None
 }

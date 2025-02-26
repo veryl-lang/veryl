@@ -675,7 +675,7 @@ FinalDeclaration: Final StatementBlock;
 // InstDeclaration
 // ----------------------------------------------------------------------------
 
-InstDeclaration: Inst Identifier Colon ScopedIdentifier [ Array ] [ InstParameter ] [ LParen [ InstPortList ] RParen ] Semicolon;
+InstDeclaration: Inst Identifier Colon [ ClockDomain ] ScopedIdentifier [ Array ] [ InstParameter ] [ LParen [ InstPortList ] RParen ] Semicolon;
 
 InstParameter: Hash LParen [ InstParameterList ] RParen;
 

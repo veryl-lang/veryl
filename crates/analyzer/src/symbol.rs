@@ -1392,6 +1392,7 @@ pub struct InstanceProperty {
     pub array: Vec<syntax_tree::Expression>,
     pub type_name: GenericSymbolPath,
     pub connects: HashMap<Token, Vec<ConnectTarget>>,
+    pub clock_domain: ClockDomain,
 }
 
 #[derive(Debug, Clone)]

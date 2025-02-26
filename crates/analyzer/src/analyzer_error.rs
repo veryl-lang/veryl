@@ -677,6 +677,20 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_clock_domain),
+        help("Remove the clock domain annotation"),
+        url("")
+    )]
+    #[error("Cannot specify clock domain annotation to module instance")]
+    InvalidClockDomain {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(invalid_enum_encoding),
         help(""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_enum_encoding")
@@ -1536,6 +1550,13 @@ impl AnalyzerError {
 
     pub fn sv_with_implicit_reset(token: &TokenRange) -> Self {
         AnalyzerError::SvWithImplicitReset {
+            input: source(token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn invalid_clock_domain(token: &TokenRange) -> Self {
+        AnalyzerError::InvalidClockDomain {
             input: source(token),
             error_location: token.into(),
         }

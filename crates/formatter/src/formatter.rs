@@ -1491,7 +1491,7 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'InstDeclaration'
     fn inst_declaration(&mut self, arg: &InstDeclaration) {
-        self.single_line = arg.inst_declaration_opt1.is_none();
+        self.single_line = arg.inst_declaration_opt2.is_none();
         self.inst(&arg.inst);
         self.space(1);
         if self.single_line {
@@ -1503,24 +1503,38 @@ impl VerylWalker for Formatter {
         }
         self.colon(&arg.colon);
         self.space(1);
+        if let Some(ref x) = arg.inst_declaration_opt {
+            if self.single_line {
+                self.align_start(align_kind::CLOCK_DOMAIN);
+            }
+            self.clock_domain(&x.clock_domain);
+            self.space(1);
+            if self.single_line {
+                self.align_finish(align_kind::CLOCK_DOMAIN);
+            }
+        } else if self.single_line {
+            self.align_start(align_kind::CLOCK_DOMAIN);
+            self.align_dummy_token(align_kind::CLOCK_DOMAIN, &arg.colon.colon_token);
+            self.align_finish(align_kind::CLOCK_DOMAIN);
+        }
         self.scoped_identifier(&arg.scoped_identifier);
         // skip align at single line
         if self.mode == Mode::Align && self.single_line {
             return;
         }
-        if let Some(ref x) = arg.inst_declaration_opt {
+        if let Some(ref x) = arg.inst_declaration_opt0 {
             self.space(1);
             self.array(&x.array);
         }
-        if let Some(ref x) = arg.inst_declaration_opt0 {
+        if let Some(ref x) = arg.inst_declaration_opt1 {
             self.space(1);
             self.inst_parameter(&x.inst_parameter);
         }
-        if let Some(ref x) = arg.inst_declaration_opt1 {
+        if let Some(ref x) = arg.inst_declaration_opt2 {
             self.space(1);
             self.token_will_push(&x.l_paren.l_paren_token);
             self.newline_push();
-            if let Some(ref x) = x.inst_declaration_opt2 {
+            if let Some(ref x) = x.inst_declaration_opt3 {
                 self.inst_port_list(&x.inst_port_list);
             }
             self.newline_pop();

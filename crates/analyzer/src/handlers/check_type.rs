@@ -299,7 +299,7 @@ impl VerylGrammarTrait for CheckType {
     fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let mut connected_params = Vec::new();
-            if let Some(ref x) = arg.inst_declaration_opt0 {
+            if let Some(ref x) = arg.inst_declaration_opt1 {
                 if let Some(ref x) = x.inst_parameter.inst_parameter_opt {
                     let items: Vec<InstParameterItem> = x.inst_parameter_list.as_ref().into();
                     for item in items {
@@ -309,8 +309,8 @@ impl VerylGrammarTrait for CheckType {
             }
 
             let mut connected_ports = Vec::new();
-            if let Some(ref x) = arg.inst_declaration_opt1 {
-                if let Some(ref x) = x.inst_declaration_opt2 {
+            if let Some(ref x) = arg.inst_declaration_opt2 {
+                if let Some(ref x) = x.inst_declaration_opt3 {
                     let items: Vec<InstPortItem> = x.inst_port_list.as_ref().into();
                     for item in items {
                         connected_ports.push(item.identifier.identifier_token.token.text);

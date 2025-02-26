@@ -2974,11 +2974,11 @@ impl VerylWalker for Emitter {
             unreachable!()
         };
 
-        self.single_line = arg.inst_declaration_opt1.is_none() && defined_ports.is_empty();
+        self.single_line = arg.inst_declaration_opt2.is_none() && defined_ports.is_empty();
         self.token(&arg.inst.inst_token.replace(""));
         self.scoped_identifier(&arg.scoped_identifier);
         self.space(1);
-        if let Some(ref x) = arg.inst_declaration_opt0 {
+        if let Some(ref x) = arg.inst_declaration_opt1 {
             // skip align at single line
             if self.mode == Mode::Emit || !self.single_line {
                 self.inst_parameter(&x.inst_parameter);
@@ -2992,16 +2992,16 @@ impl VerylWalker for Emitter {
         if self.single_line {
             self.align_finish(align_kind::IDENTIFIER);
         }
-        if let Some(ref x) = arg.inst_declaration_opt {
+        if let Some(ref x) = arg.inst_declaration_opt0 {
             self.space(1);
             self.array(&x.array);
         }
         self.space(1);
 
-        if let Some(ref x) = arg.inst_declaration_opt1 {
+        if let Some(ref x) = arg.inst_declaration_opt2 {
             self.token_will_push(&x.l_paren.l_paren_token.replace("("));
             self.newline_push();
-            if let Some(ref x) = x.inst_declaration_opt2 {
+            if let Some(ref x) = x.inst_declaration_opt3 {
                 self.inst_port_list(&x.inst_port_list);
 
                 let connected_ports: Vec<InstPortItem> = x.inst_port_list.as_ref().into();
