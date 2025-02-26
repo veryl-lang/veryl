@@ -72,6 +72,7 @@ mod analyzer {
 #[cfg(test)]
 mod formatter {
     use std::fs;
+    use veryl_analyzer::Analyzer;
     use veryl_formatter::Formatter;
     use veryl_metadata::Metadata;
     use veryl_parser::Parser;
@@ -95,6 +96,9 @@ mod formatter {
         }
 
         let ret = Parser::parse(&input, &file).unwrap();
+        let prj = &metadata.project.name;
+        let analyzer = Analyzer::new(&metadata);
+        let _ = analyzer.analyze_pass1(&prj, &file, &ret.veryl);
         let mut formatter = Formatter::new(&metadata);
         formatter.format(&ret.veryl);
 

@@ -14,5 +14,6 @@ edition               = "2021"
 
 [dependencies]
 veryl-aligner  = {version = "0.13.5", path = "../aligner"}
+veryl-analyzer = {version = "0.13.5", path = "../analyzer"}
 veryl-metadata = {version = "0.13.5", path = "../metadata"}
 veryl-parser   = {version = "0.13.5", path = "../parser"}

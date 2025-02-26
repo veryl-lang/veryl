@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 use veryl_aligner::{align_kind, Aligner, Location};
 use veryl_analyzer::attribute::Attribute as Attr;
-use veryl_analyzer::attribute::{AllowItem, CondTypeItem, EnumEncodingItem};
+use veryl_analyzer::attribute::{AlignItem, AllowItem, CondTypeItem, EnumEncodingItem};
 use veryl_analyzer::attribute_table;
 use veryl_analyzer::evaluator::{EvaluatedTypeResetKind, Evaluator};
 use veryl_analyzer::namespace::Namespace;
@@ -60,11 +60,12 @@ pub struct Emitter {
     in_import: bool,
     in_scalar_type: bool,
     in_expression: Vec<()>,
+    in_attribute: bool,
     signed: bool,
     default_clock: Option<SymbolId>,
     default_reset: Option<SymbolId>,
     reset_signal: Option<String>,
-    default_block: Option<String>,
+    default_block: Option<Identifier>,
     enum_width: usize,
     emit_enum_implicit_valiant: bool,
     file_scope_import: Vec<String>,
@@ -101,6 +102,7 @@ impl Default for Emitter {
             in_import: false,
             in_scalar_type: false,
             in_expression: Vec::new(),
+            in_attribute: false,
             signed: false,
             default_clock: None,
             default_reset: None,
@@ -403,6 +405,10 @@ impl Emitter {
         if self.mode == Mode::Align {
             self.aligner.aligns[kind].start_item();
         }
+    }
+
+    fn align_any(&self) -> bool {
+        self.aligner.any_enabled()
     }
 
     fn align_finish(&mut self, kind: usize) {
@@ -778,7 +784,7 @@ impl Emitter {
     }
 
     fn emit_generate_named_block(&mut self, arg: &GenerateNamedBlock, prefix: &str) {
-        self.default_block = Some(emitting_identifier(arg.identifier.as_ref()).to_string());
+        self.default_block = Some(emitting_identifier(arg.identifier.as_ref()));
         self.token_will_push(
             &arg.l_brace
                 .l_brace_token
@@ -1250,9 +1256,37 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Identifier'
     fn identifier(&mut self, arg: &Identifier) {
-        let text = emitting_identifier(arg);
+        let attrs = attribute_table::get(&arg.token());
+        let align = !self.align_any()
+            && !self.in_attribute
+            && attrs.iter().any(|x| x.is_align(AlignItem::Identifier));
+        if align {
+            self.align_start(align_kind::IDENTIFIER);
+        }
+
+        let text = emitting_identifier(arg).identifier_token;
         self.veryl_token(&text);
         self.push_resolved_identifier(&text.to_string());
+
+        if align {
+            self.align_finish(align_kind::IDENTIFIER);
+        }
+    }
+
+    /// Semantic action for non-terminal 'Number'
+    fn number(&mut self, arg: &Number) {
+        let attrs = attribute_table::get(&arg.token());
+        let align = !self.align_any() && attrs.iter().any(|x| x.is_align(AlignItem::Number));
+        if align {
+            self.align_start(align_kind::NUMBER);
+        }
+        match arg {
+            Number::IntegralNumber(x) => self.integral_number(&x.integral_number),
+            Number::RealNumber(x) => self.real_number(&x.real_number),
+        };
+        if align {
+            self.align_finish(align_kind::NUMBER);
+        }
     }
 
     /// Semantic action for non-terminal 'HierarchicalIdentifier'
@@ -1269,7 +1303,7 @@ impl VerylWalker for Emitter {
         };
 
         if *list_len == 0 {
-            self.veryl_token(&identifier_with_prefix_suffix(
+            self.identifier(&identifier_with_prefix_suffix(
                 &arg.identifier,
                 &prefix,
                 &suffix,
@@ -1285,7 +1319,7 @@ impl VerylWalker for Emitter {
         for (i, x) in arg.hierarchical_identifier_list0.iter().enumerate() {
             self.dot(&x.dot);
             if (i + 1) == *list_len {
-                self.veryl_token(&identifier_with_prefix_suffix(
+                self.identifier(&identifier_with_prefix_suffix(
                     &x.identifier,
                     &prefix,
                     &suffix,
@@ -1317,13 +1351,17 @@ impl VerylWalker for Emitter {
                 (Ok(symbol), _) => {
                     let context: SymbolContext = self.into();
                     let text = symbol_string(arg.identifier(), &symbol.found, &context);
-                    self.veryl_token(&arg.identifier().replace(&text));
+                    self.identifier(&Identifier {
+                        identifier_token: arg.identifier().replace(&text),
+                    });
                     self.push_resolved_identifier(&text);
                 }
                 (Err(_), path) if !path.is_resolvable() => {
                     // emit literal by generics
                     let text = path.base_path(0).0[0].to_string();
-                    self.veryl_token(&arg.identifier().replace(&text));
+                    self.identifier(&Identifier {
+                        identifier_token: arg.identifier().replace(&text),
+                    });
                     self.push_resolved_identifier(&text);
                 }
                 _ => {}
@@ -2079,7 +2117,7 @@ impl VerylWalker for Emitter {
         //self.str(";");
         //self.newline();
         self.align_start(align_kind::IDENTIFIER);
-        self.str(&emitting_identifier(arg.identifier.as_ref()).to_string());
+        self.identifier(&emitting_identifier(arg.identifier.as_ref()));
         self.align_finish(align_kind::IDENTIFIER);
         self.space(1);
         self.equ(&arg.equ);
@@ -2368,6 +2406,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Attribute'
     fn attribute(&mut self, arg: &Attribute) {
+        self.in_attribute = true;
         let identifier = arg.identifier.identifier_token.to_string();
         match identifier.as_str() {
             "ifdef" | "ifndef" => {
@@ -2451,6 +2490,7 @@ impl VerylWalker for Emitter {
             }
             _ => (),
         }
+        self.in_attribute = false;
     }
 
     /// Semantic action for non-terminal 'LetDeclaration'
@@ -2484,7 +2524,7 @@ impl VerylWalker for Emitter {
             self.str("always_comb");
         }
         self.space(1);
-        self.str(&emitting_identifier(arg.identifier.as_ref()).to_string());
+        self.identifier(&emitting_identifier(arg.identifier.as_ref()));
         self.space(1);
         self.equ(&arg.equ);
         self.space(1);
@@ -2831,7 +2871,7 @@ impl VerylWalker for Emitter {
             unreachable!();
         };
 
-        self.token(&identifier_with_prefix_suffix(
+        self.identifier(&identifier_with_prefix_suffix(
             &arg.identifier,
             &Some(format!("{}_", prefix)),
             &None,
@@ -3141,7 +3181,7 @@ impl VerylWalker for Emitter {
             self.expression(&x.expression);
             self.align_finish(align_kind::EXPRESSION);
         } else {
-            let token = emitting_identifier(arg.identifier.as_ref());
+            let token = emitting_identifier(arg.identifier.as_ref()).identifier_token;
             self.align_start(align_kind::EXPRESSION);
             self.duplicated_token(&token);
             self.align_finish(align_kind::EXPRESSION);
@@ -3699,7 +3739,7 @@ impl VerylWalker for Emitter {
             self.space(1);
             self.str(":");
             let name = self.default_block.clone().unwrap();
-            self.str(&name);
+            self.identifier(&name);
         }
         self.token_will_push(&arg.l_brace.l_brace_token.replace(""));
         for (i, x) in arg.generate_optional_named_block_list.iter().enumerate() {
@@ -4095,16 +4135,19 @@ pub fn identifier_with_prefix_suffix(
     identifier: &Identifier,
     prefix: &Option<String>,
     suffix: &Option<String>,
-) -> VerylToken {
-    if prefix.is_some() || suffix.is_some() {
+) -> Identifier {
+    let token = if prefix.is_some() || suffix.is_some() {
         let token = &identifier.identifier_token.strip_prefix("r#");
         token.append(prefix, suffix)
     } else {
         identifier.identifier_token.strip_prefix("r#")
+    };
+    Identifier {
+        identifier_token: token,
     }
 }
 
-pub fn emitting_identifier(arg: &Identifier) -> VerylToken {
+pub fn emitting_identifier(arg: &Identifier) -> Identifier {
     let (prefix, suffix) = if let Ok(found) = symbol_table::resolve(arg) {
         match &found.found.kind {
             SymbolKind::Port(x) => (x.prefix.clone(), x.suffix.clone()),

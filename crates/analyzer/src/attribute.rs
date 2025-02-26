@@ -3,7 +3,7 @@ use std::fmt;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::veryl_token::Token;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Attribute {
     Ifdef(StrId),
     Ifndef(StrId),
@@ -13,6 +13,17 @@ pub enum Attribute {
     EnumMemberPrefix(StrId),
     Test(Token, Option<StrId>),
     CondType(CondTypeItem),
+    Align(Vec<AlignItem>),
+}
+
+impl Attribute {
+    pub fn is_align(&self, item: AlignItem) -> bool {
+        if let Attribute::Align(x) = self {
+            x.contains(&item)
+        } else {
+            false
+        }
+    }
 }
 
 impl fmt::Display for Attribute {
@@ -26,6 +37,13 @@ impl fmt::Display for Attribute {
             Attribute::EnumMemberPrefix(x) => format!("enum_member_prefix({})", x),
             Attribute::Test(x, _) => format!("test({})", x.text),
             Attribute::CondType(x) => format!("cond_type({})", x),
+            Attribute::Align(x) => {
+                let mut arg = String::new();
+                for x in x {
+                    arg.push_str(&format!("{}, ", x));
+                }
+                format!("align({})", arg)
+            }
         };
         text.fmt(f)
     }
@@ -38,6 +56,7 @@ pub enum AttributeError {
     InvalidAllow(StrId),
     InvalidEnumEncoding(StrId),
     InvalidCondType(StrId),
+    InvalidAlign(StrId),
 }
 
 fn get_arg_ident(
@@ -80,6 +99,22 @@ fn get_arg_string(
     }
 }
 
+fn get_args_ident(args: &Option<veryl_parser::veryl_grammar_trait::AttributeOpt>) -> Vec<Token> {
+    use veryl_parser::veryl_grammar_trait as g;
+
+    let mut ret = Vec::new();
+
+    if let Some(ref x) = args {
+        let args: Vec<g::AttributeItem> = x.attribute_list.as_ref().into();
+        for arg in args {
+            if let g::AttributeItem::Identifier(ref x) = arg {
+                ret.push(x.identifier.identifier_token.token);
+            }
+        }
+    }
+    ret
+}
+
 struct Pattern {
     pub ifdef: StrId,
     pub ifndef: StrId,
@@ -99,6 +134,9 @@ struct Pattern {
     pub unique0: StrId,
     pub priority: StrId,
     pub none: StrId,
+    pub align: StrId,
+    pub number: StrId,
+    pub identifier: StrId,
 }
 
 impl Pattern {
@@ -122,6 +160,9 @@ impl Pattern {
             unique0: resource_table::insert_str("unique0"),
             priority: resource_table::insert_str("priority"),
             none: resource_table::insert_str("none"),
+            align: resource_table::insert_str("align"),
+            number: resource_table::insert_str("number"),
+            identifier: resource_table::insert_str("identifier"),
         }
     }
 }
@@ -225,6 +266,24 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                     Err(AttributeError::MismatchArgs("condition type"))
                 }
             }
+            x if x == pat.align => {
+                let args = get_args_ident(&value.attribute_opt);
+                let mut items = Vec::new();
+
+                for arg in &args {
+                    match arg.text {
+                        x if x == pat.number => items.push(AlignItem::Number),
+                        x if x == pat.identifier => items.push(AlignItem::Identifier),
+                        _ => return Err(AttributeError::InvalidAlign(arg.text)),
+                    }
+                }
+
+                if args.is_empty() {
+                    Err(AttributeError::MismatchArgs("align type"))
+                } else {
+                    Ok(Attribute::Align(items))
+                }
+            }
             _ => Err(AttributeError::UnknownAttribute),
         })
     }
@@ -282,6 +341,22 @@ impl fmt::Display for CondTypeItem {
             CondTypeItem::Unique0 => "unique0",
             CondTypeItem::Priority => "priority",
             CondTypeItem::None => "none",
+        };
+        text.fmt(f)
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum AlignItem {
+    Number,
+    Identifier,
+}
+
+impl fmt::Display for AlignItem {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let text = match self {
+            AlignItem::Number => "number",
+            AlignItem::Identifier => "identifier",
         };
         text.fmt(f)
     }

@@ -1,4 +1,6 @@
 use veryl_aligner::{align_kind, Aligner, Location};
+use veryl_analyzer::attribute::AlignItem;
+use veryl_analyzer::attribute_table;
 use veryl_metadata::{Format, Metadata};
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
@@ -31,6 +33,7 @@ pub struct Formatter {
     case_item_indent: Vec<usize>,
     in_scalar_type: bool,
     in_expression: Vec<()>,
+    in_attribute: bool,
 }
 
 impl Default for Formatter {
@@ -50,6 +53,7 @@ impl Default for Formatter {
             case_item_indent: Vec::new(),
             in_scalar_type: false,
             in_expression: Vec::new(),
+            in_attribute: false,
         }
     }
 }
@@ -266,6 +270,10 @@ impl Formatter {
         }
     }
 
+    fn align_any(&self) -> bool {
+        self.aligner.any_enabled()
+    }
+
     fn align_finish(&mut self, kind: usize) {
         if self.mode == Mode::Align {
             self.aligner.aligns[kind].finish_item();
@@ -310,6 +318,37 @@ impl VerylWalker for Formatter {
     /// Semantic action for non-terminal 'VerylToken'
     fn veryl_token(&mut self, arg: &VerylToken) {
         self.token(arg);
+    }
+
+    /// Semantic action for non-terminal 'Identifier'
+    fn identifier(&mut self, arg: &Identifier) {
+        let attrs = attribute_table::get(&arg.token());
+        let align = !self.align_any()
+            && !self.in_attribute
+            && attrs.iter().any(|x| x.is_align(AlignItem::Identifier));
+        if align {
+            self.align_start(align_kind::IDENTIFIER);
+        }
+        self.veryl_token(&arg.identifier_token);
+        if align {
+            self.align_finish(align_kind::IDENTIFIER);
+        }
+    }
+
+    /// Semantic action for non-terminal 'Number'
+    fn number(&mut self, arg: &Number) {
+        let attrs = attribute_table::get(&arg.token());
+        let align = !self.align_any() && attrs.iter().any(|x| x.is_align(AlignItem::Number));
+        if align {
+            self.align_start(align_kind::NUMBER);
+        }
+        match arg {
+            Number::IntegralNumber(x) => self.integral_number(&x.integral_number),
+            Number::RealNumber(x) => self.real_number(&x.real_number),
+        };
+        if align {
+            self.align_finish(align_kind::NUMBER);
+        }
     }
 
     /// Semantic action for non-terminal 'Expression'
@@ -1137,6 +1176,21 @@ impl VerylWalker for Formatter {
             self.space(1);
             self.expression(&x.expression);
         }
+    }
+
+    /// Semantic action for non-terminal 'Attribute'
+    fn attribute(&mut self, arg: &Attribute) {
+        self.in_attribute = true;
+        self.hash(&arg.hash);
+        self.l_bracket(&arg.l_bracket);
+        self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.attribute_opt {
+            self.l_paren(&x.l_paren);
+            self.attribute_list(&x.attribute_list);
+            self.r_paren(&x.r_paren);
+        }
+        self.r_bracket(&arg.r_bracket);
+        self.in_attribute = false;
     }
 
     /// Semantic action for non-terminal 'AttributeList'

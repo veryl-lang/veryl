@@ -723,6 +723,21 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_align),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_align")
+    )]
+    #[error("{identifier} is not valid condition type")]
+    InvalidAlign {
+        identifier: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(too_large_enum_variant),
         help(""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#too_large_enum_variant")
@@ -1572,6 +1587,14 @@ impl AnalyzerError {
 
     pub fn invalid_cond_type(identifier: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidCondType {
+            identifier: identifier.to_string(),
+            input: source(token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn invalid_align(identifier: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidAlign {
             identifier: identifier.to_string(),
             input: source(token),
             error_location: token.into(),
