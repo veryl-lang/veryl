@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
-use crate::server::{semantic_legend, MsgFromServer, MsgToServer, Server, ServerConfigItem};
-use async_channel::{unbounded, Receiver, Sender};
+use crate::server::{MsgFromServer, MsgToServer, Server, ServerConfigItem, semantic_legend};
+use async_channel::{Receiver, Sender, unbounded};
 use serde_json::Value;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;

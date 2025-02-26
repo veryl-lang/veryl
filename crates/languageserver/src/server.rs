@@ -5,15 +5,15 @@ use futures::executor::block_on;
 use ropey::Rope;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use tower_lsp::lsp_types::*;
 use tower_lsp::Client;
+use tower_lsp::lsp_types::*;
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::SymbolKind as VerylSymbolKind;
 use veryl_analyzer::symbol::{Symbol, TypeKind};
 use veryl_analyzer::symbol_path::SymbolPath;
 use veryl_analyzer::{
-    attribute_table, definition_table, namespace_table, symbol_table, unsafe_table, Analyzer,
-    AnalyzerError,
+    Analyzer, AnalyzerError, attribute_table, definition_table, namespace_table, symbol_table,
+    unsafe_table,
 };
 use veryl_formatter::Formatter;
 use veryl_metadata::Metadata;

@@ -115,7 +115,7 @@ impl SymbolTable {
         mut context: ResolveContext<'a>,
         kind: &TypeKind,
     ) -> Result<ResolveContext<'a>, ResolveError> {
-        if let TypeKind::UserDefined(ref x) = kind {
+        if let TypeKind::UserDefined(x) = kind {
             // Detect infinite loop in trace_user_defined
             if let Some(last_found) = context.last_found {
                 if *x.path.first().unwrap() == last_found.token.text {
@@ -216,7 +216,7 @@ impl SymbolTable {
                         SymbolKind::TypeDef(x) => {
                             context = self.trace_user_defined(context, &x.r#type.kind)?;
                         }
-                        SymbolKind::Port(ref x) => {
+                        SymbolKind::Port(x) => {
                             context = self.trace_user_defined(context, &x.r#type.kind)?;
                         }
                         SymbolKind::ModportVariableMember(_) => {
@@ -244,7 +244,7 @@ impl SymbolTable {
                             context.namespace = found.inner_namespace();
                             context.inner = true;
                         }
-                        SymbolKind::Instance(ref x) => {
+                        SymbolKind::Instance(x) => {
                             let mut type_name = x.type_name.clone();
                             type_name.resolve_imported(&context.namespace);
                             let path = type_name.mangled_path();
@@ -258,7 +258,7 @@ impl SymbolTable {
                                 context.inner = true;
                             }
                         }
-                        SymbolKind::GenericInstance(ref x) => {
+                        SymbolKind::GenericInstance(x) => {
                             let symbol = self.symbol_table.get(&x.base).unwrap();
                             context.namespace = symbol.inner_namespace();
                             context.inner = true;
@@ -266,7 +266,7 @@ impl SymbolTable {
                                 .generic_namespace_map
                                 .insert(symbol.token.text, found.token.text);
                         }
-                        SymbolKind::GenericParameter(ref x) => {
+                        SymbolKind::GenericParameter(x) => {
                             if let GenericBoundKind::Inst(proto) = &x.bound {
                                 let symbol = self.resolve(proto, &found.namespace)?;
                                 context.namespace = symbol.found.inner_namespace();
@@ -1168,9 +1168,9 @@ pub fn pop_override(id: SymbolId) {
 mod tests {
     use crate::namespace::Namespace;
     use crate::symbol_table::{ResolveError, ResolveResult, SymbolPath};
-    use crate::{symbol_table, Analyzer};
+    use crate::{Analyzer, symbol_table};
     use veryl_metadata::Metadata;
-    use veryl_parser::{resource_table, Parser};
+    use veryl_parser::{Parser, resource_table};
 
     const CODE: &str = r##"
     module ModuleA #(

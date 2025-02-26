@@ -1,5 +1,5 @@
 use crate::Backend;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::VecDeque;
 use std::env;
 use std::path::PathBuf;
@@ -157,10 +157,12 @@ async fn did_open() {
     let res = server.recv_notification().await;
     dbg!(&res);
     assert_eq!(res.method(), "textDocument/publishDiagnostics");
-    assert!(res.params().unwrap()["diagnostics"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        res.params().unwrap()["diagnostics"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test]

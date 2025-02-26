@@ -264,7 +264,7 @@ impl Metadata {
                 ),
             };
             let map = match &self.build.sourcemap_target {
-                SourceMapTarget::Directory { ref path } => {
+                SourceMapTarget::Directory { path } => {
                     let dst = dst.strip_prefix(&base).unwrap();
                     base.join(path.join(dst.with_extension("sv.map")))
                 }

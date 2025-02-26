@@ -1,8 +1,8 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::unsafe_table;
+use veryl_parser::ParolError;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
-use veryl_parser::ParolError;
 
 #[derive(Default)]
 pub struct CheckUnsafe {

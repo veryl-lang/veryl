@@ -10,10 +10,10 @@ use crate::var_ref::{
     VarRefType,
 };
 use std::collections::HashMap;
+use veryl_parser::ParolError;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
-use veryl_parser::ParolError;
 
 struct FunctionCallContext {
     pub token: Token,

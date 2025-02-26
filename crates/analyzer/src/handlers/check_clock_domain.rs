@@ -1,14 +1,14 @@
 use crate::analyzer_error::AnalyzerError;
-use crate::r#unsafe::Unsafe;
 use crate::symbol::{ClockDomain, GenericBoundKind, Port, Symbol, SymbolId, SymbolKind};
 use crate::symbol_table;
+use crate::r#unsafe::Unsafe;
 use crate::unsafe_table;
 use std::collections::HashMap;
+use veryl_parser::ParolError;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::{Token, TokenRange};
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
-use veryl_parser::ParolError;
 
 #[derive(Default)]
 pub struct CheckClockDomain {
@@ -306,7 +306,7 @@ fn get_inst_type_kind(inst_symbol: &Symbol) -> Option<SymbolKind> {
         {
             match type_symbol.found.kind {
                 SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::SystemVerilog => {
-                    return Some(type_symbol.found.kind)
+                    return Some(type_symbol.found.kind);
                 }
                 SymbolKind::GenericInstance(ref x) => {
                     let base = symbol_table::get(x.base).unwrap();

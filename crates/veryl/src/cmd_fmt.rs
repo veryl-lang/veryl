@@ -1,5 +1,5 @@
 use crate::OptFmt;
-use console::{style, Style};
+use console::{Style, style};
 use log::{debug, info};
 use miette::{IntoDiagnostic, Result, WrapErr};
 use similar::{ChangeTag, TextDiff};

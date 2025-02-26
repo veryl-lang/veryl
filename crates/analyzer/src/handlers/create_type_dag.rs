@@ -6,11 +6,11 @@ use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table::{self, ResolveErrorCause};
 use crate::type_dag::{self, Context, DagError};
 use std::collections::HashMap;
+use veryl_parser::ParolError;
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::is_anonymous_text;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
-use veryl_parser::ParolError;
 
 #[derive(Default)]
 pub struct CreateTypeDag {

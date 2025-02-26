@@ -9,11 +9,11 @@ use crate::symbol_table;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
+use veryl_parser::Stringifier;
 use veryl_parser::resource_table::{PathId, StrId};
 use veryl_parser::veryl_grammar_trait as syntax_tree;
 use veryl_parser::veryl_token::{Token, TokenRange, VerylToken};
 use veryl_parser::veryl_walker::VerylWalker;
-use veryl_parser::Stringifier;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SymbolId(pub usize);

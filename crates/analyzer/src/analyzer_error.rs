@@ -39,7 +39,9 @@ pub enum AnalyzerError {
         severity(Error),
         code(cyclice_type_dependency),
         help(""),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#cyclic_type_dependency")
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#cyclic_type_dependency"
+        )
     )]
     #[error("Cyclic dependency between {start} and {end}")]
     CyclicTypeDependency {
@@ -55,7 +57,9 @@ pub enum AnalyzerError {
         severity(Error),
         code(duplicated_identifier),
         help(""),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#duplicated_identifier")
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#duplicated_identifier"
+        )
     )]
     #[error("{identifier} is duplicated")]
     DuplicatedIdentifier {
@@ -70,7 +74,9 @@ pub enum AnalyzerError {
         severity(Error),
         code(multiple_assignment),
         help(""),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#multiple_assignment")
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#multiple_assignment"
+        )
     )]
     #[error("{identifier} is assigned in multiple procedural blocks or assignment statements")]
     MultipleAssignment {
@@ -252,7 +258,9 @@ pub enum AnalyzerError {
         severity(Error),
         code(invalid_number_character),
         help(""),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_number_character")
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_number_character"
+        )
     )]
     #[error("{kind} number can't contain {cause}")]
     InvalidNumberCharacter {
@@ -287,7 +295,9 @@ pub enum AnalyzerError {
         help(""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_clock")
     )]
-    #[error("#{identifier} can't be used as a clock because it is not 'clock' type nor a single bit signal")]
+    #[error(
+        "#{identifier} can't be used as a clock because it is not 'clock' type nor a single bit signal"
+    )]
     InvalidClock {
         identifier: String,
         #[source_code]
@@ -300,7 +310,9 @@ pub enum AnalyzerError {
         severity(Error),
         code(invalid_modport_variable_item),
         help(""),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_modport_variable_item")
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_modport_variable_item"
+        )
     )]
     #[error("#{identifier} is not a variable")]
     InvalidModportVariableItem {
@@ -315,7 +327,9 @@ pub enum AnalyzerError {
         severity(Error),
         code(invalid_modport_function_item),
         help(""),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_modport_function_item")
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_modport_function_item"
+        )
     )]
     #[error("#{identifier} is not a function")]
     InvalidModportFunctionItem {
@@ -343,7 +357,9 @@ pub enum AnalyzerError {
         help(""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_reset")
     )]
-    #[error("#{identifier} can't be used as a reset because it is not 'reset' type nor a single bit signal")]
+    #[error(
+        "#{identifier} can't be used as a reset because it is not 'reset' type nor a single bit signal"
+    )]
     InvalidReset {
         identifier: String,
         #[source_code]
@@ -356,7 +372,9 @@ pub enum AnalyzerError {
         severity(Error),
         code(invalid_reset_non_elaborative),
         help(""),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_reset_non_elaborative")
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_reset_non_elaborative"
+        )
     )]
     #[error("Reset-value cannot be used because it is not evaluable at elaboration time")]
     InvalidResetNonElaborative {
@@ -427,7 +445,9 @@ pub enum AnalyzerError {
         severity(Error),
         code(missing_default_argument),
         help("give default argument"),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#missing_default_argument")
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#missing_default_argument"
+        )
     )]
     #[error("missing default argument for parameter {identifier}")]
     MissingDefaultArgument {
@@ -442,7 +462,9 @@ pub enum AnalyzerError {
         severity(Error),
         code(mismatch_function_arity),
         help("fix function arguments"),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mismatch_function_arity")
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mismatch_function_arity"
+        )
     )]
     #[error("function \"{name}\" has {arity} arguments, but {args} arguments are supplied")]
     MismatchFunctionArity {
@@ -459,11 +481,11 @@ pub enum AnalyzerError {
         severity(Error),
         code(mismatch_generics_arity),
         help("fix generics arguments"),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mismatch_generics_arity")
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mismatch_generics_arity"
+        )
     )]
-    #[error(
-        "generics \"{name}\" has {arity} generic arguments, but {args} arguments are supplied"
-    )]
+    #[error("generics \"{name}\" has {arity} generic arguments, but {args} arguments are supplied")]
     MismatchGenericsArity {
         name: String,
         arity: usize,
@@ -478,7 +500,9 @@ pub enum AnalyzerError {
         severity(Error),
         code(mismatch_attribute_args),
         help(""),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mismatch_attribute_args")
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mismatch_attribute_args"
+        )
     )]
     #[error("Arguments of \"{name}\" is expected to \"{expected}\"")]
     MismatchAttributeArgs {
@@ -511,7 +535,9 @@ pub enum AnalyzerError {
         severity(Error),
         code(mismatch_clock_domain),
         help(""),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mismatch_clock_domain")
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mismatch_clock_domain"
+        )
     )]
     #[error("Clock domain crossing is detected")]
     MismatchClockDomain {
@@ -529,7 +555,9 @@ pub enum AnalyzerError {
         severity(Warning),
         code(mismatch_assignment),
         help(""),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mismatch_assignment")
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mismatch_assignment"
+        )
     )]
     #[error("\"{src}\" can't be assigned to \"{dst}\"")]
     MismatchAssignment {
@@ -577,7 +605,9 @@ pub enum AnalyzerError {
         severity(Error),
         code(missing_clock_signal),
         help("add clock port"),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#missing_clock_signal")
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#missing_clock_signal"
+        )
     )]
     #[error("clock signal is required for always_ff statement")]
     MissingClockSignal {
@@ -591,7 +621,9 @@ pub enum AnalyzerError {
         severity(Error),
         code(missing_reset_signal),
         help("add reset port"),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#missing_reset_signal")
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#missing_reset_signal"
+        )
     )]
     #[error("reset signal is required for always_ff with if_reset statement")]
     MissingResetSignal {
@@ -605,7 +637,9 @@ pub enum AnalyzerError {
         severity(Warning),
         code(missing_reset_statement),
         help("add reset statement"),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#missing_reset_statement")
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#missing_reset_statement"
+        )
     )]
     #[error("{name} is not reset in if_reset statement")]
     MissingResetStatement {
@@ -636,7 +670,9 @@ pub enum AnalyzerError {
         severity(Error),
         code(missing_clock_domain),
         help("add clock domain annotation"),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#missing_clock_domain")
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#missing_clock_domain"
+        )
     )]
     #[error("clock domain annotation is required when there are multiple clocks")]
     MissingClockDomain {
@@ -665,9 +701,13 @@ pub enum AnalyzerError {
         severity(Error),
         code(sv_with_implicit_reset),
         help("Use types with explicit synchronisity and polarity like `reset_async_low`"),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#sv_with_implicit_reset")
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#sv_with_implicit_reset"
+        )
     )]
-    #[error("Reset type with implicit synchronisity and polarity can't be connected to SystemVerilog module")]
+    #[error(
+        "Reset type with implicit synchronisity and polarity can't be connected to SystemVerilog module"
+    )]
     SvWithImplicitReset {
         #[source_code]
         input: MultiSources,
@@ -693,7 +733,9 @@ pub enum AnalyzerError {
         severity(Error),
         code(invalid_enum_encoding),
         help(""),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_enum_encoding")
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_enum_encoding"
+        )
     )]
     #[error("{identifier} is not valid enum encoding")]
     InvalidEnumEncoding {
@@ -740,9 +782,13 @@ pub enum AnalyzerError {
         severity(Error),
         code(too_large_enum_variant),
         help(""),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#too_large_enum_variant")
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#too_large_enum_variant"
+        )
     )]
-    #[error("The value of enum variant {identifier} is {value}, it is can't be represented by {width} bits")]
+    #[error(
+        "The value of enum variant {identifier} is {value}, it is can't be represented by {width} bits"
+    )]
     TooLargeEnumVariant {
         identifier: String,
         value: isize,
@@ -798,7 +844,9 @@ pub enum AnalyzerError {
         severity(Error),
         code(too_much_enum_variant),
         help(""),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#too_much_enum_variant")
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#too_much_enum_variant"
+        )
     )]
     #[error(
         "enum {identifier} has {number} variants, they are can't be represented by {width} bits"
@@ -817,7 +865,9 @@ pub enum AnalyzerError {
         severity(Error),
         code(undefined_identifier),
         help(""),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#undefined_identifier")
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#undefined_identifier"
+        )
     )]
     #[error("{identifier} is undefined")]
     UndefinedIdentifier {
@@ -847,7 +897,9 @@ pub enum AnalyzerError {
         severity(Error),
         code(unresolvable_generic_argument),
         help(""),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unresolvable_generic_argument")
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unresolvable_generic_argument"
+        )
     )]
     #[error("{identifier} can't be resolved from the definition of generics")]
     UnresolvableGenericArgument {

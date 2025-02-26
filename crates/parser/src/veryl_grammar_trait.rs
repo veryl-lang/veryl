@@ -1,6 +1,6 @@
 pub use crate::generated::veryl_grammar_trait::*;
 use crate::resource_table::TokenId;
-use crate::veryl_token::{is_anonymous_token, Token, TokenRange};
+use crate::veryl_token::{Token, TokenRange, is_anonymous_token};
 use paste::paste;
 use std::fmt;
 
@@ -88,7 +88,7 @@ impl From<&ScopedIdentifier> for Vec<Option<WithGenericArgument>> {
     fn from(value: &ScopedIdentifier) -> Self {
         let mut ret = Vec::new();
         match value.scoped_identifier_group.as_ref() {
-            ScopedIdentifierGroup::IdentifierScopedIdentifierOpt(ref x) => {
+            ScopedIdentifierGroup::IdentifierScopedIdentifierOpt(x) => {
                 if let Some(ref x) = x.scoped_identifier_opt {
                     ret.push(Some(x.with_generic_argument.as_ref().clone()));
                 } else {

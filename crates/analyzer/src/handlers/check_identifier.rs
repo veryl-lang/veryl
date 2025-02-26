@@ -2,10 +2,10 @@ use crate::analyzer_error::AnalyzerError;
 use crate::symbol::Direction as SymDirection;
 use crate::symbol_table::is_sv_keyword;
 use veryl_metadata::{Case, Lint};
-use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::{is_anonymous_token, Token};
-use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 use veryl_parser::ParolError;
+use veryl_parser::veryl_grammar_trait::*;
+use veryl_parser::veryl_token::{Token, is_anonymous_token};
+use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 
 pub struct CheckIdentifier {
     pub errors: Vec<AnalyzerError>,

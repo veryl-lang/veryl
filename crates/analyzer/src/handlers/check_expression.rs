@@ -8,12 +8,12 @@ use crate::symbol::{
 };
 use crate::symbol_table;
 use std::collections::{HashMap, HashSet};
+use veryl_parser::ParolError;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::resource_table::TokenId;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::TokenRange;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint, VerylWalker};
-use veryl_parser::ParolError;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Context {

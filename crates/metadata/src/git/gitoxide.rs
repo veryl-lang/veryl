@@ -1,12 +1,12 @@
 use crate::metadata_error::MetadataError;
+use git_repository::Repository;
 use git_repository::index::File;
 use git_repository::objs::BlobRef;
 use git_repository::prelude::FindExt;
 use git_repository::progress::Discard;
-use git_repository::remote::ref_map::Options;
 use git_repository::remote::Direction;
+use git_repository::remote::ref_map::Options;
 use git_repository::worktree::index;
-use git_repository::Repository;
 use log::debug;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;

@@ -89,7 +89,10 @@ impl Wavedrom {
                 let wavedrom_content = &content[code_span.clone()];
                 let wavedrom_content = escape_html(wavedrom_content);
                 let wavedrom_content = wavedrom_content.replace("\r\n", "\n");
-                let wavedrom_code = format!("<body onload=\"WaveDrom.ProcessAll()\">\n\n<script type=\"WaveDrom\">{}</script>\n\n", wavedrom_content);
+                let wavedrom_code = format!(
+                    "<body onload=\"WaveDrom.ProcessAll()\">\n\n<script type=\"WaveDrom\">{}</script>\n\n",
+                    wavedrom_content
+                );
                 wavedrom_blocks.push((span, wavedrom_code));
 
                 start_new_code_span = true;

@@ -2,7 +2,7 @@ use crate::symbol::{Symbol, SymbolId};
 use crate::symbol_table;
 use bimap::BiMap;
 use daggy::petgraph::visit::Dfs;
-use daggy::{petgraph::algo, Dag, Walker};
+use daggy::{Dag, Walker, petgraph::algo};
 use std::{cell::RefCell, collections::HashMap, collections::HashSet};
 use veryl_parser::veryl_token::Token;
 

@@ -27,6 +27,7 @@ categories  = ["parsing"]
 license     = "MIT OR Apache-2.0"
 readme      = "README.md"
 description = "A modern hardware description language"
+edition     = "2024"
 
 [workspace.dependencies]
 anyhow          = "1.0"

@@ -1,11 +1,11 @@
 use crate::analyzer_error::AnalyzerError;
 use std::fs;
 use std::path::PathBuf;
+use veryl_parser::ParolError;
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::TokenSource;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
-use veryl_parser::ParolError;
 
 #[derive(Default)]
 pub struct CheckEmbedInclude {

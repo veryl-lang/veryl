@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::Path;
-use veryl_aligner::{align_kind, Aligner, Location};
+use veryl_aligner::{Aligner, Location, align_kind};
 use veryl_analyzer::attribute::Attribute as Attr;
 use veryl_analyzer::attribute::{AlignItem, AllowItem, CondTypeItem, EnumEncodingItem};
 use veryl_analyzer::attribute_table;
@@ -14,11 +14,11 @@ use veryl_analyzer::symbol_path::{GenericSymbolPath, SymbolPath};
 use veryl_analyzer::symbol_table::{self, ResolveError, ResolveResult};
 use veryl_analyzer::{msb_table, namespace_table};
 use veryl_metadata::{Build, BuiltinType, ClockType, Format, Metadata, ResetType, SourceMapTarget};
+use veryl_parser::Stringifier;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::{is_anonymous_token, Token, TokenSource, VerylToken};
+use veryl_parser::veryl_token::{Token, TokenSource, VerylToken, is_anonymous_token};
 use veryl_parser::veryl_walker::VerylWalker;
-use veryl_parser::Stringifier;
 use veryl_sourcemap::SourceMap;
 
 #[cfg(target_os = "windows")]
@@ -2902,12 +2902,12 @@ impl VerylWalker for Emitter {
             self.push_generic_map(map.clone());
 
             match &*arg.struct_union {
-                StructUnion::Struct(ref x) => {
+                StructUnion::Struct(x) => {
                     let prefix = Some(String::from("typedef "));
                     let suffix = Some(String::from(" packed"));
                     self.token(&x.r#struct.struct_token.append(&prefix, &suffix));
                 }
-                StructUnion::Union(ref x) => {
+                StructUnion::Union(x) => {
                     let prefix = Some(String::from("typedef "));
                     let suffix = Some(String::from(" packed"));
                     self.token(&x.union.union_token.append(&prefix, &suffix));

@@ -447,11 +447,7 @@ impl Lockfile {
         let path = path.as_ref().and_then(|x| {
             let path = self.metadata_path.parent().unwrap().join(x);
             let path = path.join("Veryl.toml");
-            if path.exists() {
-                Some(path)
-            } else {
-                None
-            }
+            if path.exists() { Some(path) } else { None }
         });
 
         if let Some(path) = path {
