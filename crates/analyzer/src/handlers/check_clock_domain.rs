@@ -191,13 +191,13 @@ impl VerylGrammarTrait for CheckClockDomain {
         match self.point {
             HandlerPoint::Before => self.expr_clock_domains.clear(),
             HandlerPoint::After => {
-                // clock domain is assigned to base identifier
-                let ident = arg.hierarchical_identifier.identifier.as_ref();
-                if let Ok(symbol) = symbol_table::resolve(ident) {
-                    self.push_expr_clock_domain(
-                        &symbol.found.kind,
-                        arg.hierarchical_identifier.as_ref().into(),
-                    );
+                let idents: Vec<_> = arg.assign_destination.as_ref().into();
+                for ident in idents {
+                    // clock domain is assigned to base identifier not hierarchical_identifier
+                    let ident = ident.identifier.as_ref();
+                    if let Ok(symbol) = symbol_table::resolve(ident) {
+                        self.push_expr_clock_domain(&symbol.found.kind, ident.into());
+                    }
                 }
                 self.check_expr_clock_domains(&arg.semicolon.semicolon_token.token);
             }

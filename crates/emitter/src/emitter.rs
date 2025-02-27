@@ -2812,31 +2812,69 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'AssignDeclaration'
     fn assign_declaration(&mut self, arg: &AssignDeclaration) {
-        let emit_assign =
-            if let Ok(symbol) = symbol_table::resolve(arg.hierarchical_identifier.as_ref()) {
+        let idents: Vec<_> = arg.assign_destination.as_ref().into();
+        let mut emit_assign = false;
+        for ident in idents {
+            if let Ok(symbol) = symbol_table::resolve(&ident) {
                 match &symbol.found.kind {
-                    SymbolKind::Variable(x) => x.r#type.modifier.contains(&SymTypeModifier::Tri),
-                    SymbolKind::Port(x) => x.r#type.modifier.contains(&SymTypeModifier::Tri),
-                    _ => false,
+                    SymbolKind::Variable(x) => {
+                        if x.r#type.modifier.contains(&SymTypeModifier::Tri) {
+                            emit_assign = true;
+                        }
+                    }
+                    SymbolKind::Port(x) => {
+                        if x.r#type.modifier.contains(&SymTypeModifier::Tri) {
+                            emit_assign = true;
+                        }
+                    }
+                    _ => (),
                 }
             } else {
                 // External symbols may be tri-state
-                true
-            };
+                emit_assign = true;
+            }
+        }
         if emit_assign {
             self.assign(&arg.assign);
         } else {
             self.token(&arg.assign.assign_token.replace("always_comb"));
         }
         self.space(1);
-        self.align_start(align_kind::IDENTIFIER);
-        self.hierarchical_identifier(&arg.hierarchical_identifier);
-        self.align_finish(align_kind::IDENTIFIER);
+        self.assign_destination(&arg.assign_destination);
         self.space(1);
         self.equ(&arg.equ);
         self.space(1);
         self.expression(&arg.expression);
         self.semicolon(&arg.semicolon);
+    }
+
+    /// Semantic action for non-terminal 'AssignDestination'
+    fn assign_destination(&mut self, arg: &AssignDestination) {
+        match arg {
+            AssignDestination::HierarchicalIdentifier(x) => {
+                self.align_start(align_kind::IDENTIFIER);
+                self.hierarchical_identifier(&x.hierarchical_identifier);
+                self.align_finish(align_kind::IDENTIFIER);
+            }
+            AssignDestination::LBraceAssignConcatenationListRBrace(x) => {
+                self.l_brace(&x.l_brace);
+                self.assign_concatenation_list(&x.assign_concatenation_list);
+                self.r_brace(&x.r_brace);
+            }
+        }
+    }
+
+    /// Semantic action for non-terminal 'AssignConcatenationList'
+    fn assign_concatenation_list(&mut self, arg: &AssignConcatenationList) {
+        self.assign_concatenation_item(&arg.assign_concatenation_item);
+        for x in &arg.assign_concatenation_list_list {
+            self.comma(&x.comma);
+            self.space(1);
+            self.assign_concatenation_item(&x.assign_concatenation_item);
+        }
+        if let Some(ref x) = arg.assign_concatenation_list_opt {
+            self.comma(&x.comma);
+        }
     }
 
     /// Semantic action for non-terminal 'ModportDeclaration'

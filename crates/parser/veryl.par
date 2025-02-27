@@ -643,7 +643,14 @@ AlwaysFfReset: HierarchicalIdentifier;
 
 AlwaysCombDeclaration: AlwaysComb StatementBlock;
 
-AssignDeclaration: Assign HierarchicalIdentifier Equ Expression Semicolon;
+AssignDeclaration: Assign AssignDestination Equ Expression Semicolon;
+
+AssignDestination: HierarchicalIdentifier
+                 | LBrace AssignConcatenationList RBrace;
+
+AssignConcatenationList: AssignConcatenationItem { Comma AssignConcatenationItem } [ Comma ];
+
+AssignConcatenationItem: HierarchicalIdentifier;
 
 ModportDeclaration: Modport Identifier LBrace [ ModportList ] [ DotDot ModportDefault ] RBrace;
 

@@ -162,6 +162,22 @@ impl From<&Array> for Vec<Expression> {
     }
 }
 
+impl From<&AssignDestination> for Vec<HierarchicalIdentifier> {
+    fn from(value: &AssignDestination) -> Self {
+        match value {
+            AssignDestination::HierarchicalIdentifier(x) => {
+                vec![x.hierarchical_identifier.as_ref().clone()]
+            }
+            AssignDestination::LBraceAssignConcatenationListRBrace(x) => {
+                let list: Vec<_> = x.assign_concatenation_list.as_ref().into();
+                list.iter()
+                    .map(|x| x.hierarchical_identifier.as_ref().clone())
+                    .collect()
+            }
+        }
+    }
+}
+
 list_group_to_item!(Modport);
 list_group_to_item!(Enum);
 list_group_to_item!(StructUnion);
@@ -173,6 +189,7 @@ list_to_item!(WithGenericParameter);
 list_to_item!(WithGenericArgument);
 list_to_item!(Attribute);
 list_to_item!(Argument);
+list_to_item!(AssignConcatenation);
 group_to_item!(Module);
 group_to_item!(Interface);
 group_to_item!(Generate);
