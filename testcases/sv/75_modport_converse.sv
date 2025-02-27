@@ -33,7 +33,7 @@ interface veryl_testcase_Interface75;
     );
 
     modport partial_converse (
-        output a,
+        input  a,
         output b,
         input  c,
         input  d
