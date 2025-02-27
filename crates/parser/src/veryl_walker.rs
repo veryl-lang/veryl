@@ -405,6 +405,13 @@ pub trait VerylWalker {
         after!(self, r#const, arg);
     }
 
+    /// Semantic action for non-terminal 'Converse'
+    fn converse(&mut self, arg: &Converse) {
+        before!(self, converse, arg);
+        self.veryl_token(&arg.converse_token);
+        after!(self, converse, arg);
+    }
+
     /// Semantic action for non-terminal 'Defaul'
     fn defaul(&mut self, arg: &Defaul) {
         before!(self, defaul, arg);
@@ -1961,7 +1968,13 @@ pub trait VerylWalker {
         self.modport(&arg.modport);
         self.identifier(&arg.identifier);
         self.l_brace(&arg.l_brace);
-        self.modport_list(&arg.modport_list);
+        if let Some(ref x) = arg.modport_declaration_opt {
+            self.modport_list(&x.modport_list);
+        }
+        if let Some(ref x) = arg.modport_declaration_opt0 {
+            self.dot_dot(&x.dot_dot);
+            self.modport_default(&x.modport_default);
+        }
         self.r_brace(&arg.r_brace);
         after!(self, modport_declaration, arg);
     }
@@ -2004,6 +2017,22 @@ pub trait VerylWalker {
         self.colon(&arg.colon);
         self.direction(&arg.direction);
         after!(self, modport_item, arg);
+    }
+
+    /// Semantic action for non-terminal 'ModportDefault'
+    fn modport_default(&mut self, arg: &ModportDefault) {
+        before!(self, modport_default, arg);
+        match arg {
+            ModportDefault::Input(x) => self.input(&x.input),
+            ModportDefault::Output(x) => self.output(&x.output),
+            ModportDefault::ConverseLParenIdentifierRParen(x) => {
+                self.converse(&x.converse);
+                self.l_paren(&x.l_paren);
+                self.identifier(&x.identifier);
+                self.r_paren(&x.r_paren);
+            }
+        }
+        after!(self, modport_default, arg);
     }
 
     /// Semantic action for non-terminal 'EnumDeclaration'
