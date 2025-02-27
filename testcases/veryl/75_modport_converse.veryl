@@ -24,7 +24,7 @@ interface Interface75 {
     }
 
     modport partial_converse {
-        a: output,
+        a: input,
         ..converse(master)
     }
 

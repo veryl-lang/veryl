@@ -411,7 +411,8 @@ impl CreateSymbolTable {
                     };
 
                     if let Some(direction) = direction {
-                        let token = Token::generate(x, mp.token.source.get_path().unwrap());
+                        let path = mp.token.source.get_path().unwrap();
+                        let token = Token::generate(x, path);
                         let property = ModportVariableMemberProperty { direction };
                         let kind = SymbolKind::ModportVariableMember(property);
                         let symbol =
@@ -419,6 +420,7 @@ impl CreateSymbolTable {
                         if let Some(id) = symbol_table::insert(&token, symbol) {
                             ret.push(id);
                         }
+                        namespace_table::insert(token.id, path, &namespace);
                     }
                 }
             }
