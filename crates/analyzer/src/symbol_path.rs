@@ -420,7 +420,7 @@ impl GenericSymbolPath {
                     {
                         if matches!(parent_symbol.found.kind, SymbolKind::Package(_)) {
                             for (i, path) in parent.paths.iter().enumerate() {
-                                let token = Token::generate(*path);
+                                let token = Token::generate(*path, self_file_path);
                                 namespace_table::insert(token.id, self_file_path, &self_namespace);
                                 let generic_symbol = GenericSymbol {
                                     base: token,

@@ -1417,7 +1417,16 @@ impl VerylWalker for Formatter {
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
-        self.modport_list(&arg.modport_list);
+        if let Some(ref x) = arg.modport_declaration_opt {
+            self.modport_list(&x.modport_list);
+        }
+        if let Some(ref x) = arg.modport_declaration_opt0 {
+            if arg.modport_declaration_opt.is_some() {
+                self.newline();
+            }
+            self.dot_dot(&x.dot_dot);
+            self.modport_default(&x.modport_default);
+        }
         self.newline_pop();
         self.r_brace(&arg.r_brace);
     }

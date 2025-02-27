@@ -9,6 +9,7 @@ use crate::namespace_table;
 use crate::reference_table;
 use crate::symbol::ClockDomain as SymClockDomain;
 use crate::symbol::Direction as SymDirection;
+use crate::symbol::ModportDefault as SymModportDefault;
 use crate::symbol::Type as SymType;
 use crate::symbol::{
     ConnectTarget, DocComment, EnumMemberProperty, EnumMemberValue, EnumProperty, FunctionProperty,
@@ -87,6 +88,7 @@ pub struct CreateSymbolTable {
     generic_context: GenericContext,
     default_clock_candidates: Vec<SymbolId>,
     defualt_reset_candidates: Vec<SymbolId>,
+    variable_ids: Vec<SymbolId>,
     modport_member_ids: Vec<SymbolId>,
     modport_ids: Vec<SymbolId>,
     function_ids: HashMap<StrId, SymbolId>,
@@ -368,6 +370,62 @@ impl CreateSymbolTable {
             symbol_table::add_import(import);
         }
     }
+
+    fn get_modport_default_members(
+        &mut self,
+        mp: &Symbol,
+        directions: &HashMap<(StrId, StrId), SymDirection>,
+    ) -> Vec<SymbolId> {
+        let mut ret = Vec::new();
+
+        if let SymbolKind::Modport(ref x) = mp.kind {
+            if let Some(ref default) = x.default {
+                let explicit_members: HashSet<_> = x
+                    .members
+                    .iter()
+                    .map(|x| symbol_table::get(*x).unwrap().token.text)
+                    .collect();
+                let default_members: Vec<_> = self
+                    .variable_ids
+                    .iter()
+                    .map(|x| symbol_table::get(*x).unwrap().token.text)
+                    .filter(|x| !explicit_members.contains(x))
+                    .collect();
+
+                let namespace = mp.inner_namespace();
+                for x in default_members {
+                    let direction = match default {
+                        SymModportDefault::Input => Some(SymDirection::Input),
+                        SymModportDefault::Output => Some(SymDirection::Output),
+                        SymModportDefault::Converse(tgt) => {
+                            if let Some(tgt) = directions.get(&(tgt.text, x)) {
+                                Some(tgt.converse())
+                            } else {
+                                self.errors.push(AnalyzerError::undefined_identifier(
+                                    &tgt.text.to_string(),
+                                    &tgt.into(),
+                                ));
+                                None
+                            }
+                        }
+                    };
+
+                    if let Some(direction) = direction {
+                        let token = Token::generate(x, mp.token.source.get_path().unwrap());
+                        let property = ModportVariableMemberProperty { direction };
+                        let kind = SymbolKind::ModportVariableMember(property);
+                        let symbol =
+                            Symbol::new(&token, kind, &namespace, false, DocComment::default());
+                        if let Some(id) = symbol_table::insert(&token, symbol) {
+                            ret.push(id);
+                        }
+                    }
+                }
+            }
+        }
+
+        ret
+    }
 }
 
 impl Handler for CreateSymbolTable {
@@ -622,6 +680,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 } else if self.is_default_reset_candidate(kind.clone()) {
                     self.defualt_reset_candidates.push(id);
                 }
+                self.variable_ids.push(id);
             }
         }
         Ok(())
@@ -666,7 +725,11 @@ impl VerylGrammarTrait for CreateSymbolTable {
     fn modport_declaration(&mut self, arg: &ModportDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let mut members = Vec::new();
-            let items: Vec<ModportItem> = arg.modport_list.as_ref().into();
+            let items: Vec<ModportItem> = if let Some(ref x) = arg.modport_declaration_opt {
+                x.modport_list.as_ref().into()
+            } else {
+                Vec::new()
+            };
 
             self.namespace
                 .push(arg.identifier.identifier_token.token.text);
@@ -699,10 +762,25 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
             self.namespace.pop();
 
+            let default = if let Some(ref x) = arg.modport_declaration_opt0 {
+                match x.modport_default.as_ref() {
+                    ModportDefault::Input(_) => Some(crate::symbol::ModportDefault::Input),
+                    ModportDefault::Output(_) => Some(crate::symbol::ModportDefault::Output),
+                    ModportDefault::ConverseLParenIdentifierRParen(x) => {
+                        Some(crate::symbol::ModportDefault::Converse(
+                            x.identifier.identifier_token.token,
+                        ))
+                    }
+                }
+            } else {
+                None
+            };
+
             let property = ModportProperty {
                 // Dummy SymbolId, the actual value is inserted at interface_declaration
                 interface: SymbolId(0),
                 members,
+                default,
             };
             let kind = SymbolKind::Modport(property);
             if let Some(id) =
@@ -1348,6 +1426,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.generic_context.push();
                 self.parameters.push(Vec::new());
                 self.affiliation.push(VariableAffiliation::Intarface);
+                self.variable_ids.clear();
                 self.function_ids.clear();
                 self.modport_member_ids.clear();
                 self.modport_ids.clear();
@@ -1392,13 +1471,32 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     }
                 }
 
+                // collect all members in modport for default member
+                let mut directions = HashMap::new();
                 for id in &self.modport_ids {
+                    let mp = symbol_table::get(*id).unwrap();
+                    if let SymbolKind::Modport(ref x) = mp.kind {
+                        for x in &x.members {
+                            let member = symbol_table::get(*x).unwrap();
+                            if let SymbolKind::ModportVariableMember(x) = &member.kind {
+                                directions.insert((mp.token.text, member.token.text), x.direction);
+                            }
+                        }
+                    }
+                }
+
+                for id in &self.modport_ids.clone() {
                     let mut mp = symbol_table::get(*id).unwrap();
-                    if let SymbolKind::Modport(x) = mp.kind {
+                    if let SymbolKind::Modport(ref x) = mp.kind {
                         if let Some(interface) = interface_id {
+                            // add default members
+                            let mut members = x.members.clone();
+                            members.append(&mut self.get_modport_default_members(&mp, &directions));
+
                             let property = ModportProperty {
                                 interface,
-                                members: x.members.clone(),
+                                members,
+                                default: x.default.clone(),
                             };
                             let kind = SymbolKind::Modport(property);
                             mp.kind = kind;

@@ -672,6 +672,16 @@ pub enum Direction {
     Import,
 }
 
+impl Direction {
+    pub fn converse(&self) -> Direction {
+        match self {
+            Direction::Input => Direction::Output,
+            Direction::Output => Direction::Input,
+            _ => *self,
+        }
+    }
+}
+
 impl fmt::Display for Direction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let text = match self {
@@ -1466,6 +1476,14 @@ pub struct EnumMemberProperty {
 pub struct ModportProperty {
     pub interface: SymbolId,
     pub members: Vec<SymbolId>,
+    pub default: Option<ModportDefault>,
+}
+
+#[derive(Debug, Clone)]
+pub enum ModportDefault {
+    Input,
+    Output,
+    Converse(Token),
 }
 
 #[derive(Debug, Clone)]

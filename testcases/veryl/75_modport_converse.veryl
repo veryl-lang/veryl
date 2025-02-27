@@ -1,0 +1,35 @@
+interface Interface75 {
+    var a: logic;
+    var b: logic;
+    var c: logic;
+    var d: logic;
+
+    modport master {
+        a: input ,
+        b: input ,
+        c: output,
+        d: output,
+    }
+
+    modport slave {
+        ..converse(master)
+    }
+
+    modport all_input {
+        ..input
+    }
+
+    modport all_output {
+        ..input
+    }
+
+    modport partial_converse {
+        a: output,
+        ..converse(master)
+    }
+
+    modport partial_input {
+        c: output,
+        ..input
+    }
+}

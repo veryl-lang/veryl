@@ -12,7 +12,7 @@ pub enum TokenSource {
     File { path: PathId, text: TextId },
     Builtin,
     External,
-    Generated,
+    Generated(PathId),
 }
 
 impl fmt::Display for TokenSource {
@@ -21,7 +21,7 @@ impl fmt::Display for TokenSource {
             TokenSource::File { path, .. } => path.to_string(),
             TokenSource::Builtin => "builtin".to_string(),
             TokenSource::External => "external".to_string(),
-            TokenSource::Generated => "generated".to_string(),
+            TokenSource::Generated(_) => "generated".to_string(),
         };
         text.fmt(f)
     }
@@ -29,10 +29,10 @@ impl fmt::Display for TokenSource {
 
 impl PartialEq<PathId> for TokenSource {
     fn eq(&self, other: &PathId) -> bool {
-        if let TokenSource::File { path, .. } = self {
-            path == other
-        } else {
-            false
+        match self {
+            TokenSource::File { path, .. } => path == other,
+            TokenSource::Generated(x) => x == other,
+            _ => false,
         }
     }
 }
@@ -47,6 +47,14 @@ impl TokenSource {
             }
         } else {
             String::new()
+        }
+    }
+
+    pub fn get_path(&self) -> Option<PathId> {
+        match self {
+            TokenSource::File { path, .. } => Some(*path),
+            TokenSource::Generated(x) => Some(*x),
+            _ => None,
         }
     }
 }
@@ -84,7 +92,7 @@ impl Token {
         }
     }
 
-    pub fn generate(text: StrId) -> Self {
+    pub fn generate(text: StrId, path: PathId) -> Self {
         let id = resource_table::new_token_id();
         Token {
             id,
@@ -93,7 +101,7 @@ impl Token {
             column: 0,
             length: 0,
             pos: 0,
-            source: TokenSource::Generated,
+            source: TokenSource::Generated(path),
         }
     }
 }
@@ -1029,6 +1037,7 @@ token_with_comments!(Clock);
 token_with_comments!(ClockPosedge);
 token_with_comments!(ClockNegedge);
 token_with_comments!(Const);
+token_with_comments!(Converse);
 token_with_comments!(Default);
 token_with_comments!(Else);
 token_with_comments!(Embed);
