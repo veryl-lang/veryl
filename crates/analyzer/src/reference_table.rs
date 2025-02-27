@@ -2,7 +2,7 @@ use crate::AnalyzerError;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::{Direction, GenericMap, Symbol, SymbolKind};
-use crate::symbol_path::GenericSymbolPath;
+use crate::symbol_path::{GenericSymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
 use crate::symbol_table::{ResolveError, ResolveErrorCause};
 use std::cell::RefCell;
@@ -316,7 +316,10 @@ impl ReferenceTable {
                 ReferenceCandidate::ModportItem { arg, namespace } => {
                     namespace_table::set_default(&namespace.paths);
 
-                    match symbol_table::resolve(arg.identifier.as_ref()) {
+                    let mut path: SymbolPathNamespace = arg.identifier.as_ref().into();
+                    path.pop_namespace();
+
+                    match symbol_table::resolve(path) {
                         Ok(symbol) => {
                             for id in symbol.full_path {
                                 symbol_table::add_reference(

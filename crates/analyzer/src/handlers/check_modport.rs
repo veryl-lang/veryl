@@ -1,5 +1,6 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::symbol::SymbolKind;
+use crate::symbol_path::SymbolPathNamespace;
 use crate::symbol_table;
 use veryl_parser::ParolError;
 use veryl_parser::veryl_grammar_trait::*;
@@ -26,7 +27,10 @@ impl Handler for CheckModport {
 impl VerylGrammarTrait for CheckModport {
     fn modport_item(&mut self, arg: &ModportItem) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
+            let mut path: SymbolPathNamespace = arg.identifier.as_ref().into();
+            path.pop_namespace();
+
+            if let Ok(symbol) = symbol_table::resolve(path) {
                 match &*arg.direction {
                     Direction::Ref(_) | Direction::Modport(_) => {}
                     Direction::Import(_) => {

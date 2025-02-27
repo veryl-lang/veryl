@@ -122,6 +122,12 @@ impl From<&str> for SymbolPath {
 #[derive(Clone, Default, Debug, PartialEq, Eq)]
 pub struct SymbolPathNamespace(pub SymbolPath, pub Namespace);
 
+impl SymbolPathNamespace {
+    pub fn pop_namespace(&mut self) -> Option<StrId> {
+        self.1.pop()
+    }
+}
+
 impl From<&Token> for SymbolPathNamespace {
     fn from(value: &Token) -> Self {
         let namespace = namespace_table::get(value.id).unwrap();
