@@ -583,23 +583,24 @@ impl VerylGrammarTrait for CheckExpression {
                             match instance_history::push(sig) {
                                 Ok(true) => {
                                     // Check expression with overridden parameters
-                                    let def = definition_table::get(definition).unwrap();
-                                    match def {
-                                        Definition::Module(x) => {
-                                            let mut inst_context = self.inst_context.clone();
-                                            inst_context.push(arg.identifier.as_ref().into());
-                                            let mut analyzer =
-                                                AnalyzerPass2Expression::new(inst_context);
-                                            analyzer.module_declaration(&x);
-                                            self.errors.append(&mut analyzer.get_errors());
-                                        }
-                                        Definition::Interface(x) => {
-                                            let mut inst_context = self.inst_context.clone();
-                                            inst_context.push(arg.identifier.as_ref().into());
-                                            let mut analyzer =
-                                                AnalyzerPass2Expression::new(inst_context);
-                                            analyzer.interface_declaration(&x);
-                                            self.errors.append(&mut analyzer.get_errors());
+                                    if let Some(def) = definition_table::get(definition) {
+                                        match def {
+                                            Definition::Module(x) => {
+                                                let mut inst_context = self.inst_context.clone();
+                                                inst_context.push(arg.identifier.as_ref().into());
+                                                let mut analyzer =
+                                                    AnalyzerPass2Expression::new(inst_context);
+                                                analyzer.module_declaration(&x);
+                                                self.errors.append(&mut analyzer.get_errors());
+                                            }
+                                            Definition::Interface(x) => {
+                                                let mut inst_context = self.inst_context.clone();
+                                                inst_context.push(arg.identifier.as_ref().into());
+                                                let mut analyzer =
+                                                    AnalyzerPass2Expression::new(inst_context);
+                                                analyzer.interface_declaration(&x);
+                                                self.errors.append(&mut analyzer.get_errors());
+                                            }
                                         }
                                     }
                                     instance_history::pop();
