@@ -378,6 +378,10 @@ impl Symbol {
     pub fn proto(&self) -> Option<SymbolPath> {
         match &self.kind {
             SymbolKind::Module(x) => x.proto.clone(),
+            SymbolKind::Package(_) => {
+                let path = SymbolPath::from(&self.token);
+                Some(path)
+            }
             SymbolKind::GenericParameter(x) => match x.bound {
                 GenericBoundKind::Proto(ref x) => Some(x.clone()),
                 _ => None,

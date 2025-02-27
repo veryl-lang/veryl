@@ -1100,8 +1100,8 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 GenericBound::InstScopedIdentifier(x) => {
                     GenericBoundKind::Inst(x.scoped_identifier.as_ref().into())
                 }
-                GenericBound::ScopedIdentifier(x) => {
-                    GenericBoundKind::Proto(x.scoped_identifier.as_ref().into())
+                GenericBound::ScopedBaseIdentifier(x) => {
+                    GenericBoundKind::Proto(x.scoped_base_identifier.as_ref().into())
                 }
             };
 
