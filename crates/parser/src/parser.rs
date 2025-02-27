@@ -4,6 +4,7 @@ use crate::text_table::{self, TextInfo};
 use crate::veryl_grammar::VerylGrammar;
 use crate::veryl_grammar_trait::Veryl;
 use crate::veryl_parser::parse;
+use anyhow::anyhow;
 use std::path::Path;
 
 #[derive(Debug)]
@@ -24,7 +25,7 @@ impl Parser {
         let mut grammar = VerylGrammar::new();
         parse(input, file, &mut grammar)?;
 
-        let veryl = grammar.veryl.unwrap();
+        let veryl = grammar.veryl.ok_or(anyhow!("parse failure"))?;
 
         Ok(Parser { veryl })
     }
