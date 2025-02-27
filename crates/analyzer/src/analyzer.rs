@@ -11,6 +11,7 @@ use crate::reference_table;
 use crate::symbol::{
     Direction, DocComment, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiliation,
 };
+use crate::symbol_path::SymbolPathNamespace;
 use crate::symbol_table;
 use crate::type_dag;
 use crate::var_ref::{
@@ -449,7 +450,12 @@ fn traverse_type_symbol(id: SymbolId, path: &VarRefPath) -> Vec<VarRefPath> {
                 return ret;
             }
             SymbolKind::ModportVariableMember(x) if is_assignable(&x.direction) => {
-                if let Ok(symbol) = symbol_table::resolve(&symbol.token) {
+                // Use outer namespace of modport to trace variable
+                let mut namespace = symbol.namespace.clone();
+                let _ = namespace.pop();
+                let symbol_path = SymbolPathNamespace((&symbol.token).into(), namespace);
+
+                if let Ok(symbol) = symbol_table::resolve(symbol_path) {
                     return traverse_type_symbol(symbol.found.id, path);
                 }
             }

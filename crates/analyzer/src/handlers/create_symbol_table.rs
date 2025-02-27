@@ -413,6 +413,8 @@ impl CreateSymbolTable {
                     if let Some(direction) = direction {
                         let path = mp.token.source.get_path().unwrap();
                         let token = Token::generate(x, path);
+                        namespace_table::insert(token.id, path, &namespace);
+
                         let property = ModportVariableMemberProperty { direction };
                         let kind = SymbolKind::ModportVariableMember(property);
                         let symbol =
@@ -420,7 +422,6 @@ impl CreateSymbolTable {
                         if let Some(id) = symbol_table::insert(&token, symbol) {
                             ret.push(id);
                         }
-                        namespace_table::insert(token.id, path, &namespace);
                     }
                 }
             }
@@ -725,70 +726,74 @@ impl VerylGrammarTrait for CreateSymbolTable {
     }
 
     fn modport_declaration(&mut self, arg: &ModportDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            let mut members = Vec::new();
-            let items: Vec<ModportItem> = if let Some(ref x) = arg.modport_declaration_opt {
-                x.modport_list.as_ref().into()
-            } else {
-                Vec::new()
-            };
-
-            self.namespace
-                .push(arg.identifier.identifier_token.token.text);
-
-            for item in items {
-                let kind = match &*item.direction {
-                    Direction::Ref(_) | Direction::Modport(_) => {
-                        continue;
-                    }
-                    Direction::Import(_) => {
-                        let property = ModportFunctionMemberProperty {
-                            function: SymbolId::default(),
-                        };
-                        SymbolKind::ModportFunctionMember(property)
-                    }
-                    _ => {
-                        let direction: crate::symbol::Direction = item.direction.as_ref().into();
-                        let property = ModportVariableMemberProperty { direction };
-                        SymbolKind::ModportVariableMember(property)
-                    }
+        match self.point {
+            HandlerPoint::Before => {
+                self.namespace
+                    .push(arg.identifier.identifier_token.token.text);
+            }
+            HandlerPoint::After => {
+                let mut members = Vec::new();
+                let items: Vec<ModportItem> = if let Some(ref x) = arg.modport_declaration_opt {
+                    x.modport_list.as_ref().into()
+                } else {
+                    Vec::new()
                 };
 
-                if let Some(id) =
-                    self.insert_symbol(&item.identifier.identifier_token.token, kind, false)
-                {
-                    members.push(id);
-                    self.modport_member_ids.push(id);
-                }
-            }
+                for item in items {
+                    let kind = match &*item.direction {
+                        Direction::Ref(_) | Direction::Modport(_) => {
+                            continue;
+                        }
+                        Direction::Import(_) => {
+                            let property = ModportFunctionMemberProperty {
+                                function: SymbolId::default(),
+                            };
+                            SymbolKind::ModportFunctionMember(property)
+                        }
+                        _ => {
+                            let direction: crate::symbol::Direction =
+                                item.direction.as_ref().into();
+                            let property = ModportVariableMemberProperty { direction };
+                            SymbolKind::ModportVariableMember(property)
+                        }
+                    };
 
-            self.namespace.pop();
-
-            let default = if let Some(ref x) = arg.modport_declaration_opt0 {
-                match x.modport_default.as_ref() {
-                    ModportDefault::Input(_) => Some(crate::symbol::ModportDefault::Input),
-                    ModportDefault::Output(_) => Some(crate::symbol::ModportDefault::Output),
-                    ModportDefault::ConverseLParenIdentifierRParen(x) => {
-                        Some(crate::symbol::ModportDefault::Converse(
-                            x.identifier.identifier_token.token,
-                        ))
+                    if let Some(id) =
+                        self.insert_symbol(&item.identifier.identifier_token.token, kind, false)
+                    {
+                        members.push(id);
+                        self.modport_member_ids.push(id);
                     }
                 }
-            } else {
-                None
-            };
 
-            let property = ModportProperty {
-                // Dummy SymbolId, the actual value is inserted at interface_declaration
-                interface: SymbolId(0),
-                members,
-                default,
-            };
-            let kind = SymbolKind::Modport(property);
-            if let Some(id) =
-                self.insert_symbol(&arg.identifier.identifier_token.token, kind, false)
-            {
-                self.modport_ids.push(id);
+                self.namespace.pop();
+
+                let default = if let Some(ref x) = arg.modport_declaration_opt0 {
+                    match x.modport_default.as_ref() {
+                        ModportDefault::Input(_) => Some(crate::symbol::ModportDefault::Input),
+                        ModportDefault::Output(_) => Some(crate::symbol::ModportDefault::Output),
+                        ModportDefault::ConverseLParenIdentifierRParen(x) => {
+                            Some(crate::symbol::ModportDefault::Converse(
+                                x.identifier.identifier_token.token,
+                            ))
+                        }
+                    }
+                } else {
+                    None
+                };
+
+                let property = ModportProperty {
+                    // Dummy SymbolId, the actual value is inserted at interface_declaration
+                    interface: SymbolId(0),
+                    members,
+                    default,
+                };
+                let kind = SymbolKind::Modport(property);
+                if let Some(id) =
+                    self.insert_symbol(&arg.identifier.identifier_token.token, kind, false)
+                {
+                    self.modport_ids.push(id);
+                }
             }
         }
         Ok(())
