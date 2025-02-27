@@ -952,7 +952,9 @@ fn get_member(symbol: &Symbol) -> Vec<CompletionItem> {
 
 fn completion_member(url: &Url, line: usize, column: usize, text: &str) -> Vec<CompletionItem> {
     let current_namespace = current_namespace(url, line, column);
-    let text = resource_table::get_str_id(text.to_string()).unwrap();
+    let Some(text) = resource_table::get_str_id(text.to_string()) else {
+        return vec![];
+    };
     let mut items = Vec::new();
 
     if let Some(namespace) = current_namespace {
