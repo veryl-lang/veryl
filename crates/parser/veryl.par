@@ -416,6 +416,7 @@ RealNumber: FixedPoint
 
 HierarchicalIdentifier: Identifier { Select } { Dot Identifier { Select } };
 ScopedIdentifier      : ( DollarIdentifier | Identifier [ WithGenericArgument ] ) { ColonColon Identifier [ WithGenericArgument ] };
+ScopedBaseIdentifier  : ( DollarIdentifier | Identifier ) { ColonColon Identifier };
 ExpressionIdentifier  : ScopedIdentifier [ Width ] { Select } { Dot Identifier { Select } };
 
 // ----------------------------------------------------------------------------
@@ -717,7 +718,7 @@ WithParameterItem: ( Param | Const ) Identifier Colon ( ArrayType | Type ) Equ E
 GenericBound: Const
             | Type
             | Inst ScopedIdentifier
-            | ScopedIdentifier;
+            | ScopedBaseIdentifier;
 
 WithGenericParameter: ColonColonLAngle WithGenericParameterList RAngle;
 

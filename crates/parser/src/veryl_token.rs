@@ -260,6 +260,17 @@ impl From<&ScopedIdentifier> for TokenRange {
     }
 }
 
+impl From<&ScopedBaseIdentifier> for TokenRange {
+    fn from(value: &ScopedBaseIdentifier) -> Self {
+        let beg = value.identifier().token;
+        let mut end = beg;
+        if let Some(x) = value.scoped_base_identifier_list.last() {
+            end = x.identifier.identifier_token.token;
+        }
+        TokenRange { beg, end }
+    }
+}
+
 impl From<&ExpressionIdentifier> for TokenRange {
     fn from(value: &ExpressionIdentifier) -> Self {
         let mut range: TokenRange = value.scoped_identifier.as_ref().into();
@@ -863,6 +874,17 @@ impl ScopedIdentifier {
                 &x.identifier.identifier_token
             }
             ScopedIdentifierGroup::DollarIdentifier(x) => {
+                &x.dollar_identifier.dollar_identifier_token
+            }
+        }
+    }
+}
+
+impl ScopedBaseIdentifier {
+    pub fn identifier(&self) -> &VerylToken {
+        match &*self.scoped_base_identifier_group {
+            ScopedBaseIdentifierGroup::Identifier(x) => &x.identifier.identifier_token,
+            ScopedBaseIdentifierGroup::DollarIdentifier(x) => {
                 &x.dollar_identifier.dollar_identifier_token
             }
         }
