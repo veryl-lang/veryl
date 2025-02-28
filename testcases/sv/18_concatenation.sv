@@ -16,5 +16,9 @@ module veryl_testcase_Module18;
         {8{a}}, {8{b}}, {8{c}},
         {8{a}}, {8{b}}, {8{c}}
     };
+
+    logic [20-1:0] d;
+    logic          e;
+    always_comb {d, e} = a;
 endmodule
 //# sourceMappingURL=../map/testcases/sv/18_concatenation.sv.map

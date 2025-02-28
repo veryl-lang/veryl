@@ -16,4 +16,8 @@ module Module18 {
         a repeat 8, b repeat 8, c repeat 8,
         a repeat 8, b repeat 8, c repeat 8,
     };
+
+    var d: logic<20>;
+    var e: logic    ;
+    assign {d, e} = a;
 }

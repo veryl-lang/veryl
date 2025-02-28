@@ -1973,11 +1973,48 @@ pub trait VerylWalker {
     fn assign_declaration(&mut self, arg: &AssignDeclaration) {
         before!(self, assign_declaration, arg);
         self.assign(&arg.assign);
-        self.hierarchical_identifier(&arg.hierarchical_identifier);
+        self.assign_destination(&arg.assign_destination);
         self.equ(&arg.equ);
         self.expression(&arg.expression);
         self.semicolon(&arg.semicolon);
         after!(self, assign_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'AssignDestination'
+    fn assign_destination(&mut self, arg: &AssignDestination) {
+        before!(self, assign_destination, arg);
+        match arg {
+            AssignDestination::HierarchicalIdentifier(x) => {
+                self.hierarchical_identifier(&x.hierarchical_identifier);
+            }
+            AssignDestination::LBraceAssignConcatenationListRBrace(x) => {
+                self.l_brace(&x.l_brace);
+                self.assign_concatenation_list(&x.assign_concatenation_list);
+                self.r_brace(&x.r_brace);
+            }
+        }
+        after!(self, assign_destination, arg);
+    }
+
+    /// Semantic action for non-terminal 'AssignConcatenationList'
+    fn assign_concatenation_list(&mut self, arg: &AssignConcatenationList) {
+        before!(self, assign_concatenation_list, arg);
+        self.assign_concatenation_item(&arg.assign_concatenation_item);
+        for x in &arg.assign_concatenation_list_list {
+            self.comma(&x.comma);
+            self.assign_concatenation_item(&x.assign_concatenation_item);
+        }
+        if let Some(ref x) = arg.assign_concatenation_list_opt {
+            self.comma(&x.comma);
+        }
+        after!(self, assign_concatenation_list, arg);
+    }
+
+    /// Semantic action for non-terminal 'AssignConcatenationItem'
+    fn assign_concatenation_item(&mut self, arg: &AssignConcatenationItem) {
+        before!(self, assign_concatenation_item, arg);
+        self.hierarchical_identifier(&arg.hierarchical_identifier);
+        after!(self, assign_concatenation_item, arg);
     }
 
     /// Semantic action for non-terminal 'ModportDeclaration'

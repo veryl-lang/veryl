@@ -606,26 +606,25 @@ impl VerylGrammarTrait for CheckVarRef {
 
     fn assign_declaration(&mut self, arg: &AssignDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::After = self.point {
-            if let Ok(path) = VarRefPath::try_from(arg.hierarchical_identifier.as_ref()) {
-                let full_path = path.full_path();
-                if can_assign(full_path) {
-                    self.assign_position.push(AssignPositionType::Declaration {
-                        token: arg.assign.assign_token.token,
-                        r#type: AssignDeclarationType::Assign,
-                    });
-                    self.add_assign(&path);
-                } else {
-                    let token = &arg
-                        .hierarchical_identifier
-                        .identifier
-                        .identifier_token
-                        .token;
-                    let symbol = symbol_table::get(*full_path.last().unwrap()).unwrap();
-                    self.errors.push(AnalyzerError::invalid_assignment(
-                        &token.to_string(),
-                        &symbol.kind.to_kind_name(),
-                        &arg.hierarchical_identifier.as_ref().into(),
-                    ));
+            let idents: Vec<_> = arg.assign_destination.as_ref().into();
+            for ident in &idents {
+                if let Ok(path) = VarRefPath::try_from(ident) {
+                    let full_path = path.full_path();
+                    if can_assign(full_path) {
+                        self.assign_position.push(AssignPositionType::Declaration {
+                            token: arg.assign.assign_token.token,
+                            r#type: AssignDeclarationType::Assign,
+                        });
+                        self.add_assign(&path);
+                    } else {
+                        let token = &ident.identifier.identifier_token.token;
+                        let symbol = symbol_table::get(*full_path.last().unwrap()).unwrap();
+                        self.errors.push(AnalyzerError::invalid_assignment(
+                            &token.to_string(),
+                            &symbol.kind.to_kind_name(),
+                            &ident.into(),
+                        ));
+                    }
                 }
             }
         }

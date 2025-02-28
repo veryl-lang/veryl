@@ -518,15 +518,22 @@ impl VerylGrammarTrait for CheckExpression {
                 let exp = self.evaluator.expression(&arg.expression);
                 self.evaluated_error(&exp.errors);
 
-                if let Ok(dst) = symbol_table::resolve(arg.hierarchical_identifier.as_ref()) {
-                    let dst_last_select = arg.hierarchical_identifier.last_select();
-                    self.check_compatibility(
-                        Context::Assignment,
-                        &exp,
-                        &dst.found,
-                        &dst_last_select,
-                        &arg.into(),
-                    );
+                match arg.assign_destination.as_ref() {
+                    AssignDestination::HierarchicalIdentifier(x) => {
+                        if let Ok(dst) = symbol_table::resolve(x.hierarchical_identifier.as_ref()) {
+                            let dst_last_select = x.hierarchical_identifier.last_select();
+                            self.check_compatibility(
+                                Context::Assignment,
+                                &exp,
+                                &dst.found,
+                                &dst_last_select,
+                                &arg.into(),
+                            );
+                        }
+                    }
+                    AssignDestination::LBraceAssignConcatenationListRBrace(_) => {
+                        // TODO check concatenation
+                    }
                 }
             }
         }
