@@ -918,6 +918,31 @@ fn missing_default_generic_argument() {
 }
 
 #[test]
+fn invalid_generic_instance() {
+    let code = r#"
+    package PkgA::<A: const> {}
+    module ModuleB::<PKG: PkgA::<1>> {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidGenericInstance { .. }
+    ));
+
+    let code = r#"
+    module ModuleA::<A: const> {}
+    module ModuleB::<A: inst ModuleA::<1>> {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidGenericInstance { .. }
+    ));
+}
+
+#[test]
 fn mismatch_generics_arity() {
     let code = r#"
     module ModuleA {

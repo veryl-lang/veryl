@@ -14,13 +14,19 @@ fn main() {
         }
     }
 
-    let par_file = PathBuf::from("veryl.par");
-    let exp_file = PathBuf::from("src/generated/veryl-exp.par");
+    let generate_parser = if env::var("VERYL_GENERATE_PARSER").is_ok() {
+        true
+    } else {
+        let par_file = PathBuf::from("veryl.par");
+        let exp_file = PathBuf::from("src/generated/veryl-exp.par");
 
-    let par_modified = fs::metadata(par_file).unwrap().modified().unwrap();
-    let exp_modified = fs::metadata(exp_file).unwrap().modified().unwrap();
+        let par_modified = fs::metadata(par_file).unwrap().modified().unwrap();
+        let exp_modified = fs::metadata(exp_file).unwrap().modified().unwrap();
 
-    if par_modified > exp_modified {
+        par_modified > exp_modified
+    };
+
+    if generate_parser {
         println!("cargo:warning=veryl.par was changed");
 
         let now = Instant::now();
