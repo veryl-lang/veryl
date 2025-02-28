@@ -846,8 +846,7 @@ PackageDeclaration: [ Pub ] Package Identifier [ WithGenericParameter ] LBrace {
 
 PackageGroup: { Attribute } ( LBrace { PackageGroup } RBrace | PackageItem );
 
-PackageItem: VarDeclaration
-           | ConstDeclaration
+PackageItem: ConstDeclaration
            | TypeDefDeclaration
            | EnumDeclaration
            | StructUnionDeclaration

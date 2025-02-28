@@ -2,9 +2,6 @@ package veryl_testcase_Package17;
     // localparam declaration
     localparam int unsigned ParamX = 1;
 
-    // variable declaration
-    logic _b;
-
     // struct declaration
     typedef struct packed {
         logic        [10-1:0] a  ;

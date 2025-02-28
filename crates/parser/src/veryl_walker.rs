@@ -2957,7 +2957,6 @@ pub trait VerylWalker {
     fn package_item(&mut self, arg: &PackageItem) {
         before!(self, package_item, arg);
         match arg {
-            PackageItem::VarDeclaration(x) => self.var_declaration(&x.var_declaration),
             PackageItem::ConstDeclaration(x) => self.const_declaration(&x.const_declaration),
             PackageItem::TypeDefDeclaration(x) => {
                 self.type_def_declaration(&x.type_def_declaration)

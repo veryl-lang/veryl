@@ -2,9 +2,6 @@ package Package17 {
     // localparam declaration
     const ParamX: u32 = 1;
 
-    // variable declaration
-    var _b: logic;
-
     // struct declaration
     struct A {
         a  : logic<10>,

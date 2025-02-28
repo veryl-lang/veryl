@@ -5037,7 +5037,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 690] = &[
     },
     /* 125 - "DescriptionGroup" */
     LookaheadDFA {
-        prod0: 975,
+        prod0: 974,
         transitions: &[],
         k: 0,
     },
@@ -5045,15 +5045,15 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 690] = &[
     LookaheadDFA {
         prod0: -1,
         transitions: &[
-            Trans(0, 40, 1, 976),
-            Trans(0, 62, 2, 979),
-            Trans(0, 74, 2, 979),
-            Trans(0, 75, 2, 979),
-            Trans(0, 81, 2, 979),
-            Trans(0, 87, 2, 979),
-            Trans(0, 91, 2, 979),
-            Trans(0, 93, 2, 979),
-            Trans(0, 94, 2, 979),
+            Trans(0, 40, 1, 975),
+            Trans(0, 62, 2, 978),
+            Trans(0, 74, 2, 978),
+            Trans(0, 75, 2, 978),
+            Trans(0, 81, 2, 978),
+            Trans(0, 87, 2, 978),
+            Trans(0, 91, 2, 978),
+            Trans(0, 93, 2, 978),
+            Trans(0, 94, 2, 978),
         ],
         k: 1,
     },
@@ -5061,17 +5061,17 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 690] = &[
     LookaheadDFA {
         prod0: -1,
         transitions: &[
-            Trans(0, 37, 1, 977),
-            Trans(0, 40, 1, 977),
-            Trans(0, 44, 2, 978),
-            Trans(0, 62, 1, 977),
-            Trans(0, 74, 1, 977),
-            Trans(0, 75, 1, 977),
-            Trans(0, 81, 1, 977),
-            Trans(0, 87, 1, 977),
-            Trans(0, 91, 1, 977),
-            Trans(0, 93, 1, 977),
-            Trans(0, 94, 1, 977),
+            Trans(0, 37, 1, 976),
+            Trans(0, 40, 1, 976),
+            Trans(0, 44, 2, 977),
+            Trans(0, 62, 1, 976),
+            Trans(0, 74, 1, 976),
+            Trans(0, 75, 1, 976),
+            Trans(0, 81, 1, 976),
+            Trans(0, 87, 1, 976),
+            Trans(0, 91, 1, 976),
+            Trans(0, 93, 1, 976),
+            Trans(0, 94, 1, 976),
         ],
         k: 1,
     },
@@ -5079,16 +5079,16 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 690] = &[
     LookaheadDFA {
         prod0: -1,
         transitions: &[
-            Trans(0, 37, 1, 980),
-            Trans(0, 40, 2, 981),
-            Trans(0, 62, 2, 981),
-            Trans(0, 74, 2, 981),
-            Trans(0, 75, 2, 981),
-            Trans(0, 81, 2, 981),
-            Trans(0, 87, 2, 981),
-            Trans(0, 91, 2, 981),
-            Trans(0, 93, 2, 981),
-            Trans(0, 94, 2, 981),
+            Trans(0, 37, 1, 979),
+            Trans(0, 40, 2, 980),
+            Trans(0, 62, 2, 980),
+            Trans(0, 74, 2, 980),
+            Trans(0, 75, 2, 980),
+            Trans(0, 81, 2, 980),
+            Trans(0, 87, 2, 980),
+            Trans(0, 91, 2, 980),
+            Trans(0, 93, 2, 980),
+            Trans(0, 94, 2, 980),
         ],
         k: 1,
     },
@@ -5109,67 +5109,67 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 690] = &[
             Trans(1, 87, 2, -1),
             Trans(1, 91, 14, -1),
             Trans(1, 93, 22, -1),
-            Trans(2, 5, 3, 982),
-            Trans(2, 117, 3, 982),
+            Trans(2, 5, 3, 981),
+            Trans(2, 117, 3, 981),
             Trans(4, 5, 7, -1),
             Trans(4, 117, 5, -1),
-            Trans(5, 5, 3, 982),
-            Trans(5, 29, 3, 982),
-            Trans(5, 37, 3, 982),
-            Trans(5, 40, 3, 982),
-            Trans(5, 42, 3, 982),
-            Trans(5, 68, 3, 982),
-            Trans(6, 81, 10, 983),
-            Trans(6, 87, 3, 982),
-            Trans(6, 91, 15, 984),
-            Trans(6, 93, 21, 985),
-            Trans(7, 117, 3, 982),
+            Trans(5, 5, 3, 981),
+            Trans(5, 29, 3, 981),
+            Trans(5, 37, 3, 981),
+            Trans(5, 40, 3, 981),
+            Trans(5, 42, 3, 981),
+            Trans(5, 68, 3, 981),
+            Trans(6, 81, 10, 982),
+            Trans(6, 87, 3, 981),
+            Trans(6, 91, 15, 983),
+            Trans(6, 93, 21, 984),
+            Trans(7, 117, 3, 981),
             Trans(8, 5, 11, -1),
             Trans(8, 117, 12, -1),
-            Trans(9, 5, 10, 983),
-            Trans(9, 117, 10, 983),
-            Trans(11, 117, 10, 983),
-            Trans(12, 5, 10, 983),
-            Trans(12, 29, 10, 983),
-            Trans(12, 37, 10, 983),
-            Trans(12, 40, 10, 983),
+            Trans(9, 5, 10, 982),
+            Trans(9, 117, 10, 982),
+            Trans(11, 117, 10, 982),
+            Trans(12, 5, 10, 982),
+            Trans(12, 29, 10, 982),
+            Trans(12, 37, 10, 982),
+            Trans(12, 40, 10, 982),
             Trans(13, 5, 16, -1),
             Trans(13, 117, 17, -1),
-            Trans(14, 5, 15, 984),
-            Trans(14, 117, 15, 984),
-            Trans(16, 117, 15, 984),
-            Trans(17, 5, 15, 984),
-            Trans(17, 29, 15, 984),
-            Trans(17, 40, 15, 984),
+            Trans(14, 5, 15, 983),
+            Trans(14, 117, 15, 983),
+            Trans(16, 117, 15, 983),
+            Trans(17, 5, 15, 983),
+            Trans(17, 29, 15, 983),
+            Trans(17, 40, 15, 983),
             Trans(18, 5, 19, -1),
             Trans(18, 87, 20, -1),
-            Trans(19, 87, 21, 985),
-            Trans(20, 5, 21, 985),
-            Trans(20, 117, 21, 985),
-            Trans(22, 5, 21, 985),
-            Trans(22, 87, 21, 985),
+            Trans(19, 87, 21, 984),
+            Trans(20, 5, 21, 984),
+            Trans(20, 117, 21, 984),
+            Trans(22, 5, 21, 984),
+            Trans(22, 87, 21, 984),
             Trans(23, 5, 24, -1),
             Trans(23, 116, 25, -1),
             Trans(23, 117, 26, -1),
-            Trans(24, 116, 27, 986),
-            Trans(24, 117, 27, 986),
-            Trans(25, 5, 27, 986),
-            Trans(25, 30, 27, 986),
-            Trans(25, 47, 27, 986),
-            Trans(26, 5, 27, 986),
-            Trans(26, 29, 27, 986),
-            Trans(26, 30, 27, 986),
-            Trans(26, 47, 27, 986),
+            Trans(24, 116, 27, 985),
+            Trans(24, 117, 27, 985),
+            Trans(25, 5, 27, 985),
+            Trans(25, 30, 27, 985),
+            Trans(25, 47, 27, 985),
+            Trans(26, 5, 27, 985),
+            Trans(26, 29, 27, 985),
+            Trans(26, 30, 27, 985),
+            Trans(26, 47, 27, 985),
             Trans(28, 5, 29, -1),
             Trans(28, 42, 30, -1),
-            Trans(29, 42, 31, 987),
-            Trans(30, 5, 31, 987),
-            Trans(30, 117, 31, 987),
+            Trans(29, 42, 31, 986),
+            Trans(30, 5, 31, 986),
+            Trans(30, 117, 31, 986),
             Trans(32, 5, 33, -1),
             Trans(32, 42, 34, -1),
-            Trans(33, 42, 35, 988),
-            Trans(34, 5, 35, 988),
-            Trans(34, 117, 35, 988),
+            Trans(33, 42, 35, 987),
+            Trans(34, 5, 35, 987),
+            Trans(34, 117, 35, 987),
         ],
         k: 3,
     },
@@ -5284,13 +5284,13 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 690] = &[
     },
     /* 147 - "EmbedContent" */
     LookaheadDFA {
-        prod0: 966,
+        prod0: 965,
         transitions: &[],
         k: 0,
     },
     /* 148 - "EmbedContentToken" */
     LookaheadDFA {
-        prod0: 967,
+        prod0: 966,
         transitions: &[],
         k: 0,
     },
@@ -5298,31 +5298,31 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 690] = &[
     LookaheadDFA {
         prod0: -1,
         transitions: &[
-            Trans(0, 40, 1, 968),
-            Trans(0, 44, 2, 969),
-            Trans(0, 118, 1, 968),
+            Trans(0, 40, 1, 967),
+            Trans(0, 44, 2, 968),
+            Trans(0, 118, 1, 967),
         ],
         k: 1,
     },
     /* 150 - "EmbedDeclaration" */
     LookaheadDFA {
-        prod0: 965,
+        prod0: 964,
         transitions: &[],
         k: 0,
     },
     /* 151 - "EmbedItem" */
     LookaheadDFA {
         prod0: -1,
-        transitions: &[Trans(0, 40, 1, 970), Trans(0, 118, 2, 973)],
+        transitions: &[Trans(0, 40, 1, 969), Trans(0, 118, 2, 972)],
         k: 1,
     },
     /* 152 - "EmbedItemList" */
     LookaheadDFA {
         prod0: -1,
         transitions: &[
-            Trans(0, 40, 1, 971),
-            Trans(0, 44, 2, 972),
-            Trans(0, 118, 1, 971),
+            Trans(0, 40, 1, 970),
+            Trans(0, 44, 2, 971),
+            Trans(0, 118, 1, 970),
         ],
         k: 1,
     },
@@ -11903,7 +11903,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 690] = &[
     },
     /* 308 - "IncludeDeclaration" */
     LookaheadDFA {
-        prod0: 974,
+        prod0: 973,
         transitions: &[],
         k: 0,
     },
@@ -13635,7 +13635,6 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 690] = &[
             Trans(0, 107, 1, 937),
             Trans(0, 110, 1, 937),
             Trans(0, 113, 1, 937),
-            Trans(0, 115, 1, 937),
         ],
         k: 1,
     },
@@ -13670,7 +13669,6 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 690] = &[
             Trans(0, 107, 2, 947),
             Trans(0, 110, 2, 947),
             Trans(0, 113, 2, 947),
-            Trans(0, 115, 2, 947),
         ],
         k: 1,
     },
@@ -13689,7 +13687,6 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 690] = &[
             Trans(0, 107, 1, 945),
             Trans(0, 110, 1, 945),
             Trans(0, 113, 1, 945),
-            Trans(0, 115, 1, 945),
         ],
         k: 1,
     },
@@ -13707,7 +13704,6 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 690] = &[
             Trans(0, 107, 2, 949),
             Trans(0, 110, 2, 949),
             Trans(0, 113, 2, 949),
-            Trans(0, 115, 2, 949),
         ],
         k: 1,
     },
@@ -13715,15 +13711,14 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 690] = &[
     LookaheadDFA {
         prod0: -1,
         transitions: &[
-            Trans(0, 58, 2, 951),
-            Trans(0, 63, 4, 953),
-            Trans(0, 64, 8, 957),
-            Trans(0, 69, 6, 955),
-            Trans(0, 74, 7, 956),
-            Trans(0, 107, 5, 954),
-            Trans(0, 110, 3, 952),
-            Trans(0, 113, 5, 954),
-            Trans(0, 115, 1, 950),
+            Trans(0, 58, 1, 950),
+            Trans(0, 63, 3, 952),
+            Trans(0, 64, 7, 956),
+            Trans(0, 69, 5, 954),
+            Trans(0, 74, 6, 955),
+            Trans(0, 107, 4, 953),
+            Trans(0, 110, 2, 951),
+            Trans(0, 113, 4, 953),
         ],
         k: 1,
     },
@@ -14068,30 +14063,30 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 690] = &[
     },
     /* 507 - "ProtoModuleDeclaration" */
     LookaheadDFA {
-        prod0: 958,
+        prod0: 957,
         transitions: &[],
         k: 0,
     },
     /* 508 - "ProtoModuleDeclarationOpt" */
     LookaheadDFA {
         prod0: -1,
-        transitions: &[Trans(0, 93, 2, 964), Trans(0, 94, 1, 963)],
+        transitions: &[Trans(0, 93, 2, 963), Trans(0, 94, 1, 962)],
         k: 1,
     },
     /* 509 - "ProtoModuleDeclarationOpt0" */
     LookaheadDFA {
         prod0: -1,
         transitions: &[
-            Trans(0, 37, 1, 961),
-            Trans(0, 42, 2, 962),
-            Trans(0, 47, 2, 962),
+            Trans(0, 37, 1, 960),
+            Trans(0, 42, 2, 961),
+            Trans(0, 47, 2, 961),
         ],
         k: 1,
     },
     /* 510 - "ProtoModuleDeclarationOpt1" */
     LookaheadDFA {
         prod0: -1,
-        transitions: &[Trans(0, 42, 1, 959), Trans(0, 47, 2, 960)],
+        transitions: &[Trans(0, 42, 1, 958), Trans(0, 47, 2, 959)],
         k: 1,
     },
     /* 511 - "ProtoTerm" */
@@ -20838,7 +20833,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 690] = &[
     },
     /* 663 - "Veryl" */
     LookaheadDFA {
-        prod0: 989,
+        prod0: 988,
         transitions: &[],
         k: 0,
     },
@@ -20846,17 +20841,17 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 690] = &[
     LookaheadDFA {
         prod0: -1,
         transitions: &[
-            Trans(0, 0, 2, 991),
-            Trans(0, 37, 1, 990),
-            Trans(0, 40, 1, 990),
-            Trans(0, 62, 1, 990),
-            Trans(0, 74, 1, 990),
-            Trans(0, 75, 1, 990),
-            Trans(0, 81, 1, 990),
-            Trans(0, 87, 1, 990),
-            Trans(0, 91, 1, 990),
-            Trans(0, 93, 1, 990),
-            Trans(0, 94, 1, 990),
+            Trans(0, 0, 2, 990),
+            Trans(0, 37, 1, 989),
+            Trans(0, 40, 1, 989),
+            Trans(0, 62, 1, 989),
+            Trans(0, 74, 1, 989),
+            Trans(0, 75, 1, 989),
+            Trans(0, 81, 1, 989),
+            Trans(0, 87, 1, 989),
+            Trans(0, 91, 1, 989),
+            Trans(0, 93, 1, 989),
+            Trans(0, 94, 1, 989),
         ],
         k: 1,
     },
@@ -21962,7 +21957,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 690] = &[
     },
 ];
 
-pub const PRODUCTIONS: &[Production; 992] = &[
+pub const PRODUCTIONS: &[Production; 991] = &[
     // 0 - CommentsTerm: "(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+";
     Production {
         lhs: 108,
@@ -27074,47 +27069,42 @@ pub const PRODUCTIONS: &[Production; 992] = &[
         lhs: 478,
         production: &[],
     },
-    // 950 - PackageItem: VarDeclaration;
-    Production {
-        lhs: 479,
-        production: &[ParseType::N(658)],
-    },
-    // 951 - PackageItem: ConstDeclaration;
+    // 950 - PackageItem: ConstDeclaration;
     Production {
         lhs: 479,
         production: &[ParseType::N(115)],
     },
-    // 952 - PackageItem: TypeDefDeclaration;
+    // 951 - PackageItem: TypeDefDeclaration;
     Production {
         lhs: 479,
         production: &[ParseType::N(634)],
     },
-    // 953 - PackageItem: EnumDeclaration;
+    // 952 - PackageItem: EnumDeclaration;
     Production {
         lhs: 479,
         production: &[ParseType::N(156)],
     },
-    // 954 - PackageItem: StructUnionDeclaration;
+    // 953 - PackageItem: StructUnionDeclaration;
     Production {
         lhs: 479,
         production: &[ParseType::N(608)],
     },
-    // 955 - PackageItem: FunctionDeclaration;
+    // 954 - PackageItem: FunctionDeclaration;
     Production {
         lhs: 479,
         production: &[ParseType::N(242)],
     },
-    // 956 - PackageItem: ImportDeclaration;
+    // 955 - PackageItem: ImportDeclaration;
     Production {
         lhs: 479,
         production: &[ParseType::N(300)],
     },
-    // 957 - PackageItem: ExportDeclaration;
+    // 956 - PackageItem: ExportDeclaration;
     Production {
         lhs: 479,
         production: &[ParseType::N(175)],
     },
-    // 958 - ProtoModuleDeclaration: ProtoModuleDeclarationOpt /* Option */ Proto Module Identifier ProtoModuleDeclarationOpt0 /* Option */ ProtoModuleDeclarationOpt1 /* Option */ Semicolon;
+    // 957 - ProtoModuleDeclaration: ProtoModuleDeclarationOpt /* Option */ Proto Module Identifier ProtoModuleDeclarationOpt0 /* Option */ ProtoModuleDeclarationOpt1 /* Option */ Semicolon;
     Production {
         lhs: 507,
         production: &[
@@ -27127,37 +27117,37 @@ pub const PRODUCTIONS: &[Production; 992] = &[
             ParseType::N(508),
         ],
     },
-    // 959 - ProtoModuleDeclarationOpt1: PortDeclaration;
+    // 958 - ProtoModuleDeclarationOpt1: PortDeclaration;
     Production {
         lhs: 510,
         production: &[ParseType::N(488)],
     },
-    // 960 - ProtoModuleDeclarationOpt1: ;
+    // 959 - ProtoModuleDeclarationOpt1: ;
     Production {
         lhs: 510,
         production: &[],
     },
-    // 961 - ProtoModuleDeclarationOpt0: WithParameter;
+    // 960 - ProtoModuleDeclarationOpt0: WithParameter;
     Production {
         lhs: 509,
         production: &[ParseType::N(679)],
     },
-    // 962 - ProtoModuleDeclarationOpt0: ;
+    // 961 - ProtoModuleDeclarationOpt0: ;
     Production {
         lhs: 509,
         production: &[],
     },
-    // 963 - ProtoModuleDeclarationOpt: Pub;
+    // 962 - ProtoModuleDeclarationOpt: Pub;
     Production {
         lhs: 508,
         production: &[ParseType::N(513)],
     },
-    // 964 - ProtoModuleDeclarationOpt: ;
+    // 963 - ProtoModuleDeclarationOpt: ;
     Production {
         lhs: 508,
         production: &[],
     },
-    // 965 - EmbedDeclaration: Embed LParen Identifier RParen Identifier EmbedContent;
+    // 964 - EmbedDeclaration: Embed LParen Identifier RParen Identifier EmbedContent;
     Production {
         lhs: 150,
         production: &[
@@ -27169,12 +27159,12 @@ pub const PRODUCTIONS: &[Production; 992] = &[
             ParseType::N(146),
         ],
     },
-    // 966 - EmbedContent: EmbedContentToken : crate::veryl_token::VerylToken ;
+    // 965 - EmbedContent: EmbedContentToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 147,
         production: &[ParseType::N(148)],
     },
-    // 967 - EmbedContentToken: LBraceTerm Push(1) LBraceTerm LBraceTerm EmbedContentTokenList /* Vec */ RBraceTerm RBraceTerm RBraceTerm Pop Comments;
+    // 966 - EmbedContentToken: LBraceTerm Push(1) LBraceTerm LBraceTerm EmbedContentTokenList /* Vec */ RBraceTerm RBraceTerm RBraceTerm Pop Comments;
     Production {
         lhs: 148,
         production: &[
@@ -27190,37 +27180,37 @@ pub const PRODUCTIONS: &[Production; 992] = &[
             ParseType::N(370),
         ],
     },
-    // 968 - EmbedContentTokenList: EmbedItem EmbedContentTokenList;
+    // 967 - EmbedContentTokenList: EmbedItem EmbedContentTokenList;
     Production {
         lhs: 149,
         production: &[ParseType::N(149), ParseType::N(151)],
     },
-    // 969 - EmbedContentTokenList: ;
+    // 968 - EmbedContentTokenList: ;
     Production {
         lhs: 149,
         production: &[],
     },
-    // 970 - EmbedItem: LBraceTerm EmbedItemList /* Vec */ RBraceTerm;
+    // 969 - EmbedItem: LBraceTerm EmbedItemList /* Vec */ RBraceTerm;
     Production {
         lhs: 151,
         production: &[ParseType::N(523), ParseType::N(152), ParseType::N(370)],
     },
-    // 971 - EmbedItemList: EmbedItem EmbedItemList;
+    // 970 - EmbedItemList: EmbedItem EmbedItemList;
     Production {
         lhs: 152,
         production: &[ParseType::N(152), ParseType::N(151)],
     },
-    // 972 - EmbedItemList: ;
+    // 971 - EmbedItemList: ;
     Production {
         lhs: 152,
         production: &[],
     },
-    // 973 - EmbedItem: AnyTerm;
+    // 972 - EmbedItem: AnyTerm;
     Production {
         lhs: 151,
         production: &[ParseType::N(16)],
     },
-    // 974 - IncludeDeclaration: Include LParen Identifier Comma StringLiteral RParen Semicolon;
+    // 973 - IncludeDeclaration: Include LParen Identifier Comma StringLiteral RParen Semicolon;
     Production {
         lhs: 308,
         production: &[
@@ -27233,87 +27223,87 @@ pub const PRODUCTIONS: &[Production; 992] = &[
             ParseType::N(307),
         ],
     },
-    // 975 - DescriptionGroup: DescriptionGroupList /* Vec */ DescriptionGroupGroup;
+    // 974 - DescriptionGroup: DescriptionGroupList /* Vec */ DescriptionGroupGroup;
     Production {
         lhs: 125,
         production: &[ParseType::N(126), ParseType::N(128)],
     },
-    // 976 - DescriptionGroupGroup: LBrace DescriptionGroupGroupList /* Vec */ RBrace;
+    // 975 - DescriptionGroupGroup: LBrace DescriptionGroupGroupList /* Vec */ RBrace;
     Production {
         lhs: 126,
         production: &[ParseType::N(522), ParseType::N(127), ParseType::N(369)],
     },
-    // 977 - DescriptionGroupGroupList: DescriptionGroup DescriptionGroupGroupList;
+    // 976 - DescriptionGroupGroupList: DescriptionGroup DescriptionGroupGroupList;
     Production {
         lhs: 127,
         production: &[ParseType::N(127), ParseType::N(125)],
     },
-    // 978 - DescriptionGroupGroupList: ;
+    // 977 - DescriptionGroupGroupList: ;
     Production {
         lhs: 127,
         production: &[],
     },
-    // 979 - DescriptionGroupGroup: DescriptionItem;
+    // 978 - DescriptionGroupGroup: DescriptionItem;
     Production {
         lhs: 126,
         production: &[ParseType::N(129)],
     },
-    // 980 - DescriptionGroupList: Attribute DescriptionGroupList;
+    // 979 - DescriptionGroupList: Attribute DescriptionGroupList;
     Production {
         lhs: 128,
         production: &[ParseType::N(128), ParseType::N(48)],
     },
-    // 981 - DescriptionGroupList: ;
+    // 980 - DescriptionGroupList: ;
     Production {
         lhs: 128,
         production: &[],
     },
-    // 982 - DescriptionItem: ModuleDeclaration;
+    // 981 - DescriptionItem: ModuleDeclaration;
     Production {
         lhs: 129,
         production: &[ParseType::N(412)],
     },
-    // 983 - DescriptionItem: InterfaceDeclaration;
+    // 982 - DescriptionItem: InterfaceDeclaration;
     Production {
         lhs: 129,
         production: &[ParseType::N(354)],
     },
-    // 984 - DescriptionItem: PackageDeclaration;
+    // 983 - DescriptionItem: PackageDeclaration;
     Production {
         lhs: 129,
         production: &[ParseType::N(471)],
     },
-    // 985 - DescriptionItem: ProtoModuleDeclaration;
+    // 984 - DescriptionItem: ProtoModuleDeclaration;
     Production {
         lhs: 129,
         production: &[ParseType::N(507)],
     },
-    // 986 - DescriptionItem: ImportDeclaration;
+    // 985 - DescriptionItem: ImportDeclaration;
     Production {
         lhs: 129,
         production: &[ParseType::N(300)],
     },
-    // 987 - DescriptionItem: EmbedDeclaration;
+    // 986 - DescriptionItem: EmbedDeclaration;
     Production {
         lhs: 129,
         production: &[ParseType::N(150)],
     },
-    // 988 - DescriptionItem: IncludeDeclaration;
+    // 987 - DescriptionItem: IncludeDeclaration;
     Production {
         lhs: 129,
         production: &[ParseType::N(308)],
     },
-    // 989 - Veryl: Start VerylList /* Vec */;
+    // 988 - Veryl: Start VerylList /* Vec */;
     Production {
         lhs: 663,
         production: &[ParseType::N(664), ParseType::N(585)],
     },
-    // 990 - VerylList: DescriptionGroup VerylList;
+    // 989 - VerylList: DescriptionGroup VerylList;
     Production {
         lhs: 664,
         production: &[ParseType::N(664), ParseType::N(125)],
     },
-    // 991 - VerylList: ;
+    // 990 - VerylList: ;
     Production {
         lhs: 664,
         production: &[],
