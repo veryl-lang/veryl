@@ -195,6 +195,20 @@ pub enum AnalyzerError {
     },
 
     #[diagnostic(
+        severity(Error),
+        code(invalid_generic_instance),
+        help("remove generic arguments"),
+        url("")
+    )]
+    #[error("generic instanse cannot be used at here")]
+    InvalidGenericInstance {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
         severity(Warning),
         code(invalid_identifier),
         help("follow naming rule"),
@@ -1330,6 +1344,13 @@ impl AnalyzerError {
             input,
             error_location: token.into(),
             inst_context,
+        }
+    }
+
+    pub fn invalid_generic_instance(token: &TokenRange) -> Self {
+        AnalyzerError::InvalidGenericInstance {
+            input: source(token),
+            error_location: token.into(),
         }
     }
 

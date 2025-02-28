@@ -94,6 +94,7 @@ pub struct CreateSymbolTable {
     function_ids: HashMap<StrId, SymbolId>,
     exist_clock_without_domain: bool,
     in_proto: bool,
+    in_generic_bound: bool,
     file_scope_import_item: Vec<SymbolPathNamespace>,
     file_scope_import_wildcard: Vec<SymbolPathNamespace>,
 }
@@ -478,7 +479,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                reference_table::add(arg.into());
+                reference_table::add((arg, self.in_generic_bound).into());
 
                 // Add symbols under $sv namespace
                 if let ScopedIdentifierGroup::DollarIdentifier(x) =
@@ -1066,6 +1067,14 @@ impl VerylGrammarTrait for CreateSymbolTable {
         Ok(())
     }
 
+    fn generic_bound(&mut self, _arg: &GenericBound) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => self.in_generic_bound = true,
+            HandlerPoint::After => self.in_generic_bound = false,
+        }
+        Ok(())
+    }
+
     fn with_generic_parameter_list(
         &mut self,
         _arg: &WithGenericParameterList,
@@ -1100,8 +1109,8 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 GenericBound::InstScopedIdentifier(x) => {
                     GenericBoundKind::Inst(x.scoped_identifier.as_ref().into())
                 }
-                GenericBound::ScopedBaseIdentifier(x) => {
-                    GenericBoundKind::Proto(x.scoped_base_identifier.as_ref().into())
+                GenericBound::ScopedIdentifier(x) => {
+                    GenericBoundKind::Proto(x.scoped_identifier.as_ref().into())
                 }
             };
 

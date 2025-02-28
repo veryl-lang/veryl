@@ -890,24 +890,6 @@ pub trait VerylWalker {
         after!(self, scoped_identifier, arg);
     }
 
-    /// Semantic action for non-terminal 'ScopedBaseIdentifier'
-    fn scoped_base_identifier(&mut self, arg: &ScopedBaseIdentifier) {
-        before!(self, scoped_base_identifier, arg);
-        match &*arg.scoped_base_identifier_group {
-            ScopedBaseIdentifierGroup::DollarIdentifier(x) => {
-                self.dollar_identifier(&x.dollar_identifier);
-            }
-            ScopedBaseIdentifierGroup::Identifier(x) => {
-                self.identifier(&x.identifier);
-            }
-        }
-        for x in &arg.scoped_base_identifier_list {
-            self.colon_colon(&x.colon_colon);
-            self.identifier(&x.identifier);
-        }
-        after!(self, scoped_base_identifier, arg);
-    }
-
     /// Semantic action for non-terminal 'ExpressionIdentifier'
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) {
         before!(self, expression_identifier, arg);
@@ -2434,9 +2416,7 @@ pub trait VerylWalker {
                 self.inst(&x.inst);
                 self.scoped_identifier(&x.scoped_identifier);
             }
-            GenericBound::ScopedBaseIdentifier(x) => {
-                self.scoped_base_identifier(&x.scoped_base_identifier)
-            }
+            GenericBound::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
         }
         after!(self, generic_bound, arg);
     }

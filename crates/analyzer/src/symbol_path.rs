@@ -99,13 +99,6 @@ impl From<&syntax_tree::ScopedIdentifier> for SymbolPath {
     }
 }
 
-impl From<&syntax_tree::ScopedBaseIdentifier> for SymbolPath {
-    fn from(value: &syntax_tree::ScopedBaseIdentifier) -> Self {
-        let path: GenericSymbolPath = value.into();
-        path.mangled_path()
-    }
-}
-
 impl From<&syntax_tree::ExpressionIdentifier> for SymbolPath {
     fn from(value: &syntax_tree::ExpressionIdentifier) -> Self {
         let mut path: SymbolPath = value.scoped_identifier.as_ref().into();
@@ -552,40 +545,6 @@ impl From<&syntax_tree::ScopedIdentifier> for GenericSymbolPath {
             }
 
             paths.push(GenericSymbol { base, arguments });
-        }
-
-        GenericSymbolPath {
-            paths,
-            kind: GenericSymbolPathKind::Identifier,
-            range: value.into(),
-        }
-    }
-}
-
-impl From<&syntax_tree::ScopedBaseIdentifier> for GenericSymbolPath {
-    fn from(value: &syntax_tree::ScopedBaseIdentifier) -> Self {
-        let mut paths = Vec::new();
-
-        match value.scoped_base_identifier_group.as_ref() {
-            syntax_tree::ScopedBaseIdentifierGroup::DollarIdentifier(x) => {
-                paths.push(GenericSymbol {
-                    base: x.dollar_identifier.dollar_identifier_token.token,
-                    arguments: Vec::new(),
-                });
-            }
-            syntax_tree::ScopedBaseIdentifierGroup::Identifier(x) => {
-                paths.push(GenericSymbol {
-                    base: x.identifier.identifier_token.token,
-                    arguments: Vec::new(),
-                });
-            }
-        }
-
-        for x in &value.scoped_base_identifier_list {
-            paths.push(GenericSymbol {
-                base: x.identifier.identifier_token.token,
-                arguments: Vec::new(),
-            });
         }
 
         GenericSymbolPath {
