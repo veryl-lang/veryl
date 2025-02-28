@@ -1156,7 +1156,9 @@ impl VerylWalker for Emitter {
                 let text = format!("{actual_width}'{base}{number}");
                 self.veryl_token(&arg.based_token.replace(&text));
             } else {
-                unreachable!()
+                // If width can't be calculated, emit it as is (e.g. `'h0`)
+                let text = format!("'{base}{number}");
+                self.veryl_token(&arg.based_token.replace(&text));
             }
         } else {
             self.veryl_token(&arg.based_token);
