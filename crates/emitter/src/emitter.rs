@@ -1709,12 +1709,20 @@ impl VerylWalker for Emitter {
                 self.l_brace(&x.l_brace);
                 self.concatenation_list(&x.concatenation_list);
                 self.r_brace(&x.r_brace);
-                self.multi_line.pop();
+                if x.l_brace.line() != x.r_brace.line() {
+                    self.multi_line.pop();
+                }
             }
             Factor::QuoteLBraceArrayLiteralListRBrace(x) => {
+                if x.quote_l_brace.line() != x.r_brace.line() {
+                    self.multi_line.push(());
+                }
                 self.quote_l_brace(&x.quote_l_brace);
                 self.array_literal_list(&x.array_literal_list);
                 self.r_brace(&x.r_brace);
+                if x.quote_l_brace.line() != x.r_brace.line() {
+                    self.multi_line.pop();
+                }
             }
             Factor::IfExpression(x) => {
                 self.if_expression(&x.if_expression);
@@ -1804,11 +1812,21 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ArrayLiteralList'
     fn array_literal_list(&mut self, arg: &ArrayLiteralList) {
+        if !self.multi_line.is_empty() {
+            self.newline_push();
+        }
         self.array_literal_item(&arg.array_literal_item);
         for x in &arg.array_literal_list_list {
             self.comma(&x.comma);
-            self.space(1);
+            if x.comma.line() != x.array_literal_item.line() {
+                self.newline();
+            } else {
+                self.space(1);
+            }
             self.array_literal_item(&x.array_literal_item);
+        }
+        if !self.multi_line.is_empty() {
+            self.newline_pop();
         }
     }
 
