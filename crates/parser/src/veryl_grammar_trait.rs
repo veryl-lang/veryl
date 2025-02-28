@@ -361,6 +361,12 @@ impl FirstToken for LBrace {
     }
 }
 
+impl FirstToken for QuoteLBrace {
+    fn token(&self) -> Token {
+        self.quote_l_brace_token.token
+    }
+}
+
 impl FirstToken for RBrace {
     fn token(&self) -> Token {
         self.r_brace_token.token
@@ -383,6 +389,17 @@ impl FirstToken for Expression {
 impl FirstToken for ConcatenationItem {
     fn token(&self) -> Token {
         self.expression.as_ref().token()
+    }
+}
+
+impl FirstToken for ArrayLiteralItem {
+    fn token(&self) -> Token {
+        match self.array_literal_item_group.as_ref() {
+            ArrayLiteralItemGroup::ExpressionArrayLiteralItemOpt(x) => {
+                x.expression.as_ref().token()
+            }
+            ArrayLiteralItemGroup::DefaulColonExpression(x) => x.defaul.default_token.token,
+        }
     }
 }
 
