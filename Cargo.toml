@@ -9,6 +9,7 @@ members = [
     "crates/metadata",
     "crates/parser",
     "crates/path",
+    "crates/simulator",
     "crates/sourcemap",
     "crates/std",
     "crates/tests",
