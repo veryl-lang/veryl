@@ -5219,6 +5219,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "veryl-simulator"
+version = "0.13.5"
+dependencies = [
+ "toml 0.8.20",
+ "veryl-analyzer",
+ "veryl-metadata",
+ "veryl-parser",
+ "veryl-path",
+]
+
+[[package]]
 name = "veryl-sourcemap"
 version = "0.13.5"
 dependencies = [

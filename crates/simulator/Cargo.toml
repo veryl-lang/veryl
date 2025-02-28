@@ -1,0 +1,18 @@
+[package]
+name                  = "veryl-simulator"
+version               = "0.13.5"
+authors.workspace     = true
+repository.workspace  = true
+keywords.workspace    = true
+categories.workspace  = true
+license.workspace     = true
+readme.workspace      = true
+description.workspace = true
+edition.workspace     = true
+
+[dependencies]
+toml           = {workspace = true}
+veryl-analyzer = {version = "0.13.5", path = "../analyzer"}
+veryl-metadata = {version = "0.13.5", path = "../metadata"}
+veryl-parser   = {version = "0.13.5", path = "../parser"}
+veryl-path     = {version = "0.13.5", path = "../path"}
