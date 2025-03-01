@@ -1358,6 +1358,25 @@ fn mismatch_type() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    package PkgA {}
+    package PkgB::<B0: const, B1: const> {}
+
+    package BarPkg = PkgB::<1, 2>;
+    package FooPkg = PkgA;
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {}
+    package Pkg = ModuleA;
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 }
 
 #[test]
@@ -1960,6 +1979,22 @@ fn undefined_identifier() {
     }
     module Top {
         inst u: Sub::<Pkg::<16, 32>>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    package PkgA::<V: const> {
+        const A: bit = V;
+    }
+    module ModuleA::<PKG: PkgA> {
+        let _a: logic = PKG::A;
+    }
+    module ModuleB {
+        package Pkg = PkgA::<0>;
+        inst u: ModuleA::<Pkg>;
     }
     "#;
 

@@ -240,6 +240,18 @@ impl SymbolTable {
                             context.namespace = found.inner_namespace();
                             context.inner = true;
                         }
+                        SymbolKind::PackageAlias(x) => {
+                            let path = x.target.mangled_path();
+                            let symbol = self.resolve(&path, &context.namespace)?;
+                            if let SymbolKind::GenericInstance(x) = &symbol.found.kind {
+                                let symbol = self.symbol_table.get(&x.base).unwrap();
+                                context.namespace = symbol.inner_namespace();
+                                context.inner = true;
+                            } else {
+                                context.namespace = symbol.found.inner_namespace();
+                                context.inner = true;
+                            }
+                        }
                         SymbolKind::Enum(_) | SymbolKind::SystemVerilog | SymbolKind::Namespace => {
                             context.namespace = found.inner_namespace();
                             context.inner = true;

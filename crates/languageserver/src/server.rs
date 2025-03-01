@@ -383,6 +383,7 @@ impl Server {
                     VerylSymbolKind::Instance(_) => SymbolKind::OBJECT,
                     VerylSymbolKind::Block => SymbolKind::NAMESPACE,
                     VerylSymbolKind::Package(_) => SymbolKind::PACKAGE,
+                    VerylSymbolKind::PackageAlias(_) => SymbolKind::PACKAGE,
                     VerylSymbolKind::Struct(_) => SymbolKind::STRUCT,
                     VerylSymbolKind::StructMember(_) => SymbolKind::VARIABLE,
                     VerylSymbolKind::Union(_) => SymbolKind::STRUCT,

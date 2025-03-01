@@ -1,9 +1,16 @@
 package veryl_testcase___Package55__8__16;
-    typedef logic [8-1:0]  data_a;
+    typedef logic [8-1:0] data_a;
     typedef logic [16-1:0] data_b;
 endpackage
+package veryl_testcase___Package55__16__32;
+    typedef logic [16-1:0] data_a;
+    typedef logic [32-1:0] data_b;
+endpackage
+
 
 module veryl_testcase_Module55;
+
+
     veryl_testcase___Module55A__Module55B u0 ();
     veryl_testcase___Module55A__Module55C u1 ();
     veryl_testcase___Module55E__Module55C u2 ();
@@ -13,6 +20,7 @@ module veryl_testcase_Module55;
     veryl_testcase___Module55H__10 u6 ();
     veryl_testcase___Module55H__10 u7 ();
     veryl_testcase___Module55I____Package55__8__16 u8 ();
+    veryl_testcase___Module55I____Package55__16__32 u9 ();
 endmodule
 
 
@@ -61,5 +69,9 @@ endmodule
 module veryl_testcase___Module55I____Package55__8__16;
     veryl_testcase___Package55__8__16::data_a _a; always_comb _a = 0;
     veryl_testcase___Package55__8__16::data_b _b; always_comb _b = 0;
+endmodule
+module veryl_testcase___Module55I____Package55__16__32;
+    veryl_testcase___Package55__16__32::data_a _a; always_comb _a = 0;
+    veryl_testcase___Package55__16__32::data_b _b; always_comb _b = 0;
 endmodule
 //# sourceMappingURL=../map/testcases/sv/55_generic_module.sv.map

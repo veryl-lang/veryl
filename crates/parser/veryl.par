@@ -833,6 +833,7 @@ GenerateItem: LetDeclaration
             | EnumDeclaration
             | StructUnionDeclaration
             | ImportDeclaration
+            | PackageAlias
             | InitialDeclaration
             | FinalDeclaration
             | UnsafeBlock
@@ -842,7 +843,9 @@ GenerateItem: LetDeclaration
 // Package
 // ----------------------------------------------------------------------------
 
-PackageDeclaration: [ Pub ] Package Identifier [ WithGenericParameter ] LBrace { PackageGroup } RBrace;
+PackageDeclaration: [ Pub ] Package Identifier (( [ WithGenericParameter ] LBrace { PackageGroup } RBrace ) | ( Equ ScopedIdentifier Semicolon ));
+
+PackageAlias: Package Identifier Equ ScopedIdentifier Semicolon;
 
 PackageGroup: { Attribute } ( LBrace { PackageGroup } RBrace | PackageItem );
 
@@ -853,6 +856,7 @@ PackageItem: ConstDeclaration
            | FunctionDeclaration
            | ImportDeclaration
            | ExportDeclaration
+           | PackageAlias
            ;
 
 // ----------------------------------------------------------------------------

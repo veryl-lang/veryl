@@ -3,7 +3,11 @@ package Package55::<A: const, B: const> {
     type data_b = logic<B>;
 }
 
+package Package55I_1 = Package55::<8, 16>;
+
 module Module55 {
+    package Package55I_2 = Package55::<16, 32>;
+
     inst u0: Module55A::<Module55B>;
     inst u1: Module55A::<Module55C>;
     inst u2: Module55E::<Module55C>;
@@ -12,7 +16,8 @@ module Module55 {
     inst u5: Module55F::<>;
     inst u6: Module55H::<10>;
     inst u7: Module55H::<10>;
-    inst u8: Module55I::<Package55::<8, 16>>;
+    inst u8: Module55I::<Package55I_1>;
+    inst u9: Module55I::<Package55I_2>;
 }
 
 pub proto module Proto55;

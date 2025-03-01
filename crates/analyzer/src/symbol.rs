@@ -382,6 +382,10 @@ impl Symbol {
                 let path = SymbolPath::from(&self.token);
                 Some(path)
             }
+            SymbolKind::PackageAlias(x) => {
+                let path = x.target.generic_path();
+                Some(path)
+            }
             SymbolKind::GenericParameter(x) => match x.bound {
                 GenericBoundKind::Proto(ref x) => Some(x.clone()),
                 _ => None,
@@ -403,6 +407,7 @@ pub enum SymbolKind {
     Instance(InstanceProperty),
     Block,
     Package(PackageProperty),
+    PackageAlias(PackageAliasProperty),
     Struct(StructProperty),
     StructMember(StructMemberProperty),
     Union(UnionProperty),
@@ -441,6 +446,7 @@ impl SymbolKind {
             SymbolKind::Instance(_) => "instance".to_string(),
             SymbolKind::Block => "block".to_string(),
             SymbolKind::Package(_) => "package".to_string(),
+            SymbolKind::PackageAlias(_) => "package alias".to_string(),
             SymbolKind::Struct(_) => "struct".to_string(),
             SymbolKind::StructMember(_) => "struct member".to_string(),
             SymbolKind::Union(_) => "union".to_string(),
@@ -616,6 +622,9 @@ impl fmt::Display for SymbolKind {
             SymbolKind::Block => "block".to_string(),
             SymbolKind::Package(x) => {
                 format!("package ({} generic)", x.generic_parameters.len())
+            }
+            SymbolKind::PackageAlias(x) => {
+                format!("package alias ({})", x.target)
             }
             SymbolKind::Struct(_) => "struct".to_string(),
             SymbolKind::StructMember(x) => {
@@ -1414,6 +1423,11 @@ pub struct PackageProperty {
     pub range: TokenRange,
     pub generic_parameters: Vec<SymbolId>,
     pub generic_references: Vec<GenericSymbolPath>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PackageAliasProperty {
+    pub target: GenericSymbolPath,
 }
 
 #[derive(Debug, Clone)]

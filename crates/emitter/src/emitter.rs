@@ -1088,6 +1088,15 @@ impl Emitter {
                         .arguments
                         .push(param.1.default_value.as_ref().unwrap().clone());
                 }
+
+                for arg in &mut path.paths[i].arguments {
+                    if let Ok(arg_symbol) = symbol_table::resolve((&arg.generic_path(), &namespace))
+                    {
+                        if let SymbolKind::PackageAlias(x) = arg_symbol.found.kind {
+                            *arg = x.target.clone();
+                        }
+                    }
+                }
             }
         }
 
@@ -3929,43 +3938,50 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'PackageDeclaration'
     fn package_declaration(&mut self, arg: &PackageDeclaration) {
-        let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
-        let maps = symbol.found.generic_maps();
+        if let PackageDeclarationGroup::PackageDeclarationOpt0LBracePackageDeclarationGroupListRBrace(x) = &*arg.package_declaration_group {
+            let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
+            let maps = symbol.found.generic_maps();
 
-        for (i, map) in maps.iter().enumerate() {
-            if i != 0 {
-                self.newline();
-            }
-            self.push_generic_map(map.clone());
-
-            self.package(&arg.package);
-            self.space(1);
-            if map.generic() {
-                self.str(&map.name.clone());
-            } else {
-                if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
-                    let context: SymbolContext = self.into();
-                    self.str(&namespace_string(&symbol.found.namespace, &context));
+            for (i, map) in maps.iter().enumerate() {
+                if i != 0 {
+                    self.newline();
                 }
-                self.identifier(&arg.identifier);
-            }
-            self.token_will_push(&arg.l_brace.l_brace_token.replace(";"));
-            for (i, x) in arg.package_declaration_list.iter().enumerate() {
-                self.newline_list(i);
-                if i == 0 {
-                    let file_scope_import = self.file_scope_import.clone();
-                    for x in &file_scope_import {
-                        self.str(x);
-                        self.newline();
+                self.push_generic_map(map.clone());
+
+                self.package(&arg.package);
+                self.space(1);
+                if map.generic() {
+                    self.str(&map.name.clone());
+                } else {
+                    if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
+                        let context: SymbolContext = self.into();
+                        self.str(&namespace_string(&symbol.found.namespace, &context));
                     }
+                    self.identifier(&arg.identifier);
                 }
-                self.package_group(&x.package_group);
-            }
-            self.newline_list_post(arg.package_declaration_list.is_empty());
-            self.token(&arg.r_brace.r_brace_token.replace("endpackage"));
+                self.token_will_push(&x.l_brace.l_brace_token.replace(";"));
+                for (i, x) in x.package_declaration_group_list.iter().enumerate() {
+                    self.newline_list(i);
+                    if i == 0 {
+                        let file_scope_import = self.file_scope_import.clone();
+                        for x in &file_scope_import {
+                            self.str(x);
+                            self.newline();
+                        }
+                    }
+                    self.package_group(&x.package_group);
+                }
+                self.newline_list_post(x.package_declaration_group_list.is_empty());
+                self.token(&x.r_brace.r_brace_token.replace("endpackage"));
 
-            self.pop_generic_map();
+                self.pop_generic_map();
+            }
         }
+    }
+
+    /// Semantic action for non-terminal 'PackageAlias'
+    fn package_alias(&mut self, _arg: &PackageAlias) {
+        // nothing to emit
     }
 
     /// Semantic action for non-terminal 'PackageGroup'
@@ -4203,6 +4219,11 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
         SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_) => {
             ret.push_str(&namespace_string(&symbol.namespace, context));
             ret.push_str(&token_text);
+        }
+        SymbolKind::PackageAlias(x) => {
+            let pkg = symbol_table::resolve((&x.target.mangled_path(), &symbol.namespace)).unwrap();
+            let text = symbol_string(token, &pkg.found, context);
+            ret.push_str(&text);
         }
         SymbolKind::Parameter(_)
         | SymbolKind::Function(_)
