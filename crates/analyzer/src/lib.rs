@@ -26,3 +26,6 @@ mod tests;
 
 type HashMap<K, V> = fxhash::FxHashMap<K, V>;
 type HashSet<V> = fxhash::FxHashSet<V>;
+
+pub use smallvec::smallvec as svec;
+pub type SVec<T> = smallvec::SmallVec<[T; 4]>;
