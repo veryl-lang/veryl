@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fmt;
 use veryl_parser::resource_table::StrId;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Namespace {
     pub paths: Vec<StrId>,
 }

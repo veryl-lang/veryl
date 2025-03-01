@@ -1073,6 +1073,7 @@ const DEFINED_SYSTEM_FUNCTIONS: [&str; 196] = [
 ];
 
 thread_local!(static SYMBOL_TABLE: RefCell<SymbolTable> = RefCell::new(SymbolTable::new()));
+thread_local!(static SYMBOL_CACHE: RefCell<HashMap<SymbolPathNamespace, ResolveResult>> = RefCell::new(HashMap::new()));
 
 pub fn insert(token: &Token, symbol: Symbol) -> Option<SymbolId> {
     SYMBOL_TABLE.with(|f| f.borrow_mut().insert(token, symbol))
@@ -1083,12 +1084,22 @@ pub fn get(id: SymbolId) -> Option<Symbol> {
 }
 
 pub fn update(symbol: Symbol) {
+    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
     SYMBOL_TABLE.with(|f| f.borrow_mut().update(symbol))
 }
 
 pub fn resolve<T: Into<SymbolPathNamespace>>(path: T) -> Result<ResolveResult, ResolveError> {
-    let SymbolPathNamespace(path, namespace) = path.into();
-    SYMBOL_TABLE.with(|f| f.borrow().resolve(&path, &namespace))
+    let path: SymbolPathNamespace = path.into();
+
+    if let Some(x) = SYMBOL_CACHE.with(|f| f.borrow().get(&path).cloned()) {
+        Ok(x)
+    } else {
+        let ret = SYMBOL_TABLE.with(|f| f.borrow().resolve(&path.0, &path.1));
+        if let Ok(x) = &ret {
+            SYMBOL_CACHE.with(|f| f.borrow_mut().insert(path, x.clone()));
+        }
+        ret
+    }
 }
 
 pub fn get_all() -> Vec<Symbol> {
@@ -1104,31 +1115,38 @@ pub fn dump_assign_list() -> String {
 }
 
 pub fn drop(file_path: PathId) {
+    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
     SYMBOL_TABLE.with(|f| f.borrow_mut().drop(file_path))
 }
 
 pub fn add_reference(target: SymbolId, token: &Token) {
+    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_reference(target, token))
 }
 
 pub fn add_generic_instance(target: SymbolId, instance: SymbolId) {
+    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_generic_instance(target, instance))
 }
 
 pub fn add_import(import: Import) {
+    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_import(import))
 }
 
 pub fn apply_import() {
+    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
     SYMBOL_TABLE.with(|f| f.borrow_mut().apply_import())
 }
 
 pub fn resolve_user_defined() {
+    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
     let resolved = SYMBOL_TABLE.with(|f| f.borrow().get_user_defined());
     SYMBOL_TABLE.with(|f| f.borrow_mut().set_user_defined(resolved))
 }
 
 pub fn add_project_local(prj: StrId, from: StrId, to: StrId) {
+    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_project_local(prj, from, to))
 }
 
@@ -1137,30 +1155,37 @@ pub fn get_project_local(prj: StrId) -> Option<HashMap<StrId, StrId>> {
 }
 
 pub fn add_var_ref(var_ref: &VarRef) {
+    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_var_ref(var_ref))
 }
 
 pub fn get_var_ref_list() -> HashMap<VarRefAffiliation, Vec<VarRef>> {
+    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
     SYMBOL_TABLE.with(|f| f.borrow_mut().get_var_ref_list())
 }
 
 pub fn get_assign_list() -> Vec<Assign> {
+    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
     SYMBOL_TABLE.with(|f| f.borrow_mut().get_assign_list())
 }
 
 pub fn clear() {
+    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
     SYMBOL_TABLE.with(|f| f.borrow_mut().clear())
 }
 
 pub fn clear_evaluated_cache(path: &Namespace) {
+    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
     SYMBOL_TABLE.with(|f| f.borrow_mut().clear_evaluated_cache(path))
 }
 
 pub fn push_override(id: SymbolId, value: Evaluated) {
+    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
     SYMBOL_TABLE.with(|f| f.borrow_mut().push_override(id, value))
 }
 
 pub fn pop_override(id: SymbolId) {
+    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
     SYMBOL_TABLE.with(|f| f.borrow_mut().pop_override(id))
 }
 

@@ -8,7 +8,7 @@ use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::veryl_grammar_trait as syntax_tree;
 use veryl_parser::veryl_token::{Token, TokenRange, TokenSource};
 
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 pub struct SymbolPath(pub Vec<StrId>);
 
 impl SymbolPath {
@@ -119,7 +119,7 @@ impl From<&str> for SymbolPath {
     }
 }
 
-#[derive(Clone, Default, Debug, PartialEq, Eq)]
+#[derive(Clone, Default, Debug, PartialEq, Eq, Hash)]
 pub struct SymbolPathNamespace(pub SymbolPath, pub Namespace);
 
 impl SymbolPathNamespace {
