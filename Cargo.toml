@@ -34,6 +34,7 @@ edition     = "2024"
 anyhow          = "1.0"
 clap            = {version = "4.5.31", features = ["derive"]}
 futures         = "0.3.31"
+fxhash          = "0.2.1"
 log             = "0.4.26"
 mdbook          = "0.4.45"
 miette          = {version = "7.5"}

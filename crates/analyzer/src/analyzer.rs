@@ -1,3 +1,4 @@
+use crate::HashMap;
 use crate::analyzer::resource_table::PathId;
 use crate::analyzer_error::AnalyzerError;
 use crate::attribute_table;
@@ -19,7 +20,6 @@ use crate::var_ref::{
     VarRefAffiliation, VarRefPath, VarRefType,
 };
 use itertools::Itertools;
-use std::collections::HashMap;
 use std::path::Path;
 use veryl_metadata::{Build, Lint, Metadata};
 use veryl_parser::resource_table;

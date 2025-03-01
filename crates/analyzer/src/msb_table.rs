@@ -1,5 +1,5 @@
+use crate::HashMap;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use veryl_parser::resource_table::TokenId;
 
 #[derive(Clone, Default, Debug)]

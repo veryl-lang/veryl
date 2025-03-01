@@ -1,3 +1,4 @@
+use crate::HashMap;
 use crate::analyzer_error::AnalyzerError;
 use crate::attribute::Attribute as Attr;
 use crate::attribute::{AllowItem, CondTypeItem};
@@ -9,7 +10,6 @@ use crate::var_ref::{
     AssignStatementBranchType, ExpressionTargetType, VarRef, VarRefAffiliation, VarRefPath,
     VarRefType,
 };
-use std::collections::HashMap;
 use veryl_parser::ParolError;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::Token;
@@ -637,7 +637,7 @@ impl VerylGrammarTrait for CheckVarRef {
             // To get correct result, this statement should be executed after resolving generic parameters.
             if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
                 if let SymbolKind::Instance(ref x) = symbol.found.kind {
-                    let mut ports = HashMap::new();
+                    let mut ports = HashMap::default();
                     let mut port_unknown = false;
                     let mut sv_instance = false;
 

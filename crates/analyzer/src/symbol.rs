@@ -1,3 +1,4 @@
+use crate::HashMap;
 use crate::attribute::EnumEncodingItem;
 use crate::definition_table::DefinitionId;
 use crate::evaluator::{
@@ -7,7 +8,6 @@ use crate::namespace::Namespace;
 use crate::symbol_path::{GenericSymbolPath, SymbolPath};
 use crate::symbol_table;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::fmt;
 use veryl_parser::Stringifier;
 use veryl_parser::resource_table::{PathId, StrId};
@@ -281,7 +281,7 @@ impl Symbol {
             let map = if let SymbolKind::GenericInstance(ref x) = symbol.kind {
                 self.generic_table(&x.arguments)
             } else {
-                HashMap::new()
+                HashMap::default()
             };
             let name = format!("{}{}", prefix, symbol.token.text);
             ret.push(GenericMap { name, map });
@@ -299,7 +299,7 @@ impl Symbol {
         arguments: &[GenericSymbolPath],
     ) -> HashMap<StrId, GenericSymbolPath> {
         let generic_parameters = self.generic_parameters();
-        let mut ret = HashMap::new();
+        let mut ret = HashMap::default();
 
         for (i, arg) in arguments.iter().enumerate() {
             if let Some((p, _)) = generic_parameters.get(i) {

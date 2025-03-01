@@ -1,7 +1,7 @@
+use crate::HashSet;
 use crate::evaluator::EvaluatedValue;
 use crate::symbol::SymbolId;
 use std::cell::RefCell;
-use std::collections::HashSet;
 use veryl_parser::resource_table::StrId;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]

@@ -1,5 +1,5 @@
+use crate::HashMap;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use veryl_parser::resource_table::PathId;
 use veryl_parser::veryl_grammar_trait::{InterfaceDeclaration, ModuleDeclaration};
 use veryl_parser::veryl_token::TokenSource;

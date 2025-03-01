@@ -1,10 +1,10 @@
+use crate::HashMap;
 use crate::evaluator::{Evaluated, EvaluatedValue};
 use crate::namespace::Namespace;
 use crate::symbol::{DocComment, GenericBoundKind, Symbol, SymbolId, SymbolKind, TypeKind};
 use crate::symbol_path::{SymbolPath, SymbolPathNamespace};
 use crate::var_ref::{Assign, VarRef, VarRefAffiliation};
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::fmt;
 use veryl_parser::resource_table::{PathId, StrId, TokenId};
 use veryl_parser::veryl_token::{Token, TokenSource};
@@ -483,7 +483,7 @@ impl SymbolTable {
             .and_modify(|x| {
                 x.insert(from, to);
             })
-            .or_insert(HashMap::from([(from, to)]));
+            .or_insert(HashMap::from_iter([(from, to)]));
     }
 
     pub fn get_project_local(&self, prj: StrId) -> Option<HashMap<StrId, StrId>> {
@@ -604,7 +604,7 @@ impl ResolveContext<'_> {
             last_found: None,
             full_path: vec![],
             namespace: namespace.clone(),
-            generic_namespace_map: HashMap::new(),
+            generic_namespace_map: HashMap::default(),
             inner: false,
             other_prj: false,
             sv_member: false,
@@ -1073,7 +1073,7 @@ const DEFINED_SYSTEM_FUNCTIONS: [&str; 196] = [
 ];
 
 thread_local!(static SYMBOL_TABLE: RefCell<SymbolTable> = RefCell::new(SymbolTable::new()));
-thread_local!(static SYMBOL_CACHE: RefCell<HashMap<SymbolPathNamespace, ResolveResult>> = RefCell::new(HashMap::new()));
+thread_local!(static SYMBOL_CACHE: RefCell<HashMap<SymbolPathNamespace, ResolveResult>> = RefCell::new(HashMap::default()));
 
 pub fn insert(token: &Token, symbol: Symbol) -> Option<SymbolId> {
     SYMBOL_TABLE.with(|f| f.borrow_mut().insert(token, symbol))
