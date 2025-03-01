@@ -1,17 +1,18 @@
 use crate::namespace_table;
 use crate::symbol_path::SymbolPath;
+use crate::{SVec, svec};
 use std::collections::HashMap;
 use std::fmt;
 use veryl_parser::resource_table::StrId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Namespace {
-    pub paths: Vec<StrId>,
+    pub paths: SVec<StrId>,
 }
 
 impl Namespace {
     pub fn new() -> Self {
-        Self { paths: Vec::new() }
+        Self { paths: SVec::new() }
     }
 
     pub fn push(&mut self, path: StrId) {
@@ -48,7 +49,7 @@ impl Namespace {
     }
 
     pub fn replace(&self, table: &HashMap<StrId, StrId>) -> Self {
-        let mut paths = Vec::new();
+        let mut paths = SVec::new();
         for x in &self.paths {
             if let Some(x) = table.get(x) {
                 paths.push(*x);
@@ -60,7 +61,7 @@ impl Namespace {
     }
 
     pub fn strip_prefix(&mut self, x: &Namespace) {
-        let mut paths = vec![];
+        let mut paths = svec![];
         for (i, p) in self.paths.iter().enumerate() {
             if x.paths.get(i) != Some(p) {
                 paths.push(*p);
@@ -91,7 +92,7 @@ impl fmt::Display for Namespace {
 
 impl From<&SymbolPath> for Namespace {
     fn from(value: &SymbolPath) -> Self {
-        let mut paths = Vec::new();
+        let mut paths = SVec::new();
         for x in value.as_slice() {
             paths.push(*x);
         }
@@ -102,14 +103,14 @@ impl From<&SymbolPath> for Namespace {
 impl From<&[StrId]> for Namespace {
     fn from(value: &[StrId]) -> Self {
         Namespace {
-            paths: value.to_vec(),
+            paths: value.into(),
         }
     }
 }
 
 impl From<&str> for Namespace {
     fn from(value: &str) -> Self {
-        let mut paths = Vec::new();
+        let mut paths = SVec::new();
         for x in value.split("::") {
             paths.push(x.into());
         }

@@ -23,3 +23,6 @@ pub use analyzer::Analyzer;
 pub use analyzer_error::AnalyzerError;
 #[cfg(test)]
 mod tests;
+
+pub use smallvec::smallvec as svec;
+pub type SVec<T> = smallvec::SmallVec<[T; 8]>;

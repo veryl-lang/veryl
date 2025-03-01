@@ -5117,6 +5117,7 @@ dependencies = [
  "daggy",
  "itertools 0.14.0",
  "miette",
+ "smallvec",
  "strnum_bitwidth",
  "thiserror 2.0.11",
  "toml 0.8.20",
