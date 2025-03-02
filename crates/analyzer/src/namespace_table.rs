@@ -1,6 +1,6 @@
+use crate::HashMap;
 use crate::namespace::Namespace;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::fmt;
 use veryl_parser::resource_table::{PathId, StrId, TokenId};
 
@@ -48,7 +48,7 @@ impl Default for NamespaceTable {
     fn default() -> Self {
         Self {
             default: Namespace::new(),
-            table: HashMap::new(),
+            table: HashMap::default(),
         }
     }
 }

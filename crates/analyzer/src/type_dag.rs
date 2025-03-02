@@ -1,9 +1,10 @@
 use crate::symbol::{Symbol, SymbolId};
 use crate::symbol_table;
+use crate::{HashMap, HashSet};
 use bimap::BiMap;
 use daggy::petgraph::visit::Dfs;
 use daggy::{Dag, Walker, petgraph::algo};
-use std::{cell::RefCell, collections::HashMap, collections::HashSet};
+use std::cell::RefCell;
 use veryl_parser::veryl_token::Token;
 
 #[derive(Clone, Default)]
@@ -54,8 +55,8 @@ impl TypeDag {
         Self {
             dag,
             nodes: BiMap::new(),
-            paths: HashMap::new(),
-            symbols: HashMap::new(),
+            paths: HashMap::default(),
+            symbols: HashMap::default(),
             source,
         }
     }
@@ -181,7 +182,7 @@ impl TypeDag {
                     " ".repeat(max_width - path.name.len()),
                     symbol.kind
                 ));
-                let mut set = HashSet::new();
+                let mut set = HashSet::default();
                 for parent in self.dag.parents(*node).iter(&self.dag) {
                     let node = parent.1.index() as u32;
                     if !set.contains(&node) {

@@ -13,7 +13,9 @@ edition.workspace     = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+fxhash          = {workspace = true}
 itertools       = "0.14.0"
+smallvec        = {workspace = true}
 strnum_bitwidth = {workspace = true}
 thiserror       = {workspace = true}
 veryl-metadata  = {version = "0.13.5", path = "../metadata"}

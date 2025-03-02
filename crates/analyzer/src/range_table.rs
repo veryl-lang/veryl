@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use crate::HashMap;
 use std::fmt;
 use veryl_parser::resource_table::PathId;
 use veryl_parser::veryl_token::{Token, TokenRange, TokenSource};
@@ -12,7 +12,7 @@ pub struct RangeTable<T> {
 impl<T> Default for RangeTable<T> {
     fn default() -> Self {
         Self {
-            table: HashMap::new(),
+            table: HashMap::default(),
             temporary: Vec::new(),
         }
     }

@@ -1,9 +1,9 @@
+use crate::HashMap;
 use crate::analyzer_error::AnalyzerError;
 use crate::symbol::{ClockDomain, GenericBoundKind, Port, Symbol, SymbolId, SymbolKind};
 use crate::symbol_table;
 use crate::r#unsafe::Unsafe;
 use crate::unsafe_table;
-use std::collections::HashMap;
 use veryl_parser::ParolError;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::veryl_grammar_trait::*;
@@ -60,7 +60,7 @@ impl CheckClockDomain {
     }
 
     fn check_cdc_on_port_connections(&mut self, ports: &Vec<Port>, unsafe_token: &Token) {
-        let mut connection_table = HashMap::<ClockDomain, (ClockDomain, TokenRange)>::new();
+        let mut connection_table = HashMap::<ClockDomain, (ClockDomain, TokenRange)>::default();
 
         for port in ports {
             if let Some(connected) = self.inst_clock_domains.get(&port.name()) {

@@ -2,18 +2,19 @@ use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::{DocComment, GenericInstanceProperty, GenericMap, Symbol, SymbolKind};
 use crate::symbol_table;
+use crate::{SVec, svec};
 use std::cmp::Ordering;
 use std::fmt;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::veryl_grammar_trait as syntax_tree;
 use veryl_parser::veryl_token::{Token, TokenRange, TokenSource};
 
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct SymbolPath(pub Vec<StrId>);
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+pub struct SymbolPath(pub SVec<StrId>);
 
 impl SymbolPath {
     pub fn new(x: &[StrId]) -> Self {
-        Self(x.to_vec())
+        Self(x.into())
     }
 
     pub fn push(&mut self, x: StrId) {
@@ -32,7 +33,7 @@ impl SymbolPath {
         self.0.as_slice()
     }
 
-    pub fn to_vec(self) -> Vec<StrId> {
+    pub fn to_vec(self) -> SVec<StrId> {
         self.0
     }
 }
@@ -49,7 +50,7 @@ impl fmt::Display for SymbolPath {
 
 impl From<&[Token]> for SymbolPath {
     fn from(value: &[Token]) -> Self {
-        let mut path = Vec::new();
+        let mut path = SVec::new();
         for x in value {
             path.push(x.text);
         }
@@ -59,21 +60,21 @@ impl From<&[Token]> for SymbolPath {
 
 impl From<&Token> for SymbolPath {
     fn from(value: &Token) -> Self {
-        let path = vec![value.text];
+        let path = svec![value.text];
         SymbolPath(path)
     }
 }
 
 impl From<&syntax_tree::Identifier> for SymbolPath {
     fn from(value: &syntax_tree::Identifier) -> Self {
-        let path = vec![value.identifier_token.token.text];
+        let path = svec![value.identifier_token.token.text];
         SymbolPath(path)
     }
 }
 
 impl From<&[syntax_tree::Identifier]> for SymbolPath {
     fn from(value: &[syntax_tree::Identifier]) -> Self {
-        let mut path = Vec::new();
+        let mut path = SVec::new();
         for x in value {
             path.push(x.identifier_token.token.text);
         }
@@ -83,7 +84,7 @@ impl From<&[syntax_tree::Identifier]> for SymbolPath {
 
 impl From<&syntax_tree::HierarchicalIdentifier> for SymbolPath {
     fn from(value: &syntax_tree::HierarchicalIdentifier) -> Self {
-        let mut path = Vec::new();
+        let mut path = SVec::new();
         path.push(value.identifier.identifier_token.token.text);
         for x in &value.hierarchical_identifier_list0 {
             path.push(x.identifier.identifier_token.token.text);
@@ -111,7 +112,7 @@ impl From<&syntax_tree::ExpressionIdentifier> for SymbolPath {
 
 impl From<&str> for SymbolPath {
     fn from(value: &str) -> Self {
-        let mut path = Vec::new();
+        let mut path = SVec::new();
         for x in value.split("::") {
             path.push(x.into());
         }
@@ -119,7 +120,7 @@ impl From<&str> for SymbolPath {
     }
 }
 
-#[derive(Clone, Default, Debug, PartialEq, Eq)]
+#[derive(Clone, Default, Debug, PartialEq, Eq, Hash)]
 pub struct SymbolPathNamespace(pub SymbolPath, pub Namespace);
 
 impl SymbolPathNamespace {
@@ -156,6 +157,13 @@ impl From<(&Token, &Namespace)> for SymbolPathNamespace {
 
 impl From<(&Vec<StrId>, &Namespace)> for SymbolPathNamespace {
     fn from(value: (&Vec<StrId>, &Namespace)) -> Self {
+        let path = SymbolPath::new(value.0);
+        SymbolPathNamespace(path, value.1.clone())
+    }
+}
+
+impl From<(&SVec<StrId>, &Namespace)> for SymbolPathNamespace {
+    fn from(value: (&SVec<StrId>, &Namespace)) -> Self {
         let path = SymbolPath::new(value.0);
         SymbolPathNamespace(path, value.1.clone())
     }
