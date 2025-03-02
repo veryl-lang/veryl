@@ -137,26 +137,6 @@ impl Preprocessor for Veryl {
                                         .unwrap();
                                         let prj = &metadata.project.name;
 
-                                        let mut formatter = Formatter::new(&metadata);
-                                        formatter.format(&ret.veryl);
-
-                                        if x != formatter.as_str() {
-                                            eprintln!("veryl format failed : {path}:{line}:{col}");
-                                            let diff = TextDiff::from_lines(
-                                                x.as_ref(),
-                                                formatter.as_str(),
-                                            );
-                                            for change in diff.iter_all_changes() {
-                                                match change.tag() {
-                                                    ChangeTag::Delete => eprint!("-{}", change),
-                                                    ChangeTag::Insert => eprint!("+{}", change),
-                                                    ChangeTag::Equal => (),
-                                                }
-                                            }
-                                            total_success = false;
-                                            chapter_success = false;
-                                        }
-
                                         let analyzer = Analyzer::new(&metadata);
                                         analyzer.clear();
 
@@ -176,6 +156,26 @@ impl Preprocessor for Veryl {
                                             eprintln!("veryl analyze failed : {path}:{line}:{col}");
                                             for err in errors {
                                                 eprintln!("{err}");
+                                            }
+                                            total_success = false;
+                                            chapter_success = false;
+                                        }
+
+                                        let mut formatter = Formatter::new(&metadata);
+                                        formatter.format(&ret.veryl);
+
+                                        if x != formatter.as_str() {
+                                            eprintln!("veryl format failed : {path}:{line}:{col}");
+                                            let diff = TextDiff::from_lines(
+                                                x.as_ref(),
+                                                formatter.as_str(),
+                                            );
+                                            for change in diff.iter_all_changes() {
+                                                match change.tag() {
+                                                    ChangeTag::Delete => eprint!("-{}", change),
+                                                    ChangeTag::Insert => eprint!("+{}", change),
+                                                    ChangeTag::Equal => (),
+                                                }
                                             }
                                             total_success = false;
                                             chapter_success = false;
