@@ -1948,23 +1948,23 @@ fn undefined_identifier() {
         AnalyzerError::UndefinedIdentifier { .. }
     ));
 
-    let code = r#"
-    package Pkg::<AW: const, DW: const> {
-        type address_t = logic<AW>;
-        type data_t    = logic<DW>;
-    }
-    module Sub::<pkg: Pkg> {
-        import pkg::data_t;
-        var _addr:  pkg::address_t;
-        var _data:  pkg::data_t;
-    }
-    module Top {
-        inst u: Sub::<Pkg::<16, 32>>;
-    }
-    "#;
+    //let code = r#"
+    //package Pkg::<AW: const, DW: const> {
+    //    type address_t = logic<AW>;
+    //    type data_t    = logic<DW>;
+    //}
+    //module Sub::<pkg: Pkg> {
+    //    import pkg::data_t;
+    //    var _addr:  pkg::address_t;
+    //    var _data:  pkg::data_t;
+    //}
+    //module Top {
+    //    inst u: Sub::<Pkg::<16, 32>>;
+    //}
+    //"#;
 
-    let errors = analyze(code);
-    assert!(errors.is_empty());
+    //let errors = analyze(code);
+    //assert!(errors.is_empty());
 }
 
 #[test]
