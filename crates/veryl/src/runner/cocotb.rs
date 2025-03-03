@@ -44,43 +44,47 @@ impl Cocotb {
         Box::new(self) as Box<dyn Runner>
     }
 
-    fn parse_line(&mut self, line: &str) {
+    fn parse_line(&mut self, line: &str, force_error: bool) {
         self.debug(line);
 
-        if !line.starts_with("                ") {
-            self.state = State::Idle;
-        }
+        if force_error {
+            self.error(line);
+        } else {
+            if !line.starts_with("                ") {
+                self.state = State::Idle;
+            }
 
-        match self.state {
-            State::Idle => {
-                if line.ends_with("failed") {
-                    self.error(line);
-                    self.state = State::Error;
-                } else if line.starts_with("     0.00ns INFO") {
-                    self.info(line);
-                    self.state = State::Info;
-                } else if line.starts_with("     0.00ns WARNING") {
-                    self.warning(line);
-                    self.state = State::Warning;
-                } else if line.starts_with("     0.00ns ERROR") {
-                    self.error(line);
-                    self.state = State::Error;
-                } else if line.starts_with("     0.00ns CRITICAL") {
-                    self.fatal(line);
-                    self.state = State::Fatal;
+            match self.state {
+                State::Idle => {
+                    if line.ends_with("failed") {
+                        self.error(line);
+                        self.state = State::Error;
+                    } else if line.starts_with("     0.00ns INFO") {
+                        self.info(line);
+                        self.state = State::Info;
+                    } else if line.starts_with("     0.00ns WARNING") {
+                        self.warning(line);
+                        self.state = State::Warning;
+                    } else if line.starts_with("     0.00ns ERROR") {
+                        self.error(line);
+                        self.state = State::Error;
+                    } else if line.starts_with("     0.00ns CRITICAL") {
+                        self.fatal(line);
+                        self.state = State::Fatal;
+                    }
                 }
-            }
-            State::Info => {
-                self.info(line);
-            }
-            State::Warning => {
-                self.warning(line);
-            }
-            State::Error => {
-                self.error(line);
-            }
-            State::Fatal => {
-                self.fatal(line);
+                State::Info => {
+                    self.info(line);
+                }
+                State::Warning => {
+                    self.warning(line);
+                }
+                State::Error => {
+                    self.error(line);
+                }
+                State::Fatal => {
+                    self.fatal(line);
+                }
             }
         }
     }
@@ -90,7 +94,19 @@ impl Cocotb {
         let mut reader = FramedRead::new(stdout, LinesCodec::new());
         while let Some(line) = reader.next().await {
             let line = line.into_diagnostic()?;
-            self.parse_line(&line);
+            self.parse_line(&line, false);
+        }
+
+        let ecode = child.wait().await.into_diagnostic()?;
+        if !ecode.success() {
+            let stderr = child.stderr.take().unwrap();
+            let mut reader = FramedRead::new(stderr, LinesCodec::new());
+            while let Some(line) = reader.next().await {
+                let line = line.into_diagnostic()?;
+                self.parse_line(&line, true);
+            }
+            error!("cocotb failed by error code {ecode}");
+            self.failure();
         }
         Ok(())
     }
@@ -185,7 +201,7 @@ runner.test(
                 .arg("runner.py")
                 .current_dir(temp_dir.path())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::null())
+                .stderr(Stdio::piped())
                 .spawn()
                 .into_diagnostic()
                 .wrap_err("Failed to run \"python3\"")?;
