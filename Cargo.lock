@@ -3285,9 +3285,9 @@ dependencies = [
 
 [[package]]
 name = "parol"
-version = "2.2.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5259433beb2a2830b91e0bb7e9daa727836edcc8067b96fd9b106f6b782aada"
+checksum = "79f1134b8ed8fa3c225c826557c4df95449230cc75d5e1401ec6296bb3c0b323"
 dependencies = [
  "anyhow",
  "assert_cmd",
