@@ -177,7 +177,10 @@ impl VerylGrammarTrait for CheckType {
                 // Check variable type
                 if !self.in_user_defined_type.is_empty() && self.in_generic_argument.is_empty() {
                     if self.in_modport {
-                        if !matches!(symbol.found.kind, SymbolKind::Modport(_)) {
+                        if !matches!(
+                            symbol.found.kind,
+                            SymbolKind::Modport(_) | SymbolKind::SystemVerilog
+                        ) {
                             self.errors.push(AnalyzerError::mismatch_type(
                                 &symbol.found.token.to_string(),
                                 "modport",
