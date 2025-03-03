@@ -37,5 +37,10 @@ module veryl_testcase_Module01;
     localparam int unsigned ggg   = 0123456789.0123456789e-0123456789;
     localparam int unsigned gggg  = 0123456789.0123456789E+0123456789;
     localparam int unsigned ggggg = 0123456789.0123456789E-0123456789;
+
+    // width-less based
+    localparam logic [32-1:0] h   = 1'b0;
+    localparam logic [32-1:0] hh  = 1'o0;
+    localparam logic [32-1:0] hhh = 1'h0;
 endmodule
 //# sourceMappingURL=../map/testcases/sv/01_number.sv.map

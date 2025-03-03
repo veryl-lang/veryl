@@ -37,4 +37,9 @@ module Module01 {
     const ggg  : u32 = 0123456789.0123456789e-0123456789;
     const gggg : u32 = 0123456789.0123456789E+0123456789;
     const ggggg: u32 = 0123456789.0123456789E-0123456789;
+
+    // width-less based
+    const h  : logic<32> = 'b0;
+    const hh : logic<32> = 'o0;
+    const hhh: logic<32> = 'h0;
 }
