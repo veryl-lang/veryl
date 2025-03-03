@@ -97,6 +97,7 @@ pub struct CreateSymbolTable {
     in_generic_bound: bool,
     file_scope_import_item: Vec<SymbolPathNamespace>,
     file_scope_import_wildcard: Vec<SymbolPathNamespace>,
+    is_public: bool,
 }
 
 #[derive(Clone)]
@@ -1342,7 +1343,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
                 let range = TokenRange::new(&arg.module.module_token, &arg.r_brace.r_brace_token);
                 let proto = arg
-                    .module_declaration_opt1
+                    .module_declaration_opt0
                     .as_ref()
                     .map(|x| x.scoped_identifier.as_ref().into());
 
@@ -1358,11 +1359,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     default_reset,
                     definition,
                 };
-                let public = arg.module_declaration_opt.is_some();
                 self.insert_symbol(
                     &arg.identifier.identifier_token.token,
                     SymbolKind::Module(property),
-                    public,
+                    self.is_public,
                 );
             }
         }
@@ -1467,11 +1467,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     parameters,
                     definition,
                 };
-                let public = arg.interface_declaration_opt.is_some();
                 let interface_id = self.insert_symbol(
                     &arg.identifier.identifier_token.token,
                     SymbolKind::Interface(property),
-                    public,
+                    self.is_public,
                 );
 
                 //  link modport function
@@ -1549,11 +1548,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     generic_parameters,
                     generic_references,
                 };
-                let public = arg.package_declaration_opt.is_some();
                 self.insert_symbol(
                     &arg.identifier.identifier_token.token,
                     SymbolKind::Package(property),
-                    public,
+                    self.is_public,
                 );
             }
         }
@@ -1586,11 +1584,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     parameters,
                     ports,
                 };
-                let public = arg.proto_module_declaration_opt.is_some();
                 self.insert_symbol(
                     &arg.identifier.identifier_token.token,
                     SymbolKind::ProtoModule(property),
-                    public,
+                    self.is_public,
                 );
             }
         }
@@ -1670,6 +1667,21 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.insert_symbol(&token, SymbolKind::Test(property), false);
             }
         }
+        Ok(())
+    }
+
+    fn description_item(&mut self, arg: &DescriptionItem) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                if let DescriptionItem::DescriptionItemOptPublicDescriptionItem(x) = &arg {
+                    self.is_public = x.description_item_opt.is_some();
+                }
+            }
+            HandlerPoint::After => {
+                self.is_public = false;
+            }
+        }
+
         Ok(())
     }
 }

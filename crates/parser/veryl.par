@@ -794,13 +794,13 @@ UnsafeBlock: Unsafe LParen Identifier RParen LBrace { GenerateGroup } RBrace;
 // Module/Interface
 // ----------------------------------------------------------------------------
 
-ModuleDeclaration: [ Pub ] Module Identifier [ WithGenericParameter ] [ For ScopedIdentifier ] [ WithParameter ] [ PortDeclaration ] LBrace { ModuleGroup } RBrace;
+ModuleDeclaration: Module Identifier [ WithGenericParameter ] [ For ScopedIdentifier ] [ WithParameter ] [ PortDeclaration ] LBrace { ModuleGroup } RBrace;
 
 ModuleGroup: { Attribute } ( LBrace { ModuleGroup } RBrace | ModuleItem );
 
 ModuleItem: GenerateItem;
 
-InterfaceDeclaration: [ Pub ] Interface Identifier [ WithGenericParameter ] [ WithParameter ] LBrace { InterfaceGroup } RBrace;
+InterfaceDeclaration: Interface Identifier [ WithGenericParameter ] [ WithParameter ] LBrace { InterfaceGroup } RBrace;
 
 InterfaceGroup: { Attribute } ( LBrace { InterfaceGroup } RBrace | InterfaceItem );
 
@@ -842,7 +842,7 @@ GenerateItem: LetDeclaration
 // Package
 // ----------------------------------------------------------------------------
 
-PackageDeclaration: [ Pub ] Package Identifier [ WithGenericParameter ] LBrace { PackageGroup } RBrace;
+PackageDeclaration: Package Identifier [ WithGenericParameter ] LBrace { PackageGroup } RBrace;
 
 PackageGroup: { Attribute } ( LBrace { PackageGroup } RBrace | PackageItem );
 
@@ -859,7 +859,7 @@ PackageItem: ConstDeclaration
 // Proto
 // ----------------------------------------------------------------------------
 
-ProtoModuleDeclaration: [ Pub ] Proto Module Identifier [ WithParameter ] [ PortDeclaration ] Semicolon;
+ProtoModuleDeclaration: Proto Module Identifier [ WithParameter ] [ PortDeclaration ] Semicolon;
 
 // ----------------------------------------------------------------------------
 // Embed
@@ -886,14 +886,17 @@ IncludeDeclaration: Include LParen Identifier Comma StringLiteral RParen Semicol
 
 DescriptionGroup: { Attribute } ( LBrace { DescriptionGroup } RBrace | DescriptionItem );
 
-DescriptionItem: ModuleDeclaration
-               | InterfaceDeclaration
-               | PackageDeclaration
-               | ProtoModuleDeclaration
+DescriptionItem: [ Pub ] PublicDescriptionItem
                | ImportDeclaration
                | EmbedDeclaration
                | IncludeDeclaration
                ;
+
+PublicDescriptionItem: ModuleDeclaration
+                     | InterfaceDeclaration
+                     | PackageDeclaration
+                     | ProtoModuleDeclaration
+                     ; 
 
 // ----------------------------------------------------------------------------
 // SourceCode

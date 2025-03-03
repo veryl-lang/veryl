@@ -2675,22 +2675,19 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'ModuleDeclaration'
     fn module_declaration(&mut self, arg: &ModuleDeclaration) {
         before!(self, module_declaration, arg);
-        if let Some(ref x) = arg.module_declaration_opt {
-            self.r#pub(&x.r#pub);
-        }
         self.module(&arg.module);
         self.identifier(&arg.identifier);
-        if let Some(ref x) = arg.module_declaration_opt0 {
+        if let Some(ref x) = arg.module_declaration_opt {
             self.with_generic_parameter(&x.with_generic_parameter);
         }
-        if let Some(ref x) = arg.module_declaration_opt1 {
+        if let Some(ref x) = arg.module_declaration_opt0 {
             self.r#for(&x.r#for);
             self.scoped_identifier(&x.scoped_identifier);
         }
-        if let Some(ref x) = arg.module_declaration_opt2 {
+        if let Some(ref x) = arg.module_declaration_opt1 {
             self.with_parameter(&x.with_parameter);
         }
-        if let Some(ref x) = arg.module_declaration_opt3 {
+        if let Some(ref x) = arg.module_declaration_opt2 {
             self.port_declaration(&x.port_declaration);
         }
         self.l_brace(&arg.l_brace);
@@ -2732,15 +2729,12 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'InterfaceDeclaration'
     fn interface_declaration(&mut self, arg: &InterfaceDeclaration) {
         before!(self, interface_declaration, arg);
-        if let Some(ref x) = arg.interface_declaration_opt {
-            self.r#pub(&x.r#pub);
-        }
         self.interface(&arg.interface);
         self.identifier(&arg.identifier);
-        if let Some(ref x) = arg.interface_declaration_opt0 {
+        if let Some(ref x) = arg.interface_declaration_opt {
             self.with_generic_parameter(&x.with_generic_parameter);
         }
-        if let Some(ref x) = arg.interface_declaration_opt1 {
+        if let Some(ref x) = arg.interface_declaration_opt0 {
             self.with_parameter(&x.with_parameter);
         }
         self.l_brace(&arg.l_brace);
@@ -2918,12 +2912,9 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'PackageDeclaration'
     fn package_declaration(&mut self, arg: &PackageDeclaration) {
         before!(self, package_declaration, arg);
-        if let Some(ref x) = arg.package_declaration_opt {
-            self.r#pub(&x.r#pub);
-        }
         self.package(&arg.package);
         self.identifier(&arg.identifier);
-        if let Some(ref x) = arg.package_declaration_opt0 {
+        if let Some(ref x) = arg.package_declaration_opt {
             self.with_generic_parameter(&x.with_generic_parameter);
         }
         self.l_brace(&arg.l_brace);
@@ -2977,15 +2968,12 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'ProtoModuleDeclaration'
     fn proto_module_declaration(&mut self, arg: &ProtoModuleDeclaration) {
         before!(self, proto_module_declaration, arg);
-        if let Some(ref x) = arg.proto_module_declaration_opt {
-            self.r#pub(&x.r#pub);
-        }
         self.module(&arg.module);
         self.identifier(&arg.identifier);
-        if let Some(ref x) = arg.proto_module_declaration_opt0 {
+        if let Some(ref x) = arg.proto_module_declaration_opt {
             self.with_parameter(&x.with_parameter);
         }
-        if let Some(ref x) = arg.proto_module_declaration_opt1 {
+        if let Some(ref x) = arg.proto_module_declaration_opt0 {
             self.port_declaration(&x.port_declaration);
         }
         self.semicolon(&arg.semicolon);
@@ -3047,15 +3035,11 @@ pub trait VerylWalker {
     fn description_item(&mut self, arg: &DescriptionItem) {
         before!(self, description_item, arg);
         match arg {
-            DescriptionItem::ModuleDeclaration(x) => self.module_declaration(&x.module_declaration),
-            DescriptionItem::InterfaceDeclaration(x) => {
-                self.interface_declaration(&x.interface_declaration)
-            }
-            DescriptionItem::PackageDeclaration(x) => {
-                self.package_declaration(&x.package_declaration)
-            }
-            DescriptionItem::ProtoModuleDeclaration(x) => {
-                self.proto_module_declaration(&x.proto_module_declaration)
+            DescriptionItem::DescriptionItemOptPublicDescriptionItem(x) => {
+                if let Some(ref x) = x.description_item_opt {
+                    self.r#pub(&x.r#pub);
+                }
+                self.public_description_item(&x.public_description_item);
             }
             DescriptionItem::ImportDeclaration(x) => self.import_declaration(&x.import_declaration),
             DescriptionItem::EmbedDeclaration(x) => self.embed_declaration(&x.embed_declaration),
@@ -3064,6 +3048,26 @@ pub trait VerylWalker {
             }
         };
         after!(self, description_item, arg);
+    }
+
+    /// Semantic action for non-terminal 'PublicDescriptionItem'
+    fn public_description_item(&mut self, arg: &PublicDescriptionItem) {
+        before!(self, public_description_item, arg);
+        match arg {
+            PublicDescriptionItem::ModuleDeclaration(x) => {
+                self.module_declaration(&x.module_declaration)
+            }
+            PublicDescriptionItem::InterfaceDeclaration(x) => {
+                self.interface_declaration(&x.interface_declaration)
+            }
+            PublicDescriptionItem::PackageDeclaration(x) => {
+                self.package_declaration(&x.package_declaration)
+            }
+            PublicDescriptionItem::ProtoModuleDeclaration(x) => {
+                self.proto_module_declaration(&x.proto_module_declaration)
+            }
+        };
+        after!(self, public_description_item, arg);
     }
 
     /// Semantic action for non-terminal 'Veryl'

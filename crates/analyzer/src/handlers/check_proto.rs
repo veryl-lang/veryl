@@ -26,7 +26,7 @@ impl Handler for CheckProto {
 impl VerylGrammarTrait for CheckProto {
     fn module_declaration(&mut self, arg: &ModuleDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            if let Some(ref x) = arg.module_declaration_opt1 {
+            if let Some(ref x) = arg.module_declaration_opt0 {
                 if let Ok(symbol) = symbol_table::resolve(x.scoped_identifier.as_ref()) {
                     if let SymbolKind::ProtoModule(proto) = symbol.found.kind {
                         if let Ok(module) = symbol_table::resolve(arg.identifier.as_ref()) {
