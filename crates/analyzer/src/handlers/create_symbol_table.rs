@@ -15,10 +15,10 @@ use crate::symbol::{
     ConnectTarget, DocComment, EnumMemberProperty, EnumMemberValue, EnumProperty, FunctionProperty,
     GenericBoundKind, GenericParameterProperty, InstanceProperty, InterfaceProperty,
     ModportFunctionMemberProperty, ModportProperty, ModportVariableMemberProperty, ModuleProperty,
-    PackageProperty, Parameter, ParameterKind, ParameterProperty, Port, PortProperty,
-    ProtoModuleProperty, StructMemberProperty, StructProperty, Symbol, SymbolId, SymbolKind,
-    TestProperty, TestType, TypeDefProperty, TypeKind, UnionMemberProperty, UnionProperty,
-    VariableAffiliation, VariableProperty,
+    PackageAliasProperty, PackageProperty, Parameter, ParameterKind, ParameterProperty, Port,
+    PortProperty, ProtoModuleProperty, StructMemberProperty, StructProperty, Symbol, SymbolId,
+    SymbolKind, TestProperty, TestType, TypeDefProperty, TypeKind, UnionMemberProperty,
+    UnionProperty, VariableAffiliation, VariableProperty,
 };
 use crate::symbol_path::{GenericSymbolPath, SymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
@@ -1526,36 +1526,63 @@ impl VerylGrammarTrait for CreateSymbolTable {
     }
 
     fn package_declaration(&mut self, arg: &PackageDeclaration) -> Result<(), ParolError> {
-        let name = arg.identifier.identifier_token.token.text;
         match self.point {
             HandlerPoint::Before => {
-                self.namespace.push(name);
-                self.generic_context.push();
-                self.affiliation.push(VariableAffiliation::Package);
-                self.function_ids.clear();
-
-                self.apply_file_scope_import();
+                if let PackageDeclarationGroup::PackageDeclarationOpt0LBracePackageDeclarationGroupListRBrace(_) = &*arg.package_declaration_group {
+                    let name = arg.identifier.identifier_token.token.text;
+                    self.namespace.push(name);
+                    self.generic_context.push();
+                    self.affiliation.push(VariableAffiliation::Package);
+                    self.function_ids.clear();
+                    self.apply_file_scope_import();
+                }
             }
             HandlerPoint::After => {
-                self.namespace.pop();
-                self.affiliation.pop();
+                match &*arg.package_declaration_group {
+                    PackageDeclarationGroup::PackageDeclarationOpt0LBracePackageDeclarationGroupListRBrace(x) => {
+                        self.namespace.pop();
+                        self.affiliation.pop();
 
-                let (generic_parameters, generic_references) = self.generic_context.pop();
+                        let (generic_parameters, generic_references) = self.generic_context.pop();
 
-                let range = TokenRange::new(&arg.package.package_token, &arg.r_brace.r_brace_token);
+                        let range = TokenRange::new(&arg.package.package_token, &x.r_brace.r_brace_token);
 
-                let property = PackageProperty {
-                    range,
-                    generic_parameters,
-                    generic_references,
-                };
-                let public = arg.package_declaration_opt.is_some();
-                self.insert_symbol(
-                    &arg.identifier.identifier_token.token,
-                    SymbolKind::Package(property),
-                    public,
-                );
+                        let property = PackageProperty {
+                            range,
+                            generic_parameters,
+                            generic_references,
+                        };
+                        let public = arg.package_declaration_opt.is_some();
+                        self.insert_symbol(
+                            &arg.identifier.identifier_token.token,
+                            SymbolKind::Package(property),
+                            public,
+                        );
+                    }
+                    PackageDeclarationGroup::EquScopedIdentifierSemicolon(x) => {
+                        let target: GenericSymbolPath = x.scoped_identifier.as_ref().into();
+                        let property = PackageAliasProperty { target };
+                        self.insert_symbol(
+                            &arg.identifier.identifier_token.token,
+                            SymbolKind::PackageAlias(property),
+                            false,
+                        );
+                    }
+                }
             }
+        }
+        Ok(())
+    }
+
+    fn package_alias(&mut self, arg: &PackageAlias) -> Result<(), ParolError> {
+        if let HandlerPoint::After = self.point {
+            let target: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
+            let property = PackageAliasProperty { target };
+            self.insert_symbol(
+                &arg.identifier.identifier_token.token,
+                SymbolKind::PackageAlias(property),
+                false,
+            );
         }
         Ok(())
     }

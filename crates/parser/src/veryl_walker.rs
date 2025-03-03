@@ -2908,6 +2908,7 @@ pub trait VerylWalker {
                 self.struct_union_declaration(&x.struct_union_declaration)
             }
             GenerateItem::ImportDeclaration(x) => self.import_declaration(&x.import_declaration),
+            GenerateItem::PackageAlias(x) => self.package_alias(&x.package_alias),
             GenerateItem::InitialDeclaration(x) => self.initial_declaration(&x.initial_declaration),
             GenerateItem::FinalDeclaration(x) => self.final_declaration(&x.final_declaration),
             GenerateItem::UnsafeBlock(x) => self.unsafe_block(&x.unsafe_block),
@@ -2923,15 +2924,35 @@ pub trait VerylWalker {
         }
         self.package(&arg.package);
         self.identifier(&arg.identifier);
-        if let Some(ref x) = arg.package_declaration_opt0 {
-            self.with_generic_parameter(&x.with_generic_parameter);
+        match &*arg.package_declaration_group {
+            PackageDeclarationGroup::PackageDeclarationOpt0LBracePackageDeclarationGroupListRBrace(x) => {
+                if let Some(ref x) = x.package_declaration_opt0 {
+                    self.with_generic_parameter(&x.with_generic_parameter);
+                }
+                self.l_brace(&x.l_brace);
+                for x in &x.package_declaration_group_list {
+                    self.package_group(&x.package_group);
+                }
+                self.r_brace(&x.r_brace);
+            }
+            PackageDeclarationGroup::EquScopedIdentifierSemicolon(x) => {
+                self.equ(&x.equ);
+                self.scoped_identifier(&x.scoped_identifier);
+                self.semicolon(&x.semicolon);
+            }
         }
-        self.l_brace(&arg.l_brace);
-        for x in &arg.package_declaration_list {
-            self.package_group(&x.package_group);
-        }
-        self.r_brace(&arg.r_brace);
         after!(self, package_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'PackageAlias'
+    fn package_alias(&mut self, arg: &PackageAlias) {
+        before!(self, package_alias, arg);
+        self.package(&arg.package);
+        self.identifier(&arg.identifier);
+        self.equ(&arg.equ);
+        self.scoped_identifier(&arg.scoped_identifier);
+        self.semicolon(&arg.semicolon);
+        after!(self, package_alias, arg);
     }
 
     /// Semantic action for non-terminal 'PackageGroup'
@@ -2970,6 +2991,7 @@ pub trait VerylWalker {
             }
             PackageItem::ImportDeclaration(x) => self.import_declaration(&x.import_declaration),
             PackageItem::ExportDeclaration(x) => self.export_declaration(&x.export_declaration),
+            PackageItem::PackageAlias(x) => self.package_alias(&x.package_alias),
         }
         after!(self, package_item, arg);
     }

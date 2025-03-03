@@ -21,6 +21,7 @@ pub struct CheckType {
     in_casting_type: Vec<()>,
     in_generic_argument: Vec<()>,
     in_modport: bool,
+    in_package_alias: bool,
 }
 
 impl CheckType {
@@ -199,6 +200,40 @@ impl VerylGrammarTrait for CheckType {
                                 &arg.identifier().token.into(),
                             ));
                         }
+                    }
+                }
+
+                // Check package
+                if self.in_package_alias {
+                    let is_package = match symbol.found.kind {
+                        SymbolKind::Package(_) => true,
+                        SymbolKind::GenericInstance(ref x) => {
+                            let base = symbol_table::get(x.base).unwrap();
+                            matches!(base.kind, SymbolKind::Package(_))
+                        }
+                        SymbolKind::GenericParameter(ref x) => {
+                            if let GenericBoundKind::Proto(ref x) = x.bound {
+                                if let Ok(symbol) =
+                                    symbol_table::resolve((x, &symbol.found.namespace))
+                                {
+                                    matches!(symbol.found.kind, SymbolKind::Package(_))
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            }
+                        }
+                        _ => false,
+                    };
+
+                    if !is_package {
+                        self.errors.push(AnalyzerError::mismatch_type(
+                            &symbol.found.token.to_string(),
+                            "package",
+                            &symbol.found.kind.to_kind_name(),
+                            &arg.identifier().token.into(),
+                        ));
                     }
                 }
             }
@@ -430,6 +465,27 @@ impl VerylGrammarTrait for CheckType {
                     }
                 }
             }
+        }
+        Ok(())
+    }
+
+    fn package_declaration(&mut self, arg: &PackageDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.in_package_alias = matches!(
+                    &*arg.package_declaration_group,
+                    PackageDeclarationGroup::EquScopedIdentifierSemicolon(_)
+                );
+            }
+            HandlerPoint::After => self.in_package_alias = false,
+        }
+        Ok(())
+    }
+
+    fn package_alias(&mut self, _arg: &PackageAlias) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => self.in_package_alias = true,
+            HandlerPoint::After => self.in_package_alias = false,
         }
         Ok(())
     }

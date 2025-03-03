@@ -2,7 +2,7 @@ use crate::AnalyzerError;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::{Direction, GenericMap, Symbol, SymbolKind};
-use crate::symbol_path::{GenericSymbolPath, SymbolPathNamespace};
+use crate::symbol_path::{GenericSymbol, GenericSymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
 use crate::symbol_table::{ResolveError, ResolveErrorCause};
 use std::cell::RefCell;
@@ -187,10 +187,8 @@ impl ReferenceTable {
 
         let mut path = path.clone();
         path.resolve_imported(namespace);
-
         for i in 0..path.len() {
             let base_path = path.base_path(i);
-
             match symbol_table::resolve((&base_path, namespace)) {
                 Ok(symbol) => {
                     self.check_pacakge_reference(&symbol.found, &path.range);
@@ -223,14 +221,27 @@ impl ReferenceTable {
                         continue;
                     }
 
-                    let mut path = path.paths[i].clone();
+                    let mut args = path.paths[i].arguments.clone();
 
                     for param in params.iter().skip(n_args) {
                         //  apply default value
-                        path.arguments
-                            .push(param.1.default_value.as_ref().unwrap().clone());
+                        args.push(param.1.default_value.as_ref().unwrap().clone());
                     }
 
+                    for arg in &mut args {
+                        let path = arg.generic_path();
+                        if let Ok(arg_symbol) = symbol_table::resolve((&path, namespace)) {
+                            // arg is repalced with its target if arg is alias
+                            if let SymbolKind::PackageAlias(x) = arg_symbol.found.kind {
+                                *arg = x.target.clone();
+                            }
+                        }
+                    }
+
+                    let path = GenericSymbol {
+                        base: path.paths[i].base,
+                        arguments: args,
+                    };
                     if let Some((token, new_symbol)) = path.get_generic_instance(&symbol.found) {
                         if let Some(ref x) = symbol_table::insert(&token, new_symbol) {
                             symbol_table::add_generic_instance(symbol.found.id, *x);

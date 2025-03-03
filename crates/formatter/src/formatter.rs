@@ -2384,17 +2384,40 @@ impl VerylWalker for Formatter {
         self.package(&arg.package);
         self.space(1);
         self.identifier(&arg.identifier);
-        if let Some(ref x) = arg.package_declaration_opt0 {
-            self.with_generic_parameter(&x.with_generic_parameter);
+        match &*arg.package_declaration_group {
+            PackageDeclarationGroup::PackageDeclarationOpt0LBracePackageDeclarationGroupListRBrace(x) => {
+                if let Some(ref x) = x.package_declaration_opt0 {
+                    self.with_generic_parameter(&x.with_generic_parameter);
+                }
+                self.space(1);
+                self.token_will_push(&x.l_brace.l_brace_token);
+                for (i, x) in x.package_declaration_group_list.iter().enumerate() {
+                    self.newline_list(i);
+                    self.package_group(&x.package_group);
+                }
+                self.newline_list_post(x.package_declaration_group_list.is_empty());
+                self.r_brace(&x.r_brace);
+            }
+            PackageDeclarationGroup::EquScopedIdentifierSemicolon(x) => {
+                self.space(1);
+                self.equ(&x.equ);
+                self.space(1);
+                self.scoped_identifier(&x.scoped_identifier);
+                self.semicolon(&x.semicolon);
+            }
         }
+    }
+
+    /// Semantic action for non-terminal 'PackageAlias'
+    fn package_alias(&mut self, arg: &PackageAlias) {
+        self.package(&arg.package);
         self.space(1);
-        self.token_will_push(&arg.l_brace.l_brace_token);
-        for (i, x) in arg.package_declaration_list.iter().enumerate() {
-            self.newline_list(i);
-            self.package_group(&x.package_group);
-        }
-        self.newline_list_post(arg.package_declaration_list.is_empty());
-        self.r_brace(&arg.r_brace);
+        self.identifier(&arg.identifier);
+        self.space(1);
+        self.equ(&arg.equ);
+        self.space(1);
+        self.scoped_identifier(&arg.scoped_identifier);
+        self.semicolon(&arg.semicolon);
     }
 
     /// Semantic action for non-terminal 'PackageGroup'
