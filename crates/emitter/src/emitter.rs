@@ -1152,14 +1152,17 @@ impl VerylWalker for Emitter {
                 _ => unreachable!(),
             };
 
-            if let Some(actual_width) = strnum_bitwidth::bitwidth(number, base_num) {
-                let text = format!("{actual_width}'{base}{number}");
-                self.veryl_token(&arg.based_token.replace(&text));
+            let text = if let Some(actual_width) = strnum_bitwidth::bitwidth(number, base_num) {
+                if actual_width == 0 {
+                    format!("1'{base}{number}")
+                } else {
+                    format!("{actual_width}'{base}{number}")
+                }
             } else {
                 // If width can't be calculated, emit it as is (e.g. `'h0`)
-                let text = format!("'{base}{number}");
-                self.veryl_token(&arg.based_token.replace(&text));
-            }
+                format!("'{base}{number}")
+            };
+            self.veryl_token(&arg.based_token.replace(&text));
         } else {
             self.veryl_token(&arg.based_token);
         }
