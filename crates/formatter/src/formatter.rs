@@ -2179,28 +2179,24 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'ModuleDeclaration'
     fn module_declaration(&mut self, arg: &ModuleDeclaration) {
-        if let Some(ref x) = arg.module_declaration_opt {
-            self.r#pub(&x.r#pub);
-            self.space(1);
-        }
         self.module(&arg.module);
         self.space(1);
         self.identifier(&arg.identifier);
-        if let Some(ref x) = arg.module_declaration_opt0 {
+        if let Some(ref x) = arg.module_declaration_opt {
             self.with_generic_parameter(&x.with_generic_parameter);
         }
         self.space(1);
-        if let Some(ref x) = arg.module_declaration_opt1 {
+        if let Some(ref x) = arg.module_declaration_opt0 {
             self.r#for(&x.r#for);
             self.space(1);
             self.scoped_identifier(&x.scoped_identifier);
             self.space(1);
         }
-        if let Some(ref x) = arg.module_declaration_opt2 {
+        if let Some(ref x) = arg.module_declaration_opt1 {
             self.with_parameter(&x.with_parameter);
             self.space(1);
         }
-        if let Some(ref x) = arg.module_declaration_opt3 {
+        if let Some(ref x) = arg.module_declaration_opt2 {
             self.port_declaration(&x.port_declaration);
             self.space(1);
         }
@@ -2235,18 +2231,14 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'InterfaceDeclaration'
     fn interface_declaration(&mut self, arg: &InterfaceDeclaration) {
-        if let Some(ref x) = arg.interface_declaration_opt {
-            self.r#pub(&x.r#pub);
-            self.space(1);
-        }
         self.interface(&arg.interface);
         self.space(1);
         self.identifier(&arg.identifier);
-        if let Some(ref x) = arg.interface_declaration_opt0 {
+        if let Some(ref x) = arg.interface_declaration_opt {
             self.with_generic_parameter(&x.with_generic_parameter);
         }
         self.space(1);
-        if let Some(ref x) = arg.interface_declaration_opt1 {
+        if let Some(ref x) = arg.interface_declaration_opt0 {
             self.with_parameter(&x.with_parameter);
             self.space(1);
         }
@@ -2377,14 +2369,10 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'PackageDeclaration'
     fn package_declaration(&mut self, arg: &PackageDeclaration) {
-        if let Some(ref x) = arg.package_declaration_opt {
-            self.r#pub(&x.r#pub);
-            self.space(1);
-        }
         self.package(&arg.package);
         self.space(1);
         self.identifier(&arg.identifier);
-        if let Some(ref x) = arg.package_declaration_opt0 {
+        if let Some(ref x) = arg.package_declaration_opt {
             self.with_generic_parameter(&x.with_generic_parameter);
         }
         self.space(1);
@@ -2419,20 +2407,16 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'ProtoModuleDeclaration'
     fn proto_module_declaration(&mut self, arg: &ProtoModuleDeclaration) {
-        if let Some(ref x) = arg.proto_module_declaration_opt {
-            self.r#pub(&x.r#pub);
-            self.space(1);
-        }
         self.proto(&arg.proto);
         self.space(1);
         self.module(&arg.module);
         self.space(1);
         self.identifier(&arg.identifier);
-        if let Some(ref x) = arg.proto_module_declaration_opt0 {
+        if let Some(ref x) = arg.proto_module_declaration_opt {
             self.space(1);
             self.with_parameter(&x.with_parameter);
         }
-        if let Some(ref x) = arg.proto_module_declaration_opt1 {
+        if let Some(ref x) = arg.proto_module_declaration_opt0 {
             self.space(1);
             self.port_declaration(&x.port_declaration);
         }
@@ -2483,6 +2467,24 @@ impl VerylWalker for Formatter {
             }
             DescriptionGroupGroup::DescriptionItem(x) => self.description_item(&x.description_item),
         }
+    }
+
+    /// Semantic action for non-terminal 'DescriptionItem'
+    fn description_item(&mut self, arg: &DescriptionItem) {
+        match arg {
+            DescriptionItem::DescriptionItemOptPublicDescriptionItem(x) => {
+                if let Some(ref x) = x.description_item_opt {
+                    self.r#pub(&x.r#pub);
+                    self.space(1);
+                }
+                self.public_description_item(&x.public_description_item);
+            }
+            DescriptionItem::ImportDeclaration(x) => self.import_declaration(&x.import_declaration),
+            DescriptionItem::EmbedDeclaration(x) => self.embed_declaration(&x.embed_declaration),
+            DescriptionItem::IncludeDeclaration(x) => {
+                self.include_declaration(&x.include_declaration)
+            }
+        };
     }
 
     /// Semantic action for non-terminal 'Veryl'

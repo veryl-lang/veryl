@@ -3682,11 +3682,11 @@ impl VerylWalker for Emitter {
             if !file_scope_import.is_empty() {
                 self.newline_pop();
             }
-            if let Some(ref x) = arg.module_declaration_opt2 {
+            if let Some(ref x) = arg.module_declaration_opt1 {
                 self.space(1);
                 self.with_parameter(&x.with_parameter);
             }
-            if let Some(ref x) = arg.module_declaration_opt3 {
+            if let Some(ref x) = arg.module_declaration_opt2 {
                 self.space(1);
                 self.port_declaration(&x.port_declaration);
             }
@@ -3761,7 +3761,7 @@ impl VerylWalker for Emitter {
             if !file_scope_import.is_empty() {
                 self.newline_pop();
             }
-            if let Some(ref x) = arg.interface_declaration_opt1 {
+            if let Some(ref x) = arg.interface_declaration_opt0 {
                 self.space(1);
                 self.with_parameter(&x.with_parameter);
             }
@@ -4041,21 +4041,32 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'DescriptionItem'
     fn description_item(&mut self, arg: &DescriptionItem) {
         match arg {
-            DescriptionItem::ModuleDeclaration(x) => self.module_declaration(&x.module_declaration),
-            DescriptionItem::InterfaceDeclaration(x) => {
-                self.interface_declaration(&x.interface_declaration)
+            DescriptionItem::DescriptionItemOptPublicDescriptionItem(x) => {
+                self.public_description_item(&x.public_description_item);
             }
-            DescriptionItem::PackageDeclaration(x) => {
-                self.package_declaration(&x.package_declaration)
-            }
-            // proto is not emitted at SystemVerilog
-            DescriptionItem::ProtoModuleDeclaration(_) => (),
             // file scope import is not emitted at SystemVerilog
             DescriptionItem::ImportDeclaration(_) => (),
             DescriptionItem::EmbedDeclaration(x) => self.embed_declaration(&x.embed_declaration),
             DescriptionItem::IncludeDeclaration(x) => {
                 self.include_declaration(&x.include_declaration)
             }
+        };
+    }
+
+    /// Semantic action for non-terminal 'PublicDescriptionItem'
+    fn public_description_item(&mut self, arg: &PublicDescriptionItem) {
+        match arg {
+            PublicDescriptionItem::ModuleDeclaration(x) => {
+                self.module_declaration(&x.module_declaration)
+            }
+            PublicDescriptionItem::InterfaceDeclaration(x) => {
+                self.interface_declaration(&x.interface_declaration)
+            }
+            PublicDescriptionItem::PackageDeclaration(x) => {
+                self.package_declaration(&x.package_declaration)
+            }
+            // proto is not emitted at SystemVerilog
+            PublicDescriptionItem::ProtoModuleDeclaration(_) => (),
         };
     }
 
