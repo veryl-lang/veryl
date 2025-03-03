@@ -1,7 +1,4 @@
-package veryl_testcase___Package55__8__16;
-    typedef logic [8-1:0]  data_a;
-    typedef logic [16-1:0] data_b;
-endpackage
+
 
 module veryl_testcase_Module55;
     veryl_testcase___Module55A__Module55B u0 ();
@@ -12,7 +9,7 @@ module veryl_testcase_Module55;
     veryl_testcase___Module55F__Module55B u5 ();
     veryl_testcase___Module55H__10 u6 ();
     veryl_testcase___Module55H__10 u7 ();
-    veryl_testcase___Module55I____Package55__8__16 u8 ();
+    //inst u8: Module55I::<Package55::<8, 16>>;
 endmodule
 
 
@@ -58,8 +55,8 @@ module veryl_testcase___Module55H__10;
     __StructH__10 _a; always_comb _a = 0;
 endmodule
 
-module veryl_testcase___Module55I____Package55__8__16;
-    veryl_testcase___Package55__8__16::data_a _a; always_comb _a = 0;
-    veryl_testcase___Package55__8__16::data_b _b; always_comb _b = 0;
-endmodule
+//module Module55I::<PKG: Package55> {
+//    let _a: PKG::data_a = 0;
+//    let _b: PKG::data_b = 0;
+//}
 //# sourceMappingURL=../map/testcases/sv/55_generic_module.sv.map
