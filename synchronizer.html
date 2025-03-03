@@ -169,6 +169,18 @@
 </tr>
 </tbody>
 </table>
+<h3 id="clock-domains"><a class="header" href="#clock-domains">Clock Domains</a></h3>
+<hr />
+<table class="table_list">
+<tbody>
+<tr>
+    <th class="table_list_item">'d</th>
+</tr>
+<tr>
+    <th class="table_list_item">'s</th>
+</tr>
+</tbody>
+</table>
 <h3 id="ports"><a class="header" href="#ports">Ports</a></h3>
 <hr />
 <table class="table_list">
@@ -176,25 +188,29 @@
 <tr>
     <th class="table_list_item">i_clk</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-attribute">'d</span></td>
     <td class="table_list_item"><span class="hljs-type">clock</span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
     <th class="table_list_item">i_rst</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-attribute">'d</span></td>
     <td class="table_list_item"><span class="hljs-type">reset</span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
     <th class="table_list_item">i_d</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"><span class="hljs-attribute">'s</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic<WIDTH></span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
     <th class="table_list_item">o_d</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"><span class="hljs-attribute">'d</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic<WIDTH></span></td>
     <td class="table_list_item"></td>
 </tr>
 </tbody>
