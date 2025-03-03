@@ -6,13 +6,13 @@ edition.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-veryl-analyzer  = {version = "0.13.5", path = "../analyzer"}
-veryl-emitter   = {version = "0.13.5", path = "../emitter"}
-veryl-formatter = {version = "0.13.5", path = "../formatter"}
-veryl-metadata  = {version = "0.13.5", path = "../metadata"}
-veryl-parser    = {version = "0.13.5", path = "../parser"}
-veryl-path      = {version = "0.13.5", path = "../path"}
-veryl           = {version = "0.13.5", path = "../veryl"}
+veryl-analyzer  = {version = "0.14.0", path = "../analyzer"}
+veryl-emitter   = {version = "0.14.0", path = "../emitter"}
+veryl-formatter = {version = "0.14.0", path = "../formatter"}
+veryl-metadata  = {version = "0.14.0", path = "../metadata"}
+veryl-parser    = {version = "0.14.0", path = "../parser"}
+veryl-path      = {version = "0.14.0", path = "../path"}
+veryl           = {version = "0.14.0", path = "../veryl"}
 
 [dev-dependencies]
 criterion = {package = "codspeed-criterion-compat", version = "2.7"}
