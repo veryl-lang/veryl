@@ -174,6 +174,14 @@ impl VerylGrammarTrait for CheckType {
                     }
                 }
 
+                // Mangled enum member can't be used directly
+                if matches!(symbol.found.kind, SymbolKind::EnumMemberMangled) {
+                    self.errors.push(AnalyzerError::undefined_identifier(
+                        &symbol.found.token.to_string(),
+                        &symbol.found.token.into(),
+                    ));
+                }
+
                 // Check variable type
                 if !self.in_user_defined_type.is_empty() && self.in_generic_argument.is_empty() {
                     if self.in_modport {
