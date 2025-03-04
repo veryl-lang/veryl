@@ -1356,10 +1356,16 @@ pub struct FunctionProperty {
 
 #[derive(Debug, Clone)]
 pub struct ConnectTarget {
+    pub identifiers: Vec<ConnectTargetIdentifier>,
+    pub expression: syntax_tree::Expression,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConnectTargetIdentifier {
     pub path: Vec<(StrId, Vec<syntax_tree::Expression>)>,
 }
 
-impl ConnectTarget {
+impl ConnectTargetIdentifier {
     pub fn path(&self) -> Vec<StrId> {
         self.path.iter().map(|x| x.0).collect()
     }
@@ -1373,7 +1379,7 @@ impl ConnectTarget {
     }
 }
 
-impl From<&syntax_tree::ExpressionIdentifier> for ConnectTarget {
+impl From<&syntax_tree::ExpressionIdentifier> for ConnectTargetIdentifier {
     fn from(value: &syntax_tree::ExpressionIdentifier) -> Self {
         let path: SymbolPath = value.scoped_identifier.as_ref().into();
 
@@ -1408,7 +1414,7 @@ impl From<&syntax_tree::ExpressionIdentifier> for ConnectTarget {
 pub struct InstanceProperty {
     pub array: Vec<syntax_tree::Expression>,
     pub type_name: GenericSymbolPath,
-    pub connects: HashMap<Token, Vec<ConnectTarget>>,
+    pub connects: HashMap<Token, ConnectTarget>,
     pub clock_domain: ClockDomain,
 }
 

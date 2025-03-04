@@ -328,11 +328,11 @@ impl VerylGrammarTrait for CreateTypeDag {
                         if let SymbolKind::Port(port) = symbol_table::get(port.symbol).unwrap().kind
                         {
                             self.is_anonymous_identifier = port.direction == Direction::Output
-                                && is_anonymous_expression(&x.expression);
+                                && x.expression.is_anonymous_expression();
                         }
                     } else if self.inst_sv_module {
                         // For SV module, any ports can be connected with anonymous identifier
-                        self.is_anonymous_identifier = is_anonymous_expression(&x.expression);
+                        self.is_anonymous_identifier = x.expression.is_anonymous_expression();
                     }
                 }
             }
@@ -359,7 +359,7 @@ impl VerylGrammarTrait for CreateTypeDag {
             HandlerPoint::Before => {
                 self.is_anonymous_identifier =
                     matches!(self.port_direction.unwrap(), Direction::Output)
-                        && is_anonymous_expression(&arg.expression);
+                        && arg.expression.is_anonymous_expression();
             }
             _ => self.is_anonymous_identifier = false,
         }

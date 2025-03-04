@@ -3,7 +3,8 @@ use crate::analyzer_error::AnalyzerError;
 use crate::attribute::Attribute as Attr;
 use crate::attribute::{AllowItem, CondTypeItem};
 use crate::attribute_table;
-use crate::symbol::{Direction, GenericBoundKind, Symbol, SymbolId, SymbolKind, TypeKind};
+use crate::evaluator::Evaluator;
+use crate::symbol::{Direction, GenericBoundKind, Symbol, SymbolId, SymbolKind};
 use crate::symbol_table;
 use crate::var_ref::{
     AssignDeclarationType, AssignPosition, AssignPositionType, AssignStatementBranchItemType,
@@ -685,68 +686,68 @@ impl VerylGrammarTrait for CheckVarRef {
                         r#type: AssignDeclarationType::Inst,
                     });
 
-                    for (token, targets) in &x.connects {
-                        for target in targets {
+                    let mut evaluator = Evaluator::new();
+
+                    for (token, target) in &x.connects {
+                        // Gather port information
+                        let dir_output = if let Some(port) = ports.get(&token.text) {
+                            matches!(
+                                port.direction,
+                                Direction::Ref | Direction::Inout | Direction::Output
+                            )
+                        } else {
+                            false
+                        };
+                        let (is_clock, is_reset) = if let Some(port) = ports.get(&token.text) {
+                            (port.r#type.kind.is_clock(), port.r#type.kind.is_reset())
+                        } else {
+                            (false, false)
+                        };
+
+                        let exp = evaluator.expression(&target.expression);
+
+                        // Check assignment of clock/reset type
+                        if is_clock && !exp.is_clock() {
+                            self.errors.push(AnalyzerError::mismatch_type(
+                                &token.text.to_string(),
+                                "clock type",
+                                "non-clock type",
+                                &token.into(),
+                            ));
+                        }
+
+                        if is_reset && !exp.is_reset() {
+                            self.errors.push(AnalyzerError::mismatch_type(
+                                &token.text.to_string(),
+                                "reset type",
+                                "non-reset type",
+                                &token.into(),
+                            ));
+                        }
+
+                        // Check implicit reset to SV instance
+                        if sv_instance && exp.is_reset() && !exp.is_explicit_reset() {
+                            self.errors
+                                .push(AnalyzerError::sv_with_implicit_reset(&token.into()));
+                        }
+
+                        // Check output to non-assignable variable
+                        if dir_output && !target.expression.is_assignable() {
+                            self.errors
+                                .push(AnalyzerError::unassignable_output(&token.into()));
+                        }
+
+                        // Check assignment from output port
+                        for target in &target.identifiers {
                             if let Ok(path) =
                                 VarRefPath::try_from((target, &symbol.found.namespace))
                             {
-                                let full_path = path.full_path();
-                                let symbol = symbol_table::get(*full_path.last().unwrap()).unwrap();
-
-                                // Check assignment from output port
-                                let dir_output = if let Some(port) = ports.get(&token.text) {
-                                    matches!(
-                                        port.direction,
-                                        Direction::Ref | Direction::Inout | Direction::Output
-                                    )
-                                } else {
-                                    false
-                                };
-
                                 if dir_output | port_unknown {
                                     self.assign_position.push(AssignPositionType::Connect {
                                         token: *token,
                                         maybe: port_unknown,
                                     });
                                     self.add_assign(&path);
-                                }
-
-                                // Check assignment of clock/reset type
-                                let (is_clock, is_reset) =
-                                    if let Some(port) = ports.get(&token.text) {
-                                        (port.r#type.kind.is_clock(), port.r#type.kind.is_reset())
-                                    } else {
-                                        (false, false)
-                                    };
-
-                                if is_clock && !symbol.kind.is_clock() {
-                                    self.errors.push(AnalyzerError::mismatch_type(
-                                        &token.text.to_string(),
-                                        "clock type",
-                                        "non-clock type",
-                                        &token.into(),
-                                    ));
-                                }
-
-                                if is_reset && !symbol.kind.is_reset() {
-                                    self.errors.push(AnalyzerError::mismatch_type(
-                                        &token.text.to_string(),
-                                        "reset type",
-                                        "non-reset type",
-                                        &token.into(),
-                                    ));
-                                }
-
-                                // Check implicit reset to SV instance
-                                let is_implicit_reset = match &symbol.kind {
-                                    SymbolKind::Port(x) => x.r#type.kind == TypeKind::Reset,
-                                    SymbolKind::Variable(x) => x.r#type.kind == TypeKind::Reset,
-                                    _ => false,
-                                };
-
-                                if sv_instance && is_implicit_reset {
-                                    self.errors
-                                        .push(AnalyzerError::sv_with_implicit_reset(&token.into()));
                                 }
                             }
                         }

@@ -12,13 +12,13 @@ use crate::symbol::Direction as SymDirection;
 use crate::symbol::ModportDefault as SymModportDefault;
 use crate::symbol::Type as SymType;
 use crate::symbol::{
-    ConnectTarget, DocComment, EnumMemberProperty, EnumMemberValue, EnumProperty, FunctionProperty,
-    GenericBoundKind, GenericParameterProperty, InstanceProperty, InterfaceProperty,
-    ModportFunctionMemberProperty, ModportProperty, ModportVariableMemberProperty, ModuleProperty,
-    PackageProperty, Parameter, ParameterKind, ParameterProperty, Port, PortProperty,
-    ProtoModuleProperty, StructMemberProperty, StructProperty, Symbol, SymbolId, SymbolKind,
-    TestProperty, TestType, TypeDefProperty, TypeKind, UnionMemberProperty, UnionProperty,
-    VariableAffiliation, VariableProperty,
+    ConnectTarget, ConnectTargetIdentifier, DocComment, EnumMemberProperty, EnumMemberValue,
+    EnumProperty, FunctionProperty, GenericBoundKind, GenericParameterProperty, InstanceProperty,
+    InterfaceProperty, ModportFunctionMemberProperty, ModportProperty,
+    ModportVariableMemberProperty, ModuleProperty, PackageProperty, Parameter, ParameterKind,
+    ParameterProperty, Port, PortProperty, ProtoModuleProperty, StructMemberProperty,
+    StructProperty, Symbol, SymbolId, SymbolKind, TestProperty, TestType, TypeDefProperty,
+    TypeKind, UnionMemberProperty, UnionProperty, VariableAffiliation, VariableProperty,
 };
 use crate::symbol_path::{GenericSymbolPath, SymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
@@ -80,8 +80,8 @@ pub struct CreateSymbolTable {
     enum_members: Vec<Option<SymbolId>>,
     struct_union_members: Vec<Option<SymbolId>>,
     affiliation: Vec<VariableAffiliation>,
-    connect_targets: Vec<ConnectTarget>,
-    connects: HashMap<Token, Vec<ConnectTarget>>,
+    connect_target_identifiers: Vec<ConnectTargetIdentifier>,
+    connects: HashMap<Token, ConnectTarget>,
     parameters: Vec<Vec<Parameter>>,
     ports: Vec<Vec<Port>>,
     needs_default_generic_argument: bool,
@@ -519,7 +519,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             // This should be `After` not `Before`.
             // because namespace_table insertion of identifiers
             // in the expression_identifier should be done until `arg.into()`.
-            self.connect_targets.push(arg.into());
+            self.connect_target_identifiers.push(arg.into());
 
             // This should be `After` not `Before`.
             // Because this should be executed after scoped_identifier to handle hierarchical access only
@@ -1002,19 +1002,27 @@ impl VerylGrammarTrait for CreateSymbolTable {
         match self.point {
             HandlerPoint::Before => {
                 reference_table::add(arg.into());
-                self.connect_targets.clear();
+                self.connect_target_identifiers.clear();
             }
             HandlerPoint::After => {
                 let port = arg.identifier.identifier_token.token;
-                let targets = if arg.inst_port_item_opt.is_some() {
-                    self.connect_targets.drain(0..).collect()
+                let identifiers = if arg.inst_port_item_opt.is_some() {
+                    self.connect_target_identifiers.drain(0..).collect()
                 } else {
-                    let target = ConnectTarget {
+                    vec![ConnectTargetIdentifier {
                         path: vec![(port.text, vec![])],
-                    };
-                    vec![target]
+                    }]
                 };
-                self.connects.insert(port, targets);
+                let expression = if let Some(x) = &arg.inst_port_item_opt {
+                    x.expression.as_ref().clone()
+                } else {
+                    arg.identifier.as_ref().into()
+                };
+                let target = ConnectTarget {
+                    identifiers,
+                    expression,
+                };
+                self.connects.insert(port, target);
             }
         }
         Ok(())

@@ -2561,6 +2561,90 @@ fn unassign_variable() {
 }
 
 #[test]
+fn unassignable_output() {
+    let code = r#"
+    module ModuleA {
+        inst u: ModuleB (
+            x: 1,
+        );
+    }
+
+    module ModuleB (
+        x: output logic,
+    ) {
+        assign x = 1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UnassignableOutput { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        var y: logic;
+        inst u: ModuleB (
+            x: y + 1,
+        );
+    }
+
+    module ModuleB (
+        x: output logic,
+    ) {
+        assign x = 1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UnassignableOutput { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        var y: logic;
+        inst u: ModuleB (
+            x: {y repeat 2},
+        );
+    }
+
+    module ModuleB (
+        x: output logic,
+    ) {
+        assign x = 1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UnassignableOutput { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        var y: logic;
+        var z: logic;
+        inst u: ModuleB (
+            x: {y, z},
+        );
+    }
+
+    module ModuleB (
+        x: output logic,
+    ) {
+        assign x = 1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
 fn uncovered_branch() {
     let code = r#"
     module ModuleA {
@@ -3471,6 +3555,19 @@ fn sv_with_implicit_reset() {
 
         inst u: $sv::Module (
             rst,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        var rst: reset;
+
+        inst u: $sv::Module (
+            rst: rst as reset_sync_high,
         );
     }
     "#;

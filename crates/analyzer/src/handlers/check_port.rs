@@ -56,7 +56,7 @@ impl VerylGrammarTrait for CheckPort {
                         Direction::Output(_) => {
                             // For SystemVerilog, output ports of a function cannot be released.
                             !self.in_function
-                                && is_anonymous_expression(&x.port_default_value.expression)
+                                && x.port_default_value.expression.is_anonymous_expression()
                         }
                         _ => false,
                     };
