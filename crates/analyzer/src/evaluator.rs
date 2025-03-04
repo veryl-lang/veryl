@@ -132,6 +132,14 @@ impl Evaluated {
         matches!(self.r#type, EvaluatedType::Reset(_))
     }
 
+    pub fn is_explicit_reset(&self) -> bool {
+        if let EvaluatedType::Reset(x) = &self.r#type {
+            !matches!(x.kind, EvaluatedTypeResetKind::Implicit)
+        } else {
+            false
+        }
+    }
+
     pub fn is_4state(&self) -> bool {
         matches!(
             self.r#type,

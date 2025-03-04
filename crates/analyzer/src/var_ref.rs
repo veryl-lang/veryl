@@ -1,6 +1,6 @@
 use crate::evaluator::{Evaluated, EvaluatedValue, Evaluator};
 use crate::namespace::Namespace;
-use crate::symbol::{ConnectTarget, SymbolId};
+use crate::symbol::{ConnectTargetIdentifier, SymbolId};
 use crate::symbol_table;
 use miette::Result;
 use std::convert::{From, TryFrom};
@@ -417,10 +417,10 @@ impl TryFrom<&ExpressionIdentifier> for VarRefPath {
     }
 }
 
-impl TryFrom<(&ConnectTarget, &Namespace)> for VarRefPath {
+impl TryFrom<(&ConnectTargetIdentifier, &Namespace)> for VarRefPath {
     type Error = ();
 
-    fn try_from(arg: (&ConnectTarget, &Namespace)) -> Result<Self, Self::Error> {
+    fn try_from(arg: (&ConnectTargetIdentifier, &Namespace)) -> Result<Self, Self::Error> {
         if arg.0.is_empty() {
             return Err(());
         }

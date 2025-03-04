@@ -178,6 +178,87 @@ impl From<&AssignDestination> for Vec<HierarchicalIdentifier> {
     }
 }
 
+impl From<&Identifier> for Expression {
+    fn from(value: &Identifier) -> Self {
+        let scoped_identifier_group =
+            Box::new(ScopedIdentifierGroup::IdentifierScopedIdentifierOpt(
+                ScopedIdentifierGroupIdentifierScopedIdentifierOpt {
+                    identifier: Box::new(value.clone()),
+                    scoped_identifier_opt: None,
+                },
+            ));
+        let scoped_identifier = Box::new(ScopedIdentifier {
+            scoped_identifier_group,
+            scoped_identifier_list: vec![],
+        });
+        let expression_identifier = Box::new(ExpressionIdentifier {
+            scoped_identifier,
+            expression_identifier_opt: None,
+            expression_identifier_list: vec![],
+            expression_identifier_list0: vec![],
+        });
+        let identifier_factor = Box::new(IdentifierFactor {
+            expression_identifier,
+            identifier_factor_opt: None,
+        });
+        let factor = Box::new(Factor::IdentifierFactor(FactorIdentifierFactor {
+            identifier_factor,
+        }));
+        let expression12 = Box::new(Expression12 {
+            expression12_list: vec![],
+            factor,
+        });
+        let expression11 = Box::new(Expression11 {
+            expression12,
+            expression11_opt: None,
+        });
+        let expression10 = Box::new(Expression10 {
+            expression11,
+            expression10_list: vec![],
+        });
+        let expression09 = Box::new(Expression09 {
+            expression10,
+            expression09_list: vec![],
+        });
+        let expression08 = Box::new(Expression08 {
+            expression09,
+            expression08_list: vec![],
+        });
+        let expression07 = Box::new(Expression07 {
+            expression08,
+            expression07_list: vec![],
+        });
+        let expression06 = Box::new(Expression06 {
+            expression07,
+            expression06_list: vec![],
+        });
+        let expression05 = Box::new(Expression05 {
+            expression06,
+            expression05_list: vec![],
+        });
+        let expression04 = Box::new(Expression04 {
+            expression05,
+            expression04_list: vec![],
+        });
+        let expression03 = Box::new(Expression03 {
+            expression04,
+            expression03_list: vec![],
+        });
+        let expression02 = Box::new(Expression02 {
+            expression03,
+            expression02_list: vec![],
+        });
+        let expression01 = Box::new(Expression01 {
+            expression02,
+            expression01_list: vec![],
+        });
+        Expression {
+            expression01,
+            expression_list: vec![],
+        }
+    }
+}
+
 list_group_to_item!(Modport);
 list_group_to_item!(Enum);
 list_group_to_item!(StructUnion);
@@ -189,6 +270,7 @@ list_to_item!(WithGenericParameter);
 list_to_item!(WithGenericArgument);
 list_to_item!(Attribute);
 list_to_item!(Argument);
+list_to_item!(Concatenation);
 list_to_item!(AssignConcatenation);
 group_to_item!(Module);
 group_to_item!(Interface);
@@ -197,99 +279,132 @@ group_to_item!(Package);
 group_to_item!(Description);
 group_to_item!(StatementBlock);
 
-pub fn is_anonymous_expression(arg: &Expression) -> bool {
-    if !arg.expression_list.is_empty() {
-        return false;
-    }
-
-    let exp = &*arg.expression01;
-    if !exp.expression01_list.is_empty() {
-        return false;
-    }
-
-    let exp = &*exp.expression02;
-    if !exp.expression02_list.is_empty() {
-        return false;
-    }
-
-    let exp = &*exp.expression03;
-    if !exp.expression03_list.is_empty() {
-        return false;
-    }
-
-    let exp = &*exp.expression04;
-    if !exp.expression04_list.is_empty() {
-        return false;
-    }
-
-    let exp = &*exp.expression05;
-    if !exp.expression05_list.is_empty() {
-        return false;
-    }
-
-    let exp = &*exp.expression06;
-    if !exp.expression06_list.is_empty() {
-        return false;
-    }
-
-    let exp = &*exp.expression07;
-    if !exp.expression07_list.is_empty() {
-        return false;
-    }
-
-    let exp = &*exp.expression08;
-    if !exp.expression08_list.is_empty() {
-        return false;
-    }
-
-    let exp = &*exp.expression09;
-    if !exp.expression09_list.is_empty() {
-        return false;
-    }
-
-    let exp = &*exp.expression10;
-    if !exp.expression10_list.is_empty() {
-        return false;
-    }
-
-    let exp = &*exp.expression11;
-    if exp.expression11_opt.is_some() {
-        return false;
-    }
-
-    let exp = &*exp.expression12;
-    if !exp.expression12_list.is_empty() {
-        return false;
-    }
-
-    match &*exp.factor {
-        Factor::IdentifierFactor(x) => {
-            let factor = &x.identifier_factor;
-
-            if factor.identifier_factor_opt.is_some() {
-                return false;
-            }
-
-            let exp_identifier = &*factor.expression_identifier;
-            if exp_identifier.expression_identifier_opt.is_some() {
-                return false;
-            }
-            if !exp_identifier.expression_identifier_list.is_empty() {
-                return false;
-            }
-            if !exp_identifier.expression_identifier_list0.is_empty() {
-                return false;
-            }
-
-            let scoped_identifier = &*exp_identifier.scoped_identifier;
-            if !scoped_identifier.scoped_identifier_list.is_empty() {
-                return false;
-            }
-
-            let token = scoped_identifier.identifier().token;
-            is_anonymous_token(&token)
+impl Expression {
+    fn unwrap_factor(&self) -> Option<&Factor> {
+        if !self.expression_list.is_empty() {
+            return None;
         }
-        _ => false,
+
+        let exp = &*self.expression01;
+        if !exp.expression01_list.is_empty() {
+            return None;
+        }
+
+        let exp = &*exp.expression02;
+        if !exp.expression02_list.is_empty() {
+            return None;
+        }
+
+        let exp = &*exp.expression03;
+        if !exp.expression03_list.is_empty() {
+            return None;
+        }
+
+        let exp = &*exp.expression04;
+        if !exp.expression04_list.is_empty() {
+            return None;
+        }
+
+        let exp = &*exp.expression05;
+        if !exp.expression05_list.is_empty() {
+            return None;
+        }
+
+        let exp = &*exp.expression06;
+        if !exp.expression06_list.is_empty() {
+            return None;
+        }
+
+        let exp = &*exp.expression07;
+        if !exp.expression07_list.is_empty() {
+            return None;
+        }
+
+        let exp = &*exp.expression08;
+        if !exp.expression08_list.is_empty() {
+            return None;
+        }
+
+        let exp = &*exp.expression09;
+        if !exp.expression09_list.is_empty() {
+            return None;
+        }
+
+        let exp = &*exp.expression10;
+        if !exp.expression10_list.is_empty() {
+            return None;
+        }
+
+        let exp = &*exp.expression11;
+        if exp.expression11_opt.is_some() {
+            return None;
+        }
+
+        let exp = &*exp.expression12;
+        if !exp.expression12_list.is_empty() {
+            return None;
+        }
+
+        Some(exp.factor.as_ref())
+    }
+
+    pub fn is_assignable(&self) -> bool {
+        let Some(factor) = self.unwrap_factor() else {
+            return false;
+        };
+
+        match factor {
+            Factor::IdentifierFactor(x) => {
+                // Function call
+                if x.identifier_factor.identifier_factor_opt.is_some() {
+                    return false;
+                }
+                true
+            }
+            Factor::LBraceConcatenationListRBrace(x) => {
+                let items: Vec<_> = x.concatenation_list.as_ref().into();
+                items
+                    .iter()
+                    .all(|x| x.concatenation_item_opt.is_none() && x.expression.is_assignable())
+            }
+            _ => false,
+        }
+    }
+
+    pub fn is_anonymous_expression(&self) -> bool {
+        let Some(factor) = self.unwrap_factor() else {
+            return false;
+        };
+
+        match factor {
+            Factor::IdentifierFactor(x) => {
+                let factor = &x.identifier_factor;
+
+                if factor.identifier_factor_opt.is_some() {
+                    return false;
+                }
+
+                let exp_identifier = &*factor.expression_identifier;
+                if exp_identifier.expression_identifier_opt.is_some() {
+                    return false;
+                }
+                if !exp_identifier.expression_identifier_list.is_empty() {
+                    return false;
+                }
+                if !exp_identifier.expression_identifier_list0.is_empty() {
+                    return false;
+                }
+
+                let scoped_identifier = &*exp_identifier.scoped_identifier;
+                if !scoped_identifier.scoped_identifier_list.is_empty() {
+                    return false;
+                }
+
+                let token = scoped_identifier.identifier().token;
+                is_anonymous_token(&token)
+            }
+            _ => false,
+        }
     }
 }
 

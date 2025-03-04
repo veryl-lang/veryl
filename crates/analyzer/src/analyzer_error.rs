@@ -1134,6 +1134,22 @@ pub enum AnalyzerError {
     },
 
     #[diagnostic(
+        severity(Error),
+        code(unassignable_output),
+        help(""),
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unassignable_output"
+        )
+    )]
+    #[error("unassignable type is connected to output port")]
+    UnassignableOutput {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
         severity(Warning),
         code(uncovered_branch),
         help(""),
@@ -1863,6 +1879,13 @@ impl AnalyzerError {
     pub fn unassign_variable(identifier: &str, token: &TokenRange) -> Self {
         AnalyzerError::UnassignVariable {
             identifier: identifier.to_string(),
+            input: source(token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn unassignable_output(token: &TokenRange) -> Self {
+        AnalyzerError::UnassignableOutput {
             input: source(token),
             error_location: token.into(),
         }
