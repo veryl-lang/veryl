@@ -1,5 +1,5 @@
+use parol::parol_runtime::Report;
 use parol::{ParolErrorReporter, build::Builder};
-use parol_runtime::Report;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
