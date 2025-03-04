@@ -1948,6 +1948,23 @@ fn undefined_identifier() {
         AnalyzerError::UndefinedIdentifier { .. }
     ));
 
+    let code = r#"
+    module ModuleA {
+        enum EnumA {
+            X,
+        }
+
+        // Mangled enum member can't be used directly
+        let _a: logic = EnumA_X;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UndefinedIdentifier { .. }
+    ));
+
     //let code = r#"
     //package Pkg::<AW: const, DW: const> {
     //    type address_t = logic<AW>;
