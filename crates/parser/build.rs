@@ -1,12 +1,16 @@
-use parol::parol_runtime::Report;
-use parol::{ParolErrorReporter, build::Builder};
-use std::env;
-use std::fs;
-use std::path::PathBuf;
-use std::process;
-use std::time::Instant;
+#[cfg(not(feature = "build"))]
+fn main() {}
 
+#[cfg(feature = "build")]
 fn main() {
+    use parol::parol_runtime::Report;
+    use parol::{ParolErrorReporter, build::Builder};
+    use std::env;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::process;
+    use std::time::Instant;
+
     // Skip in GitHub Actions
     if let Ok(x) = env::var("GITHUB_ACTIONS") {
         if x == "true" {
