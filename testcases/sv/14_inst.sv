@@ -22,8 +22,8 @@ module veryl_testcase_Module14;
     veryl_testcase_InterfaceA y ();
 
     // interface instantiation with parameter
-    veryl_testcase_InterfaceA #(.a (a), .b (10)) yy  ();
-    veryl_testcase_InterfaceA #(.a (a), .b (10)) xxx ();
+    veryl_testcase_InterfaceA #( .a (a), .b (10) ) yy  ();
+    veryl_testcase_InterfaceA #( .a (a), .b (10) ) xxx ();
 
     // interface array
     veryl_testcase_InterfaceA yyy [0:10-1] ();

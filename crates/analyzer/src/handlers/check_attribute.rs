@@ -50,30 +50,6 @@ impl VerylGrammarTrait for CheckAttribute {
                                 &arg.identifier.as_ref().into(),
                             ));
                         }
-                        AttributeError::InvalidAllow(x) => {
-                            self.errors.push(AnalyzerError::invalid_allow(
-                                &x.to_string(),
-                                &arg.identifier.as_ref().into(),
-                            ));
-                        }
-                        AttributeError::InvalidEnumEncoding(x) => {
-                            self.errors.push(AnalyzerError::invalid_enum_encoding(
-                                &x.to_string(),
-                                &arg.identifier.as_ref().into(),
-                            ));
-                        }
-                        AttributeError::InvalidCondType(x) => {
-                            self.errors.push(AnalyzerError::invalid_cond_type(
-                                &x.to_string(),
-                                &arg.identifier.as_ref().into(),
-                            ));
-                        }
-                        AttributeError::InvalidAlign(x) => {
-                            self.errors.push(AnalyzerError::invalid_align(
-                                &x.to_string(),
-                                &arg.identifier.as_ref().into(),
-                            ));
-                        }
                     }
                 }
             }
