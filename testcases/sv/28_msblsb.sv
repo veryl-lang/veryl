@@ -7,9 +7,9 @@ module veryl_testcase_Module28A (
     logic [10-1:0][20-1:0]              a; always_comb a = 1;
     logic [WIDTH0 + 10-1:0][WIDTH1-1:0] b; always_comb b = 1;
 
-    logic _x; always_comb _x = a[($size(aa, 1) - 1)][($size(aa, 2) - 1):0 + 1];
-    logic _y; always_comb _y = b[($size(bb, 1) - 1) - 3][($size(bb, 2) - 1) + 5:0];
-    logic _z; always_comb _z = c[($size(cc, 1) - 1)][($size(cc, 2) - 1)];
+    logic _x; always_comb _x = a[($size(a, 1) - 1)][($size(a, 2) - 1):0 + 1];
+    logic _y; always_comb _y = b[($size(b, 1) - 1) - 3][($size(b, 2) - 1) + 5:0];
+    logic _z; always_comb _z = c[($size(c, 1) - 1)][($size(c, 2) - 1)];
 endmodule
 
 package veryl_testcase___Package28A__Package28B_B;
@@ -32,9 +32,9 @@ module veryl_testcase_ModuleB;
     veryl_testcase___Package28A__Package28B_B::StructA a  ;
     always_comb a.a = 0;
 
-    logic _w; always_comb _w = a[($bits(aa) - 1)];
-    logic _x; always_comb _x = a.a[($size(aa.a, 1) - 1)];
-    logic _y; always_comb _y = veryl_testcase_Package28C::C[($size(veryl_testcase_Package28C::Cveryl_testcase_Package28C::C, 1) - 1)];
-    logic _z; always_comb _z = veryl_testcase_Package28C::C[0][($size(veryl_testcase_Package28C::Cveryl_testcase_Package28C::C, 2) - 1)];
+    logic _w; always_comb _w = a[($bits(a) - 1)];
+    logic _x; always_comb _x = a.a[($size(a.a, 1) - 1)];
+    logic _y; always_comb _y = veryl_testcase_Package28C::C[($size(veryl_testcase_Package28C::C, 1) - 1)];
+    logic _z; always_comb _z = veryl_testcase_Package28C::C[0][($size(veryl_testcase_Package28C::C, 2) - 1)];
 endmodule
 //# sourceMappingURL=../map/testcases/sv/28_msblsb.sv.map

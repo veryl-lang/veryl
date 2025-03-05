@@ -1412,7 +1412,6 @@ impl VerylWalker for Emitter {
                     self.identifier(&Identifier {
                         identifier_token: arg.identifier().replace(&text),
                     });
-                    self.push_resolved_identifier(&text);
                 }
                 (Err(_), path) if !path.is_resolvable() => {
                     // emit literal by generics
@@ -1420,7 +1419,6 @@ impl VerylWalker for Emitter {
                     self.identifier(&Identifier {
                         identifier_token: arg.identifier().replace(&text),
                     });
-                    self.push_resolved_identifier(&text);
                 }
                 _ => {}
             }
