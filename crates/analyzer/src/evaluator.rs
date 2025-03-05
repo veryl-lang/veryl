@@ -319,11 +319,24 @@ impl Evaluated {
     ) {
         self.value = EvaluatedValue::Unknown;
         if is_4state {
-            self.r#type = EvaluatedType::Logic(EvaluatedTypeLogic {
-                signed,
-                width,
-                array,
-            });
+            let new_type = match &self.r#type {
+                EvaluatedType::Clock(x) => EvaluatedType::Clock(EvaluatedTypeClock {
+                    kind: x.kind,
+                    width,
+                    array,
+                }),
+                EvaluatedType::Reset(x) => EvaluatedType::Reset(EvaluatedTypeReset {
+                    kind: x.kind,
+                    width,
+                    array,
+                }),
+                _ => EvaluatedType::Logic(EvaluatedTypeLogic {
+                    signed,
+                    width,
+                    array,
+                }),
+            };
+            self.r#type = new_type;
         } else {
             self.r#type = EvaluatedType::Bit(EvaluatedTypeBit {
                 signed,
@@ -547,25 +560,24 @@ impl Evaluated {
 
         let is_4state = left.is_4state();
 
-        let mut ret = match (left.get_value(), left.get_total_width()) {
+        match (left.get_value(), left.get_total_width()) {
             (Some(value0), Some(width0)) => {
                 let value = calc_value(value0);
                 let width = calc_width(width0);
                 if let Some(value) = value {
-                    Evaluated::create_fixed(value, false, vec![width], vec![])
+                    left.set_fixed(value, false, vec![width], vec![]);
                 } else {
-                    Evaluated::create_variable(false, is_4state, vec![width], vec![])
+                    left.set_variable(false, is_4state, vec![width], vec![]);
                 }
             }
             (_, Some(width0)) => {
                 let width = calc_width(width0);
-                Evaluated::create_variable(false, is_4state, vec![width], vec![])
+                left.set_variable(false, is_4state, vec![width], vec![]);
             }
-            _ => Evaluated::create_unknown(),
-        };
+            _ => left.set_unknown(),
+        }
 
-        ret.errors.append(&mut left.errors);
-        ret
+        left
     }
 
     fn pow(self, exp: Evaluated, context_width: Option<&usize>) -> Evaluated {
