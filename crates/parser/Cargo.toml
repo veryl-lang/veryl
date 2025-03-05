@@ -29,4 +29,8 @@ miette        = {workspace = true, features = ["fancy-no-syscall"]}
 miette        = {workspace = true, features = ["fancy"]}
 
 [build-dependencies]
-parol         = "3.0"
+parol         = {version = "3.0", optional = true}
+
+[features]
+default = ["build"]
+build   = ["dep:parol"]
