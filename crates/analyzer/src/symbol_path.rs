@@ -432,7 +432,7 @@ impl GenericSymbolPath {
                     if let Ok(parent_symbol) =
                         symbol_table::resolve((&parent.paths, &self_namespace))
                     {
-                        if matches!(parent_symbol.found.kind, SymbolKind::Package(_)) {
+                        if parent_symbol.found.is_package(false) {
                             for (i, path) in parent.paths.iter().enumerate() {
                                 let token = Token::generate(*path, self_file_path);
                                 namespace_table::insert(token.id, self_file_path, &self_namespace);

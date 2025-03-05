@@ -41,6 +41,7 @@ fn is_variable_type(symbol: &Symbol) -> bool {
         | SymbolKind::Union(_)
         | SymbolKind::Struct(_)
         | SymbolKind::TypeDef(_)
+        | SymbolKind::ProtoTypeDef
         | SymbolKind::SystemVerilog => true,
         SymbolKind::Parameter(x) => x.r#type.kind == TypeKind::Type,
         SymbolKind::GenericParameter(x) => x.bound == GenericBoundKind::Type,

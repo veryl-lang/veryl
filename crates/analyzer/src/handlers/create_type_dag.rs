@@ -379,18 +379,20 @@ impl VerylGrammarTrait for CreateTypeDag {
 
     fn import_declaration(&mut self, arg: &ImportDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let is_wildcard = arg.import_declaration_opt.is_some();
             if let Ok(symbol) = symbol_table::resolve(arg.scoped_identifier.as_ref()) {
-                let symbol = symbol.found;
-                match symbol.kind {
-                    SymbolKind::Package(_) if is_wildcard => (),
-                    SymbolKind::SystemVerilog => (),
-                    _ if is_wildcard => {
-                        self.errors.push(AnalyzerError::invalid_import(
-                            &arg.scoped_identifier.as_ref().into(),
-                        ));
-                    }
-                    _ => (),
+                let is_wildcard = arg.import_declaration_opt.is_some();
+                let is_valid_import = if matches!(symbol.found.kind, SymbolKind::SystemVerilog) {
+                    true
+                } else if is_wildcard {
+                    symbol.found.is_package(false)
+                } else {
+                    symbol.found.is_importable(false)
+                };
+
+                if !is_valid_import {
+                    self.errors.push(AnalyzerError::invalid_import(
+                        &arg.scoped_identifier.as_ref().into(),
+                    ));
                 }
             }
         }

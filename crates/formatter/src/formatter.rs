@@ -2376,6 +2376,12 @@ impl VerylWalker for Formatter {
             self.with_generic_parameter(&x.with_generic_parameter);
         }
         self.space(1);
+        if let Some(ref x) = arg.package_declaration_opt0 {
+            self.r#for(&x.r#for);
+            self.space(1);
+            self.scoped_identifier(&x.scoped_identifier);
+            self.space(1);
+        }
         self.token_will_push(&arg.l_brace.l_brace_token);
         for (i, x) in arg.package_declaration_list.iter().enumerate() {
             self.newline_list(i);
@@ -2419,6 +2425,76 @@ impl VerylWalker for Formatter {
         if let Some(ref x) = arg.proto_module_declaration_opt0 {
             self.space(1);
             self.port_declaration(&x.port_declaration);
+        }
+        self.semicolon(&arg.semicolon);
+    }
+
+    /// Semantic action for non-terminal 'ProtoPackageDeclaration'
+    fn proto_package_declaration(&mut self, arg: &ProtoPackageDeclaration) {
+        self.proto(&arg.proto);
+        self.space(1);
+        self.package(&arg.package);
+        self.space(1);
+        self.identifier(&arg.identifier);
+        self.space(1);
+        self.token_will_push(&arg.l_brace.l_brace_token);
+        for (i, x) in arg.proto_package_declaration_list.iter().enumerate() {
+            self.newline_list(i);
+            self.proto_pacakge_item(&x.proto_pacakge_item);
+        }
+        self.newline_list_post(arg.proto_package_declaration_list.is_empty());
+        self.r_brace(&arg.r_brace);
+    }
+
+    /// Semantic action for non-terminal 'ProtoConstDeclaration'
+    fn proto_const_declaration(&mut self, arg: &ProtoConstDeclaration) {
+        self.r#const(&arg.r#const);
+        self.space(1);
+        self.align_start(align_kind::IDENTIFIER);
+        self.identifier(&arg.identifier);
+        self.align_finish(align_kind::IDENTIFIER);
+        self.colon(&arg.colon);
+        self.space(1);
+        match &*arg.proto_const_declaration_group {
+            ProtoConstDeclarationGroup::ArrayType(x) => {
+                self.array_type(&x.array_type);
+            }
+            ProtoConstDeclarationGroup::Type(x) => {
+                self.r#type(&x.r#type);
+            }
+        }
+        self.semicolon(&arg.semicolon);
+    }
+
+    /// Semantic action for non-terminal 'ProtoTypeDefDeclaration'
+    fn proto_type_def_declaration(&mut self, arg: &ProtoTypeDefDeclaration) {
+        self.r#type(&arg.r#type);
+        self.space(1);
+        self.align_start(align_kind::IDENTIFIER);
+        self.identifier(&arg.identifier);
+        self.align_finish(align_kind::IDENTIFIER);
+        self.semicolon(&arg.semicolon);
+    }
+
+    /// Semantic action for non-terminal 'ProtoFunctionDeclaration'
+    fn proto_function_declaration(&mut self, arg: &ProtoFunctionDeclaration) {
+        self.function(&arg.function);
+        self.space(1);
+        self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.proto_function_declaration_opt {
+            self.with_generic_parameter(&x.with_generic_parameter);
+        }
+        if let Some(ref x) = arg.proto_function_declaration_opt0 {
+            self.port_declaration(&x.port_declaration);
+            self.space(1);
+        }
+        if let Some(ref x) = arg.proto_function_declaration_opt1 {
+            self.align_reset();
+            self.minus_g_t(&x.minus_g_t);
+            self.space(1);
+            self.scalar_type(&x.scalar_type);
+            self.space(1);
+            self.align_reset();
         }
         self.semicolon(&arg.semicolon);
     }

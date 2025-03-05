@@ -378,19 +378,58 @@ impl Symbol {
     pub fn proto(&self) -> Option<SymbolPath> {
         match &self.kind {
             SymbolKind::Module(x) => x.proto.clone(),
-            // Disable package boundary temporarily
-            // https://github.com/veryl-lang/veryl/issues/1315
-            //
-            //SymbolKind::Package(_) => {
-            //    let path = SymbolPath::from(&self.token);
-            //    Some(path)
-            //}
+            SymbolKind::Package(x) => x.proto.clone(),
             SymbolKind::GenericParameter(x) => match x.bound {
                 GenericBoundKind::Proto(ref x) => Some(x.clone()),
                 _ => None,
             },
             _ => None,
         }
+    }
+
+    pub fn is_package(&self, include_proto: bool) -> bool {
+        match &self.kind {
+            SymbolKind::Package(_) => return true,
+            SymbolKind::ProtoPackage(_) => return include_proto,
+            SymbolKind::GenericInstance(x) => {
+                let symbol = symbol_table::get(x.base).unwrap();
+                return symbol.is_package(false);
+            }
+            SymbolKind::GenericParameter(x) => {
+                if let GenericBoundKind::Proto(proto) = &x.bound {
+                    if let Ok(symbol) = symbol_table::resolve((proto, &self.namespace)) {
+                        return symbol.found.is_package(true);
+                    }
+                }
+            }
+            _ => {}
+        }
+        false
+    }
+
+    pub fn is_importable(&self, include_proto: bool) -> bool {
+        match &self.kind {
+            SymbolKind::ProtoConst(_) | SymbolKind::ProtoTypeDef | SymbolKind::ProtoFunction(_) => {
+                return include_proto;
+            }
+            SymbolKind::Parameter(_)
+            | SymbolKind::TypeDef(_)
+            | SymbolKind::Enum(_)
+            | SymbolKind::Struct(_)
+            | SymbolKind::Union(_)
+            | SymbolKind::Function(_) => {
+                if let Some(parent) = self.get_parent() {
+                    return parent.is_package(include_proto);
+                }
+            }
+            SymbolKind::EnumMember(_) | SymbolKind::EnumMemberMangled => {
+                if let Some(parent) = self.get_parent() {
+                    return parent.is_importable(include_proto);
+                }
+            }
+            _ => {}
+        }
+        false
     }
 }
 
@@ -402,15 +441,19 @@ pub enum SymbolKind {
     ProtoModule(ProtoModuleProperty),
     Interface(InterfaceProperty),
     Function(FunctionProperty),
+    ProtoFunction(FunctionProperty),
     Parameter(ParameterProperty),
+    ProtoConst(ProtoConstProperty),
     Instance(InstanceProperty),
     Block,
     Package(PackageProperty),
+    ProtoPackage(ProtoPackageProperty),
     Struct(StructProperty),
     StructMember(StructMemberProperty),
     Union(UnionProperty),
     UnionMember(UnionMemberProperty),
     TypeDef(TypeDefProperty),
+    ProtoTypeDef,
     Enum(EnumProperty),
     EnumMember(EnumMemberProperty),
     EnumMemberMangled,
@@ -440,15 +483,19 @@ impl SymbolKind {
             SymbolKind::ProtoModule(_) => "proto module".to_string(),
             SymbolKind::Interface(_) => "interface".to_string(),
             SymbolKind::Function(_) => "function".to_string(),
+            SymbolKind::ProtoFunction(_) => "proto function".to_string(),
             SymbolKind::Parameter(_) => "parameter".to_string(),
+            SymbolKind::ProtoConst(_) => "proto const".to_string(),
             SymbolKind::Instance(_) => "instance".to_string(),
             SymbolKind::Block => "block".to_string(),
             SymbolKind::Package(_) => "package".to_string(),
+            SymbolKind::ProtoPackage(_) => "proto package".to_string(),
             SymbolKind::Struct(_) => "struct".to_string(),
             SymbolKind::StructMember(_) => "struct member".to_string(),
             SymbolKind::Union(_) => "union".to_string(),
             SymbolKind::UnionMember(_) => "union member".to_string(),
             SymbolKind::TypeDef(_) => "typedef".to_string(),
+            SymbolKind::ProtoTypeDef => "proto typedef".to_string(),
             SymbolKind::Enum(_) => "enum".to_string(),
             SymbolKind::EnumMember(_) => "enum member".to_string(),
             SymbolKind::EnumMemberMangled => "enum member mangled".to_string(),
@@ -502,6 +549,7 @@ impl SymbolKind {
     pub fn is_function(&self) -> bool {
         match self {
             SymbolKind::Function(_)
+            | SymbolKind::ProtoFunction(_)
             | SymbolKind::SystemVerilog
             | SymbolKind::ModportFunctionMember(..)
             | SymbolKind::SystemFunction => true,
@@ -524,7 +572,9 @@ impl SymbolKind {
             SymbolKind::Port(x) => Some(&x.r#type),
             SymbolKind::Variable(x) => Some(&x.r#type),
             SymbolKind::Function(x) => x.ret.as_ref(),
+            SymbolKind::ProtoFunction(x) => x.ret.as_ref(),
             SymbolKind::Parameter(x) => Some(&x.r#type),
+            SymbolKind::ProtoConst(x) => Some(&x.r#type),
             SymbolKind::StructMember(x) => Some(&x.r#type),
             SymbolKind::UnionMember(x) => Some(&x.r#type),
             SymbolKind::TypeDef(x) => Some(&x.r#type),
@@ -537,7 +587,9 @@ impl SymbolKind {
             SymbolKind::Port(x) => Some(&mut x.r#type),
             SymbolKind::Variable(x) => Some(&mut x.r#type),
             SymbolKind::Function(x) => x.ret.as_mut(),
+            SymbolKind::ProtoFunction(x) => x.ret.as_mut(),
             SymbolKind::Parameter(x) => Some(&mut x.r#type),
+            SymbolKind::ProtoConst(x) => Some(&mut x.r#type),
             SymbolKind::StructMember(x) => Some(&mut x.r#type),
             SymbolKind::UnionMember(x) => Some(&mut x.r#type),
             SymbolKind::TypeDef(x) => Some(&mut x.r#type),
@@ -600,6 +652,13 @@ impl fmt::Display for SymbolKind {
                     x.ports.len()
                 )
             }
+            SymbolKind::ProtoFunction(x) => {
+                format!(
+                    "proto function ({} generic, {} args)",
+                    x.generic_parameters.len(),
+                    x.ports.len()
+                )
+            }
             SymbolKind::Parameter(x) => {
                 let mut stringifier = Stringifier::new();
                 stringifier.expression(&x.value);
@@ -612,6 +671,9 @@ impl fmt::Display for SymbolKind {
                     }
                 }
             }
+            SymbolKind::ProtoConst(x) => {
+                format!("proto localparam ({})", x.r#type)
+            }
             SymbolKind::Instance(x) => {
                 let type_name = x.type_name.to_string();
                 format!("instance ({type_name})")
@@ -620,6 +682,7 @@ impl fmt::Display for SymbolKind {
             SymbolKind::Package(x) => {
                 format!("package ({} generic)", x.generic_parameters.len())
             }
+            SymbolKind::ProtoPackage(_) => "proto package".to_string(),
             SymbolKind::Struct(_) => "struct".to_string(),
             SymbolKind::StructMember(x) => {
                 format!("struct member ({})", x.r#type)
@@ -631,6 +694,7 @@ impl fmt::Display for SymbolKind {
             SymbolKind::TypeDef(x) => {
                 format!("typedef alias ({})", x.r#type)
             }
+            SymbolKind::ProtoTypeDef => "proto typedef".to_string(),
             SymbolKind::Enum(x) => {
                 if let Some(ref r#type) = x.r#type {
                     format!("enum ({})", r#type)
@@ -724,6 +788,12 @@ pub struct Type {
     pub width: Vec<syntax_tree::Expression>,
     pub array: Vec<syntax_tree::Expression>,
     pub is_const: bool,
+}
+
+impl Type {
+    pub fn is_compatible(&self, other: &Type) -> bool {
+        self.to_string() == other.to_string()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1233,6 +1303,12 @@ pub struct ParameterProperty {
 }
 
 #[derive(Debug, Clone)]
+pub struct ProtoConstProperty {
+    pub token: Token,
+    pub r#type: Type,
+}
+
+#[derive(Debug, Clone)]
 pub struct Parameter {
     pub name: StrId,
     pub symbol: SymbolId,
@@ -1273,67 +1349,6 @@ pub struct ProtoModuleProperty {
     pub range: TokenRange,
     pub parameters: Vec<Parameter>,
     pub ports: Vec<Port>,
-}
-
-pub enum ProtoIncompatible {
-    MissingParam(StrId),
-    MissingPort(StrId),
-    UnnecessaryParam(StrId),
-    UnnecessaryPort(StrId),
-    IncompatibleParam(StrId),
-    IncompatiblePort(StrId),
-}
-
-impl ProtoModuleProperty {
-    pub fn check_compat(&self, p: &ModuleProperty) -> Vec<ProtoIncompatible> {
-        let mut ret = Vec::new();
-
-        let actual_params: HashMap<_, _> = p
-            .parameters
-            .iter()
-            .map(|x| (x.name, x.property()))
-            .collect();
-        let actual_ports: HashMap<_, _> =
-            p.ports.iter().map(|x| (x.name(), x.property())).collect();
-        let mut proto_params: HashMap<_, _> = self
-            .parameters
-            .iter()
-            .map(|x| (x.name, x.property()))
-            .collect();
-        let mut proto_ports: HashMap<_, _> = self
-            .ports
-            .iter()
-            .map(|x| (x.name(), x.property()))
-            .collect();
-
-        for (name, actual_param) in actual_params {
-            if let Some(proto_param) = proto_params.remove(&name) {
-                if proto_param.r#type.to_string() != actual_param.r#type.to_string() {
-                    ret.push(ProtoIncompatible::IncompatibleParam(name));
-                }
-            } else {
-                ret.push(ProtoIncompatible::UnnecessaryParam(name));
-            }
-        }
-        for (name, _) in proto_params {
-            ret.push(ProtoIncompatible::MissingParam(name));
-        }
-
-        for (name, actual_port) in actual_ports {
-            if let Some(proto_port) = proto_ports.remove(&name) {
-                if proto_port.r#type.to_string() != actual_port.r#type.to_string() {
-                    ret.push(ProtoIncompatible::IncompatiblePort(name));
-                }
-            } else {
-                ret.push(ProtoIncompatible::UnnecessaryPort(name));
-            }
-        }
-        for (name, _) in proto_ports {
-            ret.push(ProtoIncompatible::MissingPort(name));
-        }
-
-        ret
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -1421,8 +1436,16 @@ pub struct InstanceProperty {
 #[derive(Debug, Clone)]
 pub struct PackageProperty {
     pub range: TokenRange,
+    pub proto: Option<SymbolPath>,
     pub generic_parameters: Vec<SymbolId>,
     pub generic_references: Vec<GenericSymbolPath>,
+    pub members: Vec<SymbolId>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProtoPackageProperty {
+    pub range: TokenRange,
+    pub members: Vec<SymbolId>,
 }
 
 #[derive(Debug, Clone)]
@@ -1515,6 +1538,12 @@ pub enum GenericBoundKind {
     Type,
     Inst(SymbolPath),
     Proto(SymbolPath),
+}
+
+impl GenericBoundKind {
+    pub fn is_compatible(&self, other: &GenericBoundKind) -> bool {
+        self.to_string() == other.to_string()
+    }
 }
 
 impl fmt::Display for GenericBoundKind {

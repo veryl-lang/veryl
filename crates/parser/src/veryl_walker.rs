@@ -2917,6 +2917,10 @@ pub trait VerylWalker {
         if let Some(ref x) = arg.package_declaration_opt {
             self.with_generic_parameter(&x.with_generic_parameter);
         }
+        if let Some(ref x) = arg.package_declaration_opt0 {
+            self.r#for(&x.r#for);
+            self.scoped_identifier(&x.scoped_identifier);
+        }
         self.l_brace(&arg.l_brace);
         for x in &arg.package_declaration_list {
             self.package_group(&x.package_group);
@@ -2968,6 +2972,7 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'ProtoModuleDeclaration'
     fn proto_module_declaration(&mut self, arg: &ProtoModuleDeclaration) {
         before!(self, proto_module_declaration, arg);
+        self.proto(&arg.proto);
         self.module(&arg.module);
         self.identifier(&arg.identifier);
         if let Some(ref x) = arg.proto_module_declaration_opt {
@@ -2978,6 +2983,92 @@ pub trait VerylWalker {
         }
         self.semicolon(&arg.semicolon);
         after!(self, proto_module_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'ProtoPackageDeclaration'
+    fn proto_package_declaration(&mut self, arg: &ProtoPackageDeclaration) {
+        before!(self, proto_package_declaration, arg);
+        self.proto(&arg.proto);
+        self.package(&arg.package);
+        self.identifier(&arg.identifier);
+        self.l_brace(&arg.l_brace);
+        for x in &arg.proto_package_declaration_list {
+            self.proto_pacakge_item(&x.proto_pacakge_item);
+        }
+        self.r_brace(&arg.r_brace);
+        after!(self, proto_package_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'ProtoPacakgeItem'
+    fn proto_pacakge_item(&mut self, arg: &ProtoPacakgeItem) {
+        before!(self, proto_pacakge_item, arg);
+        match arg {
+            ProtoPacakgeItem::ProtoConstDeclaration(x) => {
+                self.proto_const_declaration(&x.proto_const_declaration);
+            }
+            ProtoPacakgeItem::ProtoTypeDefDeclaration(x) => {
+                self.proto_type_def_declaration(&x.proto_type_def_declaration);
+            }
+            ProtoPacakgeItem::EnumDeclaration(x) => {
+                self.enum_declaration(&x.enum_declaration);
+            }
+            ProtoPacakgeItem::StructUnionDeclaration(x) => {
+                self.struct_union_declaration(&x.struct_union_declaration);
+            }
+            ProtoPacakgeItem::ProtoFunctionDeclaration(x) => {
+                self.proto_function_declaration(&x.proto_function_declaration);
+            }
+            ProtoPacakgeItem::ImportDeclaration(x) => {
+                self.import_declaration(&x.import_declaration);
+            }
+        }
+        after!(self, proto_pacakge_item, arg);
+    }
+
+    /// Semantic action for non-terminal 'ProtoConstDeclaration'
+    fn proto_const_declaration(&mut self, arg: &ProtoConstDeclaration) {
+        before!(self, proto_const_declaration, arg);
+        self.r#const(&arg.r#const);
+        self.identifier(&arg.identifier);
+        self.colon(&arg.colon);
+        match &*arg.proto_const_declaration_group {
+            ProtoConstDeclarationGroup::ArrayType(x) => {
+                self.array_type(&x.array_type);
+            }
+            ProtoConstDeclarationGroup::Type(x) => {
+                self.r#type(&x.r#type);
+            }
+        }
+        self.semicolon(&arg.semicolon);
+        after!(self, proto_const_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'ProtoTypeDefDeclaration'
+    fn proto_type_def_declaration(&mut self, arg: &ProtoTypeDefDeclaration) {
+        before!(self, proto_type_def_declaration, arg);
+        self.r#type(&arg.r#type);
+        self.identifier(&arg.identifier);
+        self.semicolon(&arg.semicolon);
+        after!(self, proto_type_def_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'ProtoFunctionDeclaration'
+    fn proto_function_declaration(&mut self, arg: &ProtoFunctionDeclaration) {
+        before!(self, proto_function_declaration, arg);
+        self.function(&arg.function);
+        self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.proto_function_declaration_opt {
+            self.with_generic_parameter(&x.with_generic_parameter);
+        }
+        if let Some(ref x) = arg.proto_function_declaration_opt0 {
+            self.port_declaration(&x.port_declaration);
+        }
+        if let Some(ref x) = arg.proto_function_declaration_opt1 {
+            self.minus_g_t(&x.minus_g_t);
+            self.scalar_type(&x.scalar_type);
+        }
+        self.semicolon(&arg.semicolon);
+        after!(self, proto_function_declaration, arg);
     }
 
     /// Semantic action for non-terminal 'EmbedDeclaration'
@@ -3065,6 +3156,9 @@ pub trait VerylWalker {
             }
             PublicDescriptionItem::ProtoModuleDeclaration(x) => {
                 self.proto_module_declaration(&x.proto_module_declaration)
+            }
+            PublicDescriptionItem::ProtoPackageDeclaration(x) => {
+                self.proto_package_declaration(&x.proto_package_declaration);
             }
         };
         after!(self, public_description_item, arg);
