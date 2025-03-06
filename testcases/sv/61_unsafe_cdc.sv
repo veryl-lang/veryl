@@ -1,6 +1,6 @@
 module veryl_testcase_Module61A (
-    input  logic i_dat,
-    output logic o_dat
+    input  var logic i_dat,
+    output var logic o_dat
 );
 
     always_comb o_dat = i_dat;
@@ -8,9 +8,9 @@ module veryl_testcase_Module61A (
 endmodule
 
 module veryl_testcase_Module61B (
-    input  logic i_clk,
-    input  logic i_dat,
-    output logic o_dat
+    input  var logic i_clk,
+    input  var logic i_dat,
+    output var logic o_dat
 );
 
     Synchronizer u_sync (

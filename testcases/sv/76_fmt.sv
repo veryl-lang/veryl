@@ -16,8 +16,8 @@ module veryl_testcase_Module76A #(
     parameter int unsigned A = 1,
     parameter int unsigned B = 1
 ) (
-    input  logic x,
-    output logic y
+    input  var logic x,
+    output var logic y
 );
     always_comb y = x;
 endmodule

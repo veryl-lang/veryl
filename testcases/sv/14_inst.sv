@@ -36,9 +36,9 @@ module veryl_testcase_Module14C #(
     parameter int unsigned X = 1,
     parameter int unsigned Y = 1
 ) (
-    input logic [32-1:0] a   ,
-    input logic [32-1:0] bb  ,
-    input logic [32-1:0] bbbb
+    input var logic [32-1:0] a   ,
+    input var logic [32-1:0] bb  ,
+    input var logic [32-1:0] bbbb
 );
 endmodule
 

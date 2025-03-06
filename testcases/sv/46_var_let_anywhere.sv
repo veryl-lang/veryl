@@ -21,9 +21,9 @@ module veryl_testcase_Module46;
     end
 
     function automatic logic [10-1:0] FuncA(
-        input  logic [10-1:0] a,
-        output logic [10-1:0] b,
-        ref    logic [10-1:0] c
+        input  var logic [10-1:0] a,
+        output var logic [10-1:0] b,
+        ref    logic     [10-1:0] c
     ) ;
         int unsigned d;
         c = a / 1;
@@ -34,9 +34,9 @@ module veryl_testcase_Module46;
     endfunction
 
     function automatic logic [10-1:0] FuncB(
-        input  logic [10-1:0] a,
-        output logic [10-1:0] b,
-        ref    logic [10-1:0] c
+        input  var logic [10-1:0] a,
+        output var logic [10-1:0] b,
+        ref    logic     [10-1:0] c
     ) ;
         int unsigned d;
         c = a / 1;

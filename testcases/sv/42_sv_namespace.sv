@@ -1,8 +1,8 @@
 module veryl_testcase_Module42 (
-    input  logic i_clk  ,
-    input  logic i_rst_n,
-    input  logic i_d    ,
-    output logic o_d
+    input  var logic i_clk  ,
+    input  var logic i_rst_n,
+    input  var logic i_d    ,
+    output var logic o_d
 );
     localparam int unsigned a = pkg::paramA;
     //const b: u32 = pkg::paramA;

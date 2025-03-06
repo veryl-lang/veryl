@@ -3,9 +3,9 @@ module veryl_testcase_Module06;
 
     // function without parameter
     function automatic logic [ParamX-1:0] FuncA(
-        input  logic [ParamX-1:0] a,
-        output logic [ParamX-1:0] b,
-        ref    logic [ParamX-1:0] c
+        input  var logic [ParamX-1:0] a,
+        output var logic [ParamX-1:0] b,
+        ref    logic     [ParamX-1:0] c
     ) ;
         int unsigned d;
         d = 1;
@@ -16,8 +16,8 @@ module veryl_testcase_Module06;
 
     // void function
     function automatic void FuncC(
-        input logic [ParamX-1:0] a,
-        ref   logic [ParamX-1:0] c
+        input var logic [ParamX-1:0] a,
+        ref   logic     [ParamX-1:0] c
     ) ;
         c = a / 1;
     endfunction

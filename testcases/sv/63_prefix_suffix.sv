@@ -1,7 +1,7 @@
 module veryl_testcase_Module63 (
-    input logic i_clk   ,
-    input logic i_rst_n ,
-    input logic i_data_a
+    input var logic i_clk   ,
+    input var logic i_rst_n ,
+    input var logic i_data_a
 );
     veryl_testcase_Module63A u (
         .i_clk    (i_clk   ),
@@ -23,9 +23,9 @@ module veryl_testcase_Module63 (
 endmodule
 
 module veryl_testcase_Module63A (
-    input logic i_clk   ,
-    input logic i_rst_n ,
-    input logic i_data_a
+    input var logic i_clk   ,
+    input var logic i_rst_n ,
+    input var logic i_data_a
 );
 endmodule
 //# sourceMappingURL=../map/testcases/sv/63_prefix_suffix.sv.map

@@ -1,7 +1,7 @@
 module veryl_testcase_Module67 (
-    input  logic i_clk,
-    input  logic i_d  ,
-    output logic o_d  
+    input  var logic i_clk,
+    input  var logic i_d  ,
+    output var logic o_d  
 );
 
     always_ff @ (posedge i_clk) begin

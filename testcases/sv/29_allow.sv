@@ -1,6 +1,6 @@
 module veryl_testcase_Module29 (
-    input logic clk  ,
-    input logic rst_n
+    input var logic clk  ,
+    input var logic rst_n
 );
     logic a;
     logic b;
@@ -20,8 +20,8 @@ module veryl_testcase_Module29 (
 endmodule
 
 module veryl_testcase_Module29A (
-    input logic clk  ,
-    input logic rst_n
+    input var logic clk  ,
+    input var logic rst_n
 );
 endmodule
 //# sourceMappingURL=../map/testcases/sv/29_allow.sv.map

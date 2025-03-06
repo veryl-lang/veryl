@@ -18,9 +18,9 @@ package veryl_testcase_Package17;
 
     // function declaration
     function automatic logic [ParamX-1:0] FuncA(
-        input  logic [ParamX-1:0] a,
-        output logic [ParamX-1:0] b,
-        ref    logic [ParamX-1:0] c
+        input  var logic [ParamX-1:0] a,
+        output var logic [ParamX-1:0] b,
+        ref    logic     [ParamX-1:0] c
     ) ;
         int unsigned d;
         d = 1;

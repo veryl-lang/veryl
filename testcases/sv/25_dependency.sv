@@ -1,6 +1,6 @@
 module veryl_testcase_Module25 (
-    input logic                        i_clk  ,
-    input logic                        i_rst_n,
+    input var logic                    i_clk  ,
+    input var logic                    i_rst_n,
     veryl_sample3_data_if.mp_in  in_if  ,
     veryl_sample3_data_if.mp_out out_if 
 );

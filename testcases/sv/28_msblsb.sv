@@ -1,5 +1,5 @@
 module veryl_testcase_Module28A (
-    input logic [30-1:0][40-1:0] c
+    input var logic [30-1:0][40-1:0] c
 );
     localparam int unsigned WIDTH0 = 10;
     localparam int unsigned WIDTH1 = 20;

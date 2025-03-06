@@ -1,6 +1,6 @@
 module veryl_testcase_Module12_1 (
-    input logic i_clk  ,
-    input logic i_rst_n
+    input var logic i_clk  ,
+    input var logic i_rst_n
 );
     logic a;
     logic b;
@@ -28,14 +28,14 @@ module veryl_testcase_Module12_1 (
 endmodule
 
 module veryl_testcase_Module12_2 (
-    input logic i_clk   ,
-    input logic i_clk_p ,
-    input logic i_clk_n ,
-    input logic i_rst_n ,
-    input logic i_rst_ah,
-    input logic i_rst_al,
-    input logic i_rst_sh,
-    input logic i_rst_sl
+    input var logic i_clk   ,
+    input var logic i_clk_p ,
+    input var logic i_clk_n ,
+    input var logic i_rst_n ,
+    input var logic i_rst_ah,
+    input var logic i_rst_al,
+    input var logic i_rst_sh,
+    input var logic i_rst_sl
 );
     logic          a ;
     logic          aa;

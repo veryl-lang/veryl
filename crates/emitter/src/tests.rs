@@ -54,8 +54,8 @@ module ModuleB (
 "#;
 
     let expect = r#"module prj_ModuleA (
-    input logic clk_pos_clk_clk_pos  ,
-    input logic rst_high_rst_rst_high
+    input var logic clk_pos_clk_clk_pos  ,
+    input var logic rst_high_rst_rst_high
 );
     prj_ModuleB u (
         .clk_pos_clk_clk_pos   (clk_pos_clk_clk_pos  ),
@@ -76,8 +76,8 @@ module ModuleB (
 endmodule
 
 module prj_ModuleB (
-    input logic clk_pos_clk_clk_pos  ,
-    input logic rst_high_rst_rst_high
+    input var logic clk_pos_clk_clk_pos  ,
+    input var logic rst_high_rst_rst_high
 );
 endmodule
 //# sourceMappingURL=test.sv.map
@@ -133,8 +133,8 @@ module ModuleB (
 "#;
 
     let expect = r#"module prj_ModuleA (
-    input logic clk_neg_clk_clk_neg,
-    input logic rst_low_rst_rst_low
+    input var logic clk_neg_clk_clk_neg,
+    input var logic rst_low_rst_rst_low
 );
     prj_ModuleB u (
         .clk_neg_clk_clk_neg (clk_neg_clk_clk_neg),
@@ -155,8 +155,8 @@ module ModuleB (
 endmodule
 
 module prj_ModuleB (
-    input logic clk_neg_clk_clk_neg,
-    input logic rst_low_rst_rst_low
+    input var logic clk_neg_clk_clk_neg,
+    input var logic rst_low_rst_rst_low
 );
 endmodule
 //# sourceMappingURL=test.sv.map
@@ -538,8 +538,8 @@ fn emit_cond_type() {
 "#;
 
     let expect = r#"module prj_ModuleA (
-    input logic i_clk,
-    input logic i_rst
+    input var logic i_clk,
+    input var logic i_rst
 );
     logic x; always_comb x = 1;
     logic a;

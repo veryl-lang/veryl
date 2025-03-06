@@ -1,10 +1,10 @@
 module veryl_testcase_Module68 (
-    input  logic         i_clk  ,
-    input  logic         i_rst_n,
-    input  logic         i_push ,
-    input  logic [8-1:0] i_data ,
-    input  logic         i_pop  ,
-    output logic [8-1:0] o_data 
+    input  var logic         i_clk  ,
+    input  var logic         i_rst_n,
+    input  var logic         i_push ,
+    input  var logic [8-1:0] i_data ,
+    input  var logic         i_pop  ,
+    output var logic [8-1:0] o_data 
 );
     std_fifo u (
         .i_clk         (i_clk  ),
