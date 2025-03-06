@@ -1,5 +1,6 @@
 use crate::OptBuild;
 use crate::cmd_check::CheckError;
+use crate::diff::print_diff;
 use log::{debug, info};
 use miette::{IntoDiagnostic, Result, WrapErr};
 use std::collections::HashMap;
@@ -25,7 +26,7 @@ impl CmdBuild {
         Self { opt }
     }
 
-    pub fn exec(&self, metadata: &mut Metadata, include_tests: bool) -> Result<bool> {
+    pub fn exec(&self, metadata: &mut Metadata, include_tests: bool, quiet: bool) -> Result<bool> {
         let paths = metadata.paths(&self.opt.files, true)?;
 
         let mut check_error = CheckError::default();
@@ -65,6 +66,7 @@ impl CmdBuild {
             None
         };
 
+        let mut all_pass = true;
         for (path, input, parser, _) in &contexts {
             let (dst, map) = if let Some(ref temp_dir) = temp_dir {
                 let dst_temp = temp_dir.path().join(
@@ -90,45 +92,57 @@ impl CmdBuild {
                 std::fs::create_dir_all(dst.parent().unwrap()).into_diagnostic()?;
             }
 
-            let mut file = OpenOptions::new()
-                .create(true)
-                .write(true)
-                .truncate(true)
-                .open(&dst)
-                .into_diagnostic()?;
-            file.write_all(emitter.as_str().as_bytes())
-                .into_diagnostic()?;
-            file.flush().into_diagnostic()?;
-
-            debug!("Output file ({})", dst.to_string_lossy());
-
-            if metadata.build.sourcemap_target != SourceMapTarget::None {
-                let source_map = emitter.source_map();
-                source_map.set_source_content(input);
-                let source_map = source_map.to_bytes().into_diagnostic()?;
-
-                let map_dir = map.parent().unwrap();
-                if !map_dir.exists() {
-                    std::fs::create_dir_all(map.parent().unwrap()).into_diagnostic()?;
+            if self.opt.check {
+                let output = fs::read_to_string(&dst).unwrap_or(String::new());
+                if output != emitter.as_str() {
+                    if !quiet {
+                        print_diff(&path.src, &output, emitter.as_str());
+                    }
+                    all_pass = false;
                 }
-
+            } else {
                 let mut file = OpenOptions::new()
                     .create(true)
                     .write(true)
                     .truncate(true)
-                    .open(&map)
+                    .open(&dst)
                     .into_diagnostic()?;
-                file.write_all(&source_map).into_diagnostic()?;
+                file.write_all(emitter.as_str().as_bytes())
+                    .into_diagnostic()?;
                 file.flush().into_diagnostic()?;
 
-                debug!("Output map ({})", map.to_string_lossy());
+                debug!("Output file ({})", dst.to_string_lossy());
+
+                if metadata.build.sourcemap_target != SourceMapTarget::None {
+                    let source_map = emitter.source_map();
+                    source_map.set_source_content(input);
+                    let source_map = source_map.to_bytes().into_diagnostic()?;
+
+                    let map_dir = map.parent().unwrap();
+                    if !map_dir.exists() {
+                        std::fs::create_dir_all(map.parent().unwrap()).into_diagnostic()?;
+                    }
+
+                    let mut file = OpenOptions::new()
+                        .create(true)
+                        .write(true)
+                        .truncate(true)
+                        .open(&map)
+                        .into_diagnostic()?;
+                    file.write_all(&source_map).into_diagnostic()?;
+                    file.flush().into_diagnostic()?;
+
+                    debug!("Output map ({})", map.to_string_lossy());
+                }
             }
         }
 
-        self.gen_filelist(metadata, &paths, temp_dir, include_tests)?;
+        if !self.opt.check {
+            self.gen_filelist(metadata, &paths, temp_dir, include_tests)?;
+        }
 
         let _ = check_error.check_err()?;
-        Ok(true)
+        Ok(all_pass)
     }
 
     fn gen_filelist_line(&self, metadata: &Metadata, path: &Path) -> Result<String> {
