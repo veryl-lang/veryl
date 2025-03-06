@@ -84,7 +84,7 @@ fn main() -> Result<ExitCode> {
     let ret = match opt.command {
         Commands::New(x) => cmd_new::CmdNew::new(x).exec()?,
         Commands::Init(x) => cmd_init::CmdInit::new(x).exec()?,
-        Commands::Fmt(x) => cmd_fmt::CmdFmt::new(x).exec(&mut metadata)?,
+        Commands::Fmt(x) => cmd_fmt::CmdFmt::new(x).exec(&mut metadata, opt.quiet)?,
         Commands::Check(x) => cmd_check::CmdCheck::new(x).exec(&mut metadata)?,
         Commands::Build(x) => cmd_build::CmdBuild::new(x).exec(&mut metadata, false)?,
         Commands::Clean(x) => cmd_clean::CmdClean::new(x).exec(&mut metadata)?,
