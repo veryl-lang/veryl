@@ -2067,7 +2067,6 @@ impl VerylWalker for Formatter {
                         Direction::Input(x) => &x.input.input_token,
                         Direction::Output(x) => &x.output.output_token,
                         Direction::Inout(x) => &x.inout.inout_token,
-                        Direction::Ref(x) => &x.r#ref.ref_token,
                         Direction::Modport(x) => &x.modport.modport_token,
                         Direction::Import(x) => &x.import.import_token,
                     };
@@ -2119,7 +2118,6 @@ impl VerylWalker for Formatter {
             Direction::Input(x) => self.input(&x.input),
             Direction::Output(x) => self.output(&x.output),
             Direction::Inout(x) => self.inout(&x.inout),
-            Direction::Ref(x) => self.r#ref(&x.r#ref),
             Direction::Modport(x) => self.modport(&x.modport),
             Direction::Import(x) => self.import(&x.import),
         };

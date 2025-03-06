@@ -414,7 +414,6 @@ impl fmt::Display for Direction {
             Direction::Input(x) => &x.input.input_token,
             Direction::Output(x) => &x.output.output_token,
             Direction::Inout(x) => &x.inout.inout_token,
-            Direction::Ref(x) => &x.r#ref.ref_token,
             Direction::Modport(x) => &x.modport.modport_token,
             Direction::Import(x) => &x.import.import_token,
         };

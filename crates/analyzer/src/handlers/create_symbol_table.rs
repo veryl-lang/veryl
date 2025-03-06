@@ -752,7 +752,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
                 for item in items {
                     let kind = match &*item.direction {
-                        Direction::Ref(_) | Direction::Modport(_) => {
+                        Direction::Modport(_) => {
                             continue;
                         }
                         Direction::Import(_) => {

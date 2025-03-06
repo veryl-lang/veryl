@@ -522,15 +522,6 @@ fn invalid_assignment() {
 #[test]
 fn invalid_direction() {
     let code = r#"
-    module ModuleA (
-        a: ref logic,
-    ) {}
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidDirection { .. }));
-
-    let code = r#"
     module ModuleB (
         b: import logic,
     ) {}
@@ -555,18 +546,6 @@ fn invalid_direction() {
         function FuncD (
             D: modport logic,
         ) {}
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidDirection { .. }));
-
-    let code = r#"
-    interface InterfaceE {
-        var e: logic;
-        modport mp {
-            e: ref,
-        }
     }
     "#;
 
@@ -759,18 +738,6 @@ fn invalid_port_default_value() {
     let code = r#"
     module ModuleA (
         a: inout tri logic = 0,
-    ){}
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::InvalidPortDefaultValue { .. }
-    ));
-
-    let code = r#"
-    module ModuleA (
-        a: ref logic = 0,
     ){}
     "#;
 
@@ -2861,10 +2828,8 @@ fn unassign_variable() {
     interface InterfaceA {
         function FuncA(
             a: output logic,
-            b: ref    logic
         ) {
             a = 0;
-            b = 1;
         }
         modport mp {
             FuncA: import,
@@ -2875,25 +2840,21 @@ fn unassign_variable() {
     ){
         function FuncB(
             a: output logic,
-            b: ref    logic,
         ) -> logic {
             a = 0;
-            b = 1;
             return 0;
         }
 
         var _a: logic;
         var _b: logic;
         var _c: logic;
-        var _d: logic;
-        var _e: logic;
 
         always_comb {
-            if_a.FuncA(_a, _b);
+            if_a.FuncA(_a);
         }
 
         always_comb {
-            _c = FuncB(_d, _e);
+            _b = FuncB(_c);
         }
     }
     "#;

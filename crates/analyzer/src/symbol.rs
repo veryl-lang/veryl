@@ -747,7 +747,6 @@ pub enum Direction {
     Input,
     Output,
     Inout,
-    Ref,
     Interface,
     Modport,
     Import,
@@ -769,7 +768,6 @@ impl fmt::Display for Direction {
             Direction::Input => "input".to_string(),
             Direction::Output => "output".to_string(),
             Direction::Inout => "inout".to_string(),
-            Direction::Ref => "ref".to_string(),
             Direction::Interface => "interface".to_string(),
             Direction::Modport => "modport".to_string(),
             Direction::Import => "import".to_string(),
@@ -784,7 +782,6 @@ impl From<&syntax_tree::Direction> for Direction {
             syntax_tree::Direction::Input(_) => Direction::Input,
             syntax_tree::Direction::Output(_) => Direction::Output,
             syntax_tree::Direction::Inout(_) => Direction::Inout,
-            syntax_tree::Direction::Ref(_) => Direction::Ref,
             syntax_tree::Direction::Modport(_) => Direction::Modport,
             syntax_tree::Direction::Import(_) => Direction::Import,
         }

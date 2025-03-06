@@ -4,22 +4,20 @@ module veryl_testcase_Module06;
     // function without parameter
     function automatic logic [ParamX-1:0] FuncA(
         input  var logic [ParamX-1:0] a,
-        output var logic [ParamX-1:0] b,
-        ref    logic     [ParamX-1:0] c
+        output var logic [ParamX-1:0] b
     ) ;
-        int unsigned d;
-        d = 1;
-        b = a + 1 + d;
-        c = a / 1;
+        int unsigned c;
+        c = 1;
+        b = a + 1 + c;
         return a + 2;
     endfunction
 
     // void function
     function automatic void FuncC(
-        input var logic [ParamX-1:0] a,
-        ref   logic     [ParamX-1:0] c
+        input  var logic [ParamX-1:0] a,
+        output var logic [ParamX-1:0] b
     ) ;
-        c = a / 1;
+        b = a / 1;
     endfunction
 
     logic [ParamX-1:0] a; always_comb a = 1;
@@ -27,17 +25,16 @@ module veryl_testcase_Module06;
     logic [ParamX-1:0] c;
     logic [ParamX-1:0] d;
     logic [ParamX-1:0] e;
-    logic [ParamX-1:0] f;
 
     // function call
-    always_comb d = FuncA(a, b, c);
+    always_comb c = FuncA(a, b);
 
     // void function call
     initial begin
-        FuncC(a, e);
+        FuncC(a, d);
     end
 
     // system function call
-    always_comb f = $clog2(a);
+    always_comb e = $clog2(a);
 endmodule
 //# sourceMappingURL=../map/testcases/sv/06_function.sv.map

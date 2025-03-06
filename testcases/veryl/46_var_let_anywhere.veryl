@@ -21,23 +21,19 @@ module Module46 {
     function FuncA (
         a: input  logic<10>,
         b: output logic<10>,
-        c: ref    logic<10>,
     ) -> logic<10> {
-        c = a / 1;
-        var d: u32;
-        d = 1;
-        b = a + 1 + d;
+        var c: u32;
+        c = 1;
+        b = a + 1 + c;
         return a + 2;
     }
 
     function FuncB (
         a: input  logic<10>,
         b: output logic<10>,
-        c: ref    logic<10>,
     ) -> logic<10> {
-        c = a / 1;
-        let d: u32 = 1;
-        b = a + 1 + d;
+        let c: u32 = 1;
+        b = a + 1 + c;
         return a + 2;
     }
 }

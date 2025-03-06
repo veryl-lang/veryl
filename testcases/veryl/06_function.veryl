@@ -5,20 +5,18 @@ module Module06 {
     function FuncA (
         a: input  logic<ParamX>,
         b: output logic<ParamX>,
-        c: ref    logic<ParamX>,
     ) -> logic<ParamX> {
-        let d: u32 = 1;
-        b = a + 1 + d;
-        c = a / 1;
+        let c: u32 = 1;
+        b = a + 1 + c;
         return a + 2;
     }
 
     // void function
     function FuncC (
-        a: input logic<ParamX>,
-        c: ref   logic<ParamX>,
+        a: input  logic<ParamX>,
+        b: output logic<ParamX>,
     ) {
-        c = a / 1;
+        b = a / 1;
     }
 
     let a: logic<ParamX> = 1;
@@ -26,16 +24,15 @@ module Module06 {
     var c: logic<ParamX>;
     var d: logic<ParamX>;
     var e: logic<ParamX>;
-    var f: logic<ParamX>;
 
     // function call
-    assign d = FuncA(a, b, c);
+    assign c = FuncA(a, b);
 
     // void function call
     initial {
-        FuncC(a, e);
+        FuncC(a, d);
     }
 
     // system function call
-    assign f = $clog2(a);
+    assign e = $clog2(a);
 }
