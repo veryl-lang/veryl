@@ -93,21 +93,6 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
-        code(invalid_allow),
-        help(""),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_allow")
-    )]
-    #[error("{identifier} can't be allowed")]
-    InvalidAllow {
-        identifier: String,
-        #[source_code]
-        input: MultiSources,
-        #[label("Error location")]
-        error_location: SourceSpan,
-    },
-
-    #[diagnostic(
-        severity(Error),
         code(invalid_assignment),
         help("remove the assignment"),
         url(
@@ -731,55 +716,6 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
-        code(invalid_enum_encoding),
-        help(""),
-        url(
-            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_enum_encoding"
-        )
-    )]
-    #[error("{identifier} is not valid enum encoding")]
-    InvalidEnumEncoding {
-        identifier: String,
-        #[source_code]
-        input: MultiSources,
-        #[label("Error location")]
-        error_location: SourceSpan,
-    },
-
-    #[diagnostic(
-        severity(Error),
-        code(invalid_cond_type),
-        help(""),
-        url(
-            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_cond_type"
-        )
-    )]
-    #[error("{identifier} is not valid condition type")]
-    InvalidCondType {
-        identifier: String,
-        #[source_code]
-        input: MultiSources,
-        #[label("Error location")]
-        error_location: SourceSpan,
-    },
-
-    #[diagnostic(
-        severity(Error),
-        code(invalid_align),
-        help(""),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_align")
-    )]
-    #[error("{identifier} is not valid condition type")]
-    InvalidAlign {
-        identifier: String,
-        #[source_code]
-        input: MultiSources,
-        #[label("Error location")]
-        error_location: SourceSpan,
-    },
-
-    #[diagnostic(
-        severity(Error),
         code(too_large_enum_variant),
         help(""),
         url(
@@ -1299,14 +1235,6 @@ impl AnalyzerError {
         }
     }
 
-    pub fn invalid_allow(identifier: &str, token: &TokenRange) -> Self {
-        AnalyzerError::InvalidAllow {
-            identifier: identifier.to_string(),
-            input: source(token),
-            error_location: token.into(),
-        }
-    }
-
     pub fn invalid_assignment(identifier: &str, kind: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidAssignment {
             identifier: identifier.into(),
@@ -1640,30 +1568,6 @@ impl AnalyzerError {
 
     pub fn invalid_clock_domain(token: &TokenRange) -> Self {
         AnalyzerError::InvalidClockDomain {
-            input: source(token),
-            error_location: token.into(),
-        }
-    }
-
-    pub fn invalid_enum_encoding(identifier: &str, token: &TokenRange) -> Self {
-        AnalyzerError::InvalidEnumEncoding {
-            identifier: identifier.to_string(),
-            input: source(token),
-            error_location: token.into(),
-        }
-    }
-
-    pub fn invalid_cond_type(identifier: &str, token: &TokenRange) -> Self {
-        AnalyzerError::InvalidCondType {
-            identifier: identifier.to_string(),
-            input: source(token),
-            error_location: token.into(),
-        }
-    }
-
-    pub fn invalid_align(identifier: &str, token: &TokenRange) -> Self {
-        AnalyzerError::InvalidAlign {
-            identifier: identifier.to_string(),
             input: source(token),
             error_location: token.into(),
         }

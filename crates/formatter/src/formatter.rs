@@ -1,5 +1,5 @@
 use veryl_aligner::{Aligner, Location, Measure, align_kind};
-use veryl_analyzer::attribute::AlignItem;
+use veryl_analyzer::attribute::{AlignItem, FormatItem};
 use veryl_analyzer::attribute_table;
 use veryl_metadata::{Format, Metadata};
 use veryl_parser::resource_table;
@@ -28,7 +28,7 @@ pub struct Formatter {
     measure: Measure,
     in_start_token: bool,
     consumed_next_newline: bool,
-    single_line: bool,
+    single_line: Vec<()>,
     multi_line: Vec<()>,
     adjust_line: bool,
     case_item_indent: Vec<usize>,
@@ -49,7 +49,7 @@ impl Default for Formatter {
             measure: Measure::default(),
             in_start_token: false,
             consumed_next_newline: false,
-            single_line: false,
+            single_line: Vec::new(),
             multi_line: Vec::new(),
             adjust_line: false,
             case_item_indent: Vec::new(),
@@ -131,50 +131,62 @@ impl Formatter {
     }
 
     fn newline_push(&mut self) {
-        if self.mode == Mode::Align {
-            return;
-        }
-
-        self.unindent();
-        if !self.consumed_next_newline {
-            self.str(NEWLINE);
+        if self.single_line() {
+            self.space(1);
         } else {
-            self.consumed_next_newline = false;
+            if self.mode == Mode::Align {
+                return;
+            }
+
+            self.unindent();
+            if !self.consumed_next_newline {
+                self.str(NEWLINE);
+            } else {
+                self.consumed_next_newline = false;
+            }
+            self.indent += 1;
+            self.indent();
+            self.adjust_line = true;
         }
-        self.indent += 1;
-        self.indent();
-        self.adjust_line = true;
     }
 
     fn newline_pop(&mut self) {
-        if self.mode == Mode::Align {
-            return;
-        }
-
-        self.unindent();
-        if !self.consumed_next_newline {
-            self.str(NEWLINE);
+        if self.single_line() {
+            self.space(1);
         } else {
-            self.consumed_next_newline = false;
+            if self.mode == Mode::Align {
+                return;
+            }
+
+            self.unindent();
+            if !self.consumed_next_newline {
+                self.str(NEWLINE);
+            } else {
+                self.consumed_next_newline = false;
+            }
+            self.indent -= 1;
+            self.indent();
+            self.adjust_line = true;
         }
-        self.indent -= 1;
-        self.indent();
-        self.adjust_line = true;
     }
 
     fn newline(&mut self) {
-        if self.mode == Mode::Align {
-            return;
-        }
-
-        self.unindent();
-        if !self.consumed_next_newline {
-            self.str(NEWLINE);
+        if self.single_line() {
+            self.space(1);
         } else {
-            self.consumed_next_newline = false;
+            if self.mode == Mode::Align {
+                return;
+            }
+
+            self.unindent();
+            if !self.consumed_next_newline {
+                self.str(NEWLINE);
+            } else {
+                self.consumed_next_newline = false;
+            }
+            self.indent();
+            self.adjust_line = true;
         }
-        self.indent();
-        self.adjust_line = true;
     }
 
     fn newline_list(&mut self, i: usize) {
@@ -265,7 +277,8 @@ impl Formatter {
     }
 
     fn token_will_push(&mut self, x: &VerylToken) {
-        self.process_token(x, true)
+        let will_push = !self.single_line();
+        self.process_token(x, will_push)
     }
 
     fn align_start(&mut self, kind: usize) {
@@ -332,6 +345,30 @@ impl Formatter {
     fn measure_get(&mut self, token: &Token) -> Option<u32> {
         self.measure.get(token.id)
     }
+
+    fn single_line_start(&mut self) {
+        self.single_line.push(());
+    }
+
+    fn single_line_finish(&mut self) {
+        self.single_line.pop();
+    }
+
+    fn single_line(&self) -> bool {
+        !self.single_line.is_empty()
+    }
+
+    fn multi_line_start(&mut self) {
+        self.multi_line.push(());
+    }
+
+    fn multi_line_finish(&mut self) {
+        self.multi_line.pop();
+    }
+
+    fn multi_line(&self) -> bool {
+        !self.multi_line.is_empty()
+    }
 }
 
 impl VerylWalker for Formatter {
@@ -342,10 +379,9 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'Identifier'
     fn identifier(&mut self, arg: &Identifier) {
-        let attrs = attribute_table::get(&arg.token());
         let align = !self.align_any()
             && !self.in_attribute
-            && attrs.iter().any(|x| x.is_align(AlignItem::Identifier));
+            && attribute_table::is_align(&arg.token(), AlignItem::Identifier);
         if align {
             self.align_start(align_kind::IDENTIFIER);
         }
@@ -357,8 +393,7 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'Number'
     fn number(&mut self, arg: &Number) {
-        let attrs = attribute_table::get(&arg.token());
-        let align = !self.align_any() && attrs.iter().any(|x| x.is_align(AlignItem::Number));
+        let align = !self.align_any() && attribute_table::is_align(&arg.token(), AlignItem::Number);
         if align {
             self.align_start(align_kind::NUMBER);
         }
@@ -534,24 +569,24 @@ impl VerylWalker for Formatter {
             }
             Factor::LBraceConcatenationListRBrace(x) => {
                 if x.l_brace.line() != x.r_brace.line() {
-                    self.multi_line.push(());
+                    self.multi_line_start();
                 }
                 self.l_brace(&x.l_brace);
                 self.concatenation_list(&x.concatenation_list);
                 self.r_brace(&x.r_brace);
                 if x.l_brace.line() != x.r_brace.line() {
-                    self.multi_line.pop();
+                    self.multi_line_finish();
                 }
             }
             Factor::QuoteLBraceArrayLiteralListRBrace(x) => {
                 if x.quote_l_brace.line() != x.r_brace.line() {
-                    self.multi_line.push(());
+                    self.multi_line_start();
                 }
                 self.quote_l_brace(&x.quote_l_brace);
                 self.array_literal_list(&x.array_literal_list);
                 self.r_brace(&x.r_brace);
                 if x.quote_l_brace.line() != x.r_brace.line() {
-                    self.multi_line.pop();
+                    self.multi_line_finish();
                 }
             }
             Factor::IfExpression(x) => {
@@ -610,7 +645,7 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'ConcatenationList'
     fn concatenation_list(&mut self, arg: &ConcatenationList) {
-        if !self.multi_line.is_empty() {
+        if self.multi_line() {
             self.newline_push();
         }
         self.concatenation_item(&arg.concatenation_item);
@@ -626,7 +661,7 @@ impl VerylWalker for Formatter {
         if let Some(ref x) = arg.concatenation_list_opt {
             self.comma(&x.comma);
         }
-        if !self.multi_line.is_empty() {
+        if self.multi_line() {
             self.newline_pop();
         }
     }
@@ -644,7 +679,7 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'ArrayLiteralList'
     fn array_literal_list(&mut self, arg: &ArrayLiteralList) {
-        if !self.multi_line.is_empty() {
+        if self.multi_line() {
             self.newline_push();
         }
         self.array_literal_item(&arg.array_literal_item);
@@ -660,7 +695,7 @@ impl VerylWalker for Formatter {
         if let Some(ref x) = arg.array_literal_list_opt {
             self.comma(&x.comma);
         }
-        if !self.multi_line.is_empty() {
+        if self.multi_line() {
             self.newline_pop();
         }
     }
@@ -690,31 +725,26 @@ impl VerylWalker for Formatter {
     fn if_expression(&mut self, arg: &IfExpression) {
         self.measure_start();
 
+        let compact = attribute_table::is_format(&arg.token(), FormatItem::Compact);
         let single_line = if self.mode == Mode::Emit {
             let width = self.measure_get(&arg.token()).unwrap();
-            width < self.format_opt.max_width as u32
+            (width < self.format_opt.max_width as u32) || compact
         } else {
             // calc line width as single_line in Align mode
             true
         };
+        if single_line {
+            self.single_line_start();
+        }
 
         self.r#if(&arg.r#if);
         self.space(1);
         self.expression(&arg.expression);
         self.space(1);
-        if single_line {
-            self.l_brace(&arg.l_brace);
-            self.space(1);
-        } else {
-            self.token_will_push(&arg.l_brace.l_brace_token);
-            self.newline_push();
-        }
+        self.token_will_push(&arg.l_brace.l_brace_token);
+        self.newline_push();
         self.expression(&arg.expression0);
-        if single_line {
-            self.space(1);
-        } else {
-            self.newline_pop();
-        }
+        self.newline_pop();
         self.r_brace(&arg.r_brace);
         for x in &arg.if_expression_list {
             self.space(1);
@@ -724,40 +754,25 @@ impl VerylWalker for Formatter {
             self.space(1);
             self.expression(&x.expression);
             self.space(1);
-            if single_line {
-                self.l_brace(&x.l_brace);
-                self.space(1);
-            } else {
-                self.token_will_push(&x.l_brace.l_brace_token);
-                self.newline_push();
-            }
+            self.token_will_push(&x.l_brace.l_brace_token);
+            self.newline_push();
             self.expression(&x.expression0);
-            if single_line {
-                self.space(1);
-            } else {
-                self.newline_pop();
-            }
+            self.newline_pop();
             self.r_brace(&x.r_brace);
         }
         self.space(1);
         self.r#else(&arg.r#else);
         self.space(1);
-        if single_line {
-            self.l_brace(&arg.l_brace0);
-            self.space(1);
-        } else {
-            self.token_will_push(&arg.l_brace0.l_brace_token);
-            self.newline_push();
-        }
+        self.token_will_push(&arg.l_brace0.l_brace_token);
+        self.newline_push();
         self.expression(&arg.expression1);
-        if single_line {
-            self.space(1);
-        } else {
-            self.newline_pop();
-        }
+        self.newline_pop();
         self.r_brace(&arg.r_brace0);
 
         self.measure_finish(&arg.token());
+        if single_line {
+            self.single_line_finish();
+        }
     }
 
     /// Semantic action for non-terminal 'CaseExpression'
@@ -1658,35 +1673,41 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'InstDeclaration'
     fn inst_declaration(&mut self, arg: &InstDeclaration) {
-        self.single_line = arg.inst_declaration_opt2.is_none();
+        let compact = attribute_table::is_format(&arg.identifier.token(), FormatItem::Compact);
+        let single_line = arg.inst_declaration_opt2.is_none() || compact;
+
         self.inst(&arg.inst);
         self.space(1);
-        if self.single_line {
+        if single_line {
+            self.single_line_start();
+        }
+        if self.single_line() {
             self.align_start(align_kind::IDENTIFIER);
         }
         self.identifier(&arg.identifier);
-        if self.single_line {
+        if self.single_line() {
             self.align_finish(align_kind::IDENTIFIER);
         }
         self.colon(&arg.colon);
         self.space(1);
         if let Some(ref x) = arg.inst_declaration_opt {
-            if self.single_line {
+            if self.single_line() {
                 self.align_start(align_kind::CLOCK_DOMAIN);
             }
             self.clock_domain(&x.clock_domain);
             self.space(1);
-            if self.single_line {
+            if self.single_line() {
                 self.align_finish(align_kind::CLOCK_DOMAIN);
             }
-        } else if self.single_line {
+        } else if self.single_line() {
             self.align_start(align_kind::CLOCK_DOMAIN);
             self.align_dummy_token(align_kind::CLOCK_DOMAIN, &arg.colon.colon_token);
             self.align_finish(align_kind::CLOCK_DOMAIN);
         }
         self.scoped_identifier(&arg.scoped_identifier);
         // skip align at single line
-        if self.mode == Mode::Align && self.single_line {
+        if self.mode == Mode::Align && self.single_line() {
+            self.single_line_finish();
             return;
         }
         if let Some(ref x) = arg.inst_declaration_opt0 {
@@ -1708,24 +1729,20 @@ impl VerylWalker for Formatter {
             self.r_paren(&x.r_paren);
         }
         self.semicolon(&arg.semicolon);
-        self.single_line = false;
+        if single_line {
+            self.single_line_finish();
+        }
     }
 
     /// Semantic action for non-terminal 'InstParameter'
     fn inst_parameter(&mut self, arg: &InstParameter) {
         self.hash(&arg.hash);
-        if self.single_line {
-            self.l_paren(&arg.l_paren);
-        } else {
-            self.token_will_push(&arg.l_paren.l_paren_token);
-            self.newline_push();
-        }
+        self.token_will_push(&arg.l_paren.l_paren_token);
+        self.newline_push();
         if let Some(ref x) = arg.inst_parameter_opt {
             self.inst_parameter_list(&x.inst_parameter_list);
         }
-        if !self.single_line {
-            self.newline_pop();
-        }
+        self.newline_pop();
         self.r_paren(&arg.r_paren);
     }
 
@@ -1734,17 +1751,16 @@ impl VerylWalker for Formatter {
         self.inst_parameter_group(&arg.inst_parameter_group);
         for x in &arg.inst_parameter_list_list {
             self.comma(&x.comma);
-            if self.single_line {
-                self.space(1);
-            } else {
-                self.newline();
-            }
+            self.newline();
             self.inst_parameter_group(&x.inst_parameter_group);
         }
-        if let Some(ref x) = arg.inst_parameter_list_opt {
-            self.comma(&x.comma);
-        } else {
-            self.str(",");
+        // Omit trailing comma at single_line
+        if !self.single_line() {
+            if let Some(ref x) = arg.inst_parameter_list_opt {
+                self.comma(&x.comma);
+            } else {
+                self.str(",");
+            }
         }
     }
 
@@ -1795,10 +1811,13 @@ impl VerylWalker for Formatter {
             self.newline();
             self.inst_port_group(&x.inst_port_group);
         }
-        if let Some(ref x) = arg.inst_port_list_opt {
-            self.comma(&x.comma);
-        } else {
-            self.str(",");
+        // Omit trailing comma at single_line
+        if !self.single_line() {
+            if let Some(ref x) = arg.inst_port_list_opt {
+                self.comma(&x.comma);
+            } else {
+                self.str(",");
+            }
         }
     }
 

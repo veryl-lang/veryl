@@ -22,8 +22,8 @@ module Module14 {
     inst y: InterfaceA;
 
     // interface instantiation with parameter
-    inst yy : InterfaceA #(a, b: 10,);
-    inst xxx: InterfaceA #(a, b: 10,);
+    inst yy : InterfaceA #( a, b: 10 );
+    inst xxx: InterfaceA #( a, b: 10 );
 
     // interface array
     inst yyy: InterfaceA [10];

@@ -14,11 +14,20 @@ pub enum Attribute {
     Test(Token, Option<StrId>),
     CondType(CondTypeItem),
     Align(Vec<AlignItem>),
+    Format(Vec<FormatItem>),
 }
 
 impl Attribute {
     pub fn is_align(&self, item: AlignItem) -> bool {
         if let Attribute::Align(x) = self {
+            x.contains(&item)
+        } else {
+            false
+        }
+    }
+
+    pub fn is_format(&self, item: FormatItem) -> bool {
+        if let Attribute::Format(x) = self {
             x.contains(&item)
         } else {
             false
@@ -44,6 +53,13 @@ impl fmt::Display for Attribute {
                 }
                 format!("align({})", arg)
             }
+            Attribute::Format(x) => {
+                let mut arg = String::new();
+                for x in x {
+                    arg.push_str(&format!("{}, ", x));
+                }
+                format!("format({})", arg)
+            }
         };
         text.fmt(f)
     }
@@ -53,10 +69,6 @@ impl fmt::Display for Attribute {
 pub enum AttributeError {
     UnknownAttribute,
     MismatchArgs(&'static str),
-    InvalidAllow(StrId),
-    InvalidEnumEncoding(StrId),
-    InvalidCondType(StrId),
-    InvalidAlign(StrId),
 }
 
 fn get_arg_ident(
@@ -137,6 +149,8 @@ struct Pattern {
     pub align: StrId,
     pub number: StrId,
     pub identifier: StrId,
+    pub fmt: StrId,
+    pub compact: StrId,
 }
 
 impl Pattern {
@@ -163,6 +177,8 @@ impl Pattern {
             align: resource_table::insert_str("align"),
             number: resource_table::insert_str("number"),
             identifier: resource_table::insert_str("identifier"),
+            fmt: resource_table::insert_str("fmt"),
+            compact: resource_table::insert_str("compact"),
         }
     }
 }
@@ -199,6 +215,10 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
             x if x == pat.allow => {
                 let arg = get_arg_ident(&value.attribute_opt, 0);
 
+                let err = AttributeError::MismatchArgs(
+                    "rule: (missing_port|missing_reset_statement|unused_variable)",
+                );
+
                 if let Some(arg) = arg {
                     match arg.text {
                         x if x == pat.missing_port => Ok(Attribute::Allow(AllowItem::MissingPort)),
@@ -208,14 +228,16 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                         x if x == pat.unused_variable => {
                             Ok(Attribute::Allow(AllowItem::UnusedVariable))
                         }
-                        _ => Err(AttributeError::InvalidAllow(arg.text)),
+                        _ => Err(err),
                     }
                 } else {
-                    Err(AttributeError::MismatchArgs("allowable rule"))
+                    Err(err)
                 }
             }
             x if x == pat.enum_encoding => {
                 let arg = get_arg_ident(&value.attribute_opt, 0);
+
+                let err = AttributeError::MismatchArgs("encoding type: (sequential|onehot|gray)");
 
                 if let Some(arg) = arg {
                     match arg.text {
@@ -226,10 +248,10 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                             Ok(Attribute::EnumEncoding(EnumEncodingItem::OneHot))
                         }
                         x if x == pat.gray => Ok(Attribute::EnumEncoding(EnumEncodingItem::Gray)),
-                        _ => Err(AttributeError::InvalidEnumEncoding(arg.text)),
+                        _ => Err(err),
                     }
                 } else {
-                    Err(AttributeError::MismatchArgs("enum encoding rule"))
+                    Err(err)
                 }
             }
             x if x == pat.enum_member_prefix => {
@@ -254,34 +276,58 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
             x if x == pat.cond_type => {
                 let arg = get_arg_ident(&value.attribute_opt, 0);
 
+                let err =
+                    AttributeError::MismatchArgs("condition type: (unique|unique0|priority|none)");
+
                 if let Some(arg) = arg {
                     match arg.text {
                         x if x == pat.unique => Ok(Attribute::CondType(CondTypeItem::Unique)),
                         x if x == pat.unique0 => Ok(Attribute::CondType(CondTypeItem::Unique0)),
                         x if x == pat.priority => Ok(Attribute::CondType(CondTypeItem::Priority)),
                         x if x == pat.none => Ok(Attribute::CondType(CondTypeItem::None)),
-                        _ => Err(AttributeError::InvalidCondType(arg.text)),
+                        _ => Err(err),
                     }
                 } else {
-                    Err(AttributeError::MismatchArgs("condition type"))
+                    Err(err)
                 }
             }
             x if x == pat.align => {
                 let args = get_args_ident(&value.attribute_opt);
                 let mut items = Vec::new();
 
+                let err = AttributeError::MismatchArgs("align type: (number|identifier)");
+
                 for arg in &args {
                     match arg.text {
                         x if x == pat.number => items.push(AlignItem::Number),
                         x if x == pat.identifier => items.push(AlignItem::Identifier),
-                        _ => return Err(AttributeError::InvalidAlign(arg.text)),
+                        _ => return Err(err),
                     }
                 }
 
                 if args.is_empty() {
-                    Err(AttributeError::MismatchArgs("align type"))
+                    Err(err)
                 } else {
                     Ok(Attribute::Align(items))
+                }
+            }
+            x if x == pat.fmt => {
+                let args = get_args_ident(&value.attribute_opt);
+                let mut items = Vec::new();
+
+                let err = AttributeError::MismatchArgs("format type: (compact)");
+
+                for arg in &args {
+                    match arg.text {
+                        x if x == pat.compact => items.push(FormatItem::Compact),
+                        _ => return Err(err),
+                    }
+                }
+
+                if args.is_empty() {
+                    Err(err)
+                } else {
+                    Ok(Attribute::Format(items))
                 }
             }
             _ => Err(AttributeError::UnknownAttribute),
@@ -357,6 +403,20 @@ impl fmt::Display for AlignItem {
         let text = match self {
             AlignItem::Number => "number",
             AlignItem::Identifier => "identifier",
+        };
+        text.fmt(f)
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum FormatItem {
+    Compact,
+}
+
+impl fmt::Display for FormatItem {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let text = match self {
+            FormatItem::Compact => "compact",
         };
         text.fmt(f)
     }

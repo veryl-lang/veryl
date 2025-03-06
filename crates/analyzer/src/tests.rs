@@ -487,19 +487,6 @@ fn multiple_assignment() {
 }
 
 #[test]
-fn invalid_allow() {
-    let code = r#"
-    module ModuleA {
-        #[allow(dummy_name)]
-        var a: logic;
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidAllow { .. }));
-}
-
-#[test]
 fn invalid_assignment() {
     let code = r#"
     module ModuleA (
@@ -1015,6 +1002,19 @@ fn mismatch_attribute_args() {
     module ModuleA {
         #[sv]
         const a: u32 = 1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAttributeArgs { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        #[allow(dummy_name)]
+        var a: logic;
     }
     "#;
 
