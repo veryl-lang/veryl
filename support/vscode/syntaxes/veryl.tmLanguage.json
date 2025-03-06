@@ -42,7 +42,7 @@
 				},
 				{
 					"name": "storage.modifier.veryl",
-					"match": "\\b(tri|signed|input|output|inout|ref)\\b"
+					"match": "\\b(tri|signed|input|output|inout|ref|converse)\\b"
 				}
 			]
 		},
