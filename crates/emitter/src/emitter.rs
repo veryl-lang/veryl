@@ -4067,7 +4067,8 @@ impl VerylWalker for Emitter {
                 self.package_declaration(&x.package_declaration)
             }
             // proto is not emitted at SystemVerilog
-            PublicDescriptionItem::ProtoModuleDeclaration(_) => (),
+            PublicDescriptionItem::ProtoModuleDeclaration(_)
+            | PublicDescriptionItem::ProtoPackageDeclaration(_) => (),
         };
     }
 
@@ -4264,7 +4265,9 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
             }
             ret.push_str(&token_text);
         }
-        SymbolKind::GenericParameter(_) | SymbolKind::ProtoModule(_) => (),
+        SymbolKind::GenericParameter(_)
+        | SymbolKind::ProtoModule(_)
+        | SymbolKind::ProtoPackage(_) => (),
         SymbolKind::Port(x) => {
             if let Some(ref x) = x.prefix {
                 ret.push_str(x);
@@ -4287,6 +4290,9 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
         | SymbolKind::Block
         | SymbolKind::StructMember(_)
         | SymbolKind::UnionMember(_)
+        | SymbolKind::ProtoConst(_)
+        | SymbolKind::ProtoTypeDef
+        | SymbolKind::ProtoFunction(_)
         | SymbolKind::ModportVariableMember(_)
         | SymbolKind::ModportFunctionMember(_)
         | SymbolKind::Genvar

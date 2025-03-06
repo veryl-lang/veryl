@@ -230,7 +230,8 @@ impl SymbolTable {
                         }
                         SymbolKind::Module(_)
                         | SymbolKind::Interface(_)
-                        | SymbolKind::Package(_) => {
+                        | SymbolKind::Package(_)
+                        | SymbolKind::ProtoPackage(_) => {
                             if context.other_prj & !found.public {
                                 return Err(ResolveError::new(
                                     context.last_found,
@@ -278,9 +279,12 @@ impl SymbolTable {
                         }
                         // don't trace inner item
                         SymbolKind::Function(_)
+                        | SymbolKind::ProtoFunction(_)
                         | SymbolKind::ProtoModule(_)
                         | SymbolKind::Struct(_)
                         | SymbolKind::Union(_)
+                        | SymbolKind::ProtoConst(_)
+                        | SymbolKind::ProtoTypeDef
                         | SymbolKind::Modport(_)
                         | SymbolKind::ModportFunctionMember(_)
                         | SymbolKind::EnumMember(_)
@@ -433,22 +437,38 @@ impl SymbolTable {
         for import in import_list {
             if let Ok(symbol) = self.resolve(&import.path.0, &import.path.1) {
                 let symbol = symbol.found;
-                match symbol.kind {
-                    SymbolKind::Package(_) if import.wildcard => {
-                        let mut target = symbol.namespace.clone();
-                        target.push(symbol.token.text);
-
+                if import.wildcard {
+                    if let Some(pkg) = self.get_package(&symbol, false) {
+                        let mut target = pkg.namespace.clone();
+                        target.push(pkg.token.text);
                         self.add_imported_package(&target, &import.namespace);
                     }
-                    SymbolKind::SystemVerilog => (),
-                    // Error will be reported at create_reference
-                    _ if import.wildcard => (),
-                    _ => {
-                        self.add_imported_item(symbol.token.id, &import.namespace);
-                    }
+                } else if !matches!(symbol.kind, SymbolKind::SystemVerilog) {
+                    self.add_imported_item(symbol.token.id, &import.namespace);
                 }
             }
         }
+    }
+
+    fn get_package(&self, symbol: &Symbol, include_proto: bool) -> Option<Symbol> {
+        match &symbol.kind {
+            SymbolKind::Package(_) => return Some(symbol.clone()),
+            SymbolKind::ProtoPackage(_) if include_proto => return Some(symbol.clone()),
+            SymbolKind::GenericInstance(x) => {
+                let symbol = self.get(x.base).unwrap();
+                return self.get_package(&symbol, false);
+            }
+            SymbolKind::GenericParameter(x) => {
+                if let GenericBoundKind::Proto(proto) = &x.bound {
+                    if let Ok(symbol) = self.resolve(proto, &symbol.namespace) {
+                        return self.get_package(&symbol.found, true);
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        None
     }
 
     pub fn get_user_defined(&self) -> Vec<(SymbolId, SymbolId)> {

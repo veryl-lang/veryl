@@ -16,11 +16,12 @@ use crate::symbol::{
     EnumProperty, FunctionProperty, GenericBoundKind, GenericParameterProperty, InstanceProperty,
     InterfaceProperty, ModportFunctionMemberProperty, ModportProperty,
     ModportVariableMemberProperty, ModuleProperty, PackageProperty, Parameter, ParameterKind,
-    ParameterProperty, Port, PortProperty, ProtoModuleProperty, StructMemberProperty,
-    StructProperty, Symbol, SymbolId, SymbolKind, TestProperty, TestType, TypeDefProperty,
-    TypeKind, UnionMemberProperty, UnionProperty, VariableAffiliation, VariableProperty,
+    ParameterProperty, Port, PortProperty, ProtoConstProperty, ProtoModuleProperty,
+    ProtoPackageProperty, StructMemberProperty, StructProperty, Symbol, SymbolId, SymbolKind,
+    TestProperty, TestType, TypeDefProperty, TypeKind, UnionMemberProperty, UnionProperty,
+    VariableAffiliation, VariableProperty,
 };
-use crate::symbol_path::{GenericSymbolPath, SymbolPath, SymbolPathNamespace};
+use crate::symbol_path::{GenericSymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
 use crate::symbol_table::Import as SymImport;
 use std::collections::{HashMap, HashSet};
@@ -79,6 +80,7 @@ pub struct CreateSymbolTable {
     enum_member_value: Option<EnumMemberValue>,
     enum_members: Vec<Option<SymbolId>>,
     struct_union_members: Vec<Option<SymbolId>>,
+    package_members: Vec<SymbolId>,
     affiliation: Vec<VariableAffiliation>,
     connect_target_identifiers: Vec<ConnectTargetIdentifier>,
     connects: HashMap<Token, ConnectTarget>,
@@ -94,7 +96,6 @@ pub struct CreateSymbolTable {
     function_ids: HashMap<StrId, SymbolId>,
     exist_clock_without_domain: bool,
     in_proto: bool,
-    in_generic_bound: bool,
     file_scope_import_item: Vec<SymbolPathNamespace>,
     file_scope_import_wildcard: Vec<SymbolPathNamespace>,
     is_public: bool,
@@ -431,6 +432,12 @@ impl CreateSymbolTable {
 
         ret
     }
+
+    fn push_package_member(&mut self, id: SymbolId) {
+        if let Some(&VariableAffiliation::Package) = self.affiliation.last() {
+            self.package_members.push(id);
+        }
+    }
 }
 
 impl Handler for CreateSymbolTable {
@@ -480,7 +487,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                reference_table::add((arg, self.in_generic_bound).into());
+                reference_table::add(arg.into());
 
                 // Add symbols under $sv namespace
                 if let ScopedIdentifierGroup::DollarIdentifier(x) =
@@ -722,7 +729,9 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 }
             };
             let kind = SymbolKind::Parameter(property);
-            self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
+            if let Some(id) = self.insert_symbol(&token, kind, false) {
+                self.push_package_member(id);
+            }
         }
         Ok(())
     }
@@ -859,7 +868,11 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     encoding: self.enum_encoding,
                 };
                 let kind = SymbolKind::Enum(property);
-                self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
+                if let Some(id) =
+                    self.insert_symbol(&arg.identifier.identifier_token.token, kind, false)
+                {
+                    self.push_package_member(id);
+                }
             }
         }
         Ok(())
@@ -936,7 +949,11 @@ impl VerylGrammarTrait for CreateSymbolTable {
                         SymbolKind::Union(property)
                     }
                 };
-                self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
+                if let Some(id) =
+                    self.insert_symbol(&arg.identifier.identifier_token.token, kind, false)
+                {
+                    self.push_package_member(id);
+                }
             }
         }
         Ok(())
@@ -947,7 +964,11 @@ impl VerylGrammarTrait for CreateSymbolTable {
             let r#type = arg.array_type.as_ref().into();
             let property = TypeDefProperty { r#type };
             let kind = SymbolKind::TypeDef(property);
-            self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
+            if let Some(id) =
+                self.insert_symbol(&arg.identifier.identifier_token.token, kind, false)
+            {
+                self.push_package_member(id);
+            }
         }
         Ok(())
     }
@@ -1072,14 +1093,6 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 };
                 self.parameters.last_mut().unwrap().push(parameter);
             }
-        }
-        Ok(())
-    }
-
-    fn generic_bound(&mut self, _arg: &GenericBound) -> Result<(), ParolError> {
-        match self.point {
-            HandlerPoint::Before => self.in_generic_bound = true,
-            HandlerPoint::After => self.in_generic_bound = false,
         }
         Ok(())
     }
@@ -1279,6 +1292,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 ) {
                     self.function_ids
                         .insert(arg.identifier.identifier_token.token.text, id);
+                    self.push_package_member(id);
                 }
             }
         }
@@ -1287,8 +1301,8 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
     fn import_declaration(&mut self, arg: &ImportDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let path: SymbolPath = arg.scoped_identifier.as_ref().into();
-            let path: SymbolPathNamespace = (&path, &self.namespace).into();
+            let path: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
+            let path: SymbolPathNamespace = (&path.generic_path(), &self.namespace).into();
             let namespace = path.1.clone();
             let wildcard = arg.import_declaration_opt.is_some();
 
@@ -1550,11 +1564,17 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 let (generic_parameters, generic_references) = self.generic_context.pop();
 
                 let range = TokenRange::new(&arg.package.package_token, &arg.r_brace.r_brace_token);
+                let proto = arg
+                    .package_declaration_opt0
+                    .as_ref()
+                    .map(|x| x.scoped_identifier.as_ref().into());
 
                 let property = PackageProperty {
                     range,
+                    proto,
                     generic_parameters,
                     generic_references,
+                    members: self.package_members.drain(..).collect(),
                 };
                 self.insert_symbol(
                     &arg.identifier.identifier_token.token,
@@ -1597,6 +1617,123 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     SymbolKind::ProtoModule(property),
                     self.is_public,
                 );
+            }
+        }
+        Ok(())
+    }
+
+    fn proto_package_declaration(
+        &mut self,
+        arg: &ProtoPackageDeclaration,
+    ) -> Result<(), ParolError> {
+        let name = arg.identifier.identifier_token.token.text;
+        match self.point {
+            HandlerPoint::Before => {
+                self.namespace.push(name);
+                self.affiliation.push(VariableAffiliation::Package);
+                self.function_ids.clear();
+                self.apply_file_scope_import();
+            }
+            HandlerPoint::After => {
+                self.namespace.pop();
+                self.affiliation.pop();
+
+                let range = TokenRange::new(&arg.proto.proto_token, &arg.r_brace.r_brace_token);
+                let property = ProtoPackageProperty {
+                    range,
+                    members: self.package_members.drain(..).collect(),
+                };
+                self.insert_symbol(
+                    &arg.identifier.identifier_token.token,
+                    SymbolKind::ProtoPackage(property),
+                    self.is_public,
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    fn proto_const_declaration(&mut self, arg: &ProtoConstDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            let token = arg.identifier.identifier_token.token;
+            let r#type = match &*arg.proto_const_declaration_group {
+                ProtoConstDeclarationGroup::ArrayType(x) => x.array_type.as_ref().into(),
+                ProtoConstDeclarationGroup::Type(_) => SymType {
+                    modifier: vec![],
+                    kind: TypeKind::Type,
+                    width: vec![],
+                    array: vec![],
+                    is_const: false,
+                },
+            };
+            let property = ProtoConstProperty { token, r#type };
+            let kind = SymbolKind::ProtoConst(property);
+            if let Some(id) = self.insert_symbol(&token, kind, false) {
+                self.push_package_member(id);
+            }
+        }
+        Ok(())
+    }
+
+    fn proto_type_def_declaration(
+        &mut self,
+        arg: &ProtoTypeDefDeclaration,
+    ) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            let token = arg.identifier.identifier_token.token;
+            let kind = SymbolKind::ProtoTypeDef;
+            if let Some(id) = self.insert_symbol(&token, kind, false) {
+                self.push_package_member(id);
+            }
+        }
+        Ok(())
+    }
+
+    fn proto_function_declaration(
+        &mut self,
+        arg: &ProtoFunctionDeclaration,
+    ) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                let name = arg.identifier.identifier_token.token.text;
+                self.namespace.push(name);
+                self.generic_context.push();
+                self.ports.push(Vec::new());
+                self.affiliation.push(VariableAffiliation::Function);
+            }
+            HandlerPoint::After => {
+                self.namespace.pop();
+                self.affiliation.pop();
+
+                let (generic_parameters, generic_references) = self.generic_context.pop();
+                let ports: Vec<_> = self.ports.pop().unwrap();
+
+                let ret = arg
+                    .proto_function_declaration_opt1
+                    .as_ref()
+                    .map(|x| (&*x.scalar_type).into());
+
+                let range =
+                    TokenRange::new(&arg.function.function_token, &arg.semicolon.semicolon_token);
+
+                let property = FunctionProperty {
+                    range,
+                    generic_parameters,
+                    generic_references,
+                    ports,
+                    ret,
+                };
+
+                if let Some(id) = self.insert_symbol(
+                    &arg.identifier.identifier_token.token,
+                    SymbolKind::ProtoFunction(property),
+                    false,
+                ) {
+                    self.function_ids
+                        .insert(arg.identifier.identifier_token.token.text, id);
+                    self.push_package_member(id);
+                }
             }
         }
         Ok(())

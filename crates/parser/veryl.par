@@ -842,7 +842,7 @@ GenerateItem: LetDeclaration
 // Package
 // ----------------------------------------------------------------------------
 
-PackageDeclaration: Package Identifier [ WithGenericParameter ] LBrace { PackageGroup } RBrace;
+PackageDeclaration: Package Identifier [ WithGenericParameter ] [ For ScopedIdentifier ] LBrace { PackageGroup } RBrace;
 
 PackageGroup: { Attribute } ( LBrace { PackageGroup } RBrace | PackageItem );
 
@@ -860,6 +860,22 @@ PackageItem: ConstDeclaration
 // ----------------------------------------------------------------------------
 
 ProtoModuleDeclaration: Proto Module Identifier [ WithParameter ] [ PortDeclaration ] Semicolon;
+
+ProtoPackageDeclaration: Proto Package Identifier LBrace { ProtoPacakgeItem } RBrace;
+
+ProtoPacakgeItem: ProtoConstDeclaration
+                | ProtoTypeDefDeclaration
+                | EnumDeclaration
+                | StructUnionDeclaration
+                | ProtoFunctionDeclaration
+                | ImportDeclaration
+                ;
+
+ProtoConstDeclaration: Const Identifier Colon ( ArrayType | Type ) Semicolon;
+
+ProtoTypeDefDeclaration: Type Identifier Semicolon;
+
+ProtoFunctionDeclaration: Function Identifier [ WithGenericParameter ] [ PortDeclaration ] [ MinusGT ScalarType ] Semicolon;
 
 // ----------------------------------------------------------------------------
 // Embed
@@ -896,7 +912,8 @@ PublicDescriptionItem: ModuleDeclaration
                      | InterfaceDeclaration
                      | PackageDeclaration
                      | ProtoModuleDeclaration
-                     ; 
+                     | ProtoPackageDeclaration
+                     ;
 
 // ----------------------------------------------------------------------------
 // SourceCode

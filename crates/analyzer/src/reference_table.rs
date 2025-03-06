@@ -20,7 +20,6 @@ pub enum ReferenceCandidate {
     ScopedIdentifier {
         arg: ScopedIdentifier,
         namespace: Namespace,
-        is_generic_bound: bool,
     },
     ExpressionIdentifier {
         arg: ExpressionIdentifier,
@@ -45,12 +44,11 @@ impl From<&HierarchicalIdentifier> for ReferenceCandidate {
     }
 }
 
-impl From<(&ScopedIdentifier, bool)> for ReferenceCandidate {
-    fn from(value: (&ScopedIdentifier, bool)) -> Self {
+impl From<&ScopedIdentifier> for ReferenceCandidate {
+    fn from(value: &ScopedIdentifier) -> Self {
         Self::ScopedIdentifier {
-            arg: value.0.clone(),
+            arg: value.clone(),
             namespace: namespace_table::get_default(),
-            is_generic_bound: value.1,
         }
     }
 }
@@ -178,17 +176,20 @@ impl ReferenceTable {
         &mut self,
         path: &GenericSymbolPath,
         namespace: &Namespace,
-        is_generic_bound: bool,
         generics_token: Option<Token>,
     ) {
         if path.is_generic_reference() {
             return;
         }
 
+        let orig_len = path.len();
         let mut path = path.clone();
         path.resolve_imported(namespace);
 
-        for i in 0..path.len() {
+        // Prefix paths added by `resolve_imported` have already been resolved.
+        // They should be skipped.
+        let prefix_len = path.len() - orig_len;
+        for i in prefix_len..path.len() {
             let base_path = path.base_path(i);
 
             match symbol_table::resolve((&base_path, namespace)) {
@@ -197,14 +198,6 @@ impl ReferenceTable {
                     symbol_table::add_reference(symbol.found.id, &path.paths[0].base);
 
                     // Check number of arguments
-                    if is_generic_bound {
-                        if !path.paths[i].arguments.is_empty() {
-                            self.errors
-                                .push(AnalyzerError::invalid_generic_instance(&path.range));
-                        }
-                        continue;
-                    }
-
                     let params = symbol.found.generic_parameters();
                     let n_args = path.paths[i].arguments.len();
                     let match_artiy = if params.len() > n_args {
@@ -247,7 +240,6 @@ impl ReferenceTable {
                             self.generic_symbol_path(
                                 path,
                                 &symbol.found.inner_namespace(),
-                                is_generic_bound,
                                 Some(symbol.found.token),
                             );
                         }
@@ -294,18 +286,14 @@ impl ReferenceTable {
                         }
                     }
                 }
-                ReferenceCandidate::ScopedIdentifier {
-                    arg,
-                    namespace,
-                    is_generic_bound,
-                } => {
+                ReferenceCandidate::ScopedIdentifier { arg, namespace } => {
                     namespace_table::set_default(&namespace.paths);
 
                     let ident = arg.identifier().token;
                     let path: GenericSymbolPath = arg.into();
                     let namespace = namespace_table::get(ident.id).unwrap();
 
-                    self.generic_symbol_path(&path, &namespace, *is_generic_bound, None);
+                    self.generic_symbol_path(&path, &namespace, None);
                 }
                 ReferenceCandidate::ExpressionIdentifier { arg, namespace } => {
                     namespace_table::set_default(&namespace.paths);

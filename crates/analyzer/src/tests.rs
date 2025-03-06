@@ -610,6 +610,30 @@ fn invalid_import() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidImport { .. }));
+
+    let code = r#"
+    proto package Pkg {}
+    module ModuleA {
+        import Pkg::*;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidImport { .. }));
+
+    let code = r#"
+    proto package Pkg {
+        enum FOO {
+            BAR
+        }
+    }
+    module ModuleA {
+        import Pkg::FOO;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidImport { .. }));
 }
 
 #[test]
@@ -918,31 +942,6 @@ fn missing_default_generic_argument() {
 }
 
 #[test]
-fn invalid_generic_instance() {
-    let code = r#"
-    package PkgA::<A: const> {}
-    module ModuleB::<PKG: PkgA::<1>> {}
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::InvalidGenericInstance { .. }
-    ));
-
-    let code = r#"
-    module ModuleA::<A: const> {}
-    module ModuleB::<A: inst ModuleA::<1>> {}
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::InvalidGenericInstance { .. }
-    ));
-}
-
-#[test]
 fn mismatch_generics_arity() {
     let code = r#"
     module ModuleA {
@@ -1024,6 +1023,329 @@ fn mismatch_attribute_args() {
         errors[0],
         AnalyzerError::MismatchAttributeArgs { .. }
     ));
+}
+
+#[test]
+fn incompat_proto() {
+    let code = r#"
+    proto package ProtoPkg {
+        const C: u32;
+    }
+    package Pkg for ProtoPkg {
+        const C: u32 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto package ProtoPkg {
+        const C: u32;
+    }
+    package Pkg for ProtoPkg {
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto package ProtoPkg {
+        const C: u32;
+    }
+    package Pkg for ProtoPkg {
+        const C: i32 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto package ProtoPkg {
+        const C: u32;
+    }
+    package Pkg for ProtoPkg {
+        type C = logic;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto package ProtoPkg {
+        type T;
+    }
+    package Pkg for ProtoPkg {
+        type T = logic;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto package ProtoPkg {
+        type T;
+    }
+    package Pkg for ProtoPkg {
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto package ProtoPkg {
+        type T;
+    }
+    package Pkg for ProtoPkg {
+        const T: u32 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto package ProtoPkg {
+        enum E {
+            FOO,
+        }
+    }
+    package Pkg for ProtoPkg {
+        enum E {
+            FOO,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto package ProtoPkg {
+        enum E {
+            FOO
+        }
+    }
+    package Pkg for ProtoPkg {
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto package ProtoPkg {
+        enum E {
+            FOO,
+        }
+    }
+    package Pkg for ProtoPkg {
+        enum E{
+            BAR,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto package ProtoPkg {
+        enum E {
+            FOO
+        }
+    }
+    package Pkg for ProtoPkg {
+        const E: u32 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto package ProtoPkg {
+        struct S {
+            foo: logic,
+        }
+    }
+    package Pkg for ProtoPkg {
+        struct S {
+            foo: logic,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto package ProtoPkg {
+        struct S {
+            foo: logic,
+        }
+    }
+    package Pkg for ProtoPkg {
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto package ProtoPkg {
+        struct S {
+            foo: logic,
+        }
+    }
+    package Pkg for ProtoPkg {
+        struct S {
+            bar: logic,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto package ProtoPkg {
+        struct S {
+            foo: logic,
+        }
+    }
+    package Pkg for ProtoPkg {
+        const S: u32 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto package ProtoPkg {
+        union U {
+            foo: logic,
+        }
+    }
+    package Pkg for ProtoPkg {
+        union U {
+            foo: logic,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto package ProtoPkg {
+        union U {
+            foo: logic,
+        }
+    }
+    package Pkg for ProtoPkg {
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto package ProtoPkg {
+        union U {
+            foo: logic,
+        }
+    }
+    package Pkg for ProtoPkg {
+        union U {
+            bar: logic,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto package ProtoPkg {
+        union U {
+            foo: logic,
+        }
+    }
+    package Pkg for ProtoPkg {
+        const U: u32 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto package ProtoPkg {
+        function F(
+            a: input logic,
+        ) -> logic;
+    }
+    package Pkg for ProtoPkg {
+        function F(
+            a: input logic,
+        ) -> logic {
+            return a;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto package ProtoPkg {
+        function F(
+            a: input logic,
+        ) -> logic;
+    }
+    package Pkg for ProtoPkg {
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto package ProtoPkg {
+        function F(
+            a: input logic,
+        ) -> logic;
+    }
+    package Pkg for ProtoPkg {
+        function F(
+            a: input logic,
+        ){}
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto package ProtoPkg {
+        function F(
+            a: input logic,
+        ) -> logic;
+    }
+    package Pkg for ProtoPkg {
+        const F: u32 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
 }
 
 #[test]
@@ -1335,9 +1657,11 @@ fn mismatch_type() {
     assert!(errors.is_empty());
 
     let code = r#"
-    package PkgA {}
-    package PkgB {}
-    module ModuleA::<PKG: PkgA> {}
+    proto package ProtoPkgA {}
+    package PkgA for ProtoPkgA {}
+    proto package ProtoPkgB {}
+    package PkgB for ProtoPkgB {}
+    module ModuleA::<PKG: ProtoPkgA> {}
     module ModuleB {
         inst u: ModuleA::<PkgB>;
     }
@@ -1347,9 +1671,10 @@ fn mismatch_type() {
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
-    package Pkg {}
-    module ModuleA::<PKG: Pkg> {
-        inst u: Pkg;
+    proto package ProtoPkg {}
+    package Pkg for ProtoPkg {}
+    module ModuleA::<PKG: ProtoPkg> {
+        inst u: PKG;
     }
     module ModuleB {
         inst u: ModuleA::<Pkg>;
@@ -1965,23 +2290,42 @@ fn undefined_identifier() {
         AnalyzerError::UndefinedIdentifier { .. }
     ));
 
-    //let code = r#"
-    //package Pkg::<AW: const, DW: const> {
-    //    type address_t = logic<AW>;
-    //    type data_t    = logic<DW>;
-    //}
-    //module Sub::<pkg: Pkg> {
-    //    import pkg::data_t;
-    //    var _addr:  pkg::address_t;
-    //    var _data:  pkg::data_t;
-    //}
-    //module Top {
-    //    inst u: Sub::<Pkg::<16, 32>>;
-    //}
-    //"#;
+    let code = r#"
+    package Pkg::<AW: const, DW: const> {
+        type address_t = logic<AW>;
+        type data_t    = logic<DW>;
+    }
+    module ModuleA {
+        import Pkg::<16, 32>::*;
+        let _addr:  address_t = 0;
+        let _data:  data_t    = 0;
+    }
+    "#;
 
-    //let errors = analyze(code);
-    //assert!(errors.is_empty());
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto package ProtoPkg {
+        type address_t;
+        type data_t   ;
+    }
+    package Pkg::<AW: const, DW: const> for ProtoPkg {
+        type address_t = logic<AW>;
+        type data_t    = logic<DW>;
+    }
+    module ModuleA::<pkg: ProtoPkg> {
+        import pkg::*;
+        let _addr: address_t = 0;
+        let _data: data_t    = 0;
+    }
+    module ModuleB {
+        inst u: ModuleA::<Pkg::<16, 32>>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

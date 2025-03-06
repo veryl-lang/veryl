@@ -1,4 +1,9 @@
-package Package55::<A: const, B: const> {
+proto package ProtoPackage55 {
+    type data_a;
+    type data_b;
+}
+
+package Package55::<A: const, B: const> for ProtoPackage55 {
     type data_a = logic<A>;
     type data_b = logic<B>;
 }
@@ -12,7 +17,7 @@ module Module55 {
     inst u5: Module55F::<>;
     inst u6: Module55H::<10>;
     inst u7: Module55H::<10>;
-    //inst u8: Module55I::<Package55::<8, 16>>;
+    inst u8: Module55I::<Package55::<8, 16>>;
 }
 
 pub proto module Proto55;
@@ -48,7 +53,7 @@ module Module55H::<W: const> {
     let _a: StructH::<W> = 0;
 }
 
-//module Module55I::<PKG: Package55> {
-//    let _a: PKG::data_a = 0;
-//    let _b: PKG::data_b = 0;
-//}
+module Module55I::<PKG: ProtoPackage55> {
+    let _a: PKG::data_a = 0;
+    let _b: PKG::data_b = 0;
+}
