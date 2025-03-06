@@ -22,7 +22,7 @@ impl CmdFmt {
         Self { opt }
     }
 
-    pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
+    pub fn exec(&self, metadata: &mut Metadata, quiet: bool) -> Result<bool> {
         let paths = metadata.paths(&self.opt.files, true)?;
 
         let mut all_pass = true;
@@ -43,7 +43,9 @@ impl CmdFmt {
 
             if !pass {
                 if self.opt.check {
-                    print_diff(&path.src, input.as_str(), formatter.as_str());
+                    if !quiet {
+                        print_diff(&path.src, input.as_str(), formatter.as_str());
+                    }
                     all_pass = false;
                 } else {
                     let mut file = OpenOptions::new()
