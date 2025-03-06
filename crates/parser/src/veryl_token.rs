@@ -1026,6 +1026,7 @@ token_with_comments!(Operator10);
 token_with_comments!(Operator11);
 token_with_comments!(UnaryOperator);
 
+token_with_comments!(Alias);
 token_with_comments!(AlwaysComb);
 token_with_comments!(AlwaysFf);
 token_with_comments!(As);

@@ -2430,6 +2430,20 @@ impl VerylWalker for Formatter {
         }
     }
 
+    /// Semantic action for non-terminal 'AliasPackageDeclaration'
+    fn alias_package_declaration(&mut self, arg: &AliasPackageDeclaration) {
+        self.alias(&arg.alias);
+        self.space(1);
+        self.package(&arg.package);
+        self.space(1);
+        self.identifier(&arg.identifier);
+        self.space(1);
+        self.equ(&arg.equ);
+        self.space(1);
+        self.scoped_identifier(&arg.scoped_identifier);
+        self.semicolon(&arg.semicolon);
+    }
+
     /// Semantic action for non-terminal 'ProtoModuleDeclaration'
     fn proto_module_declaration(&mut self, arg: &ProtoModuleDeclaration) {
         self.proto(&arg.proto);

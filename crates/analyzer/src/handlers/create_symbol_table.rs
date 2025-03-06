@@ -12,9 +12,9 @@ use crate::symbol::Direction as SymDirection;
 use crate::symbol::ModportDefault as SymModportDefault;
 use crate::symbol::Type as SymType;
 use crate::symbol::{
-    ConnectTarget, ConnectTargetIdentifier, DocComment, EnumMemberProperty, EnumMemberValue,
-    EnumProperty, FunctionProperty, GenericBoundKind, GenericParameterProperty, InstanceProperty,
-    InterfaceProperty, ModportFunctionMemberProperty, ModportProperty,
+    AliasPackageProperty, ConnectTarget, ConnectTargetIdentifier, DocComment, EnumMemberProperty,
+    EnumMemberValue, EnumProperty, FunctionProperty, GenericBoundKind, GenericParameterProperty,
+    InstanceProperty, InterfaceProperty, ModportFunctionMemberProperty, ModportProperty,
     ModportVariableMemberProperty, ModuleProperty, PackageProperty, Parameter, ParameterKind,
     ParameterProperty, Port, PortProperty, ProtoConstProperty, ProtoModuleProperty,
     ProtoPackageProperty, StructMemberProperty, StructProperty, Symbol, SymbolId, SymbolKind,
@@ -1554,7 +1554,6 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.generic_context.push();
                 self.affiliation.push(VariableAffiliation::Package);
                 self.function_ids.clear();
-
                 self.apply_file_scope_import();
             }
             HandlerPoint::After => {
@@ -1581,6 +1580,23 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     SymbolKind::Package(property),
                     self.is_public,
                 );
+            }
+        }
+        Ok(())
+    }
+
+    fn alias_package_declaration(
+        &mut self,
+        arg: &AliasPackageDeclaration,
+    ) -> Result<(), ParolError> {
+        if let HandlerPoint::After = self.point {
+            let target: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
+            let property = AliasPackageProperty { target };
+            let token = arg.identifier.identifier_token.token;
+            if let Some(id) =
+                self.insert_symbol(&token, SymbolKind::AliasPackage(property), self.is_public)
+            {
+                self.push_package_member(id);
             }
         }
         Ok(())

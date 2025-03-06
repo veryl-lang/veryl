@@ -6,6 +6,8 @@ package veryl_testcase___Package55__8__16;
 endpackage
 
 module veryl_testcase_Module55;
+
+
     veryl_testcase___Module55A__Module55B u0 ();
     veryl_testcase___Module55A__Module55C u1 ();
     veryl_testcase___Module55E__Module55C u2 ();
@@ -15,6 +17,7 @@ module veryl_testcase_Module55;
     veryl_testcase___Module55H__10 u6 ();
     veryl_testcase___Module55H__10 u7 ();
     veryl_testcase___Module55I____Package55__8__16 u8 ();
+    veryl_testcase___Module55I____Package55__8__16 u9 ();
 endmodule
 
 

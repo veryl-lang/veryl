@@ -241,6 +241,32 @@ impl SymbolTable {
                             context.namespace = found.inner_namespace();
                             context.inner = true;
                         }
+                        SymbolKind::AliasPackage(x) => {
+                            if context.other_prj && !found.public {
+                                return Err(ResolveError::new(
+                                    context.last_found,
+                                    ResolveErrorCause::Private,
+                                ));
+                            }
+
+                            let symbol = if let Ok(symbol) =
+                                self.resolve(&x.target.mangled_path(), &context.namespace)
+                            {
+                                symbol.found
+                            } else {
+                                let symbol =
+                                    self.resolve(&x.target.generic_path(), &context.namespace)?;
+                                symbol.found
+                            };
+                            if let SymbolKind::GenericInstance(x) = &symbol.kind {
+                                let base = self.symbol_table.get(&x.base).unwrap();
+                                context.namespace = base.inner_namespace();
+                                context.inner = true;
+                            } else {
+                                context.namespace = symbol.inner_namespace();
+                                context.inner = true;
+                            }
+                        }
                         SymbolKind::Enum(_) | SymbolKind::SystemVerilog | SymbolKind::Namespace => {
                             context.namespace = found.inner_namespace();
                             context.inner = true;
@@ -454,6 +480,11 @@ impl SymbolTable {
         match &symbol.kind {
             SymbolKind::Package(_) => return Some(symbol.clone()),
             SymbolKind::ProtoPackage(_) if include_proto => return Some(symbol.clone()),
+            SymbolKind::AliasPackage(x) => {
+                if let Ok(symbol) = self.resolve(&x.target.generic_path(), &symbol.namespace) {
+                    return self.get_package(&symbol.found, include_proto);
+                }
+            }
             SymbolKind::GenericInstance(x) => {
                 let symbol = self.get(x.base).unwrap();
                 return self.get_package(&symbol, false);

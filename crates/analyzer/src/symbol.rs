@@ -379,6 +379,11 @@ impl Symbol {
         match &self.kind {
             SymbolKind::Module(x) => x.proto.clone(),
             SymbolKind::Package(x) => x.proto.clone(),
+            SymbolKind::AliasPackage(x) => {
+                let symbol =
+                    symbol_table::resolve((&x.target.generic_path(), &self.namespace)).ok()?;
+                symbol.found.proto()
+            }
             SymbolKind::GenericParameter(x) => match x.bound {
                 GenericBoundKind::Proto(ref x) => Some(x.clone()),
                 _ => None,
@@ -389,7 +394,7 @@ impl Symbol {
 
     pub fn is_package(&self, include_proto: bool) -> bool {
         match &self.kind {
-            SymbolKind::Package(_) => return true,
+            SymbolKind::Package(_) | SymbolKind::AliasPackage(_) => return true,
             SymbolKind::ProtoPackage(_) => return include_proto,
             SymbolKind::GenericInstance(x) => {
                 let symbol = symbol_table::get(x.base).unwrap();
@@ -448,6 +453,7 @@ pub enum SymbolKind {
     Block,
     Package(PackageProperty),
     ProtoPackage(ProtoPackageProperty),
+    AliasPackage(AliasPackageProperty),
     Struct(StructProperty),
     StructMember(StructMemberProperty),
     Union(UnionProperty),
@@ -490,6 +496,7 @@ impl SymbolKind {
             SymbolKind::Block => "block".to_string(),
             SymbolKind::Package(_) => "package".to_string(),
             SymbolKind::ProtoPackage(_) => "proto package".to_string(),
+            SymbolKind::AliasPackage(_) => "package alias".to_string(),
             SymbolKind::Struct(_) => "struct".to_string(),
             SymbolKind::StructMember(_) => "struct member".to_string(),
             SymbolKind::Union(_) => "union".to_string(),
@@ -683,6 +690,9 @@ impl fmt::Display for SymbolKind {
                 format!("package ({} generic)", x.generic_parameters.len())
             }
             SymbolKind::ProtoPackage(_) => "proto package".to_string(),
+            SymbolKind::AliasPackage(x) => {
+                format!("package alias (target {})", x.target)
+            }
             SymbolKind::Struct(_) => "struct".to_string(),
             SymbolKind::StructMember(x) => {
                 format!("struct member ({})", x.r#type)
@@ -1440,6 +1450,11 @@ pub struct PackageProperty {
     pub generic_parameters: Vec<SymbolId>,
     pub generic_references: Vec<GenericSymbolPath>,
     pub members: Vec<SymbolId>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AliasPackageProperty {
+    pub target: GenericSymbolPath,
 }
 
 #[derive(Debug, Clone)]
