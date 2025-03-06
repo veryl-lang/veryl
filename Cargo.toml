@@ -47,7 +47,7 @@ serde_json      = "1.0"
 similar         = {version = "2.7.0", features = ["text", "inline"]}
 smallvec        = "1.14"
 strnum_bitwidth = "0.1.2"
-tempfile        = "3.17"
+tempfile        = "3.18"
 thiserror       = "2.0"
 tokio           = {version = "1.43.0", features = ["full"]}
 toml            = "0.8.20"
