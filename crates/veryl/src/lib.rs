@@ -13,6 +13,7 @@ pub mod cmd_new;
 pub mod cmd_publish;
 pub mod cmd_test;
 pub mod cmd_update;
+pub mod diff;
 pub mod doc;
 pub mod runner;
 
@@ -102,6 +103,10 @@ pub struct OptCheck {
 pub struct OptBuild {
     /// Target files
     pub files: Vec<PathBuf>,
+
+    /// Run build in check mode
+    #[arg(long)]
+    pub check: bool,
 }
 
 /// Clean-up the current project
