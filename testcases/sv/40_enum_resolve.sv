@@ -11,7 +11,7 @@ module veryl_testcase_Module40;
 
     always_comb a = EnumA_member_a;
     function automatic logic is_a(
-        input EnumA e
+        input var EnumA e
     ) ;
         return e == EnumA_member_a;
     endfunction

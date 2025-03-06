@@ -6,8 +6,8 @@ module veryl_testcase_Module04 #(
     localparam type         aaa = logic [10-1:0]
 ) (
     // module port
-    input  logic     [10-1:0] b    ,
-    output logic     [10-1:0] bb   ,
+    input  var logic [10-1:0] b    ,
+    output var logic [10-1:0] bb   ,
     inout  tri logic [10-1:0] bbb  ,
     interface bbbb ,
     veryl_testcase_Interface04.d bbbbb

@@ -3,21 +3,21 @@ package veryl_testcase_Package73;
 endpackage
 
 module veryl_testcase___Module73A__0 (
-    input  logic i_a,
-    input  logic i_b,
-    input  logic i_c,
-    output logic o_d,
-    output logic o_e
+    input  var logic i_a,
+    input  var logic i_b,
+    input  var logic i_c,
+    output var logic o_d,
+    output var logic o_e
 );
     always_comb o_d = 0;
     always_comb o_e = 0;
 endmodule
 module veryl_testcase___Module73A__1 (
-    input  logic i_a,
-    input  logic i_b,
-    input  logic i_c,
-    output logic o_d,
-    output logic o_e
+    input  var logic i_a,
+    input  var logic i_b,
+    input  var logic i_c,
+    output var logic o_d,
+    output var logic o_e
 );
     always_comb o_d = 0;
     always_comb o_e = 0;

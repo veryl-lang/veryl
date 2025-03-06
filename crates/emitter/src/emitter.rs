@@ -58,6 +58,7 @@ pub struct Emitter {
     case_item_indent: Option<usize>,
     in_always_ff: bool,
     in_direction_modport: bool,
+    in_direction_with_var: bool,
     in_import: bool,
     in_scalar_type: bool,
     in_expression: Vec<()>,
@@ -101,6 +102,7 @@ impl Default for Emitter {
             case_item_indent: None,
             in_always_ff: false,
             in_direction_modport: false,
+            in_direction_with_var: false,
             in_import: false,
             in_scalar_type: false,
             in_expression: Vec::new(),
@@ -2200,6 +2202,10 @@ impl VerylWalker for Emitter {
             // dummy space for implicit type
             self.space(1);
         }
+        if self.in_direction_with_var {
+            self.str("var");
+            self.space(1);
+        }
         for x in &arg.scalar_type_list {
             self.type_modifier(&x.type_modifier);
         }
@@ -3512,10 +3518,17 @@ impl VerylWalker for Emitter {
             PortDeclarationItemGroup::PortTypeConcrete(x) => {
                 let x = x.port_type_concrete.as_ref();
                 self.direction(&x.direction);
-                if let Direction::Modport(_) = *x.direction {
-                    self.in_direction_modport = true;
-                } else {
-                    self.space(1);
+                match x.direction.as_ref() {
+                    Direction::Modport(_) => {
+                        self.in_direction_modport = true;
+                    }
+                    Direction::Input(_) | Direction::Output(_) => {
+                        self.in_direction_with_var = true;
+                        self.space(1);
+                    }
+                    _ => {
+                        self.space(1);
+                    }
                 }
                 self.scalar_type(&x.array_type.scalar_type);
                 self.space(1);
@@ -3532,6 +3545,7 @@ impl VerylWalker for Emitter {
                 }
                 self.align_finish(align_kind::ARRAY);
                 self.in_direction_modport = false;
+                self.in_direction_with_var = false;
             }
             PortDeclarationItemGroup::PortTypeAbstract(x) => {
                 let x = x.port_type_abstract.as_ref();

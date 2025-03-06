@@ -3,14 +3,14 @@ module //a
  (
 
     input //a
-     logic //a
+     var logic //a
      i_clk // a
     ,
-    input logic i_rst_n,
-    input logic i_up   ,
+    input var logic i_rst_n,
+    input var logic i_up   ,
 
-    input  logic         i_down ,
-    output logic [8-1:0] o_count
+    input  var logic         i_down ,
+    output var logic [8-1:0] o_count
 );
 
     logic //a

@@ -9,9 +9,9 @@ module veryl_testcase_Module35;
 endmodule
 
 module veryl_testcase_Module35B (
-    input  logic [32-1:0] aa  ,
-    output logic [32-1:0] bb  ,
-    output logic [32-1:0] bbbb
+    input  var logic [32-1:0] aa  ,
+    output var logic [32-1:0] bb  ,
+    output var logic [32-1:0] bbbb
 );
     always_comb begin
         bb   = 0;

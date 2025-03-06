@@ -15,13 +15,13 @@ module veryl_testcase_Module23 #(
     `endif
 ) (
     `ifdef DEFINE_A
-    input logic port_a
+    input var logic port_a
     ,`endif
-    input logic port_b
+    input var logic port_b
 
     `ifdef DEFINE_A
     ,
-    input logic port_c
+    input var logic port_c
     `endif
 );
     `ifdef DEFINE_A

@@ -27,10 +27,10 @@ module veryl_testcase_Module36 #(
     parameter  int unsigned ParamA = 1,
     localparam int unsigned ParamB = 1
 ) (
-    input  logic              i_clk  , /// Clock
-    input  logic              i_rst_n, /// Reset
-    input  logic [ParamA-1:0] i_data , /// Data input
-    output logic [ParamA-1:0] o_data  /// Data output
+    input  var logic              i_clk  , /// Clock
+    input  var logic              i_rst_n, /// Reset
+    input  var logic [ParamA-1:0] i_data , /// Data input
+    output var logic [ParamA-1:0] o_data  /// Data output
 );
     always_comb o_data = 0;
 endmodule
