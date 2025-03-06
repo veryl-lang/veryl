@@ -1683,6 +1683,46 @@ fn mismatch_type() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    package PkgA {}
+    package PkgB::<B0: const, B1: const> {}
+
+    alias package FooPkg = PkgA;
+    alias package BarPkg = PkgB::<1, 2>;
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    package PkgA {}
+    package PkgB::<B0: const, B1: const> {}
+
+    module ModuleA {
+        alias package FooPkg = PkgA;
+        alias package BarPkg = PkgB::<1, 2>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {}
+    alias package Pkg = ModuleA;
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    proto package PkgA {}
+    alias package PkgB = PkgA;
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 }
 
 #[test]
@@ -2291,12 +2331,13 @@ fn undefined_identifier() {
     ));
 
     let code = r#"
-    package Pkg::<AW: const, DW: const> {
+    package PkgBase::<AW: const, DW: const> {
         type address_t = logic<AW>;
         type data_t    = logic<DW>;
     }
+    alias package Pkg = PkgBase::<16, 32>;
     module ModuleA {
-        import Pkg::<16, 32>::*;
+        import Pkg::*;
         let _addr:  address_t = 0;
         let _data:  data_t    = 0;
     }
@@ -2310,7 +2351,7 @@ fn undefined_identifier() {
         type address_t;
         type data_t   ;
     }
-    package Pkg::<AW: const, DW: const> for ProtoPkg {
+    package PkgBase::<AW: const, DW: const> for ProtoPkg {
         type address_t = logic<AW>;
         type data_t    = logic<DW>;
     }
@@ -2320,7 +2361,8 @@ fn undefined_identifier() {
         let _data: data_t    = 0;
     }
     module ModuleB {
-        inst u: ModuleA::<Pkg::<16, 32>>;
+        alias package Pkg = PkgBase::<16, 32>;
+        inst u: ModuleA::<Pkg>;
     }
     "#;
 

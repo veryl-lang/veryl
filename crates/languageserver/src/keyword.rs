@@ -1,4 +1,5 @@
 pub const KEYWORDS: &[&str] = &[
+    "alias",
     "always_comb",
     "always_ff",
     "assign",

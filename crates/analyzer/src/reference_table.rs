@@ -2,7 +2,7 @@ use crate::AnalyzerError;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::{Direction, GenericMap, Symbol, SymbolKind};
-use crate::symbol_path::{GenericSymbolPath, SymbolPathNamespace};
+use crate::symbol_path::{GenericSymbol, GenericSymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
 use crate::symbol_table::{ResolveError, ResolveErrorCause};
 use std::cell::RefCell;
@@ -216,14 +216,26 @@ impl ReferenceTable {
                         continue;
                     }
 
-                    let mut path = path.paths[i].clone();
-
+                    let mut args = path.paths[i].arguments.clone();
                     for param in params.iter().skip(n_args) {
                         //  apply default value
-                        path.arguments
-                            .push(param.1.default_value.as_ref().unwrap().clone());
+                        args.push(param.1.default_value.as_ref().unwrap().clone());
                     }
 
+                    for arg in &mut args {
+                        if let Ok(symbol) = symbol_table::resolve((&arg.mangled_path(), namespace))
+                        {
+                            // Replace arg with its target if arg is alias
+                            if let SymbolKind::AliasPackage(x) = symbol.found.kind {
+                                *arg = x.target.clone();
+                            }
+                        }
+                    }
+
+                    let path = GenericSymbol {
+                        base: path.paths[i].base,
+                        arguments: args,
+                    };
                     if let Some((token, new_symbol)) = path.get_generic_instance(&symbol.found) {
                         if let Some(ref x) = symbol_table::insert(&token, new_symbol) {
                             symbol_table::add_generic_instance(symbol.found.id, *x);

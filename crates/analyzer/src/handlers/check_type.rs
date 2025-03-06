@@ -21,6 +21,7 @@ pub struct CheckType {
     in_casting_type: Vec<()>,
     in_generic_argument: Vec<()>,
     in_modport: bool,
+    in_alias_package: bool,
 }
 
 impl CheckType {
@@ -213,6 +214,16 @@ impl VerylGrammarTrait for CheckType {
                         }
                     }
                 }
+
+                // Check targe of package alias
+                if self.in_alias_package && !symbol.found.is_package(false) {
+                    self.errors.push(AnalyzerError::mismatch_type(
+                        &symbol.found.token.to_string(),
+                        "package",
+                        &symbol.found.kind.to_kind_name(),
+                        &arg.identifier().token.into(),
+                    ));
+                }
             }
 
             // Check generic argument type
@@ -305,6 +316,17 @@ impl VerylGrammarTrait for CheckType {
             HandlerPoint::Before => self.in_module = true,
             HandlerPoint::After => self.in_module = false,
         };
+        Ok(())
+    }
+
+    fn alias_package_declaration(
+        &mut self,
+        _arg: &AliasPackageDeclaration,
+    ) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => self.in_alias_package = true,
+            HandlerPoint::After => self.in_alias_package = false,
+        }
         Ok(())
     }
 

@@ -1127,6 +1127,14 @@ impl Emitter {
                         .arguments
                         .push(param.1.default_value.as_ref().unwrap().clone());
                 }
+
+                for arg in &mut path.paths[i].arguments {
+                    if let Ok(symbol) = symbol_table::resolve((&arg.mangled_path(), &namespace)) {
+                        if let SymbolKind::AliasPackage(x) = symbol.found.kind {
+                            *arg = x.target.clone();
+                        }
+                    }
+                }
             }
         }
 
@@ -4016,6 +4024,11 @@ impl VerylWalker for Emitter {
         }
     }
 
+    /// Semantic action for non-terminal 'AliasPackageDeclaration'
+    fn alias_package_declaration(&mut self, _arg: &AliasPackageDeclaration) {
+        // nothing to emit
+    }
+
     /// Semantic action for non-terminal 'EmbedDeclaration'
     fn embed_declaration(&mut self, arg: &EmbedDeclaration) {
         if arg.identifier.identifier_token.to_string() == "inline" {
@@ -4092,8 +4105,9 @@ impl VerylWalker for Emitter {
             PublicDescriptionItem::PackageDeclaration(x) => {
                 self.package_declaration(&x.package_declaration)
             }
-            // proto is not emitted at SystemVerilog
-            PublicDescriptionItem::ProtoModuleDeclaration(_)
+            // alias and proto are not emitted at SystemVerilog
+            PublicDescriptionItem::AliasPackageDeclaration(_)
+            | PublicDescriptionItem::ProtoModuleDeclaration(_)
             | PublicDescriptionItem::ProtoPackageDeclaration(_) => (),
         };
     }
@@ -4242,6 +4256,13 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
         SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_) => {
             ret.push_str(&namespace_string(&symbol.namespace, context));
             ret.push_str(&token_text);
+        }
+        SymbolKind::AliasPackage(x) => {
+            if let Ok(symbol) = symbol_table::resolve((&x.target.mangled_path(), &symbol.namespace))
+            {
+                let text = symbol_string(token, &symbol.found, context);
+                ret.push_str(&text);
+            }
         }
         SymbolKind::Parameter(_)
         | SymbolKind::Function(_)

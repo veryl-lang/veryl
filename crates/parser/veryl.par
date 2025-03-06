@@ -65,6 +65,7 @@ RBracketTerm          : <INITIAL, Generic       >']'                            
 RParenTerm            : <INITIAL, Generic       >')'                                                                                   : Token;
 SemicolonTerm         : <INITIAL, Generic       >';'                                                                                   : Token;
 StarTerm              : <INITIAL, Generic       >'*'                                                                                   : Token;
+AliasTerm             : <INITIAL, Generic       >/(?-u:\b)alias(?-u:\b)/                                                               : Token;
 AlwaysCombTerm        : <INITIAL, Generic       >/(?-u:\b)always_comb(?-u:\b)/                                                         : Token;
 AlwaysFfTerm          : <INITIAL, Generic       >/(?-u:\b)always_ff(?-u:\b)/                                                           : Token;
 AssignTerm            : <INITIAL, Generic       >/(?-u:\b)assign(?-u:\b)/                                                              : Token;
@@ -191,6 +192,7 @@ RParenToken          : RParenTerm          : Token Comments;
 SemicolonToken       : SemicolonTerm       : Token Comments;
 StarToken            : StarTerm            : Token Comments;
 
+AliasToken         : AliasTerm         : Token Comments;
 AlwaysCombToken    : AlwaysCombTerm    : Token Comments;
 AlwaysFfToken      : AlwaysFfTerm      : Token Comments;
 AsToken            : AsTerm            : Token Comments;
@@ -321,6 +323,7 @@ Semicolon       : SemicolonToken       : VerylToken;
 Star            : StarToken            : VerylToken;
 
 // Keyword
+Alias         : AliasToken         : VerylToken;
 AlwaysComb    : AlwaysCombToken    : VerylToken;
 AlwaysFf      : AlwaysFfToken      : VerylToken;
 As            : AsToken            : VerylToken;
@@ -833,6 +836,7 @@ GenerateItem: LetDeclaration
             | EnumDeclaration
             | StructUnionDeclaration
             | ImportDeclaration
+            | AliasPackageDeclaration
             | InitialDeclaration
             | FinalDeclaration
             | UnsafeBlock
@@ -853,7 +857,14 @@ PackageItem: ConstDeclaration
            | FunctionDeclaration
            | ImportDeclaration
            | ExportDeclaration
+           | AliasPackageDeclaration
            ;
+
+// ----------------------------------------------------------------------------
+// Alias
+// ----------------------------------------------------------------------------
+
+AliasPackageDeclaration: Alias Package Identifier Equ ScopedIdentifier Semicolon;
 
 // ----------------------------------------------------------------------------
 // Proto
@@ -911,6 +922,7 @@ DescriptionItem: [ Pub ] PublicDescriptionItem
 PublicDescriptionItem: ModuleDeclaration
                      | InterfaceDeclaration
                      | PackageDeclaration
+                     | AliasPackageDeclaration
                      | ProtoModuleDeclaration
                      | ProtoPackageDeclaration
                      ;

@@ -386,6 +386,7 @@ impl Server {
                     VerylSymbolKind::Block => SymbolKind::NAMESPACE,
                     VerylSymbolKind::Package(_) => SymbolKind::PACKAGE,
                     VerylSymbolKind::ProtoPackage(_) => SymbolKind::PACKAGE,
+                    VerylSymbolKind::AliasPackage(_) => SymbolKind::PACKAGE,
                     VerylSymbolKind::Struct(_) => SymbolKind::STRUCT,
                     VerylSymbolKind::StructMember(_) => SymbolKind::VARIABLE,
                     VerylSymbolKind::Union(_) => SymbolKind::STRUCT,
