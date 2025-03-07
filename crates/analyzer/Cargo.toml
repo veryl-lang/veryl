@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl-analyzer"
-version               = "0.14.1"
+version               = "0.14.2-rc.1"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -18,8 +18,8 @@ itertools       = "0.14.0"
 smallvec        = {workspace = true}
 strnum_bitwidth = {workspace = true}
 thiserror       = {workspace = true}
-veryl-metadata  = {version = "0.14.1", path = "../metadata"}
-veryl-parser    = {version = "0.14.1", path = "../parser"}
+veryl-metadata  = {version = "0.14.2-rc.1", path = "../metadata"}
+veryl-parser    = {version = "0.14.2-rc.1", path = "../parser"}
 daggy           = "0.8.1"
 bimap           = "0.6.3"
 

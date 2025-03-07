@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl-path"
-version               = "0.14.1"
+version               = "0.14.2-rc.1"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
