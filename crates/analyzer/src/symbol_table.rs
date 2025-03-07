@@ -91,7 +91,14 @@ impl SymbolTable {
         let entry = self.name_table.entry(token.text).or_default();
         for id in entry.iter() {
             let item = self.symbol_table.get(id).unwrap();
-            if symbol.namespace == item.namespace {
+            let symbol = &symbol.namespace;
+            let item = &item.namespace;
+
+            let same_namespace = symbol.paths == item.paths;
+            let define_exclusive = symbol.define_context.exclusive(&item.define_context);
+
+            let conflict = same_namespace && !define_exclusive;
+            if conflict {
                 return None;
             }
         }

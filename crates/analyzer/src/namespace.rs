@@ -1,17 +1,75 @@
+use crate::attribute::Attribute;
+use crate::attribute_table;
 use crate::namespace_table;
 use crate::symbol_path::SymbolPath;
 use crate::{HashMap, SVec, svec};
+use std::collections::BTreeSet;
 use std::fmt;
 use veryl_parser::resource_table::StrId;
+use veryl_parser::veryl_token::Token;
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+pub struct DefineContext {
+    pos: BTreeSet<StrId>,
+    neg: BTreeSet<StrId>,
+}
+
+impl DefineContext {
+    pub fn exclusive(&self, value: &DefineContext) -> bool {
+        !self.pos.is_disjoint(&value.neg) || !self.neg.is_disjoint(&value.pos)
+    }
+}
+
+impl From<Token> for DefineContext {
+    fn from(token: Token) -> Self {
+        let attrs = attribute_table::get(&token);
+        attrs.as_slice().into()
+    }
+}
+
+impl From<&[Attribute]> for DefineContext {
+    fn from(value: &[Attribute]) -> Self {
+        let mut ret = DefineContext::default();
+        for x in value {
+            match x {
+                Attribute::Ifdef(x) => {
+                    ret.pos.insert(*x);
+                }
+                Attribute::Ifndef(x) => {
+                    ret.neg.insert(*x);
+                }
+                _ => (),
+            }
+        }
+        ret
+    }
+}
+
+impl fmt::Display for DefineContext {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut text = String::new();
+        for x in &self.pos {
+            text.push_str(&format!("+{x}"));
+        }
+        for x in &self.neg {
+            text.push_str(&format!("-{x}"));
+        }
+        text.fmt(f)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Namespace {
     pub paths: SVec<StrId>,
+    pub define_context: DefineContext,
 }
 
 impl Namespace {
     pub fn new() -> Self {
-        Self { paths: SVec::new() }
+        Self {
+            paths: SVec::new(),
+            define_context: DefineContext::default(),
+        }
     }
 
     pub fn push(&mut self, path: StrId) {
@@ -27,6 +85,7 @@ impl Namespace {
     }
 
     pub fn included(&self, x: &Namespace) -> bool {
+        let exclusive = self.define_context.exclusive(&x.define_context);
         for (i, x) in x.paths.iter().enumerate() {
             if let Some(path) = self.paths.get(i) {
                 if path != x {
@@ -36,7 +95,7 @@ impl Namespace {
                 return false;
             }
         }
-        true
+        !exclusive
     }
 
     pub fn matched(&self, x: &Namespace) -> bool {
@@ -56,7 +115,10 @@ impl Namespace {
                 paths.push(*x);
             }
         }
-        Self { paths }
+        Self {
+            paths,
+            define_context: self.define_context.clone(),
+        }
     }
 
     pub fn strip_prefix(&mut self, x: &Namespace) {
@@ -85,6 +147,7 @@ impl fmt::Display for Namespace {
                 text.push_str(&format!("::{path}"));
             }
         }
+        text.push_str(&self.define_context.to_string());
         text.fmt(f)
     }
 }
@@ -95,7 +158,10 @@ impl From<&SymbolPath> for Namespace {
         for x in value.as_slice() {
             paths.push(*x);
         }
-        Namespace { paths }
+        Namespace {
+            paths,
+            define_context: DefineContext::default(),
+        }
     }
 }
 
@@ -103,6 +169,7 @@ impl From<&[StrId]> for Namespace {
     fn from(value: &[StrId]) -> Self {
         Namespace {
             paths: value.into(),
+            define_context: DefineContext::default(),
         }
     }
 }
@@ -113,6 +180,49 @@ impl From<&str> for Namespace {
         for x in value.split("::") {
             paths.push(x.into());
         }
-        Namespace { paths }
+        Namespace {
+            paths,
+            define_context: DefineContext::default(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn define_context() {
+        let mut a = DefineContext::default();
+        a.pos.insert(StrId(0));
+        a.pos.insert(StrId(1));
+        a.neg.insert(StrId(2));
+        let mut b = DefineContext::default();
+        b.pos.insert(StrId(2));
+
+        assert!(a.exclusive(&b));
+
+        let mut a = DefineContext::default();
+        a.pos.insert(StrId(0));
+        a.pos.insert(StrId(1));
+        a.neg.insert(StrId(2));
+        let mut b = DefineContext::default();
+        b.pos.insert(StrId(1));
+
+        assert!(!a.exclusive(&b));
+
+        let mut a = DefineContext::default();
+        a.pos.insert(StrId(0));
+        a.pos.insert(StrId(1));
+        a.neg.insert(StrId(2));
+        let mut b = DefineContext::default();
+        b.neg.insert(StrId(0));
+
+        assert!(a.exclusive(&b));
+
+        let a = DefineContext::default();
+        let b = DefineContext::default();
+
+        assert!(!a.exclusive(&b));
     }
 }

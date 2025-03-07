@@ -41,11 +41,11 @@ where
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct StrId(usize);
+pub struct StrId(pub usize);
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct PathId(usize);
+pub struct PathId(pub usize);
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct TokenId(usize);
+pub struct TokenId(pub usize);
 
 pub trait Incrementable {
     fn inc(&mut self);

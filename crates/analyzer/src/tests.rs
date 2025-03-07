@@ -4176,3 +4176,35 @@ fn infinite_recursion() {
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InfiniteRecursion { .. }));
 }
+
+#[test]
+fn define_context() {
+    let code = r#"
+    module ModuleA {
+        #[ifdef(A)]
+        var _a: logic;
+
+        #[ifdef(B)]
+        var _a: logic;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::DuplicatedIdentifier { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        #[ifdef(A)]
+        let _a: logic = 1;
+
+        #[ifndef(A)]
+        let _a: logic = 1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
