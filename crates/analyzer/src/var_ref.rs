@@ -364,13 +364,19 @@ impl TryFrom<&HierarchicalIdentifier> for VarRefPath {
             return Err(());
         };
 
-        path_items.push(full_path.pop().unwrap());
+        let Some(item) = full_path.pop() else {
+            return Err(());
+        };
+        path_items.push(item);
         for x in &arg.hierarchical_identifier_list {
             path_items.push(VarRefPathItem::from(&*x.select));
         }
 
         for x in &arg.hierarchical_identifier_list0 {
-            path_items.push(full_path.pop().unwrap());
+            let Some(item) = full_path.pop() else {
+                return Err(());
+            };
+            path_items.push(item);
             for x in &x.hierarchical_identifier_list0_list {
                 path_items.push(VarRefPathItem::from(&*x.select));
             }
@@ -397,9 +403,15 @@ impl TryFrom<&ExpressionIdentifier> for VarRefPath {
             return Err(());
         };
 
-        path_items.push(full_path.pop().unwrap());
+        let Some(item) = full_path.pop() else {
+            return Err(());
+        };
+        path_items.push(item);
         for _x in &arg.scoped_identifier.scoped_identifier_list {
-            path_items.push(full_path.pop().unwrap());
+            let Some(item) = full_path.pop() else {
+                return Err(());
+            };
+            path_items.push(item);
         }
 
         for x in &arg.expression_identifier_list {
@@ -407,7 +419,10 @@ impl TryFrom<&ExpressionIdentifier> for VarRefPath {
         }
 
         for x in &arg.expression_identifier_list0 {
-            path_items.push(full_path.pop().unwrap());
+            let Some(item) = full_path.pop() else {
+                return Err(());
+            };
+            path_items.push(item);
             for x in &x.expression_identifier_list0_list {
                 path_items.push(VarRefPathItem::from(&*x.select));
             }
