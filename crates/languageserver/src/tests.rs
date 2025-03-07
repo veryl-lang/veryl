@@ -133,6 +133,7 @@ fn build_did_open(text: &str) -> Request {
 }
 
 #[tokio::test]
+#[ntest::timeout(120000)]
 async fn did_open() {
     let mut server = TestServer::new(Backend::new);
 
@@ -166,6 +167,7 @@ async fn did_open() {
 }
 
 #[tokio::test]
+#[ntest::timeout(120000)]
 async fn diagnostics() {
     let mut server = TestServer::new(Backend::new);
 
@@ -199,6 +201,7 @@ async fn diagnostics() {
 }
 
 #[tokio::test]
+#[ntest::timeout(120000)]
 async fn progress() {
     let mut server = TestServer::new(Backend::new);
 
