@@ -237,12 +237,14 @@ impl VerylGrammarTrait for CheckVarRef {
                 {
                     AssignPositionType::StatementBranchItem {
                         token: arg.else_token.token,
+                        define_context: arg.else_token.token.into(),
                         index: self.branch_index,
                         r#type: AssignStatementBranchItemType::Else,
                     }
                 } else {
                     AssignPositionType::DeclarationBranchItem {
                         token: arg.else_token.token,
+                        define_context: arg.else_token.token.into(),
                         index: self.branch_index,
                     }
                 };
@@ -302,6 +304,7 @@ impl VerylGrammarTrait for CheckVarRef {
                     } else if let Some(path) = map_assignable_factor(&arg.expression) {
                         self.assign_position.push(AssignPositionType::Statement {
                             token: function_call.token,
+                            define_context: function_call.token.into(),
                             resettable: false,
                         });
                         self.add_assign(&path);
@@ -351,6 +354,7 @@ impl VerylGrammarTrait for CheckVarRef {
             if let Ok(path) = VarRefPath::try_from(arg.identifier.as_ref()) {
                 self.assign_position.push(AssignPositionType::Statement {
                     token: arg.equ.equ_token.token,
+                    define_context: arg.equ.equ_token.token.into(),
                     resettable: false,
                 });
                 self.add_assign(&path);
@@ -385,6 +389,7 @@ impl VerylGrammarTrait for CheckVarRef {
                             if can_assign(full_path) {
                                 self.assign_position.push(AssignPositionType::Statement {
                                     token,
+                                    define_context: token.into(),
                                     resettable: true,
                                 });
                                 self.add_assign(&path);
@@ -430,6 +435,7 @@ impl VerylGrammarTrait for CheckVarRef {
                 self.assign_position
                     .push(AssignPositionType::StatementBranch {
                         token: arg.r#if.if_token.token,
+                        define_context: arg.r#if.if_token.token.into(),
                         branches,
                         has_default,
                         allow_missing_reset_statement: false,
@@ -438,6 +444,7 @@ impl VerylGrammarTrait for CheckVarRef {
                 self.assign_position
                     .push(AssignPositionType::StatementBranchItem {
                         token: arg.r#if.if_token.token,
+                        define_context: arg.r#if.if_token.token.into(),
                         index: self.branch_index,
                         r#type: AssignStatementBranchItemType::If,
                     });
@@ -467,6 +474,7 @@ impl VerylGrammarTrait for CheckVarRef {
                 self.assign_position
                     .push(AssignPositionType::StatementBranch {
                         token: arg.if_reset.if_reset_token.token,
+                        define_context: arg.if_reset.if_reset_token.token.into(),
                         branches,
                         has_default,
                         allow_missing_reset_statement,
@@ -475,6 +483,7 @@ impl VerylGrammarTrait for CheckVarRef {
                 self.assign_position
                     .push(AssignPositionType::StatementBranchItem {
                         token: arg.if_reset.if_reset_token.token,
+                        define_context: arg.if_reset.if_reset_token.token.into(),
                         index: self.branch_index,
                         r#type: AssignStatementBranchItemType::IfReset,
                     });
@@ -493,6 +502,7 @@ impl VerylGrammarTrait for CheckVarRef {
             if let Ok(path) = VarRefPath::try_from(arg.identifier.as_ref()) {
                 self.assign_position.push(AssignPositionType::Statement {
                     token: arg.r#for.for_token.token,
+                    define_context: arg.r#for.for_token.token.into(),
                     resettable: false,
                 });
                 self.add_assign(&path);
@@ -517,6 +527,7 @@ impl VerylGrammarTrait for CheckVarRef {
                 self.assign_position
                     .push(AssignPositionType::StatementBranch {
                         token: arg.case.case_token.token,
+                        define_context: arg.case.case_token.token.into(),
                         branches,
                         has_default,
                         allow_missing_reset_statement: false,
@@ -536,6 +547,7 @@ impl VerylGrammarTrait for CheckVarRef {
                 self.assign_position
                     .push(AssignPositionType::StatementBranchItem {
                         token: arg.colon.colon_token.token,
+                        define_context: arg.colon.colon_token.token.into(),
                         index: self.branch_index,
                         r#type: AssignStatementBranchItemType::Case,
                     });
@@ -553,6 +565,7 @@ impl VerylGrammarTrait for CheckVarRef {
             if let Ok(path) = VarRefPath::try_from(arg.identifier.as_ref()) {
                 self.assign_position.push(AssignPositionType::Declaration {
                     token: arg.r#let.let_token.token,
+                    define_context: arg.r#let.let_token.token.into(),
                     r#type: AssignDeclarationType::Let,
                 });
                 self.add_assign(&path);
@@ -569,6 +582,7 @@ impl VerylGrammarTrait for CheckVarRef {
                 });
                 self.assign_position.push(AssignPositionType::Declaration {
                     token: arg.always_ff.always_ff_token.token,
+                    define_context: arg.always_ff.always_ff_token.token.into(),
                     r#type: AssignDeclarationType::AlwaysFF,
                 });
             }
@@ -588,6 +602,7 @@ impl VerylGrammarTrait for CheckVarRef {
                 });
                 self.assign_position.push(AssignPositionType::Declaration {
                     token: arg.always_comb.always_comb_token.token,
+                    define_context: arg.always_comb.always_comb_token.token.into(),
                     r#type: AssignDeclarationType::AlwaysComb,
                 });
             }
@@ -608,6 +623,7 @@ impl VerylGrammarTrait for CheckVarRef {
                     if can_assign(full_path) {
                         self.assign_position.push(AssignPositionType::Declaration {
                             token: arg.assign.assign_token.token,
+                            define_context: arg.assign.assign_token.token.into(),
                             r#type: AssignDeclarationType::Assign,
                         });
                         self.add_assign(&path);
@@ -677,6 +693,7 @@ impl VerylGrammarTrait for CheckVarRef {
 
                     self.assign_position.push(AssignPositionType::Declaration {
                         token: arg.inst.inst_token.token,
+                        define_context: arg.inst.inst_token.token.into(),
                         r#type: AssignDeclarationType::Inst,
                     });
 
@@ -736,6 +753,7 @@ impl VerylGrammarTrait for CheckVarRef {
                                 if dir_output | port_unknown {
                                     self.assign_position.push(AssignPositionType::Connect {
                                         token: *token,
+                                        define_context: (*token).into(),
                                         maybe: port_unknown,
                                     });
                                     self.add_assign(&path);
@@ -757,6 +775,7 @@ impl VerylGrammarTrait for CheckVarRef {
                 });
                 self.assign_position.push(AssignPositionType::Declaration {
                     token: arg.function.function_token.token,
+                    define_context: arg.function.function_token.token.into(),
                     r#type: AssignDeclarationType::Function,
                 });
             }
@@ -778,11 +797,13 @@ impl VerylGrammarTrait for CheckVarRef {
                 self.assign_position
                     .push(AssignPositionType::DeclarationBranch {
                         token: arg.r#if.if_token.token,
+                        define_context: arg.r#if.if_token.token.into(),
                         branches,
                     });
                 self.assign_position
                     .push(AssignPositionType::DeclarationBranchItem {
                         token: arg.r#if.if_token.token,
+                        define_context: arg.r#if.if_token.token.into(),
                         index: self.branch_index,
                     });
                 self.branch_index += 1;
@@ -799,6 +820,7 @@ impl VerylGrammarTrait for CheckVarRef {
             if let Ok(path) = VarRefPath::try_from(arg.identifier.as_ref()) {
                 self.assign_position.push(AssignPositionType::Statement {
                     token: arg.r#for.for_token.token,
+                    define_context: arg.r#for.for_token.token.into(),
                     resettable: false,
                 });
                 self.add_assign(&path);

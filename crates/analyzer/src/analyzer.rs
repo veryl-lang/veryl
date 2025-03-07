@@ -524,6 +524,14 @@ fn check_multiple_assignment(
         return vec![];
     }
 
+    let x_define = x_pos.0.last().unwrap().define_context();
+    let y_define = y_pos.0.last().unwrap().define_context();
+
+    // If x and y is in exclusive define context, they are not conflict.
+    if x_define.exclusive(y_define) {
+        return vec![];
+    }
+
     // Earyl return to avoid calling AnalyzerError constructor
     for i in 0..len {
         let x_type = &x_pos.0[i];

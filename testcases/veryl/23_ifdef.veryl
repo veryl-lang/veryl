@@ -14,6 +14,9 @@ module Module23 #(
     port_a: input logic,
     port_b: input logic,
 
+    #[ifndef(DEFINE_A)]
+    port_a: input logic,
+
     #[ifdef(DEFINE_A)]
     {
         port_c: input logic,
@@ -36,6 +39,9 @@ module Module23 #(
             _d = 0;
         }
     }
+
+    #[ifndef(DEFINE_D)]
+    assign _d = 1;
 }
 
 #[ifdef(DEFINE_A)]

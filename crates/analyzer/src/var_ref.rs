@@ -1,5 +1,5 @@
 use crate::evaluator::{Evaluated, EvaluatedValue, Evaluator};
-use crate::namespace::Namespace;
+use crate::namespace::{DefineContext, Namespace};
 use crate::symbol::{ConnectTargetIdentifier, SymbolId};
 use crate::symbol_table;
 use miette::Result;
@@ -480,22 +480,26 @@ impl fmt::Display for AssignPosition {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub enum AssignPositionType {
     DeclarationBranch {
         token: Token,
+        define_context: DefineContext,
         branches: usize,
     },
     DeclarationBranchItem {
         token: Token,
+        define_context: DefineContext,
         index: usize,
     },
     Declaration {
         token: Token,
+        define_context: DefineContext,
         r#type: AssignDeclarationType,
     },
     StatementBranch {
         token: Token,
+        define_context: DefineContext,
         branches: usize,
         has_default: bool,
         allow_missing_reset_statement: bool,
@@ -503,17 +507,26 @@ pub enum AssignPositionType {
     },
     StatementBranchItem {
         token: Token,
+        define_context: DefineContext,
         index: usize,
         r#type: AssignStatementBranchItemType,
     },
     Statement {
         token: Token,
+        define_context: DefineContext,
         resettable: bool,
     },
     Connect {
         token: Token,
+        define_context: DefineContext,
         maybe: bool,
     },
+}
+
+impl PartialEq for AssignPositionType {
+    fn eq(&self, other: &Self) -> bool {
+        self.token().eq(other.token())
+    }
 }
 
 impl AssignPositionType {
@@ -526,6 +539,18 @@ impl AssignPositionType {
             AssignPositionType::StatementBranchItem { token, .. } => token,
             AssignPositionType::Statement { token, .. } => token,
             AssignPositionType::Connect { token, .. } => token,
+        }
+    }
+
+    pub fn define_context(&self) -> &DefineContext {
+        match self {
+            AssignPositionType::DeclarationBranch { define_context, .. } => define_context,
+            AssignPositionType::DeclarationBranchItem { define_context, .. } => define_context,
+            AssignPositionType::Declaration { define_context, .. } => define_context,
+            AssignPositionType::StatementBranch { define_context, .. } => define_context,
+            AssignPositionType::StatementBranchItem { define_context, .. } => define_context,
+            AssignPositionType::Statement { define_context, .. } => define_context,
+            AssignPositionType::Connect { define_context, .. } => define_context,
         }
     }
 

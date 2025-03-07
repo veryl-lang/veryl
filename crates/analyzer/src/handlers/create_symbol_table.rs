@@ -119,6 +119,13 @@ impl CreateSymbolTable {
         }
     }
 
+    fn get_namespace(&self, token: &Token) -> Namespace {
+        let attrs = attribute_table::get(token);
+        let mut ret = self.namespace.clone();
+        ret.define_context = attrs.as_slice().into();
+        ret
+    }
+
     fn insert_symbol(&mut self, token: &Token, kind: SymbolKind, public: bool) -> Option<SymbolId> {
         let line = token.line;
         let doc_comment = if let TokenSource::File { path, .. } = token.source {
@@ -145,7 +152,7 @@ impl CreateSymbolTable {
         } else {
             DocComment::default()
         };
-        let mut symbol = Symbol::new(token, kind, &self.namespace, public, doc_comment);
+        let mut symbol = Symbol::new(token, kind, &self.get_namespace(token), public, doc_comment);
 
         if attribute_table::contains(token, Attr::Allow(AllowItem::UnusedVariable)) {
             symbol.allow_unused = true;
@@ -167,17 +174,14 @@ impl CreateSymbolTable {
             return SymClockDomain::Implicit;
         }
 
-        let id = if let Ok(symbol) = symbol_table::resolve((
-            &clock_domain.identifier.identifier_token.token,
-            &self.namespace,
-        )) {
+        let token = &clock_domain.identifier.identifier_token.token;
+        let id = if let Ok(symbol) = symbol_table::resolve((token, &self.get_namespace(token))) {
             symbol.found.id
         } else {
-            let token = &clock_domain.identifier.identifier_token.token;
             let symbol = Symbol::new(
                 token,
                 SymbolKind::ClockDomain,
-                &self.namespace,
+                &self.get_namespace(token),
                 false,
                 DocComment::default(),
             );
@@ -458,9 +462,9 @@ fn scoped_identifier_tokens(arg: &ScopedIdentifier) -> Vec<Token> {
 impl VerylGrammarTrait for CreateSymbolTable {
     fn identifier(&mut self, arg: &Identifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let id = arg.identifier_token.token.id;
-            if let TokenSource::File { path, .. } = arg.identifier_token.token.source {
-                namespace_table::insert(id, path, &self.namespace);
+            let token = arg.identifier_token.token;
+            if let TokenSource::File { path, .. } = token.source {
+                namespace_table::insert(token.id, path, &self.get_namespace(&token));
             }
         }
         Ok(())
@@ -468,9 +472,9 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
     fn dollar_identifier(&mut self, arg: &DollarIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let id = arg.dollar_identifier_token.token.id;
-            if let TokenSource::File { path, .. } = arg.dollar_identifier_token.token.source {
-                namespace_table::insert(id, path, &self.namespace);
+            let token = arg.dollar_identifier_token.token;
+            if let TokenSource::File { path, .. } = token.source {
+                namespace_table::insert(token.id, path, &self.get_namespace(&token));
             }
         }
         Ok(())
@@ -1301,8 +1305,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
     fn import_declaration(&mut self, arg: &ImportDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
+            let token = &arg.scoped_identifier.identifier().token;
             let path: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
-            let path: SymbolPathNamespace = (&path.generic_path(), &self.namespace).into();
+            let path: SymbolPathNamespace =
+                (&path.generic_path(), &self.get_namespace(token)).into();
             let namespace = path.1.clone();
             let wildcard = arg.import_declaration_opt.is_some();
 
