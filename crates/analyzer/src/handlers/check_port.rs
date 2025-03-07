@@ -76,14 +76,6 @@ impl VerylGrammarTrait for CheckPort {
     fn direction(&mut self, arg: &Direction) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             match arg {
-                Direction::Ref(x) => {
-                    if !self.in_function {
-                        self.errors.push(AnalyzerError::invalid_direction(
-                            "ref",
-                            &x.r#ref.ref_token.token.into(),
-                        ));
-                    }
-                }
                 Direction::Modport(x) => {
                     if !self.in_module || self.in_function {
                         self.errors.push(AnalyzerError::invalid_direction(

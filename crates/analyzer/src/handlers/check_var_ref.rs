@@ -108,10 +108,8 @@ fn is_assignable_symbol(symbol: &Symbol) -> bool {
     match &symbol.kind {
         SymbolKind::Variable(_) => true,
         SymbolKind::Port(x) if x.direction == Direction::Output => true,
-        SymbolKind::Port(x) if x.direction == Direction::Ref => true,
         SymbolKind::Port(x) if x.direction == Direction::Inout => true,
         SymbolKind::ModportVariableMember(x) if x.direction == Direction::Output => true,
-        SymbolKind::ModportVariableMember(x) if x.direction == Direction::Ref => true,
         SymbolKind::ModportVariableMember(x) if x.direction == Direction::Inout => true,
         _ => false,
     }
@@ -299,10 +297,7 @@ impl VerylGrammarTrait for CheckVarRef {
                         .port_directions
                         .pop()
                         .unwrap_or(Direction::Input);
-                    if !matches!(
-                        direction,
-                        Direction::Output | Direction::Inout | Direction::Ref
-                    ) {
+                    if !matches!(direction, Direction::Output | Direction::Inout) {
                         self.in_expression.push(true);
                     } else if let Some(path) = map_assignable_factor(&arg.expression) {
                         self.assign_position.push(AssignPositionType::Statement {
@@ -340,7 +335,6 @@ impl VerylGrammarTrait for CheckVarRef {
                             Direction::Input => ExpressionTargetType::InputPort,
                             Direction::Output => ExpressionTargetType::OutputPort,
                             Direction::Inout => ExpressionTargetType::InoutPort,
-                            Direction::Ref => ExpressionTargetType::RefPort,
                             _ => return Ok(()),
                         },
                         _ => return Ok(()),
@@ -691,10 +685,7 @@ impl VerylGrammarTrait for CheckVarRef {
                     for (token, target) in &x.connects {
                         // Gather port information
                         let dir_output = if let Some(port) = ports.get(&token.text) {
-                            matches!(
-                                port.direction,
-                                Direction::Ref | Direction::Inout | Direction::Output
-                            )
+                            matches!(port.direction, Direction::Inout | Direction::Output)
                         } else {
                             false
                         };

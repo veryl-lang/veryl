@@ -32,7 +32,7 @@ impl VerylGrammarTrait for CheckModport {
 
             if let Ok(symbol) = symbol_table::resolve(path) {
                 match &*arg.direction {
-                    Direction::Ref(_) | Direction::Modport(_) => {}
+                    Direction::Modport(_) => {}
                     Direction::Import(_) => {
                         if !matches!(symbol.found.kind, SymbolKind::Function(_)) {
                             self.errors

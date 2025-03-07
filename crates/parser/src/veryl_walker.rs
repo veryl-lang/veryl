@@ -664,13 +664,6 @@ pub trait VerylWalker {
         after!(self, r#pub, arg);
     }
 
-    /// Semantic action for non-terminal 'Ref'
-    fn r#ref(&mut self, arg: &Ref) {
-        before!(self, r#ref, arg);
-        self.veryl_token(&arg.ref_token);
-        after!(self, r#ref, arg);
-    }
-
     /// Semantic action for non-terminal 'Repeat'
     fn repeat(&mut self, arg: &Repeat) {
         before!(self, repeat, arg);
@@ -2607,7 +2600,6 @@ pub trait VerylWalker {
             Direction::Input(x) => self.input(&x.input),
             Direction::Output(x) => self.output(&x.output),
             Direction::Inout(x) => self.inout(&x.inout),
-            Direction::Ref(x) => self.r#ref(&x.r#ref),
             Direction::Modport(x) => self.modport(&x.modport),
             Direction::Import(x) => self.import(&x.import),
         };

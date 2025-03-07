@@ -1074,7 +1074,6 @@ token_with_comments!(Package);
 token_with_comments!(Param);
 token_with_comments!(Proto);
 token_with_comments!(Pub);
-token_with_comments!(Ref);
 token_with_comments!(Repeat);
 token_with_comments!(Reset);
 token_with_comments!(ResetAsyncHigh);

@@ -112,7 +112,6 @@ PackageTerm           : <INITIAL, Generic       >/(?-u:\b)package(?-u:\b)/      
 ParamTerm             : <INITIAL, Generic       >/(?-u:\b)param(?-u:\b)/                                                               : Token;
 ProtoTerm             : <INITIAL, Generic       >/(?-u:\b)proto(?-u:\b)/                                                               : Token;
 PubTerm               : <INITIAL, Generic       >/(?-u:\b)pub(?-u:\b)/                                                                 : Token;
-RefTerm               : <INITIAL, Generic       >/(?-u:\b)ref(?-u:\b)/                                                                 : Token;
 RepeatTerm            : <INITIAL, Generic       >/(?-u:\b)repeat(?-u:\b)/                                                              : Token;
 ResetTerm             : <INITIAL, Generic       >/(?-u:\b)reset(?-u:\b)/                                                               : Token;
 ResetAsyncHighTerm    : <INITIAL, Generic       >/(?-u:\b)reset_async_high(?-u:\b)/                                                    : Token;
@@ -239,7 +238,6 @@ PackageToken       : PackageTerm       : Token Comments;
 ParamToken         : ParamTerm         : Token Comments;
 ProtoToken         : ProtoTerm         : Token Comments;
 PubToken           : PubTerm           : Token Comments;
-RefToken           : RefTerm           : Token Comments;
 RepeatToken        : RepeatTerm        : Token Comments;
 ResetToken         : ResetTerm         : Token Comments;
 ResetAsyncHighToken: ResetAsyncHighTerm: Token Comments;
@@ -371,7 +369,6 @@ Package       : PackageToken       : VerylToken;
 Param         : ParamToken         : VerylToken;
 Proto         : ProtoToken         : VerylToken;
 Pub           : PubToken           : VerylToken;
-Ref           : RefToken           : VerylToken;
 Repeat        : RepeatToken        : VerylToken;
 Reset         : ResetToken         : VerylToken;
 ResetAsyncHigh: ResetAsyncHighToken: VerylToken;
@@ -768,7 +765,6 @@ PortTypeAbstract: [ ClockDomain ] Interface [ ColonColon Identifier ] [ Array ];
 Direction: Input
          | Output
          | Inout
-         | Ref
          | Modport
          | Import
          ;

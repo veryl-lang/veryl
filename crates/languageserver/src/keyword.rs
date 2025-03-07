@@ -46,7 +46,6 @@ pub const KEYWORDS: &[&str] = &[
     "param",
     "proto",
     "pub",
-    "ref",
     "repeat",
     "reset",
     "reset_async_high",

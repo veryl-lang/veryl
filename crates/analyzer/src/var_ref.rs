@@ -700,5 +700,4 @@ pub enum ExpressionTargetType {
     InputPort,
     OutputPort,
     InoutPort,
-    RefPort,
 }

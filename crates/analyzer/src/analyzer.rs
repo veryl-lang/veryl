@@ -354,7 +354,7 @@ impl Analyzer {
 fn is_assignable(direction: &Direction) -> bool {
     matches!(
         direction,
-        Direction::Ref | Direction::Inout | Direction::Output | Direction::Modport
+        Direction::Inout | Direction::Output | Direction::Modport
     )
 }
 

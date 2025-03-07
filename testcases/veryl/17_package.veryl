@@ -20,11 +20,9 @@ package Package17 {
     function FuncA (
         a: input  logic<ParamX>,
         b: output logic<ParamX>,
-        c: ref    logic<ParamX>,
     ) -> logic<ParamX> {
-        let d: u32 = 1;
-        b = a + 1 + d;
-        c = a / 1;
+        let c: u32 = 1;
+        b = a + 1 + c;
         return a + 2;
     }
 }
