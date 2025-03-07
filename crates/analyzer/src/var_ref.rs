@@ -435,7 +435,10 @@ impl TryFrom<(&ConnectTargetIdentifier, &Namespace)> for VarRefPath {
                 .collect();
 
             for (_, selects) in &arg.0.path {
-                path_items.push(full_path.pop().unwrap());
+                let Some(item) = full_path.pop() else {
+                    return Err(());
+                };
+                path_items.push(item);
                 for select in selects {
                     path_items.push(VarRefPathItem::from(select));
                 }
