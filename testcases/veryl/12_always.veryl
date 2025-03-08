@@ -37,10 +37,11 @@ module Module12_2 (
     i_rst_sh: input `_ reset_sync_high ,
     i_rst_sl: input `_ reset_sync_low  ,
 ) {
-    var a : logic    ;
-    var aa: logic    ;
-    let b : logic     = 1;
-    let c : logic<10> = 1;
+    var a  : logic    ;
+    var aa : logic    ;
+    var aaa: logic    ;
+    let b  : logic     = 1;
+    let c  : logic<10> = 1;
 
     // always_ff declaration with default polarity
     always_ff (i_clk, i_rst) {
@@ -114,9 +115,9 @@ module Module12_2 (
 
     // always_comb declaration
     always_comb {
-        a    = 10;
-        aa   = 10'b0;
-        aa.a = 10'b01z;
+        a   = 10;
+        aa  = 10'b0;
+        aaa = 10'b01z;
 
         a  = 10 + 10;
         aa = 10 + 16'hffff * (3 / 4);

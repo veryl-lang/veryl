@@ -797,6 +797,16 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
+    #[diagnostic(severity(Error), code(invisible_identifier), help(""), url(""))]
+    #[error("cannot refer indentifier {identifier} because it is invisible at here")]
+    InvisibleIndentifier {
+        identifier: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
     #[diagnostic(
         severity(Error),
         code(undefined_identifier),
@@ -1627,6 +1637,14 @@ impl AnalyzerError {
             identifier: identifier.to_string(),
             number,
             width,
+            input: source(token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn invisible_identifier(identifier: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvisibleIndentifier {
+            identifier: identifier.to_string(),
             input: source(token),
             error_location: token.into(),
         }

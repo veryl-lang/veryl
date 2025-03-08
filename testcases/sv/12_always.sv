@@ -37,10 +37,11 @@ module veryl_testcase_Module12_2 (
     input var logic i_rst_sh,
     input var logic i_rst_sl
 );
-    logic          a ;
-    logic          aa;
-    logic          b ; always_comb b  = 1;
-    logic [10-1:0] c ; always_comb c  = 1;
+    logic          a  ;
+    logic          aa ;
+    logic          aaa;
+    logic          b  ; always_comb b   = 1;
+    logic [10-1:0] c  ; always_comb c   = 1;
 
     // always_ff declaration with default polarity
     always_ff @ (posedge i_clk, negedge i_rst_n) begin
@@ -114,9 +115,9 @@ module veryl_testcase_Module12_2 (
 
     // always_comb declaration
     always_comb begin
-        a    = 10;
-        aa   = 10'b0;
-        aa.a = 10'b01z;
+        a   = 10;
+        aa  = 10'b0;
+        aaa = 10'b01z;
 
         a  = 10 + 10;
         aa = 10 + 16'hffff * (3 / 4);
