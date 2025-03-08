@@ -1,0 +1,25 @@
+name: Check dependencies
+
+on:
+  push:
+    branches:
+      - "master"
+    paths:
+      - '**/Cargo.lock'
+      - '**/Cargo.toml'
+      - '**/deny.toml'
+  pull_request:
+    paths:
+      - '**/Cargo.lock'
+      - '**/Cargo.toml'
+      - '**/deny.toml'
+
+jobs:
+  check:
+    name: Check dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses
