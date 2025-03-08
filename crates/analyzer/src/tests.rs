@@ -1597,19 +1597,6 @@ fn mismatch_type() {
     let code = r#"
     module ModuleA {
         enum EnumA {
-            B,
-        }
-        let _a: EnumA = EnumA::B;
-        let _b: EnumA = _a::B;
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
-
-    let code = r#"
-    module ModuleA {
-        enum EnumA {
             A,
             B,
         }
@@ -2263,6 +2250,70 @@ fn invalid_enum_variant() {
     assert!(matches!(
         errors[0],
         AnalyzerError::InvalidEnumVariant { .. }
+    ));
+}
+
+#[test]
+fn invisible_identifier() {
+    let code = r#"
+    package Pkg::<A: const> {}
+    module ModuleA {
+        const A: u32 = Pkg::<1>::A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvisibleIndentifier { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        const A: logic = 0;
+    }
+    module MoudleB {
+        const B: logic = ModuleA::A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvisibleIndentifier { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        const A: logic = 0;
+    }
+    module MoudleB {
+        inst u: ModuleA;
+        let _b: logic = u.A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvisibleIndentifier { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        enum E {
+            FOO,
+        }
+
+        let a: E = E::FOO;
+        let b: E = a::FOO;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvisibleIndentifier { .. }
     ));
 }
 

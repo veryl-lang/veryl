@@ -1,8 +1,10 @@
 use crate::HashMap;
 use crate::evaluator::{Evaluated, EvaluatedValue};
 use crate::namespace::Namespace;
-use crate::symbol::{DocComment, GenericBoundKind, Symbol, SymbolId, SymbolKind, TypeKind};
-use crate::symbol_path::{SymbolPath, SymbolPathNamespace};
+use crate::symbol::{
+    Direction, DocComment, GenericBoundKind, Symbol, SymbolId, SymbolKind, TypeKind,
+};
+use crate::symbol_path::{GenericSymbolPath, SymbolPath, SymbolPathNamespace};
 use crate::var_ref::{Assign, VarRef, VarRefAffiliation};
 use std::cell::RefCell;
 use std::fmt;
@@ -26,6 +28,7 @@ pub struct ResolveError {
 pub enum ResolveErrorCause {
     NotFound(StrId),
     Private,
+    Invisible,
 }
 
 impl ResolveError {
@@ -139,9 +142,159 @@ impl SymbolTable {
                 _ => (),
             }
             context.namespace = symbol.found.inner_namespace();
+            context.last_found_type = Some(symbol.found.id);
             context.inner = true;
         }
         Ok(context)
+    }
+
+    fn trace_type_path<'a>(
+        &self,
+        mut context: ResolveContext<'a>,
+        path: &GenericSymbolPath,
+    ) -> Result<ResolveContext<'a>, ResolveError> {
+        let type_symbol = if let Ok(symbol) = self.resolve(&path.mangled_path(), &context.namespace)
+        {
+            symbol.found
+        } else {
+            let symbol = self.resolve(&path.generic_path(), &context.namespace)?;
+            symbol.found
+        };
+
+        match type_symbol.kind {
+            SymbolKind::GenericInstance(_) => self.trace_generic_instance(context, &type_symbol),
+            SymbolKind::GenericParameter(_) => self.trace_generic_parameter(context, &type_symbol),
+            _ => {
+                context.namespace = type_symbol.inner_namespace();
+                context.last_found_type = Some(type_symbol.id);
+                context.inner = true;
+                Ok(context)
+            }
+        }
+    }
+
+    fn trace_generic_instance<'a>(
+        &self,
+        mut context: ResolveContext<'a>,
+        found: &Symbol,
+    ) -> Result<ResolveContext<'a>, ResolveError> {
+        if let SymbolKind::GenericInstance(x) = &found.kind {
+            let base = self.symbol_table.get(&x.base).unwrap();
+            context.namespace = base.inner_namespace();
+            context.last_found_type = Some(base.id);
+            context.inner = true;
+            context
+                .generic_namespace_map
+                .insert(base.token.text, found.token.text);
+        }
+        Ok(context)
+    }
+
+    fn trace_generic_parameter<'a>(
+        &self,
+        mut context: ResolveContext<'a>,
+        found: &Symbol,
+    ) -> Result<ResolveContext<'a>, ResolveError> {
+        if let SymbolKind::GenericParameter(x) = &found.kind {
+            let symbol = match &x.bound {
+                GenericBoundKind::Inst(proto) => &self.resolve(proto, &found.namespace)?.found,
+                GenericBoundKind::Proto(proto) => &self.resolve(proto, &found.namespace)?.found,
+                _ => found,
+            };
+
+            context.namespace = symbol.inner_namespace();
+            context.last_found_type = Some(symbol.id);
+            context.inner = true;
+        }
+        Ok(context)
+    }
+
+    fn is_public(&self, context: &ResolveContext, found: &Symbol) -> bool {
+        match found.kind {
+            SymbolKind::Module(_)
+            | SymbolKind::Interface(_)
+            | SymbolKind::Package(_)
+            | SymbolKind::ProtoPackage(_)
+            | SymbolKind::AliasPackage(_) => !context.other_prj || found.public,
+            _ => true,
+        }
+    }
+
+    fn is_visible(&self, context: &ResolveContext, found: &Symbol) -> bool {
+        if context.last_found.is_none() || matches!(found.kind, SymbolKind::SystemVerilog) {
+            return true;
+        }
+
+        let last_found = context.last_found.unwrap();
+        let last_found_type = context.last_found_type.map(|x| {
+            let symbol = self.symbol_table.get(&x).unwrap();
+            symbol.kind.clone()
+        });
+        let via_interface_instance = match &last_found.kind {
+            SymbolKind::Port(x) => matches!(x.direction, Direction::Modport | Direction::Interface),
+            SymbolKind::Instance(_) => matches!(last_found_type, Some(SymbolKind::Interface(_))),
+            SymbolKind::GenericParameter(x) => {
+                matches!(&x.bound, GenericBoundKind::Inst(_))
+                    && matches!(last_found_type, Some(SymbolKind::Interface(_)))
+            }
+            _ => false,
+        };
+        let via_interface = match &last_found.kind {
+            SymbolKind::Interface(_) => true,
+            SymbolKind::GenericInstance(_) => {
+                matches!(last_found_type, Some(SymbolKind::Interface(_)))
+            }
+            SymbolKind::GenericParameter(x) => {
+                matches!(&x.bound, GenericBoundKind::Proto(_))
+                    && matches!(last_found_type, Some(SymbolKind::Interface(_)))
+            }
+            _ => false,
+        };
+        let via_pacakge = match &last_found.kind {
+            SymbolKind::Package(_) | SymbolKind::ProtoPackage(_) | SymbolKind::AliasPackage(_) => {
+                true
+            }
+            SymbolKind::GenericInstance(_) => {
+                matches!(last_found_type, Some(SymbolKind::Package(_)))
+            }
+            SymbolKind::GenericParameter(_) => {
+                matches!(last_found_type, Some(SymbolKind::ProtoPackage(_)))
+            }
+            _ => false,
+        };
+        let via_enum = match &last_found.kind {
+            SymbolKind::Enum(_) => true,
+            SymbolKind::TypeDef(_) => matches!(last_found_type, Some(SymbolKind::Enum(_))),
+            _ => false,
+        };
+
+        match &found.kind {
+            SymbolKind::Variable(_)
+            | SymbolKind::ModportFunctionMember(_)
+            | SymbolKind::ModportVariableMember(_) => via_interface_instance,
+            SymbolKind::StructMember(_) | SymbolKind::UnionMember(_) => matches!(
+                last_found.kind,
+                SymbolKind::Port(_)
+                    | SymbolKind::ModportVariableMember(_)
+                    | SymbolKind::Variable(_)
+                    | SymbolKind::Parameter(_)
+                    | SymbolKind::ProtoConst(_)
+                    | SymbolKind::StructMember(_)
+                    | SymbolKind::UnionMember(_)
+            ),
+            SymbolKind::Parameter(_)
+            | SymbolKind::ProtoConst(_)
+            | SymbolKind::TypeDef(_)
+            | SymbolKind::ProtoTypeDef
+            | SymbolKind::Enum(_)
+            | SymbolKind::Struct(_)
+            | SymbolKind::Union(_)
+            | SymbolKind::ProtoFunction(_) => via_pacakge,
+            SymbolKind::Function(_) => via_interface_instance || via_pacakge,
+            SymbolKind::EnumMember(_) | SymbolKind::EnumMemberMangled => via_enum,
+            SymbolKind::Modport(_) => via_interface,
+            _ => matches!(last_found.kind, SymbolKind::Namespace),
+        }
     }
 
     pub fn resolve(
@@ -199,13 +352,22 @@ impl SymbolTable {
                     if included && symbol.namespace.depth() >= max_depth {
                         symbol.evaluate();
                         context.found = Some(symbol);
-                        context.last_found = Some(symbol);
                         context.imported = imported;
                         max_depth = symbol.namespace.depth();
                     }
                 }
 
                 if let Some(found) = context.found {
+                    if !self.is_public(&context, found) {
+                        return Err(ResolveError::new(context.found, ResolveErrorCause::Private));
+                    } else if !self.is_visible(&context, found) {
+                        return Err(ResolveError::new(
+                            context.found,
+                            ResolveErrorCause::Invisible,
+                        ));
+                    }
+
+                    context.last_found = context.found;
                     context.full_path.push(found.id);
                     match &found.kind {
                         SymbolKind::Variable(x) => {
@@ -239,40 +401,11 @@ impl SymbolTable {
                         | SymbolKind::Interface(_)
                         | SymbolKind::Package(_)
                         | SymbolKind::ProtoPackage(_) => {
-                            if context.other_prj & !found.public {
-                                return Err(ResolveError::new(
-                                    context.last_found,
-                                    ResolveErrorCause::Private,
-                                ));
-                            }
                             context.namespace = found.inner_namespace();
                             context.inner = true;
                         }
                         SymbolKind::AliasPackage(x) => {
-                            if context.other_prj && !found.public {
-                                return Err(ResolveError::new(
-                                    context.last_found,
-                                    ResolveErrorCause::Private,
-                                ));
-                            }
-
-                            let symbol = if let Ok(symbol) =
-                                self.resolve(&x.target.mangled_path(), &context.namespace)
-                            {
-                                symbol.found
-                            } else {
-                                let symbol =
-                                    self.resolve(&x.target.generic_path(), &context.namespace)?;
-                                symbol.found
-                            };
-                            if let SymbolKind::GenericInstance(x) = &symbol.kind {
-                                let base = self.symbol_table.get(&x.base).unwrap();
-                                context.namespace = base.inner_namespace();
-                                context.inner = true;
-                            } else {
-                                context.namespace = symbol.inner_namespace();
-                                context.inner = true;
-                            }
+                            context = self.trace_type_path(context, &x.target)?;
                         }
                         SymbolKind::Enum(_) | SymbolKind::SystemVerilog | SymbolKind::Namespace => {
                             context.namespace = found.inner_namespace();
@@ -281,34 +414,13 @@ impl SymbolTable {
                         SymbolKind::Instance(x) => {
                             let mut type_name = x.type_name.clone();
                             type_name.resolve_imported(&context.namespace);
-                            let path = type_name.mangled_path();
-                            let symbol = self.resolve(&path, &context.namespace)?;
-                            if let SymbolKind::GenericInstance(x) = &symbol.found.kind {
-                                let symbol = self.symbol_table.get(&x.base).unwrap();
-                                context.namespace = symbol.inner_namespace();
-                                context.inner = true;
-                            } else {
-                                context.namespace = symbol.found.inner_namespace();
-                                context.inner = true;
-                            }
+                            context = self.trace_type_path(context, &type_name)?;
                         }
-                        SymbolKind::GenericInstance(x) => {
-                            let symbol = self.symbol_table.get(&x.base).unwrap();
-                            context.namespace = symbol.inner_namespace();
-                            context.inner = true;
-                            context
-                                .generic_namespace_map
-                                .insert(symbol.token.text, found.token.text);
+                        SymbolKind::GenericInstance(_) => {
+                            context = self.trace_generic_instance(context, found)?;
                         }
-                        SymbolKind::GenericParameter(x) => {
-                            if let GenericBoundKind::Inst(proto) = &x.bound {
-                                let symbol = self.resolve(proto, &found.namespace)?;
-                                context.namespace = symbol.found.inner_namespace();
-                                context.inner = true;
-                            } else {
-                                context.namespace = found.inner_namespace();
-                                context.inner = true;
-                            }
+                        SymbolKind::GenericParameter(_) => {
+                            context = self.trace_generic_parameter(context, found)?;
                         }
                         // don't trace inner item
                         SymbolKind::Function(_)
@@ -646,6 +758,7 @@ impl fmt::Display for SymbolTable {
 struct ResolveContext<'a> {
     found: Option<&'a Symbol>,
     last_found: Option<&'a Symbol>,
+    last_found_type: Option<SymbolId>,
     full_path: Vec<SymbolId>,
     namespace: Namespace,
     generic_namespace_map: HashMap<StrId, StrId>,
@@ -660,6 +773,7 @@ impl ResolveContext<'_> {
         Self {
             found: None,
             last_found: None,
+            last_found_type: None,
             full_path: vec![],
             namespace: namespace.clone(),
             generic_namespace_map: HashMap::default(),

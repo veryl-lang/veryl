@@ -121,6 +121,10 @@ impl ReferenceTable {
                     self.errors
                         .push(AnalyzerError::private_member(&name, token));
                 }
+                ResolveErrorCause::Invisible => {
+                    self.errors
+                        .push(AnalyzerError::invisible_identifier(&name, token));
+                }
             }
         } else if let ResolveErrorCause::NotFound(not_found) = err.cause {
             let name = format!("{}", not_found);
