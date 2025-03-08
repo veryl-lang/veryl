@@ -246,6 +246,7 @@ impl Symbol {
                         Evaluated::create_unknown()
                     }
                 }
+                SymbolKind::SystemVerilog => Evaluated::create_unknown_static(),
                 _ => Evaluated::create_unknown(),
             };
             self.evaluated.replace(Some(evaluated.clone()));
